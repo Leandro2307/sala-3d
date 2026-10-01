@@ -14,6 +14,7 @@ const SHARE_SLOTS = 4;
 const MAX_CHAT = 60;
 const MAX_PHOTO = 60_000; // data URL da foto do rosto (128x128 jpeg dá ~12 kB)
 const PUNCH_RANGE = 4.5; // metros: folga sobre o alcance real, só para barrar absurdo
+const SHIRTS = ['none', 'lula', 'bolsonaro'];
 
 // STUN público + TURN opcional via variáveis de ambiente (necessário em algumas redes 4G/corporativas).
 const iceServers = [
@@ -68,7 +69,7 @@ function publicUser(u) {
   return {
     id: u.id, name: u.name, color: u.color, mic: u.mic,
     slot: u.slot, screenStreamId: u.screenStreamId,
-    p: u.p, r: u.r, a: u.a, photo: u.photo, health: u.health, ko: u.ko,
+    p: u.p, r: u.r, a: u.a, photo: u.photo, shirt: u.shirt, health: u.health, ko: u.ko,
   };
 }
 
@@ -127,6 +128,7 @@ function attachSockets(io) {
         slot: null,
         screenStreamId: null,
         photo: cleanPhoto(data?.photo),
+        shirt: SHIRTS.includes(data?.shirt) ? data.shirt : 'none',
         health: 1,
         ko: false,
         p: [0, 0, -4], r: Math.PI, a: 0,
@@ -242,6 +244,12 @@ function attachSockets(io) {
       if (!user) return;
       user.photo = cleanPhoto(dataUrl);
       io.to(room.id).emit('user-update', { id: user.id, photo: user.photo });
+    });
+
+    socket.on('shirt', (kind) => {
+      if (!user) return;
+      user.shirt = SHIRTS.includes(kind) ? kind : 'none';
+      io.to(room.id).emit('user-update', { id: user.id, shirt: user.shirt });
     });
 
     // ------------------------------------------------------------ ringue

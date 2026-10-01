@@ -565,7 +565,7 @@ export class World {
       puff.castShadow = true;
       puff.receiveShadow = true;
       this.scene.add(puff);
-      this.addBox({ min: [x - 0.85, 0, z - 0.85], max: [x + 0.85, 1.05, z + 0.85], mesh: puff });
+      this.addBox({ min: [x - 0.85, 0, z - 0.85], max: [x + 0.85, 1.05, z + 0.85], data: { type: 'puff' }, mesh: puff });
     });
   }
 
@@ -773,6 +773,7 @@ export class World {
 
       if (def.move) {
         collider.base = mesh.position.clone();
+        collider.fase = Math.random(); // sorteada uma vez por aba: a sua é só sua
         this.movers.push(collider);
         // faixas de aviso nas bordas das plataformas móveis
         const edge = new THREE.Mesh(
@@ -897,7 +898,9 @@ export class World {
     const t = Date.now() / 1000;
     for (const c of this.movers) {
       const m = c.data.move;
-      const offset = Math.sin((t / m.period) * Math.PI * 2) * m.amp;
+      // Cada jogador tem a sua fase: as plataformas móveis ficam em lugares
+      // diferentes para cada um, então ninguém espera a vez do outro no parkour.
+      const offset = Math.sin((t / m.period + c.fase) * Math.PI * 2) * m.amp;
       const prev = c.mesh.position.clone();
       c.mesh.position.copy(c.base);
       c.mesh.position[m.axis] += offset;

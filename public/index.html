@@ -34,6 +34,7 @@
 
     <div id="crosshair"></div>
     <div id="hover-hint" hidden><kbd>E</kbd><span></span></div>
+    <div id="sit-hint" hidden><kbd>C</kbd><span>Sentar</span></div>
 
     <div id="parkour-hud" hidden>
       <div class="pk-time" id="pk-time">0:00.00</div>
@@ -76,6 +77,8 @@
           <span><kbd>R</kbd> voltar ao checkpoint</span>
           <span><kbd>T</kbd> chat</span>
           <span><kbd>M</kbd> microfone</span>
+          <span><kbd>C</kbd> sentar</span>
+          <span><kbd>F</kbd> socar</span>
           <span><kbd>1</kbd>–<kbd>6</kbd> reações</span>
         </div>
         <div class="help-grid" data-input="touch">
@@ -84,6 +87,7 @@
           <span><b>Arraste a tela</b> olhar</span>
           <span><b>Pinça</b> aproximar</span>
           <span><b>Toque numa tela</b> focar</span>
+          <span><b>Luva</b> socar · <b>cadeira</b> sentar</span>
           <span><b>⤢</b> tela cheia</span>
         </div>
       </div>
@@ -100,6 +104,7 @@
     </div>
     <div class="touch-actions">
       <button type="button" class="tb" id="tb-use" hidden><i data-icon="eye" data-size="20"></i><span class="tb-label"></span></button>
+      <button type="button" class="tb small" id="tb-sit" hidden aria-label="Sentar"><i data-icon="chair" data-size="18"></i></button>
       <button type="button" class="tb small" id="tb-respawn" aria-label="Voltar ao checkpoint"><i data-icon="undo" data-size="18"></i></button>
       <button type="button" class="tb small" id="tb-view" aria-label="Alternar câmera"><i data-icon="view" data-size="18"></i></button>
       <button type="button" class="tb small" id="tb-run" aria-pressed="false" aria-label="Correr"><i data-icon="run" data-size="18"></i></button>
@@ -310,6 +315,15 @@
       <div class="field">
         <span>Cor do boneco</span>
         <div class="swatches" id="swatches" role="radiogroup" aria-label="Cor do boneco"></div>
+      </div>
+
+      <div class="field">
+        <span>Camiseta <small class="opt">(opcional)</small></span>
+        <div class="segmented shirts" id="in-shirt">
+          <button type="button" data-shirt="none">Nenhuma</button>
+          <button type="button" data-shirt="lula">PT · 13</button>
+          <button type="button" data-shirt="bolsonaro">22</button>
+        </div>
       </div>
 
       <div class="field">

@@ -27,7 +27,7 @@ const PANEL_TITLES = { people: 'Pessoas', chat: 'Chat da sala', youtube: 'YouTub
 // ------------------------------------------------------------------ ajustes salvos
 const DEFAULTS = {
   name: '', color: COLORS[0], mic: true, voice: 100, screen: 90, yt: 80, spatial: false,
-  shareMode: 'detail', sens: 100, shadows: true, sfx: true, micDevice: '', helpCollapsed: false, photo: null,
+  shareMode: 'detail', sens: 100, shadows: true, sfx: true, micDevice: '', helpCollapsed: false, photo: null, shirt: 'none',
 };
 const stored = (() => {
   try { return JSON.parse(localStorage.getItem('sala3d') || '{}'); } catch { return {}; }
@@ -177,6 +177,21 @@ function applyPhoto(dataUrl) {
 
 renderPhotoPreview();
 if (settings.photo) localAvatar.setPhoto(settings.photo);
+
+// ---------------------------------------------------------------- camiseta
+function renderShirt() {
+  $$('#in-shirt button').forEach((b) => b.classList.toggle('on', b.dataset.shirt === settings.shirt));
+  localAvatar.setShirt(settings.shirt);
+}
+renderShirt();
+$('#in-shirt').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-shirt]');
+  if (!b) return;
+  settings.shirt = b.dataset.shirt;
+  saveSettings();
+  renderShirt();
+  if (socket && state.joined) socket.emit('shirt', settings.shirt);
+});
 $('#photo-pick').addEventListener('click', () => $('#photo-file').click());
 $('#photo-file').addEventListener('change', async (e) => {
   const file = e.target.files?.[0];
@@ -272,6 +287,7 @@ async function join() {
       view: toggleView,
       respawn: () => { if (!state.focus) respawn(); },
       punch: () => punch(),
+      sit: () => toggleSit(),
       fullscreen: () => { toggleFullscreen(); updateFullscreenButton(); },
     });
     syncTouchVisibility();
@@ -295,6 +311,7 @@ function emitJoin() {
       color: settings.color,
       mic: state.micOn && state.micAvailable,
       photo: settings.photo,
+      shirt: settings.shirt,
     }, resolve);
   });
 }
@@ -368,7 +385,7 @@ function bindSocket() {
     u.avatar.speaking = !!s;
   });
 
-  socket.on('user-update', ({ id, mic, photo, health, ko }) => {
+  socket.on('user-update', ({ id, mic, photo, shirt, health, ko }) => {
     const u = state.users.get(id);
     if (!u) return;
     if (mic !== undefined) {
@@ -379,6 +396,10 @@ function bindSocket() {
     if (photo !== undefined) {
       u.photo = photo;
       u.avatar.setPhoto(photo);
+    }
+    if (shirt !== undefined) {
+      u.shirt = shirt;
+      u.avatar.setShirt(shirt);
     }
     if (health !== undefined) u.avatar.setHealth(health);
     if (ko !== undefined) u.avatar.setKo(ko);
@@ -455,6 +476,7 @@ function addUser(data) {
   const avatar = new Avatar({ name: data.name, color: data.color });
   avatar.setStatus({ mic: data.mic, sharing: data.slot != null });
   if (data.photo) avatar.setPhoto(data.photo);
+  if (data.shirt && data.shirt !== 'none') avatar.setShirt(data.shirt);
   if (data.health != null) avatar.setHealth(data.health);
   if (data.ko) avatar.setKo(true);
   avatar.setNetworkState(data.p, data.r, data.a);
@@ -989,6 +1011,40 @@ function goToStart() {
   teleportToCollider(start, Math.PI);
 }
 
+// ------------------------------------------------------------------ sentar
+const TIPOS_ASSENTO = new Set(['sofa', 'puff']);
+function assentoAtual() {
+  if (!player.grounded) return null;
+  return TIPOS_ASSENTO.has(player.ground?.data?.type) ? player.ground : null;
+}
+
+function toggleSit() {
+  if (player.sitting) {
+    player.stand();
+    return;
+  }
+  const assento = assentoAtual();
+  if (assento) player.sit(assento);
+  else toast('Fique em cima de um sofá ou pufe para sentar.', 'info', 2600);
+}
+
+function updateSitHint() {
+  const podeSentar = !player.sitting && !!assentoAtual() && !state.focus && !state.panel;
+  const dica = $('#sit-hint');
+  const mostrar = podeSentar || player.sitting;
+  if (dica.hidden === !mostrar) { /* já está certo */ } else dica.hidden = !mostrar;
+  if (mostrar) dica.querySelector('span').textContent = player.sitting ? 'Levantar' : 'Sentar';
+  if (touchPad) {
+    const b = $('#tb-sit');
+    if (b) b.hidden = !mostrar || !!state.panel || !!state.focus;
+  }
+}
+
+player.on('sit', (sentado) => {
+  updateSitHint();
+  if (sentado) sfx.message();
+});
+
 function respawn() {
   if (run.state !== 'idle' && run.checkpoint && run.checkpoint.data.type !== 'start') {
     teleportToCollider(run.checkpoint);
@@ -1042,8 +1098,12 @@ const combat = new Combat({
     .map((u) => ({ id: u.id, position: u.avatar.group.position })),
   onState: (health, inRing) => updateFightHud(health, inRing),
   onHitLanded: () => sfx.punchHit(),
-  onDamage: () => sfx.punchTaken(),
+  onDamage: () => {
+    sfx.punchTaken();
+    player.addShake(0.9); // o golpe tem que pesar na tela de quem apanha
+  },
   onKo: (porQuem) => {
+    player.addShake(1.6); // nocaute sacode muito mais
     toast(porQuem ? `${porQuem} te nocauteou!` : 'Você caiu do ringue!', 'error', 3600);
     updateFightHud(0, combat.inRing);
   },
@@ -1063,7 +1123,7 @@ function updateFightHud(health, inRing) {
   hud.classList.toggle('ko', combat.knockedOut);
   $('#fh-hint').innerHTML = combat.knockedOut
     ? 'Nocauteado…'
-    : (isTouch ? 'Toque na luva para socar' : '<kbd>F</kbd> socar');
+    : (isTouch ? 'Toque na luva para socar' : 'Clique ou <kbd>F</kbd> para socar');
   if (isTouch) $('#tb-punch').hidden = !!state.panel || !!state.focus;
   localAvatar.setHealth(v);
   socket?.emit('health', v);
@@ -1365,8 +1425,8 @@ function renderShareMode() {
   const dicas = {
     detail: 'Para código, planilhas, slides: imagem parada e nítida.',
     motion: 'Para filme e vídeo: 30 quadros por segundo em 1080p.',
-    game: 'Para jogo pesado: 60 quadros por segundo em 720p. Prioriza fluidez em vez de nitidez — '
-      + 'é o que evita travar quando a placa de vídeo já está ocupada com o jogo.',
+    game: 'Para jogo pesado: Full HD a 60 quadros por segundo. Se a internet apertar, ele derruba '
+      + 'a resolução em vez dos quadros — é o que evita engasgo quando a placa de vídeo já está ocupada.',
   };
   $('#share-mode-hint').textContent = dicas[settings.shareMode] || 'Vale para o próximo compartilhamento.';
 }
@@ -1428,6 +1488,9 @@ window.addEventListener('keydown', (e) => {
     case 'KeyF':
       punch();
       break;
+    case 'KeyC':
+      toggleSit();
+      break;
     case 'KeyM':
       toggleMic();
       break;
@@ -1452,6 +1515,7 @@ player.on('click', () => {
     // no celular o toque curto já ativa o que estiver na mira (tela, telão)
     if (state.focus) return;
     if (state.hovered) enterFocus(state.hovered);
+    else if (combat.inRing) punch();
     return;
   }
   if (!state.focus) lockPointer();
@@ -1465,7 +1529,10 @@ function lockPointer() {
 }
 
 document.addEventListener('mousedown', (e) => {
-  if (document.pointerLockElement === world.canvas && e.button === 0 && state.hovered) enterFocus(state.hovered);
+  if (document.pointerLockElement !== world.canvas || e.button !== 0) return;
+  // dentro do ringue o botão esquerdo é o soco; fora dele continua focando telas
+  if (combat.inRing && !state.focus) punch();
+  else if (state.hovered) enterFocus(state.hovered);
 });
 
 // Ponto de inspeção para testes automatizados. Só existe com ?debug=1 na URL —
@@ -1569,6 +1636,7 @@ function frame() {
     detectSpeaking(dt);
     sendState(dt);
     updateHover();
+    updateSitHint();
     slowTimer += dt;
     if (slowTimer > 0.25) {
       slowTimer = 0;

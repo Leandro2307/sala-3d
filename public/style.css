@@ -873,6 +873,9 @@ body.touch .help-grid[data-input="touch"] { display: grid; }
   animation: fade 220ms ease both;
 }
 #focus video { width: 100%; height: 100%; object-fit: contain; padding: 68px 16px 16px; }
+/* dvh acompanha a barra do navegador aparecendo/sumindo; com 100% o vídeo saía da tela */
+#focus { height: 100dvh; max-height: 100dvh; overflow: hidden; }
+#focus video { max-height: 100dvh; }
 #focus:fullscreen video { padding: 0; }
 .focus-bar {
   position: absolute;
@@ -908,6 +911,42 @@ body.touch .help-grid[data-input="touch"] { display: grid; }
 .spinner { width: 16px; height: 16px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.2); border-top-color: var(--warn); animation: spin 800ms linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+
+/* dica de sentar, logo abaixo da mira */
+#sit-hint {
+  position: absolute;
+  left: 50%;
+  top: calc(50% + 62px);
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px 6px 6px;
+  border-radius: 999px;
+  background: var(--glass);
+  border: 1px solid var(--line);
+  backdrop-filter: blur(10px);
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+/* camisetas: cada botão mostra a cor do time */
+.segmented.shirts button { position: relative; padding-left: 26px; }
+.segmented.shirts button::before {
+  content: '';
+  position: absolute;
+  left: 9px;
+  top: 50%;
+  width: 11px;
+  height: 11px;
+  margin-top: -5.5px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
+.segmented.shirts button[data-shirt='none']::before { background: repeating-linear-gradient(45deg, #3b4254 0 3px, #262c3a 3px 6px); }
+.segmented.shirts button[data-shirt='lula']::before { background: #c81e1e; }
+.segmented.shirts button[data-shirt='bolsonaro']::before { background: linear-gradient(135deg, #166534 50%, #fde047 50%); }
 
 /* ------------------------------------------------------------ ringue / luta */
 #fight-hud {

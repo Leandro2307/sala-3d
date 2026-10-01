@@ -30,10 +30,10 @@ export const SHARE_PRESETS = {
     fps: 60,
     width: 1920,
     height: 1080,
-    maxBitrate: 9_000_000,
+    maxBitrate: 16_000_000, // 1080p60 precisa de banda; abaixo disso ele borra nas cenas de ação
     hint: 'motion',
     degradation: 'maintain-framerate',
-    scale: 1.5, // 1080p -> 720p: metade dos pixels pra codificar, muito mais fluido
+    scale: 1, // Full HD de verdade
   },
 };
 

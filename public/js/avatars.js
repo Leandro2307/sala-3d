@@ -8,13 +8,49 @@ export const EMOTES = {
   wave: '👋', party: '🎉', laugh: '😂', heart: '❤️', clap: '👏', fire: '🔥',
 };
 
+// Proporções: pé no chão em y=0 e topo da cabeça em ~1.8, que é a altura do colisor.
+const ALTURA = {
+  perna: 0.58, // do chão até o quadril
+  troncoY: 1.0, // centro do tronco
+  cabecaY: 1.52,
+  cabecaR: 0.285,
+};
+
+// A frente do boneco é +Z (a viseira original já era centrada ali).
+// Reprojeta o UV de um pedaço de esfera/cilindro como se a textura fosse colada
+// de frente, senão o UV nativo da esfera distorce a foto nas bordas.
+function uvDeFrente(geo) {
+  const pos = geo.attributes.position;
+  const uv = geo.attributes.uv;
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (let i = 0; i < pos.count; i++) {
+    minX = Math.min(minX, pos.getX(i)); maxX = Math.max(maxX, pos.getX(i));
+    minY = Math.min(minY, pos.getY(i)); maxY = Math.max(maxY, pos.getY(i));
+  }
+  for (let i = 0; i < pos.count; i++) {
+    // +X do mundo cai na direita da tela para quem olha o boneco de frente,
+    // então u cresce junto com x — inverter aqui espelhava o texto da camiseta.
+    uv.setXY(i, (pos.getX(i) - minX) / (maxX - minX), (pos.getY(i) - minY) / (maxY - minY));
+  }
+  uv.needsUpdate = true;
+  return geo;
+}
+
 const shared = {
-  body: new THREE.CapsuleGeometry(0.4, 0.5, 10, 28),
-  head: new THREE.SphereGeometry(0.34, 32, 24),
-  visor: new THREE.SphereGeometry(0.34, 32, 16, Math.PI * 0.08, Math.PI * 0.84, Math.PI * 0.3, Math.PI * 0.32),
-  hand: new THREE.SphereGeometry(0.12, 16, 12),
-  halo: new THREE.TorusGeometry(0.5, 0.035, 8, 48),
+  torso: new THREE.CapsuleGeometry(0.3, 0.38, 10, 28),
+  quadril: new THREE.SphereGeometry(0.26, 20, 14),
+  coxa: new THREE.CapsuleGeometry(0.115, 0.3, 6, 14),
+  pe: new THREE.SphereGeometry(0.125, 14, 10),
+  head: new THREE.SphereGeometry(0.285, 32, 24),
+  visor: new THREE.SphereGeometry(0.285, 32, 16, Math.PI * 0.08, Math.PI * 0.84, Math.PI * 0.3, Math.PI * 0.32),
+  hand: new THREE.SphereGeometry(0.105, 16, 12),
+  halo: new THREE.TorusGeometry(0.44, 0.03, 8, 48),
+  // calota na frente da cabeça, onde entra a foto do rosto
+  rosto: uvDeFrente(new THREE.SphereGeometry(0.292, 28, 22, Math.PI / 2 - 0.62, 1.24, Math.PI / 2 - 0.58, 1.16)),
+  // faixa curva no peito, onde entra a estampa da camiseta
+  peito: uvDeFrente(new THREE.CylinderGeometry(0.307, 0.307, 0.34, 28, 1, true, -0.72, 1.44)),
   visorMat: new THREE.MeshStandardMaterial({ color: 0x0d1018, roughness: 0.12, metalness: 0.6 }),
+  sapatoMat: new THREE.MeshStandardMaterial({ color: 0x1b2030, roughness: 0.6 }),
 };
 
 function makeCanvasSprite(w, h, scaleX, scaleY) {
@@ -69,6 +105,74 @@ function drawScreenBadge(ctx, x, y, s) {
   ctx.restore();
 }
 
+// Camisetas de time político. São opções de vestuário escolhidas por quem joga —
+// as duas existem, com o mesmo destaque, e nenhuma é padrão.
+export const SHIRTS = {
+  none: { label: 'Sem camiseta', cor: null },
+  lula: { label: 'PT — Lula 13', cor: 0xc81e1e, numero: '13', nome: 'LULA', fundo: '#c81e1e', tinta: '#ffffff', estrela: true },
+  bolsonaro: { label: 'Bolsonaro 22', cor: 0x166534, numero: '22', nome: 'BOLSONARO', fundo: '#166534', tinta: '#fde047' },
+};
+
+function estampaCamiseta(kind) {
+  const def = SHIRTS[kind];
+  if (!def || !def.numero) return null;
+  const cv = document.createElement('canvas');
+  cv.width = 256;
+  cv.height = 256;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = def.fundo;
+  ctx.fillRect(0, 0, 256, 256);
+
+  if (def.estrela) {
+    // estrela de cinco pontas atrás do número
+    ctx.save();
+    ctx.translate(128, 104);
+    ctx.fillStyle = 'rgba(255,255,255,0.16)';
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const r = i % 2 === 0 ? 62 : 26;
+      const ang = (Math.PI / 5) * i - Math.PI / 2;
+      ctx[i ? 'lineTo' : 'moveTo'](Math.cos(ang) * r, Math.sin(ang) * r);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  ctx.fillStyle = def.tinta;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = `800 108px ${FONT}`;
+  ctx.fillText(def.numero, 128, 108);
+  ctx.font = `700 ${def.nome.length > 6 ? 30 : 42}px ${FONT}`;
+  ctx.fillText(def.nome, 128, 194);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+// Recorta a foto num círculo com borda, para ela virar um rosto e não um quadrado.
+function fotoRedonda(img, cor) {
+  const n = 256;
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = n;
+  const ctx = cv.getContext('2d');
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(n / 2, n / 2, n / 2 - 10, 0, Math.PI * 2);
+  ctx.clip();
+  ctx.drawImage(img, 0, 0, n, n);
+  ctx.restore();
+  ctx.strokeStyle = cor;
+  ctx.lineWidth = 12;
+  ctx.beginPath();
+  ctx.arc(n / 2, n / 2, n / 2 - 8, 0, Math.PI * 2);
+  ctx.stroke();
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
 export class Avatar {
   constructor({ name, color, isLocal = false }) {
     this.isLocal = isLocal;
@@ -87,22 +191,46 @@ export class Avatar {
 
     this.material = new THREE.MeshStandardMaterial({ color, roughness: 0.42, metalness: 0.02 });
 
-    this.body = new THREE.Mesh(shared.body, this.material);
-    this.body.position.y = 0.65;
+    this.body = new THREE.Mesh(shared.torso, this.material);
+    this.body.position.y = ALTURA.troncoY;
+    this.hip = new THREE.Mesh(shared.quadril, this.material);
+    this.hip.position.y = ALTURA.perna;
+    this.hip.scale.set(1, 0.72, 1);
     this.head = new THREE.Mesh(shared.head, this.material);
-    this.head.position.y = 1.47;
+    this.head.position.y = ALTURA.cabecaY;
     const visor = new THREE.Mesh(shared.visor, shared.visorMat);
     visor.scale.setScalar(1.03);
     this.head.add(visor);
     this.visor = visor;
     this.face = null; // foto do rosto, quando a pessoa escolhe uma
     this.photo = null;
+    this.shirt = 'none';
+    this.chest = null; // estampa da camiseta
     this.health = 1; // 0..1 — barra só aparece quando leva porrada
     this.swing = 0; // animação do soco
     this.ko = false;
+    this.sitting = false;
     this.handL = new THREE.Mesh(shared.hand, this.material);
     this.handR = new THREE.Mesh(shared.hand, this.material);
-    for (const m of [this.body, this.head, this.handL, this.handR]) {
+
+    // pernas: cada uma é um grupo que gira no quadril
+    this.legs = [];
+    for (const lado of [-1, 1]) {
+      const perna = new THREE.Group();
+      perna.position.set(lado * 0.145, ALTURA.perna, 0);
+      const coxa = new THREE.Mesh(shared.coxa, this.material);
+      coxa.position.y = -0.265;
+      coxa.castShadow = true;
+      const pe = new THREE.Mesh(shared.pe, shared.sapatoMat);
+      pe.position.set(0, -0.53, 0.04);
+      pe.scale.set(1, 0.66, 1.42);
+      pe.castShadow = true;
+      perna.add(coxa, pe);
+      this.inner.add(perna);
+      this.legs.push(perna);
+    }
+
+    for (const m of [this.body, this.hip, this.head, this.handL, this.handR]) {
       m.castShadow = true;
       this.inner.add(m);
     }
@@ -113,7 +241,7 @@ export class Avatar {
       new THREE.MeshBasicMaterial({ color: 0x6ee7c8, transparent: true, opacity: 0, toneMapped: false, depthWrite: false }),
     );
     this.halo.rotation.x = Math.PI / 2;
-    this.halo.position.y = 1.47;
+    this.halo.position.y = ALTURA.cabecaY;
     this.inner.add(this.halo);
 
     this.tag = makeCanvasSprite(512, 128, 2.6, 0.65);
@@ -177,11 +305,12 @@ export class Avatar {
 
   setName(name) { this.name = name; this.drawTag(); }
 
-  // Foto do rosto: entra no lugar da viseira, virada para a frente do boneco (+Z).
+  // Foto do rosto. É uma calota que acompanha a curva da cabeça e fica POR FORA
+  // dela: antes era um disco chato na mesma altura da superfície, e por isso as
+  // bordas afundavam dentro da cabeça.
   setPhoto(dataUrl) {
     if (this.face) {
       this.head.remove(this.face);
-      this.face.geometry.dispose();
       this.face.material.map?.dispose();
       this.face.material.dispose();
       this.face = null;
@@ -191,22 +320,46 @@ export class Avatar {
       this.visor.visible = true;
       return;
     }
-    const tex = new THREE.TextureLoader().load(dataUrl, () => { tex.needsUpdate = true; });
-    tex.colorSpace = THREE.SRGBColorSpace;
-    const disco = new THREE.Mesh(
-      new THREE.CircleGeometry(0.235, 36),
-      new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }),
-    );
-    disco.position.set(0, 0.015, 0.245);
-    const aro = new THREE.Mesh(
-      new THREE.TorusGeometry(0.238, 0.018, 8, 36),
-      new THREE.MeshStandardMaterial({ color: this.color, roughness: 0.4, emissive: this.color, emissiveIntensity: 0.3 }),
-    );
-    aro.position.copy(disco.position);
-    disco.add(aro);
-    this.head.add(disco);
-    this.face = disco;
-    this.visor.visible = false;
+    const img = new Image();
+    img.onload = () => {
+      if (this.photo !== dataUrl) return; // trocou de foto enquanto carregava
+      const tex = fotoRedonda(img, this.color);
+      const calota = new THREE.Mesh(
+        shared.rosto,
+        new THREE.MeshBasicMaterial({ map: tex, transparent: true, toneMapped: false }),
+      );
+      this.head.add(calota);
+      this.face = calota;
+      this.visor.visible = false;
+    };
+    img.onerror = () => { this.visor.visible = true; };
+    img.src = dataUrl;
+  }
+
+  // Camiseta: pinta o tronco e cola a estampa curva no peito.
+  setShirt(kind) {
+    this.shirt = SHIRTS[kind] ? kind : 'none';
+    if (this.chest) {
+      this.body.remove(this.chest);
+      this.chest.material.map?.dispose();
+      this.chest.material.dispose();
+      this.chest = null;
+    }
+    const def = SHIRTS[this.shirt];
+    this.shirtMat = this.shirtMat || new THREE.MeshStandardMaterial({ roughness: 0.62, metalness: 0.02 });
+    if (!def.cor) {
+      this.body.material = this.material;
+      return;
+    }
+    this.shirtMat.color.setHex(def.cor);
+    this.body.material = this.shirtMat;
+    const tex = estampaCamiseta(this.shirt);
+    if (tex) {
+      const faixa = new THREE.Mesh(shared.peito, new THREE.MeshStandardMaterial({ map: tex, roughness: 0.62 }));
+      faixa.position.y = 0.02;
+      this.body.add(faixa);
+      this.chest = faixa;
+    }
   }
 
   setHealth(v) {
@@ -225,10 +378,11 @@ export class Avatar {
   setColor(color) {
     this.color = color;
     this.material.color.set(color);
-    if (this.face) {
-      const aro = this.face.children[0];
-      aro?.material.color.set(color);
-      aro?.material.emissive.set(color);
+    // a foto tem a borda na cor do jogador: redesenha para acompanhar
+    if (this.photo) {
+      const url = this.photo;
+      this.photo = null;
+      this.setPhoto(url);
     }
     this.drawTag();
   }
@@ -332,21 +486,42 @@ export class Avatar {
     const s = Math.sin(this.phase);
     const bob = moving ? Math.abs(s) * 0.12 : Math.sin(t * 2 + this.phase) * 0.015;
 
-    this.body.position.y = 0.65 + bob;
-    this.head.position.y = 1.47 + bob * 1.1;
-    this.body.rotation.z = moving ? s * 0.06 : 0;
-    this.body.rotation.x = moving ? (this.anim === 2 ? 0.16 : 0.08) : 0;
+    const sentado = this.anim === 4;
+    const alturaSentado = sentado ? -0.34 : 0;
+
+    this.body.position.y = ALTURA.troncoY + bob + alturaSentado;
+    this.hip.position.y = ALTURA.perna + bob * 0.8 + alturaSentado;
+    this.head.position.y = ALTURA.cabecaY + bob * 1.1 + alturaSentado;
+    this.body.rotation.z = moving && !sentado ? s * 0.06 : 0;
+    this.body.rotation.x = sentado ? -0.12 : moving ? (this.anim === 2 ? 0.16 : 0.08) : 0;
     this.halo.position.y = this.head.position.y;
 
+    // pernas: alternam no caminhar, juntam no ar, dobram para a frente sentado
+    const passo = moving ? s * (this.anim === 2 ? 0.95 : 0.62) : 0;
+    this.legs.forEach((perna, i) => {
+      const lado = i === 0 ? 1 : -1;
+      perna.position.y = ALTURA.perna + bob * 0.8 + alturaSentado;
+      if (sentado) {
+        perna.rotation.x = -1.42; // coxa para a frente
+        perna.rotation.z = 0;
+        perna.children[1].position.set(0, -0.3, 0.46); // pé apoiado no chão
+      } else {
+        perna.rotation.x = airborne ? (lado > 0 ? -0.55 : 0.3) : passo * lado;
+        perna.rotation.z = 0;
+        perna.children[1].position.set(0, -0.53, 0.04);
+      }
+    });
+
     if (airborne) {
-      this.handL.position.set(-0.55, 1.35, 0.05);
-      this.handR.position.set(0.55, 1.35, 0.05);
+      this.handL.position.set(-0.46, 1.18, 0.05);
+      this.handR.position.set(0.46, 1.18, 0.05);
       this.body.scale.set(0.94, 1.06, 0.94);
     } else {
       this.body.scale.set(1, 1, 1);
-      const swing = moving ? s * 0.32 : 0;
-      this.handL.position.set(-0.56, 0.72 + bob, swing);
-      this.handR.position.set(0.56, 0.72 + bob, -swing);
+      const bracos = moving && !sentado ? s * 0.3 : 0;
+      const yMao = (sentado ? 0.76 : 0.92) + bob + alturaSentado;
+      this.handL.position.set(-0.44, yMao, sentado ? 0.3 : bracos);
+      this.handR.position.set(0.44, yMao, sentado ? 0.3 : -bracos);
     }
     if (this.waveTime > 0) {
       this.waveTime -= dt;
@@ -357,8 +532,8 @@ export class Avatar {
     if (this.swing > 0) {
       this.swing = Math.max(0, this.swing - dt / 0.26);
       const golpe = Math.sin((1 - this.swing) * Math.PI);
-      this.handR.position.set(0.42 - golpe * 0.18, 1.18 + bob, 0.25 + golpe * 0.95);
-      this.handL.position.set(-0.48, 1.05 + bob, 0.18);
+      this.handR.position.set(0.34 - golpe * 0.16, 1.05 + bob, 0.24 + golpe * 0.9);
+      this.handL.position.set(-0.4, 0.95 + bob, 0.18);
       this.body.rotation.y = -golpe * 0.3;
     } else if (!this.ko) {
       this.body.rotation.y = 0;

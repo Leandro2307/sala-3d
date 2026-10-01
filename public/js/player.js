@@ -39,6 +39,9 @@ export class Player {
     this.runLock = false; // botão "correr" fixado
     this.jumpHeld = false; // botão de pulo mantido pressionado
     this.touchLook = 1; // multiplicador do arrasto com o dedo
+    this.sitting = false; // sentado num sofá/pufe
+    this.shake = 0; // tremor da câmera (soco recebido)
+    this.shakeSeed = Math.random() * 100;
     this.override = null; // { position, target } para modo foco
     this.events = {};
     this.anim = 0;
@@ -145,6 +148,38 @@ export class Player {
     this.pitch -= dy * s;
     const limit = this.mode === 'first' ? 1.45 : 1.1;
     this.pitch = THREE.MathUtils.clamp(this.pitch, -limit, limit * 0.9);
+  }
+
+  // Senta no assento em que o jogador está pisando.
+  sit(assento) {
+    if (!assento) return false;
+    this.sitting = true;
+    this.vel.set(0, 0, 0);
+    this.pos.y = assento.max.y;
+    this.jumpBuffer = 0;
+    this.emit('sit', true);
+    return true;
+  }
+
+  stand() {
+    if (!this.sitting) return false;
+    this.sitting = false;
+    this.emit('sit', false);
+    return true;
+  }
+
+  // Qualquer intenção de andar ou pular levanta: ninguém quer ficar preso no sofá.
+  querSeMexer() {
+    const k = this.keys;
+    for (const code of ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']) {
+      if (k.has(code)) return true;
+    }
+    return !!(this.moveInput.x || this.moveInput.y || this.jumpBuffer > 0 || this.jumpHeld);
+  }
+
+  // Sacode a câmera. Usado quando se leva um soco: sem isso o golpe não "pesa".
+  addShake(força = 1) {
+    this.shake = Math.min(1.6, this.shake + força);
   }
 
   toggleMode() {
@@ -272,7 +307,15 @@ export class Player {
   }
 
   update(dt) {
-    if (this.enabled) {
+    if (this.enabled && this.sitting) {
+      if (this.querSeMexer()) this.stand();
+      else {
+        this.vel.set(0, 0, 0);
+        this.anim = 4;
+      }
+    }
+
+    if (this.enabled && !this.sitting) {
       // botão de pulo mantido pressionado: pula de novo ao encostar no chão
       if (this.jumpHeld && !this.override) this.jumpBuffer = Math.max(this.jumpBuffer, 0.12);
       // carregado por plataforma móvel (deslocamento deste frame)
@@ -287,7 +330,7 @@ export class Player {
 
     // orientação do boneco
     const hs = Math.hypot(this.vel.x, this.vel.z);
-    if (this.mode === 'first') {
+    if (this.mode === 'first' || this.sitting) {
       this.bodyYaw = Math.atan2(-Math.sin(this.yaw), -Math.cos(this.yaw));
     } else if (hs > 0.6) {
       const target = Math.atan2(this.vel.x, this.vel.z);
@@ -295,13 +338,22 @@ export class Player {
       d = Math.atan2(Math.sin(d), Math.cos(d));
       this.bodyYaw += d * Math.min(1, dt * 14);
     }
-    this.anim = !this.grounded && this.coyote <= 0 ? 3 : hs > 9 ? 2 : hs > 0.6 ? 1 : 0;
+    this.anim = this.sitting ? 4 : !this.grounded && this.coyote <= 0 ? 3 : hs > 9 ? 2 : hs > 0.6 ? 1 : 0;
 
     this.avatar.group.position.copy(this.pos);
     this.avatar.inner.rotation.y = this.bodyYaw;
     this.avatar.anim = this.anim;
 
     this.updateCamera(dt);
+  }
+
+  applyShake(cam) {
+    if (this.shake <= 0) return;
+    const t = performance.now() / 1000 + this.shakeSeed;
+    const k = this.shake * this.shake * 0.42; // ao quadrado: soco forte sacode muito mais
+    cam.position.x += Math.sin(t * 47) * k;
+    cam.position.y += Math.sin(t * 61 + 1.7) * k;
+    cam.position.z += Math.sin(t * 53 + 3.1) * k * 0.6;
   }
 
   lookDirection(out = new THREE.Vector3()) {
@@ -311,6 +363,8 @@ export class Player {
 
   updateCamera(dt) {
     const cam = this.world.camera;
+    // decai rápido: tremor longo embrulha o estômago
+    if (this.shake > 0) this.shake = Math.max(0, this.shake - dt * 2.6);
     if (this.override) {
       const k = 1 - Math.exp(-dt * 6);
       cam.position.lerp(this.override.position, k);
@@ -323,6 +377,7 @@ export class Player {
     const dir = this.lookDirection(_dir);
     if (this.mode === 'first') {
       cam.position.set(this.pos.x, this.pos.y + 1.62, this.pos.z);
+      this.applyShake(cam);
       this.lookPoint.copy(cam.position).add(dir);
       cam.lookAt(this.lookPoint);
       this.avatar.setVisible(false);
@@ -340,6 +395,7 @@ export class Player {
     else this.camDistCurrent += (allowed - this.camDistCurrent) * Math.min(1, dt * 5);
 
     cam.position.copy(target).addScaledVector(dir, -this.camDistCurrent);
+    this.applyShake(cam);
     cam.position.x = THREE.MathUtils.clamp(cam.position.x, ROOM.minX + 0.4, ROOM.maxX - 0.4);
     cam.position.z = THREE.MathUtils.clamp(cam.position.z, ROOM.minZ + 0.4, ROOM.maxZ - 0.4);
     cam.position.y = THREE.MathUtils.clamp(cam.position.y, 0.3, ROOM.height - 0.4);

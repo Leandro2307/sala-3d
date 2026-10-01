@@ -143,6 +143,7 @@ export function setupTouchControls(player, actions = {}) {
     '#tb-view': actions.view,
     '#tb-respawn': actions.respawn,
     '#tb-punch': actions.punch,
+    '#tb-sit': actions.sit,
     '#tb-full': actions.fullscreen,
   })) {
     const el = root.querySelector(id);
