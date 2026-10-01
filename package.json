@@ -1,0 +1,22 @@
+{
+  "name": "sala-3d",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Sala 3D para compartilhar tela, voz e YouTube com amigos — com parkour.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "https": "node server.js --https",
+    "tunnel": "cloudflared.exe tunnel --url http://localhost:3000 --no-autoupdate",
+    "publico": "node scripts/publico.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "selfsigned": "^5.5.0",
+    "socket.io": "^4.8.4",
+    "three": "^0.186.1"
+  }
+}

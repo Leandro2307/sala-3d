@@ -1,0 +1,17 @@
+node_modules/
+
+# Certificados locais de HTTPS — key.pem é CHAVE PRIVADA, nunca vai pro repositório
+certs/
+
+# O cloudflared são 55 MB de binário; cada um baixa o seu
+cloudflared.exe
+cloudflared
+
+# lixo de sistema / editor
+.DS_Store
+Thumbs.db
+*.log
+.env
+.env.*
+.vscode/
+.idea/

@@ -1,0 +1,14 @@
+# Blueprint do Render — https://render.com/docs/blueprint-spec
+# Suba isso num repositório Git e aponte o Render pra ele: ele lê este arquivo e configura sozinho.
+services:
+  - name: sala-3d
+    type: web
+    runtime: node
+    plan: free
+    region: virginia # região mais perto do Brasil (menor latência que oregon)
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /config
+    envVars:
+      - key: NODE_VERSION
+        value: "22"

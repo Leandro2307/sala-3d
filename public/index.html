@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0d12">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Sala 3D</title>
+  <meta name="description" content="Compartilhe a tela com som, converse e assista YouTube junto numa sala 3D — com parkour.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='9' fill='%230b0d12'/><rect x='6' y='8' width='20' height='13' rx='3' fill='none' stroke='%236ee7c8' stroke-width='2.4'/><circle cx='16' cy='25' r='2.2' fill='%236ee7c8'/></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+  <script type="importmap">
+    { "imports": { "three": "/vendor/three/build/three.module.js", "three/addons/": "/vendor/three/examples/jsm/" } }
+  </script>
+</head>
+<body>
+  <div id="css3d"></div>
+  <canvas id="gl"></canvas>
+  <div id="media-sink" aria-hidden="true"></div>
+
+  <!-- ============================================================ HUD -->
+  <div id="hud" hidden>
+    <div class="room-chip">
+      <span class="live-dot"></span>
+      <span id="room-name">principal</span>
+      <span class="sep">·</span>
+      <span id="room-count">1 pessoa</span>
+      <button id="copy-invite" class="chip-btn" type="button"><i data-icon="link" data-size="15"></i>Copiar convite</button>
+    </div>
+
+    <div id="crosshair"></div>
+    <div id="hover-hint" hidden><kbd>E</kbd><span></span></div>
+
+    <div id="parkour-hud" hidden>
+      <div class="pk-time" id="pk-time">0:00.00</div>
+      <div class="pk-cps" id="pk-cps"><i></i><i></i><i></i></div>
+      <div class="pk-msg" id="pk-msg"></div>
+    </div>
+
+    <div id="yt-focus-hud" hidden>
+      <span>Clique no vídeo para usar os controles do YouTube</span>
+      <button type="button" id="yt-focus-exit" class="chip-btn"><kbd>Esc</kbd> Sair do foco</button>
+    </div>
+
+    <div id="yt-unblock" hidden>
+      <button type="button" class="primary small" id="yt-unblock-btn"><i data-icon="volume" data-size="16"></i>Ativar o som do telão</button>
+    </div>
+
+    <div id="controls-help">
+      <button type="button" id="help-toggle" aria-expanded="true" aria-controls="help-body">
+        <i data-icon="gamepad" data-size="14"></i>
+        <span class="help-title">Controles</span>
+        <i data-icon="chevron" data-size="14" class="help-chevron"></i>
+      </button>
+      <div id="help-body">
+        <div class="help-grid" data-input="keyboard">
+          <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> andar</span>
+          <span><kbd>Espaço</kbd> pular</span>
+          <span><kbd>Shift</kbd> correr</span>
+          <span><kbd>Clique</kbd> olhar com o mouse</span>
+          <span><kbd>E</kbd> focar na tela</span>
+          <span><kbd>V</kbd> 1ª/3ª pessoa</span>
+          <span><kbd>R</kbd> voltar ao checkpoint</span>
+          <span><kbd>T</kbd> chat</span>
+          <span><kbd>M</kbd> microfone</span>
+          <span><kbd>1</kbd>–<kbd>6</kbd> reações</span>
+        </div>
+        <div class="help-grid" data-input="touch">
+          <span><b>Analógico</b> andar</span>
+          <span><b>Até a borda</b> correr</span>
+          <span><b>Arraste a tela</b> olhar</span>
+          <span><b>Pinça</b> aproximar</span>
+          <span><b>Toque numa tela</b> focar</span>
+          <span><b>⤢</b> tela cheia</span>
+        </div>
+      </div>
+    </div>
+
+    <div id="toasts" aria-live="polite"></div>
+  </div>
+
+  <!-- ============================================================ controles de toque (celular) -->
+  <div id="touch" hidden>
+    <div id="stick" aria-label="Analógico de movimento">
+      <span class="stick-ring"></span>
+      <span class="stick-knob"></span>
+    </div>
+    <div class="touch-actions">
+      <button type="button" class="tb" id="tb-use" hidden><i data-icon="eye" data-size="20"></i><span class="tb-label"></span></button>
+      <button type="button" class="tb small" id="tb-respawn" aria-label="Voltar ao checkpoint"><i data-icon="undo" data-size="18"></i></button>
+      <button type="button" class="tb small" id="tb-view" aria-label="Alternar câmera"><i data-icon="view" data-size="18"></i></button>
+      <button type="button" class="tb small" id="tb-run" aria-pressed="false" aria-label="Correr"><i data-icon="run" data-size="18"></i></button>
+      <button type="button" class="tb big" id="tb-jump" aria-label="Pular"><i data-icon="jump" data-size="26"></i></button>
+    </div>
+    <button type="button" class="tb corner" id="tb-full" aria-label="Tela cheia"><i data-icon="maximize" data-size="18"></i></button>
+  </div>
+
+  <!-- ============================================================ barra inferior -->
+  <nav id="bar" hidden>
+    <div class="bar-left">
+      <span id="clock">00:00</span>
+      <span class="sep">|</span>
+      <span id="bar-room">principal</span>
+    </div>
+
+    <div class="bar-center">
+      <button type="button" class="round" id="btn-mic" data-tip="Microfone (M)"><span class="mic-level"></span><i data-icon="mic"></i></button>
+      <button type="button" class="round" id="btn-share" data-tip="Compartilhar tela"><i data-icon="share"></i></button>
+      <div class="pop-wrap">
+        <button type="button" class="round" id="btn-react" data-tip="Reações"><i data-icon="smile"></i></button>
+        <div class="popover" id="react-pop" hidden>
+          <button type="button" data-emote="wave">👋</button>
+          <button type="button" data-emote="party">🎉</button>
+          <button type="button" data-emote="laugh">😂</button>
+          <button type="button" data-emote="heart">❤️</button>
+          <button type="button" data-emote="clap">👏</button>
+          <button type="button" data-emote="fire">🔥</button>
+        </div>
+      </div>
+      <button type="button" class="round" id="btn-view" data-tip="Câmera 1ª/3ª pessoa (V)"><i data-icon="view"></i></button>
+      <button type="button" class="round danger wide" id="btn-leave" data-tip="Sair da sala"><i data-icon="leave"></i></button>
+    </div>
+
+    <div class="bar-right">
+      <button type="button" class="ghost" data-panel="youtube" data-tip="YouTube no telão"><i data-icon="youtube"></i></button>
+      <button type="button" class="ghost" data-panel="people" data-tip="Pessoas"><i data-icon="users"></i><span class="badge" id="people-badge">1</span></button>
+      <button type="button" class="ghost" data-panel="chat" data-tip="Chat (T)"><i data-icon="chat"></i><span class="dot" id="chat-dot" hidden></span></button>
+      <button type="button" class="ghost" data-panel="parkour" data-tip="Parkour"><i data-icon="trophy"></i></button>
+      <button type="button" class="ghost" data-panel="settings" data-tip="Ajustes"><i data-icon="settings"></i></button>
+    </div>
+  </nav>
+
+  <!-- ============================================================ painel lateral -->
+  <aside id="panel" hidden>
+    <header>
+      <h2 id="panel-title">Pessoas</h2>
+      <button type="button" class="icon-btn" id="panel-close" aria-label="Fechar painel"><i data-icon="x"></i></button>
+    </header>
+
+    <section data-section="people">
+      <div class="invite-box">
+        <div>
+          <strong>Chame seus amigos</strong>
+          <span id="invite-url">—</span>
+        </div>
+        <button type="button" class="secondary small" id="copy-invite-2"><i data-icon="copy" data-size="16"></i>Copiar</button>
+      </div>
+      <ul class="people" id="people-list"></ul>
+    </section>
+
+    <section data-section="chat">
+      <ol class="chat" id="chat-list"></ol>
+      <form class="chat-form" id="chat-form" autocomplete="off">
+        <input id="chat-input" maxlength="400" placeholder="Mensagem para todos">
+        <button type="submit" class="icon-btn accent" aria-label="Enviar"><i data-icon="send" data-size="18"></i></button>
+      </form>
+    </section>
+
+    <section data-section="youtube">
+      <form class="yt-form" id="yt-form" autocomplete="off">
+        <input id="yt-url" placeholder="Cole o link do YouTube">
+        <button type="submit" class="primary small">Tocar</button>
+      </form>
+      <p class="field-error" id="yt-error" hidden></p>
+
+      <div class="now-playing" id="yt-now" hidden>
+        <div class="np-title" id="yt-title">—</div>
+        <div class="np-by" id="yt-by"></div>
+        <div class="np-progress" id="yt-progress"><div class="np-fill" id="yt-fill"></div></div>
+        <div class="np-times"><span id="yt-cur">0:00</span><span id="yt-dur">0:00</span></div>
+        <div class="np-controls">
+          <button type="button" class="icon-btn" id="yt-back" aria-label="Voltar 10 segundos"><i data-icon="back"></i></button>
+          <button type="button" class="icon-btn big accent" id="yt-play" aria-label="Tocar/pausar"><i data-icon="play"></i></button>
+          <button type="button" class="icon-btn" id="yt-fwd" aria-label="Avançar 10 segundos"><i data-icon="fwd"></i></button>
+          <button type="button" class="icon-btn" id="yt-sync" aria-label="Sincronizar comigo"><i data-icon="sync"></i></button>
+          <button type="button" class="icon-btn" id="yt-stop" aria-label="Tirar vídeo do telão"><i data-icon="stop"></i></button>
+        </div>
+      </div>
+
+      <label class="slider-row">
+        <span><i data-icon="volume" data-size="16"></i>Volume do YouTube (só para você)</span>
+        <input type="range" id="yt-volume" min="0" max="100" value="80">
+      </label>
+
+      <div class="sub-block">
+        <h3>No telão agora</h3>
+        <div class="main-sources" id="main-sources"></div>
+      </div>
+      <p class="tip">Dica: olhe para o telão e aperte <kbd>E</kbd> para dar zoom e usar os controles do próprio YouTube. Tudo que você fizer sincroniza para todos.</p>
+    </section>
+
+    <section data-section="parkour">
+      <p class="lead">Saia da plataforma <b>LARGADA</b> para o cronômetro começar. Passe pelos 3 checkpoints e chegue ao camarote VIP lá no alto — com vista para o telão.</p>
+      <ul class="rules">
+        <li>Encostar no piso roxo durante a corrida te leva ao último checkpoint.</li>
+        <li><kbd>Shift</kbd> corre e faz pulos mais longos. Plataformas laranja são camas elásticas.</li>
+        <li><kbd>R</kbd> volta ao checkpoint (ou à largada).</li>
+      </ul>
+      <button type="button" class="primary" id="pk-go"><i data-icon="flag" data-size="18"></i>Ir para a largada</button>
+      <div class="sub-block">
+        <h3>Recordes da sala</h3>
+        <ol class="leaderboard" id="leaderboard"><li class="empty">Ninguém completou ainda. Seja o primeiro!</li></ol>
+      </div>
+    </section>
+
+    <section data-section="settings">
+      <label class="field">
+        <span>Microfone</span>
+        <select id="set-mic-device"><option value="">Padrão do sistema</option></select>
+      </label>
+      <label class="slider-row">
+        <span>Volume das vozes</span>
+        <input type="range" id="set-voice" min="0" max="100" value="100">
+      </label>
+      <label class="slider-row">
+        <span>Volume das telas compartilhadas</span>
+        <input type="range" id="set-screen" min="0" max="100" value="90">
+      </label>
+      <label class="toggle-row">
+        <span><b>Voz por proximidade</b><small>Quem está longe fica mais baixo</small></span>
+        <input type="checkbox" id="set-spatial" class="switch">
+      </label>
+      <p class="note-box" id="share-unsupported" hidden>
+        <b>Compartilhar tela não funciona neste aparelho.</b>
+        Celulares e tablets não deixam o navegador capturar a tela. Para mostrar a sua, entre pelo
+        computador no Chrome ou Edge — mas você pode ver as telas dos outros, falar e assistir normalmente.
+      </p>
+      <div class="field" id="share-mode-field">
+        <span>Compartilhar tela otimizada para</span>
+        <div class="segmented" id="set-share-mode">
+          <button type="button" data-value="detail">Texto nítido</button>
+          <button type="button" data-value="motion">Vídeo fluido</button>
+        </div>
+        <small class="hint">Vale para o próximo compartilhamento.</small>
+      </div>
+      <label class="slider-row">
+        <span>Sensibilidade do mouse</span>
+        <input type="range" id="set-sens" min="20" max="250" value="100">
+      </label>
+      <label class="toggle-row">
+        <span><b>Sombras</b><small>Desligue se ficar lento</small></span>
+        <input type="checkbox" id="set-shadows" class="switch" checked>
+      </label>
+      <label class="toggle-row">
+        <span><b>Efeitos sonoros</b><small>Pulos, checkpoints, entradas</small></span>
+        <input type="checkbox" id="set-sfx" class="switch" checked>
+      </label>
+    </section>
+  </aside>
+
+  <!-- ============================================================ foco 2D numa tela compartilhada -->
+  <div id="focus" hidden>
+    <video id="focus-video" playsinline autoplay muted></video>
+    <div class="focus-bar">
+      <div class="focus-name"><span class="live-dot"></span><span id="focus-name">Tela</span></div>
+      <div class="focus-actions">
+        <button type="button" class="secondary small" id="focus-pin"><i data-icon="pin" data-size="16"></i>Pôr no telão</button>
+        <button type="button" class="secondary small" id="focus-full"><i data-icon="maximize" data-size="16"></i>Tela cheia</button>
+        <button type="button" class="icon-btn" id="focus-close" aria-label="Fechar"><i data-icon="x"></i></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ lobby -->
+  <div id="lobby">
+    <form class="lobby-card" id="lobby-form" autocomplete="off">
+      <div class="brand">
+        <span class="brand-mark"><i data-icon="share" data-size="20"></i></span>
+        <span>Sala 3D</span>
+      </div>
+      <h1>Assista junto.<br>Fale junto.<br><em>Pule junto.</em></h1>
+      <p class="lobby-sub">Compartilhe a tela do PC ou de uma aba com som, coloque YouTube no telão e ande pela sala — tem parkour até o camarote.</p>
+
+      <label class="field">
+        <span>Seu nome</span>
+        <input id="in-name" maxlength="20" placeholder="Como te chamam?" required>
+      </label>
+
+      <div class="field">
+        <span>Cor do boneco</span>
+        <div class="swatches" id="swatches" role="radiogroup" aria-label="Cor do boneco"></div>
+      </div>
+
+      <label class="field">
+        <span>Sala</span>
+        <div class="input-prefix"><b>#</b><input id="in-room" maxlength="40" placeholder="principal"></div>
+      </label>
+
+      <label class="toggle-row compact">
+        <span><b>Entrar com microfone ligado</b></span>
+        <input type="checkbox" id="in-mic" class="switch" checked>
+      </label>
+
+      <button type="submit" class="primary block" id="btn-join">Entrar na sala</button>
+      <p class="lobby-note" id="lobby-note">Para mandar o som da tela, marque <b>“Compartilhar áudio”</b> quando o navegador perguntar.</p>
+      <p class="lobby-note" id="lobby-note-touch" hidden>No celular você anda com o <b>analógico</b>, olha <b>arrastando o dedo</b> e fala pelo microfone. Só o <b>compartilhar tela</b> exige um computador.</p>
+    </form>
+  </div>
+
+  <div id="reconnecting" hidden><div class="spinner"></div>Reconectando…</div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script type="module" src="/js/main.js"></script>
+</body>
+</html>
