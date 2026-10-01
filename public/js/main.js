@@ -3,9 +3,11 @@ import * as THREE from 'three';
 import { World, SPAWN } from './world.js';
 import { Avatar } from './avatars.js';
 import { Player } from './player.js';
-import { RTC } from './rtc.js';
+import { RTC, SHARE_PRESETS } from './rtc.js';
 import { YouTubeSync } from './youtube.js';
-import { ParkourRun, formatTime } from './parkour.js';
+import { ParkourRun, formatTime, CHECKPOINT_COUNT } from './parkour.js';
+import { Combat } from './combat.js';
+import { RING, COMBAT, ringCorners } from './arena.js';
 import { sfx, audioContext, setSfxEnabled } from './sfx.js';
 import { icon, hydrateIcons } from './icons.js';
 import { isTouch, setupTouchControls, toggleFullscreen, isFullscreen } from './touch.js';
@@ -20,12 +22,12 @@ const typing = () => {
 
 const COLORS = ['#7c9cff', '#6ee7c8', '#f472b6', '#fbbf24', '#a78bfa', '#fb7185', '#38bdf8', '#a3e635', '#f97316', '#e2e8f0'];
 const EMOTE_KEYS = ['wave', 'party', 'laugh', 'heart', 'clap', 'fire'];
-const PANEL_TITLES = { people: 'Pessoas', chat: 'Chat da sala', youtube: 'YouTube no telão', parkour: 'Parkour', settings: 'Ajustes' };
+const PANEL_TITLES = { people: 'Pessoas', chat: 'Chat da sala', youtube: 'YouTube no telão', parkour: 'Parkour', ringue: 'Ringue de luta', settings: 'Ajustes' };
 
 // ------------------------------------------------------------------ ajustes salvos
 const DEFAULTS = {
   name: '', color: COLORS[0], mic: true, voice: 100, screen: 90, yt: 80, spatial: false,
-  shareMode: 'detail', sens: 100, shadows: true, sfx: true, micDevice: '', helpCollapsed: false,
+  shareMode: 'detail', sens: 100, shadows: true, sfx: true, micDevice: '', helpCollapsed: false, photo: null,
 };
 const stored = (() => {
   try { return JSON.parse(localStorage.getItem('sala3d') || '{}'); } catch { return {}; }
@@ -127,6 +129,67 @@ $('#swatches').addEventListener('click', (e) => {
 nameInput.addEventListener('input', () => localAvatar.setName(nameInput.value.trim() || 'Você'));
 if (settings.name) localAvatar.setName(settings.name);
 
+// ---------------------------------------------------------------- foto do rosto
+// Reduz para 128x128 recortando o centro: o que trafega é um JPEG de ~10 kB, não o
+// arquivo original de vários MB que a câmera do celular produz.
+const PHOTO_SIZE = 128;
+function photoFromFile(file) {
+  return new Promise((resolve, reject) => {
+    if (!file.type.startsWith('image/')) return reject(new Error('Isso não é uma imagem.'));
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const lado = Math.min(img.width, img.height);
+      const cv = document.createElement('canvas');
+      cv.width = cv.height = PHOTO_SIZE;
+      const ctx = cv.getContext('2d');
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, (img.width - lado) / 2, (img.height - lado) / 2, lado, lado, 0, 0, PHOTO_SIZE, PHOTO_SIZE);
+      resolve(cv.toDataURL('image/jpeg', 0.78));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Não consegui abrir essa imagem.')); };
+    img.src = url;
+  });
+}
+
+function renderPhotoPreview() {
+  const box = $('#photo-prev');
+  if (settings.photo) {
+    box.innerHTML = '';
+    const img = new Image();
+    img.src = settings.photo;
+    img.alt = '';
+    box.appendChild(img);
+  } else {
+    box.innerHTML = icon('user', 22);
+  }
+  $('#photo-clear').hidden = !settings.photo;
+}
+
+function applyPhoto(dataUrl) {
+  settings.photo = dataUrl || null;
+  saveSettings();
+  renderPhotoPreview();
+  localAvatar.setPhoto(settings.photo);
+  if (socket && state.joined) socket.emit('photo', settings.photo);
+}
+
+renderPhotoPreview();
+if (settings.photo) localAvatar.setPhoto(settings.photo);
+$('#photo-pick').addEventListener('click', () => $('#photo-file').click());
+$('#photo-file').addEventListener('change', async (e) => {
+  const file = e.target.files?.[0];
+  e.target.value = '';
+  if (!file) return;
+  try {
+    applyPhoto(await photoFromFile(file));
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+});
+$('#photo-clear').addEventListener('click', () => applyPhoto(null));
+
 if (!window.isSecureContext || !navigator.mediaDevices) {
   // o aviso tem que cair na nota que está visível (a do celular é outra)
   const note = isTouch ? $('#lobby-note-touch') : $('#lobby-note');
@@ -163,6 +226,7 @@ async function join() {
   try { config = await (await fetch('/config')).json(); } catch { /* usa o padrão */ }
 
   socket = window.io();
+  combat.socket = socket;
   rtc = new RTC(socket, { iceServers: config.iceServers, onTrack: handleTrack });
   rtc.shareMode = settings.shareMode;
   yt = new YouTubeSync(socket, {
@@ -207,6 +271,7 @@ async function join() {
       use: () => { if (state.hovered) enterFocus(state.hovered); else if (state.focus) exitFocus(); },
       view: toggleView,
       respawn: () => { if (!state.focus) respawn(); },
+      punch: () => punch(),
       fullscreen: () => { toggleFullscreen(); updateFullscreenButton(); },
     });
     syncTouchVisibility();
@@ -229,6 +294,7 @@ function emitJoin() {
       name: settings.name,
       color: settings.color,
       mic: state.micOn && state.micAvailable,
+      photo: settings.photo,
     }, resolve);
   });
 }
@@ -250,6 +316,7 @@ function applyJoined(data) {
   if (data.chat.length) data.chat.forEach((m) => addChat(m, false));
   else $('#chat-list').innerHTML = '<li class="empty">Nenhuma mensagem ainda. Diga oi! 👋</li>';
   setLeaderboard(data.leaderboard);
+  setFightBoard(data.fights);
 
   for (const u of data.users) rtc.getPeer(u.id);
 
@@ -301,12 +368,44 @@ function bindSocket() {
     u.avatar.speaking = !!s;
   });
 
-  socket.on('user-update', ({ id, mic }) => {
+  socket.on('user-update', ({ id, mic, photo, health, ko }) => {
     const u = state.users.get(id);
     if (!u) return;
-    u.mic = mic;
-    u.avatar.setStatus({ mic });
-    renderPeople();
+    if (mic !== undefined) {
+      u.mic = mic;
+      u.avatar.setStatus({ mic });
+      renderPeople();
+    }
+    if (photo !== undefined) {
+      u.photo = photo;
+      u.avatar.setPhoto(photo);
+    }
+    if (health !== undefined) u.avatar.setHealth(health);
+    if (ko !== undefined) u.avatar.setKo(ko);
+  });
+
+  // ------------------------------------------------------------ ringue
+  socket.on('punch', ({ id }) => {
+    const u = state.users.get(id);
+    if (!u || u.isSelf) return;
+    u.avatar.punch();
+    sfx.punchSwing();
+  });
+
+  socket.on('hit', ({ from, fromName, dir }) => {
+    combat.takeHit({ dir, from, fromName });
+  });
+
+  socket.on('ko', ({ id, name, by, byColor, fights }) => {
+    setFightBoard(fights);
+    const u = state.users.get(id);
+    if (u && !u.isSelf) {
+      u.avatar.setKo(true);
+      u.avatar.setHealth(0);
+      setTimeout(() => { u.avatar.setKo(false); u.avatar.setHealth(1); }, COMBAT.respawnDelay * 1000);
+    }
+    sfx.ko();
+    toast(by ? `${by} nocauteou ${name}!` : `${name} caiu do ringue!`, 'warn', 4200, byColor || null);
   });
 
   socket.on('share-update', ({ id, slot, screenStreamId }) => {
@@ -355,6 +454,9 @@ function addUser(data) {
   if (state.users.has(data.id)) return state.users.get(data.id);
   const avatar = new Avatar({ name: data.name, color: data.color });
   avatar.setStatus({ mic: data.mic, sharing: data.slot != null });
+  if (data.photo) avatar.setPhoto(data.photo);
+  if (data.health != null) avatar.setHealth(data.health);
+  if (data.ko) avatar.setKo(true);
   avatar.setNetworkState(data.p, data.r, data.a);
   world.scene.add(avatar.group);
   const u = { ...data, isSelf: false, avatar, streams: new Map(), audioEl: null, screenVideo: null, speaking: false };
@@ -823,6 +925,11 @@ const run = new ParkourRun({
   },
   onStart: () => showParkourHud('running', ''),
   onCancel: () => hideParkourHud(),
+  onAbandon: () => {
+    hideParkourHud();
+    world.resetCheckpoints();
+    toast('Você saiu do parkour. Pise na LARGADA para correr de novo.', 'info', 3800);
+  },
   onCheckpoint: (d) => {
     sfx.checkpoint();
     world.markCheckpoint(d.id);
@@ -865,6 +972,7 @@ function showParkourHud(mode, msg) {
 }
 function hideParkourHud() { $('#parkour-hud').hidden = true; }
 function setPkTime(t) { $('#pk-time').textContent = formatTime(t); }
+$('#pk-cps').innerHTML = '<i></i>'.repeat(CHECKPOINT_COUNT);
 function setPkCps(n) { $$('#pk-cps i').forEach((el, i) => el.classList.toggle('on', i < n)); }
 function flashPk(msg) {
   $('#pk-msg').textContent = msg;
@@ -892,12 +1000,89 @@ function respawn() {
 
 function setLeaderboard(board) {
   const ol = $('#leaderboard');
+  const mine = $('#pk-mine');
   if (!board?.length) {
     ol.innerHTML = '<li class="empty">Ninguém completou ainda. Seja o primeiro!</li>';
+    mine.hidden = true;
     return;
   }
-  ol.innerHTML = board.map((e) => `<li><span class="who"><i style="--c:${esc(e.color)}"></i>${esc(e.name)}</span><time>${formatTime(e.time)}</time></li>`).join('');
+  ol.innerHTML = board.map((e) => {
+    const eu = e.name === settings.name ? ' class="me"' : '';
+    return `<li${eu}><span class="who"><i style="--c:${esc(e.color)}"></i>${esc(e.name)}</span><time>${formatTime(e.time)}</time></li>`;
+  }).join('');
+  const pos = board.findIndex((e) => e.name === settings.name);
+  if (pos >= 0) {
+    mine.hidden = false;
+    mine.textContent = `Seu melhor: ${formatTime(board[pos].time)} — ${pos + 1}º de ${board.length}.`;
+  } else {
+    mine.hidden = false;
+    mine.textContent = `Você ainda não completou o percurso (${CHECKPOINT_COUNT} checkpoints).`;
+  }
 }
+
+function setFightBoard(board) {
+  const ol = $('#fight-board');
+  if (!board?.length) {
+    ol.innerHTML = '<li class="empty">Ninguém se pegou ainda.</li>';
+    return;
+  }
+  ol.innerHTML = board.map((e) => {
+    const eu = e.name === settings.name ? ' class="me"' : '';
+    return `<li${eu}><span class="who"><i style="--c:${esc(e.color)}"></i>${esc(e.name)}</span>`
+      + `<span><span class="kos">${e.kos}</span><span class="levou">levou ${e.levou}</span></span></li>`;
+  }).join('');
+}
+
+// ------------------------------------------------------------------ ringue de luta
+const combat = new Combat({
+  player,
+  socket: null, // preenchido em join(), quando o socket existe
+  getOthers: () => [...state.users.values()]
+    .filter((u) => !u.isSelf && u.avatar)
+    .map((u) => ({ id: u.id, position: u.avatar.group.position })),
+  onState: (health, inRing) => updateFightHud(health, inRing),
+  onHitLanded: () => sfx.punchHit(),
+  onDamage: () => sfx.punchTaken(),
+  onKo: (porQuem) => {
+    toast(porQuem ? `${porQuem} te nocauteou!` : 'Você caiu do ringue!', 'error', 3600);
+    updateFightHud(0, combat.inRing);
+  },
+});
+
+function updateFightHud(health, inRing) {
+  const hud = $('#fight-hud');
+  hud.hidden = !inRing;
+  if (!inRing) {
+    $('#tb-punch').hidden = true;
+    return;
+  }
+  const v = Math.max(0, Math.min(1, health / COMBAT.maxHealth));
+  $('#fh-fill').style.width = `${v * 100}%`;
+  hud.classList.toggle('hurt', v <= 0.55 && v > 0.28);
+  hud.classList.toggle('danger', v <= 0.28);
+  hud.classList.toggle('ko', combat.knockedOut);
+  $('#fh-hint').innerHTML = combat.knockedOut
+    ? 'Nocauteado…'
+    : (isTouch ? 'Toque na luva para socar' : '<kbd>F</kbd> socar');
+  if (isTouch) $('#tb-punch').hidden = !!state.panel || !!state.focus;
+  localAvatar.setHealth(v);
+  socket?.emit('health', v);
+}
+
+function punch() {
+  if (combat.punch()) {
+    localAvatar.punch();
+    sfx.punchSwing(); // o som de acerto vem depois, pelo onHitLanded
+  }
+}
+
+function goToRing() {
+  const c = ringCorners()[0];
+  run.abandon();
+  player.teleport(c, Math.atan2(RING.x - c[0], RING.z - c[2]) + Math.PI);
+}
+$('#ring-go').addEventListener('click', () => { goToRing(); closePanel(); });
+$('#pk-quit').addEventListener('click', () => run.abandon());
 
 player.on('jump', () => sfx.jump());
 player.on('pad', () => sfx.pad());
@@ -1176,13 +1361,28 @@ bindToggle('#set-sfx', 'sfx', (on) => setSfxEnabled(on));
 
 function renderShareMode() {
   $$('#set-share-mode button').forEach((b) => b.classList.toggle('on', b.dataset.value === settings.shareMode));
+  const preset = SHARE_PRESETS[settings.shareMode] || SHARE_PRESETS.detail;
+  const dicas = {
+    detail: 'Para código, planilhas, slides: imagem parada e nítida.',
+    motion: 'Para filme e vídeo: 30 quadros por segundo em 1080p.',
+    game: 'Para jogo pesado: 60 quadros por segundo em 720p. Prioriza fluidez em vez de nitidez — '
+      + 'é o que evita travar quando a placa de vídeo já está ocupada com o jogo.',
+  };
+  $('#share-mode-hint').textContent = dicas[settings.shareMode] || 'Vale para o próximo compartilhamento.';
 }
 renderShareMode();
 $('#set-share-mode').addEventListener('click', (e) => {
   const b = e.target.closest('[data-value]');
   if (!b) return;
   settings.shareMode = b.dataset.value;
-  if (rtc) rtc.shareMode = settings.shareMode;
+  if (rtc) {
+    rtc.shareMode = settings.shareMode;
+    // se já está compartilhando, reaplica sem precisar recomeçar
+    if (state.sharing) {
+      rtc.retuneAll();
+      toast('Qualidade ajustada. A resolução só muda no próximo compartilhamento.', 'info', 5000);
+    }
+  }
   renderShareMode();
   saveSettings();
 });
@@ -1210,6 +1410,7 @@ window.addEventListener('keydown', (e) => {
     else if (state.focus) exitFocus();
     else if (!$('#react-pop').hidden) $('#react-pop').hidden = true;
     else if (state.panel) closePanel();
+    else run.abandon(); // preso no parkour? Esc sai da corrida
     return;
   }
   if (typing() || e.repeat) return;
@@ -1223,6 +1424,9 @@ window.addEventListener('keydown', (e) => {
       break;
     case 'KeyV':
       toggleView();
+      break;
+    case 'KeyF':
+      punch();
       break;
     case 'KeyM':
       toggleMic();
@@ -1263,6 +1467,12 @@ function lockPointer() {
 document.addEventListener('mousedown', (e) => {
   if (document.pointerLockElement === world.canvas && e.button === 0 && state.hovered) enterFocus(state.hovered);
 });
+
+// Ponto de inspeção para testes automatizados. Só existe com ?debug=1 na URL —
+// em uso normal nada disso fica exposto.
+if (params.get('debug') === '1') {
+  window.__sala3d = { state, player, combat, run, world, settings, punch, goToRing, respawn };
+}
 
 // ------------------------------------------------------------------ loop principal
 let lastFrame = performance.now();
@@ -1354,6 +1564,8 @@ function frame() {
     player.update(dt);
     run.update(dt, player.grounded ? player.ground : null);
     if (run.state === 'running') setPkTime(run.time);
+    combat.update(dt);
+    localAvatar.setKo(combat.knockedOut);
     detectSpeaking(dt);
     sendState(dt);
     updateHover();

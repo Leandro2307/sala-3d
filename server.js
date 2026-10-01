@@ -12,6 +12,8 @@ const HTTPS_PORT = Number(process.env.HTTPS_PORT) || 3443;
 const USE_HTTPS = process.argv.includes('--https') || process.env.HTTPS === '1';
 const SHARE_SLOTS = 4;
 const MAX_CHAT = 60;
+const MAX_PHOTO = 60_000; // data URL da foto do rosto (128x128 jpeg dá ~12 kB)
+const PUNCH_RANGE = 4.5; // metros: folga sobre o alcance real, só para barrar absurdo
 
 // STUN público + TURN opcional via variáveis de ambiente (necessário em algumas redes 4G/corporativas).
 const iceServers = [
@@ -32,6 +34,19 @@ app.get('/config', (_req, res) => res.json({ iceServers, shareSlots: SHARE_SLOTS
 
 // ---------------------------------------------------------------- estado das salas
 const rooms = new Map();
+// Os placares vivem fora da sala de propósito: a sala é apagada 30 min depois de
+// esvaziar, e junto iam embora os recordes. Assim eles duram enquanto o processo viver.
+// (No plano grátis do Render o serviço reinicia quando fica ocioso, e aí zeram.)
+const boards = new Map(); // roomId -> { parkour: [], fights: [] }
+
+function getBoards(id) {
+  let b = boards.get(id);
+  if (!b) {
+    b = { parkour: [], fights: [] };
+    boards.set(id, b);
+  }
+  return b;
+}
 
 function getRoom(id) {
   let room = rooms.get(id);
@@ -43,7 +58,6 @@ function getRoom(id) {
       main: 'youtube', // 'youtube' ou userId fixado no telão
       youtube: { videoId: null, playing: false, time: 0, updatedAt: Date.now(), by: null },
       chat: [],
-      leaderboard: [],
     };
     rooms.set(id, room);
   }
@@ -54,8 +68,25 @@ function publicUser(u) {
   return {
     id: u.id, name: u.name, color: u.color, mic: u.mic,
     slot: u.slot, screenStreamId: u.screenStreamId,
-    p: u.p, r: u.r, a: u.a,
+    p: u.p, r: u.r, a: u.a, photo: u.photo, health: u.health, ko: u.ko,
   };
+}
+
+// Aceita só data URL de imagem, com tamanho limitado.
+function cleanPhoto(value) {
+  if (typeof value !== 'string') return null;
+  if (value.length > MAX_PHOTO) return null;
+  const tipos = ['data:image/jpeg;base64,', 'data:image/png;base64,', 'data:image/webp;base64,'];
+  const prefixo = tipos.find((t) => value.startsWith(t));
+  if (!prefixo) return null;
+  const corpo = value.slice(prefixo.length);
+  if (!corpo || !/^[A-Za-z0-9+/=]+$/.test(corpo)) return null;
+  return value;
+}
+
+function dist(a, b) {
+  if (!a || !b) return Infinity;
+  return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
 }
 
 function ytSnapshot(room) {
@@ -95,6 +126,9 @@ function attachSockets(io) {
         mic: !!data?.mic,
         slot: null,
         screenStreamId: null,
+        photo: cleanPhoto(data?.photo),
+        health: 1,
+        ko: false,
         p: [0, 0, -4], r: Math.PI, a: 0,
       };
       room.users.set(socket.id, user);
@@ -107,7 +141,8 @@ function attachSockets(io) {
         youtube: ytSnapshot(room),
         main: room.main,
         chat: room.chat,
-        leaderboard: room.leaderboard,
+        leaderboard: getBoards(roomId).parkour,
+        fights: getBoards(roomId).fights,
       });
       socket.to(roomId).emit('user-joined', publicUser(user));
     });
@@ -202,11 +237,79 @@ function attachSockets(io) {
       io.to(room.id).emit('chat', msg);
     });
 
+    // ------------------------------------------------------------ foto do rosto
+    socket.on('photo', (dataUrl) => {
+      if (!user) return;
+      user.photo = cleanPhoto(dataUrl);
+      io.to(room.id).emit('user-update', { id: user.id, photo: user.photo });
+    });
+
+    // ------------------------------------------------------------ ringue
+    socket.on('punch', () => {
+      if (!user) return;
+      socket.to(room.id).emit('punch', { id: user.id });
+    });
+
+    socket.on('hit', ({ to, dir } = {}) => {
+      if (!user) return;
+      const alvo = room.users.get(to);
+      if (!alvo || alvo.id === user.id) return;
+      // confere a distância no servidor: impede socar alguém do outro lado da sala
+      if (dist(user.p, alvo.p) > PUNCH_RANGE) return;
+      const d = Array.isArray(dir) ? dir.slice(0, 2).map(Number) : [0, 0];
+      if (!d.every(Number.isFinite)) return;
+      io.to(to).emit('hit', { from: user.id, fromName: user.name, dir: d });
+    });
+
+    socket.on('health', (v) => {
+      if (!user) return;
+      const h = Number(v);
+      if (!Number.isFinite(h)) return;
+      user.health = Math.max(0, Math.min(1, h));
+      socket.to(room.id).volatile.emit('user-update', { id: user.id, health: user.health });
+    });
+
+    socket.on('ko', ({ by } = {}) => {
+      if (!user) return;
+      user.ko = true;
+      user.health = 0;
+      const autor = by && by !== user.id ? room.users.get(by) : null;
+      if (autor) {
+        const placar = getBoards(room.id).fights;
+        let linha = placar.find((e) => e.name === autor.name);
+        if (!linha) {
+          linha = { name: autor.name, color: autor.color, kos: 0, levou: 0 };
+          placar.push(linha);
+        }
+        linha.kos += 1;
+        linha.color = autor.color;
+        const vitima = placar.find((e) => e.name === user.name);
+        if (vitima) vitima.levou += 1;
+        else placar.push({ name: user.name, color: user.color, kos: 0, levou: 1 });
+        placar.sort((a, b) => b.kos - a.kos || a.levou - b.levou);
+        placar.length = Math.min(placar.length, 10);
+      }
+      io.to(room.id).emit('ko', {
+        id: user.id,
+        name: user.name,
+        by: autor ? autor.name : null,
+        byColor: autor ? autor.color : null,
+        fights: getBoards(room.id).fights,
+      });
+    });
+
+    socket.on('revive', () => {
+      if (!user) return;
+      user.ko = false;
+      user.health = 1;
+      io.to(room.id).emit('user-update', { id: user.id, ko: false, health: 1 });
+    });
+
     socket.on('parkour-finish', (time) => {
       if (!user) return;
       const t = Number(time);
       if (!Number.isFinite(t) || t < 8 || t > 3600) return;
-      const board = room.leaderboard;
+      const board = getBoards(room.id).parkour;
       const existing = board.find((e) => e.name === user.name);
       if (existing && existing.time <= t) {
         io.to(room.id).emit('parkour-finish', { name: user.name, color: user.color, time: t, record: false, leaderboard: board });

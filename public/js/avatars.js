@@ -94,6 +94,12 @@ export class Avatar {
     const visor = new THREE.Mesh(shared.visor, shared.visorMat);
     visor.scale.setScalar(1.03);
     this.head.add(visor);
+    this.visor = visor;
+    this.face = null; // foto do rosto, quando a pessoa escolhe uma
+    this.photo = null;
+    this.health = 1; // 0..1 — barra só aparece quando leva porrada
+    this.swing = 0; // animação do soco
+    this.ko = false;
     this.handL = new THREE.Mesh(shared.hand, this.material);
     this.handR = new THREE.Mesh(shared.hand, this.material);
     for (const m of [this.body, this.head, this.handL, this.handR]) {
@@ -151,14 +157,79 @@ export class Avatar {
     let ix = x0 + 60 + tw + 36;
     if (this.sharing) { drawScreenBadge(ctx, ix, 64, 24); ix += 60; }
     if (!this.mic) drawMicOff(ctx, ix, 64, 24);
+
+    // barra de vida: só aparece quando a pessoa está machucada
+    if (this.health < 1) {
+      const bw = Math.max(pw, 180);
+      const bx = (w - bw) / 2;
+      ctx.fillStyle = 'rgba(10,12,18,0.8)';
+      ctx.beginPath();
+      ctx.roundRect(bx, 112, bw, 14, 7);
+      ctx.fill();
+      const v = Math.max(0, Math.min(1, this.health));
+      ctx.fillStyle = v > 0.5 ? '#4ade80' : v > 0.25 ? '#fbbf24' : '#f2555a';
+      ctx.beginPath();
+      ctx.roundRect(bx + 2, 114, Math.max(0, (bw - 4) * v), 10, 5);
+      ctx.fill();
+    }
     tex.needsUpdate = true;
   }
 
   setName(name) { this.name = name; this.drawTag(); }
 
+  // Foto do rosto: entra no lugar da viseira, virada para a frente do boneco (+Z).
+  setPhoto(dataUrl) {
+    if (this.face) {
+      this.head.remove(this.face);
+      this.face.geometry.dispose();
+      this.face.material.map?.dispose();
+      this.face.material.dispose();
+      this.face = null;
+    }
+    this.photo = dataUrl || null;
+    if (!dataUrl) {
+      this.visor.visible = true;
+      return;
+    }
+    const tex = new THREE.TextureLoader().load(dataUrl, () => { tex.needsUpdate = true; });
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const disco = new THREE.Mesh(
+      new THREE.CircleGeometry(0.235, 36),
+      new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }),
+    );
+    disco.position.set(0, 0.015, 0.245);
+    const aro = new THREE.Mesh(
+      new THREE.TorusGeometry(0.238, 0.018, 8, 36),
+      new THREE.MeshStandardMaterial({ color: this.color, roughness: 0.4, emissive: this.color, emissiveIntensity: 0.3 }),
+    );
+    aro.position.copy(disco.position);
+    disco.add(aro);
+    this.head.add(disco);
+    this.face = disco;
+    this.visor.visible = false;
+  }
+
+  setHealth(v) {
+    const novo = Math.max(0, Math.min(1, v));
+    if (Math.abs(novo - this.health) < 0.005) return;
+    this.health = novo;
+    this.drawTag();
+  }
+
+  setKo(on) {
+    this.ko = !!on;
+  }
+
+  punch() { this.swing = 1; }
+
   setColor(color) {
     this.color = color;
     this.material.color.set(color);
+    if (this.face) {
+      const aro = this.face.children[0];
+      aro?.material.color.set(color);
+      aro?.material.emissive.set(color);
+    }
     this.drawTag();
   }
 
@@ -281,6 +352,21 @@ export class Avatar {
       this.waveTime -= dt;
       this.handR.position.set(0.58 + Math.sin(t * 14) * 0.12, 1.85, 0.1);
     }
+
+    // soco: o braço direito dispara para frente e volta
+    if (this.swing > 0) {
+      this.swing = Math.max(0, this.swing - dt / 0.26);
+      const golpe = Math.sin((1 - this.swing) * Math.PI);
+      this.handR.position.set(0.42 - golpe * 0.18, 1.18 + bob, 0.25 + golpe * 0.95);
+      this.handL.position.set(-0.48, 1.05 + bob, 0.18);
+      this.body.rotation.y = -golpe * 0.3;
+    } else if (!this.ko) {
+      this.body.rotation.y = 0;
+    }
+
+    // nocauteado: cai de lado
+    const alvoKo = this.ko ? Math.PI / 2.1 : 0;
+    this.inner.rotation.z += (alvoKo - this.inner.rotation.z) * Math.min(1, dt * 9);
 
     // fala
     const targetLevel = this.speaking ? 1 : 0;

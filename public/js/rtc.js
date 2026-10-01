@@ -1,6 +1,42 @@
 // WebRTC em malha (cada pessoa conecta direto com cada outra): microfone + tela + som da tela.
 // Usa o padrão "perfect negotiation" para renegociar sem conflitos quando alguém liga/desliga a tela.
 
+// Presets de captura. O que trava jogo pesado não é só banda: é o encoder brigando
+// com o jogo pela GPU. Por isso o preset "game" captura em 60 fps mas manda o
+// navegador sacrificar resolução antes de sacrificar fluidez.
+export const SHARE_PRESETS = {
+  detail: {
+    label: 'Texto nítido',
+    fps: 15,
+    width: 1920,
+    height: 1080,
+    maxBitrate: 3_500_000,
+    hint: 'detail',
+    degradation: 'maintain-resolution',
+    scale: 1,
+  },
+  motion: {
+    label: 'Vídeo',
+    fps: 30,
+    width: 1920,
+    height: 1080,
+    maxBitrate: 6_000_000,
+    hint: 'motion',
+    degradation: 'balanced',
+    scale: 1,
+  },
+  game: {
+    label: 'Jogo',
+    fps: 60,
+    width: 1920,
+    height: 1080,
+    maxBitrate: 9_000_000,
+    hint: 'motion',
+    degradation: 'maintain-framerate',
+    scale: 1.5, // 1080p -> 720p: metade dos pixels pra codificar, muito mais fluido
+  },
+};
+
 export class RTC {
   constructor(socket, { iceServers, onTrack, onPeerGone }) {
     this.socket = socket;
@@ -50,13 +86,17 @@ export class RTC {
   }
 
   // -------------------------------------------------------------- tela
+  preset() {
+    return SHARE_PRESETS[this.shareMode] || SHARE_PRESETS.detail;
+  }
+
   async startScreen() {
-    const motion = this.shareMode === 'motion';
+    const preset = this.preset();
     const stream = await navigator.mediaDevices.getDisplayMedia({
       video: {
-        frameRate: { ideal: motion ? 30 : 15, max: 30 },
-        width: { ideal: 1920 },
-        height: { ideal: 1080 },
+        frameRate: { ideal: preset.fps, max: preset.fps },
+        width: { ideal: preset.width },
+        height: { ideal: preset.height },
       },
       audio: {
         echoCancellation: false,
@@ -71,7 +111,7 @@ export class RTC {
       monitorTypeSurfaces: 'include',
     });
     const video = stream.getVideoTracks()[0];
-    if (video) video.contentHint = motion ? 'motion' : 'detail';
+    if (video) video.contentHint = preset.hint;
     const audio = stream.getAudioTracks()[0];
     if (audio) audio.contentHint = 'music';
     this.screenStream = stream;
@@ -85,16 +125,53 @@ export class RTC {
 
   addScreenTo(peer) {
     if (!this.screenStream || peer.screenTransceivers.length) return;
-    const motion = this.shareMode === 'motion';
+    const preset = this.preset();
     for (const track of this.screenStream.getTracks()) {
       const init = { direction: 'sendonly', streams: [this.screenStream] };
       if (track.kind === 'video') {
-        init.sendEncodings = [{ maxBitrate: motion ? 6_000_000 : 3_500_000, maxFramerate: 30 }];
+        init.sendEncodings = [{
+          maxBitrate: preset.maxBitrate,
+          maxFramerate: preset.fps,
+          scaleResolutionDownBy: preset.scale,
+          networkPriority: 'high',
+          priority: 'high',
+        }];
       } else {
         init.sendEncodings = [{ maxBitrate: 192_000 }];
       }
       peer.screenTransceivers.push(peer.pc.addTransceiver(track, init));
     }
+    this.tuneScreen(peer);
+  }
+
+  // degradationPreference só existe no nível do sender: tem que ser aplicado
+  // depois, com setParameters — não dá para passar em addTransceiver.
+  async tuneScreen(peer) {
+    const preset = this.preset();
+    for (const tr of peer.screenTransceivers) {
+      const sender = tr.sender;
+      if (!sender || sender.track?.kind !== 'video') continue;
+      try {
+        const params = sender.getParameters();
+        if (!params.encodings || !params.encodings.length) params.encodings = [{}];
+        params.degradationPreference = preset.degradation;
+        Object.assign(params.encodings[0], {
+          maxBitrate: preset.maxBitrate,
+          maxFramerate: preset.fps,
+          scaleResolutionDownBy: preset.scale,
+          networkPriority: 'high',
+          priority: 'high',
+        });
+        await sender.setParameters(params);
+      } catch (err) {
+        console.warn('[rtc] ajuste do envio', err);
+      }
+    }
+  }
+
+  // reaplica em todos (usado quando o preset muda com a tela já no ar)
+  retuneAll() {
+    for (const peer of this.peers.values()) this.tuneScreen(peer);
   }
 
   stopScreen() {

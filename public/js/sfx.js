@@ -27,6 +27,39 @@ function tone({ freq = 440, to = null, dur = 0.12, type = 'sine', gain = 0.06, d
   osc.stop(t0 + dur + 0.02);
 }
 
+// Ruído branco reaproveitado: gerar o buffer a cada soco é desperdício.
+let ruidoBuf = null;
+function ruidoBuffer(ac) {
+  if (ruidoBuf) return ruidoBuf;
+  const n = Math.floor(ac.sampleRate * 0.5);
+  ruidoBuf = ac.createBuffer(1, n, ac.sampleRate);
+  const d = ruidoBuf.getChannelData(0);
+  for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+  return ruidoBuf;
+}
+
+// Rajada de ruído filtrada — é o que dá o "tchá" do impacto. Só com oscilador
+// senoidal um soco vira bipe; a parte percussiva vem daqui.
+function ruido({ dur = 0.1, gain = 0.08, type = 'lowpass', freq = 1200, toFreq = null, q = 1, delay = 0 }) {
+  if (!enabled) return;
+  const ac = audioContext();
+  const t0 = ac.currentTime + delay;
+  const src = ac.createBufferSource();
+  src.buffer = ruidoBuffer(ac);
+  const filtro = ac.createBiquadFilter();
+  filtro.type = type;
+  filtro.frequency.setValueAtTime(freq, t0);
+  if (toFreq) filtro.frequency.exponentialRampToValueAtTime(toFreq, t0 + dur);
+  filtro.Q.value = q;
+  const g = ac.createGain();
+  g.gain.setValueAtTime(0, t0);
+  g.gain.linearRampToValueAtTime(gain, t0 + 0.004);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  src.connect(filtro).connect(g).connect(ac.destination);
+  src.start(t0);
+  src.stop(t0 + dur + 0.02);
+}
+
 export const sfx = {
   jump: () => tone({ freq: 320, to: 520, dur: 0.1, type: 'triangle', gain: 0.035 }),
   pad: () => tone({ freq: 180, to: 760, dur: 0.32, type: 'sine', gain: 0.07 }),
@@ -37,4 +70,30 @@ export const sfx = {
   leave: () => [600, 400].forEach((f, i) => tone({ freq: f, dur: 0.12, gain: 0.035, delay: i * 0.07 })),
   message: () => tone({ freq: 880, dur: 0.08, gain: 0.03 }),
   teleport: () => tone({ freq: 900, to: 220, dur: 0.3, type: 'sine', gain: 0.05 }),
+
+  // ------------------------------------------------------------ ringue
+  // Soco no vazio: só o deslocamento de ar, agudo e curto.
+  punchSwing: () => ruido({ dur: 0.13, gain: 0.05, type: 'bandpass', freq: 1700, toFreq: 480, q: 1.1 }),
+
+  // Soco que acerta: estalo de ruído por cima + corpo grave que desce rápido.
+  // As duas camadas juntas é o que soa como pancada, e não como bipe.
+  punchHit: () => {
+    ruido({ dur: 0.075, gain: 0.13, type: 'lowpass', freq: 2600, toFreq: 700, q: 0.7 });
+    tone({ freq: 165, to: 48, dur: 0.17, type: 'sine', gain: 0.17 });
+    tone({ freq: 95, to: 40, dur: 0.1, type: 'triangle', gain: 0.07, delay: 0.012 });
+  },
+
+  // Apanhar: a mesma pancada, mais abafada (você ouve de dentro).
+  punchTaken: () => {
+    ruido({ dur: 0.09, gain: 0.1, type: 'lowpass', freq: 900, toFreq: 300 });
+    tone({ freq: 140, to: 44, dur: 0.22, type: 'sine', gain: 0.15 });
+  },
+
+  // Nocaute: pancada mais pesada, com cauda e um "uuu" descendo.
+  ko: () => {
+    ruido({ dur: 0.16, gain: 0.15, type: 'lowpass', freq: 1800, toFreq: 240 });
+    tone({ freq: 120, to: 32, dur: 0.5, type: 'sine', gain: 0.2 });
+    tone({ freq: 420, to: 90, dur: 0.55, type: 'triangle', gain: 0.05, delay: 0.05 });
+    ruido({ dur: 0.5, gain: 0.03, type: 'lowpass', freq: 500, toFreq: 120, delay: 0.1 });
+  },
 };

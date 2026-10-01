@@ -7,6 +7,8 @@ const C = {
   b: 0x60a5fa,
   c: 0xa78bfa,
   d: 0xf472b6,
+  e: 0x22d3ee,
+  f: 0xfb7185,
   moving: 0xfbbf24,
   pad: 0xfb923c,
   checkpoint: 0xe2e8f0,
@@ -42,19 +44,36 @@ export const COURSE = [
   { pos: [25, 19.4, 9], size: [3, 3], color: C.c },
   { id: 'cp3', type: 'checkpoint', pos: [29.5, 20, 4.5], size: [4, 4], color: C.checkpoint, label: 'CHECKPOINT 3' },
 
-  // D — Travessia no alto até o camarote
-  { pos: [21, 20, 4.5], size: [7, 0.8], color: C.d },
-  { pos: [13.5, 20.6, 4.5], size: [2, 2], color: C.d },
-  { pos: [13.5, 21.2, 10], size: [1.8, 1.8], color: C.d },
-  { pos: [13.5, 21.2, 16], size: [2.4, 2.4], color: C.moving, move: { axis: 'x', amp: 4, period: 5 } },
-  { pos: [13.5, 21.8, 22], size: [2, 2], color: C.d },
-  { pos: [8, 22.4, 27], size: [2, 2], color: C.d },
+  // D — Vigas finas sobre o vazio
+  { pos: [25, 20.4, 0.5], size: [2, 2], color: C.e },
+  { pos: [19.5, 20.8, -2], size: [6, 0.75], color: C.e }, // viga estreita
+  { pos: [13.5, 21.2, -2], size: [2.2, 2.2], color: C.e },
+  { pos: [8, 21.6, 1], size: [2, 2], color: C.moving, move: { axis: 'z', amp: 3.4, period: 4.2 } },
+  { pos: [3, 22, 5], size: [1.9, 1.9], color: C.e },
+  { id: 'cp4', type: 'checkpoint', pos: [-2, 22.4, 9], size: [4, 4], color: C.checkpoint, label: 'CHECKPOINT 4' },
+
+  // E — Zigue-zague quebrado, cada vez menor
+  { pos: [-7, 23, 12.5], size: [2, 2], color: C.f },
+  { pos: [-11.5, 23.6, 16], size: [1.8, 1.8], color: C.f },
+  { pos: [-16, 24.2, 12.5], size: [1.7, 1.7], color: C.moving, move: { axis: 'z', amp: 3, period: 3.4 } },
+  { pos: [-20.5, 24.8, 16], size: [1.6, 1.6], color: C.f },
+  { type: 'pad', pos: [-25, 24.8, 19.5], size: [2.8, 2.8], color: C.pad, strength: 17 },
+  { id: 'cp5', type: 'checkpoint', pos: [-29, 27.2, 23.5], size: [4, 4], color: C.checkpoint, label: 'CHECKPOINT 5' },
+
+  // F — Reta final até o camarote (descendo)
+  { pos: [-29, 27.2, 28], size: [2.2, 2.2], color: C.d },
+  { pos: [-24, 26.4, 31.5], size: [2.2, 2.2], color: C.moving, move: { axis: 'x', amp: 3.6, period: 4.6 } },
+  { pos: [-18, 25.6, 34], size: [2, 2], color: C.d },
+  { pos: [-12, 24.6, 36.5], size: [2, 2], color: C.d },
 
   // Camarote VIP
   { id: 'balcony', type: 'balcony', pos: [-4, 23, 36], size: [32, 8], h: 0.8, color: C.balcony },
   { id: 'finish', type: 'finish', pos: [-4, 23.15, 36.5], size: [4, 4], h: 0.15, color: C.finish, label: 'CHEGADA' },
   { type: 'teleport', pos: [-15, 23.15, 37.5], size: [2.6, 2.6], h: 0.15, color: C.teleport, target: [0, 0, -2], label: 'DESCER' },
 ];
+
+// Quantos checkpoints o percurso tem (o HUD desenha um ponto para cada).
+export const CHECKPOINT_COUNT = COURSE.filter((p) => p.type === 'checkpoint').length;
 
 // Grade de proteção do camarote (deixa aberto o lado por onde se chega).
 export const RAILS = [
@@ -91,6 +110,7 @@ export class ParkourRun {
     this.time = 0;
     this.checkpoint = null;
     this.reached = new Set();
+    this.quit = false; // desistiu: não volta a valer até pisar na largada de novo
   }
 
   // chamado todo frame com a superfície em que o jogador está pisando (ou null no ar)
@@ -107,6 +127,9 @@ export class ParkourRun {
       }
       return;
     }
+
+    // desistiu: só volta a correr pisando na largada (tratado acima)
+    if (this.quit) return;
 
     if (this.state === 'ready') {
       // saiu andando direto para o chão: não é uma corrida
@@ -140,5 +163,16 @@ export class ParkourRun {
     const was = this.state;
     this.reset();
     return was;
+  }
+
+  // Desistir no meio da corrida: para o cronômetro e devolve o jogador ao chão.
+  // Sem isso, quem já pegou um checkpoint ficava preso — todo toque no chão o
+  // teleportava de volta, e só terminando a corrida dava para sair.
+  abandon() {
+    if (this.state === 'idle') return false;
+    this.reset();
+    this.quit = true;
+    this.cb.onAbandon?.();
+    return true;
   }
 }

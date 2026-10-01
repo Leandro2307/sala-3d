@@ -142,6 +142,7 @@ export function setupTouchControls(player, actions = {}) {
     '#tb-use': actions.use,
     '#tb-view': actions.view,
     '#tb-respawn': actions.respawn,
+    '#tb-punch': actions.punch,
     '#tb-full': actions.fullscreen,
   })) {
     const el = root.querySelector(id);
@@ -151,6 +152,10 @@ export function setupTouchControls(player, actions = {}) {
   return {
     reset: () => { stick.reset(); player.jumpHeld = false; },
     show(on) { root.hidden = !on; },
+    showPunch(on) {
+      const el = root.querySelector('#tb-punch');
+      if (el) el.hidden = !on;
+    },
     // o botão de ação só aparece quando há algo pra usar (uma tela, o telão)
     setUseTarget(label) {
       const el = root.querySelector('#tb-use');

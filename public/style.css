@@ -906,6 +906,96 @@ body.touch .help-grid[data-input="touch"] { display: grid; }
 .spinner { width: 16px; height: 16px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.2); border-top-color: var(--warn); animation: spin 800ms linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+
+/* ------------------------------------------------------------ ringue / luta */
+#fight-hud {
+  position: absolute;
+  left: 50%;
+  bottom: 104px;
+  transform: translateX(-50%);
+  width: min(300px, 60vw);
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--glass);
+  border: 1px solid rgba(244, 63, 94, 0.3);
+  backdrop-filter: blur(14px);
+  pointer-events: none;
+}
+.fh-bar {
+  height: 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+.fh-bar span {
+  display: block;
+  height: 100%;
+  width: 100%;
+  border-radius: 6px;
+  background: linear-gradient(90deg, #4ade80, #a3e635);
+  transition: width 160ms linear, background 300ms;
+}
+#fight-hud.hurt .fh-bar span { background: linear-gradient(90deg, #fbbf24, #fb923c); }
+#fight-hud.danger .fh-bar span { background: linear-gradient(90deg, #f2555a, #fb7185); }
+#fight-hud.ko { border-color: rgba(242, 85, 90, 0.7); }
+.fh-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-top: 7px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.fh-hint { text-transform: none; letter-spacing: 0; font-weight: 500; }
+#fight-hud.ko .fh-hint { color: var(--danger); }
+
+.tb.punch {
+  background: rgba(244, 63, 94, 0.2);
+  border-color: rgba(244, 63, 94, 0.5);
+  color: #fb7185;
+}
+.tb.punch.held { background: rgba(244, 63, 94, 0.45); }
+
+#pk-quit {
+  margin-top: 8px;
+  pointer-events: auto;
+}
+
+.leaderboard.fights li:not(.empty)::before { content: counter(rank); }
+.leaderboard .kos { font-family: var(--mono); font-weight: 700; }
+.leaderboard .levou { color: var(--muted); font-weight: 500; font-size: 12px; margin-left: 6px; }
+.leaderboard li.me { background: rgba(110, 231, 200, 0.1); border-color: rgba(110, 231, 200, 0.28); }
+
+/* ------------------------------------------------------------ foto do rosto */
+.opt { color: var(--muted); font-weight: 500; }
+.photo-row { display: flex; align-items: center; gap: 12px; }
+.photo-prev {
+  width: 56px;
+  height: 56px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--line-strong);
+  color: var(--muted);
+  overflow: hidden;
+}
+.photo-prev img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.photo-acts { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.ghost-btn {
+  background: none;
+  border: 0;
+  color: var(--muted);
+  text-decoration: underline;
+  padding: 0;
+}
+.ghost-btn:hover { color: var(--text); }
+
 /* ------------------------------------------------------------ telas pequenas */
 @media (max-width: 860px) {
   #bar { grid-template-columns: 1fr auto; }
@@ -936,6 +1026,9 @@ body.touch #bar {
 body.touch .bar-left { display: flex; font-size: 12px; max-width: 86px; }
 body.touch #clock, body.touch .bar-left .sep { display: none; }
 body.touch .bar-center, body.touch .bar-right { gap: 4px; }
+body.touch .bar-right { overflow-x: auto; scrollbar-width: none; }
+body.touch .bar-right::-webkit-scrollbar { display: none; }
+body.touch .ghost { flex: none; }
 body.touch .bar-center { justify-content: flex-end; }
 body.touch .round, body.touch .ghost { width: 40px; height: 40px; }
 body.touch #btn-view { display: none; } /* já existe no painel de toque */
@@ -950,6 +1043,7 @@ body.touch #controls-help {
 }
 body.touch #crosshair { opacity: 0.5; }
 body.touch #parkour-hud { top: calc(58px + env(safe-area-inset-top)); }
+body.touch #fight-hud { bottom: auto; top: calc(58px + env(safe-area-inset-top)); width: min(230px, 56vw); }
 
 /* painel quase inteiro: a tela é pequena e os controles somem enquanto ele está aberto */
 body.touch #panel {

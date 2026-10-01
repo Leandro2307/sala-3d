@@ -37,8 +37,17 @@
 
     <div id="parkour-hud" hidden>
       <div class="pk-time" id="pk-time">0:00.00</div>
-      <div class="pk-cps" id="pk-cps"><i></i><i></i><i></i></div>
+      <div class="pk-cps" id="pk-cps"></div>
       <div class="pk-msg" id="pk-msg"></div>
+      <button type="button" class="chip-btn" id="pk-quit"><kbd>Esc</kbd> Sair do parkour</button>
+    </div>
+
+    <div id="fight-hud" hidden>
+      <div class="fh-bar"><span id="fh-fill"></span></div>
+      <div class="fh-row">
+        <span class="fh-label">Ringue</span>
+        <span class="fh-hint" id="fh-hint"><kbd>F</kbd> socar</span>
+      </div>
     </div>
 
     <div id="yt-focus-hud" hidden>
@@ -94,6 +103,7 @@
       <button type="button" class="tb small" id="tb-respawn" aria-label="Voltar ao checkpoint"><i data-icon="undo" data-size="18"></i></button>
       <button type="button" class="tb small" id="tb-view" aria-label="Alternar câmera"><i data-icon="view" data-size="18"></i></button>
       <button type="button" class="tb small" id="tb-run" aria-pressed="false" aria-label="Correr"><i data-icon="run" data-size="18"></i></button>
+      <button type="button" class="tb punch" id="tb-punch" hidden aria-label="Socar"><i data-icon="fist" data-size="22"></i></button>
       <button type="button" class="tb big" id="tb-jump" aria-label="Pular"><i data-icon="jump" data-size="26"></i></button>
     </div>
     <button type="button" class="tb corner" id="tb-full" aria-label="Tela cheia"><i data-icon="maximize" data-size="18"></i></button>
@@ -130,6 +140,7 @@
       <button type="button" class="ghost" data-panel="people" data-tip="Pessoas"><i data-icon="users"></i><span class="badge" id="people-badge">1</span></button>
       <button type="button" class="ghost" data-panel="chat" data-tip="Chat (T)"><i data-icon="chat"></i><span class="dot" id="chat-dot" hidden></span></button>
       <button type="button" class="ghost" data-panel="parkour" data-tip="Parkour"><i data-icon="trophy"></i></button>
+      <button type="button" class="ghost" data-panel="ringue" data-tip="Ringue de luta"><i data-icon="fist"></i></button>
       <button type="button" class="ghost" data-panel="settings" data-tip="Ajustes"><i data-icon="settings"></i></button>
     </div>
   </nav>
@@ -204,6 +215,21 @@
       <div class="sub-block">
         <h3>Recordes da sala</h3>
         <ol class="leaderboard" id="leaderboard"><li class="empty">Ninguém completou ainda. Seja o primeiro!</li></ol>
+        <p class="tip" id="pk-mine" hidden></p>
+      </div>
+    </section>
+
+    <section data-section="ringue">
+      <p class="lead">O ringue fica no chão, embaixo do parkour. Suba pela escadinha e distribua porrada — cada soco empurra, e quem cai do tablado ou zera a vida leva nocaute.</p>
+      <ul class="rules">
+        <li><kbd>F</kbd> (ou o botão de luva no celular) dá o soco. Só acerta quem está perto e na sua frente.</li>
+        <li>A vida volta sozinha depois de alguns segundos sem apanhar.</li>
+        <li>Nocaute = volta num canto do ringue com a vida cheia.</li>
+      </ul>
+      <button type="button" class="primary" id="ring-go"><i data-icon="fist" data-size="18"></i>Ir para o ringue</button>
+      <div class="sub-block">
+        <h3>Placar da porradaria</h3>
+        <ol class="leaderboard fights" id="fight-board"><li class="empty">Ninguém se pegou ainda.</li></ol>
       </div>
     </section>
 
@@ -233,9 +259,10 @@
         <span>Compartilhar tela otimizada para</span>
         <div class="segmented" id="set-share-mode">
           <button type="button" data-value="detail">Texto nítido</button>
-          <button type="button" data-value="motion">Vídeo fluido</button>
+          <button type="button" data-value="motion">Vídeo</button>
+          <button type="button" data-value="game">Jogo</button>
         </div>
-        <small class="hint">Vale para o próximo compartilhamento.</small>
+        <small class="hint" id="share-mode-hint">Vale para o próximo compartilhamento.</small>
       </div>
       <label class="slider-row">
         <span>Sensibilidade do mouse</span>
@@ -283,6 +310,19 @@
       <div class="field">
         <span>Cor do boneco</span>
         <div class="swatches" id="swatches" role="radiogroup" aria-label="Cor do boneco"></div>
+      </div>
+
+      <div class="field">
+        <span>Sua foto no boneco <small class="opt">(opcional)</small></span>
+        <div class="photo-row">
+          <div class="photo-prev" id="photo-prev"><i data-icon="user" data-size="22"></i></div>
+          <div class="photo-acts">
+            <button type="button" class="secondary small" id="photo-pick"><i data-icon="camera" data-size="16"></i>Escolher foto</button>
+            <button type="button" class="ghost-btn small" id="photo-clear" hidden>Remover</button>
+          </div>
+          <input type="file" id="photo-file" accept="image/*" hidden>
+        </div>
+        <small class="hint">Fica no rosto do seu boneco. Ela é reduzida para 128px e só vai para quem está na sala.</small>
       </div>
 
       <label class="field">

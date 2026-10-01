@@ -4,6 +4,7 @@ import { isTouch } from './touch.js';
 import { CSS3DRenderer, CSS3DObject } from 'three/addons/renderers/CSS3DRenderer.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { COURSE, RAILS, FUN_PADS } from './parkour.js';
+import { RING } from './arena.js';
 
 export const ROOM = { minX: -36, maxX: 36, minZ: -40, maxZ: 40, height: 34 };
 export const SPAWN = { pos: [0, 0, -2], yaw: 0 };
@@ -375,6 +376,7 @@ export class World {
     this.buildAudience();
     this.buildScreens();
     this.buildCourse();
+    this.buildRing();
 
     window.addEventListener('resize', () => this.resize());
   }
@@ -625,6 +627,111 @@ export class World {
     }
   }
 
+
+  // -------------------------------------------------------------- ringue de luta
+  // Fica no chão, debaixo do parkour. O tablado é um colisor normal; as cordas são
+  // só enfeite, de propósito: dá para ser arremessado para fora do ringue.
+  buildRing() {
+    const { x: cx, z: cz, size, matTop, matThickness } = RING;
+    const half = size / 2;
+    const C = RING.colors;
+    const grupo = new THREE.Group();
+    this.scene.add(grupo);
+
+    // lona com as linhas pintadas
+    const lonaTex = canvasTexture(512, 512, (ctx, w, h) => {
+      ctx.fillStyle = '#1e2435';
+      ctx.fillRect(0, 0, w, h);
+      ctx.strokeStyle = 'rgba(244,63,94,0.75)';
+      ctx.lineWidth = 10;
+      ctx.strokeRect(36, 36, w - 72, h - 72);
+      ctx.strokeStyle = 'rgba(244,63,94,0.3)';
+      ctx.lineWidth = 6;
+      ctx.beginPath();
+      ctx.arc(w / 2, h / 2, w * 0.21, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(251,191,36,0.9)';
+      ctx.font = 'bold 54px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('PORRADARIA', w / 2, h / 2);
+    });
+
+    const lona = new THREE.Mesh(
+      new THREE.BoxGeometry(size, matThickness, size),
+      [
+        new THREE.MeshStandardMaterial({ color: C.skirt, roughness: 0.8 }),
+        new THREE.MeshStandardMaterial({ color: C.skirt, roughness: 0.8 }),
+        new THREE.MeshStandardMaterial({ map: lonaTex, roughness: 0.72 }),
+        new THREE.MeshStandardMaterial({ color: C.skirt, roughness: 0.8 }),
+        new THREE.MeshStandardMaterial({ color: C.skirt, roughness: 0.8 }),
+        new THREE.MeshStandardMaterial({ color: C.skirt, roughness: 0.8 }),
+      ],
+    );
+    lona.position.set(cx, matTop - matThickness / 2, cz);
+    lona.castShadow = true;
+    lona.receiveShadow = true;
+    grupo.add(lona);
+    this.addBox({
+      min: [cx - half, matTop - matThickness, cz - half],
+      max: [cx + half, matTop, cz + half],
+      data: { type: 'ring' },
+      mesh: lona,
+    });
+
+    // postes nos quatro cantos
+    const posteGeo = new THREE.CylinderGeometry(RING.postRadius, RING.postRadius, RING.postHeight, 12);
+    const posteMat = new THREE.MeshStandardMaterial({ color: C.post, roughness: 0.35, emissive: C.post, emissiveIntensity: 0.25 });
+    const cantos = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
+    for (const [sx, sz] of cantos) {
+      const poste = new THREE.Mesh(posteGeo, posteMat);
+      poste.position.set(cx + sx * half, matTop + RING.postHeight / 2, cz + sz * half);
+      poste.castShadow = true;
+      grupo.add(poste);
+    }
+
+    // cordas (sem colisão de propósito)
+    const cordaMat = new THREE.MeshStandardMaterial({ color: C.rope, roughness: 0.5, emissive: C.rope, emissiveIntensity: 0.3 });
+    for (const altura of RING.ropes) {
+      for (let i = 0; i < 4; i++) {
+        const [ax, az] = cantos[i];
+        const [bx, bz] = cantos[(i + 1) % 4];
+        const x1 = cx + ax * half, z1 = cz + az * half;
+        const x2 = cx + bx * half, z2 = cz + bz * half;
+        const comprimento = Math.hypot(x2 - x1, z2 - z1);
+        const corda = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, comprimento, 8), cordaMat);
+        corda.rotation.z = Math.PI / 2;
+        corda.rotation.y = -Math.atan2(z2 - z1, x2 - x1);
+        corda.position.set((x1 + x2) / 2, matTop + altura, (z1 + z2) / 2);
+        grupo.add(corda);
+      }
+    }
+
+    // escadinha para subir no ringue
+    for (let i = 0; i < 2; i++) {
+      const degrauTop = matTop * ((i + 1) / 3);
+      const w = 3.4;
+      const d = 0.9;
+      const z = cz - half - 0.45 - (1 - i) * d;
+      const degrau = new THREE.Mesh(
+        new RoundedBoxGeometry(w, degrauTop, d, 2, 0.08),
+        new THREE.MeshStandardMaterial({ color: C.skirt, roughness: 0.8 }),
+      );
+      degrau.position.set(cx, degrauTop / 2, z);
+      degrau.castShadow = true;
+      degrau.receiveShadow = true;
+      grupo.add(degrau);
+      this.addBox({ min: [cx - w / 2, 0, z - d / 2], max: [cx + w / 2, degrauTop, z + d / 2], data: { type: 'ring' }, mesh: degrau });
+    }
+
+    // luz quente em cima do ringue
+    const luz = new THREE.SpotLight(0xffd9a0, 420, 26, Math.PI / 4.5, 0.5, 1.4);
+    luz.position.set(cx, matTop + 11, cz);
+    luz.target.position.set(cx, matTop, cz);
+    this.scene.add(luz, luz.target);
+
+    this.ringGroup = grupo;
+  }
   buildCourse() {
     const matCache = new Map();
     const material = (color, emissive = 0.14) => {
