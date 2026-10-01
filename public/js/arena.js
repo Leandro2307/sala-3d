@@ -37,7 +37,8 @@ export const COMBAT = {
 
 // Cantos do ringue, para nascer/renascer sem cair em cima de alguém.
 export function ringCorners() {
-  const h = RING.size / 2 - 2.2;
+  // bem para dentro: nascer colado no canto deixava o poste na frente da câmera
+  const h = RING.size / 2 - 4.2;
   return [
     [RING.x - h, RING.matTop, RING.z - h],
     [RING.x + h, RING.matTop, RING.z - h],

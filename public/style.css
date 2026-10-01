@@ -442,6 +442,8 @@ body.touch #hud, body.touch #bar, body.touch #touch { -webkit-user-select: none;
 #help-body { padding: 0 14px 12px; }
 .help-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px 14px; font-size: 12px; color: #c5cbd8; }
 .help-grid span { display: flex; align-items: center; gap: 3px; white-space: nowrap; }
+/* item comprido ocupa a linha inteira: em meia coluna ele era cortado */
+.help-grid span.wide { grid-column: 1 / -1; }
 .help-grid b { color: var(--accent); font-weight: 600; }
 /* mostra só o conjunto de dicas que serve pro aparelho em uso */
 .help-grid[data-input="touch"] { display: none; }

@@ -688,6 +688,8 @@ export class World {
       poste.position.set(cx + sx * half, matTop + RING.postHeight / 2, cz + sz * half);
       poste.castShadow = true;
       grupo.add(poste);
+      // sem isto a câmera de 3ª pessoa atravessa o poste e ele tapa a tela inteira
+      this.cameraBlockers.push(poste);
     }
 
     // cordas (sem colisão de propósito)
