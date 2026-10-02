@@ -17,6 +17,8 @@ const MAX_PHOTO = 60_000; // data URL da foto do rosto (128x128 jpeg dá ~12 kB)
 const PUNCH_RANGE = 4.5; // metros: folga sobre o alcance real, só para barrar absurdo
 const SHIRTS = ['none', 'lula', 'bolsonaro'];
 const PERSONAGENS = ['padrao', 'robo', 'cavaleiro', 'barbaro', 'mago', 'ladino'];
+const VOLTA_MIN = 6; // segundos: abaixo disso é atravessar a pista, não dar a volta
+const VOLTA_MAX = 600;
 
 // STUN público + TURN opcional via variáveis de ambiente (necessário em algumas redes 4G/corporativas).
 const iceServers = [
@@ -47,8 +49,9 @@ const boards = new Map(); // roomId -> { parkour: [], fights: [] }
 
 function getBoards(id) {
   let b = boards.get(id);
+  if (b && !b.voltas) b.voltas = []; // sala criada antes da pista existir
   if (!b) {
-    b = { parkour: [], fights: [] };
+    b = { parkour: [], fights: [], voltas: [] };
     boards.set(id, b);
   }
   return b;
@@ -151,6 +154,7 @@ function attachSockets(io) {
         chat: room.chat,
         leaderboard: getBoards(roomId).parkour,
         fights: getBoards(roomId).fights,
+        voltas: getBoards(roomId).voltas,
       });
       socket.to(roomId).emit('user-joined', publicUser(user));
     });
@@ -323,6 +327,24 @@ function attachSockets(io) {
       user.ko = false;
       user.health = 1;
       io.to(room.id).emit('user-update', { id: user.id, ko: false, health: 1 });
+    });
+
+    socket.on('volta', (tempo) => {
+      if (!user) return;
+      const t = Number(tempo);
+      if (!Number.isFinite(t) || t < VOLTA_MIN || t > VOLTA_MAX) return;
+      const placar = getBoards(room.id).voltas;
+      const existente = placar.find((e) => e.name === user.name);
+      let recorde = true;
+      if (existente) {
+        if (existente.time <= t) recorde = false;
+        else Object.assign(existente, { time: t, color: user.color });
+      } else {
+        placar.push({ name: user.name, color: user.color, time: t });
+      }
+      placar.sort((a, b) => a.time - b.time);
+      placar.length = Math.min(placar.length, 10);
+      io.to(room.id).emit('volta', { name: user.name, color: user.color, time: t, recorde, voltas: placar });
     });
 
     socket.on('parkour-finish', (time) => {

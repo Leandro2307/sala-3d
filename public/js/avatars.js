@@ -1,6 +1,7 @@
 // Bonecos: tronco em cápsula, cabeça redonda (ou com a foto da pessoa), braços e
 // pernas articulados em dois segmentos, e camiseta opcional estampada no peito.
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { criarPersonagem } from './modelo.js';
 
 const FONT = "'Plus Jakarta Sans', system-ui, sans-serif";
@@ -60,6 +61,15 @@ const shared = {
   peito: uvDeFrente(new THREE.CylinderGeometry(0.307, 0.307, 0.34, 28, 1, true, -0.72, 1.44)),
   visorMat: new THREE.MeshStandardMaterial({ color: 0x0d1018, roughness: 0.12, metalness: 0.6 }),
   sapatoMat: new THREE.MeshStandardMaterial({ color: 0x1b2030, roughness: 0.6 }),
+  // carro: a frente aponta para +Z, igual ao boneco
+  chassi: new RoundedBoxGeometry(1.5, 0.52, 3.1, 3, 0.2),
+  cabine: new RoundedBoxGeometry(1.18, 0.5, 1.45, 3, 0.18),
+  roda: new THREE.CylinderGeometry(0.33, 0.33, 0.26, 16),
+  farol: new THREE.SphereGeometry(0.11, 10, 8),
+  vidroMat: new THREE.MeshStandardMaterial({ color: 0x0d1018, roughness: 0.08, metalness: 0.7 }),
+  pneuMat: new THREE.MeshStandardMaterial({ color: 0x14161d, roughness: 0.85 }),
+  farolMat: new THREE.MeshBasicMaterial({ color: 0xfff3c4, toneMapped: false }),
+  lanternaMat: new THREE.MeshBasicMaterial({ color: 0xff4d4d, toneMapped: false }),
 };
 
 function makeCanvasSprite(w, h, scaleX, scaleY) {
@@ -377,6 +387,63 @@ export class Avatar {
     for (const { raiz } of this.arms) raiz.visible = ligado;
   }
 
+  // Monta o carro só na primeira vez que alguém se transforma.
+  criarCarro() {
+    if (this.carro) return this.carro;
+    const g = new THREE.Group();
+    const pintura = new THREE.MeshStandardMaterial({ color: this.color, roughness: 0.3, metalness: 0.45 });
+    this.pinturaMat = pintura;
+
+    const chassi = new THREE.Mesh(shared.chassi, pintura);
+    chassi.position.y = 0.46;
+    chassi.castShadow = true;
+    const cabine = new THREE.Mesh(shared.cabine, shared.vidroMat);
+    cabine.position.set(0, 0.84, -0.12);
+    cabine.castShadow = true;
+    g.add(chassi, cabine);
+
+    for (const [sx, sz] of [[-1, 1], [1, 1], [-1, -1], [1, -1]]) {
+      const roda = new THREE.Mesh(shared.roda, shared.pneuMat);
+      roda.rotation.z = Math.PI / 2;
+      roda.position.set(sx * 0.78, 0.33, sz * 1.0);
+      roda.castShadow = true;
+      g.add(roda);
+      if (sz > 0) this.rodasFrente = (this.rodasFrente || []).concat(roda);
+      else this.rodasTras = (this.rodasTras || []).concat(roda);
+    }
+
+    for (const sx of [-1, 1]) {
+      const f = new THREE.Mesh(shared.farol, shared.farolMat);
+      f.position.set(sx * 0.48, 0.5, 1.56);
+      g.add(f);
+      const l = new THREE.Mesh(shared.farol, shared.lanternaMat);
+      l.scale.set(1.3, 0.6, 0.6);
+      l.position.set(sx * 0.5, 0.56, -1.56);
+      g.add(l);
+    }
+
+    g.visible = false;
+    this.inner.add(g);
+    this.carro = g;
+    return g;
+  }
+
+  // Transformação: o corpo some e o carro aparece (ou o contrário).
+  setVeiculo(on) {
+    if (this.veiculo === !!on) return;
+    this.veiculo = !!on;
+    this.criarCarro();
+    this.carro.visible = this.veiculo;
+    if (this.veiculo) {
+      this.mostrarCorpoPadrao(false);
+      if (this.personagem) this.personagem.grupo.visible = false;
+    } else {
+      if (this.personagem) this.personagem.grupo.visible = true;
+      else this.mostrarCorpoPadrao(true);
+    }
+    this.tag.sprite.position.y = this.veiculo ? 1.6 : 2.3;
+  }
+
   setName(name) { this.name = name; this.drawTag(); }
 
   // Foto do rosto. É uma calota que acompanha a curva da cabeça e fica POR FORA
@@ -455,6 +522,7 @@ export class Avatar {
   setColor(color) {
     this.color = color;
     this.material.color.set(color);
+    this.pinturaMat?.color.set(color);
     // a foto tem a borda na cor do jogador: redesenha para acompanhar
     if (this.photo) {
       const url = this.photo;
@@ -537,6 +605,8 @@ export class Avatar {
 
   // posição/rotação recebidas pela rede
   setNetworkState(p, r, a) {
+    // 5 é o carro: assim a transformação chega junto com a animação, sem campo novo
+    this.setVeiculo(a === 5);
     this.target.set(p[0], p[1], p[2]);
     this.targetYaw = r;
     this.anim = a;
@@ -557,8 +627,22 @@ export class Avatar {
       this.inner.rotation.y += d * k;
     }
 
-    // Com modelo glTF, quem anima é o AnimationMixer; o corpo procedural é pulado.
-    if (this.personagem) {
+    // em modo carro só as rodas giram; o resto do boneco está escondido
+    if (this.veiculo) {
+      // nos outros jogadores a velocidade não vem pela rede: mede pelo deslocamento
+      if (!this.isLocal) {
+        const dx = this.group.position.x - (this._ultX ?? this.group.position.x);
+        const dz = this.group.position.z - (this._ultZ ?? this.group.position.z);
+        this.velocidade = dt > 0 ? Math.hypot(dx, dz) / dt : 0;
+      }
+      this._ultX = this.group.position.x;
+      this._ultZ = this.group.position.z;
+      const giro = (this.velocidade || 0) * dt / 0.33;
+      for (const r of [...(this.rodasFrente || []), ...(this.rodasTras || [])]) r.rotation.x -= giro;
+      if (this.rodasFrente) for (const r of this.rodasFrente) r.rotation.y = (this.volante || 0) * 0.45;
+      this.halo.position.y = 1.1;
+      this.inner.rotation.z += (0 - this.inner.rotation.z) * Math.min(1, dt * 9);
+    } else if (this.personagem) {
       this.personagem.update(dt, this.anim, this.anim === 2 ? 1.6 : 1);
       this.halo.position.y = 1.5;
     } else {

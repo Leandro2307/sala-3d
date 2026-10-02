@@ -9,6 +9,7 @@ import { YouTubeSync } from './youtube.js';
 import { ParkourRun, formatTime, CHECKPOINT_COUNT } from './parkour.js';
 import { Combat } from './combat.js';
 import { RING, COMBAT, ringCorners } from './arena.js';
+import { Corrida, PISTA, largada, formatarVolta } from './pista.js';
 import { sfx, audioContext, setSfxEnabled } from './sfx.js';
 import { icon, hydrateIcons } from './icons.js';
 import { isTouch, setupTouchControls, toggleFullscreen, isFullscreen, temTelaCheia } from './touch.js';
@@ -23,7 +24,7 @@ const typing = () => {
 
 const COLORS = ['#7c9cff', '#6ee7c8', '#f472b6', '#fbbf24', '#a78bfa', '#fb7185', '#38bdf8', '#a3e635', '#f97316', '#e2e8f0'];
 const EMOTE_KEYS = ['wave', 'party', 'laugh', 'heart', 'clap', 'fire'];
-const PANEL_TITLES = { people: 'Pessoas', chat: 'Chat da sala', youtube: 'YouTube no telão', parkour: 'Parkour', ringue: 'Ringue de luta', settings: 'Ajustes' };
+const PANEL_TITLES = { people: 'Pessoas', chat: 'Chat da sala', youtube: 'YouTube no telão', parkour: 'Parkour', ringue: 'Ringue de luta', corrida: 'Pista de corrida', settings: 'Ajustes' };
 
 // ------------------------------------------------------------------ ajustes salvos
 const DEFAULTS = {
@@ -423,6 +424,7 @@ function applyJoined(data) {
   else $('#chat-list').innerHTML = '<li class="empty">Nenhuma mensagem ainda. Diga oi! 👋</li>';
   setLeaderboard(data.leaderboard);
   setFightBoard(data.fights);
+  setRaceBoard(data.voltas);
 
   for (const u of data.users) rtc.getPeer(u.id);
 
@@ -499,6 +501,12 @@ function bindSocket() {
   });
 
   // ------------------------------------------------------------ ringue
+  socket.on('volta', ({ name, color, time, recorde, voltas }) => {
+    setRaceBoard(voltas);
+    if (name === settings.name) return; // o próprio já viu no HUD
+    if (recorde) toast(`${name} fez ${formatarVolta(time)} na pista`, 'info', 4200, color);
+  });
+
   socket.on('punch', ({ id }) => {
     const u = state.users.get(id);
     if (!u || u.isSelf) return;
@@ -1137,6 +1145,11 @@ function updateSitHint() {
   }
 }
 
+player.on('veiculo', (on) => {
+  localAvatar.setVeiculo(on);
+  if (!on) $('#race-hud').hidden = true;
+});
+
 player.on('sit', (sentado) => {
   updateSitHint();
   if (sentado) sfx.message();
@@ -1185,6 +1198,75 @@ function setFightBoard(board) {
       + `<span><span class="kos">${e.kos}</span><span class="levou">levou ${e.levou}</span></span></li>`;
   }).join('');
 }
+
+// ------------------------------------------------------------------ pista de corrida
+$('#rh-setores').innerHTML = '<i></i>'.repeat(PISTA.setores);
+
+const corrida = new Corrida({
+  onPista: (dentro) => {
+    $('#race-hud').hidden = !(dentro && player.veiculo);
+  },
+  onLargada: () => {
+    flashRace('Valendo!');
+    sfx.checkpoint();
+  },
+  onSetor: (n) => setRaceSetores(n),
+  onCortou: () => flashRace('Volta não contou: faltou passar por setores'),
+  onCancelar: () => { setRaceSetores(0); $('#rh-msg').textContent = ''; },
+  onVolta: (tempo, n, recorde) => {
+    setRaceSetores(0);
+    sfx.finish();
+    socket?.emit('volta', tempo);
+    flashRace(recorde ? `Volta ${n}: ${formatarVolta(tempo)} — seu recorde!` : `Volta ${n}: ${formatarVolta(tempo)}`);
+    $('#rh-melhor').textContent = corrida.melhor != null ? 'Melhor ' + formatarVolta(corrida.melhor) : '—';
+  },
+});
+
+let raceMsgTimer = null;
+function flashRace(msg) {
+  $('#rh-msg').textContent = msg;
+  clearTimeout(raceMsgTimer);
+  raceMsgTimer = setTimeout(() => { $('#rh-msg').textContent = ''; }, 3200);
+}
+function setRaceSetores(n) {
+  $$('#rh-setores i').forEach((el, i) => el.classList.toggle('on', i < n));
+}
+
+function setRaceBoard(board) {
+  const ol = $('#race-board');
+  const minha = $('#race-mine');
+  if (!board?.length) {
+    ol.innerHTML = '<li class="empty">Ninguém completou uma volta ainda.</li>';
+    minha.hidden = true;
+    return;
+  }
+  ol.innerHTML = board.map((e) => {
+    const eu = e.name === settings.name ? ' class="me"' : '';
+    return `<li${eu}><span class="who"><i style="--c:${esc(e.color)}"></i>${esc(e.name)}</span><time>${formatarVolta(e.time)}</time></li>`;
+  }).join('');
+  const pos = board.findIndex((e) => e.name === settings.name);
+  minha.hidden = false;
+  minha.textContent = pos >= 0
+    ? `Sua melhor volta: ${formatarVolta(board[pos].time)} — ${pos + 1}º de ${board.length}.`
+    : 'Você ainda não completou uma volta.';
+}
+
+function toggleVeiculo() {
+  const virou = player.setVeiculo(!player.veiculo);
+  if (!virou) return;
+  sfx.teleport();
+  if (player.veiculo) toast('Modo carro: W acelera, S freia, A/D viram. Shift é turbo.', 'info', 4200);
+  $('#race-hud').hidden = !(player.veiculo && corrida.naPista);
+  if (touchPad) touchPad.showCarro?.(player.veiculo);
+}
+
+function irParaLargada() {
+  const l = largada(Math.floor(Math.random() * 3));
+  if (!player.veiculo) toggleVeiculo();
+  player.teleport(l.pos, l.yaw);
+  corrida.reset();
+}
+$('#race-go').addEventListener('click', () => { irParaLargada(); closePanel(); });
 
 // ------------------------------------------------------------------ ringue de luta
 const combat = new Combat({
@@ -1588,6 +1670,9 @@ window.addEventListener('keydown', (e) => {
     case 'KeyC':
       toggleSit();
       break;
+    case 'KeyG':
+      toggleVeiculo();
+      break;
     case 'KeyM':
       toggleMic();
       break;
@@ -1636,7 +1721,8 @@ document.addEventListener('mousedown', (e) => {
 // em uso normal nada disso fica exposto.
 if (params.get('debug') === '1') {
   window.__sala3d = {
-    state, player, combat, run, world, settings, punch, goToRing, respawn,
+    state, player, combat, run, corrida, world, settings, punch, goToRing, respawn,
+    toggleVeiculo, irParaLargada,
     tocarTela, telasMudas, liberarSomDasTelas, makeVideo,
   };
 }
@@ -1733,6 +1819,8 @@ function frame() {
     if (run.state === 'running') setPkTime(run.time);
     combat.update(dt);
     localAvatar.setKo(combat.knockedOut);
+    corrida.update(dt, player.pos.x, player.pos.z, player.veiculo);
+    if (corrida.ativa) $('#rh-time').textContent = formatarVolta(corrida.tempo);
     detectSpeaking(dt);
     sendState(dt);
     updateHover();

@@ -953,6 +953,32 @@ body.touch .help-grid[data-input="touch"] { display: grid; }
 .segmented.shirts button[data-shirt='lula']::before { background: #c81e1e; }
 .segmented.shirts button[data-shirt='bolsonaro']::before { background: linear-gradient(135deg, #166534 50%, #fde047 50%); }
 
+/* ------------------------------------------------------------ pista de corrida */
+#race-hud {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 230px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: var(--glass);
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  backdrop-filter: blur(14px);
+  text-align: center;
+  pointer-events: none;
+}
+.rh-top { display: flex; align-items: baseline; justify-content: center; gap: 10px; }
+.rh-label { font-size: 10px; font-weight: 800; letter-spacing: 0.14em; color: var(--muted); }
+.rh-time { font-family: var(--mono); font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.rh-setores { display: flex; justify-content: center; gap: 4px; margin: 7px 0 5px; }
+.rh-setores i { width: 14px; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.16); transition: background 180ms; }
+.rh-setores i.on { background: var(--warn); }
+.rh-row { display: flex; justify-content: center; gap: 12px; font-size: 12px; color: var(--muted); min-height: 16px; }
+#rh-msg { color: var(--warn); font-weight: 600; }
+body.touch #race-hud { top: calc(54px + env(safe-area-inset-top)); min-width: 180px; padding: 7px 10px; }
+body.touch .rh-time { font-size: 20px; }
+
 /* ------------------------------------------------------------ ringue / luta */
 #fight-hud {
   position: absolute;

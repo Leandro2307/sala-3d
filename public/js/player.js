@@ -9,6 +9,14 @@ const GRAVITY = 30;
 const JUMP = 11.5;
 const WALK = 7.5;
 const RUN = 11.5;
+// carro: anda muito mais rápido, mas acelera e freia com inércia
+const CARRO_TOPO = 27;
+const CARRO_TURBO = 36;
+const CARRO_RE = 9;
+const CARRO_ACEL = 17;
+const CARRO_FREIO = 26;
+const CARRO_ATRITO = 1.6;
+const CARRO_ESTERCO = 2.1; // radianos por segundo no volante
 const EPS = 1e-4;
 
 const _v = new THREE.Vector3();
@@ -40,6 +48,9 @@ export class Player {
     this.jumpHeld = false; // botão de pulo mantido pressionado
     this.touchLook = 1; // multiplicador do arrasto com o dedo
     this.sitting = false; // sentado num sofá/pufe
+    this.veiculo = false; // transformado em carro
+    this.volante = 0; // -1..1, só para animar as rodas
+    this.velocidade = 0; // m/s na direção do carro
     this.shake = 0; // tremor da câmera (soco recebido)
     this.shakeSeed = Math.random() * 100;
     this.override = null; // { position, target } para modo foco
@@ -182,6 +193,19 @@ export class Player {
     this.shake = Math.min(1.6, this.shake + força);
   }
 
+  // Vira carro (ou volta a ser boneco). Em carro o controle é de direção:
+  // W/S aceleram e freiam, A/D viram o volante — não dá para andar de lado.
+  setVeiculo(on) {
+    if (this.veiculo === !!on) return false;
+    this.veiculo = !!on;
+    this.sitting = false;
+    this.velocidade = 0;
+    this.volante = 0;
+    this.vel.set(0, this.vel.y, 0);
+    this.emit('veiculo', this.veiculo);
+    return true;
+  }
+
   toggleMode() {
     this.mode = this.mode === 'third' ? 'first' : 'third';
     return this.mode;
@@ -264,6 +288,12 @@ export class Player {
       r = this.moveInput.x;
     }
     const running = k.has('ShiftLeft') || k.has('ShiftRight') || this.runInput || this.runLock;
+
+    if (this.veiculo) {
+      this.passoCarro(dt, f, r, running);
+      return;
+    }
+
     const hasInput = (f !== 0 || r !== 0) && !this.override;
 
     const sy = Math.sin(this.yaw);
@@ -306,6 +336,45 @@ export class Player {
     }
   }
 
+  // Um passo da física do carro. Mantido separado do boneco porque o modelo é
+  // outro: a velocidade vive na direção em que o carro aponta, e virar o volante
+  // gira o carro inteiro em vez de mudar a direção do passo.
+  passoCarro(dt, acelerador, direcao, turbo) {
+    if (this.override) {
+      this.velocidade *= Math.max(0, 1 - dt * 4);
+    } else {
+      const topo = turbo ? CARRO_TURBO : CARRO_TOPO;
+      if (acelerador > 0) this.velocidade += CARRO_ACEL * acelerador * dt;
+      else if (acelerador < 0) {
+        // S freia enquanto o carro anda para a frente; parado, engata a ré
+        const taxa = this.velocidade > 0.5 ? CARRO_FREIO : CARRO_ACEL;
+        this.velocidade -= taxa * -acelerador * dt;
+      } else {
+        this.velocidade -= this.velocidade * CARRO_ATRITO * dt;
+      }
+      this.velocidade = THREE.MathUtils.clamp(this.velocidade, -CARRO_RE, topo);
+
+      // o volante só responde com o carro em movimento, como um carro de verdade
+      const resposta = Math.min(1, Math.abs(this.velocidade) / 7);
+      this.volante += (direcao - this.volante) * Math.min(1, dt * 8);
+      this.yaw -= this.volante * CARRO_ESTERCO * resposta * dt * Math.sign(this.velocidade || 1);
+    }
+
+    const fx = -Math.sin(this.yaw);
+    const fz = -Math.cos(this.yaw);
+    this.vel.x = fx * this.velocidade;
+    this.vel.z = fz * this.velocidade;
+    this.vel.y = Math.max(this.vel.y - GRAVITY * dt, -45);
+
+    this.moveAxis('x', this.vel.x * dt);
+    this.moveAxis('z', this.vel.z * dt);
+    this.moveVertical(this.vel.y * dt);
+    // bateu em alguma coisa: perde a velocidade de verdade
+    const real = Math.hypot(this.vel.x, this.vel.z);
+    if (real < Math.abs(this.velocidade) - 2) this.velocidade *= 0.45;
+    if (this.grounded) this.coyote = 0.11;
+  }
+
   update(dt) {
     if (this.enabled && this.sitting) {
       if (this.querSeMexer()) this.stand();
@@ -330,7 +399,9 @@ export class Player {
 
     // orientação do boneco
     const hs = Math.hypot(this.vel.x, this.vel.z);
-    if (this.mode === 'first' || this.sitting) {
+    if (this.veiculo) {
+      this.bodyYaw = Math.atan2(-Math.sin(this.yaw), -Math.cos(this.yaw));
+    } else if (this.mode === 'first' || this.sitting) {
       this.bodyYaw = Math.atan2(-Math.sin(this.yaw), -Math.cos(this.yaw));
     } else if (hs > 0.6) {
       const target = Math.atan2(this.vel.x, this.vel.z);
@@ -338,11 +409,13 @@ export class Player {
       d = Math.atan2(Math.sin(d), Math.cos(d));
       this.bodyYaw += d * Math.min(1, dt * 14);
     }
-    this.anim = this.sitting ? 4 : !this.grounded && this.coyote <= 0 ? 3 : hs > 9 ? 2 : hs > 0.6 ? 1 : 0;
+    this.anim = this.veiculo ? 5 : this.sitting ? 4 : !this.grounded && this.coyote <= 0 ? 3 : hs > 9 ? 2 : hs > 0.6 ? 1 : 0;
 
     this.avatar.group.position.copy(this.pos);
     this.avatar.inner.rotation.y = this.bodyYaw;
     this.avatar.anim = this.anim;
+    this.avatar.velocidade = this.velocidade;
+    this.avatar.volante = this.volante;
 
     this.updateCamera(dt);
   }

@@ -5,8 +5,11 @@ import { CSS3DRenderer, CSS3DObject } from 'three/addons/renderers/CSS3DRenderer
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { COURSE, RAILS, FUN_PADS } from './parkour.js';
 import { RING } from './arena.js';
+import { PISTA, CAMINHO } from './pista.js';
 
-export const ROOM = { minX: -36, maxX: 36, minZ: -40, maxZ: 40, height: 34 };
+// A sala alargou no eixo X para caber o circuito em volta de tudo. O comprimento
+// (Z) ficou igual, senão o telão se afastaria da plateia.
+export const ROOM = { minX: -52, maxX: 52, minZ: -40, maxZ: 40, height: 34 };
 export const SPAWN = { pos: [0, 0, -2], yaw: 0 };
 
 const FONT = "'Plus Jakarta Sans', system-ui, sans-serif";
@@ -377,6 +380,7 @@ export class World {
     this.buildScreens();
     this.buildCourse();
     this.buildRing();
+    this.buildTrack();
 
     window.addEventListener('resize', () => this.resize());
   }
@@ -555,7 +559,9 @@ export class World {
     const puffColors = [0x6ee7c8, 0xf472b6, 0x60a5fa, 0xfbbf24];
     puffColors.forEach((color, i) => {
       const x = -9 + i * 6;
-      const z = -31;
+      // a reta de baixo do circuito passa em z = -33: os pufes recuam para não
+      // ficarem no meio da pista
+      const z = -26;
       const puff = new THREE.Mesh(
         new THREE.SphereGeometry(1.1, 32, 24),
         new THREE.MeshStandardMaterial({ color, roughness: 0.55 }),
@@ -733,6 +739,132 @@ export class World {
     this.scene.add(luz, luz.target);
 
     this.ringGroup = grupo;
+  }
+
+  // -------------------------------------------------------------- pista de corrida
+  // Fita de asfalto seguindo a linha central do circuito. Sem colisores de
+  // propósito: seriam ~150 caixas a mais, e a física percorre todas elas 120x
+  // por segundo. Sair da pista já é punido pelo controle de setores da volta.
+  buildTrack() {
+    const grupo = new THREE.Group();
+    this.scene.add(grupo);
+    const meia = PISTA.largura / 2;
+
+    const asfaltoTex = canvasTexture(64, 256, (ctx, w, h) => {
+      ctx.fillStyle = '#1b1f2b';
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = 'rgba(255,255,255,0.10)';
+      ctx.fillRect(w / 2 - 2, 0, 4, h * 0.45); // tracejado central
+      ctx.fillStyle = 'rgba(255,255,255,0.05)';
+      ctx.fillRect(0, 0, w, 2);
+    });
+    asfaltoTex.wrapS = asfaltoTex.wrapT = THREE.RepeatWrapping;
+
+    const zebraTex = canvasTexture(16, 32, (ctx, w, h) => {
+      ctx.fillStyle = '#f1f5f9';
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = '#ef4444';
+      ctx.fillRect(0, 0, w, h / 2);
+    });
+    zebraTex.wrapS = zebraTex.wrapT = THREE.RepeatWrapping;
+
+    // Monta uma fita entre dois deslocamentos laterais da linha central.
+    const fita = (de, ate, altura, material, repetirV) => {
+      const n = CAMINHO.length;
+      const pos = [];
+      const uv = [];
+      const idx = [];
+      let percorrido = 0;
+      for (let i = 0; i <= n; i++) {
+        const a = CAMINHO[i % n];
+        const prev = CAMINHO[(i - 1 + n) % n];
+        const prox = CAMINHO[(i + 1) % n];
+        const dx = prox.x - prev.x;
+        const dz = prox.y - prev.y;
+        const comp = Math.hypot(dx, dz) || 1;
+        const nx = -dz / comp; // normal lateral
+        const nz = dx / comp;
+        if (i > 0) percorrido += a.distanceTo(prev);
+        const v = percorrido / repetirV;
+        pos.push(PISTA.cx + a.x + nx * de, altura, PISTA.cz + a.y + nz * de);
+        pos.push(PISTA.cx + a.x + nx * ate, altura, PISTA.cz + a.y + nz * ate);
+        uv.push(0, v, 1, v);
+        if (i < n) {
+          const k = i * 2;
+          idx.push(k, k + 1, k + 2, k + 1, k + 3, k + 2);
+        }
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+      geo.setIndex(idx);
+      geo.computeVertexNormals();
+      const malha = new THREE.Mesh(geo, material);
+      malha.receiveShadow = true;
+      grupo.add(malha);
+      return malha;
+    };
+
+    asfaltoTex.repeat.set(1, 1);
+    fita(-meia, meia, PISTA.y, new THREE.MeshStandardMaterial({
+      map: asfaltoTex, roughness: 0.95, metalness: 0.0,
+    }), 8);
+
+    const zebraMat = new THREE.MeshStandardMaterial({ map: zebraTex, roughness: 0.7 });
+    fita(meia, meia + 0.9, PISTA.y + 0.01, zebraMat, 3);
+    fita(-meia - 0.9, -meia, PISTA.y + 0.01, zebraMat, 3);
+
+    // linha de largada/chegada
+    const xadrez = canvasTexture(64, 64, (ctx, w, h) => {
+      const c = w / 8;
+      for (let y = 0; y < 8; y++) {
+        for (let x = 0; x < 8; x++) {
+          ctx.fillStyle = (x + y) % 2 ? '#0b0d12' : '#f8fafc';
+          ctx.fillRect(x * c, y * c, c, c);
+        }
+      }
+    });
+    const inicio = CAMINHO[0];
+    const linha = new THREE.Mesh(
+      new THREE.PlaneGeometry(PISTA.largura, 2.4),
+      new THREE.MeshStandardMaterial({ map: xadrez, roughness: 0.8 }),
+    );
+    linha.rotation.x = -Math.PI / 2;
+    linha.position.set(PISTA.cx + inicio.x, PISTA.y + 0.02, PISTA.cz + inicio.y);
+    grupo.add(linha);
+
+    // pórtico sobre a largada, para dar o ponto de referência de longe
+    const posteMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.6 });
+    for (const lado of [-1, 1]) {
+      const poste = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.26, 6.4, 10), posteMat);
+      poste.position.set(PISTA.cx + inicio.x + lado * (meia + 0.9), 3.2, PISTA.cz + inicio.y);
+      poste.castShadow = true;
+      grupo.add(poste);
+    }
+    const travessa = new THREE.Mesh(
+      new RoundedBoxGeometry(PISTA.largura + 2.6, 1.1, 0.5, 2, 0.12),
+      new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.5, emissive: 0x1e293b, emissiveIntensity: 0.6 }),
+    );
+    travessa.position.set(PISTA.cx + inicio.x, 6.2, PISTA.cz + inicio.y);
+    grupo.add(travessa);
+
+    const placa = canvasTexture(512, 128, (ctx, w, h) => {
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = '#fbbf24';
+      ctx.font = 'bold 72px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('LARGADA', w / 2, h / 2 + 4);
+    });
+    const letreiro = new THREE.Mesh(
+      new THREE.PlaneGeometry(PISTA.largura + 2, 1),
+      new THREE.MeshBasicMaterial({ map: placa, toneMapped: false }),
+    );
+    letreiro.position.set(PISTA.cx + inicio.x, 6.2, PISTA.cz + inicio.y + 0.3);
+    grupo.add(letreiro);
+
+    this.trackGroup = grupo;
   }
   buildCourse() {
     const matCache = new Map();

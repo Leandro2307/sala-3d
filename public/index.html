@@ -43,6 +43,18 @@
       <button type="button" class="chip-btn" id="pk-quit"><kbd>Esc</kbd> Sair do parkour</button>
     </div>
 
+    <div id="race-hud" hidden>
+      <div class="rh-top">
+        <span class="rh-label">VOLTA</span>
+        <span class="rh-time" id="rh-time">0:00.00</span>
+      </div>
+      <div class="rh-setores" id="rh-setores"></div>
+      <div class="rh-row">
+        <span id="rh-melhor">—</span>
+        <span id="rh-msg"></span>
+      </div>
+    </div>
+
     <div id="fight-hud" hidden>
       <div class="fh-bar"><span id="fh-fill"></span></div>
       <div class="fh-row">
@@ -78,6 +90,7 @@
           <span><kbd>T</kbd> chat</span>
           <span><kbd>M</kbd> microfone</span>
           <span><kbd>C</kbd> sentar</span>
+          <span><kbd>G</kbd> virar carro</span>
           <span><kbd>F</kbd> socar</span>
           <span><kbd>1</kbd>–<kbd>6</kbd> reações</span>
         </div>
@@ -146,6 +159,7 @@
       <button type="button" class="ghost" data-panel="chat" data-tip="Chat (T)"><i data-icon="chat"></i><span class="dot" id="chat-dot" hidden></span></button>
       <button type="button" class="ghost" data-panel="parkour" data-tip="Parkour"><i data-icon="trophy"></i></button>
       <button type="button" class="ghost" data-panel="ringue" data-tip="Ringue de luta"><i data-icon="fist"></i></button>
+      <button type="button" class="ghost" data-panel="corrida" data-tip="Pista de corrida"><i data-icon="car"></i></button>
       <button type="button" class="ghost" data-panel="settings" data-tip="Ajustes"><i data-icon="settings"></i></button>
     </div>
   </nav>
@@ -235,6 +249,21 @@
       <div class="sub-block">
         <h3>Placar da porradaria</h3>
         <ol class="leaderboard fights" id="fight-board"><li class="empty">Ninguém se pegou ainda.</li></ol>
+      </div>
+    </section>
+
+    <section data-section="corrida">
+      <p class="lead">O circuito dá a volta na sala inteira. Aperte <kbd>G</kbd> para virar carro — aí W acelera, S freia e A/D viram o volante. <kbd>Shift</kbd> é o turbo.</p>
+      <ul class="rules">
+        <li>A volta só conta se você passar por todos os setores: cortar caminho não vale.</li>
+        <li>Sair do asfalto cancela a volta em andamento.</li>
+        <li>Aperte <kbd>G</kbd> de novo para voltar a andar a pé.</li>
+      </ul>
+      <button type="button" class="primary" id="race-go"><i data-icon="car" data-size="18"></i>Ir para a largada</button>
+      <div class="sub-block">
+        <h3>Melhores voltas</h3>
+        <ol class="leaderboard" id="race-board"><li class="empty">Ninguém completou uma volta ainda.</li></ol>
+        <p class="tip" id="race-mine" hidden></p>
       </div>
     </section>
 
