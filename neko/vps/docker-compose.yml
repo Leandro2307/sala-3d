@@ -1,0 +1,63 @@
+# Navegador compartilhado da Sala 3D na VPS — a mesma máquina do Catálogo Atendro.
+# Montado para não atrapalhar a API do catálogo:
+#   - prioridade de CPU baixa e teto de memória (abaixo);
+#   - rede própria, isolada pelo firewall.sh: sai para a internet, mas não enxerga a API, o
+#     SSH nem endereços internos;
+#   - nenhuma porta HTTP aberta: o Caddy do catálogo faz o HTTPS de navegador.<ip>.sslip.io.
+# Instalação e remoção: neko/vps/LEIA-ME.md
+name: sala3d-navegador
+
+services:
+  neko:
+    image: ghcr.io/m1k1o/neko/firefox:latest
+    container_name: sala3d-navegador # o abrir.py usa esse nome para os atalhos
+    restart: unless-stopped
+    shm_size: 512mb
+    # A VPS tem 1 núcleo. Peso 64 (o padrão é 1024; no cgroup vira 12 contra 100 da API):
+    # quando a API precisa de CPU, ela passa na frente; parada, sobra quase tudo para o
+    # navegador. O teto deixa uma folga fixa.
+    cpu_shares: 64
+    cpus: 0.9
+    mem_limit: 1800m
+    memswap_limit: 2300m
+    oom_score_adj: 800 # faltou memória: o kernel derruba este antes do catálogo
+    pids_limit: 2048
+    ports:
+      - "59000:59000/udp" # vídeo e som
+      - "59000:59000/tcp" # reserva para rede que bloqueia UDP
+    networks:
+      navegador:
+        ipv4_address: 172.30.99.10
+    volumes:
+      # o login (YouTube Premium etc.) sobrevive a reiniciar o container
+      - ./perfil:/home/neko/.mozilla/firefox/profile.default
+      # mesma política do modo local: cookies ficam, senha nunca é salva
+      - ./firefox-policies.json:/usr/lib/firefox/distribution/policies.json:ro
+    environment:
+      NEKO_DESKTOP_SCREEN: 1280x720@25
+      # H.264 no preset mais rápido do x264: o codificador mais leve que o neko tem (o VP8
+      # padrão pesa bem mais na CPU). Uma linha de execução só, porque só há um núcleo.
+      NEKO_CAPTURE_VIDEO_CODEC: h264
+      NEKO_CAPTURE_VIDEO_IDS: main
+      NEKO_CAPTURE_VIDEO_PIPELINES: >-
+        {"main":{"width":"width","height":"height","fps":"25","show_pointer":true,
+        "gst_prefix":"! video/x-raw,format=I420","gst_encoder":"x264enc",
+        "gst_params":{"threads":"1","bitrate":"2500","key-int-max":"50","byte-stream":"true",
+        "tune":"zerolatency","speed-preset":"ultrafast"},
+        "gst_suffix":"! video/x-h264,stream-format=byte-stream,profile=constrained-baseline"}}
+      NEKO_MEMBER_PROVIDER: multiuser
+      NEKO_MEMBER_MULTIUSER_USER_PASSWORD: ${BROWSER_PASSWORD:?falta o .env}
+      NEKO_MEMBER_MULTIUSER_ADMIN_PASSWORD: ${BROWSER_ADMIN_PASSWORD:?falta o .env}
+      NEKO_SESSION_IMPLICIT_HOSTING: "true"
+      NEKO_SERVER_PROXY: "true" # atrás do Caddy
+      NEKO_WEBRTC_UDPMUX: 59000
+      NEKO_WEBRTC_TCPMUX: 59000
+      NEKO_WEBRTC_NAT1TO1: ${BROWSER_IP:?falta o .env}
+
+networks:
+  navegador:
+    name: navegador
+    ipam:
+      config:
+        - subnet: 172.30.99.0/24
+          gateway: 172.30.99.1

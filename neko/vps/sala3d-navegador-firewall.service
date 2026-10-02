@@ -1,0 +1,13 @@
+[Unit]
+Description=Sala 3D - isolamento de rede do navegador compartilhado
+After=docker.service ufw.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh /opt/sala3d-navegador/firewall.sh
+ExecStop=/bin/sh /opt/sala3d-navegador/firewall.sh remover
+
+[Install]
+WantedBy=multi-user.target

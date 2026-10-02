@@ -1,0 +1,22 @@
+[Unit]
+Description=Sala 3D - atalhos do navegador compartilhado (abrir.py)
+After=docker.service sala3d-navegador-firewall.service
+Wants=docker.service
+
+[Service]
+EnvironmentFile=/opt/sala3d-navegador/.env
+Environment=DOCKER_CONFIG=/tmp
+ExecStart=/usr/bin/python3 /opt/sala3d-navegador/abrir.py
+# a rede do navegador (172.30.99.1) só existe depois que o Docker sobe: tenta de novo
+Restart=always
+RestartSec=5
+# usuário descartável, só com acesso ao Docker (para o docker exec do atalho)
+DynamicUser=yes
+SupplementaryGroups=docker
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

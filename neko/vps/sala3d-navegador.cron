@@ -1,0 +1,2 @@
+# Sala 3D: mantém o Caddy do catálogo ligado à rede do navegador e o navegador em CPU ociosa
+* * * * * root /bin/sh /opt/sala3d-navegador/manter.sh

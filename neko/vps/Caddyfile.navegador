@@ -1,0 +1,13 @@
+
+# --- Sala 3D: navegador compartilhado (neko) -------------------------------------------
+# Independente do catálogo acima. Para remover, apague daqui até o fim do arquivo.
+navegador.103-199-185-217.sslip.io {
+	# atalhos (ícone do YouTube etc.): quem chama é o servidor da sala, com token
+	handle /sala3d/abrir {
+		reverse_proxy 172.30.99.1:8090
+	}
+	handle {
+		reverse_proxy sala3d-navegador:8080
+	}
+	header -Server
+}

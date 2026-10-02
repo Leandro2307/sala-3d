@@ -114,7 +114,8 @@
       "privacy.file_unique_origin": true,
       "ui.key.menuAccessKeyFocuses": false,
       "browser.tabs.allowTabDetach": false,
-      "browser.sessionstore.resume_from_crash": false
+      "browser.sessionstore.resume_from_crash": false,
+      "media.av1.enabled": false
     },
     "PromptForDownloadLocation": false,
     "SanitizeOnShutdown": {

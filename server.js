@@ -64,7 +64,20 @@ const XDOTOOL_OPEN = [
   'xdotool key Return',
 ].join('; ');
 
+// Navegador numa VPS (neko/vps): lá não dá para rodar docker exec daqui, então quem digita o
+// endereço é o abrir.py da VPS, em BROWSER_URL/sala3d/abrir, protegido pelo token.
+const BROWSER_OPEN_TOKEN = String(process.env.BROWSER_OPEN_TOKEN || '');
+
 function openInBrowser(url, done) {
+  if (BROWSER_OPEN_TOKEN) {
+    fetch(`${BROWSER.url}/sala3d/abrir`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${BROWSER_OPEN_TOKEN}` },
+      body: JSON.stringify({ url }),
+      signal: AbortSignal.timeout(15000),
+    }).then((r) => done(r.ok ? null : new Error(`HTTP ${r.status}`)), done);
+    return;
+  }
   execFile('docker', ['exec', '-u', 'neko', BROWSER_CONTAINER, 'sh', '-c', XDOTOOL_OPEN, 'sh', url],
     { timeout: 15000, windowsHide: true },
     (err) => done(err));
