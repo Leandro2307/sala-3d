@@ -47,10 +47,11 @@ export class RTC {
     this.peers = new Map();
     this.micStream = null;
     this.micTrack = null;
-    this.screenStream = null;
+    // Telas no ar, por chave (a mesma do servidor). Uma pessoa pode mandar várias abas/janelas
+    // ao mesmo tempo. preset: null segue o ajuste salvo; arquivo transmitido usa sempre
+    // 'motion'. extraScale reduz vídeo acima de 1080p (arquivo 4K) antes de codificar.
+    this.screens = new Map(); // key -> { stream, preset, extraScale }
     this.shareMode = 'detail'; // 'detail' (texto nítido) ou 'motion' (vídeo fluido)
-    this.presetOverride = null; // arquivo transmitido usa sempre 'motion', sem mexer no ajuste salvo
-    this.extraScale = 1; // reduz vídeo acima de 1080p (arquivo 4K) antes de codificar
 
     socket.on('signal', ({ from, data }) => this.handleSignal(from, data));
   }
@@ -88,14 +89,20 @@ export class RTC {
   }
 
   // -------------------------------------------------------------- tela
-  preset() {
-    return SHARE_PRESETS[this.presetOverride || this.shareMode] || SHARE_PRESETS.detail;
+  preset(key) {
+    return SHARE_PRESETS[this.screens.get(key)?.preset || this.shareMode] || SHARE_PRESETS.detail;
   }
 
-  async startScreen() {
-    this.presetOverride = null;
-    this.extraScale = 1;
-    const preset = this.preset();
+  // Várias telas saindo ao mesmo tempo dividem a banda de quem compartilha: cada uma fica com
+  // uma parte do teto do preset (nunca abaixo de 1,2 Mbps, para o texto continuar legível).
+  bitrate(key) {
+    const n = Math.max(1, this.screens.size);
+    return Math.max(1_200_000, Math.round(this.preset(key).maxBitrate / n));
+  }
+
+  // pede a aba/janela/tela ao navegador; quem chama decide se publica (addScreen)
+  async captureScreen() {
+    const preset = SHARE_PRESETS[this.shareMode] || SHARE_PRESETS.detail;
     const stream = await navigator.mediaDevices.getDisplayMedia({
       video: {
         frameRate: { ideal: preset.fps, max: preset.fps },
@@ -118,46 +125,50 @@ export class RTC {
     if (video) video.contentHint = preset.hint;
     const audio = stream.getAudioTracks()[0];
     if (audio) audio.contentHint = 'music';
-    this.screenStream = stream;
     return stream;
   }
 
-  // Transmitir um arquivo: o stream vem do próprio <video> (captureStream), não da captura
-  // de tela — imagem e som saem direto do arquivo, sem perder qualidade nem pegar o resto do PC.
-  useStream(stream, { height = 0 } = {}) {
-    this.presetOverride = 'motion';
-    this.extraScale = height > 1080 ? height / 1080 : 1;
-    const video = stream.getVideoTracks()[0];
-    if (video) video.contentHint = 'motion';
-    const audio = stream.getAudioTracks()[0];
-    if (audio) audio.contentHint = 'music';
-    this.screenStream = stream;
+  // Põe uma tela no ar para todo mundo (chamar depois do servidor reservar a tela).
+  // Arquivo transmitido: o stream vem do próprio <video> (captureStream) e vai como 'motion'.
+  addScreen(key, stream, { file = false, height = 0 } = {}) {
+    if (file) {
+      const video = stream.getVideoTracks()[0];
+      if (video) video.contentHint = 'motion';
+      const audio = stream.getAudioTracks()[0];
+      if (audio) audio.contentHint = 'music';
+    }
+    this.screens.set(key, {
+      stream,
+      preset: file ? 'motion' : null,
+      extraScale: file && height > 1080 ? height / 1080 : 1,
+    });
+    for (const peer of this.peers.values()) this.addScreenTo(peer, key);
+    this.retuneAll(); // a banda agora é dividida por mais uma
   }
 
-  // adiciona a tela a todas as conexões (chamar depois do servidor reservar a tela)
-  publishScreen() {
-    for (const peer of this.peers.values()) this.addScreenTo(peer);
-  }
-
-  addScreenTo(peer) {
-    if (!this.screenStream) return;
-    const preset = this.preset();
-    for (const track of this.screenStream.getTracks()) {
-      // um envio por tipo (vídeo/áudio); o que já existe fica
-      if (peer.screenTransceivers.some((tr) => tr.receiver.track.kind === track.kind)) continue;
-      const init = { direction: 'sendonly', streams: [this.screenStream] };
-      if (track.kind === 'video') {
-        init.sendEncodings = [{
-          maxBitrate: preset.maxBitrate,
-          maxFramerate: preset.fps,
-          scaleResolutionDownBy: preset.scale * this.extraScale,
-          networkPriority: 'high',
-          priority: 'high',
-        }];
-      } else {
-        init.sendEncodings = [{ maxBitrate: 192_000 }];
+  addScreenTo(peer, only = null) {
+    for (const [key, scr] of this.screens) {
+      if (only && key !== only) continue;
+      const preset = this.preset(key);
+      const trs = peer.screenTransceivers.get(key) || [];
+      for (const track of scr.stream.getTracks()) {
+        // um envio por tipo (vídeo/áudio); o que já existe fica
+        if (trs.some((tr) => tr.receiver.track.kind === track.kind)) continue;
+        const init = { direction: 'sendonly', streams: [scr.stream] };
+        if (track.kind === 'video') {
+          init.sendEncodings = [{
+            maxBitrate: this.bitrate(key),
+            maxFramerate: preset.fps,
+            scaleResolutionDownBy: preset.scale * scr.extraScale,
+            networkPriority: 'high',
+            priority: 'high',
+          }];
+        } else {
+          init.sendEncodings = [{ maxBitrate: 192_000 }];
+        }
+        trs.push(peer.pc.addTransceiver(track, init));
       }
-      peer.screenTransceivers.push(peer.pc.addTransceiver(track, init));
+      peer.screenTransceivers.set(key, trs);
     }
     this.tuneScreen(peer);
   }
@@ -165,24 +176,28 @@ export class RTC {
   // degradationPreference só existe no nível do sender: tem que ser aplicado
   // depois, com setParameters — não dá para passar em addTransceiver.
   async tuneScreen(peer) {
-    const preset = this.preset();
-    for (const tr of peer.screenTransceivers) {
-      const sender = tr.sender;
-      if (!sender || sender.track?.kind !== 'video') continue;
-      try {
-        const params = sender.getParameters();
-        if (!params.encodings || !params.encodings.length) params.encodings = [{}];
-        params.degradationPreference = preset.degradation;
-        Object.assign(params.encodings[0], {
-          maxBitrate: preset.maxBitrate,
-          maxFramerate: preset.fps,
-          scaleResolutionDownBy: preset.scale * this.extraScale,
-          networkPriority: 'high',
-          priority: 'high',
-        });
-        await sender.setParameters(params);
-      } catch (err) {
-        console.warn('[rtc] ajuste do envio', err);
+    for (const [key, trs] of peer.screenTransceivers) {
+      const scr = this.screens.get(key);
+      if (!scr) continue;
+      const preset = this.preset(key);
+      for (const tr of trs) {
+        const sender = tr.sender;
+        if (!sender || sender.track?.kind !== 'video') continue;
+        try {
+          const params = sender.getParameters();
+          if (!params.encodings || !params.encodings.length) params.encodings = [{}];
+          params.degradationPreference = preset.degradation;
+          Object.assign(params.encodings[0], {
+            maxBitrate: this.bitrate(key),
+            maxFramerate: preset.fps,
+            scaleResolutionDownBy: preset.scale * scr.extraScale,
+            networkPriority: 'high',
+            priority: 'high',
+          });
+          await sender.setParameters(params);
+        } catch (err) {
+          console.warn('[rtc] ajuste do envio', err);
+        }
       }
     }
   }
@@ -190,35 +205,39 @@ export class RTC {
   // O captureStream() de um <video> encerra as trilhas quando o arquivo chega ao fim e cria
   // trilhas novas se ele voltar a tocar. Troca a trilha no envio (sem renegociar) e cria o
   // envio para quem entrou na sala enquanto o vídeo estava parado.
-  replaceScreenTrack(track) {
+  replaceScreenTrack(key, track) {
     track.contentHint = track.kind === 'video' ? 'motion' : 'music';
     for (const peer of this.peers.values()) {
-      const tr = peer.screenTransceivers.find((t) => t.receiver.track.kind === track.kind);
+      const tr = (peer.screenTransceivers.get(key) || []).find((t) => t.receiver.track.kind === track.kind);
       if (tr) tr.sender.replaceTrack(track).catch((err) => console.warn('[rtc] troca de trilha', err));
-      else this.addScreenTo(peer);
+      else this.addScreenTo(peer, key);
     }
   }
 
-  // reaplica em todos (usado quando o preset muda com a tela já no ar)
+  // reaplica em todos (preset mudou ou o número de telas mudou)
   retuneAll() {
     for (const peer of this.peers.values()) this.tuneScreen(peer);
   }
 
-  stopScreen() {
-    if (!this.screenStream) return;
-    for (const t of this.screenStream.getTracks()) t.stop();
-    this.screenStream = null;
-    this.presetOverride = null;
-    this.extraScale = 1;
-    for (const peer of this.peers.values()) {
-      for (const tr of peer.screenTransceivers) {
-        try {
-          peer.pc.removeTrack(tr.sender);
-          tr.stop();
-        } catch { /* conexão já fechada */ }
+  // tira uma tela do ar (key) ou todas
+  stopScreen(key = null) {
+    const keys = key == null ? [...this.screens.keys()] : [key];
+    for (const k of keys) {
+      const scr = this.screens.get(k);
+      if (!scr) continue;
+      for (const t of scr.stream.getTracks()) t.stop();
+      this.screens.delete(k);
+      for (const peer of this.peers.values()) {
+        for (const tr of peer.screenTransceivers.get(k) || []) {
+          try {
+            peer.pc.removeTrack(tr.sender);
+            tr.stop();
+          } catch { /* conexão já fechada */ }
+        }
+        peer.screenTransceivers.delete(k);
       }
-      peer.screenTransceivers = [];
     }
+    if (keys.length) this.retuneAll(); // sobra mais banda para as que ficaram
   }
 
   // -------------------------------------------------------------- conexões
@@ -234,7 +253,7 @@ export class RTC {
       makingOffer: false,
       ignoreOffer: false,
       micSender: null,
-      screenTransceivers: [],
+      screenTransceivers: new Map(), // key da tela -> transceivers (vídeo e áudio)
       pending: [],
     };
     this.peers.set(id, peer);

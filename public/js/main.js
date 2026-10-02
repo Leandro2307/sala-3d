@@ -73,8 +73,8 @@ const state = {
   main: 'media',
   micOn: settings.mic,
   micAvailable: false,
-  sharing: false,
-  casting: false, // a "tela" compartilhada é um arquivo de vídeo, não a captura da tela
+  casting: false, // uma das minhas telas é um arquivo de vídeo, não a captura da tela
+  castKey: null, // chave dessa tela (só um arquivo por vez)
   panel: null,
   focus: null,
   hovered: null,
@@ -144,8 +144,42 @@ function makeVideo(muted) {
   sink.appendChild(v);
   return v;
 }
-const localScreenVideo = makeVideo(true);
 const self = () => state.users.get(state.selfId);
+
+// ------------------------------------------------------------------ telas compartilhadas
+// Cada pessoa pode compartilhar várias abas/janelas, cada uma numa tela (u.shares: chave ->
+// { key, slot, streamId, video }). A chave vem do servidor ("<id>~<n>") e é o que vai para o
+// telão; o streamId liga a chave ao vídeo que chega pelo WebRTC.
+function telasNoAr() {
+  const out = [];
+  for (const user of state.users.values()) for (const share of user.shares.values()) out.push({ share, user });
+  return out;
+}
+
+function acharTela(key) {
+  if (typeof key !== 'string' || key === 'media') return null;
+  const user = state.users.get(key.split('~')[0]);
+  const share = user?.shares.get(key);
+  return share ? { share, user } : null;
+}
+
+const shareVideo = (sh) => (sh?.video?.srcObject ? sh.video : null);
+const compartilhando = () => (self()?.shares.size ?? 0) > 0;
+// slot null: com as 4 telas ocupadas, mais uma vai direto para o telão (só uma assim por sala)
+const ondeEsta = (sh) => (sh.slot == null ? 'Telão' : `Tela ${sh.slot + 1}`);
+const ordemDasTelas = (a, b) => (a.slot ?? -1) - (b.slot ?? -1);
+const cabeMaisUma = () => {
+  const telas = telasNoAr();
+  return telas.filter((t) => t.share.slot != null).length < world.slots.length || !telas.some((t) => t.share.slot == null);
+};
+
+function soltarVideo(sh) {
+  if (!sh.video) return;
+  sh.video.srcObject = null;
+  sh.video.remove();
+  telasMudas.delete(sh.video);
+  sh.video = null;
+}
 
 // ------------------------------------------------------------------ toasts
 function toast(text, kind = 'info', ms = 4200, color = null) {
@@ -427,7 +461,7 @@ function applyJoined(data) {
   state.users.clear();
   state.users.set(data.selfId, {
     id: data.selfId, name: settings.name, color: settings.color, mic: state.micOn && state.micAvailable,
-    slot: null, screenStreamId: null, isSelf: true, avatar: localAvatar, streams: new Map(),
+    shares: new Map(), isSelf: true, avatar: localAvatar, streams: new Map(),
   });
   for (const u of data.users) addUser(u);
   state.main = data.main;
@@ -458,7 +492,7 @@ function bindSocket() {
     if (!state.joined) return;
     // reconexão: refaz tudo do zero com o novo id
     $('#reconnecting').hidden = true;
-    if (state.sharing) stopShare(false);
+    pararTodasAsTelas(false);
     for (const id of [...state.users.keys()]) if (id !== state.selfId) removeUser(id, true);
     const data = await emitJoin();
     applyJoined(data);
@@ -553,19 +587,30 @@ function bindSocket() {
     toast(by ? `${by} nocauteou ${name}!` : `${name} caiu do ringue!`, 'warn', 4200, byColor || null);
   });
 
-  socket.on('share-update', ({ id, slot, screenStreamId }) => {
+  // uma tela de alguém entrou (slot) ou saiu (slot null). As minhas eu registro na resposta do
+  // share-start e apago no stopShare: aqui só chegam de volta.
+  // A que estava só no telão pode ganhar uma tela quando outra sai (mesma chave, slot novo).
+  socket.on('share-update', ({ id, key, slot, streamId, gone }) => {
     const u = state.users.get(id);
-    if (!u) return;
-    const was = u.slot;
-    if (slot == null && u.screenStreamId) u.streams.delete(u.screenStreamId);
-    u.slot = slot;
-    u.screenStreamId = screenStreamId;
-    u.avatar.setStatus({ sharing: slot != null });
-    if (!u.isSelf) {
-      routeStreams(u);
-      if (slot != null && was == null) toast(`${u.name} começou a compartilhar a tela (Tela ${slot + 1})`, 'info', 4500, u.color);
+    if (!u || typeof key !== 'string') return;
+    const tinha = u.shares.get(key);
+    if (tinha && !gone) {
+      tinha.slot = slot ?? null;
+    } else if (u.isSelf) {
+      return;
+    } else if (gone) {
+      if (!tinha) return;
+      u.streams.delete(tinha.streamId);
+      soltarVideo(tinha);
+      u.shares.delete(key);
+    } else {
+      const sh = { key, slot: slot ?? null, streamId, video: null };
+      u.shares.set(key, sh);
+      toast(`${u.name} começou a compartilhar (${ondeEsta(sh)})`, 'info', 4500, u.color);
     }
-    refreshScreens();
+    u.avatar.setStatus({ sharing: u.shares.size > 0 });
+    if (u.isSelf) refreshScreens();
+    else routeStreams(u);
     renderPeople();
   });
 
@@ -574,8 +619,8 @@ function bindSocket() {
     refreshScreens();
     renderPeople();
     if (by && by !== settings.name) {
-      const u = state.users.get(source);
-      toast(source === 'media' ? `${by} voltou o telão para o ${tv.label}` : `${by} colocou a tela de ${u?.name ?? 'alguém'} no telão`);
+      const dono = acharTela(source)?.user;
+      toast(source === 'media' ? `${by} voltou o telão para o ${tv.label}` : `${by} colocou a tela de ${dono?.name ?? 'alguém'} no telão`);
     }
   });
 
@@ -602,7 +647,7 @@ function bindSocket() {
 function addUser(data) {
   if (state.users.has(data.id)) return state.users.get(data.id);
   const avatar = new Avatar({ name: data.name, color: data.color });
-  avatar.setStatus({ mic: data.mic, sharing: data.slot != null });
+  avatar.setStatus({ mic: data.mic, sharing: data.shares?.length > 0 });
   if (data.photo) avatar.setPhoto(data.photo);
   if (data.shirt && data.shirt !== 'none') avatar.setShirt(data.shirt);
   if (data.char && data.char !== 'padrao') avatar.setPersonagem(PERSONAGENS[data.char]);
@@ -610,7 +655,8 @@ function addUser(data) {
   if (data.ko) avatar.setKo(true);
   avatar.setNetworkState(data.p, data.r, data.a);
   world.scene.add(avatar.group);
-  const u = { ...data, isSelf: false, avatar, streams: new Map(), audioEl: null, screenVideo: null, speaking: false };
+  const shares = new Map((data.shares || []).map((sh) => [sh.key, { ...sh, video: null }]));
+  const u = { ...data, shares, isSelf: false, avatar, streams: new Map(), audioEl: null, speaking: false };
   state.users.set(u.id, u);
   return u;
 }
@@ -623,13 +669,10 @@ function removeUser(id, quiet = false) {
     u.audioEl.srcObject = null;
     u.audioEl.remove();
   }
-  if (u.screenVideo) {
-    u.screenVideo.srcObject = null;
-    u.screenVideo.remove();
-  }
+  for (const sh of u.shares.values()) soltarVideo(sh);
+  if (state.focus?.kind === 'share' && u.shares.has(state.focus.key)) exitFocus();
   state.users.delete(id);
   rtc.removePeer(id);
-  if (state.focus?.userId === id) exitFocus();
   if (!quiet) {
     refreshScreens();
     renderPeople();
@@ -657,34 +700,46 @@ function renderPeople() {
   if (!state.joined && !state.selfId) return;
   const users = [...state.users.values()].sort((a, b) => (a.isSelf ? -1 : b.isSelf ? 1 : a.name.localeCompare(b.name)));
   $('#people-list').innerHTML = users.map((u) => {
-    const sharing = u.slot != null;
-    const sub = sharing
-      ? `Compartilhando · Tela ${u.slot + 1}${state.main === u.id ? ' · no telão' : ''}`
+    const telas = [...u.shares.values()].sort(ordemDasTelas);
+    const sub = telas.length
+      ? `Compartilhando · ${telas.map(ondeEsta).join(', ')}`
       : u.isSelf ? 'Você' : statusText(u);
+    // uma linha por tela: ver, pôr no telão e (as suas) parar
+    const linhas = telas.map((sh) => {
+      const noTelao = state.main === sh.key;
+      return `<li data-key="${esc(sh.key)}">
+        <span>${ondeEsta(sh)}${noTelao && sh.slot != null ? ' · <b>no telão</b>' : ''}</span>
+        <button type="button" class="icon-btn" data-act="view" title="Ver a tela">${icon('eye', 16)}</button>
+        <button type="button" class="icon-btn${noTelao ? ' on' : ''}" data-act="pin" title="${noTelao ? 'Tirar do telão' : 'Pôr no telão'}">${icon('pin', 16)}</button>
+        ${u.isSelf ? `<button type="button" class="icon-btn" data-act="stop" title="Parar esta tela">${icon('x', 16)}</button>` : ''}
+      </li>`;
+    }).join('');
     return `<li class="person${u.speaking ? ' speaking' : ''}" data-id="${esc(u.id)}">
       <span class="avatar-dot" style="--c:${esc(u.color)}">${esc((u.name[0] || '?').toUpperCase())}</span>
       <div class="person-info">
         <div class="person-name">${esc(u.name)}${u.isSelf ? ' <small>(você)</small>' : ''}</div>
-        <div class="person-sub${sharing ? ' sharing' : ''}">${esc(sub)}</div>
+        <div class="person-sub${telas.length ? ' sharing' : ''}">${esc(sub)}</div>
       </div>
       <div class="person-actions">
-        ${sharing ? `<button type="button" class="icon-btn" data-act="view" title="Ver a tela">${icon('eye', 18)}</button>
-        <button type="button" class="icon-btn${state.main === u.id ? ' on' : ''}" data-act="pin" title="${state.main === u.id ? 'Tirar do telão' : 'Pôr no telão'}">${icon('pin', 18)}</button>` : ''}
         ${!u.isSelf ? `<button type="button" class="icon-btn" data-act="goto" title="Ir até">${icon('goto', 18)}</button>` : ''}
         ${u.mic ? '' : `<span class="muted-ic" title="Microfone desligado">${icon('micOff', 18)}</span>`}
       </div>
+      ${linhas ? `<ul class="person-shares">${linhas}</ul>` : ''}
     </li>`;
   }).join('');
+  renderSharePop();
 }
 
 $('#people-list').addEventListener('click', (e) => {
   const btn = e.target.closest('[data-act]');
   if (!btn) return;
   const id = btn.closest('[data-id]').dataset.id;
+  const key = btn.closest('[data-key]')?.dataset.key;
   const u = state.users.get(id);
   if (!u) return;
-  if (btn.dataset.act === 'view') enterFocus({ kind: 'share', userId: id });
-  if (btn.dataset.act === 'pin') togglePin(id);
+  if (btn.dataset.act === 'view') enterFocus({ kind: 'share', key });
+  if (btn.dataset.act === 'pin') togglePin(key);
+  if (btn.dataset.act === 'stop') stopShare(key, true);
   if (btn.dataset.act === 'goto') {
     const p = u.avatar.group.position;
     run.cancel();
@@ -693,8 +748,8 @@ $('#people-list').addEventListener('click', (e) => {
   }
 });
 
-function togglePin(id) {
-  socket.emit('main', state.main === id ? 'media' : id);
+function togglePin(key) {
+  if (key) socket.emit('main', state.main === key ? 'media' : key);
 }
 
 // ------------------------------------------------------------------ microfone
@@ -777,84 +832,156 @@ async function populateDevices() {
 }
 
 // ------------------------------------------------------------------ compartilhar tela
-async function toggleShare() {
-  if (state.sharing) return stopShare(true);
+// Dá para compartilhar várias abas/janelas ao mesmo tempo: cada clique em "Compartilhar outra"
+// abre o seletor do navegador de novo e a escolhida vai para a próxima tela livre.
+async function novaTela() {
   if (shareBusy) return;
   if (!navigator.mediaDevices?.getDisplayMedia) {
     toast('Seu navegador não permite compartilhar a tela aqui. Use Chrome/Edge no computador (https ou localhost).', 'error', 6000);
     return;
   }
+  if (!cabeMaisUma()) {
+    toast('Todas as telas e o telão estão ocupados. Pare uma delas para compartilhar outra.', 'warn', 5000);
+    return;
+  }
   let stream;
+  let key;
   shareBusy = true;
   try {
-    stream = await rtc.startScreen();
-    if (!(await publishShare(stream))) return;
+    stream = await rtc.captureScreen();
+    key = await publishShare(stream);
+    if (!key) return;
   } catch (err) {
     if (err.name !== 'NotAllowedError' && err.name !== 'AbortError') toast(`Não foi possível compartilhar: ${err.message}`, 'error');
     return;
   } finally {
     shareBusy = false;
   }
+  const onde = ondeEsta(self().shares.get(key));
   if (!stream.getAudioTracks().length) {
-    toast('Compartilhando sem som. Para mandar o som, escolha uma aba ou a tela inteira e marque “Compartilhar áudio”.', 'warn', 8000);
+    toast(`${onde} sem som. Para mandar o som, escolha uma aba ou a tela inteira e marque “Compartilhar áudio”.`, 'warn', 8000);
   } else {
-    toast(`Você está compartilhando na Tela ${self().slot + 1} (com som)`);
+    toast(`Você está compartilhando no ${onde === 'Telão' ? 'telão' : onde} (com som)`);
   }
 }
 
-// reserva uma tela no servidor e manda o stream (captura de tela ou arquivo) para todo mundo
-async function publishShare(stream) {
+// Reserva uma tela no servidor e manda o stream (captura ou arquivo) para todo mundo.
+// Devolve a chave da tela, ou null se não deu.
+async function publishShare(stream, { file = false, height = 0 } = {}) {
   const res = await new Promise((resolve) => socket.emit('share-start', { streamId: stream.id }, resolve));
   if (!res?.ok) {
-    rtc.stopScreen();
+    if (!file) for (const t of stream.getTracks()) t.stop();
     toast(res?.error || 'Não foi possível compartilhar.', 'error');
-    return false;
+    return null;
   }
-  state.sharing = true;
-  const me = self();
-  me.slot = res.slot;
-  me.screenStreamId = stream.id;
-  localScreenVideo.srcObject = stream;
-  localScreenVideo.play().catch(() => {});
-  rtc.publishScreen();
-  // captura de tela: a trilha acaba quando a pessoa clica em "Parar" na barra do navegador.
+  const video = makeVideo(true);
+  video.srcObject = stream;
+  video.play().catch(() => {});
+  self().shares.set(res.key, { key: res.key, slot: res.slot ?? null, streamId: stream.id, video, file });
+  rtc.addScreen(res.key, stream, { file, height });
+  // captura: a trilha acaba quando a pessoa clica em "Parar" na barra do navegador.
   // Arquivo: acaba toda vez que o vídeo chega ao fim, e isso não é motivo para parar.
-  if (!state.casting) {
-    stream.getVideoTracks()[0]?.addEventListener('ended', () => {
-      if (rtc.screenStream === stream) stopShare(true);
-    });
-  }
+  if (!file) stream.getVideoTracks()[0]?.addEventListener('ended', () => stopShare(res.key, true));
   localAvatar.setStatus({ sharing: true });
   updateShareButton();
   refreshScreens();
   renderPeople();
-  return true;
+  return res.key;
 }
 
-function stopShare(notify) {
-  if (!state.sharing) return;
-  rtc.stopScreen();
-  stopCastVideo();
-  if (notify) socket.emit('share-stop');
-  state.sharing = false;
-  localScreenVideo.srcObject = null;
+function stopShare(key, notify) {
   const me = self();
-  if (me) {
-    me.slot = null;
-    me.screenStreamId = null;
-  }
-  localAvatar.setStatus({ sharing: false });
+  const sh = me?.shares.get(key);
+  if (!sh) return;
+  rtc.stopScreen(key);
+  if (sh.file) stopCastVideo();
+  if (notify) socket.emit('share-stop', key);
+  me.shares.delete(key);
+  soltarVideo(sh);
+  localAvatar.setStatus({ sharing: me.shares.size > 0 });
   updateShareButton();
   refreshScreens();
   renderPeople();
 }
 
-function updateShareButton() {
-  const b = $('#btn-share');
-  b.classList.toggle('on', state.sharing);
-  b.querySelector('i').innerHTML = icon(state.sharing ? 'shareOff' : 'share');
-  b.dataset.tip = state.casting ? 'Parar de transmitir o vídeo' : state.sharing ? 'Parar de compartilhar' : 'Compartilhar tela';
+function pararTodasAsTelas(notify) {
+  for (const key of [...(self()?.shares.keys() || [])]) stopShare(key, notify);
 }
+
+function updateShareButton() {
+  const n = self()?.shares.size ?? 0;
+  const b = $('#btn-share');
+  b.classList.toggle('on', n > 0);
+  b.dataset.tip = n ? 'Suas telas' : 'Compartilhar tela';
+  const c = $('#share-count');
+  c.hidden = n < 1;
+  c.textContent = n;
+  if (!n) $('#share-pop').hidden = true;
+}
+
+// o que a pessoa escolheu no seletor do navegador
+function tipoDaTela(sh) {
+  if (sh.file) return 'Vídeo do computador';
+  const surf = sh.video?.srcObject?.getVideoTracks()[0]?.getSettings?.().displaySurface;
+  return surf === 'browser' ? 'Aba' : surf === 'window' ? 'Janela' : surf === 'monitor' ? 'Tela inteira' : 'Tela';
+}
+
+// menu do botão de compartilhar enquanto há telas no ar
+function renderSharePop() {
+  const pop = $('#share-pop');
+  if (!pop) return;
+  const telas = [...(self()?.shares.values() || [])].sort(ordemDasTelas);
+  if (!telas.length) {
+    pop.hidden = true;
+    pop.innerHTML = '';
+    return;
+  }
+  const cabe = cabeMaisUma();
+  const vaiProTelao = cabe && telasNoAr().filter((t) => t.share.slot != null).length >= world.slots.length;
+  pop.innerHTML = '<div class="sp-title">Suas telas</div>'
+    + telas.map((sh) => {
+      const noTelao = state.main === sh.key;
+      return `<div class="sp-row" data-key="${esc(sh.key)}">
+        <span class="sp-name">${esc(tipoDaTela(sh))}<small>${ondeEsta(sh)}${noTelao && sh.slot != null ? ' · no telão' : ''}</small></span>
+        <button type="button" class="sp-btn${noTelao ? ' on' : ''}" data-act="pin" title="${noTelao ? 'Tirar do telão' : 'Pôr no telão'}">${icon('pin', 16)}</button>
+        <button type="button" class="sp-btn danger" data-act="stop" title="Parar esta tela">${icon('x', 16)}</button>
+      </div>`;
+    }).join('')
+    + `<button type="button" class="sp-add" data-act="add"${cabe ? '' : ' disabled'}>${icon('share', 16)}${!cabe ? 'Telas e telão ocupados' : vaiProTelao ? 'Compartilhar outra direto no telão' : 'Compartilhar outra aba ou janela'}</button>`
+    + (telas.length > 1 ? '<button type="button" class="sp-stop-all" data-act="stop-all">Parar todas</button>' : '');
+}
+
+$('#btn-share').addEventListener('click', () => {
+  if (!compartilhando()) {
+    novaTela();
+    return;
+  }
+  renderSharePop();
+  $('#share-pop').hidden = !$('#share-pop').hidden;
+});
+
+$('#share-pop').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-act]');
+  if (!b || b.disabled) return;
+  const key = b.closest('[data-key]')?.dataset.key;
+  switch (b.dataset.act) {
+    case 'add':
+      $('#share-pop').hidden = true;
+      novaTela();
+      return;
+    case 'pin':
+      togglePin(key);
+      break;
+    case 'stop':
+      stopShare(key, true);
+      break;
+    case 'stop-all':
+      pararTodasAsTelas(true);
+      break;
+    default:
+  }
+  renderSharePop();
+});
 
 // ------------------------------------------------------------------ vídeo do computador
 // O arquivo toca num <video> escondido e o captureStream() dele vira a "tela" que vai para
@@ -898,7 +1025,8 @@ async function castFile(file) {
 }
 
 async function startCast(file) {
-  if (state.sharing) stopShare(true);
+  // um arquivo por vez; as abas/janelas compartilhadas continuam no ar
+  if (state.castKey) stopShare(state.castKey, true);
   stopCastVideo();
   castUrl = URL.createObjectURL(file);
   castVideo.src = castUrl;
@@ -928,28 +1056,30 @@ async function startCast(file) {
     toast('Não consegui transmitir a imagem desse arquivo.', 'error');
     return;
   }
-  rtc.useStream(stream, { height: castVideo.videoHeight });
   state.casting = true;
-  if (!(await publishShare(stream))) {
+  const key = await publishShare(stream, { file: true, height: castVideo.videoHeight });
+  if (!key) {
     stopCastVideo();
     return;
   }
+  state.castKey = key;
   // depois do fim, dar play de novo cria trilhas novas no mesmo stream: repassa para todos
   stream.addEventListener('addtrack', (e) => {
-    if (rtc.screenStream !== stream) return;
-    rtc.replaceScreenTrack(e.track);
-    localScreenVideo.play().catch(() => {}); // o stream ficou sem trilhas no fim e o <video> parou
+    if (state.castKey !== key) return;
+    rtc.replaceScreenTrack(key, e.track);
+    self()?.shares.get(key)?.video?.play().catch(() => {}); // o stream ficou sem trilhas no fim e o <video> parou
   });
   $('#cast-title').textContent = file.name;
   updateShareButton();
   renderCast();
   // quem escolhe um filme quer ver no telão, não numa das telinhas
-  if (state.main !== state.selfId) socket.emit('main', state.selfId);
+  if (state.main !== key) socket.emit('main', key);
   toast(`Transmitindo “${file.name}” no telão`);
 }
 
 function stopCastVideo() {
   state.casting = false;
+  state.castKey = null;
   castVideo.pause();
   castVideo.removeAttribute('src');
   castVideo.load();
@@ -994,7 +1124,7 @@ $('#cast-back').addEventListener('click', () => { castVideo.currentTime = Math.m
 $('#cast-fwd').addEventListener('click', () => {
   if (Number.isFinite(castVideo.duration)) castVideo.currentTime = Math.min(castVideo.duration, castVideo.currentTime + 10);
 });
-$('#cast-stop').addEventListener('click', () => stopShare(true));
+$('#cast-stop').addEventListener('click', () => stopShare(state.castKey, true));
 $('#cast-progress').addEventListener('click', (e) => {
   const dur = castVideo.duration;
   if (!Number.isFinite(dur) || !dur) return;
@@ -1019,14 +1149,14 @@ function handleTrack(peerId, stream) {
   routeStreams(u);
 }
 
-// decide qual stream é voz e qual é tela
+// decide qual stream é voz e qual é cada uma das telas da pessoa
 function routeStreams(u) {
-  let screen = null;
+  const daTela = new Set([...u.shares.values()].map((sh) => sh.streamId));
+  const vivo = (st) => st && st.getTracks().some((t) => t.readyState === 'live');
   let mic = null;
-  for (const s of u.streams.values()) {
-    if (!s.getTracks().some((t) => t.readyState === 'live')) continue;
-    if (u.screenStreamId && s.id === u.screenStreamId) screen = s;
-    else if (!s.getVideoTracks().length && !mic) mic = s;
+  for (const st of u.streams.values()) {
+    if (!vivo(st) || daTela.has(st.id)) continue;
+    if (!st.getVideoTracks().length && !mic) mic = st;
   }
   if (mic) {
     if (!u.audioEl) {
@@ -1039,34 +1169,31 @@ function routeStreams(u) {
       u.audioEl.play().catch(() => {});
     }
   }
-  if (screen) {
-    if (!u.screenVideo) u.screenVideo = makeVideo(true);
-    if (u.screenVideo.srcObject !== screen) {
-      u.screenVideo.srcObject = screen;
-      tocarTela(u.screenVideo);
+  for (const sh of u.shares.values()) {
+    const st = u.streams.get(sh.streamId);
+    if (vivo(st)) {
+      if (!sh.video) sh.video = makeVideo(true);
+      if (sh.video.srcObject !== st) {
+        sh.video.srcObject = st;
+        tocarTela(sh.video);
+      }
+    } else if (sh.video?.srcObject) {
+      sh.video.srcObject = null;
     }
-  } else if (u.screenVideo && u.screenVideo.srcObject) {
-    u.screenVideo.srcObject = null;
   }
   updateVolumes();
   refreshScreens();
 }
 
-function shareVideoOf(u) {
-  if (!u || u.slot == null) return null;
-  if (u.isSelf) return state.sharing ? localScreenVideo : null;
-  return u.screenVideo?.srcObject ? u.screenVideo : null;
-}
-
 function refreshScreens() {
-  const users = [...state.users.values()];
-  const pinned = state.main !== 'media' ? state.users.get(state.main) : null;
+  const telas = telasNoAr();
+  const pinned = acharTela(state.main);
   // Fixou a tela de alguém no telão com um vídeo tocando: o vídeo vai para a tela dessa
   // pessoa (trocam de lugar). Antes o vídeo simplesmente sumia.
-  const slotMidia = pinned && tv?.state.id && pinned.slot != null ? world.slots[pinned.slot] : null;
+  const slotMidia = pinned && tv?.state.id && pinned.share.slot != null ? world.slots[pinned.share.slot] : null;
   world.slots.forEach((slot, i) => {
-    const owner = users.find((u) => u.slot === i);
-    slot.owner = owner?.id ?? null;
+    const dono = telas.find((t) => t.share.slot === i);
+    slot.owner = dono?.share.key ?? null;
     if (slot === slotMidia) {
       const meta = PROVIDERS[tv.state.provider];
       slot.setLabel(`${tv.label} · Tela ${i + 1}`, meta?.color);
@@ -1075,18 +1202,19 @@ function refreshScreens() {
       return;
     }
     slot.setMidia(false);
-    if (!owner) {
+    if (!dono) {
       slot.clearVideo();
       slot.setPlaceholder(`Tela ${i + 1}`, 'Livre — clique em “Compartilhar tela”');
       slot.setLabel(null);
       return;
     }
-    slot.setLabel(`${owner.isSelf ? 'Você' : owner.name} · Tela ${i + 1}`, owner.color);
-    const v = shareVideoOf(owner);
+    const { user: u, share: sh } = dono;
+    slot.setLabel(`${u.isSelf ? 'Você' : u.name} · Tela ${i + 1}`, u.color);
+    const v = shareVideo(sh);
     if (v) slot.setVideo(v);
     else {
       slot.clearVideo();
-      slot.setPlaceholder(owner.name, 'Conectando à tela…');
+      slot.setPlaceholder(u.name, 'Conectando à tela…');
     }
   });
 
@@ -1097,13 +1225,14 @@ function refreshScreens() {
     ms.owner = null;
     ms.setLabel(null);
     if (pinned) {
-      ms.owner = pinned.id;
-      ms.setLabel(pinned.isSelf ? 'Você' : pinned.name, pinned.color);
-      const v = shareVideoOf(pinned);
+      const { user: u, share: sh } = pinned;
+      ms.owner = sh.key;
+      ms.setLabel(u.isSelf ? 'Você' : u.name, u.color);
+      const v = shareVideo(sh);
       if (v) ms.setMode('share', v);
       else {
         ms.setMode('empty');
-        ms.setPlaceholder(pinned.name, 'Conectando à tela…');
+        ms.setPlaceholder(u.name, 'Conectando à tela…');
       }
     } else if (tv?.state.id) {
       // o cartaz só aparece no telão que não está com o player (o mais longe de você)
@@ -1119,7 +1248,7 @@ function refreshScreens() {
   tv?.setHidden(!midiaVisivel);
 
   if (state.focus?.kind === 'tv' && !midiaVisivel) exitFocus();
-  if (state.focus?.kind === 'share' && !shareVideoOf(state.users.get(state.focus.userId))) exitFocus();
+  if (state.focus?.kind === 'share' && !shareVideo(acharTela(state.focus.key)?.share)) exitFocus();
   renderMainSources();
 }
 
@@ -1135,7 +1264,7 @@ function updateVolumes() {
       }
       u.audioEl.volume = THREE.MathUtils.clamp(v, 0, 1);
     }
-    if (u.screenVideo) u.screenVideo.volume = settings.screen / 100;
+    for (const sh of u.shares.values()) if (sh.video) sh.video.volume = settings.screen / 100;
   }
 }
 
@@ -1188,13 +1317,13 @@ function showTvError(msg) {
 }
 
 function renderMainSources() {
-  const sharers = [...state.users.values()].filter((u) => u.slot != null);
+  const telas = telasNoAr().sort((a, b) => ordemDasTelas(a.share, b.share));
   const playing = !!tv?.state.id;
   const color = playing ? PROVIDERS[tv.state.provider]?.color : 'var(--muted)';
   const sub = playing ? (tv.title || 'Carregando…') : 'Nada tocando';
   $('#main-sources').innerHTML = [
     `<button type="button" class="source${state.main === 'media' ? ' on' : ''}" data-src="media"><span class="sdot" style="--c:${color}"></span>${playing ? esc(tv.label) : 'Player'}<small>${esc(sub.slice(0, 26))}</small></button>`,
-    ...sharers.map((u) => `<button type="button" class="source${state.main === u.id ? ' on' : ''}" data-src="${esc(u.id)}"><span class="sdot" style="--c:${esc(u.color)}"></span>${u.isSelf && state.casting ? 'Seu vídeo' : `Tela de ${esc(u.isSelf ? 'você' : u.name)}`}<small>Tela ${u.slot + 1}</small></button>`),
+    ...telas.map(({ user: u, share: sh }) => `<button type="button" class="source${state.main === sh.key ? ' on' : ''}" data-src="${esc(sh.key)}"><span class="sdot" style="--c:${esc(u.color)}"></span>${sh.file ? 'Seu vídeo' : `Tela de ${esc(u.isSelf ? 'você' : u.name)}`}<small>${ondeEsta(sh)}</small></button>`),
   ].join('');
 }
 
@@ -1795,14 +1924,14 @@ function screenInfo(screen) {
       return { kind: 'tv', screen, label: tv?.state.provider === 'browser' ? 'Usar o navegador' : `Focar no telão (${tv?.label ?? 'vídeo'})` };
     }
     if (screen.mode === 'share' && screen.owner) {
-      const u = state.users.get(screen.owner);
-      return { kind: 'share', userId: screen.owner, label: `Ver a tela de ${u?.isSelf ? 'você' : u?.name}` };
+      const u = acharTela(screen.owner)?.user;
+      return { kind: 'share', key: screen.owner, label: `Ver a tela de ${u?.isSelf ? 'você' : u?.name}` };
     }
     return null;
   }
   if (screen.midia) return { kind: 'tv', screen, label: `Focar no vídeo (${tv?.label ?? 'vídeo'})` };
-  const u = screen.owner && state.users.get(screen.owner);
-  if (u && shareVideoOf(u)) return { kind: 'share', userId: u.id, label: u.isSelf ? 'Ver sua tela' : `Ver a tela de ${u.name}` };
+  const t = acharTela(screen.owner);
+  if (t && shareVideo(t.share)) return { kind: 'share', key: t.share.key, label: t.user.isSelf ? 'Ver sua tela' : `Ver a tela de ${t.user.name}` };
   return null;
 }
 
@@ -1869,14 +1998,14 @@ function enterFocus(info) {
     $('#hover-hint').hidden = true;
     return;
   }
-  const u = state.users.get(info.userId);
-  const v = shareVideoOf(u);
+  const t = acharTela(info.key);
+  const v = shareVideo(t?.share);
   if (!v) return;
-  state.focus = { kind: 'share', userId: u.id };
+  state.focus = { kind: 'share', key: t.share.key };
   const fv = $('#focus-video');
   fv.srcObject = v.srcObject;
   fv.play().catch(() => {});
-  $('#focus-name').textContent = u.isSelf ? 'Sua tela' : `Tela de ${u.name}`;
+  $('#focus-name').textContent = `${t.user.isSelf ? 'Sua tela' : `Tela de ${t.user.name}`} · ${ondeEsta(t.share)}`;
   updateFocusPin();
   $('#focus').hidden = false;
   syncTouchVisibility();
@@ -1884,7 +2013,7 @@ function enterFocus(info) {
 
 function updateFocusPin() {
   if (state.focus?.kind !== 'share') return;
-  const pinned = state.main === state.focus.userId;
+  const pinned = state.main === state.focus.key;
   $('#focus-pin').innerHTML = `${icon('pin', 16)}${pinned ? 'Tirar do telão' : 'Pôr no telão'}`;
 }
 
@@ -1915,7 +2044,7 @@ $('#focus-full').addEventListener('click', () => {
   else $('#focus').requestFullscreen().catch(() => {});
 });
 $('#focus-pin').addEventListener('click', () => {
-  if (state.focus?.kind === 'share') togglePin(state.focus.userId);
+  if (state.focus?.kind === 'share') togglePin(state.focus.key);
   setTimeout(updateFocusPin, 150);
 });
 
@@ -1980,7 +2109,6 @@ helpBtn.addEventListener('click', () => {
 $$('[data-panel]').forEach((b) => b.addEventListener('click', () => openPanel(b.dataset.panel)));
 $('#panel-close').addEventListener('click', closePanel);
 $('#btn-mic').addEventListener('click', toggleMic);
-$('#btn-share').addEventListener('click', toggleShare);
 $('#btn-view').addEventListener('click', toggleView);
 $('#btn-react').addEventListener('click', (e) => {
   e.stopPropagation();
@@ -1990,11 +2118,16 @@ $('#react-pop').addEventListener('click', (e) => {
   const b = e.target.closest('[data-emote]');
   if (b) sendEmote(b.dataset.emote);
 });
+// fecha cada menu ao clicar fora dele (composedPath: o clique pode ter redesenhado o menu)
 document.addEventListener('click', (e) => {
-  if (!e.target.closest('.pop-wrap')) $('#react-pop').hidden = true;
+  const caminho = e.composedPath();
+  for (const id of ['#react-pop', '#share-pop']) {
+    const pop = $(id);
+    if (!caminho.includes(pop.parentElement)) pop.hidden = true;
+  }
 });
 $('#btn-leave').addEventListener('click', () => {
-  stopShare(true);
+  pararTodasAsTelas(true);
   socket?.disconnect();
   rtc?.closeAll();
   window.location.href = `${window.location.pathname}?sala=${encodeURIComponent(state.room || '')}`;
@@ -2080,7 +2213,7 @@ $('#set-share-mode').addEventListener('click', (e) => {
   if (rtc) {
     rtc.shareMode = settings.shareMode;
     // se já está compartilhando, reaplica sem precisar recomeçar
-    if (state.sharing) {
+    if (compartilhando()) {
       rtc.retuneAll();
       toast('Qualidade ajustada. A resolução só muda no próximo compartilhamento.', 'info', 5000);
     }
@@ -2197,6 +2330,7 @@ if (params.get('debug') === '1') {
     state, player, combat, run, corrida, world, settings, punch, goToRing, respawn,
     toggleVeiculo, irParaLargada,
     tocarTela, telasMudas, liberarSomDasTelas, makeVideo,
+    publishShare, stopShare, acharTela, telasNoAr, get rtc() { return rtc; },
   };
 }
 

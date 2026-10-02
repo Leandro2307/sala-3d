@@ -158,8 +158,8 @@ function getRoom(id) {
     room = {
       id,
       users: new Map(),
-      slots: new Array(SHARE_SLOTS).fill(null), // userId por tela
-      main: 'media', // 'media' (o player do telão) ou userId fixado no telão
+      slots: new Array(SHARE_SLOTS).fill(null), // chave do compartilhamento em cada tela
+      main: 'media', // 'media' (o player do telão) ou a chave do compartilhamento fixado nele
       media: { provider: null, id: null, playing: false, time: 0, updatedAt: Date.now(), by: null },
       chat: [],
     };
@@ -171,7 +171,7 @@ function getRoom(id) {
 function publicUser(u) {
   return {
     id: u.id, name: u.name, color: u.color, mic: u.mic,
-    slot: u.slot, screenStreamId: u.screenStreamId,
+    shares: [...u.shares.values()],
     p: u.p, r: u.r, a: u.a, photo: u.photo, shirt: u.shirt, char: u.char, health: u.health, ko: u.ko,
   };
 }
@@ -208,13 +208,41 @@ function cleanText(value, max) {
   return String(value ?? '').replace(/[\u0000-\u001f]/g, '').trim().slice(0, max);
 }
 
-function freeSlot(room, user) {
-  if (user.slot == null) return false;
-  room.slots[user.slot] = null;
-  user.slot = null;
-  user.screenStreamId = null;
-  if (room.main === user.id) room.main = 'media';
-  return true;
+// Uma pessoa pode compartilhar várias abas/janelas ao mesmo tempo, cada uma numa tela. A chave
+// ("<id da pessoa>~<n>") é o que vai para o telão; o streamId liga a chave ao vídeo no WebRTC.
+const donoDaChave = (key) => String(key).split('~')[0];
+
+function shareExists(room, key) {
+  return !!room.users.get(donoDaChave(key))?.shares.has(key);
+}
+
+// libera uma tela (key) ou todas as da pessoa; devolve as chaves liberadas
+function freeShares(room, user, key = null) {
+  const keys = key == null ? [...user.shares.keys()] : user.shares.has(key) ? [key] : [];
+  for (const k of keys) {
+    const sh = user.shares.get(k);
+    if (sh.slot != null && room.slots[sh.slot] === k) room.slots[sh.slot] = null;
+    user.shares.delete(k);
+    if (room.main === k) room.main = 'media';
+  }
+  return keys;
+}
+
+// Com as 4 telas ocupadas, mais um compartilhamento vai direto para o telão, sem tela
+// própria (slot null) — assim o telão mostra uma página e cada tela outra. Só um por sala.
+function semTela(room) {
+  for (const u of room.users.values()) for (const sh of u.shares.values()) if (sh.slot == null) return { user: u, share: sh };
+  return null;
+}
+
+// liberou uma tela: o compartilhamento que estava só no telão ganha ela
+function encaixarSemTela(room) {
+  const t = semTela(room);
+  const livre = room.slots.indexOf(null);
+  if (!t || livre === -1) return null;
+  t.share.slot = livre;
+  room.slots[livre] = t.share.key;
+  return t;
 }
 
 function attachSockets(io) {
@@ -231,8 +259,8 @@ function attachSockets(io) {
         name: cleanText(data?.name, 20) || 'Visitante',
         color: /^#[0-9a-f]{6}$/i.test(data?.color) ? data.color : '#7c9cff',
         mic: !!data?.mic,
-        slot: null,
-        screenStreamId: null,
+        shares: new Map(), // chave -> { key, slot, streamId }
+        shareSeq: 0,
         photo: cleanPhoto(data?.photo),
         shirt: SHIRTS.includes(data?.shirt) ? data.shirt : 'none',
         char: PERSONAGENS.includes(data?.char) ? data.char : 'padrao',
@@ -277,33 +305,43 @@ function attachSockets(io) {
       io.to(room.id).emit('user-update', { id: user.id, mic: user.mic });
     });
 
+    // cada chamada é mais uma aba/janela (ou um arquivo) numa tela livre
     socket.on('share-start', (msg, ack) => {
       const { streamId } = obj(msg);
+      const reply = typeof ack === 'function' ? ack : () => {};
       if (!user) return;
-      let slot = user.slot;
-      if (slot == null) slot = room.slots.indexOf(null);
-      if (slot === -1) return ack?.({ ok: false, error: 'Todas as telas estão ocupadas.' });
-      room.slots[slot] = user.id;
-      user.slot = slot;
-      user.screenStreamId = cleanText(streamId, 80);
+      const sid = cleanText(streamId, 80);
+      if (!sid) return reply({ ok: false, error: 'Compartilhamento inválido.' });
+      let slot = room.slots.indexOf(null);
+      if (slot === -1) {
+        if (semTela(room)) return reply({ ok: false, error: 'Todas as telas e o telão já estão ocupados.' });
+        slot = null; // vai direto para o telão
+      }
+      const key = `${user.id}~${++user.shareSeq}`;
+      const share = { key, slot, streamId: sid };
+      if (slot != null) room.slots[slot] = key;
+      user.shares.set(key, share);
       // Telão vazio? Fixa a tela compartilhada nele automaticamente.
-      if (room.main === 'media' && !room.media.id) room.main = user.id;
-      io.to(room.id).emit('share-update', { id: user.id, slot, screenStreamId: user.screenStreamId });
+      if (slot == null || (room.main === 'media' && !room.media.id)) room.main = key;
+      io.to(room.id).emit('share-update', { id: user.id, ...share });
       io.to(room.id).emit('main', { source: room.main, by: null });
-      ack?.({ ok: true, slot });
+      reply({ ok: true, slot, key });
     });
 
-    socket.on('share-stop', () => {
+    // sem chave: para todas as telas da pessoa
+    socket.on('share-stop', (key) => {
       if (!user) return;
-      if (freeSlot(room, user)) {
-        io.to(room.id).emit('share-update', { id: user.id, slot: null, screenStreamId: null });
-        io.to(room.id).emit('main', { source: room.main, by: null });
-      }
+      const keys = freeShares(room, user, typeof key === 'string' ? key : null);
+      for (const k of keys) io.to(room.id).emit('share-update', { id: user.id, key: k, gone: true });
+      if (!keys.length) return;
+      const t = encaixarSemTela(room);
+      if (t) io.to(room.id).emit('share-update', { id: t.user.id, ...t.share });
+      io.to(room.id).emit('main', { source: room.main, by: null });
     });
 
     socket.on('main', (source) => {
-      if (!user) return;
-      if (source !== 'media' && room.users.get(source)?.slot == null) return;
+      if (!user || typeof source !== 'string') return;
+      if (source !== 'media' && !shareExists(room, source)) return;
       room.main = source;
       io.to(room.id).emit('main', { source, by: user.name });
     });
@@ -522,10 +560,14 @@ function attachSockets(io) {
 
     socket.on('disconnect', () => {
       if (!room || !user) return;
-      const hadSlot = freeSlot(room, user);
+      const hadSlot = freeShares(room, user).length > 0;
       room.users.delete(user.id);
       io.to(room.id).emit('user-left', { id: user.id });
-      if (hadSlot) io.to(room.id).emit('main', { source: room.main, by: null });
+      if (hadSlot) {
+        const t = encaixarSemTela(room);
+        if (t) io.to(room.id).emit('share-update', { id: t.user.id, ...t.share });
+        io.to(room.id).emit('main', { source: room.main, by: null });
+      }
       if (room.users.size === 0) {
         // Sala vazia: guarda só o placar e o vídeo por um tempo; limpa se ninguém voltar.
         setTimeout(() => { if (rooms.get(room.id)?.users.size === 0) rooms.delete(room.id); }, 30 * 60 * 1000);

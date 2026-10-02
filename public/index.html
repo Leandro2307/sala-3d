@@ -156,7 +156,11 @@
 
     <div class="bar-center">
       <button type="button" class="round" id="btn-mic" data-tip="Microfone (M)"><span class="mic-level"></span><i data-icon="mic"></i></button>
-      <button type="button" class="round" id="btn-share" data-tip="Compartilhar tela"><i data-icon="share"></i></button>
+      <div class="pop-wrap">
+        <button type="button" class="round" id="btn-share" data-tip="Compartilhar tela"><i data-icon="share"></i><span class="share-count" id="share-count" hidden></span></button>
+        <!-- suas telas no ar: dá para compartilhar várias abas/janelas, cada uma numa tela -->
+        <div class="popover share-pop" id="share-pop" hidden></div>
+      </div>
       <div class="pop-wrap">
         <button type="button" class="round" id="btn-react" data-tip="Reações"><i data-icon="smile"></i></button>
         <div class="popover" id="react-pop" hidden>

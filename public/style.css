@@ -695,6 +695,69 @@ body.touch .help-grid[data-input="touch"] { display: grid; }
 }
 .popover button:hover { background: rgba(255, 255, 255, 0.1); transform: translateY(-3px) scale(1.12); }
 
+/* menu "Suas telas": várias abas/janelas compartilhadas ao mesmo tempo */
+#btn-share { position: relative; }
+.share-count {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 18px;
+  text-align: center;
+}
+.popover.share-pop {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  width: 290px;
+  padding: 10px;
+  border-radius: 16px;
+}
+.share-pop .sp-title {
+  padding: 2px 6px 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.share-pop .sp-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 4px 4px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.share-pop .sp-name { flex: 1; min-width: 0; display: grid; font-size: 13px; font-weight: 600; }
+.share-pop .sp-name small { color: var(--muted); font-size: 11px; font-weight: 500; }
+.popover.share-pop button { width: auto; height: auto; border-radius: 10px; font-size: 13px; color: inherit; }
+.popover.share-pop button:hover { transform: none; background: rgba(255, 255, 255, 0.1); }
+.popover.share-pop .sp-btn { display: grid; place-items: center; width: 32px; height: 32px; color: #c3c9d6; }
+.popover.share-pop .sp-btn.on { color: var(--accent); }
+.popover.share-pop .sp-btn.danger:hover { color: var(--danger); }
+.popover.share-pop .sp-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 10px 12px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 700;
+}
+.popover.share-pop .sp-add:hover { background: #8ff0d6; }
+.popover.share-pop .sp-add:disabled { background: rgba(255, 255, 255, 0.06); color: var(--muted); cursor: default; }
+.popover.share-pop .sp-stop-all { padding: 8px; color: var(--danger); font-weight: 600; }
+
 /* ------------------------------------------------------------ painel lateral */
 #panel {
   position: fixed;
@@ -797,6 +860,13 @@ body.touch .help-grid[data-input="touch"] { display: grid; }
 .person-actions .icon-btn { width: 32px; height: 32px; color: #c3c9d6; }
 .person-actions .muted-ic { color: var(--danger); padding: 0 6px; }
 .person-actions .icon-btn.on { color: var(--accent); }
+/* uma linha por tela compartilhada, embaixo do nome */
+.person-shares { grid-column: 1 / -1; list-style: none; margin: -6px 0 0 48px; padding: 0; display: grid; gap: 2px; }
+.person-shares li { display: flex; align-items: center; gap: 2px; color: var(--muted); font-size: 12px; }
+.person-shares li span { flex: 1; }
+.person-shares li b { color: var(--accent); font-weight: 600; }
+.person-shares .icon-btn { width: 28px; height: 28px; color: #c3c9d6; }
+.person-shares .icon-btn.on { color: var(--accent); }
 
 .chat { list-style: none; margin: 0; padding: 0; flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
 .chat .empty { color: var(--muted); text-align: center; margin: auto 0; font-size: 13px; }
