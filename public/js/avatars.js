@@ -373,6 +373,17 @@ export class Avatar {
       this.personagem = p;
       this.inner.add(p.grupo);
       this.mostrarCorpoPadrao(false);
+      // já estava de carro ao trocar de personagem: entra direto na forma veículo
+      if (this.veiculo) {
+        if (p.temTransformacao) {
+          p.transformar(true);
+          if (this.carro) this.carro.visible = false;
+        } else {
+          p.grupo.visible = false;
+          this.criarCarro();
+          this.carro.visible = true;
+        }
+      }
       return { ok: true, padrao: false, animado: p.temAnimacao, clipes: p.clips.length };
     } catch (err) {
       console.warn('[modelo] não carregou', err);
@@ -432,6 +443,18 @@ export class Avatar {
   setVeiculo(on) {
     if (this.veiculo === !!on) return;
     this.veiculo = !!on;
+
+    // Modelo com transformação própria (Optimus, Solus): o personagem vira
+    // veículo sozinho, com a animação dele. Carro desenhado em código nem entra.
+    if (this.personagem?.temTransformacao) {
+      this.personagem.transformar(this.veiculo);
+      this.personagem.grupo.visible = true;
+      if (this.carro) this.carro.visible = false;
+      this.mostrarCorpoPadrao(false);
+      this.tag.sprite.position.y = this.veiculo ? 2.0 : 2.6;
+      return;
+    }
+
     this.criarCarro();
     this.carro.visible = this.veiculo;
     if (this.veiculo) {
@@ -628,7 +651,11 @@ export class Avatar {
     }
 
     // em modo carro só as rodas giram; o resto do boneco está escondido
-    if (this.veiculo) {
+    if (this.veiculo && this.personagem?.temTransformacao) {
+      this.personagem.update(dt, 5, 1);
+      this.halo.position.y = 1.4;
+      this.inner.rotation.z += (0 - this.inner.rotation.z) * Math.min(1, dt * 9);
+    } else if (this.veiculo) {
       // nos outros jogadores a velocidade não vem pela rede: mede pelo deslocamento
       if (!this.isLocal) {
         const dx = this.group.position.x - (this._ultX ?? this.group.position.x);

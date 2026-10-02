@@ -16,7 +16,7 @@ const MAX_CHAT = 60;
 const MAX_PHOTO = 60_000; // data URL da foto do rosto (128x128 jpeg dá ~12 kB)
 const PUNCH_RANGE = 4.5; // metros: folga sobre o alcance real, só para barrar absurdo
 const SHIRTS = ['none', 'lula', 'bolsonaro'];
-const PERSONAGENS = ['padrao', 'robo', 'cavaleiro', 'barbaro', 'mago', 'ladino'];
+const PERSONAGENS = ['padrao', 'robo', 'cavaleiro', 'barbaro', 'mago', 'ladino', 'optimus', 'solus'];
 const VOLTA_MIN = 6; // segundos: abaixo disso é atravessar a pista, não dar a volta
 const VOLTA_MAX = 600;
 

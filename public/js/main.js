@@ -1825,6 +1825,7 @@ function frame() {
     sendState(dt);
     updateHover();
     updateSitHint();
+    world.focarSol(player.pos.x, player.pos.z);
     slowTimer += dt;
     if (slowTimer > 0.25) {
       slowTimer = 0;

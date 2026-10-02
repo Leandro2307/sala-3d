@@ -3,55 +3,69 @@
 import * as THREE from 'three';
 
 export const PISTA = {
-  cx: 0,
-  cz: 0,
-  rx: 45, // meia-largura do circuito (eixo X)
-  rz: 33, // meia-altura do circuito (eixo Z)
-  raio: 15, // raio das curvas
-  largura: 9, // largura da pista
-  y: 0.14, // altura do asfalto
-  setores: 8, // quantos trechos a volta tem (impede cortar caminho)
+  // O circuito fica num setor próprio, a leste da sala: assim o traçado pode ter
+  // o desenho que tem sem esbarrar no parkour, no ringue nem na plateia.
+  cx: 152,
+  cz: 30,
+  escala: 0.37, // converte as coordenadas do desenho para metros
+  largura: 9,
+  y: 0.14,
+  setores: 10,
   cores: {
     asfalto: 0x1b1f2b,
     borda: 0xf1f5f9,
     bordaAlt: 0xef4444,
-    mureta: 0x2b3245,
     largada: 0xf8fafc,
   },
 };
 
-// Linha central do circuito: retas + curvas arredondadas, em sentido horário
-// visto de cima, começando na reta de baixo (z negativo).
-function construirCaminho(amostrasPorCurva = 18) {
-  const { rx, rz, raio: r } = PISTA;
-  const pts = [];
-  const add = (x, z) => pts.push(new THREE.Vector2(x, z));
+// Traçado do Autódromo Internacional Ayrton Senna (Goiânia), ponto a ponto a
+// partir do desenho do circuito. As coordenadas são as do desenho; o centro
+// (230, 230) vira o centro do setor da pista.
+const DESENHO = [
+  [290, 262], // largada/chegada
+  [260, 300], [220, 352],
+  [175, 400], // Curva 1
+  [100, 382],
+  [25, 295], // Curva 2
+  [52, 300], [88, 330], // Curva VIP
+  [112, 300], [138, 233], // Curva 3
+  [162, 240], [182, 265],
+  [250, 230], [310, 190],
+  [342, 148], // Parabólica Interior
+  [300, 150], [240, 166], [190, 186],
+  [160, 198], // Orelha
+  [150, 160], [170, 128],
+  [214, 114], [250, 115], // Gancho
+  [236, 84], [192, 62],
+  [248, 46], [284, 62], // Esses
+  [302, 88],
+  [350, 70], [408, 75], // Parabólica Ayrton Senna
+  [434, 118], [418, 180],
+  [372, 222], [326, 248],
+];
 
-  const ax = rx - r; // até onde vai a reta no eixo X
-  const az = rz - r;
+export const CURVAS = [
+  { nome: 'Curva 1', i: 3 },
+  { nome: 'Curva 2', i: 5 },
+  { nome: 'Curva VIP', i: 7 },
+  { nome: 'Curva 3', i: 9 },
+  { nome: 'Parabólica Interior', i: 14 },
+  { nome: 'Orelha', i: 18 },
+  { nome: 'Gancho', i: 22 },
+  { nome: 'Esses', i: 26 },
+  { nome: 'Parabólica Ayrton Senna', i: 29 },
+];
 
-  add(-ax, -rz);
-  add(ax, -rz); // reta de baixo
-  for (let i = 1; i <= amostrasPorCurva; i++) { // curva inferior direita
-    const a = (-Math.PI / 2) + (i / amostrasPorCurva) * (Math.PI / 2);
-    add(ax + Math.cos(a) * r, -az + Math.sin(a) * r);
-  }
-  add(rx, az); // reta da direita
-  for (let i = 1; i <= amostrasPorCurva; i++) { // curva superior direita
-    const a = 0 + (i / amostrasPorCurva) * (Math.PI / 2);
-    add(ax + Math.cos(a) * r, az + Math.sin(a) * r);
-  }
-  add(-ax, rz); // reta de cima
-  for (let i = 1; i <= amostrasPorCurva; i++) { // curva superior esquerda
-    const a = (Math.PI / 2) + (i / amostrasPorCurva) * (Math.PI / 2);
-    add(-ax + Math.cos(a) * r, az + Math.sin(a) * r);
-  }
-  add(-rx, -az); // reta da esquerda
-  for (let i = 1; i <= amostrasPorCurva; i++) { // curva inferior esquerda
-    const a = Math.PI + (i / amostrasPorCurva) * (Math.PI / 2);
-    add(-ax + Math.cos(a) * r, -az + Math.sin(a) * r);
-  }
-  return pts;
+// Suaviza os pontos do desenho numa curva fechada e amostra a linha central.
+function construirCaminho(amostras = 420) {
+  const ctrl = DESENHO.map(([ix, iy]) => new THREE.Vector3(
+    (ix - 230) * PISTA.escala,
+    0,
+    (iy - 230) * PISTA.escala,
+  ));
+  const curva = new THREE.CatmullRomCurve3(ctrl, true, 'centripetal', 0.5);
+  return curva.getPoints(amostras).slice(0, amostras).map((p) => new THREE.Vector2(p.x, p.z));
 }
 
 export const CAMINHO = construirCaminho();
@@ -76,10 +90,18 @@ const _ap = new THREE.Vector2();
 
 // Projeta uma posição no caminho: devolve a fração da volta (0..1) e a distância
 // até a linha central (para saber se está dentro da pista).
-export function projetar(x, z) {
+// Distância entre duas frações de volta, considerando que a volta é circular.
+function distT(a, b) {
+  const d = Math.abs(a - b);
+  return Math.min(d, 1 - d);
+}
+
+export function projetar(x, z, tAnterior = null) {
   _p.set(x - PISTA.cx, z - PISTA.cz);
   let melhorDist = Infinity;
   let melhorT = 0;
+  let pertoDist = Infinity; // melhor candidato perto de onde o carro estava
+  let pertoT = 0;
   for (let i = 0; i < CAMINHO.length; i++) {
     const a = CAMINHO[i];
     const b = CAMINHO[(i + 1) % CAMINHO.length];
@@ -90,10 +112,21 @@ export function projetar(x, z) {
     const px = a.x + _ab.x * u;
     const pz = a.y + _ab.y * u;
     const d = Math.hypot(_p.x - px, _p.y - pz);
+    const t = (ACUM[i] + u * (ACUM[i + 1] - ACUM[i])) / COMPRIMENTO;
     if (d < melhorDist) {
       melhorDist = d;
-      melhorT = (ACUM[i] + u * (ACUM[i + 1] - ACUM[i])) / COMPRIMENTO;
+      melhorT = t;
     }
+    if (tAnterior !== null && distT(t, tAnterior) < 0.04 && d < pertoDist) {
+      pertoDist = d;
+      pertoT = t;
+    }
+  }
+  // Onde a pista passa rente a ela mesma (o grampo da 10, o complexo da VIP), a
+  // distância sozinha pode "pular" o carro para a outra faixa e bagunçar os
+  // setores. Se existe um ponto quase tão bom perto de onde ele estava, vale esse.
+  if (pertoDist < melhorDist + 3) {
+    return { t: pertoT, dist: pertoDist };
   }
   return { t: melhorT, dist: melhorDist };
 }
@@ -148,7 +181,7 @@ export class Corrida {
 
   // chamado a cada frame com a posição do jogador
   update(dt, x, z, emVeiculo) {
-    const { t, dist } = projetar(x, z);
+    const { t, dist } = projetar(x, z, this.naPista ? this.ultimoT : null);
     const dentro = dist <= PISTA.largura / 2 + 1.5;
     if (dentro !== this.naPista) {
       this.naPista = dentro;

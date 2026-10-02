@@ -29,7 +29,9 @@ export const PERSONAGENS = {
       id,
       label: ['Cavaleiro', 'Bárbaro', 'Mago', 'Ladino'][i],
       url: '/models/' + id + '.glb',
-      altura: 1.8,
+      // altura medida na pose de repouso do arquivo; de pé eles esticam um pouco,
+      // então o alvo é menor que a altura final desejada
+      altura: 1.55,
       // o pacote traz 76 clipes; estes são os que o jogo usa, escolhidos à mão
       // porque o palpite automático pegava a pose de combate com arma na mão
       clipes: {
@@ -45,6 +47,48 @@ export const PERSONAGENS = {
     };
     return acc;
   }, {}),
+
+  // Estes dois trazem a animação de transformar em veículo — é o que faz a
+  // transformação acontecer de verdade, em vez de trocar pelo carro desenhado
+  // em código. Em compensação não têm ciclo de andar: deslizam ao caminhar.
+  optimus: {
+    id: 'optimus',
+    label: 'Optimus',
+    url: '/models/optimus.glb',
+    // a pose de repouso deste arquivo é bem mais baixa que o robô de pé: ele
+    // estica 2,1x ao assumir a pose, então o alvo tem que ser proporcionalmente menor
+    altura: 1.34,
+    clipes: {
+      idle: 'transform_to_robot',
+      walk: 'transform_to_robot',
+      run: 'transform_to_robot',
+      air: 'transform_to_robot',
+      sit: 'transform_to_robot',
+      punch: 'fire_gun01',
+    },
+    poses: ['transform_to_robot'],
+    transforma: { paraVeiculo: 'transform_to_vehicle', paraRobo: 'transform_to_robot' },
+    credito: 'OrangeSauceu (Transformers: Earth Wars)',
+    aviso: 'transforma em caminhão de verdade; não tem ciclo de andar',
+  },
+  solus: {
+    id: 'solus',
+    label: 'Solus Prime',
+    url: '/models/solus.glb',
+    altura: 2.3,
+    clipes: {
+      idle: 'idle',
+      walk: 'idle',
+      run: 'idle',
+      air: 'idle',
+      sit: 'idle',
+      punch: 'Main_Hammer_Attack',
+      wave: 'Forge_Solus_Prime_Equip',
+    },
+    transforma: { paraVeiculo: 'main_to_alt', paraRobo: 'alt_to_main' },
+    credito: 'OrangeSauceu (Transformers: Earth Wars)',
+    aviso: 'transforma de verdade; não tem ciclo de andar',
+  },
 };
 
 export function registrarPersonagem(def) {
@@ -144,13 +188,21 @@ export class Personagem {
 
     this.mixer = new THREE.AnimationMixer(this.raiz);
     this.mapa = mapearClipes(this.clips, def.clipes);
+    // alguns modelos não têm ciclo de andar: o clipe serve como POSE, toca uma
+    // vez e segura o último quadro em vez de ficar repetindo o movimento inteiro
+    const poses = new Set(def.poses || []);
     this.acoes = {};
     for (const [estado, clip] of Object.entries(this.mapa)) {
       if (!clip) continue;
       const acao = this.mixer.clipAction(clip);
-      acao.setLoop(THREE.LoopRepeat);
+      const ehPose = poses.has(clip.name);
+      acao.setLoop(ehPose ? THREE.LoopOnce : THREE.LoopRepeat);
+      acao.clampWhenFinished = ehPose;
       this.acoes[estado] = acao;
     }
+    this.travado = null; // animação de transformação segurando a pose
+    this.modoVeiculo = false;
+    this.temIdleCiclico = !!this.mapa.idle && !poses.has(this.mapa.idle.name);
     // golpes e gestos que tocam uma vez e voltam ao estado anterior
     this.umaVez = {};
     for (const [chave, re] of Object.entries({ punch: /punch|soco|attack/i, wave: /wave|acen|cheer/i })) {
@@ -165,6 +217,11 @@ export class Personagem {
     }
     this.gesto = null;
     this.mixer.addEventListener('finished', (e) => {
+      // terminou de voltar a robô: devolve o controle para os estados normais
+      if (e.action === this.travado && !this.modoVeiculo && this.temIdleCiclico) {
+        this.travado.fadeOut(0.25);
+        this.travado = null;
+      }
       if (e.action === this.gesto) {
         const voltar = this.atual;
         this.gesto.fadeOut(0.18);
@@ -191,6 +248,37 @@ export class Personagem {
     this.estadoAtual = estado;
   }
 
+  // Transformação de verdade: alguns modelos trazem o clipe de virar veículo e
+  // de voltar a robô. Toca uma vez e segura a pose final, em vez de usar o carro
+  // desenhado em código.
+  transformar(paraVeiculo) {
+    const t = this.def.transforma;
+    if (!t) return false;
+    const nome = paraVeiculo ? t.paraVeiculo : t.paraRobo;
+    const clip = this.clips.find((c) => c.name === nome);
+    if (!clip) return false;
+    const acao = this.mixer.clipAction(clip);
+    if (this.atual) this.atual.fadeOut(0.18);
+    if (this.travado && this.travado !== acao) this.travado.fadeOut(0.18);
+    if (this.gesto) { this.gesto.stop(); this.gesto = null; }
+    acao.reset();
+    acao.setLoop(THREE.LoopOnce);
+    acao.clampWhenFinished = true;
+    acao.enabled = true;
+    acao.setEffectiveWeight(1);
+    acao.fadeIn(0.18).play();
+    this.travado = acao;
+    this.modoVeiculo = !!paraVeiculo;
+    this.atual = null;
+    this.estadoAtual = paraVeiculo ? 'veiculo' : 'robo';
+    return true;
+  }
+
+  get temTransformacao() {
+    const t = this.def.transforma;
+    return !!(t && this.clips.some((c) => c.name === t.paraVeiculo));
+  }
+
   // Toca um gesto por cima do estado atual (soco, aceno) e volta sozinho.
   tocarGesto(nome) {
     const acao = this.umaVez[nome];
@@ -206,6 +294,11 @@ export class Personagem {
   }
 
   update(dt, anim, velocidade = 1) {
+    // travado numa pose de transformação: nada de trocar de estado
+    if (this.travado) {
+      this.mixer.update(dt);
+      return;
+    }
     if (!this.gesto) this.setEstado(POR_ANIM[anim] || 'idle');
     // andar/correr acompanham a velocidade real, senão os pés patinam no chão
     if (this.atual && (this.estadoAtual === 'walk' || this.estadoAtual === 'run')) {

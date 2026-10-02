@@ -7,9 +7,10 @@ import { COURSE, RAILS, FUN_PADS } from './parkour.js';
 import { RING } from './arena.js';
 import { PISTA, CAMINHO } from './pista.js';
 
-// A sala alargou no eixo X para caber o circuito em volta de tudo. O comprimento
-// (Z) ficou igual, senão o telão se afastaria da plateia.
-export const ROOM = { minX: -52, maxX: 52, minZ: -40, maxZ: 40, height: 34 };
+// O galpão tem duas alas: a do cinema (em torno da origem, com o telão em minZ)
+// e a do autódromo, a leste. O telão continua em minZ para não se afastar da
+// plateia; quem cresceu foi o resto.
+export const ROOM = { minX: -52, maxX: 235, minZ: -40, maxZ: 100, height: 34 };
 export const SPAWN = { pos: [0, 0, -2], yaw: 0 };
 
 const FONT = "'Plus Jakarta Sans', system-ui, sans-serif";
@@ -401,6 +402,7 @@ export class World {
     sun.shadow.normalBias = 0.04;
     sun.shadow.radius = 3;
     this.sun = sun;
+    this.sunOffset = sun.position.clone().sub(sun.target.position);
     this.scene.add(sun, sun.target);
 
     // brilho azulado que "vem" da parede de telas
@@ -411,6 +413,18 @@ export class World {
     const backGlow = new THREE.PointLight(0xd08bff, 180, 60, 1.2);
     backGlow.position.set(0, 18, 26);
     this.scene.add(backGlow);
+  }
+
+  // O galpão ficou grande demais para uma sombra só: em vez de esticar o mapa de
+  // sombra sobre tudo (e borrar tudo), o sol acompanha o jogador. A área coberta
+  // continua pequena e nítida, e vai junto com quem está olhando.
+  focarSol(x, z) {
+    if (!this.sun) return;
+    const alvo = this.sun.target.position;
+    if (Math.abs(alvo.x - x) < 6 && Math.abs(alvo.z - z) < 6) return;
+    alvo.set(x, 0, z);
+    this.sun.position.copy(alvo).add(this.sunOffset);
+    this.sun.target.updateMatrixWorld();
   }
 
   addBox({ min, max, data = {}, mesh = null, blocksCamera = false }) {
