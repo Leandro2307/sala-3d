@@ -47,6 +47,10 @@ export class Player {
     this.runLock = false; // botão "correr" fixado
     this.jumpHeld = false; // botão de pulo mantido pressionado
     this.pedal = 0; // pedais do celular no modo carro: 1 acelera, -1 freia/ré
+    // poderes
+    this.voando = false; // sem gravidade: Espaço/pulo sobe, C/botão desce, Shift acelera
+    this.puloAlto = false; // pulo com o dobro da força (~4x a altura)
+    this.descerHeld = false; // botão "descer" do celular, voando
     this.touchLook = 1; // multiplicador do arrasto com o dedo
     this.sitting = false; // sentado num sofá/pufe
     this.veiculo = false; // transformado em carro
@@ -300,6 +304,11 @@ export class Player {
 
     const hasInput = (f !== 0 || r !== 0) && !this.override;
 
+    if (this.voando) {
+      this.passoVoo(dt, f, r, running, hasInput);
+      return;
+    }
+
     const sy = Math.sin(this.yaw);
     const cy = Math.cos(this.yaw);
     _dir.set(-sy * f + cy * r, 0, -cy * f - sy * r);
@@ -314,7 +323,7 @@ export class Player {
 
     // pulo (com buffer e coyote time)
     if (this.jumpBuffer > 0 && (this.grounded || this.coyote > 0) && !this.override) {
-      this.vel.y = JUMP;
+      this.vel.y = JUMP * (this.puloAlto ? 2 : 1);
       this.jumpBuffer = 0;
       this.coyote = 0;
       this.grounded = false;
@@ -338,6 +347,29 @@ export class Player {
     } else if (type === 'teleport') {
       this.emit('teleport', this.ground.data.target);
     }
+  }
+
+  // Um passo de voo: anda na direção da câmera, sobe e desce por botão, sem gravidade.
+  // As colisões continuam valendo (não atravessa parede nem chão).
+  passoVoo(dt, f, r, running, hasInput) {
+    const k = this.keys;
+    const sy = Math.sin(this.yaw);
+    const cy = Math.cos(this.yaw);
+    _dir.set(-sy * f + cy * r, 0, -cy * f - sy * r);
+    if (_dir.lengthSq() > 0) _dir.normalize();
+    const mag = Math.min(1, Math.hypot(f, r));
+    const speed = (running ? 30 : 15) * mag;
+    const t = Math.min(1, 6 * dt);
+    this.vel.x += ((hasInput ? _dir.x * speed : 0) - this.vel.x) * t;
+    this.vel.z += ((hasInput ? _dir.z * speed : 0) - this.vel.z) * t;
+    const sobe = (k.has('Space') || this.jumpHeld) && !this.override;
+    const desce = (k.has('KeyC') || k.has('ControlLeft') || this.descerHeld) && !this.override;
+    const vy = ((sobe ? 1 : 0) - (desce ? 1 : 0)) * (running ? 16 : 10);
+    this.vel.y += (vy - this.vel.y) * t;
+    this.jumpBuffer = 0;
+    this.moveAxis('x', this.vel.x * dt);
+    this.moveAxis('z', this.vel.z * dt);
+    this.moveVertical(this.vel.y * dt);
   }
 
   // Um passo da física do carro. Mantido separado do boneco porque o modelo é

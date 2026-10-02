@@ -16,6 +16,7 @@ const SHARE_SLOTS = 4;
 const MAX_CHAT = 60;
 const MAX_PHOTO = 60_000; // data URL da foto do rosto (128x128 jpeg dá ~12 kB)
 const PUNCH_RANGE = 4.5; // metros: folga sobre o alcance real, só para barrar absurdo
+const TIRO = { alcance: 85, cadenciaMs: 250 }; // arma da camiseta 22 (o cliente usa 80 m e 300 ms)
 const SHIRTS = ['none', 'lula', 'bolsonaro'];
 const PERSONAGENS = ['padrao', 'robo', 'cavaleiro', 'barbaro', 'mago', 'ladino', 'optimus', 'solus'];
 const VOLTA_MIN = 6; // segundos: abaixo disso é atravessar a pista, não dar a volta
@@ -379,6 +380,26 @@ function attachSockets(io) {
       const d = Array.isArray(dir) ? dir.slice(0, 2).map(Number) : [0, 0];
       if (!d.every(Number.isFinite)) return;
       io.to(to).emit('hit', { from: user.id, fromName: user.name, dir: d });
+    });
+
+    // Tiro: só quem está com a camiseta 22. O servidor confere a camiseta, a cadência, que o
+    // tiro saiu de perto de quem atirou e o alcance; o traçante vai para todo mundo ver.
+    socket.on('tiro', (msg) => {
+      const { to, dir, de, ate } = obj(msg);
+      if (!user || user.shirt !== 'bolsonaro') return;
+      const agora = Date.now();
+      if (agora - (user.ultimoTiro || 0) < TIRO.cadenciaMs) return;
+      user.ultimoTiro = agora;
+      const ponto = (v) => (Array.isArray(v) && v.length === 3 && v.every((n) => Number.isFinite(Number(n))) ? v.map(Number) : null);
+      const a = ponto(de);
+      const b = ponto(ate);
+      if (!a || !b || dist(a, user.p) > 6 || dist(a, b) > TIRO.alcance) return;
+      socket.to(room.id).emit('tiro', { id: user.id, de: a, ate: b });
+      const alvo = room.users.get(to);
+      if (!alvo || alvo.id === user.id || dist(user.p, alvo.p) > TIRO.alcance) return;
+      const d = Array.isArray(dir) ? dir.slice(0, 2).map(Number) : [0, 0];
+      if (!d.every(Number.isFinite)) return;
+      io.to(to).emit('hit', { from: user.id, fromName: user.name, dir: d, arma: true });
     });
 
     socket.on('health', (v) => {

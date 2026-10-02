@@ -228,6 +228,44 @@ class ScreenDisplay {
 
     this.video = null;
     this.texture = null;
+
+    // "Buraco" transparente no WebGL por onde aparece o player do telão (CSS3D por trás do
+    // canvas). Toda tela tem um: o player normalmente fica no telão, mas quando o telão
+    // passa a mostrar a tela de alguém, o vídeo vai para a tela dessa pessoa.
+    this.hole = new THREE.Mesh(
+      new THREE.PlaneGeometry(w, h),
+      new THREE.MeshBasicMaterial({
+        color: 0x000000, opacity: 0, blending: THREE.NoBlending, side: THREE.DoubleSide,
+        toneMapped: false, fog: false,
+      }),
+    );
+    this.hole.position.z = 0.015;
+    this.hole.visible = false;
+    this.hole.userData.screen = this;
+    this.group.add(this.hole);
+    this.isHost = false; // é esta tela que está com o player agora?
+    this.midia = false; // tela lateral fazendo as vezes de telão
+    this.aoMudar = null;
+  }
+
+  // esta tela deveria estar mostrando o player do telão?
+  get mostraMidia() { return this.midia; }
+
+  // Mostra o player (se for esta a tela que está com ele) ou o cartaz do que está tocando.
+  atualizarBuraco() {
+    const ativo = this.mostraMidia;
+    this.hole.visible = ativo && this.isHost;
+    if (ativo) {
+      this.placeholder.visible = !this.isHost;
+      this.glow.material.opacity = 0.32;
+    }
+    this.aoMudar?.();
+  }
+
+  setMidia(on) {
+    if (on) this.clearVideo();
+    this.midia = on;
+    this.atualizarBuraco();
   }
 
   setPlaceholder(title, subtitle) {
@@ -307,34 +345,18 @@ class ScreenDisplay {
 class Telao extends ScreenDisplay {
   constructor(opts) {
     super({ ...opts, icon: 'play' });
-    this.hole = new THREE.Mesh(
-      new THREE.PlaneGeometry(this.w, this.h),
-      new THREE.MeshBasicMaterial({
-        color: 0x000000, opacity: 0, blending: THREE.NoBlending, side: THREE.DoubleSide,
-        toneMapped: false, fog: false,
-      }),
-    );
-    this.hole.position.z = 0.015;
-    this.hole.visible = false;
-    this.hole.userData.screen = this;
-    this.group.add(this.hole);
     this.mode = 'empty';
-    this.isHost = false; // é este telão que está com o player agora?
-    this.aoMudar = null;
   }
+
+  get mostraMidia() { return this.mode === 'media'; }
 
   // 'empty' (sem vídeo) | 'media' (player do telão) | 'share'
   setMode(mode, video = null) {
     this.mode = mode;
-    this.hole.visible = mode === 'media' && this.isHost;
     if (mode === 'share' && video) this.setVideo(video);
     else this.clearVideo();
-    if (mode === 'media') {
-      // o telão que não está com o player mostra o cartaz do que está tocando
-      this.placeholder.visible = !this.isHost;
-      this.glow.material.opacity = 0.32;
-    }
-    this.aoMudar?.();
+    // o telão que não está com o player mostra o cartaz do que está tocando
+    this.atualizarBuraco();
   }
 }
 
@@ -723,7 +745,8 @@ export class World {
     this.css.domElement.firstChild.firstChild.appendChild(this.tvElement);
     this.tvElement.style.display = 'none';
     this.telaoTravado = null;
-    this.setTelaoHost(this.mainScreen);
+    this.slotMidia = null;
+    this.setMidiaHost(this.mainScreen);
 
     this.slots = SLOT_LAYOUT.map((l, i) => {
       const s = new ScreenDisplay({
@@ -733,6 +756,7 @@ export class World {
       s.index = i;
       s.group.position.set(l.x, l.y, l.z);
       s.group.rotation.y = l.rotY;
+      s.aoMudar = () => { if (s.isHost) this.tvCss.visible = s.mostraMidia; };
       this.scene.add(s.group);
       return s;
     });
@@ -742,7 +766,7 @@ export class World {
 
   criarTelao(opts) {
     const t = new Telao(opts);
-    t.aoMudar = () => { if (t.isHost) this.tvCss.visible = t.mode === 'media'; };
+    t.aoMudar = () => { if (t.isHost) this.tvCss.visible = t.mostraMidia; };
     this.scene.add(t.group);
     this.telaoes = this.telaoes || [];
     this.telaoes.push(t);
@@ -750,36 +774,57 @@ export class World {
     return t;
   }
 
-  // Põe o player atrás deste telão (só muda o transform do CSS3D: o iframe não recarrega).
-  setTelaoHost(t) {
+  // Põe o player atrás desta tela — um telão, ou uma tela lateral quando o telão está com a
+  // tela de alguém (só muda o transform do CSS3D: o iframe não recarrega).
+  setMidiaHost(t) {
     if (this.tvHost === t) return;
     this.tvHost = t;
-    for (const s of this.telaoes) {
+    for (const s of [...this.telaoes, ...(this.slots || [])]) {
       s.isHost = s === t;
-      s.setMode(s.mode, s.video);
+      s.atualizarBuraco();
     }
     t.group.updateWorldMatrix(true, true);
     t.hole.getWorldPosition(this.tvCss.position);
     t.hole.getWorldQuaternion(this.tvCss.quaternion);
     this.tvCss.scale.setScalar(t.w / TV_PX.w);
-    this.tvCss.visible = t.mode === 'media';
+    this.tvCss.visible = t.mostraMidia;
   }
 
-  // Modo foco: o telão em foco fica com o player até sair do foco, perto ou longe.
+  // Modo foco: a tela em foco fica com o player até sair do foco, perto ou longe.
   travarTelao(t) {
     this.telaoTravado = t;
-    if (t) this.setTelaoHost(t);
+    if (t) this.setMidiaHost(t);
+    else if (this.slotMidia) this.setMidiaHost(this.slotMidia);
+  }
+
+  // Telão mostrando a tela de alguém e um vídeo carregado: o vídeo vai para a tela dessa
+  // pessoa (os dois trocam de lugar) em vez de sumir. null devolve o vídeo ao telão.
+  midiaNoSlot(slot) {
+    if (this.slotMidia === slot) return;
+    this.slotMidia = slot;
+    if (this.telaoTravado) return;
+    this.setMidiaHost(slot || this.telaoMaisPerto());
+  }
+
+  telaoMaisPerto() {
+    const cam = this.camera.position;
+    return this.telaoes.reduce((a, b) => (b.group.position.distanceTo(cam) < a.group.position.distanceTo(cam) ? b : a));
   }
 
   // O player vai para o telão mais perto da câmera. A folga de 15% evita ficar trocando
   // quando alguém para bem no meio do caminho entre os dois.
   atualizarTelao() {
-    if (this.telaoTravado || !this.telaoes || this.telaoes.length < 2) return;
+    if (this.telaoTravado || this.slotMidia || !this.telaoes) return;
+    if (!this.telaoes.includes(this.tvHost)) {
+      this.setMidiaHost(this.telaoMaisPerto());
+      return;
+    }
+    if (this.telaoes.length < 2) return;
     const cam = this.camera.position;
     const dist = (s) => s.group.position.distanceTo(cam);
     let perto = this.tvHost;
     for (const s of this.telaoes) if (dist(s) < dist(perto) * 0.85) perto = s;
-    if (perto !== this.tvHost) this.setTelaoHost(perto);
+    if (perto !== this.tvHost) this.setMidiaHost(perto);
   }
 
 

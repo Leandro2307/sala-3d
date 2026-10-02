@@ -55,10 +55,12 @@
       </div>
     </div>
 
+    <div id="poderes-hud" hidden></div>
+
     <div id="fight-hud" hidden>
       <div class="fh-bar"><span id="fh-fill"></span></div>
       <div class="fh-row">
-        <span class="fh-label">Ringue</span>
+        <span class="fh-label" id="fh-label">Ringue</span>
         <span class="fh-hint" id="fh-hint"><kbd>F</kbd> socar</span>
       </div>
     </div>
@@ -92,6 +94,9 @@
           <span><kbd>C</kbd> sentar</span>
           <span><kbd>G</kbd> virar carro</span>
           <span><kbd>F</kbd> socar</span>
+          <span><kbd>Q</kbd> voar</span>
+          <span><kbd>J</kbd> pulo alto</span>
+          <span id="help-tiro" hidden><kbd>X</kbd> atirar</span>
           <span><kbd>1</kbd>–<kbd>6</kbd> reações</span>
         </div>
         <div class="help-grid" data-input="touch">
@@ -105,6 +110,8 @@
           <span><b>Corrida</b> no carro: botão de correr = turbo</span>
           <span><b>↺</b> checkpoint · no carro, volta à pista</span>
           <span><b>⤢</b> tela cheia · <b>😊</b> reações</span>
+          <span><b>Asa</b> voar · <b>seta</b> pulo alto</span>
+          <span><b>Luva</b> soca em qualquer lugar</span>
         </div>
       </div>
     </div>
@@ -125,12 +132,18 @@
       <button type="button" class="tb small" id="tb-view" aria-label="Alternar câmera"><i data-icon="view" data-size="18"></i></button>
       <button type="button" class="tb small" id="tb-run" aria-pressed="false" aria-label="Correr"><i data-icon="run" data-size="18"></i></button>
       <button type="button" class="tb small" id="tb-car" aria-pressed="false" aria-label="Virar carro"><i data-icon="car" data-size="18"></i></button>
-      <button type="button" class="tb punch" id="tb-punch" hidden aria-label="Socar"><i data-icon="fist" data-size="22"></i></button>
+      <button type="button" class="tb punch" id="tb-punch" aria-label="Socar"><i data-icon="fist" data-size="22"></i></button>
       <button type="button" class="tb pedal" id="tb-freio" hidden aria-label="Freio e ré"><i data-icon="freio" data-size="22"></i><span class="tb-label">Freio</span></button>
       <button type="button" class="tb big pedal" id="tb-acelera" hidden aria-label="Acelerar"><i data-icon="acelera" data-size="26"></i><span class="tb-label">Acelera</span></button>
       <button type="button" class="tb big" id="tb-jump" aria-label="Pular"><i data-icon="jump" data-size="26"></i></button>
     </div>
     <button type="button" class="tb corner" id="tb-full" aria-label="Tela cheia"><i data-icon="maximize" data-size="18"></i></button>
+    <div class="touch-poderes">
+      <button type="button" class="tb small" id="tb-voar" aria-pressed="false" aria-label="Voar"><i data-icon="asa" data-size="18"></i></button>
+      <button type="button" class="tb small" id="tb-pulo" aria-pressed="false" aria-label="Pulo alto"><i data-icon="mola" data-size="18"></i></button>
+      <button type="button" class="tb small" id="tb-descer" hidden aria-label="Descer"><i data-icon="desce" data-size="18"></i></button>
+      <button type="button" class="tb tiro" id="tb-tiro" hidden aria-label="Atirar"><i data-icon="mira" data-size="22"></i></button>
+    </div>
   </div>
 
   <!-- ============================================================ barra inferior -->
@@ -410,6 +423,7 @@
           <button type="button" data-shirt="lula">PT · 13</button>
           <button type="button" data-shirt="bolsonaro">22</button>
         </div>
+        <small class="hint">Quem veste a 22 entra armado (<kbd>X</kbd> atira).</small>
       </div>
 
       <div class="field" id="campo-foto">

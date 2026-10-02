@@ -33,6 +33,11 @@ export const COMBAT = {
   regenRate: 9, // vida por segundo
   respawnDelay: 2.2, // segundos nocauteado antes de voltar
   creditoRingOut: 7, // segundos: cair do ringue depois de apanhar ainda conta para quem bateu
+  // arma (só para quem escolheu a camiseta 22 — o servidor confere de novo)
+  danoTiro: 22,
+  empurraoTiro: 6,
+  cadenciaTiro: 0.3, // segundos entre tiros
+  alcanceTiro: 80,
 };
 
 // Cantos do ringue, para nascer/renascer sem cair em cima de alguém.

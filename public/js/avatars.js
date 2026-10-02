@@ -231,6 +231,9 @@ export class Avatar {
     this.swing = 0; // animação do soco
     this.ko = false;
     this.sitting = false;
+    this.armado = false; // camiseta 22: anda com a arma na mão
+    this.mira = 0; // segundos com o braço apontando (depois de um tiro)
+    this.coice = 0;
     this.personagem = null; // modelo glTF, quando a pessoa escolhe um
     // pescoço e ombros, para a cabeça não flutuar solta
     this.neck = new THREE.Mesh(shared.pescoco, this.material);
@@ -503,6 +506,7 @@ export class Avatar {
   // Camiseta: pinta o tronco e cola a estampa curva no peito.
   setShirt(kind) {
     this.shirt = SHIRTS[kind] ? kind : 'none';
+    this.setArma(this.shirt === 'bolsonaro'); // a 22 vem com arma
     if (this.chest) {
       this.body.remove(this.chest);
       this.chest.material.map?.dispose();
@@ -524,6 +528,47 @@ export class Avatar {
       this.body.add(faixa);
       this.chest = faixa;
     }
+  }
+
+  // Arma de brinquedo: cano escuro, coronha amarela e faixa verde. Vai na mão do boneco
+  // padrão; nos personagens 3D (sem braço procedural) fica presa ao lado do corpo.
+  setArma(on) {
+    this.armado = !!on;
+    if (!on || this.armaMao) return;
+    const criar = () => {
+      const g = new THREE.Group();
+      const metal = new THREE.MeshStandardMaterial({ color: 0x2a2f3a, roughness: 0.35, metalness: 0.7 });
+      const cano = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.3, 0.07), metal);
+      cano.position.y = -0.15; // o braço aponta para -Y da mão: o cano segue o braço
+      const cabo = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.07, 0.15), new THREE.MeshStandardMaterial({ color: 0xfacc15, roughness: 0.5 }));
+      cabo.position.set(0, -0.04, -0.07);
+      const faixa = new THREE.Mesh(new THREE.BoxGeometry(0.065, 0.05, 0.075), new THREE.MeshStandardMaterial({ color: 0x16a34a, roughness: 0.5 }));
+      faixa.position.y = -0.2;
+      const ponta = new THREE.Object3D();
+      ponta.position.y = -0.31;
+      g.add(cano, cabo, faixa, ponta);
+      for (const m of [cano, cabo, faixa]) m.castShadow = true;
+      g.userData.ponta = ponta;
+      return g;
+    };
+    this.armaMao = criar();
+    this.arms[1].mao.add(this.armaMao);
+    this.armaSolta = criar();
+    this.armaSolta.position.set(0.36, 1.05, 0.28);
+    this.armaSolta.rotation.x = -Math.PI / 2; // cano para a frente (+Z do boneco)
+    this.inner.add(this.armaSolta);
+  }
+
+  atirar() {
+    this.mira = 1.4;
+    this.coice = 1;
+  }
+
+  // ponta do cano em coordenadas do mundo (de onde sai o traçante)
+  pontaDaArma(out) {
+    const g = this.personagem ? this.armaSolta : this.armaMao;
+    if (this.armado && g && g.visible) return g.userData.ponta.getWorldPosition(out);
+    return out.copy(this.group.position).add(new THREE.Vector3(0, 1.35, 0));
   }
 
   setHealth(v) {
@@ -641,6 +686,10 @@ export class Avatar {
   }
 
   update(dt, t) {
+    if (this.armaMao) {
+      this.armaMao.visible = this.armado && !this.personagem && !this.veiculo;
+      this.armaSolta.visible = this.armado && !!this.personagem && !this.veiculo;
+    }
     if (!this.isLocal && this.hasTarget) {
       const k = 1 - Math.exp(-dt * 12);
       if (this.group.position.distanceToSquared(this.target) > 400) this.group.position.copy(this.target);
@@ -737,6 +786,15 @@ export class Avatar {
         const dir = this.arms[1];
         dir.raiz.rotation.set(-2.6, 0, 0.5 + Math.sin(t * 14) * 0.25);
         dir.cotovelo.rotation.x = 0.35;
+      }
+
+      // depois de um tiro, o braço da arma fica apontando para a frente (com o coice)
+      if (this.mira > 0 && this.armado && !sentado && this.swing <= 0) {
+        this.mira -= dt;
+        this.coice = Math.max(0, this.coice - dt * 7);
+        const dir = this.arms[1];
+        dir.raiz.rotation.set(-1.52 - this.coice * 0.35, 0, 0.1);
+        dir.cotovelo.rotation.x = 0.05 + this.coice * 0.25;
       }
 
       // soco: o braço direito dispara para frente e volta

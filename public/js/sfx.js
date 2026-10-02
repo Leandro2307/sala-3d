@@ -61,6 +61,11 @@ function ruido({ dur = 0.1, gain = 0.08, type = 'lowpass', freq = 1200, toFreq =
 }
 
 export const sfx = {
+  // estampido: rajada de ruído grave e curta + um "tum" (vol cai com a distância)
+  tiro: (vol = 1) => {
+    ruido({ dur: 0.18, gain: 0.12 * vol, type: 'lowpass', freq: 3600, toFreq: 260, q: 0.7 });
+    tone({ freq: 150, to: 55, dur: 0.14, type: 'square', gain: 0.03 * vol });
+  },
   jump: () => tone({ freq: 320, to: 520, dur: 0.1, type: 'triangle', gain: 0.035 }),
   pad: () => tone({ freq: 180, to: 760, dur: 0.32, type: 'sine', gain: 0.07 }),
   checkpoint: () => [660, 880, 1320].forEach((f, i) => tone({ freq: f, dur: 0.16, type: 'triangle', gain: 0.05, delay: i * 0.08 })),

@@ -275,6 +275,7 @@ $('#in-shirt').addEventListener('click', (e) => {
   settings.shirt = b.dataset.shirt;
   saveSettings();
   renderShirt();
+  if (state.joined) poderesMudaram();
   if (socket && state.joined) socket.emit('shirt', settings.shirt);
 });
 $('#photo-pick').addEventListener('click', () => $('#photo-file').click());
@@ -367,6 +368,7 @@ async function join() {
   player.teleport(spawn, SPAWN.yaw);
   player.enabled = true;
   updateMicButton();
+  poderesMudaram(); // mostra o X (atirar) na ajuda de quem veste a 22
   if (!navigator.mediaDevices?.getDisplayMedia) {
     $('#btn-share').hidden = true;
     $('#share-unsupported').hidden = false;
@@ -381,6 +383,9 @@ async function join() {
       punch: () => punch(),
       sit: () => toggleSit(),
       car: () => toggleVeiculo(),
+      voar: () => toggleVoar(),
+      puloAlto: () => togglePuloAlto(),
+      tiro: () => atirar(),
       fullscreen: async () => {
         const r = await toggleFullscreen();
         updateFullscreenButton();
@@ -393,6 +398,7 @@ async function join() {
       },
     });
     syncTouchVisibility();
+    poderesMudaram();
     if (!temTelaCheia) $('#tb-full').hidden = true; // iOS não tem tela cheia de página
     if (window.matchMedia('(orientation: portrait)').matches) {
       toast('Vire o celular na horizontal para jogar melhor.', 'warn', 7000);
@@ -522,8 +528,17 @@ function bindSocket() {
     sfx.punchSwing();
   });
 
-  socket.on('hit', ({ from, fromName, dir }) => {
-    combat.takeHit({ dir, from, fromName });
+  socket.on('tiro', ({ id, de, ate }) => {
+    const u = state.users.get(id);
+    if (!u || u.isSelf) return;
+    desenharTiro(de, ate);
+    u.avatar.atirar();
+    const d = localAvatar.group.position.distanceTo(_tmpTiro.set(de[0], de[1], de[2]));
+    sfx.tiro(THREE.MathUtils.clamp(1 - d / 90, 0.06, 1));
+  });
+
+  socket.on('hit', ({ from, fromName, dir, arma }) => {
+    combat.takeHit({ dir, from, fromName, arma });
   });
 
   socket.on('ko', ({ id, name, by, byColor, fights }) => {
@@ -1045,9 +1060,21 @@ function shareVideoOf(u) {
 
 function refreshScreens() {
   const users = [...state.users.values()];
+  const pinned = state.main !== 'media' ? state.users.get(state.main) : null;
+  // Fixou a tela de alguém no telão com um vídeo tocando: o vídeo vai para a tela dessa
+  // pessoa (trocam de lugar). Antes o vídeo simplesmente sumia.
+  const slotMidia = pinned && tv?.state.id && pinned.slot != null ? world.slots[pinned.slot] : null;
   world.slots.forEach((slot, i) => {
     const owner = users.find((u) => u.slot === i);
     slot.owner = owner?.id ?? null;
+    if (slot === slotMidia) {
+      const meta = PROVIDERS[tv.state.provider];
+      slot.setLabel(`${tv.label} · Tela ${i + 1}`, meta?.color);
+      slot.setPlaceholder(tv.title || tv.label, 'Tocando aqui — chegue mais perto');
+      slot.setMidia(true);
+      return;
+    }
+    slot.setMidia(false);
     if (!owner) {
       slot.clearVideo();
       slot.setPlaceholder(`Tela ${i + 1}`, 'Livre — clique em “Compartilhar tela”');
@@ -1063,8 +1090,9 @@ function refreshScreens() {
     }
   });
 
+  world.midiaNoSlot(slotMidia);
+
   // o telão do cinema e o da pista mostram sempre a mesma coisa
-  const pinned = state.main !== 'media' ? state.users.get(state.main) : null;
   for (const ms of world.telaoes) {
     ms.owner = null;
     ms.setLabel(null);
@@ -1087,9 +1115,10 @@ function refreshScreens() {
     }
   }
   const ms = world.mainScreen;
-  tv?.setHidden(ms.mode !== 'media');
+  const midiaVisivel = ms.mode === 'media' || !!slotMidia;
+  tv?.setHidden(!midiaVisivel);
 
-  if (state.focus?.kind === 'tv' && ms.mode !== 'media') exitFocus();
+  if (state.focus?.kind === 'tv' && !midiaVisivel) exitFocus();
   if (state.focus?.kind === 'share' && !shareVideoOf(state.users.get(state.focus.userId))) exitFocus();
   renderMainSources();
 }
@@ -1539,6 +1568,10 @@ function setRaceBoard(board) {
 function toggleVeiculo() {
   const virou = player.setVeiculo(!player.veiculo);
   if (!virou) return;
+  if (player.veiculo && player.voando) {
+    player.voando = false;
+    poderesMudaram();
+  }
   sfx.teleport();
   if (player.veiculo) {
     toast(isTouch
@@ -1579,22 +1612,146 @@ const combat = new Combat({
 
 function updateFightHud(health, inRing) {
   const hud = $('#fight-hud');
-  hud.hidden = !inRing;
-  if (!inRing) {
-    $('#tb-punch').hidden = true;
-    return;
-  }
   const v = Math.max(0, Math.min(1, health / COMBAT.maxHealth));
+  // a porradaria vale no mapa todo: fora do ringue a barra aparece quando você apanha
+  hud.hidden = !(inRing || v < 1 || combat.knockedOut);
+  $('#fh-label').textContent = inRing ? 'Ringue' : 'Vida';
+  localAvatar.setHealth(v);
+  socket?.emit('health', v);
+  if (hud.hidden) return;
   $('#fh-fill').style.width = `${v * 100}%`;
   hud.classList.toggle('hurt', v <= 0.55 && v > 0.28);
   hud.classList.toggle('danger', v <= 0.28);
   hud.classList.toggle('ko', combat.knockedOut);
   $('#fh-hint').innerHTML = combat.knockedOut
     ? 'Nocauteado…'
-    : (isTouch ? 'Toque na luva para socar' : 'Clique ou <kbd>F</kbd> para socar');
-  if (isTouch) $('#tb-punch').hidden = !!state.panel || !!state.focus;
-  localAvatar.setHealth(v);
-  socket?.emit('health', v);
+    : isTouch ? 'Toque na luva para socar' : `<kbd>F</kbd> soca${temArma() ? ' · <kbd>X</kbd> atira' : ''}`;
+}
+
+// ------------------------------------------------------------------ arma (camiseta 22)
+// O servidor confere a camiseta de novo: isto aqui é só para não mostrar o que não vale.
+function temArma() { return settings.shirt === 'bolsonaro'; }
+
+const _tmpTiro = new THREE.Vector3();
+const _camDir = new THREE.Vector3();
+const _origemTiro = new THREE.Vector3();
+const _direita = new THREE.Vector3();
+const _raioTiro = new THREE.Raycaster();
+const tiros = [];
+const tiroGeo = new THREE.BoxGeometry(0.05, 0.05, 1);
+const flashTex = (() => {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d').createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0, 'rgba(255,248,200,1)');
+  g.addColorStop(0.4, 'rgba(255,190,80,0.8)');
+  g.addColorStop(1, 'rgba(255,140,40,0)');
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(c);
+})();
+
+// traçante amarelo da arma até onde a bala parou, mais o clarão na ponta do cano
+function desenharTiro(de, ate) {
+  const a = new THREE.Vector3(...de);
+  const b = new THREE.Vector3(...ate);
+  const risco = new THREE.Mesh(tiroGeo, new THREE.MeshBasicMaterial({ color: 0xfff1a8, transparent: true, toneMapped: false }));
+  risco.position.copy(a).add(b).multiplyScalar(0.5);
+  risco.scale.set(1, 1, Math.max(0.01, a.distanceTo(b)));
+  risco.lookAt(b);
+  const clarao = new THREE.Sprite(new THREE.SpriteMaterial({ map: flashTex, transparent: true, depthWrite: false, toneMapped: false }));
+  clarao.position.copy(a);
+  clarao.scale.setScalar(0.9);
+  world.scene.add(risco, clarao);
+  tiros.push({ risco, clarao, vida: 0.12 });
+}
+
+function atualizarTiros(dt) {
+  for (let i = tiros.length - 1; i >= 0; i--) {
+    const t = tiros[i];
+    t.vida -= dt;
+    t.risco.material.opacity = Math.max(0, t.vida / 0.12);
+    t.clarao.material.opacity = Math.max(0, t.vida / 0.12);
+    if (t.vida <= 0) {
+      t.risco.removeFromParent();
+      t.clarao.removeFromParent();
+      t.risco.material.dispose();
+      t.clarao.material.dispose();
+      tiros.splice(i, 1);
+    }
+  }
+}
+
+function atirar() {
+  if (!temArma()) {
+    toast('Arma só para quem escolheu a camiseta 22.', 'info', 2600);
+    return;
+  }
+  if (player.veiculo || player.sitting || state.focus || !state.joined) return;
+  const cam = world.camera;
+  cam.getWorldDirection(_camDir);
+  // o raio sai da mira, mas da altura do boneco para a frente: em 3ª pessoa a câmera fica
+  // atrás, e acertaria quem estivesse entre ela e você
+  const frente = Math.max(0, _tmpTiro.copy(player.pos).sub(cam.position).dot(_camDir));
+  _origemTiro.copy(cam.position).addScaledVector(_camDir, frente);
+  const r = combat.atirar({
+    origem: _origemTiro,
+    dir: _camDir,
+    bloqueado: (o, d, max) => {
+      _raioTiro.set(o, d);
+      _raioTiro.far = max;
+      const h = _raioTiro.intersectObjects(world.cameraBlockers, false)[0];
+      return h ? h.distance : null;
+    },
+  });
+  if (!r) return; // cadência ou nocauteado
+  // vira o corpo para onde atirou: os outros veem o braço apontando para lá
+  player.bodyYaw = Math.atan2(-Math.sin(player.yaw), -Math.cos(player.yaw));
+  localAvatar.atirar();
+  // o traçante sai da frente do peito, um pouco à direita (onde fica a arma)
+  _direita.crossVectors(_camDir, cam.up).normalize();
+  const de = new THREE.Vector3(player.pos.x, player.pos.y + 1.3, player.pos.z).addScaledVector(_camDir, 0.6).addScaledVector(_direita, 0.3);
+  const arred = (v) => v.toArray().map((n) => Math.round(n * 100) / 100);
+  desenharTiro(arred(de), arred(r.ponto));
+  sfx.tiro();
+  if (r.alvo) sfx.punchHit();
+  socket?.emit('tiro', { to: r.alvo?.id ?? null, dir: r.dirXZ, de: arred(de), ate: arred(r.ponto) });
+}
+
+// ------------------------------------------------------------------ poderes
+function toggleVoar() {
+  if (player.veiculo) {
+    toast('Saia do carro para voar.', 'info', 2600);
+    return;
+  }
+  player.voando = !player.voando;
+  if (player.voando && player.sitting) player.stand();
+  poderesMudaram();
+  toast(player.voando
+    ? (isTouch ? 'Voando! O botão de pulo sobe e a seta para baixo desce.' : 'Voando! Espaço sobe, C desce, Shift acelera. Q desliga.')
+    : 'Voo desligado.', 'info', 3600);
+}
+
+function togglePuloAlto() {
+  player.puloAlto = !player.puloAlto;
+  poderesMudaram();
+  toast(player.puloAlto ? `Pulo alto ligado${isTouch ? '' : ' (J desliga)'}.` : 'Pulo alto desligado.', 'info', 2600);
+}
+
+function poderesMudaram() {
+  // com poder ligado o parkour não vale: a corrida em andamento é cancelada
+  if ((player.voando || player.puloAlto) && run.state !== 'idle') {
+    run.cancel();
+    hideParkourHud();
+    world.resetCheckpoints();
+    toast('Com poder ligado o parkour não conta: corrida cancelada.', 'warn', 4000);
+  }
+  touchPad?.setPoderes({ voando: player.voando, puloAlto: player.puloAlto, armado: temArma() });
+  const ativos = [player.voando && '🪽 Voando', player.puloAlto && '⬆ Pulo alto'].filter(Boolean);
+  $('#poderes-hud').hidden = !ativos.length;
+  $('#poderes-hud').textContent = ativos.join('  ·  ');
+  $('#help-tiro').hidden = !temArma();
 }
 
 function punch() {
@@ -1643,6 +1800,7 @@ function screenInfo(screen) {
     }
     return null;
   }
+  if (screen.midia) return { kind: 'tv', screen, label: `Focar no vídeo (${tv?.label ?? 'vídeo'})` };
   const u = screen.owner && state.users.get(screen.owner);
   if (u && shareVideoOf(u)) return { kind: 'share', userId: u.id, label: u.isSelf ? 'Ver sua tela' : `Ver a tela de ${u.name}` };
   return null;
@@ -1973,7 +2131,16 @@ window.addEventListener('keydown', (e) => {
       punch();
       break;
     case 'KeyC':
-      toggleSit();
+      if (!player.voando) toggleSit(); // voando, C é descer
+      break;
+    case 'KeyQ':
+      toggleVoar();
+      break;
+    case 'KeyJ':
+      togglePuloAlto();
+      break;
+    case 'KeyX':
+      atirar();
       break;
     case 'KeyG':
       toggleVeiculo();
@@ -2020,6 +2187,7 @@ document.addEventListener('mousedown', (e) => {
   // dentro do ringue o botão esquerdo é o soco; fora dele continua focando telas
   if (combat.inRing && !state.focus) punch();
   else if (state.hovered) enterFocus(state.hovered);
+  else if (temArma()) atirar();
 });
 
 // Ponto de inspeção para testes automatizados. Só existe com ?debug=1 na URL —
@@ -2121,9 +2289,18 @@ function frame() {
 
   if (state.joined) {
     player.update(dt);
-    run.update(dt, player.grounded ? player.ground : null);
+    // com poder ligado o parkour nem começa (pular alto/voar até o camarote não é recorde)
+    if (player.voando || player.puloAlto) {
+      if (run.state !== 'idle') {
+        run.cancel();
+        hideParkourHud();
+      }
+    } else {
+      run.update(dt, player.grounded ? player.ground : null);
+    }
     if (run.state === 'running') setPkTime(run.time);
     combat.update(dt);
+    atualizarTiros(dt);
     localAvatar.setKo(combat.knockedOut);
     corrida.update(dt, player.pos.x, player.pos.z, player.veiculo);
     if (corrida.ativa) $('#rh-time').textContent = formatarVolta(corrida.tempo);

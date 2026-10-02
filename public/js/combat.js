@@ -1,4 +1,5 @@
-// Luta no ringue: soco com alcance e cone à frente, empurrão, vida e nocaute.
+// Porradaria (no mapa todo, não só no ringue): soco com alcance e cone à frente, tiro para
+// quem tem arma, empurrão, vida e nocaute. No ringue, cair do tablado também é nocaute.
 // Cada cliente manda só o que ele mesmo fez (socou / levou dano), no mesmo nível de
 // confiança do resto da sala — é um jogo entre amigos, não um competitivo valendo nada.
 import * as THREE from 'three';
@@ -19,6 +20,7 @@ export class Combat {
 
     this.health = COMBAT.maxHealth;
     this.cooldown = 0;
+    this.cooldownTiro = 0;
     this.sinceHit = 99;
     this.knockedOut = false;
     this.koTimer = 0;
@@ -38,7 +40,7 @@ export class Combat {
 
   // ------------------------------------------------------------------ socar
   punch() {
-    if (this.cooldown > 0 || this.knockedOut || !this.inRing) return false;
+    if (this.cooldown > 0 || this.knockedOut) return false;
     this.cooldown = COMBAT.cooldown;
     this.swing = 1;
     this.socket?.emit('punch');
@@ -76,19 +78,48 @@ export class Combat {
     return true;
   }
 
+  // ------------------------------------------------------------------ atirar
+  // O raio sai da mira (origem/dir) e acerta o primeiro jogador no caminho — cada boneco vira
+  // três esferas empilhadas — se nenhuma parede (bloqueado) estiver antes. Devolve onde a bala
+  // parou, para desenhar o traçante, e quem levou, se alguém levou.
+  atirar({ origem, dir, bloqueado }) {
+    if (this.cooldownTiro > 0 || this.knockedOut) return null;
+    this.cooldownTiro = COMBAT.cadenciaTiro;
+    let melhor = null;
+    for (const o of this.getOthers()) {
+      for (const altura of [0.45, 0.95, 1.45]) {
+        _a.set(o.position.x, o.position.y + altura, o.position.z).sub(origem);
+        const t = _a.dot(dir);
+        if (t < 0 || t > COMBAT.alcanceTiro) continue;
+        if (_a.lengthSq() - t * t > 0.42 * 0.42) continue;
+        if (!melhor || t < melhor.t) melhor = { alvo: o, t };
+      }
+    }
+    const longe = melhor ? melhor.t : COMBAT.alcanceTiro;
+    const parede = bloqueado?.(origem, dir, longe);
+    if (parede != null && parede < longe) melhor = null;
+    const ponto = origem.clone().addScaledVector(dir, melhor ? melhor.t : parede ?? COMBAT.alcanceTiro);
+    if (!melhor) return { alvo: null, ponto, dirXZ: null };
+    _b.copy(melhor.alvo.position).sub(origem);
+    _b.y = 0;
+    _b.normalize();
+    return { alvo: melhor.alvo, ponto, dirXZ: [_b.x, _b.z] };
+  }
+
   // ------------------------------------------------------------------ apanhar
-  takeHit({ dir, from, fromName }) {
+  takeHit({ dir, from, fromName, arma }) {
     if (this.knockedOut) return;
     const [dx, dz] = Array.isArray(dir) ? dir : [0, 0];
-    const forte = this.health <= COMBAT.damage;
-    const push = forte ? COMBAT.koKnockback : COMBAT.knockback;
+    const dano = arma ? COMBAT.danoTiro : COMBAT.damage;
+    const forte = this.health <= dano;
+    const push = forte ? COMBAT.koKnockback : arma ? COMBAT.empurraoTiro : COMBAT.knockback;
     this.player.vel.x += dx * push;
     this.player.vel.z += dz * push;
     this.player.vel.y = Math.max(this.player.vel.y, forte ? COMBAT.koLift : COMBAT.lift);
     this.player.grounded = false;
     this.player.ground = null;
 
-    this.health = Math.max(0, this.health - COMBAT.damage);
+    this.health = Math.max(0, this.health - dano);
     this.sinceHit = 0;
     this.ultimoAgressor = { id: from || null, name: fromName || null, idade: 0 };
     this.onDamage?.();
@@ -99,6 +130,7 @@ export class Combat {
   knockOut(byName, byId) {
     if (this.knockedOut) return;
     this.knockedOut = true;
+    this.koNoRingue = this.inRing; // no ringue volta para um canto; no resto do mapa, levanta onde caiu
     this.koTimer = COMBAT.respawnDelay;
     this.lastKoBy = byName || null;
     this.socket?.emit('ko', { by: byId || null });
@@ -108,6 +140,7 @@ export class Combat {
   // ------------------------------------------------------------------ por frame
   update(dt) {
     this.cooldown = Math.max(0, this.cooldown - dt);
+    this.cooldownTiro = Math.max(0, this.cooldownTiro - dt);
     this.sinceHit += dt;
     if (this.swing > 0) this.swing = Math.max(0, this.swing - dt / 0.26);
 
@@ -123,7 +156,7 @@ export class Combat {
       if (this.koTimer <= 0) {
         this.knockedOut = false;
         this.health = COMBAT.maxHealth;
-        this.respawnInRing();
+        if (this.koNoRingue) this.respawnInRing();
         this.onState?.(this.health, this.inRing);
       }
       return;
@@ -142,7 +175,7 @@ export class Combat {
       return;
     }
 
-    if (this.inRing && this.health < COMBAT.maxHealth && this.sinceHit > COMBAT.regenDelay) {
+    if (this.health < COMBAT.maxHealth && this.sinceHit > COMBAT.regenDelay) {
       const antes = this.health;
       this.health = Math.min(COMBAT.maxHealth, this.health + COMBAT.regenRate * dt);
       if (Math.floor(antes) !== Math.floor(this.health)) this.onState?.(this.health, this.inRing);

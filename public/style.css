@@ -1099,6 +1099,32 @@ body.touch .rh-time { font-size: 20px; }
 #tb-freio { background: rgba(244, 63, 94, 0.18); border-color: rgba(244, 63, 94, 0.5); color: #fb7185; }
 #tb-freio.held { background: rgba(244, 63, 94, 0.42); }
 #tb-acelera.held { background: rgba(110, 231, 200, 0.4); }
+/* poderes e arma (celular): coluna à direita, acima dos botões de ação */
+.touch-poderes {
+  position: absolute;
+  right: calc(18px + env(safe-area-inset-right));
+  bottom: calc(118px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+.tb.tiro { width: 58px; height: 58px; background: rgba(250, 204, 21, 0.18); border-color: rgba(250, 204, 21, 0.55); color: #facc15; }
+.tb.tiro.held { background: rgba(250, 204, 21, 0.4); }
+#poderes-hud {
+  position: absolute;
+  left: 50%;
+  bottom: 96px;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: var(--glass-strong);
+  border: 1px solid var(--line);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+body.touch #poderes-hud { bottom: auto; top: calc(60px + env(safe-area-inset-top)); }
 /* no celular não tem Esc: o botão já diz o que faz */
 body.touch #pk-quit kbd, body.touch #tv-focus-exit kbd { display: none; }
 
@@ -1209,6 +1235,8 @@ body.touch #panel {
   body.touch .tb.pedal { width: 56px; height: 56px; }
   body.touch .tb.big.pedal { width: 70px; height: 70px; }
   body.touch .touch-actions { gap: 8px; }
+  body.touch .touch-poderes { bottom: calc(96px + env(safe-area-inset-bottom)); gap: 6px; }
+  body.touch .tb.tiro { width: 50px; height: 50px; }
   /* paisagem baixinha: a ajuda fica só como etiqueta recolhida (abre quando tocar) */
   body.touch #controls-help:not(.collapsed) { max-height: calc(100vh - 150px); overflow-y: auto; }
 }

@@ -166,8 +166,20 @@ export function setupTouchControls(player, actions = {}) {
     });
   }
 
+  // voando, "descer" é segurar (como o pulo, que sobe)
+  const descer = root.querySelector('#tb-descer');
+  if (descer) {
+    setupButton(descer, {
+      onPress: () => { player.descerHeld = true; },
+      onRelease: () => { player.descerHeld = false; },
+    });
+  }
+
   for (const [id, fn] of Object.entries({
     '#tb-use': actions.use,
+    '#tb-voar': actions.voar,
+    '#tb-pulo': actions.puloAlto,
+    '#tb-tiro': actions.tiro,
     '#tb-view': actions.view,
     '#tb-respawn': actions.respawn,
     '#tb-punch': actions.punch,
@@ -195,9 +207,23 @@ export function setupTouchControls(player, actions = {}) {
       atualizarPedal();
     },
     show(on) { root.hidden = !on; },
+    // estado dos poderes nos botões (aceso = ligado); "descer" só aparece voando
+    setPoderes({ voando, puloAlto, armado }) {
+      const marcar = (sel, on) => {
+        const el = $b(sel);
+        el.classList.toggle('on', on);
+        el.setAttribute('aria-pressed', String(on));
+      };
+      marcar('#tb-voar', voando);
+      marcar('#tb-pulo', puloAlto);
+      $b('#tb-descer').hidden = !voando;
+      $b('#tb-tiro').hidden = !armado;
+      if (!voando) player.descerHeld = false;
+    },
     // modo carro: pedais no lugar do pulo, o botão de correr vira turbo
     showCarro(on) {
       root.classList.toggle('carro', on);
+      $b('#tb-punch').hidden = on; // de carro não dá para socar
       $b('#tb-acelera').hidden = !on;
       $b('#tb-freio').hidden = !on;
       $b('#tb-jump').hidden = on;
