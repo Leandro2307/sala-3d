@@ -1,4 +1,5 @@
-// Bonecos lisos: corpo em cápsula, cabeça redonda com viseira e mãozinhas flutuantes.
+// Bonecos: tronco em cápsula, cabeça redonda (ou com a foto da pessoa), braços e
+// pernas articulados em dois segmentos, e camiseta opcional estampada no peito.
 import * as THREE from 'three';
 
 const FONT = "'Plus Jakarta Sans', system-ui, sans-serif";
@@ -38,15 +39,22 @@ function uvDeFrente(geo) {
 
 const shared = {
   torso: new THREE.CapsuleGeometry(0.3, 0.38, 10, 28),
+  ombros: new THREE.SphereGeometry(0.3, 22, 16),
   quadril: new THREE.SphereGeometry(0.26, 20, 14),
-  coxa: new THREE.CapsuleGeometry(0.115, 0.3, 6, 14),
+  pescoco: new THREE.CylinderGeometry(0.12, 0.15, 0.14, 16),
+  coxa: new THREE.CapsuleGeometry(0.115, 0.26, 6, 14),
+  canela: new THREE.CapsuleGeometry(0.098, 0.24, 6, 14),
   pe: new THREE.SphereGeometry(0.125, 14, 10),
+  braco: new THREE.CapsuleGeometry(0.082, 0.19, 6, 14),
+  antebraco: new THREE.CapsuleGeometry(0.072, 0.18, 6, 14),
+  junta: new THREE.SphereGeometry(0.085, 12, 10),
   head: new THREE.SphereGeometry(0.285, 32, 24),
   visor: new THREE.SphereGeometry(0.285, 32, 16, Math.PI * 0.08, Math.PI * 0.84, Math.PI * 0.3, Math.PI * 0.32),
-  hand: new THREE.SphereGeometry(0.105, 16, 12),
+  hand: new THREE.SphereGeometry(0.098, 16, 12),
   halo: new THREE.TorusGeometry(0.44, 0.03, 8, 48),
-  // calota na frente da cabeça, onde entra a foto do rosto
-  rosto: uvDeFrente(new THREE.SphereGeometry(0.292, 28, 22, Math.PI / 2 - 0.62, 1.24, Math.PI / 2 - 0.58, 1.16)),
+  // Calota na frente da cabeça, onde entra a foto. Larga de propósito: cobre
+  // praticamente todo o rosto, em vez de ficar uma bolinha no meio da cabeça.
+  rosto: uvDeFrente(new THREE.SphereGeometry(0.2905, 40, 32, Math.PI / 2 - 1.05, 2.1, Math.PI / 2 - 0.92, 1.84)),
   // faixa curva no peito, onde entra a estampa da camiseta
   peito: uvDeFrente(new THREE.CylinderGeometry(0.307, 0.307, 0.34, 28, 1, true, -0.72, 1.44)),
   visorMat: new THREE.MeshStandardMaterial({ color: 0x0d1018, roughness: 0.12, metalness: 0.6 }),
@@ -151,25 +159,27 @@ function estampaCamiseta(kind) {
   return tex;
 }
 
-// Recorta a foto num círculo com borda, para ela virar um rosto e não um quadrado.
+// A foto ocupa a calota inteira — ela É o rosto. A borda é só um esmaecido suave
+// nos cantos, para a foto encontrar a cor da cabeça sem um aro duro no meio dela.
 function fotoRedonda(img, cor) {
-  const n = 256;
+  const n = 512;
   const cv = document.createElement('canvas');
   cv.width = cv.height = n;
   const ctx = cv.getContext('2d');
-  ctx.save();
-  ctx.beginPath();
-  ctx.arc(n / 2, n / 2, n / 2 - 10, 0, Math.PI * 2);
-  ctx.clip();
   ctx.drawImage(img, 0, 0, n, n);
-  ctx.restore();
-  ctx.strokeStyle = cor;
-  ctx.lineWidth = 12;
-  ctx.beginPath();
-  ctx.arc(n / 2, n / 2, n / 2 - 8, 0, Math.PI * 2);
-  ctx.stroke();
+
+  // esmaece só a franja externa: o miolo fica com a foto cheia
+  const g = ctx.createRadialGradient(n / 2, n / 2, n * 0.40, n / 2, n / 2, n * 0.52);
+  g.addColorStop(0, 'rgba(0,0,0,1)');
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.globalCompositeOperation = 'destination-in';
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, n, n);
+  ctx.globalCompositeOperation = 'source-over';
+
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
   return tex;
 }
 
@@ -210,27 +220,59 @@ export class Avatar {
     this.swing = 0; // animação do soco
     this.ko = false;
     this.sitting = false;
-    this.handL = new THREE.Mesh(shared.hand, this.material);
-    this.handR = new THREE.Mesh(shared.hand, this.material);
+    // pescoço e ombros, para a cabeça não flutuar solta
+    this.neck = new THREE.Mesh(shared.pescoco, this.material);
+    this.neck.position.y = 1.27;
+    this.shoulders = new THREE.Mesh(shared.ombros, this.material);
+    this.shoulders.position.y = 1.16;
+    this.shoulders.scale.set(1.12, 0.62, 0.92);
 
-    // pernas: cada uma é um grupo que gira no quadril
+    // pernas: quadril → coxa → joelho → canela → pé
     this.legs = [];
     for (const lado of [-1, 1]) {
       const perna = new THREE.Group();
       perna.position.set(lado * 0.145, ALTURA.perna, 0);
       const coxa = new THREE.Mesh(shared.coxa, this.material);
-      coxa.position.y = -0.265;
+      coxa.position.y = -0.13;
       coxa.castShadow = true;
+      const joelho = new THREE.Group();
+      joelho.position.y = -0.27;
+      const canela = new THREE.Mesh(shared.canela, this.material);
+      canela.position.y = -0.12;
+      canela.castShadow = true;
       const pe = new THREE.Mesh(shared.pe, shared.sapatoMat);
-      pe.position.set(0, -0.53, 0.04);
-      pe.scale.set(1, 0.66, 1.42);
+      pe.position.set(0, -0.26, 0.05);
+      pe.scale.set(1, 0.6, 1.45);
       pe.castShadow = true;
-      perna.add(coxa, pe);
+      joelho.add(canela, pe);
+      perna.add(coxa, joelho);
       this.inner.add(perna);
-      this.legs.push(perna);
+      this.legs.push({ raiz: perna, joelho });
     }
 
-    for (const m of [this.body, this.hip, this.head, this.handL, this.handR]) {
+    // braços: ombro → braço → cotovelo → antebraço → mão
+    this.arms = [];
+    for (const lado of [-1, 1]) {
+      const ombro = new THREE.Group();
+      ombro.position.set(lado * 0.335, 1.17, -0.01);
+      const braco = new THREE.Mesh(shared.braco, this.material);
+      braco.position.y = -0.1;
+      braco.castShadow = true;
+      const cotovelo = new THREE.Group();
+      cotovelo.position.y = -0.21;
+      const antebraco = new THREE.Mesh(shared.antebraco, this.material);
+      antebraco.position.y = -0.1;
+      antebraco.castShadow = true;
+      const mao = new THREE.Mesh(shared.hand, this.material);
+      mao.position.y = -0.23;
+      mao.castShadow = true;
+      cotovelo.add(antebraco, mao);
+      ombro.add(braco, cotovelo);
+      this.inner.add(ombro);
+      this.arms.push({ raiz: ombro, cotovelo, mao, lado });
+    }
+
+    for (const m of [this.body, this.hip, this.shoulders, this.neck, this.head]) {
       m.castShadow = true;
       this.inner.add(m);
     }
@@ -496,45 +538,65 @@ export class Avatar {
     this.body.rotation.x = sentado ? -0.12 : moving ? (this.anim === 2 ? 0.16 : 0.08) : 0;
     this.halo.position.y = this.head.position.y;
 
-    // pernas: alternam no caminhar, juntam no ar, dobram para a frente sentado
-    const passo = moving ? s * (this.anim === 2 ? 0.95 : 0.62) : 0;
-    this.legs.forEach((perna, i) => {
+    this.neck.position.y = 1.27 + bob + alturaSentado;
+    this.shoulders.position.y = 1.16 + bob + alturaSentado;
+
+    // pernas: coxa gira no quadril, canela dobra no joelho
+    const passo = moving ? s * (this.anim === 2 ? 0.95 : 0.6) : 0;
+    this.legs.forEach(({ raiz, joelho }, i) => {
       const lado = i === 0 ? 1 : -1;
-      perna.position.y = ALTURA.perna + bob * 0.8 + alturaSentado;
+      raiz.position.y = ALTURA.perna + bob * 0.8 + alturaSentado;
       if (sentado) {
-        perna.rotation.x = -1.42; // coxa para a frente
-        perna.rotation.z = 0;
-        perna.children[1].position.set(0, -0.3, 0.46); // pé apoiado no chão
+        raiz.rotation.x = -1.45;
+        joelho.rotation.x = 1.4; // joelho dobrado: canela desce reta
+      } else if (airborne) {
+        raiz.rotation.x = lado > 0 ? -0.5 : 0.28;
+        joelho.rotation.x = lado > 0 ? 0.75 : 0.2;
       } else {
-        perna.rotation.x = airborne ? (lado > 0 ? -0.55 : 0.3) : passo * lado;
-        perna.rotation.z = 0;
-        perna.children[1].position.set(0, -0.53, 0.04);
+        const g = passo * lado;
+        raiz.rotation.x = g;
+        // o joelho só dobra na perna que está voltando, como numa passada real
+        joelho.rotation.x = Math.max(0, -g) * 1.5 + (moving ? 0.1 : 0.04);
       }
     });
 
-    if (airborne) {
-      this.handL.position.set(-0.46, 1.18, 0.05);
-      this.handR.position.set(0.46, 1.18, 0.05);
-      this.body.scale.set(0.94, 1.06, 0.94);
-    } else {
-      this.body.scale.set(1, 1, 1);
-      const bracos = moving && !sentado ? s * 0.3 : 0;
-      const yMao = (sentado ? 0.76 : 0.92) + bob + alturaSentado;
-      this.handL.position.set(-0.44, yMao, sentado ? 0.3 : bracos);
-      this.handR.position.set(0.44, yMao, sentado ? 0.3 : -bracos);
-    }
+    // braços: balançam ao contrário das pernas
+    this.arms.forEach(({ raiz, cotovelo, lado }, i) => {
+      raiz.position.y = 1.18 + bob + alturaSentado;
+      if (this.swing > 0 && lado > 0) return; // o braço do soco é tratado abaixo
+      if (sentado) {
+        raiz.rotation.set(-0.5, 0, lado * 0.24);
+        cotovelo.rotation.x = 0.75;
+      } else if (airborne) {
+        raiz.rotation.set(-2.2, 0, lado * 0.3);
+        cotovelo.rotation.x = 0.3;
+      } else {
+        raiz.rotation.set(-passo * lado * 0.85, 0, lado * 0.22);
+        cotovelo.rotation.x = 0.18 + Math.abs(passo) * 0.5;
+      }
+    });
+
+    this.body.scale.set(1, 1, 1);
+    if (airborne) this.body.scale.set(0.96, 1.05, 0.96);
     if (this.waveTime > 0) {
       this.waveTime -= dt;
-      this.handR.position.set(0.58 + Math.sin(t * 14) * 0.12, 1.85, 0.1);
+      const dir = this.arms[1];
+      dir.raiz.rotation.set(-2.6, 0, 0.5 + Math.sin(t * 14) * 0.25);
+      dir.cotovelo.rotation.x = 0.35;
     }
 
     // soco: o braço direito dispara para frente e volta
     if (this.swing > 0) {
       this.swing = Math.max(0, this.swing - dt / 0.26);
       const golpe = Math.sin((1 - this.swing) * Math.PI);
-      this.handR.position.set(0.34 - golpe * 0.16, 1.05 + bob, 0.24 + golpe * 0.9);
-      this.handL.position.set(-0.4, 0.95 + bob, 0.18);
-      this.body.rotation.y = -golpe * 0.3;
+      const dir = this.arms[1];
+      // o braço parte recolhido e estica para a frente
+      dir.raiz.rotation.set(-1.5 - golpe * 0.25, 0, 0.1);
+      dir.cotovelo.rotation.x = 1.5 - golpe * 1.45;
+      const esq = this.arms[0];
+      esq.raiz.rotation.set(-1.1, 0, -0.2);
+      esq.cotovelo.rotation.x = 1.3;
+      this.body.rotation.y = -golpe * 0.28;
     } else if (!this.ko) {
       this.body.rotation.y = 0;
     }

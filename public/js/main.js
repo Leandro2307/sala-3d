@@ -10,7 +10,7 @@ import { Combat } from './combat.js';
 import { RING, COMBAT, ringCorners } from './arena.js';
 import { sfx, audioContext, setSfxEnabled } from './sfx.js';
 import { icon, hydrateIcons } from './icons.js';
-import { isTouch, setupTouchControls, toggleFullscreen, isFullscreen } from './touch.js';
+import { isTouch, setupTouchControls, toggleFullscreen, isFullscreen, temTelaCheia } from './touch.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -80,6 +80,54 @@ let analyser = null;
 let micBuf = null;
 
 const sink = $('#media-sink');
+// Celular bloqueia autoplay COM som. Antes o vídeo nascia com som, o play()
+// era recusado e o erro ia para um catch vazio — resultado: a tela do amigo
+// ficava preta no celular. Agora toca sempre mudo primeiro (isso o navegador
+// deixa), tenta ligar o som e, se for barrado, mostra o botão de ativar.
+const telasMudas = new Set();
+
+async function tocarTela(v) {
+  v.muted = true;
+  try {
+    await v.play();
+  } catch (err) {
+    console.warn('[tela] nem mudo tocou', err);
+    return;
+  }
+  v.muted = false;
+  await new Promise((r) => setTimeout(r, 60));
+  if (v.paused || v.muted) {
+    v.muted = true;
+    telasMudas.add(v);
+    v.play().catch(() => {});
+  } else {
+    telasMudas.delete(v);
+  }
+  updateUnblockButton();
+}
+
+// Chamado por um clique de verdade: aí o navegador libera o som.
+function liberarSomDasTelas() {
+  for (const v of telasMudas) {
+    v.muted = false;
+    v.play().catch(() => {});
+  }
+  telasMudas.clear();
+  updateUnblockButton();
+}
+
+function updateUnblockButton() {
+  const alvo = $('#yt-unblock');
+  if (!alvo) return;
+  const ytBloqueado = !!(yt?.blocked && world.mainScreen.mode === 'youtube');
+  const telaMuda = telasMudas.size > 0;
+  alvo.hidden = !(ytBloqueado || telaMuda);
+  const btn = $('#yt-unblock-btn');
+  if (btn && alvo.hidden === false) {
+    btn.innerHTML = icon('volume', 16) + (telaMuda && !ytBloqueado ? 'Ativar o som da tela' : 'Ativar o som do telão');
+  }
+}
+
 function makeVideo(muted) {
   const v = document.createElement('video');
   v.autoplay = true;
@@ -288,9 +336,19 @@ async function join() {
       respawn: () => { if (!state.focus) respawn(); },
       punch: () => punch(),
       sit: () => toggleSit(),
-      fullscreen: () => { toggleFullscreen(); updateFullscreenButton(); },
+      fullscreen: async () => {
+        const r = await toggleFullscreen();
+        updateFullscreenButton();
+        if (r.ok) return;
+        if (r.motivo === 'sem-suporte') {
+          toast('Este navegador não tem tela cheia. No iPhone, use o Safari e "Adicionar à Tela de Início".', 'warn', 7000);
+        } else {
+          toast('O navegador recusou a tela cheia. Tente de novo tocando no botão.', 'warn', 5000);
+        }
+      },
     });
     syncTouchVisibility();
+    if (!temTelaCheia) $('#tb-full').hidden = true; // iOS não tem tela cheia de página
     if (window.matchMedia('(orientation: portrait)').matches) {
       toast('Vire o celular na horizontal para jogar melhor.', 'warn', 7000);
     }
@@ -743,10 +801,10 @@ function routeStreams(u) {
     }
   }
   if (screen) {
-    if (!u.screenVideo) u.screenVideo = makeVideo(false);
+    if (!u.screenVideo) u.screenVideo = makeVideo(true);
     if (u.screenVideo.srcObject !== screen) {
       u.screenVideo.srcObject = screen;
-      u.screenVideo.play().catch(() => {});
+      tocarTela(u.screenVideo);
     }
   } else if (u.screenVideo && u.screenVideo.srcObject) {
     u.screenVideo.srcObject = null;
@@ -893,7 +951,10 @@ $('#yt-volume').addEventListener('input', (e) => {
   yt?.setVolume(settings.yt);
   saveSettings();
 });
-$('#yt-unblock-btn').addEventListener('click', () => yt.unblock());
+$('#yt-unblock-btn').addEventListener('click', () => {
+  yt?.unblock();
+  liberarSomDasTelas();
+});
 // qualquer clique real na página já serve para liberar o som do telão
 document.addEventListener('pointerdown', () => { if (yt?.blocked) yt.unblock(); }, true);
 
@@ -1538,7 +1599,10 @@ document.addEventListener('mousedown', (e) => {
 // Ponto de inspeção para testes automatizados. Só existe com ?debug=1 na URL —
 // em uso normal nada disso fica exposto.
 if (params.get('debug') === '1') {
-  window.__sala3d = { state, player, combat, run, world, settings, punch, goToRing, respawn };
+  window.__sala3d = {
+    state, player, combat, run, world, settings, punch, goToRing, respawn,
+    tocarTela, telasMudas, liberarSomDasTelas, makeVideo,
+  };
 }
 
 // ------------------------------------------------------------------ loop principal
@@ -1607,7 +1671,7 @@ function slowUpdate() {
     const u = state.users.get(li.dataset.id);
     li.classList.toggle('speaking', !!u?.speaking);
   }
-  $('#yt-unblock').hidden = !(yt?.blocked && world.mainScreen.mode === 'youtube');
+  updateUnblockButton();
 
   if (state.panel === 'youtube' && yt?.state.videoId) {
     const cur = yt.currentTime();

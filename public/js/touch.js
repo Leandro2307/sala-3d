@@ -78,7 +78,7 @@ function setupStick(el, player) {
 
 // ------------------------------------------------------------------ botões
 // "hold" = mantém pressionado (pular); os outros disparam uma vez por toque.
-function setupButton(el, { onPress, onRelease }) {
+function setupButton(el, { onPress, onRelease, noSoltar }) {
   let id = null;
   el.addEventListener('pointerdown', (e) => {
     if (id !== null) return;
@@ -93,6 +93,7 @@ function setupButton(el, { onPress, onRelease }) {
     id = null;
     el.classList.remove('held');
     onRelease?.();
+    noSoltar?.();
   };
   el.addEventListener('pointerup', end);
   el.addEventListener('pointercancel', end);
@@ -100,18 +101,30 @@ function setupButton(el, { onPress, onRelease }) {
 }
 
 // ------------------------------------------------------------------ tela cheia
-export function toggleFullscreen() {
+// Tela cheia é assíncrona e pode ser recusada. Devolve o motivo para quem chamou
+// poder avisar o usuário, em vez de simplesmente não acontecer nada.
+export async function toggleFullscreen() {
   const doc = document;
   const el = doc.documentElement;
   if (doc.fullscreenElement || doc.webkitFullscreenElement) {
-    (doc.exitFullscreen || doc.webkitExitFullscreen)?.call(doc);
-    return false;
+    await (doc.exitFullscreen || doc.webkitExitFullscreen)?.call(doc);
+    return { ok: true, cheia: false };
   }
-  (el.requestFullscreen || el.webkitRequestFullscreen)?.call(el, { navigationUI: 'hide' });
-  // trava em paisagem quando o navegador permite (Android/Chrome)
-  screen.orientation?.lock?.('landscape').catch(() => {});
-  return true;
+  const pedir = el.requestFullscreen || el.webkitRequestFullscreen;
+  if (!pedir) return { ok: false, motivo: 'sem-suporte' };
+  try {
+    await pedir.call(el, { navigationUI: 'hide' });
+  } catch (err) {
+    return { ok: false, motivo: 'recusado', erro: err?.message || String(err) };
+  }
+  // a trava de orientação só vale depois que a tela cheia entrou
+  try { await screen.orientation?.lock?.('landscape'); } catch { /* iOS e alguns Android não deixam */ }
+  return { ok: true, cheia: true };
 }
+
+// iOS não tem tela cheia de documento — só de <video>. Serve para explicar o porquê.
+export const temTelaCheia = !!(document.documentElement.requestFullscreen
+  || document.documentElement.webkitRequestFullscreen);
 
 export function isFullscreen() {
   return !!(document.fullscreenElement || document.webkitFullscreenElement);
@@ -144,10 +157,17 @@ export function setupTouchControls(player, actions = {}) {
     '#tb-respawn': actions.respawn,
     '#tb-punch': actions.punch,
     '#tb-sit': actions.sit,
-    '#tb-full': actions.fullscreen,
   })) {
     const el = root.querySelector(id);
     if (el && fn) setupButton(el, { onPress: fn });
+  }
+
+  // Tela cheia precisa sair de um gesto "completo": o navegador não concede a
+  // permissão no pointerdown, só ao soltar o toque. Era por isso que nada acontecia.
+  const cheia = root.querySelector('#tb-full');
+  if (cheia && actions.fullscreen) {
+    setupButton(cheia, { noSoltar: actions.fullscreen });
+    cheia.addEventListener('click', (e) => e.preventDefault());
   }
 
   return {
