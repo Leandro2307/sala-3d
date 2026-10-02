@@ -7,6 +7,9 @@ certs/
 cloudflared.exe
 cloudflared
 
+# navegador compartilhado: o perfil guarda os logins (cookies do YouTube etc.) e o .env as senhas
+neko/perfil/
+
 # lixo de sistema / editor
 .DS_Store
 Thumbs.db

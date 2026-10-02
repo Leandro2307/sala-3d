@@ -1,4 +1,4 @@
-// Sala 3D — servidor de sinalização (WebRTC), estado da sala, YouTube sincronizado e parkour.
+// Sala 3D — servidor de sinalização (WebRTC), estado da sala, telão sincronizado e parkour.
 const express = require('express');
 const http = require('http');
 const https = require('https');
@@ -7,6 +7,7 @@ const os = require('os');
 const path = require('path');
 const { Server } = require('socket.io');
 const compression = require('compression');
+const { execFile } = require('child_process');
 
 const PORT = Number(process.env.PORT) || 3000;
 const HTTPS_PORT = Number(process.env.HTTPS_PORT) || 3443;
@@ -19,6 +20,79 @@ const SHIRTS = ['none', 'lula', 'bolsonaro'];
 const PERSONAGENS = ['padrao', 'robo', 'cavaleiro', 'barbaro', 'mago', 'ladino', 'optimus', 'solus'];
 const VOLTA_MIN = 6; // segundos: abaixo disso é atravessar a pista, não dar a volta
 const VOLTA_MAX = 600;
+
+// Navegador compartilhado (neko, ver neko/docker-compose.yml). Só existe se BROWSER_URL estiver
+// definido — o "npm run navegador" faz isso. A senha é a de participante, não a de admin: quem
+// tem o link da sala já pode entrar no navegador mesmo.
+const BROWSER = (() => {
+  const url = String(process.env.BROWSER_URL || '').replace(/\/+$/, '');
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error('protocolo');
+  } catch {
+    console.warn(`  BROWSER_URL inválido (${url}): navegador compartilhado desligado.`);
+    return null;
+  }
+  return { url, password: String(process.env.BROWSER_PASSWORD || '') };
+})();
+// mesmo nome do container_name em neko/docker-compose.yml
+const BROWSER_CONTAINER = process.env.BROWSER_CONTAINER || 'sala3d-navegador';
+
+// Atalhos do navegador compartilhado. A lista é fixa aqui de propósito: o cliente só manda o
+// id, então ninguém consegue fazer o navegador da sala abrir um endereço qualquer.
+const BROWSER_SITES = [
+  { id: 'youtube', label: 'YouTube', url: 'https://www.youtube.com/' },
+  { id: 'twitch', label: 'Twitch', url: 'https://www.twitch.tv/' },
+  { id: 'kick', label: 'Kick', url: 'https://kick.com/' },
+  { id: 'pluto', label: 'Pluto TV', url: 'https://pluto.tv/br' },
+  { id: 'google', label: 'Google', url: 'https://www.google.com/' },
+];
+
+// O Firefox do neko roda com --no-remote (não aceita "abra este link" por linha de comando),
+// então o atalho faz o que uma pessoa faria: Ctrl+L, digita o endereço, Enter. O endereço vai
+// como argumento ($1), nunca colado dentro do script.
+const XDOTOOL_OPEN = [
+  'export DISPLAY="${DISPLAY:-:99.0}"',
+  "w=$(xdotool search --onlyvisible --name 'Mozilla Firefox$' | head -1)",
+  '[ -n "$w" ] || exit 3',
+  'xdotool windowactivate --sync "$w" 2>/dev/null',
+  'xdotool key --clearmodifiers ctrl+l',
+  'sleep 0.2',
+  'xdotool type --delay 8 "$1"',
+  'xdotool key Return',
+].join('; ');
+
+function openInBrowser(url, done) {
+  execFile('docker', ['exec', '-u', 'neko', BROWSER_CONTAINER, 'sh', '-c', XDOTOOL_OPEN, 'sh', url],
+    { timeout: 15000, windowsHide: true },
+    (err) => done(err));
+}
+
+// Plataformas aceitas no telão. O cliente converte o link; aqui só se confere o formato,
+// para ninguém conseguir enfiar um iframe arbitrário na tela dos outros.
+const VIDEO_EXT = /\.(mp4|m4v|webm|ogv|ogg|mov|mkv|m3u8|mpd)$/i;
+function urlOk(value, { hosts = null, max = 2000, ext = null } = {}) {
+  if (typeof value !== 'string' || value.length > max) return false;
+  let u;
+  try { u = new URL(value); } catch { return false; }
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') return false;
+  if (ext && !ext.test(u.pathname)) return false;
+  return !hosts || hosts.some((h) => u.hostname === h || u.hostname.endsWith(`.${h}`));
+}
+const MEDIA_IDS = {
+  youtube: (id) => /^[\w-]{11}$/.test(id),
+  twitch: (id) => /^[a-z0-9_]{2,25}$/.test(id), // canal ao vivo
+  'twitch-vod': (id) => /^\d{5,14}$/.test(id),
+  'twitch-clip': (id) => /^[\w-]{3,100}$/.test(id),
+  kick: (id) => /^[\w-]{2,40}$/.test(id),
+  vimeo: (id) => /^\d{1,12}(\/[0-9a-f]{6,20})?$/.test(id),
+  dailymotion: (id) => /^[a-z0-9]{5,12}$/i.test(id),
+  facebook: (id) => urlOk(id, { hosts: ['facebook.com', 'fb.watch'], max: 300 }),
+  // link direto: sem a extensão, qualquer um faria o navegador dos outros abrir URLs arbitrárias
+  video: (id) => urlOk(id, { ext: VIDEO_EXT }),
+  browser: (id) => !!BROWSER && id === 'shared', // só existe um, e só se estiver configurado
+};
 
 // STUN público + TURN opcional via variáveis de ambiente (necessário em algumas redes 4G/corporativas).
 const iceServers = [
@@ -38,7 +112,14 @@ const app = express();
 app.use(compression());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/vendor/three', express.static(path.join(__dirname, 'node_modules', 'three')));
-app.get('/config', (_req, res) => res.json({ iceServers, shareSlots: SHARE_SLOTS }));
+// players de HLS (.m3u8) e DASH (.mpd): só são baixados quando alguém cola um link desses
+app.use('/vendor/hls', express.static(path.join(__dirname, 'node_modules', 'hls.js', 'dist')));
+app.use('/vendor/dash', express.static(path.join(__dirname, 'node_modules', 'dashjs', 'dist', 'modern', 'esm')));
+app.get('/config', (_req, res) => res.json({
+  iceServers,
+  shareSlots: SHARE_SLOTS,
+  browser: BROWSER && { ...BROWSER, sites: BROWSER_SITES.map(({ id, label, url }) => ({ id, label, host: new URL(url).hostname })) },
+}));
 
 // ---------------------------------------------------------------- estado das salas
 const rooms = new Map();
@@ -64,8 +145,8 @@ function getRoom(id) {
       id,
       users: new Map(),
       slots: new Array(SHARE_SLOTS).fill(null), // userId por tela
-      main: 'youtube', // 'youtube' ou userId fixado no telão
-      youtube: { videoId: null, playing: false, time: 0, updatedAt: Date.now(), by: null },
+      main: 'media', // 'media' (o player do telão) ou userId fixado no telão
+      media: { provider: null, id: null, playing: false, time: 0, updatedAt: Date.now(), by: null },
       chat: [],
     };
     rooms.set(id, room);
@@ -98,13 +179,16 @@ function dist(a, b) {
   return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
 }
 
-function ytSnapshot(room) {
-  return { ...room.youtube, serverNow: Date.now() };
+function mediaSnapshot(room) {
+  return { ...room.media, serverNow: Date.now() };
 }
 
-function ytCurrentTime(yt) {
-  return yt.playing ? yt.time + (Date.now() - yt.updatedAt) / 1000 : yt.time;
+function mediaCurrentTime(m) {
+  return m.playing ? m.time + (Date.now() - m.updatedAt) / 1000 : m.time;
 }
+
+// Payload de cliente pode ser qualquer coisa: null passa pelo "= {}" e derrubaria o processo.
+const obj = (v) => (v && typeof v === 'object' ? v : {});
 
 function cleanText(value, max) {
   return String(value ?? '').replace(/[\u0000-\u001f]/g, '').trim().slice(0, max);
@@ -115,7 +199,7 @@ function freeSlot(room, user) {
   room.slots[user.slot] = null;
   user.slot = null;
   user.screenStreamId = null;
-  if (room.main === user.id) room.main = 'youtube';
+  if (room.main === user.id) room.main = 'media';
   return true;
 }
 
@@ -149,7 +233,7 @@ function attachSockets(io) {
         selfId: socket.id,
         room: roomId,
         users: [...room.users.values()].filter((u) => u.id !== socket.id).map(publicUser),
-        youtube: ytSnapshot(room),
+        media: mediaSnapshot(room),
         main: room.main,
         chat: room.chat,
         leaderboard: getBoards(roomId).parkour,
@@ -167,7 +251,8 @@ function attachSockets(io) {
       socket.to(room.id).volatile.emit('state', { id: user.id, p: user.p, r: user.r, a: user.a, s: s.s ? 1 : 0 });
     });
 
-    socket.on('signal', ({ to, data } = {}) => {
+    socket.on('signal', (msg) => {
+      const { to, data } = obj(msg);
       if (!user || !room.users.has(to)) return;
       io.to(to).emit('signal', { from: user.id, data });
     });
@@ -178,7 +263,8 @@ function attachSockets(io) {
       io.to(room.id).emit('user-update', { id: user.id, mic: user.mic });
     });
 
-    socket.on('share-start', ({ streamId } = {}, ack) => {
+    socket.on('share-start', (msg, ack) => {
+      const { streamId } = obj(msg);
       if (!user) return;
       let slot = user.slot;
       if (slot == null) slot = room.slots.indexOf(null);
@@ -187,7 +273,7 @@ function attachSockets(io) {
       user.slot = slot;
       user.screenStreamId = cleanText(streamId, 80);
       // Telão vazio? Fixa a tela compartilhada nele automaticamente.
-      if (room.main === 'youtube' && !room.youtube.videoId) room.main = user.id;
+      if (room.main === 'media' && !room.media.id) room.main = user.id;
       io.to(room.id).emit('share-update', { id: user.id, slot, screenStreamId: user.screenStreamId });
       io.to(room.id).emit('main', { source: room.main, by: null });
       ack?.({ ok: true, slot });
@@ -203,40 +289,49 @@ function attachSockets(io) {
 
     socket.on('main', (source) => {
       if (!user) return;
-      if (source !== 'youtube' && room.users.get(source)?.slot == null) return;
+      if (source !== 'media' && room.users.get(source)?.slot == null) return;
       room.main = source;
       io.to(room.id).emit('main', { source, by: user.name });
     });
 
-    socket.on('yt', (msg = {}) => {
+    socket.on('media', (raw) => {
+      const msg = obj(raw);
       if (!user) return;
-      const yt = room.youtube;
+      const m = room.media;
       const now = Date.now();
-      const current = ytCurrentTime(yt);
+      const current = mediaCurrentTime(m);
       switch (msg.action) {
         case 'load': {
-          const id = cleanText(msg.videoId, 20);
-          if (!/^[\w-]{6,20}$/.test(id)) return;
-          Object.assign(yt, { videoId: id, playing: true, time: Math.max(0, Number(msg.time) || 0) });
-          room.main = 'youtube';
-          io.to(room.id).emit('main', { source: 'youtube', by: user.name });
+          const provider = String(msg.provider || '');
+          const id = typeof msg.id === 'string' ? msg.id.trim() : '';
+          if (!Object.hasOwn(MEDIA_IDS, provider) || !MEDIA_IDS[provider](id)) return;
+          const t = Number(msg.time);
+          Object.assign(m, { provider, id, playing: true, time: Number.isFinite(t) && t > 0 ? t : 0 });
+          room.main = 'media';
+          // sem autor: quem avisa "fulano colocou um vídeo" é o evento 'media' logo abaixo (evita aviso duplo)
+          io.to(room.id).emit('main', { source: 'media', by: null });
           break;
         }
         case 'play':
         case 'pause': {
-          if (!yt.videoId) return;
+          if (!m.id) return;
           const t = Number(msg.time);
-          Object.assign(yt, { playing: msg.action === 'play', time: Number.isFinite(t) && t >= 0 ? t : current });
+          Object.assign(m, { playing: msg.action === 'play', time: Number.isFinite(t) && t >= 0 ? t : current });
           break;
         }
-        case 'seek': yt.time = Math.max(0, Number(msg.time) || 0); break;
-        case 'ended': if (yt.playing && current > 3) Object.assign(yt, { playing: false, time: current }); break;
-        case 'stop': Object.assign(yt, { videoId: null, playing: false, time: 0 }); break;
+        case 'seek': {
+          const t = Number(msg.time);
+          if (!m.id || !Number.isFinite(t)) return;
+          m.time = Math.max(0, t);
+          break;
+        }
+        case 'ended': if (m.playing && current > 3) Object.assign(m, { playing: false, time: current }); break;
+        case 'stop': Object.assign(m, { provider: null, id: null, playing: false, time: 0 }); break;
         default: return;
       }
-      yt.updatedAt = now;
-      yt.by = user.name;
-      io.to(room.id).emit('yt', { ...ytSnapshot(room), action: msg.action });
+      m.updatedAt = now;
+      m.by = user.name;
+      io.to(room.id).emit('media', { ...mediaSnapshot(room), action: msg.action });
     });
 
     socket.on('chat', (text) => {
@@ -274,7 +369,8 @@ function attachSockets(io) {
       socket.to(room.id).emit('punch', { id: user.id });
     });
 
-    socket.on('hit', ({ to, dir } = {}) => {
+    socket.on('hit', (msg) => {
+      const { to, dir } = obj(msg);
       if (!user) return;
       const alvo = room.users.get(to);
       if (!alvo || alvo.id === user.id) return;
@@ -293,7 +389,8 @@ function attachSockets(io) {
       socket.to(room.id).volatile.emit('user-update', { id: user.id, health: user.health });
     });
 
-    socket.on('ko', ({ by } = {}) => {
+    socket.on('ko', (msg) => {
+      const { by } = obj(msg);
       if (!user) return;
       user.ko = true;
       user.health = 0;
@@ -362,6 +459,26 @@ function attachSockets(io) {
       board.sort((a, b) => a.time - b.time);
       board.length = Math.min(board.length, 10);
       io.to(room.id).emit('parkour-finish', { name: user.name, color: user.color, time: t, record: true, leaderboard: board });
+    });
+
+    // atalho: abre um dos sites da lista no navegador compartilhado
+    socket.on('browser-open', (siteId, ack) => {
+      const reply = typeof ack === 'function' ? ack : () => {};
+      if (!user || !BROWSER) return reply({ ok: false, error: 'Navegador compartilhado desligado.' });
+      const site = BROWSER_SITES.find((s) => s.id === siteId);
+      if (!site) return reply({ ok: false, error: 'Atalho desconhecido.' });
+      // um clique por segundo na sala: dois atalhos ao mesmo tempo digitariam um por cima do outro
+      const now = Date.now();
+      if (now - (room.browserOpenAt || 0) < 1000) return reply({ ok: false, error: 'Calma, um atalho de cada vez.' });
+      room.browserOpenAt = now;
+      openInBrowser(site.url, (err) => {
+        if (err) {
+          console.warn('[navegador] atalho falhou:', err.message);
+          return reply({ ok: false, error: 'Não consegui abrir: o navegador compartilhado está ligado?' });
+        }
+        reply({ ok: true });
+        io.to(room.id).emit('browser-opened', { site: site.label, by: user.name });
+      });
     });
 
     socket.on('emote', (kind) => {

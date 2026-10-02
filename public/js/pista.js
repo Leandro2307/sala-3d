@@ -17,7 +17,14 @@ export const PISTA = {
   largura: 16,
   y: 0.14,
   setores: 12,
+  // Linha de largada/chegada, em fração do traçado (0 = primeiro ponto do desenho): na reta
+  // em frente à arquibancada, logo depois do telão. A volta é medida a partir daqui.
+  largadaT: 0.03,
 };
+
+// fração do traçado (0..1) -> fração da volta contada a partir da linha de largada, e de volta
+const naVolta = (t) => (((t - PISTA.largadaT) % 1) + 1) % 1;
+const noTracado = (v) => (v + PISTA.largadaT) % 1;
 
 // Traçado do Autódromo Internacional Ayrton Senna (Goiânia).
 // Os pontos são densos de propósito: com poucos pontos a suavização "inventa"
@@ -43,7 +50,7 @@ const DESENHO = [
 ];
 
 export const CURVAS = [
-  { nome: 'Esses', t: 2 / 64 },
+  { nome: 'Esses', t: 0.048 }, // logo depois da largada (antes ficava em cima da linha nova)
   { nome: 'Parabólica Ayrton Senna', t: 6 / 64 },
   { nome: 'Curva 1', t: 20 / 64 },
   { nome: 'Curva 2', t: 25 / 64 },
@@ -178,9 +185,10 @@ export function pontoEm(t) {
   };
 }
 
-// Onde o carro nasce: na linha de largada, olhando para a frente da pista.
+// Onde o carro nasce: no grid, uns 9 m ANTES da linha, olhando para a frente. Antes nascia
+// logo depois dela, e o tempo só começava a contar depois de uma volta inteira.
 export function largada(faixa = 0) {
-  const p = pontoEm(0.002);
+  const p = pontoEm(PISTA.largadaT - 0.004);
   const lateral = p.angulo;
   const desl = (faixa - 1) * 3;
   return {
@@ -193,6 +201,9 @@ export function formatarVolta(s) {
   const m = Math.floor(s / 60);
   return `${m}:${(s - m * 60).toFixed(2).padStart(5, '0')}`;
 }
+
+// Voltar para a pista mais à frente do que isto (fração da volta, ~46 m) é cortar caminho.
+const CORTE_MAX = 0.02;
 
 // Controla uma corrida: conta setores na ordem e fecha a volta na largada.
 export class Corrida {
@@ -207,49 +218,80 @@ export class Corrida {
     this.setor = 0;
     this.voltas = 0;
     this.melhor = null;
-    this.ultimoT = 0;
+    this.ultimoT = 0; // último ponto da volta (0..1) em que o carro esteve NA pista
     this.naPista = false;
+    this.saidaT = null; // onde saiu da pista, enquanto estiver fora
+    this.invalida = false; // cortou caminho nesta volta: o tempo corre, mas não vale
   }
 
   // chamado a cada frame com a posição do jogador
   update(dt, x, z, emVeiculo) {
-    const { t, dist } = projetar(x, z, this.naPista ? this.ultimoT : null);
+    // daqui para baixo, t é a fração da VOLTA (0 na linha de largada), não do traçado
+    const proj = projetar(x, z, this.naPista ? noTracado(this.ultimoT) : null);
+    const t = naVolta(proj.t);
+    const { dist } = proj;
     const dentro = dist <= PISTA.largura / 2 + 1.5;
     if (dentro !== this.naPista) {
       this.naPista = dentro;
       this.cb.onPista?.(dentro);
     }
-    if (!dentro || !emVeiculo) {
+
+    // a pé não tem corrida
+    if (!emVeiculo) {
       if (this.ativa) {
         this.ativa = false;
         this.cb.onCancelar?.();
       }
-      this.ultimoT = t;
+      this.saidaT = null;
+      if (dentro) this.ultimoT = t;
       return;
     }
 
-    const alvoSetor = (this.setor + 1) / PISTA.setores;
+    // Sair da pista NÃO para o relógio, como numa corrida de verdade. Enquanto está fora,
+    // só se lembra de onde saiu; a conferência é feita quando o carro volta.
+    if (this.ativa) this.tempo += dt;
+    if (!dentro) {
+      if (this.saidaT === null) this.saidaT = this.ultimoT;
+      return;
+    }
+
+    let cortou = false;
+    if (this.saidaT !== null) {
+      // quanto andou para a frente enquanto estava fora
+      const avanco = (((t - this.saidaT) % 1) + 1) % 1;
+      cortou = avanco > CORTE_MAX && avanco < 0.5;
+      // a passagem pela linha é medida a partir de onde saiu: cruzar a linha por fora conta
+      this.ultimoT = this.saidaT;
+      this.saidaT = null;
+      if (cortou && !this.ativa) this.ultimoT = t; // volta nenhuma começa num atalho
+      if (cortou && this.ativa && !this.invalida) {
+        this.invalida = true;
+        this.cb.onInvalida?.();
+      }
+    }
+
     if (!this.ativa) {
       // só começa a contar quando cruza a largada para a frente
       if (this.ultimoT > 0.9 && t < 0.1) {
         this.ativa = true;
         this.tempo = 0;
         this.setor = 0;
+        this.invalida = false;
         this.cb.onLargada?.();
       }
       this.ultimoT = t;
       return;
     }
 
-    this.tempo += dt;
+    const alvoSetor = (this.setor + 1) / PISTA.setores;
     if (this.setor < PISTA.setores - 1 && t >= alvoSetor && t < alvoSetor + 0.5) {
       this.setor++;
       this.cb.onSetor?.(this.setor, PISTA.setores);
     }
 
-    // fechou a volta: tem que ter passado por todos os setores
+    // fechou a volta: tem que ter passado por todos os setores e não ter cortado caminho
     if (this.ultimoT > 0.9 && t < 0.1) {
-      if (this.setor >= PISTA.setores - 1) {
+      if (this.setor >= PISTA.setores - 1 && !this.invalida) {
         const tempo = this.tempo;
         this.voltas++;
         const recorde = this.melhor === null || tempo < this.melhor;
@@ -260,6 +302,9 @@ export class Corrida {
       }
       this.tempo = 0;
       this.setor = 0;
+      // se a linha foi cruzada no meio do atalho, a volta nova também já nasce sem valer
+      this.invalida = cortou;
+      if (cortou) this.cb.onInvalida?.();
     }
     this.ultimoT = t;
   }

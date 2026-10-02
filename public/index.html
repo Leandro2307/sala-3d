@@ -7,7 +7,7 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Sala 3D</title>
-  <meta name="description" content="Compartilhe a tela com som, converse e assista YouTube junto numa sala 3D — com parkour.">
+  <meta name="description" content="Compartilhe a tela com som, converse e assista YouTube, Twitch, Kick e mais junto numa sala 3D — com parkour.">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='9' fill='%230b0d12'/><rect x='6' y='8' width='20' height='13' rx='3' fill='none' stroke='%236ee7c8' stroke-width='2.4'/><circle cx='16' cy='25' r='2.2' fill='%236ee7c8'/></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -63,13 +63,13 @@
       </div>
     </div>
 
-    <div id="yt-focus-hud" hidden>
-      <span>Clique no vídeo para usar os controles do YouTube</span>
-      <button type="button" id="yt-focus-exit" class="chip-btn"><kbd>Esc</kbd> Sair do foco</button>
+    <div id="tv-focus-hud" hidden>
+      <span id="tv-focus-text">Clique no vídeo para usar os controles do player</span>
+      <button type="button" id="tv-focus-exit" class="chip-btn"><kbd>Esc</kbd> Sair do foco</button>
     </div>
 
-    <div id="yt-unblock" hidden>
-      <button type="button" class="primary small" id="yt-unblock-btn"><i data-icon="volume" data-size="16"></i>Ativar o som do telão</button>
+    <div id="tv-unblock" hidden>
+      <button type="button" class="primary small" id="tv-unblock-btn"><i data-icon="volume" data-size="16"></i>Ativar o som do telão</button>
     </div>
 
     <div id="controls-help">
@@ -154,7 +154,7 @@
     </div>
 
     <div class="bar-right">
-      <button type="button" class="ghost" data-panel="youtube" data-tip="YouTube no telão"><i data-icon="youtube"></i></button>
+      <button type="button" class="ghost" data-panel="telao" data-tip="Telão: vídeos e lives"><i data-icon="tv"></i></button>
       <button type="button" class="ghost" data-panel="people" data-tip="Pessoas"><i data-icon="users"></i><span class="badge" id="people-badge">1</span></button>
       <button type="button" class="ghost" data-panel="chat" data-tip="Chat (T)"><i data-icon="chat"></i><span class="dot" id="chat-dot" hidden></span></button>
       <button type="button" class="ghost" data-panel="parkour" data-tip="Parkour"><i data-icon="trophy"></i></button>
@@ -190,37 +190,82 @@
       </form>
     </section>
 
-    <section data-section="youtube">
-      <form class="yt-form" id="yt-form" autocomplete="off">
-        <input id="yt-url" placeholder="Cole o link do YouTube">
+    <section data-section="telao">
+      <form class="tv-form" id="tv-form" autocomplete="off">
+        <input id="tv-url" placeholder="Cole o link de um vídeo ou live">
         <button type="submit" class="primary small">Tocar</button>
       </form>
-      <p class="field-error" id="yt-error" hidden></p>
+      <p class="field-error" id="tv-error" hidden></p>
+      <ul class="tv-platforms" aria-label="Plataformas aceitas">
+        <li style="--c:#ff4d5e">YouTube</li>
+        <li style="--c:#a970ff">Twitch</li>
+        <li style="--c:#53fc18">Kick</li>
+        <li style="--c:#1ab7ea">Vimeo</li>
+        <li style="--c:#3d7bff">Dailymotion</li>
+        <li style="--c:#1877f2">Facebook</li>
+        <li style="--c:#6ee7c8">.mp4 · .m3u8 · .mpd</li>
+      </ul>
 
-      <div class="now-playing" id="yt-now" hidden>
-        <div class="np-title" id="yt-title">—</div>
-        <div class="np-by" id="yt-by"></div>
-        <div class="np-progress" id="yt-progress"><div class="np-fill" id="yt-fill"></div></div>
-        <div class="np-times"><span id="yt-cur">0:00</span><span id="yt-dur">0:00</span></div>
-        <div class="np-controls">
-          <button type="button" class="icon-btn" id="yt-back" aria-label="Voltar 10 segundos"><i data-icon="back"></i></button>
-          <button type="button" class="icon-btn big accent" id="yt-play" aria-label="Tocar/pausar"><i data-icon="play"></i></button>
-          <button type="button" class="icon-btn" id="yt-fwd" aria-label="Avançar 10 segundos"><i data-icon="fwd"></i></button>
-          <button type="button" class="icon-btn" id="yt-sync" aria-label="Sincronizar comigo"><i data-icon="sync"></i></button>
-          <button type="button" class="icon-btn" id="yt-stop" aria-label="Tirar vídeo do telão"><i data-icon="stop"></i></button>
+      <div class="now-playing" id="tv-now" hidden>
+        <div class="np-head">
+          <span class="np-badge" id="tv-badge">YouTube</span>
+          <span class="np-live" id="tv-live" hidden>Ao vivo</span>
         </div>
+        <div class="np-title" id="tv-title">—</div>
+        <div class="np-by" id="tv-by"></div>
+        <div id="tv-timeline">
+          <div class="np-progress" id="tv-progress"><div class="np-fill" id="tv-fill"></div></div>
+          <div class="np-times"><span id="tv-cur">0:00</span><span id="tv-dur">0:00</span></div>
+        </div>
+        <div class="np-controls">
+          <button type="button" class="icon-btn" id="tv-back" aria-label="Voltar 10 segundos"><i data-icon="back"></i></button>
+          <button type="button" class="icon-btn big accent" id="tv-play" aria-label="Tocar/pausar"><i data-icon="play"></i></button>
+          <button type="button" class="icon-btn" id="tv-fwd" aria-label="Avançar 10 segundos"><i data-icon="fwd"></i></button>
+          <button type="button" class="icon-btn" id="tv-sync" aria-label="Sincronizar comigo"><i data-icon="sync"></i></button>
+          <button type="button" class="icon-btn" id="tv-stop" aria-label="Tirar vídeo do telão"><i data-icon="stop"></i></button>
+        </div>
+        <p class="tip" id="tv-noapi" hidden>Esse player não aceita controle de fora: olhe para o telão e aperte <kbd>E</kbd> para usar os controles dele. Pausar ali vale só para você.</p>
       </div>
 
-      <label class="slider-row">
-        <span><i data-icon="volume" data-size="16"></i>Volume do YouTube (só para você)</span>
-        <input type="range" id="yt-volume" min="0" max="100" value="80">
+      <label class="slider-row" id="tv-volume-row">
+        <span><i data-icon="volume" data-size="16"></i>Volume do telão (só para você)</span>
+        <input type="range" id="tv-volume" min="0" max="100" value="80">
       </label>
+
+      <div class="sub-block" id="cast-block">
+        <h3>Vídeo do seu computador</h3>
+        <p class="tip">Manda um arquivo (filme, episódio, gravação) direto para o telão, com som e sem compartilhar a tela. Só você precisa ter o arquivo.</p>
+        <button type="button" class="secondary block" id="cast-pick"><i data-icon="film" data-size="18"></i>Escolher vídeo</button>
+        <input type="file" id="cast-file" accept="video/*,.mkv,.mov,.m4v" hidden>
+        <div class="now-playing" id="cast-now" hidden>
+          <div class="np-head"><span class="np-badge" style="--c:#6ee7c8">Do seu PC</span></div>
+          <div class="np-title" id="cast-title">—</div>
+          <div class="np-progress" id="cast-progress"><div class="np-fill" id="cast-fill"></div></div>
+          <div class="np-times"><span id="cast-cur">0:00</span><span id="cast-dur">0:00</span></div>
+          <div class="np-controls">
+            <button type="button" class="icon-btn" id="cast-back" aria-label="Voltar 10 segundos"><i data-icon="back"></i></button>
+            <button type="button" class="icon-btn big accent" id="cast-play" aria-label="Tocar/pausar"><i data-icon="pause"></i></button>
+            <button type="button" class="icon-btn" id="cast-fwd" aria-label="Avançar 10 segundos"><i data-icon="fwd"></i></button>
+            <button type="button" class="icon-btn" id="cast-stop" aria-label="Parar de transmitir"><i data-icon="stop"></i></button>
+          </div>
+        </div>
+        <p class="note-box" id="cast-unsupported" hidden>Este navegador não consegue transmitir arquivos. Use Chrome ou Edge no computador.</p>
+      </div>
+
+      <div class="sub-block" id="browser-block" hidden>
+        <h3>Navegador compartilhado</h3>
+        <p class="tip">Um navegador de verdade no telão, com qualquer site. Olhe para o telão, aperte <kbd>E</kbd> e clique nele para pegar o controle: o que você fizer, todo mundo vê.</p>
+        <div class="browser-sites" id="browser-sites" aria-label="Abrir no navegador compartilhado"></div>
+        <button type="button" class="secondary block" id="browser-open"><i data-icon="globe" data-size="18"></i>Pôr o navegador no telão</button>
+        <p class="note-box"><b>Use contas separadas.</b> Quem está na sala pode mexer em tudo que estiver logado nele: e-mail, pagamentos, configurações da conta.</p>
+      </div>
 
       <div class="sub-block">
         <h3>No telão agora</h3>
         <div class="main-sources" id="main-sources"></div>
       </div>
-      <p class="tip">Dica: olhe para o telão e aperte <kbd>E</kbd> para dar zoom e usar os controles do próprio YouTube. Tudo que você fizer sincroniza para todos.</p>
+      <p class="tip">Dica: olhe para o telão e aperte <kbd>E</kbd> para dar zoom e usar os controles do próprio player. No YouTube, Twitch, Vimeo e links diretos, tudo que você fizer sincroniza para todos.</p>
+      <p class="tip">Netflix, Prime Video, Disney+, Max e Globoplay têm proteção contra cópia (DRM) e não funcionam no telão.</p>
     </section>
 
     <section data-section="parkour">
@@ -334,7 +379,7 @@
         <span>Sala 3D</span>
       </div>
       <h1>Assista junto.<br>Fale junto.<br><em>Pule junto.</em></h1>
-      <p class="lobby-sub">Compartilhe a tela do PC ou de uma aba com som, coloque YouTube no telão e ande pela sala — tem parkour até o camarote.</p>
+      <p class="lobby-sub">Compartilhe a tela com som, ponha YouTube, Twitch, Kick ou um filme do seu PC no telão e ande pela sala — tem parkour até o camarote.</p>
 
       <label class="field">
         <span>Seu nome</span>

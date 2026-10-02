@@ -49,6 +49,8 @@ export class RTC {
     this.micTrack = null;
     this.screenStream = null;
     this.shareMode = 'detail'; // 'detail' (texto nítido) ou 'motion' (vídeo fluido)
+    this.presetOverride = null; // arquivo transmitido usa sempre 'motion', sem mexer no ajuste salvo
+    this.extraScale = 1; // reduz vídeo acima de 1080p (arquivo 4K) antes de codificar
 
     socket.on('signal', ({ from, data }) => this.handleSignal(from, data));
   }
@@ -87,10 +89,12 @@ export class RTC {
 
   // -------------------------------------------------------------- tela
   preset() {
-    return SHARE_PRESETS[this.shareMode] || SHARE_PRESETS.detail;
+    return SHARE_PRESETS[this.presetOverride || this.shareMode] || SHARE_PRESETS.detail;
   }
 
   async startScreen() {
+    this.presetOverride = null;
+    this.extraScale = 1;
     const preset = this.preset();
     const stream = await navigator.mediaDevices.getDisplayMedia({
       video: {
@@ -118,21 +122,35 @@ export class RTC {
     return stream;
   }
 
+  // Transmitir um arquivo: o stream vem do próprio <video> (captureStream), não da captura
+  // de tela — imagem e som saem direto do arquivo, sem perder qualidade nem pegar o resto do PC.
+  useStream(stream, { height = 0 } = {}) {
+    this.presetOverride = 'motion';
+    this.extraScale = height > 1080 ? height / 1080 : 1;
+    const video = stream.getVideoTracks()[0];
+    if (video) video.contentHint = 'motion';
+    const audio = stream.getAudioTracks()[0];
+    if (audio) audio.contentHint = 'music';
+    this.screenStream = stream;
+  }
+
   // adiciona a tela a todas as conexões (chamar depois do servidor reservar a tela)
   publishScreen() {
     for (const peer of this.peers.values()) this.addScreenTo(peer);
   }
 
   addScreenTo(peer) {
-    if (!this.screenStream || peer.screenTransceivers.length) return;
+    if (!this.screenStream) return;
     const preset = this.preset();
     for (const track of this.screenStream.getTracks()) {
+      // um envio por tipo (vídeo/áudio); o que já existe fica
+      if (peer.screenTransceivers.some((tr) => tr.receiver.track.kind === track.kind)) continue;
       const init = { direction: 'sendonly', streams: [this.screenStream] };
       if (track.kind === 'video') {
         init.sendEncodings = [{
           maxBitrate: preset.maxBitrate,
           maxFramerate: preset.fps,
-          scaleResolutionDownBy: preset.scale,
+          scaleResolutionDownBy: preset.scale * this.extraScale,
           networkPriority: 'high',
           priority: 'high',
         }];
@@ -158,7 +176,7 @@ export class RTC {
         Object.assign(params.encodings[0], {
           maxBitrate: preset.maxBitrate,
           maxFramerate: preset.fps,
-          scaleResolutionDownBy: preset.scale,
+          scaleResolutionDownBy: preset.scale * this.extraScale,
           networkPriority: 'high',
           priority: 'high',
         });
@@ -166,6 +184,18 @@ export class RTC {
       } catch (err) {
         console.warn('[rtc] ajuste do envio', err);
       }
+    }
+  }
+
+  // O captureStream() de um <video> encerra as trilhas quando o arquivo chega ao fim e cria
+  // trilhas novas se ele voltar a tocar. Troca a trilha no envio (sem renegociar) e cria o
+  // envio para quem entrou na sala enquanto o vídeo estava parado.
+  replaceScreenTrack(track) {
+    track.contentHint = track.kind === 'video' ? 'motion' : 'music';
+    for (const peer of this.peers.values()) {
+      const tr = peer.screenTransceivers.find((t) => t.receiver.track.kind === track.kind);
+      if (tr) tr.sender.replaceTrack(track).catch((err) => console.warn('[rtc] troca de trilha', err));
+      else this.addScreenTo(peer);
     }
   }
 
@@ -178,6 +208,8 @@ export class RTC {
     if (!this.screenStream) return;
     for (const t of this.screenStream.getTracks()) t.stop();
     this.screenStream = null;
+    this.presetOverride = null;
+    this.extraScale = 1;
     for (const peer of this.peers.values()) {
       for (const tr of peer.screenTransceivers) {
         try {

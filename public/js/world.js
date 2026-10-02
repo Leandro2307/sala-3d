@@ -1,21 +1,27 @@
-// Cena 3D: sala de cinema com parede de telas, sofás, parkour e camarote.
+// Cena 3D: sala de cinema com parede de telas, sofás, parkour e camarote; lá fora, o
+// autódromo ao ar livre, com serra, floresta e lago em volta.
 import * as THREE from 'three';
 import { isTouch } from './touch.js';
 import { CSS3DRenderer, CSS3DObject } from 'three/addons/renderers/CSS3DRenderer.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { COURSE, RAILS, FUN_PADS } from './parkour.js';
 import { RING } from './arena.js';
-import { PISTA, CAMINHO, CURVAS, pontoEm } from './pista.js';
+import { PISTA, CAMINHO, CURVAS, pontoEm, projetar } from './pista.js';
+import { criarNatureza } from './natureza.js';
 
-// O galpão tem duas alas: a do cinema (em torno da origem, com o telão em minZ)
-// e a do autódromo, a leste. O telão continua em minZ para não se afastar da
-// plateia; quem cresceu foi o resto.
+// Área jogável inteira (cercada): a sala do cinema num canto, em volta da origem, e o
+// autódromo ao ar livre a leste. O telão do cinema continua em minZ, perto da plateia.
 export const ROOM = { minX: -52, maxX: 480, minZ: -40, maxZ: 530, height: 60 };
+// A sala do cinema: fechada e igual por dentro ao que sempre foi. A porta fica na parede
+// leste, virada para o autódromo.
+export const SALA = { minX: ROOM.minX, maxX: 60, minZ: ROOM.minZ, maxZ: 60, height: ROOM.height, porta: { z0: 14, z1: 46, altura: 18 } };
 export const SPAWN = { pos: [0, 0, -2], yaw: 0 };
 
 const FONT = "'Plus Jakarta Sans', system-ui, sans-serif";
 const _tmp = new THREE.Vector3();
-const YT_PX = { w: 1280, h: 720 };
+const _m4 = new THREE.Matrix4();
+const _frustum = new THREE.Frustum();
+const TV_PX = { w: 1280, h: 720 }; // superfície CSS3D do player do telão (iframe/<video>)
 
 // Parede de telas: telão no centro, 4 telas de compartilhamento nas laterais (levemente viradas para o centro).
 const MAIN_LAYOUT = { x: 0, y: 12.6, z: ROOM.minZ + 0.6, w: 30, h: 16.875 };
@@ -295,10 +301,12 @@ class ScreenDisplay {
   }
 }
 
-class MainScreen extends ScreenDisplay {
+// Telão (o do cinema e o da pista). O player (iframe/<video>) é um só e fica atrás do
+// telão mais perto de quem está olhando — ver World.atualizarTelao. Cada telão tem o seu
+// "buraco" transparente no WebGL por onde o player aparece (CSS3D por trás do canvas).
+class Telao extends ScreenDisplay {
   constructor(opts) {
     super({ ...opts, icon: 'play' });
-    // "buraco" transparente no WebGL por onde aparece o iframe do YouTube (CSS3D por trás do canvas)
     this.hole = new THREE.Mesh(
       new THREE.PlaneGeometry(this.w, this.h),
       new THREE.MeshBasicMaterial({
@@ -310,37 +318,23 @@ class MainScreen extends ScreenDisplay {
     this.hole.visible = false;
     this.hole.userData.screen = this;
     this.group.add(this.hole);
-
-    this.cssElement = document.createElement('div');
-    this.cssElement.className = 'yt-surface';
-    this.cssElement.style.width = `${YT_PX.w}px`;
-    this.cssElement.style.height = `${YT_PX.h}px`;
-    const inner = document.createElement('div');
-    inner.id = 'yt-player';
-    this.cssElement.appendChild(inner);
-    this.cssObject = new CSS3DObject(this.cssElement);
-    this.cssObject.visible = false;
     this.mode = 'empty';
+    this.isHost = false; // é este telão que está com o player agora?
+    this.aoMudar = null;
   }
 
-  syncCss() {
-    this.group.updateWorldMatrix(true, false);
-    this.hole.getWorldPosition(this.cssObject.position);
-    this.hole.getWorldQuaternion(this.cssObject.quaternion);
-    this.cssObject.scale.setScalar(this.w / YT_PX.w);
-  }
-
-  // 'empty' (sem vídeo) | 'youtube' | 'share'
+  // 'empty' (sem vídeo) | 'media' (player do telão) | 'share'
   setMode(mode, video = null) {
     this.mode = mode;
-    this.hole.visible = mode === 'youtube';
-    this.cssObject.visible = mode === 'youtube';
+    this.hole.visible = mode === 'media' && this.isHost;
     if (mode === 'share' && video) this.setVideo(video);
     else this.clearVideo();
-    if (mode === 'youtube') {
-      this.placeholder.visible = false;
+    if (mode === 'media') {
+      // o telão que não está com o player mostra o cartaz do que está tocando
+      this.placeholder.visible = !this.isHost;
       this.glow.material.opacity = 0.32;
     }
+    this.aoMudar?.();
   }
 }
 
@@ -365,7 +359,8 @@ export class World {
     this.scene.background = new THREE.Color(0x0b0d12);
     this.cssScene = new THREE.Scene();
 
-    this.camera = new THREE.PerspectiveCamera(68, window.innerWidth / window.innerHeight, 0.1, 400);
+    // longe o bastante para a serra no horizonte (o céu é desenhado no fundo, sem limite)
+    this.camera = new THREE.PerspectiveCamera(68, window.innerWidth / window.innerHeight, 0.1, 3000);
     this.camera.position.set(0, 12, 30);
 
     this.colliders = [];
@@ -374,8 +369,13 @@ export class World {
     this.decorAnimated = [];
     this.checkpointLabels = new Map();
     this.fadeLabels = []; // placas do parkour somem quando a câmera chega perto
+    this.reservas = []; // lugares onde a natureza não planta nada (arquibancada, telão, porta)
+    this.estradas = [];
+    // Tudo que fica do lado de fora da sala do cinema. Some quando a câmera está lá dentro e
+    // não dá para ver a porta: a serra e a floresta não precisam ser desenhadas atrás da parede.
+    this.fora = new THREE.Group();
+    this.scene.add(this.fora);
 
-    this.buildCeu();
     this.buildLights();
     this.buildRoom();
     this.buildAudience();
@@ -383,34 +383,43 @@ export class World {
     this.buildCourse();
     this.buildRing();
     this.buildTrack();
+    this.natureza = criarNatureza(this.scene, this.renderer, {
+      area: ROOM, sala: SALA, reservas: this.reservas, estradas: this.estradas, addBox: (o) => this.addBox(o), grupo: this.fora,
+    });
+    const P = SALA.porta;
+    this.portaBox = new THREE.Box3(new THREE.Vector3(SALA.maxX - 1, 0, P.z0), new THREE.Vector3(SALA.maxX + 1, P.altura, P.z1));
+    // O lado de fora só é desenhado quando alguém olha pela porta ou sai, e é aí que o
+    // navegador compilaria os shaders dele: a primeira olhada travava a tela por segundos.
+    // Compila tudo agora, enquanto a pessoa ainda está no lobby.
+    // Depois, um quadro invisível visto do alto manda terreno, árvores e texturas para a
+    // placa de vídeo — senão o primeiro passo para fora ainda engasgava uns 300 ms.
+    this.fora.visible = true;
+    const aquecer = () => {
+      const alvo = new THREE.WebGLRenderTarget(64, 64);
+      const cam = new THREE.PerspectiveCamera(120, 1, 1, 4000);
+      cam.position.set((ROOM.minX + ROOM.maxX) / 2, 700, (ROOM.minZ + ROOM.maxZ) / 2);
+      cam.lookAt(cam.position.x, 0, cam.position.z);
+      const vis = this.fora.visible;
+      const solAntes = this.sun.target.position.clone();
+      this.fora.visible = true;
+      this.focarSol(200, 120); // a sombra também: árvores e torcida têm shader de sombra próprio
+      this.renderer.setRenderTarget(alvo);
+      this.renderer.render(this.scene, cam);
+      this.renderer.setRenderTarget(null);
+      this.focarSol(solAntes.x, solAntes.z);
+      this.fora.visible = vis;
+      alvo.dispose();
+    };
+    if (this.renderer.compileAsync) this.renderer.compileAsync(this.scene, this.camera).then(aquecer).catch(() => {});
+    else {
+      this.renderer.compile(this.scene, this.camera);
+      aquecer();
+    }
 
     window.addEventListener('resize', () => this.resize());
   }
 
   // -------------------------------------------------------------- construção
-  buildCeu() {
-    const tex = canvasTexture(8, 256, (ctx, w, h) => {
-      const g = ctx.createLinearGradient(0, 0, 0, h);
-      g.addColorStop(0.00, '#05070f'); // zênite
-      g.addColorStop(0.45, '#0d1426');
-      g.addColorStop(0.72, '#1b2440');
-      g.addColorStop(0.88, '#2a2f53'); // o brilho baixo que dá a linha do horizonte
-      g.addColorStop(1.00, '#0b0d18');
-      ctx.fillStyle = g;
-      ctx.fillRect(0, 0, w, h);
-    });
-    const raio = Math.max(ROOM.maxX - ROOM.minX, ROOM.maxZ - ROOM.minZ) * 0.9;
-    const ceu = new THREE.Mesh(
-      new THREE.SphereGeometry(raio, 24, 16),
-      new THREE.MeshBasicMaterial({ map: tex, side: THREE.BackSide, depthWrite: false, toneMapped: false }),
-    );
-    ceu.position.set((ROOM.minX + ROOM.maxX) / 2, 0, (ROOM.minZ + ROOM.maxZ) / 2);
-    ceu.renderOrder = -1;
-    this.scene.add(ceu);
-    // névoa: some com a borda do mundo em vez de cortar no preto
-    this.scene.fog = new THREE.Fog(0x141a2e, 180, raio * 1.1);
-  }
-
   buildLights() {
     const hemi = new THREE.HemisphereLight(0xc9d3ff, 0x252036, 1.45);
     this.scene.add(hemi);
@@ -458,12 +467,18 @@ export class World {
     return c;
   }
 
+  // A sala do cinema ficou do jeito que era por dentro; o que mudou é que ela agora tem
+  // paredes próprias (antes era um galpão único com a pista dentro) e uma porta para fora.
   buildRoom() {
-    const { minX, maxX, minZ, maxZ, height } = ROOM;
-    const W = maxX - minX;
-    const D = maxZ - minZ;
+    const S = SALA;
+    const W = S.maxX - S.minX;
+    const D = S.maxZ - S.minZ;
+    const cx = (S.minX + S.maxX) / 2;
+    const cz = (S.minZ + S.maxZ) / 2;
+    const { height } = S;
+    const P = S.porta;
 
-    // chão com grade sutil
+    // chão com grade sutil (lá fora é grama)
     const gridTex = canvasTexture(256, 256, (ctx, w, h) => {
       ctx.fillStyle = '#171a22';
       ctx.fillRect(0, 0, w, h);
@@ -478,80 +493,66 @@ export class World {
       new THREE.MeshStandardMaterial({ map: gridTex, roughness: 0.85, metalness: 0.05 }),
     );
     floor.rotation.x = -Math.PI / 2;
+    floor.position.set(cx, 0, cz);
     floor.receiveShadow = true;
     this.scene.add(floor);
-    this.addBox({ min: [minX - 5, -4, minZ - 5], max: [maxX + 5, 0, maxZ + 5], data: { type: 'floor' } });
+    // o chão da física continua um só, do tamanho da área inteira
+    this.addBox({ min: [ROOM.minX - 5, -4, ROOM.minZ - 5], max: [ROOM.maxX + 5, 0, ROOM.maxZ + 5], data: { type: 'floor' } });
 
-    // área do parkour com piso neon (pisar nele durante a corrida = volta ao checkpoint)
-    const zoneTex = canvasTexture(256, 256, (ctx, w, h) => {
-      ctx.fillStyle = '#1a1230';
-      ctx.fillRect(0, 0, w, h);
-      ctx.strokeStyle = 'rgba(167,139,250,0.45)';
-      ctx.lineWidth = 4;
-      ctx.strokeRect(0, 0, w, h);
-    });
-    zoneTex.wrapS = zoneTex.wrapT = THREE.RepeatWrapping;
-    zoneTex.repeat.set(W / 4, 38 / 4);
-    const zone = new THREE.Mesh(
-      new THREE.PlaneGeometry(W, 38),
-      new THREE.MeshStandardMaterial({ map: zoneTex, roughness: 0.6, emissive: 0x2a1650, emissiveIntensity: 0.35 }),
-    );
-    zone.rotation.x = -Math.PI / 2;
-    zone.position.set(0, 0.005, maxZ - 19);
-    zone.receiveShadow = true;
-    this.scene.add(zone);
-
-    // faixa separando plateia e parkour
-    const stripe = new THREE.Mesh(
-      new THREE.PlaneGeometry(W, 0.14),
-      new THREE.MeshBasicMaterial({ color: 0xa78bfa, transparent: true, opacity: 0.55, toneMapped: false }),
-    );
-    stripe.rotation.x = -Math.PI / 2;
-    stripe.position.set(0, 0.01, maxZ - 38);
-    this.scene.add(stripe);
-
-    // paredes
+    // paredes: caixas finas — por dentro o material de sempre, por fora a fachada
     const wallMat = new THREE.MeshStandardMaterial({ color: 0x151821, roughness: 0.9 });
     const frontMat = new THREE.MeshStandardMaterial({ color: 0x0d0f15, roughness: 0.95 });
-    const walls = [
-      { w: W, pos: [0, height / 2, minZ], rot: 0, mat: frontMat },
-      { w: W, pos: [0, height / 2, maxZ], rot: Math.PI, mat: wallMat },
-      { w: D, pos: [minX, height / 2, 0], rot: Math.PI / 2, mat: wallMat },
-      { w: D, pos: [maxX, height / 2, 0], rot: -Math.PI / 2, mat: wallMat },
-    ];
-    for (const wdef of walls) {
-      const m = new THREE.Mesh(new THREE.PlaneGeometry(wdef.w, height), wdef.mat);
-      m.position.set(...wdef.pos);
-      m.rotation.y = wdef.rot;
+    const fachadaMat = new THREE.MeshStandardMaterial({ color: 0x232838, roughness: 0.8, metalness: 0.2 });
+    const esp = 0.6;
+    // faces da BoxGeometry: 0 +x, 1 -x, 2 +y, 3 -y, 4 +z, 5 -z
+    const parede = (min, max, faceDentro, matDentro) => {
+      const mats = new Array(6).fill(fachadaMat);
+      mats[faceDentro] = matDentro;
+      const m = new THREE.Mesh(new THREE.BoxGeometry(max[0] - min[0], max[1] - min[1], max[2] - min[2]), mats);
+      m.position.set((min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2);
       m.receiveShadow = true;
       this.scene.add(m);
       this.cameraBlockers.push(m);
-    }
+      this.addBox({ min, max });
+      return m;
+    };
+    parede([S.minX, 0, S.minZ - esp], [S.maxX + esp, height, S.minZ], 4, frontMat); // atrás do telão
+    parede([S.minX, 0, S.maxZ], [S.maxX + esp, height, S.maxZ + esp], 5, wallMat); // fundo
+    parede([S.minX - esp, 0, S.minZ - esp], [S.minX, height, S.maxZ + esp], 0, wallMat); // oeste
+    parede([S.maxX, 0, S.minZ], [S.maxX + esp, height, P.z0], 1, wallMat); // leste, antes da porta
+    parede([S.maxX, 0, P.z1], [S.maxX + esp, height, S.maxZ], 1, wallMat); // leste, depois da porta
+    parede([S.maxX, P.altura, P.z0], [S.maxX + esp, height, P.z1], 1, wallMat); // em cima da porta
+    // os limites da área jogável (cerca lá fora) continuam sólidos
     const t = 4;
-    this.addBox({ min: [minX - t, -4, minZ - t], max: [maxX + t, height + 4, minZ] });
-    this.addBox({ min: [minX - t, -4, maxZ], max: [maxX + t, height + 4, maxZ + t] });
-    this.addBox({ min: [minX - t, -4, minZ - t], max: [minX, height + 4, maxZ + t] });
-    this.addBox({ min: [maxX, -4, minZ - t], max: [maxX + t, height + 4, maxZ + t] });
+    const R = ROOM;
+    this.addBox({ min: [R.minX - t, -4, R.minZ - t], max: [R.maxX + t, height + 4, R.minZ] });
+    this.addBox({ min: [R.minX - t, -4, R.maxZ], max: [R.maxX + t, height + 4, R.maxZ + t] });
+    this.addBox({ min: [R.minX - t, -4, R.minZ - t], max: [R.minX, height + 4, R.maxZ + t] });
+    this.addBox({ min: [R.maxX, -4, R.minZ - t], max: [R.maxX + t, height + 4, R.maxZ + t] });
 
-    // teto
+    // teto (e a laje por cima, para quem olha de fora)
     const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(W, D), new THREE.MeshStandardMaterial({ color: 0x0e1016, roughness: 1 }));
     ceiling.rotation.x = Math.PI / 2;
-    ceiling.position.y = height;
+    ceiling.position.set(cx, height, cz);
     this.scene.add(ceiling);
-    this.addBox({ min: [minX, height, minZ], max: [maxX, height + 4, maxZ] });
+    const laje = new THREE.Mesh(new THREE.BoxGeometry(W + 2 * esp, 0.6, D + 2 * esp), fachadaMat);
+    laje.position.set(cx, height + 0.35, cz);
+    this.fora.add(laje);
+    this.addBox({ min: [R.minX, height, R.minZ], max: [R.maxX, height + 4, R.maxZ] });
 
     // faixas de luz no teto e rodapé neon
     const stripMat = new THREE.MeshBasicMaterial({ color: 0xdfe7ff, toneMapped: false });
     for (const x of [-18, 0, 18]) {
       const s = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.15, D - 12), stripMat);
-      s.position.set(x, height - 0.1, 0);
+      s.position.set(x, height - 0.1, cz);
       this.scene.add(s);
     }
     const baseMat = new THREE.MeshBasicMaterial({ color: 0x6ee7c8, toneMapped: false });
     const baseboards = [
-      { size: [W, 0.12, 0.12], pos: [0, 0.3, maxZ - 0.06] },
-      { size: [0.12, 0.12, D], pos: [minX + 0.06, 0.3, 0] },
-      { size: [0.12, 0.12, D], pos: [maxX - 0.06, 0.3, 0] },
+      { size: [W, 0.12, 0.12], pos: [cx, 0.3, S.maxZ - 0.06] },
+      { size: [0.12, 0.12, D], pos: [S.minX + 0.06, 0.3, cz] },
+      { size: [0.12, 0.12, P.z0 - S.minZ], pos: [S.maxX - 0.06, 0.3, (S.minZ + P.z0) / 2] },
+      { size: [0.12, 0.12, S.maxZ - P.z1], pos: [S.maxX - 0.06, 0.3, (P.z1 + S.maxZ) / 2] },
     ];
     for (const b of baseboards) {
       const m = new THREE.Mesh(new THREE.BoxGeometry(...b.size), baseMat);
@@ -562,7 +563,7 @@ export class World {
     // pilares de luz nos cantos
     const pillarMat = new THREE.MeshStandardMaterial({ color: 0x1b1f2a, roughness: 0.4, metalness: 0.4 });
     const pillarGlow = new THREE.MeshBasicMaterial({ color: 0xa78bfa, toneMapped: false });
-    for (const [x, z] of [[minX + 1.5, minZ + 1.5], [maxX - 1.5, minZ + 1.5], [minX + 1.5, maxZ - 1.5], [maxX - 1.5, maxZ - 1.5]]) {
+    for (const [x, z] of [[S.minX + 1.5, S.minZ + 1.5], [S.maxX - 1.5, S.minZ + 1.5], [S.minX + 1.5, S.maxZ - 1.5], [S.maxX - 1.5, S.maxZ - 1.5]]) {
       const p = new THREE.Mesh(new RoundedBoxGeometry(3, height, 3, 3, 0.4), pillarMat);
       p.position.set(x, height / 2, z);
       p.castShadow = true;
@@ -572,6 +573,68 @@ export class World {
       this.scene.add(g);
       this.addBox({ min: [x - 1.5, 0, z - 1.5], max: [x + 1.5, height, z + 1.5], mesh: p, blocksCamera: true });
     }
+
+    this.buildFachada();
+  }
+
+  // Por fora: contorno neon na porta, letreiro e frisos de LED. É o que se vê da pista.
+  buildFachada() {
+    const S = SALA;
+    const P = S.porta;
+    const xFora = S.maxX + 0.65;
+    const neon = new THREE.MeshBasicMaterial({ color: 0x6ee7c8, toneMapped: false });
+    const rosa = new THREE.MeshBasicMaterial({ color: 0xff5d73, toneMapped: false });
+    const largura = P.z1 - P.z0;
+    const zc = (P.z0 + P.z1) / 2;
+    // moldura da porta, dos dois lados da parede (a de dentro faz parte da sala)
+    for (const x of [xFora, S.maxX - 0.05]) {
+      const pai = x === xFora ? this.fora : this.scene;
+      for (const [sy, sz, py, pz] of [
+        [0.3, largura + 0.6, P.altura + 0.15, zc],
+        [P.altura, 0.3, P.altura / 2, P.z0 - 0.15],
+        [P.altura, 0.3, P.altura / 2, P.z1 + 0.15],
+      ]) {
+        const m = new THREE.Mesh(new THREE.BoxGeometry(0.1, sy, sz), neon);
+        m.position.set(x, py, pz);
+        pai.add(m);
+      }
+    }
+    // letreiro em cima da porta
+    const tex = canvasTexture(1024, 256, (ctx, w, h) => {
+      ctx.fillStyle = '#0d1018';
+      roundRect(ctx, 8, 8, w - 16, h - 16, 40);
+      ctx.fill();
+      ctx.strokeStyle = '#ff5d73';
+      ctx.lineWidth = 10;
+      roundRect(ctx, 22, 22, w - 44, h - 44, 30);
+      ctx.stroke();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = `800 132px ${FONT}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.shadowColor = '#ff5d73';
+      ctx.shadowBlur = 30;
+      ctx.fillText('CINEMA', w / 2, h / 2 + 6);
+    });
+    const placa = new THREE.Mesh(new THREE.PlaneGeometry(largura, largura / 4), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }));
+    placa.position.set(xFora + 0.05, P.altura + 3 + largura / 8, zc);
+    placa.rotation.y = Math.PI / 2;
+    this.fora.add(placa);
+    // frisos verticais de LED nas quinas de fora
+    for (const [x, z] of [[S.maxX + 0.7, S.minZ], [S.maxX + 0.7, S.maxZ + 0.6], [S.minX - 0.7, S.maxZ + 0.6]]) {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(0.25, S.height, 0.25), rosa);
+      m.position.set(x, S.height / 2, z);
+      this.fora.add(m);
+    }
+    // faixa de LED no alto da fachada leste e do fundo
+    const faixa1 = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.5, S.maxZ - S.minZ), neon);
+    faixa1.position.set(xFora, S.height - 3, (S.minZ + S.maxZ) / 2);
+    const faixa2 = new THREE.Mesh(new THREE.BoxGeometry(S.maxX - S.minX, 0.5, 0.1), neon);
+    faixa2.position.set((S.minX + S.maxX) / 2, S.height - 3, S.maxZ + 0.65);
+    this.fora.add(faixa1, faixa2);
+
+    // na saída: guarda o espaço para não nascer árvore na frente da porta
+    this.reservas.push({ x: S.maxX + 18, z: zc, r: 26 });
   }
 
   buildAudience() {
@@ -638,18 +701,29 @@ export class World {
   }
 
   buildScreens() {
-    this.mainScreen = new MainScreen({
+    this.mainScreen = this.criarTelao({
       w: MAIN_LAYOUT.w, h: MAIN_LAYOUT.h,
-      title: 'Telão', subtitle: 'Cole um link do YouTube ou fixe a tela de alguém aqui',
+      title: 'Telão', subtitle: 'Cole um link (YouTube, Twitch, Kick…) ou fixe a tela de alguém aqui',
       accent: '#ff5d73',
     });
     this.mainScreen.group.position.set(MAIN_LAYOUT.x, MAIN_LAYOUT.y, MAIN_LAYOUT.z);
-    this.scene.add(this.mainScreen.group);
-    this.mainScreen.syncCss();
-    this.cssScene.add(this.mainScreen.cssObject);
-    // o CSS3DRenderer só insere elementos visíveis; o player do YouTube precisa existir no DOM desde já
-    this.css.domElement.firstChild.firstChild.appendChild(this.mainScreen.cssElement);
-    this.mainScreen.cssElement.style.display = 'none';
+
+    // A superfície CSS3D onde o player mora. É uma só: muda de telão conforme quem olha anda.
+    this.tvElement = document.createElement('div');
+    this.tvElement.className = 'tv-surface';
+    this.tvElement.style.width = `${TV_PX.w}px`;
+    this.tvElement.style.height = `${TV_PX.h}px`;
+    const host = document.createElement('div');
+    host.id = 'tv-host';
+    this.tvElement.appendChild(host);
+    this.tvCss = new CSS3DObject(this.tvElement);
+    this.tvCss.visible = false;
+    this.cssScene.add(this.tvCss);
+    // o CSS3DRenderer só insere elementos visíveis; o player do telão precisa existir no DOM desde já
+    this.css.domElement.firstChild.firstChild.appendChild(this.tvElement);
+    this.tvElement.style.display = 'none';
+    this.telaoTravado = null;
+    this.setTelaoHost(this.mainScreen);
 
     this.slots = SLOT_LAYOUT.map((l, i) => {
       const s = new ScreenDisplay({
@@ -664,11 +738,48 @@ export class World {
     });
 
     this.screens = [this.mainScreen, ...this.slots];
-    this.screenMeshes = [];
-    for (const s of this.screens) {
-      this.screenMeshes.push(s.surface, s.placeholder, s.videoMesh);
-      if (s.hole) this.screenMeshes.push(s.hole);
+  }
+
+  criarTelao(opts) {
+    const t = new Telao(opts);
+    t.aoMudar = () => { if (t.isHost) this.tvCss.visible = t.mode === 'media'; };
+    this.scene.add(t.group);
+    this.telaoes = this.telaoes || [];
+    this.telaoes.push(t);
+    if (this.screens) this.screens.push(t);
+    return t;
+  }
+
+  // Põe o player atrás deste telão (só muda o transform do CSS3D: o iframe não recarrega).
+  setTelaoHost(t) {
+    if (this.tvHost === t) return;
+    this.tvHost = t;
+    for (const s of this.telaoes) {
+      s.isHost = s === t;
+      s.setMode(s.mode, s.video);
     }
+    t.group.updateWorldMatrix(true, true);
+    t.hole.getWorldPosition(this.tvCss.position);
+    t.hole.getWorldQuaternion(this.tvCss.quaternion);
+    this.tvCss.scale.setScalar(t.w / TV_PX.w);
+    this.tvCss.visible = t.mode === 'media';
+  }
+
+  // Modo foco: o telão em foco fica com o player até sair do foco, perto ou longe.
+  travarTelao(t) {
+    this.telaoTravado = t;
+    if (t) this.setTelaoHost(t);
+  }
+
+  // O player vai para o telão mais perto da câmera. A folga de 15% evita ficar trocando
+  // quando alguém para bem no meio do caminho entre os dois.
+  atualizarTelao() {
+    if (this.telaoTravado || !this.telaoes || this.telaoes.length < 2) return;
+    const cam = this.camera.position;
+    const dist = (s) => s.group.position.distanceTo(cam);
+    let perto = this.tvHost;
+    for (const s of this.telaoes) if (dist(s) < dist(perto) * 0.85) perto = s;
+    if (perto !== this.tvHost) this.setTelaoHost(perto);
   }
 
 
@@ -785,7 +896,7 @@ export class World {
   // por segundo. Sair da pista já é punido pelo controle de setores da volta.
   buildTrack() {
     const grupo = new THREE.Group();
-    this.scene.add(grupo);
+    this.fora.add(grupo);
     const meia = PISTA.largura / 2;
 
     const asfaltoTex = canvasTexture(128, 256, (ctx, w, h) => {
@@ -847,9 +958,8 @@ export class World {
     };
 
     asfaltoTex.repeat.set(1, 1);
-    fita(-meia, meia, PISTA.y, new THREE.MeshStandardMaterial({
-      map: asfaltoTex, roughness: 0.95, metalness: 0.0,
-    }), 14);
+    this.asfaltoMat = new THREE.MeshStandardMaterial({ map: asfaltoTex, roughness: 0.95, metalness: 0.0 });
+    fita(-meia, meia, PISTA.y, this.asfaltoMat, 14);
 
     const zebraMat = new THREE.MeshStandardMaterial({
       map: zebraTex, roughness: 0.55, emissiveMap: zebraTex, emissive: 0xffffff, emissiveIntensity: 0.22,
@@ -872,13 +982,13 @@ export class World {
         }
       }
     });
-    const larg = pontoEm(0);
+    const larg = pontoEm(PISTA.largadaT);
     const linha = new THREE.Mesh(
       new THREE.PlaneGeometry(PISTA.largura, 3.2),
       new THREE.MeshStandardMaterial({ map: xadrez, roughness: 0.8 }),
     );
     linha.rotation.x = -Math.PI / 2;
-    linha.rotation.z = -larg.angulo;
+    linha.rotation.z = larg.angulo; // gira no próprio plano antes de deitar: largura na transversal
     linha.position.set(larg.x, PISTA.y + 0.02, larg.z);
     grupo.add(linha);
 
@@ -898,7 +1008,7 @@ export class World {
       new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.5, emissive: 0x1e293b, emissiveIntensity: 0.6 }),
     );
     travessa.position.set(larg.x, 8.6, larg.z);
-    travessa.rotation.y = -larg.angulo;
+    travessa.rotation.y = larg.angulo; // comprimento da viga na transversal da pista
     grupo.add(travessa);
 
     const placaL = canvasTexture(512, 128, (ctx, w, h) => {
@@ -915,54 +1025,56 @@ export class World {
       new THREE.MeshBasicMaterial({ map: placaL, toneMapped: false }),
     );
     letreiro.position.set(larg.x - Math.sin(larg.angulo) * 0.4, 8.6, larg.z - Math.cos(larg.angulo) * 0.4);
-    letreiro.rotation.y = -larg.angulo + Math.PI;
+    letreiro.rotation.y = larg.angulo + Math.PI; // virado para quem vem chegando
     grupo.add(letreiro);
 
     this.decorarPista(grupo, fita);
     this.trackGroup = grupo;
   }
 
-  // A ala do autódromo estava um breu de chão cinza. Isto dá a ela o mesmo
-  // tratamento que a sala do cinema tem: chão com cor, luz e coisas para olhar.
+  // Ambiente do autódromo (o traçado é o de sempre): área de escape, guard-rail, postes,
+  // pneus, arquibancada com torcida, telão, placas e a estrada que vem do cinema.
   decorarPista(grupo, fita) {
     const meia = PISTA.largura / 2;
+    const zebra = Math.max(0.8, PISTA.largura * 0.085);
+    const borda = meia + zebra;
+    const lateralDe = (p) => [Math.cos(p.angulo), -Math.sin(p.angulo)];
 
-    // 1) tapete de grama/asfalto em volta, com grade neon como no parkour
-    const apronTex = canvasTexture(256, 256, (ctx, w, h) => {
-      ctx.fillStyle = '#141a2b';
+    // 1) área de escape de concreto dos dois lados (no lugar do tapete neon de quando era galpão)
+    const escapeTex = canvasTexture(128, 128, (ctx, w, h) => {
+      ctx.fillStyle = '#5b5f69';
       ctx.fillRect(0, 0, w, h);
-      ctx.strokeStyle = 'rgba(96,165,250,0.30)';
-      ctx.lineWidth = 3;
-      ctx.strokeRect(0, 0, w, h);
-      ctx.strokeStyle = 'rgba(96,165,250,0.10)';
-      ctx.lineWidth = 1.5;
-      for (let i = 1; i < 4; i++) {
-        ctx.beginPath(); ctx.moveTo((w / 4) * i, 0); ctx.lineTo((w / 4) * i, h); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(0, (h / 4) * i); ctx.lineTo(w, (h / 4) * i); ctx.stroke();
+      for (let i = 0; i < 1400; i++) {
+        ctx.fillStyle = `rgba(${Math.random() < 0.5 ? '255,255,255' : '0,0,0'},${(Math.random() * 0.08).toFixed(3)})`;
+        ctx.fillRect(Math.random() * w, Math.random() * h, 2, 2);
       }
     });
-    apronTex.wrapS = apronTex.wrapT = THREE.RepeatWrapping;
-    const apronMat = new THREE.MeshStandardMaterial({ map: apronTex, roughness: 0.9 });
-    fita(meia + 1.2, meia + 22, 0.04, apronMat, 10);
-    fita(-meia - 22, -meia - 1.2, 0.04, apronMat, 10);
-    // tira de neon acompanhando a pista: é o que dá a linha de luz no horizonte
-    const neonMat = new THREE.MeshBasicMaterial({ color: 0x4f8bff, toneMapped: false });
-    fita(meia + 21.3, meia + 22, 0.06, neonMat, 1);
-    fita(-meia - 22, -meia - 21.3, 0.06, neonMat, 1);
+    escapeTex.wrapS = escapeTex.wrapT = THREE.RepeatWrapping;
+    const escapeMat = new THREE.MeshStandardMaterial({ map: escapeTex, roughness: 0.95 });
+    fita(borda, borda + 6, 0.06, escapeMat, 8);
+    fita(-borda - 6, -borda, 0.06, escapeMat, 8);
 
-    // 2) postes de luz: cabeça acesa (de graça) e algumas luzes de verdade
+    // 2) arquibancada e estrada do cinema primeiro: a estrada termina dentro da pista, e
+    //    guard-rail, postes e placas precisam saber onde deixar o vão dela
+    const arq = this.buildArquibancada(grupo, meia);
+    this.buildEstrada(arq, meia);
+
+    // 3) guard-rail
+    this.guardRail(grupo, borda + 6.5);
+
+    // 3) postes de luz: cabeça acesa (de graça) e algumas luzes de verdade
     const posteGeo = new THREE.CylinderGeometry(0.22, 0.3, 11, 10);
     const posteMat = new THREE.MeshStandardMaterial({ color: 0x2b3245, roughness: 0.6 });
     const luminariaGeo = new RoundedBoxGeometry(2.6, 0.4, 1.1, 2, 0.12);
     const luminariaMat = new THREE.MeshBasicMaterial({ color: 0xfff1c9, toneMapped: false });
     const POSTES = 28;
     for (let i = 0; i < POSTES; i++) {
-      const t = i / POSTES;
-      const p = pontoEm(t);
-      const lateral = p.angulo;
+      const p = pontoEm(i / POSTES);
+      const [lx, lz] = lateralDe(p);
       const lado = i % 2 ? 1 : -1;
-      const px = p.x + Math.cos(lateral) * (meia + 9) * lado;
-      const pz = p.z - Math.sin(lateral) * (meia + 9) * lado;
+      const px = p.x + lx * (meia + 9) * lado;
+      const pz = p.z + lz * (meia + 9) * lado;
+      if (this.pertoDeVia(px, pz, 2)) continue; // não planta poste no meio da entrada
       const poste = new THREE.Mesh(posteGeo, posteMat);
       poste.position.set(px, 5.5, pz);
       poste.castShadow = true;
@@ -975,41 +1087,47 @@ export class World {
       if (i % 2 === 0) {
         const luz = new THREE.PointLight(0xe8eeff, 170, 58, 1.7);
         luz.position.set(px, 10.4, pz);
-        grupo.add(luz);
+        this.scene.add(luz); // fora do grupo da pista de propósito: ver cullFora
       }
     }
 
-    // 3) pilhas de pneu nas curvas, nas cores da casa
-    const pneuGeo = new THREE.TorusGeometry(0.62, 0.26, 8, 16);
-    const pneuMat = new THREE.MeshStandardMaterial({ color: 0x14161d, roughness: 0.9 });
+    // 4) pilhas de pneu nas curvas (instanciadas: eram 210 malhas, agora são 2)
     const coresPilha = [0xf43f5e, 0xfbbf24, 0x60a5fa, 0x6ee7c8];
+    const pneuGeo = new THREE.TorusGeometry(0.62, 0.26, 8, 16);
+    const pneus = [];
+    CURVAS.forEach((curva, ci) => {
+      for (let k = -3; k <= 3; k++) {
+        const p = pontoEm((curva.t + k * 0.0035 + 1) % 1);
+        const [lx, lz] = lateralDe(p);
+        for (let a = 0; a < 3; a++) pneus.push({ x: p.x + lx * (borda + 3.5), z: p.z + lz * (borda + 3.5), y: 0.3 + a * 0.5, topo: a === 2, cor: coresPilha[ci % coresPilha.length] });
+      }
+    });
+    const pretos = new THREE.InstancedMesh(pneuGeo, new THREE.MeshStandardMaterial({ color: 0x14161d, roughness: 0.9 }), pneus.filter((p) => !p.topo).length);
+    const topos = new THREE.InstancedMesh(pneuGeo, new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6, emissive: 0x333333 }), pneus.filter((p) => p.topo).length);
+    const m4 = new THREE.Matrix4();
+    const deitado = new THREE.Matrix4().makeRotationX(Math.PI / 2);
+    let ip = 0;
+    let it = 0;
+    for (const p of pneus) {
+      m4.makeTranslation(p.x, p.y, p.z).multiply(deitado);
+      if (p.topo) {
+        topos.setMatrixAt(it, m4);
+        topos.setColorAt(it++, new THREE.Color(p.cor));
+      } else pretos.setMatrixAt(ip++, m4);
+    }
+    for (const malha of [pretos, topos]) {
+      malha.castShadow = true;
+      malha.computeBoundingSphere();
+      grupo.add(malha);
+    }
+
+    // 5) placa com o nome de cada curva
     CURVAS.forEach((curva, ci) => {
       const cor = coresPilha[ci % coresPilha.length];
-      const topoMat = new THREE.MeshStandardMaterial({ color: cor, roughness: 0.6, emissive: cor, emissiveIntensity: 0.35 });
-      // Do lado de FORA da zebra. Antes ficavam a 3,2 m da linha central, ou
-      // seja, em cima do asfalto — dava para bater de frente numa pilha de pneu
-      // no meio da reta.
-      const afastamento = meia + Math.max(0.8, PISTA.largura * 0.085) + 3.5;
-      for (let k = -3; k <= 3; k++) {
-        const t = (curva.t + k * 0.0035 + 1) % 1;
-        const p = pontoEm(t);
-        const lateral = p.angulo;
-        const px = p.x + Math.cos(lateral) * afastamento;
-        const pz = p.z - Math.sin(lateral) * afastamento;
-        for (let a = 0; a < 3; a++) {
-          const pneu = new THREE.Mesh(pneuGeo, a === 2 ? topoMat : pneuMat);
-          pneu.rotation.x = Math.PI / 2;
-          pneu.position.set(px, 0.3 + a * 0.5, pz);
-          pneu.castShadow = true;
-          grupo.add(pneu);
-        }
-      }
-
-      // 4) placa com o nome da curva
       const p = pontoEm(curva.t);
-      const lateral = p.angulo;
-      const px = p.x + Math.cos(lateral) * (meia + 13);
-      const pz = p.z - Math.sin(lateral) * (meia + 13);
+      const [lx, lz] = lateralDe(p);
+      const px = p.x + lx * (meia + 13);
+      const pz = p.z + lz * (meia + 13);
       const tex = canvasTexture(512, 128, (ctx, w, h) => {
         ctx.fillStyle = '#0f172a';
         ctx.fillRect(0, 0, w, h);
@@ -1021,10 +1139,7 @@ export class World {
         ctx.textBaseline = 'middle';
         ctx.fillText(curva.nome, w / 2, h / 2 - 4);
       });
-      const placa = new THREE.Mesh(
-        new THREE.PlaneGeometry(11, 2.75),
-        new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }),
-      );
+      const placa = new THREE.Mesh(new THREE.PlaneGeometry(11, 2.75), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }));
       placa.position.set(px, 3.6, pz);
       placa.lookAt(p.x, 3.2, p.z);
       grupo.add(placa);
@@ -1033,43 +1148,450 @@ export class World {
       grupo.add(pe);
     });
 
-    // 5) arquibancada na reta da largada
-    const inicio = pontoEm(0.02);
-    const ang = inicio.angulo;
-    const lateral = ang;
-    const bx = inicio.x + Math.cos(lateral) * (meia + 26);
-    const bz = inicio.z - Math.sin(lateral) * (meia + 26);
-    const arquibancada = new THREE.Group();
-    for (let d = 0; d < 5; d++) {
-      const degrau = new THREE.Mesh(
-        new RoundedBoxGeometry(34, 1.1, 2.6, 2, 0.1),
-        new THREE.MeshStandardMaterial({ color: 0x232a3d, roughness: 0.85 }),
-      );
-      degrau.position.set(0, 0.55 + d * 1.0, -d * 2.4);
-      degrau.castShadow = true;
-      degrau.receiveShadow = true;
-      arquibancada.add(degrau);
-      // fileira de "público" em blocos coloridos
-      for (let k = -7; k <= 7; k++) {
-        if (Math.random() < 0.35) continue;
-        const cor = coresPilha[(k + d * 3 + 14) % coresPilha.length];
-        const pessoa = new THREE.Mesh(
-          new THREE.CapsuleGeometry(0.28, 0.4, 4, 8),
-          new THREE.MeshStandardMaterial({ color: cor, roughness: 0.7 }),
-        );
-        pessoa.position.set(k * 2.2, 1.6 + d * 1.0, -d * 2.4 - 0.2);
-        arquibancada.add(pessoa);
-      }
-    }
-    arquibancada.position.set(bx, 0, bz);
-    arquibancada.rotation.y = -ang + Math.PI;
-    grupo.add(arquibancada);
+    // 6) telão da pista e patrocínio
+    this.buildTelaoPista(grupo, meia, arq);
+    this.buildPatrocinio(grupo, borda + 9);
 
     // luz quente sobre a arquibancada e a largada
     const luzLargada = new THREE.PointLight(0xffe6c0, 280, 70, 1.6);
-    luzLargada.position.set(inicio.x, 13, inicio.z);
-    grupo.add(luzLargada);
+    luzLargada.position.set(arq.x, 13, arq.zFrente + 6);
+    this.scene.add(luzLargada);
   }
+
+  // Lâmina de guard-rail ao longo da pista, dos dois lados. Some onde encostaria em outro
+  // trecho (nos grampos o deslocamento cruzaria o asfalto do lado) e perto do cinema.
+  guardRail(grupo, afast) {
+    const tex = canvasTexture(8, 64, (ctx, w, h) => {
+      const g = ctx.createLinearGradient(0, 0, 0, h);
+      g.addColorStop(0, '#c9ced6');
+      g.addColorStop(0.28, '#7f8794');
+      g.addColorStop(0.5, '#dfe3e9');
+      g.addColorStop(0.72, '#7f8794');
+      g.addColorStop(1, '#c2c8d0');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = '#2563eb';
+      ctx.fillRect(0, h * 0.45, w, h * 0.1);
+    });
+    tex.wrapS = THREE.RepeatWrapping;
+    const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.4, metalness: 0.55, side: THREE.DoubleSide });
+    const n = CAMINHO.length;
+    for (const lado of [-1, 1]) {
+      const pos = [];
+      const uv = [];
+      const idx = [];
+      let k = 0;
+      let anterior = null;
+      let v = 0;
+      for (let i = 0; i <= n; i++) {
+        const a = CAMINHO[i % n];
+        const prev = CAMINHO[(i - 1 + n) % n];
+        const prox = CAMINHO[(i + 1) % n];
+        const dx = prox.x - prev.x;
+        const dz = prox.y - prev.y;
+        const comp = Math.hypot(dx, dz) || 1;
+        const x = PISTA.cx + a.x + (-dz / comp) * afast * lado;
+        const z = PISTA.cz + a.y + (dx / comp) * afast * lado;
+        const ok = projetar(x, z).dist > afast - 1.5 && !(x < SALA.maxX + 10 && z < SALA.maxZ + 10)
+          && !this.pertoDeVia(x, z, 2.5); // vão da entrada da pista
+        if (!ok) {
+          anterior = null;
+          continue;
+        }
+        if (anterior) {
+          v += Math.hypot(x - anterior[0], z - anterior[1]);
+          idx.push(k - 2, k, k - 1, k - 1, k, k + 1);
+        }
+        pos.push(x, 0.32, z, x, 1.12, z);
+        uv.push(v / 4, 0, v / 4, 1);
+        anterior = [x, z];
+        k += 2;
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+      geo.setIndex(idx);
+      geo.computeVertexNormals();
+      const malha = new THREE.Mesh(geo, mat);
+      malha.castShadow = true;
+      grupo.add(malha);
+    }
+  }
+
+  // Arquibancada de frente para a reta, alinhada aos eixos de propósito: os degraus são
+  // colisores de caixa (não giram) e dá para sentar neles (tecla C) para ver o telão.
+  buildArquibancada(grupo, meia) {
+    const p = pontoEm(0.02);
+    const [lx, lz] = [Math.cos(p.angulo), -Math.sin(p.angulo)];
+    const L = 64;
+    const DEGRAUS = 8;
+    const prof = 2.4;
+    const alt = 0.9;
+    // a reta corre quase no eixo X: a frente fica virada para +Z, de cara para a pista
+    const x = Math.round(p.x + lx * (meia + 20));
+    const zFrente = Math.round(p.z + lz * (meia + 20));
+    const zFundo = zFrente - DEGRAUS * prof;
+
+    const concreto = new THREE.MeshStandardMaterial({ color: 0x2a3142, roughness: 0.85 });
+    const coresAssento = [0x2563eb, 0x0ea5e9];
+    for (let d = 0; d < DEGRAUS; d++) {
+      const topo = alt * (d + 1);
+      const z0 = zFrente - (d + 1) * prof;
+      const degrau = new THREE.Mesh(new THREE.BoxGeometry(L, topo, prof), concreto);
+      degrau.position.set(x, topo / 2, z0 + prof / 2);
+      degrau.castShadow = true;
+      degrau.receiveShadow = true;
+      grupo.add(degrau);
+      const assento = new THREE.Mesh(
+        new THREE.BoxGeometry(L - 0.4, 0.45, 0.3),
+        new THREE.MeshStandardMaterial({ color: coresAssento[d % 2], roughness: 0.6 }),
+      );
+      assento.position.set(x, topo + 0.22, z0 + 0.3);
+      grupo.add(assento);
+      this.addBox({ min: [x - L / 2, 0, z0], max: [x + L / 2, topo, z0 + prof], data: { type: 'sofa' }, mesh: degrau });
+    }
+    // calçada na frente
+    const calcada = new THREE.Mesh(new THREE.PlaneGeometry(L + 8, 7), new THREE.MeshStandardMaterial({ color: 0x4a4f5a, roughness: 0.9 }));
+    calcada.rotation.x = -Math.PI / 2;
+    calcada.position.set(x, 0.05, zFrente + 3.5);
+    calcada.receiveShadow = true;
+    grupo.add(calcada);
+
+    // cobertura em balanço, com pilares no fundo
+    const topoArq = alt * DEGRAUS;
+    const coberturaY = topoArq + 5.5;
+    const aco = new THREE.MeshStandardMaterial({ color: 0x3b4252, roughness: 0.45, metalness: 0.6 });
+    for (let i = 0; i <= 4; i++) {
+      const px = x - L / 2 + 2 + (i * (L - 4)) / 4;
+      const pilar = new THREE.Mesh(new THREE.BoxGeometry(0.7, coberturaY, 0.7), aco);
+      pilar.position.set(px, coberturaY / 2, zFundo - 0.6);
+      pilar.castShadow = true;
+      grupo.add(pilar);
+      this.cameraBlockers.push(pilar);
+      this.addBox({ min: [px - 0.35, 0, zFundo - 0.95], max: [px + 0.35, coberturaY, zFundo - 0.25] });
+    }
+    const lona = new THREE.MeshStandardMaterial({ color: 0xe6ebf2, roughness: 0.75 });
+    const cobertura = new THREE.Mesh(new THREE.BoxGeometry(L + 4, 0.5, DEGRAUS * prof + 6), lona);
+    cobertura.position.set(x, coberturaY, zFundo + (DEGRAUS * prof) / 2 + 1.5);
+    cobertura.rotation.x = -0.06;
+    cobertura.castShadow = true;
+    grupo.add(cobertura);
+    // luminárias embaixo da cobertura: sem elas a parte de baixo é só sombra
+    const luminaria = new THREE.MeshBasicMaterial({ color: 0xfff4dc, toneMapped: false });
+    for (const dz of [0.25, 0.55, 0.85]) {
+      const barra = new THREE.Mesh(new THREE.BoxGeometry(L - 6, 0.12, 0.35), luminaria);
+      barra.position.set(x, coberturaY - 0.35 - dz * 0.6, zFundo + DEGRAUS * prof * dz + 1);
+      grupo.add(barra);
+    }
+    // faixa com o nome, na borda da cobertura
+    const nomeTex = canvasTexture(1024, 96, (ctx, w, h) => {
+      ctx.fillStyle = '#0d1018';
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = '#6ee7c8';
+      ctx.fillRect(0, h - 8, w, 8);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = `800 58px ${FONT}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('ARQUIBANCADA  ·  SALA 3D', w / 2, h / 2 - 2);
+    });
+    const faixa = new THREE.Mesh(new THREE.PlaneGeometry(L + 4, 2), new THREE.MeshBasicMaterial({ map: nomeTex, toneMapped: false }));
+    faixa.position.set(x, coberturaY - 0.6, zFrente + 4.6);
+    grupo.add(faixa);
+
+    // bandeiras em cima da cobertura
+    const bandeiras = [];
+    const panoGeo = new THREE.PlaneGeometry(2.6, 1.6, 8, 1).translate(1.3, 0, 0);
+    [0xf43f5e, 0xfbbf24, 0x22c55e, 0x60a5fa, 0xa78bfa, 0xf97316].forEach((cor, i) => {
+      const px = x - L / 2 + 6 + (i * (L - 12)) / 5;
+      const mastro = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 4, 6), aco);
+      mastro.position.set(px, coberturaY + 2.2, zFrente + 2);
+      grupo.add(mastro);
+      const pano = new THREE.Mesh(panoGeo.clone(), new THREE.MeshStandardMaterial({ color: cor, roughness: 0.7, side: THREE.DoubleSide }));
+      pano.position.set(px, coberturaY + 3.4, zFrente + 2);
+      grupo.add(pano);
+      bandeiras.push({ pano, base: pano.geometry.attributes.position.array.slice(), fase: i });
+    });
+    this.decorAnimated.push((t) => {
+      for (const b of bandeiras) {
+        const arr = b.pano.geometry.attributes.position.array;
+        for (let i = 0; i < arr.length; i += 3) {
+          const u = b.base[i] / 2.6; // 0 no mastro, 1 na ponta
+          arr[i + 2] = b.base[i + 2] + Math.sin(t * 4 + b.base[i] * 1.8 + b.fase) * 0.35 * u;
+        }
+        b.pano.geometry.attributes.position.needsUpdate = true;
+      }
+    });
+
+    // torcida: corpo e cabeça instanciados, fazendo "ola" de vez em quando
+    const rnd = (() => { let s = 99; return () => ((s = (s * 16807) % 2147483647) / 2147483647); })();
+    const pessoas = [];
+    for (let d = 0; d < DEGRAUS; d++) {
+      for (let k = 0; k < Math.floor(L / 1.3); k++) {
+        if (rnd() < 0.45) continue;
+        pessoas.push({ x: x - L / 2 + 0.9 + k * 1.3 + (rnd() - 0.5) * 0.3, y: alt * (d + 1), z: zFrente - d * prof - 1.1, fase: rnd() * 6 });
+      }
+    }
+    const corpoGeo = new THREE.CapsuleGeometry(0.3, 0.55, 3, 8).translate(0, 0.6, 0);
+    const cabecaGeo = new THREE.SphereGeometry(0.22, 10, 8).translate(0, 1.32, 0);
+    const corpos = new THREE.InstancedMesh(corpoGeo, new THREE.MeshStandardMaterial({ roughness: 0.7 }), pessoas.length);
+    const cabecas = new THREE.InstancedMesh(cabecaGeo, new THREE.MeshStandardMaterial({ roughness: 0.6 }), pessoas.length);
+    const camisas = [0xf43f5e, 0xfbbf24, 0x60a5fa, 0x6ee7c8, 0xa78bfa, 0xf8fafc, 0x22c55e, 0xf97316];
+    const peles = [0xf1c6a7, 0xd9a07a, 0xa86f4c, 0x6e452d];
+    pessoas.forEach((pp, i) => {
+      corpos.setColorAt(i, new THREE.Color(camisas[Math.floor(rnd() * camisas.length)]));
+      cabecas.setColorAt(i, new THREE.Color(peles[Math.floor(rnd() * peles.length)]));
+    });
+    const mp = new THREE.Matrix4();
+    const atualizarTorcida = (t) => {
+      for (let i = 0; i < pessoas.length; i++) {
+        const pp = pessoas[i];
+        // a "ola" corre de uma ponta à outra; fora dela, um balanço leve
+        const onda = Math.max(0, Math.sin(t * 1.1 - (pp.x - x) * 0.09)) ** 12 * 0.75;
+        const y = pp.y + onda + Math.abs(Math.sin(t * 2.2 + pp.fase)) * 0.06;
+        mp.makeTranslation(pp.x, y, pp.z);
+        corpos.setMatrixAt(i, mp);
+        cabecas.setMatrixAt(i, mp);
+      }
+      corpos.instanceMatrix.needsUpdate = true;
+      cabecas.instanceMatrix.needsUpdate = true;
+    };
+    atualizarTorcida(0);
+    for (const malha of [corpos, cabecas]) {
+      malha.castShadow = true;
+      malha.computeBoundingSphere();
+      malha.frustumCulled = false; // a "ola" levanta todo mundo: a esfera calculada parada ficaria pequena
+      grupo.add(malha);
+    }
+    let quadro = 0;
+    this.decorAnimated.push((t) => {
+      // só mexe na torcida quando alguém pode estar vendo e a cada dois quadros
+      if (++quadro % 2) return;
+      if (this.camera.position.distanceTo(_tmp.set(x, 5, zFrente)) > 260) return;
+      atualizarTorcida(t);
+    });
+
+    this.reservas.push({ x, z: zFrente - (DEGRAUS * prof) / 2, r: L / 2 + 10 });
+    return { x, zFrente, zFundo, L };
+  }
+
+  // Telão da pista: mesmo tamanho de tela de cinema, de frente para a arquibancada, do
+  // outro lado da reta. Mostra o mesmo que o telão do cinema (o player segue quem olha).
+  buildTelaoPista(grupo, meia, arq) {
+    const p = pontoEm(0.0125);
+    const [lx, lz] = [Math.cos(p.angulo), -Math.sin(p.angulo)];
+    const w = 36;
+    const h = (w * 9) / 16;
+    const base = 9;
+    const tx = p.x - lx * (meia + 22);
+    const tz = p.z - lz * (meia + 22);
+    const alvoZ = (arq.zFrente + arq.zFundo) / 2;
+    const rotY = Math.atan2(arq.x - tx, alvoZ - tz);
+
+    this.pistaScreen = this.criarTelao({
+      w, h, title: 'Telão da pista', subtitle: 'Cole um link no painel Telão: ele toca aqui e no cinema', accent: '#ff5d73',
+    });
+    this.pistaScreen.group.position.set(tx, base + h / 2, tz);
+    this.pistaScreen.group.rotation.y = rotY;
+
+    // estrutura: duas pernas de aço, travessa atrás e base de concreto
+    const estrutura = new THREE.Group();
+    estrutura.position.set(tx, 0, tz);
+    estrutura.rotation.y = rotY;
+    const aco = new THREE.MeshStandardMaterial({ color: 0x2b3245, roughness: 0.45, metalness: 0.6 });
+    for (const sx of [-1, 1]) {
+      const perna = new THREE.Mesh(new THREE.BoxGeometry(1.4, base + h * 0.6, 1.4), aco);
+      perna.position.set(sx * (w / 2 - 5), (base + h * 0.6) / 2, -1.2);
+      perna.castShadow = true;
+      estrutura.add(perna);
+    }
+    const travessa = new THREE.Mesh(new THREE.BoxGeometry(w - 6, 1, 1), aco);
+    travessa.position.set(0, base + 1.2, -1.2);
+    estrutura.add(travessa);
+    const sapata = new THREE.Mesh(new THREE.BoxGeometry(w + 2, 0.6, 5), new THREE.MeshStandardMaterial({ color: 0x3a3f4b, roughness: 0.9 }));
+    sapata.position.set(0, 0.3, -1.2);
+    sapata.receiveShadow = true;
+    estrutura.add(sapata);
+    // faixa de LED embaixo da tela
+    const led = new THREE.Mesh(new THREE.BoxGeometry(w + 0.7, 0.25, 0.3), new THREE.MeshBasicMaterial({ color: 0xff5d73, toneMapped: false }));
+    led.position.set(0, base - 0.55, 0);
+    estrutura.add(led);
+    grupo.add(estrutura);
+
+    this.reservas.push({ x: tx, z: tz, r: w / 2 + 6 });
+  }
+
+  // Placas de patrocínio atrás do guard-rail, só onde há espaço livre.
+  buildPatrocinio(grupo, afast) {
+    const marcas = [
+      ['SALA 3D', '#6ee7c8', '#071a16'],
+      ['PIPOCA TURBO', '#fbbf24', '#1c1203'],
+      ['NEON COLA', '#f472b6', '#1d0614'],
+      ['RÁDIO VOLTA', '#60a5fa', '#06111f'],
+      ['PNEU BOM', '#f97316', '#1c0c03'],
+      ['GOIÂNIA 2,3 KM', '#a78bfa', '#100a1f'],
+    ];
+    const texturas = marcas.map(([nome, cor, fundo]) => canvasTexture(512, 96, (ctx, w, h) => {
+      ctx.fillStyle = fundo;
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = cor;
+      ctx.fillRect(0, 0, 14, h);
+      ctx.fillRect(w - 14, 0, 14, h);
+      ctx.font = `800 54px ${FONT}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(nome, w / 2, h / 2 + 2);
+    }));
+    const pe = new THREE.MeshStandardMaterial({ color: 0x2b3245, roughness: 0.6 });
+    const verso = new THREE.MeshStandardMaterial({ color: 0x1b1f2a, roughness: 0.8 });
+    const faces = texturas.map((map) => {
+      const frente = new THREE.MeshBasicMaterial({ map, toneMapped: false });
+      // faces da BoxGeometry: 0 +x, 1 -x, 2 +y, 3 -y, 4 +z (frente, virada para a pista), 5 -z
+      return [verso, verso, verso, verso, frente, verso];
+    });
+    let n = 0;
+    for (let t = 0.06; t < 0.97; t += 0.075) {
+      const p = pontoEm(t);
+      const [lx, lz] = [Math.cos(p.angulo), -Math.sin(p.angulo)];
+      for (const lado of [1, -1]) {
+        const x = p.x + lx * afast * lado;
+        const z = p.z + lz * afast * lado;
+        const livre = projetar(x, z).dist > afast - 2
+          && !this.pertoDeVia(x, z, 8)
+          && !this.reservas.some((r) => Math.hypot(x - r.x, z - r.z) < r.r)
+          && !(x < SALA.maxX + 10 && z < SALA.maxZ + 10);
+        if (!livre) continue;
+        const placa = new THREE.Mesh(new THREE.BoxGeometry(14, 2.6, 0.12), faces[n % faces.length]);
+        placa.position.set(x, 2.6, z);
+        placa.lookAt(p.x, 2.6, p.z);
+        grupo.add(placa);
+        for (const s of [-1, 1]) {
+          const poste = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 2.6, 6), pe);
+          poste.position.copy(placa.position).add(_tmp.set(lz * s * 6 * lado, -1.3, -lx * s * 6 * lado));
+          grupo.add(poste);
+        }
+        n++;
+        break; // uma placa por ponto da pista
+      }
+    }
+  }
+
+  // Estrada de pedra da porta do cinema até a pista: passa pela ponta da arquibancada e entra
+  // no asfalto no sentido do tráfego, uns 28 m antes da linha de largada — quem chega por ela
+  // cruza a linha logo em seguida e a volta já começa a contar.
+  buildEstrada(arq, meia) {
+    const S = SALA;
+    const zPorta = (S.porta.z0 + S.porta.z1) / 2;
+    const arqPonta = [arq.x - arq.L / 2 - 4, arq.zFrente + 3];
+    const pj = pontoEm(PISTA.largadaT - 0.012);
+    const entrada = [pj.x + Math.cos(pj.angulo) * (meia - 1), pj.z - Math.sin(pj.angulo) * (meia - 1)];
+    const ctrl = [
+      [S.maxX + 1, zPorta], [S.maxX + 26, zPorta + 4], [S.maxX + 52, zPorta + 14],
+      [(S.maxX + 52 + arqPonta[0]) / 2, (zPorta + 14 + arqPonta[1]) / 2 + 4], arqPonta, entrada,
+    ].map(([x, z]) => new THREE.Vector3(x, 0, z));
+    const curva = new THREE.CatmullRomCurve3(ctrl, false, 'centripetal');
+    const pts = curva.getSpacedPoints(90);
+    const largura = 9;
+
+    const pedraTex = canvasTexture(128, 128, (ctx, w, h) => {
+      ctx.fillStyle = '#7d7468';
+      ctx.fillRect(0, 0, w, h);
+      for (let y = 0; y < 4; y++) {
+        for (let x = 0; x < 4; x++) {
+          const tom = 105 + Math.floor(Math.random() * 40);
+          ctx.fillStyle = `rgb(${tom + 12},${tom + 4},${tom - 8})`;
+          roundRect(ctx, x * 32 + (y % 2) * 16 + 2, y * 32 + 2, 28, 28, 6);
+          ctx.fill();
+        }
+      }
+    });
+    pedraTex.wrapS = pedraTex.wrapT = THREE.RepeatWrapping;
+    const pos = [];
+    const uv = [];
+    const idx = [];
+    let v = 0;
+    pts.forEach((p, i) => {
+      const a = pts[Math.max(0, i - 1)];
+      const b = pts[Math.min(pts.length - 1, i + 1)];
+      const dx = b.x - a.x;
+      const dz = b.z - a.z;
+      const c = Math.hypot(dx, dz) || 1;
+      const nx = -dz / c;
+      const nz = dx / c;
+      if (i > 0) v += p.distanceTo(pts[i - 1]);
+      // mesma ordem da fita da pista (lado - antes do +): os triângulos ficam virados para cima
+      // 0,07: acima da área de escape (0,06), então a pedra vai até a zebra
+      pos.push(p.x - nx * largura / 2, 0.07, p.z - nz * largura / 2, p.x + nx * largura / 2, 0.07, p.z + nz * largura / 2);
+      uv.push(0, v / 4, largura / 4, v / 4);
+      if (i < pts.length - 1) idx.push(i * 2, i * 2 + 1, i * 2 + 2, i * 2 + 1, i * 2 + 3, i * 2 + 2);
+      // lampiões dos dois lados, alternados
+      if (i % 6 === 3) {
+        const lado = (i / 6) % 2 < 1 ? 1 : -1;
+        const lx = p.x + nx * (largura / 2 + 1) * lado;
+        const lz = p.z + nz * (largura / 2 + 1) * lado;
+        if (projetar(lx, lz).dist < meia + 9) return; // perto do asfalto: sem lampião
+        const haste = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 2.6, 6), new THREE.MeshStandardMaterial({ color: 0x2b2f3a }));
+        haste.position.set(lx, 1.3, lz);
+        const globo = new THREE.Mesh(new THREE.SphereGeometry(0.26, 12, 8), new THREE.MeshBasicMaterial({ color: 0xffe2a8, toneMapped: false }));
+        globo.position.set(lx, 2.75, lz);
+        this.fora.add(haste, globo);
+      }
+    });
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    const estrada = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: pedraTex, roughness: 0.95 }));
+    estrada.receiveShadow = true;
+    this.fora.add(estrada);
+    const pontos = pts.map((p) => [p.x, p.z]);
+    this.estradas.push({ pontos, largura });
+
+    // placa logo na saída do cinema
+    const zP = (S.porta.z0 + S.porta.z1) / 2;
+    this.placaDirecao(S.maxX + 9, zP - 8, -Math.PI / 2, 'AUTÓDROMO  ↗', '#6ee7c8');
+    return pontos;
+  }
+
+  // Alguma estrada/entrada passa a menos de (largura/2 + folga) deste ponto?
+  pertoDeVia(x, z, folga) {
+    for (const { pontos, largura } of this.estradas) {
+      for (let i = 0; i < pontos.length - 1; i++) {
+        const [ax, az] = pontos[i];
+        const [bx, bz] = pontos[i + 1];
+        const abx = bx - ax;
+        const abz = bz - az;
+        const u = Math.max(0, Math.min(1, ((x - ax) * abx + (z - az) * abz) / (abx * abx + abz * abz || 1)));
+        if (Math.hypot(x - (ax + abx * u), z - (az + abz * u)) < largura / 2 + folga) return true;
+      }
+    }
+    return false;
+  }
+
+  // Placa de direção num poste, com o texto dos dois lados.
+  placaDirecao(x, z, rotY, texto, cor) {
+    const tex = canvasTexture(512, 128, (ctx, w, h) => {
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = cor;
+      ctx.fillRect(0, h - 12, w, 12);
+      ctx.fillStyle = '#f8fafc';
+      ctx.font = `800 58px ${FONT}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(texto, w / 2, h / 2 - 4);
+    });
+    const verso = new THREE.MeshStandardMaterial({ color: 0x1b1f2a, roughness: 0.8 });
+    const frente = new THREE.MeshBasicMaterial({ map: tex, toneMapped: false });
+    const placa = new THREE.Mesh(new THREE.BoxGeometry(6, 1.5, 0.12), [verso, verso, verso, verso, frente, frente]);
+    placa.position.set(x, 3, z);
+    placa.rotation.y = rotY;
+    const poste = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 3, 6), new THREE.MeshStandardMaterial({ color: 0x2b3245 }));
+    poste.position.set(x, 1.5, z);
+    this.fora.add(placa, poste);
+  }
+
   buildCourse() {
     const matCache = new Map();
     const material = (color, emissive = 0.14) => {
@@ -1245,12 +1767,28 @@ export class World {
       c.max.copy(c.mesh.position).add(c.half);
     }
     for (const fn of this.decorAnimated) fn(time);
+    this.natureza?.update(time);
   }
 
   setShadows(on) {
     this.renderer.shadowMap.enabled = on;
     this.sun.castShadow = on;
     this.scene.traverse((o) => { if (o.material) o.material.needsUpdate = true; });
+  }
+
+  // Dentro da sala do cinema, só a porta deixa ver o lado de fora.
+  cullFora() {
+    const cam = this.camera;
+    const p = cam.position;
+    const dentro = p.x > SALA.minX && p.x < SALA.maxX && p.z > SALA.minZ && p.z < SALA.maxZ;
+    let ver = !dentro;
+    if (dentro) {
+      cam.updateMatrixWorld();
+      _m4.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+      _frustum.setFromProjectionMatrix(_m4);
+      ver = _frustum.intersectsBox(this.portaBox);
+    }
+    this.fora.visible = ver;
   }
 
   resize() {
@@ -1263,6 +1801,9 @@ export class World {
   }
 
   render() {
+    this.natureza?.seguirCamera(this.camera, performance.now() / 1000);
+    this.atualizarTelao();
+    this.cullFora();
     for (const label of this.fadeLabels) {
       label.getWorldPosition(_tmp);
       const d = _tmp.distanceTo(this.camera.position);

@@ -1,11 +1,11 @@
-// Sala 3D — junta tudo: lobby, mundo, jogador, voz/tela (WebRTC), YouTube, chat e parkour.
+// Sala 3D — junta tudo: lobby, mundo, jogador, voz/tela (WebRTC), telão (YouTube, Twitch…), chat e parkour.
 import * as THREE from 'three';
 import { World, SPAWN } from './world.js';
 import { Avatar } from './avatars.js';
 import { PERSONAGENS } from './modelo.js';
 import { Player } from './player.js';
 import { RTC, SHARE_PRESETS } from './rtc.js';
-import { YouTubeSync } from './youtube.js';
+import { MediaSync, PROVIDERS, preloadYouTube } from './media.js';
 import { ParkourRun, formatTime, CHECKPOINT_COUNT } from './parkour.js';
 import { Combat } from './combat.js';
 import { RING, COMBAT, ringCorners } from './arena.js';
@@ -24,17 +24,20 @@ const typing = () => {
 
 const COLORS = ['#7c9cff', '#6ee7c8', '#f472b6', '#fbbf24', '#a78bfa', '#fb7185', '#38bdf8', '#a3e635', '#f97316', '#e2e8f0'];
 const EMOTE_KEYS = ['wave', 'party', 'laugh', 'heart', 'clap', 'fire'];
-const PANEL_TITLES = { people: 'Pessoas', chat: 'Chat da sala', youtube: 'YouTube no telão', parkour: 'Parkour', ringue: 'Ringue de luta', corrida: 'Pista de corrida', settings: 'Ajustes' };
+const PANEL_TITLES = { people: 'Pessoas', chat: 'Chat da sala', telao: 'Telão', parkour: 'Parkour', ringue: 'Ringue de luta', corrida: 'Pista de corrida', settings: 'Ajustes' };
 
 // ------------------------------------------------------------------ ajustes salvos
 const DEFAULTS = {
-  name: '', color: COLORS[0], mic: true, voice: 100, screen: 90, yt: 80, spatial: false,
+  name: '', color: COLORS[0], mic: true, voice: 100, screen: 90, tv: 80, spatial: false,
   shareMode: 'detail', sens: 100, shadows: true, sfx: true, micDevice: '', helpCollapsed: false, photo: null, shirt: 'none', char: 'padrao',
 };
 const stored = (() => {
   try { return JSON.parse(localStorage.getItem('sala3d') || '{}'); } catch { return {}; }
 })();
 const settings = { ...DEFAULTS, ...stored };
+// o volume do telão se chamava "yt" quando ele só tocava YouTube
+if (stored.tv === undefined && stored.yt !== undefined) settings.tv = stored.yt;
+delete settings.yt;
 // celular: sombra custa caro e quase não se vê na tela pequena — só se o usuário nunca escolheu
 if (isTouch && stored.shadows === undefined) settings.shadows = false;
 function saveSettings() {
@@ -65,10 +68,11 @@ const state = {
   room: null,
   roomRequested: null,
   users: new Map(),
-  main: 'youtube',
+  main: 'media',
   micOn: settings.mic,
   micAvailable: false,
   sharing: false,
+  casting: false, // a "tela" compartilhada é um arquivo de vídeo, não a captura da tela
   panel: null,
   focus: null,
   hovered: null,
@@ -77,7 +81,7 @@ const state = {
 };
 let socket = null;
 let rtc = null;
-let yt = null;
+let tv = null; // player do telão (MediaSync)
 let analyser = null;
 let micBuf = null;
 
@@ -119,14 +123,14 @@ function liberarSomDasTelas() {
 }
 
 function updateUnblockButton() {
-  const alvo = $('#yt-unblock');
+  const alvo = $('#tv-unblock');
   if (!alvo) return;
-  const ytBloqueado = !!(yt?.blocked && world.mainScreen.mode === 'youtube');
+  const tvBloqueado = !!(tv?.blocked && world.mainScreen.mode === 'media');
   const telaMuda = telasMudas.size > 0;
-  alvo.hidden = !(ytBloqueado || telaMuda);
-  const btn = $('#yt-unblock-btn');
+  alvo.hidden = !(tvBloqueado || telaMuda);
+  const btn = $('#tv-unblock-btn');
   if (btn && alvo.hidden === false) {
-    btn.innerHTML = icon('volume', 16) + (telaMuda && !ytBloqueado ? 'Ativar o som da tela' : 'Ativar o som do telão');
+    btn.innerHTML = icon('volume', 16) + (telaMuda && !tvBloqueado ? 'Ativar o som da tela' : 'Ativar o som do telão');
   }
 }
 
@@ -323,13 +327,20 @@ async function join() {
   combat.socket = socket;
   rtc = new RTC(socket, { iceServers: config.iceServers, onTrack: handleTrack });
   rtc.shareMode = settings.shareMode;
-  yt = new YouTubeSync(socket, {
-    onChange: onYtChange,
+  preloadYouTube();
+  $('#browser-block').hidden = !config.browser;
+  renderBrowserSites(config.browser?.sites || []);
+  tv = new MediaSync(socket, $('#tv-host'), {
+    // o sufixo do id evita dois "Ana" brigando pela mesma sessão dentro do neko
+    browser: config.browser && { ...config.browser, name: () => `${settings.name}-${(state.selfId || '').slice(-3)}` },
+    onChange: onTvChange,
     onError: (msg) => {
       toast(msg, 'error', 6000);
-      showYtError(msg);
+      showTvError(msg);
     },
+    onNotice: (msg) => toast(msg, 'warn', 6000),
   });
+  tv.setVolume(settings.tv);
   bindSocket();
 
   const data = await emitJoin();
@@ -384,12 +395,6 @@ async function join() {
       toast('Vire o celular na horizontal para jogar melhor.', 'warn', 7000);
     }
   }
-
-  yt.setVolume(settings.yt);
-  yt.init('yt-player').then(() => refreshScreens()).catch((err) => {
-    console.warn('[yt]', err);
-    toast('Não foi possível carregar o YouTube.', 'warn');
-  });
 }
 
 function emitJoin() {
@@ -417,7 +422,7 @@ function applyJoined(data) {
   });
   for (const u of data.users) addUser(u);
   state.main = data.main;
-  yt.setInitial(data.youtube);
+  tv.setInitial(data.media);
 
   $('#chat-list').innerHTML = '';
   if (data.chat.length) data.chat.forEach((m) => addChat(m, false));
@@ -552,11 +557,15 @@ function bindSocket() {
     renderPeople();
     if (by && by !== settings.name) {
       const u = state.users.get(source);
-      toast(source === 'youtube' ? `${by} colocou o YouTube no telão` : `${by} colocou a tela de ${u?.name ?? 'alguém'} no telão`);
+      toast(source === 'media' ? `${by} voltou o telão para o ${tv.label}` : `${by} colocou a tela de ${u?.name ?? 'alguém'} no telão`);
     }
   });
 
   socket.on('chat', (m) => addChat(m, m.id !== state.selfId));
+
+  socket.on('browser-opened', ({ site, by }) => {
+    toast(by === settings.name ? `Abrindo ${site} no telão` : `${by} abriu ${site} no navegador do telão`, 'info', 3500, '#38bdf8');
+  });
 
   socket.on('emote', ({ id, kind }) => state.users.get(id)?.avatar.emote(kind));
 
@@ -667,7 +676,7 @@ $('#people-list').addEventListener('click', (e) => {
 });
 
 function togglePin(id) {
-  socket.emit('main', state.main === id ? 'youtube' : id);
+  socket.emit('main', state.main === id ? 'media' : id);
 }
 
 // ------------------------------------------------------------------ microfone
@@ -752,22 +761,36 @@ async function populateDevices() {
 // ------------------------------------------------------------------ compartilhar tela
 async function toggleShare() {
   if (state.sharing) return stopShare(true);
+  if (shareBusy) return;
   if (!navigator.mediaDevices?.getDisplayMedia) {
     toast('Seu navegador não permite compartilhar a tela aqui. Use Chrome/Edge no computador (https ou localhost).', 'error', 6000);
     return;
   }
   let stream;
+  shareBusy = true;
   try {
     stream = await rtc.startScreen();
+    if (!(await publishShare(stream))) return;
   } catch (err) {
     if (err.name !== 'NotAllowedError' && err.name !== 'AbortError') toast(`Não foi possível compartilhar: ${err.message}`, 'error');
     return;
+  } finally {
+    shareBusy = false;
   }
+  if (!stream.getAudioTracks().length) {
+    toast('Compartilhando sem som. Para mandar o som, escolha uma aba ou a tela inteira e marque “Compartilhar áudio”.', 'warn', 8000);
+  } else {
+    toast(`Você está compartilhando na Tela ${self().slot + 1} (com som)`);
+  }
+}
+
+// reserva uma tela no servidor e manda o stream (captura de tela ou arquivo) para todo mundo
+async function publishShare(stream) {
   const res = await new Promise((resolve) => socket.emit('share-start', { streamId: stream.id }, resolve));
   if (!res?.ok) {
     rtc.stopScreen();
     toast(res?.error || 'Não foi possível compartilhar.', 'error');
-    return;
+    return false;
   }
   state.sharing = true;
   const me = self();
@@ -776,22 +799,24 @@ async function toggleShare() {
   localScreenVideo.srcObject = stream;
   localScreenVideo.play().catch(() => {});
   rtc.publishScreen();
-  stream.getVideoTracks()[0]?.addEventListener('ended', () => stopShare(true));
-  localAvatar.setStatus({ sharing: true });
-
-  if (!stream.getAudioTracks().length) {
-    toast('Compartilhando sem som. Para mandar o som, escolha uma aba ou a tela inteira e marque “Compartilhar áudio”.', 'warn', 8000);
-  } else {
-    toast(`Você está compartilhando na Tela ${res.slot + 1} (com som)`);
+  // captura de tela: a trilha acaba quando a pessoa clica em "Parar" na barra do navegador.
+  // Arquivo: acaba toda vez que o vídeo chega ao fim, e isso não é motivo para parar.
+  if (!state.casting) {
+    stream.getVideoTracks()[0]?.addEventListener('ended', () => {
+      if (rtc.screenStream === stream) stopShare(true);
+    });
   }
+  localAvatar.setStatus({ sharing: true });
   updateShareButton();
   refreshScreens();
   renderPeople();
+  return true;
 }
 
 function stopShare(notify) {
   if (!state.sharing) return;
   rtc.stopScreen();
+  stopCastVideo();
   if (notify) socket.emit('share-stop');
   state.sharing = false;
   localScreenVideo.srcObject = null;
@@ -810,8 +835,160 @@ function updateShareButton() {
   const b = $('#btn-share');
   b.classList.toggle('on', state.sharing);
   b.querySelector('i').innerHTML = icon(state.sharing ? 'shareOff' : 'share');
-  b.dataset.tip = state.sharing ? 'Parar de compartilhar' : 'Compartilhar tela';
+  b.dataset.tip = state.casting ? 'Parar de transmitir o vídeo' : state.sharing ? 'Parar de compartilhar' : 'Compartilhar tela';
 }
+
+// ------------------------------------------------------------------ vídeo do computador
+// O arquivo toca num <video> escondido e o captureStream() dele vira a "tela" que vai para
+// os outros pelo WebRTC: qualidade do arquivo, com som, sem capturar o resto do PC.
+const castVideo = makeVideo(false);
+// Só o captureStream() sem prefixo: o mozCaptureStream() do Firefox deixa quem transmite
+// sem som (bugzilla.mozilla.org/show_bug.cgi?id=1178751).
+const castSupported = !!castVideo.captureStream && !!window.RTCPeerConnection;
+let castUrl = null;
+let shareBusy = false; // começando uma tela ou um arquivo: um de cada vez
+
+// espera um evento; resolve true se veio, false se estourou o tempo, e rejeita no evento de falha
+function waitEvent(target, ok, fail, ms) {
+  return new Promise((resolve, reject) => {
+    const done = (fn, arg) => {
+      clearTimeout(timer);
+      target.removeEventListener(ok, onOk);
+      if (fail) target.removeEventListener(fail, onFail);
+      fn(arg);
+    };
+    const onOk = () => done(resolve, true);
+    const onFail = () => done(reject, new Error(fail));
+    const timer = setTimeout(() => done(resolve, false), ms);
+    target.addEventListener(ok, onOk);
+    if (fail) target.addEventListener(fail, onFail);
+  });
+}
+
+async function castFile(file) {
+  if (!castSupported) {
+    toast('Este navegador não consegue transmitir arquivos. Use Chrome ou Edge no computador.', 'error', 6000);
+    return;
+  }
+  if (shareBusy) return;
+  shareBusy = true;
+  try {
+    await startCast(file);
+  } finally {
+    shareBusy = false;
+  }
+}
+
+async function startCast(file) {
+  if (state.sharing) stopShare(true);
+  stopCastVideo();
+  castUrl = URL.createObjectURL(file);
+  castVideo.src = castUrl;
+  castVideo.muted = false;
+  castVideo.volume = settings.tv / 100;
+  let abriu = false;
+  try {
+    abriu = await waitEvent(castVideo, 'loadedmetadata', 'error', 20000);
+  } catch { /* abriu continua false */ }
+  if (!abriu || !castVideo.videoWidth) {
+    stopCastVideo();
+    toast('O navegador não conseguiu abrir esse arquivo. MP4 (H.264) e WebM funcionam sempre; MKV e MOV dependem dos codecs.', 'error', 8000);
+    return;
+  }
+  try {
+    await castVideo.play();
+  } catch {
+    // sem permissão para tocar com som aqui: os outros recebem o som mesmo assim
+    castVideo.muted = true;
+    await castVideo.play().catch(() => {});
+    toast('Toque em ▶ no painel do telão para ouvir aqui também.', 'warn', 6000);
+  }
+  const stream = castVideo.captureStream();
+  if (!stream.getVideoTracks().length) await waitEvent(stream, 'addtrack', null, 3000);
+  if (!stream.getVideoTracks().length) {
+    stopCastVideo();
+    toast('Não consegui transmitir a imagem desse arquivo.', 'error');
+    return;
+  }
+  rtc.useStream(stream, { height: castVideo.videoHeight });
+  state.casting = true;
+  if (!(await publishShare(stream))) {
+    stopCastVideo();
+    return;
+  }
+  // depois do fim, dar play de novo cria trilhas novas no mesmo stream: repassa para todos
+  stream.addEventListener('addtrack', (e) => {
+    if (rtc.screenStream !== stream) return;
+    rtc.replaceScreenTrack(e.track);
+    localScreenVideo.play().catch(() => {}); // o stream ficou sem trilhas no fim e o <video> parou
+  });
+  $('#cast-title').textContent = file.name;
+  updateShareButton();
+  renderCast();
+  // quem escolhe um filme quer ver no telão, não numa das telinhas
+  if (state.main !== state.selfId) socket.emit('main', state.selfId);
+  toast(`Transmitindo “${file.name}” no telão`);
+}
+
+function stopCastVideo() {
+  state.casting = false;
+  castVideo.pause();
+  castVideo.removeAttribute('src');
+  castVideo.load();
+  if (castUrl) URL.revokeObjectURL(castUrl);
+  castUrl = null;
+  renderCast();
+}
+
+function renderCast() {
+  $('#cast-now').hidden = !state.casting;
+  $('#cast-pick').innerHTML = icon('film', 18) + (state.casting ? 'Trocar de vídeo' : 'Escolher vídeo');
+  $('#cast-play').innerHTML = icon(castVideo.paused ? 'play' : 'pause', 22);
+}
+
+function updateCastProgress() {
+  const cur = castVideo.currentTime || 0;
+  const dur = Number.isFinite(castVideo.duration) ? castVideo.duration : 0;
+  $('#cast-cur').textContent = mmss(cur);
+  $('#cast-dur').textContent = mmss(dur);
+  $('#cast-fill').style.width = dur ? `${Math.min(100, (cur / dur) * 100)}%` : '0%';
+}
+
+if (!castSupported) {
+  $('#cast-pick').hidden = true;
+  $('#cast-unsupported').hidden = false;
+}
+$('#cast-pick').addEventListener('click', () => $('#cast-file').click());
+$('#cast-file').addEventListener('change', (e) => {
+  const file = e.target.files?.[0];
+  e.target.value = '';
+  if (file) castFile(file);
+});
+$('#cast-play').addEventListener('click', () => {
+  if (castVideo.paused) {
+    castVideo.muted = false;
+    castVideo.play().catch(() => {});
+  } else {
+    castVideo.pause();
+  }
+});
+$('#cast-back').addEventListener('click', () => { castVideo.currentTime = Math.max(0, castVideo.currentTime - 10); });
+$('#cast-fwd').addEventListener('click', () => {
+  if (Number.isFinite(castVideo.duration)) castVideo.currentTime = Math.min(castVideo.duration, castVideo.currentTime + 10);
+});
+$('#cast-stop').addEventListener('click', () => stopShare(true));
+$('#cast-progress').addEventListener('click', (e) => {
+  const dur = castVideo.duration;
+  if (!Number.isFinite(dur) || !dur) return;
+  const r = e.currentTarget.getBoundingClientRect();
+  castVideo.currentTime = ((e.clientX - r.left) / r.width) * dur;
+  updateCastProgress();
+});
+castVideo.addEventListener('play', renderCast);
+castVideo.addEventListener('pause', renderCast);
+castVideo.addEventListener('ended', () => {
+  if (state.casting) toast('O vídeo terminou. Aperte ▶ para ver de novo ou ⏹ para parar de transmitir.', 'info', 6000);
+});
 
 // ------------------------------------------------------------------ mídia recebida
 function handleTrack(peerId, stream) {
@@ -883,28 +1060,33 @@ function refreshScreens() {
     }
   });
 
-  const ms = world.mainScreen;
-  ms.owner = null;
-  const pinned = state.main !== 'youtube' ? state.users.get(state.main) : null;
-  ms.setLabel(null);
-  if (pinned) {
-    ms.owner = pinned.id;
-    ms.setLabel(pinned.isSelf ? 'Você' : pinned.name, pinned.color);
-    const v = shareVideoOf(pinned);
-    if (v) ms.setMode('share', v);
-    else {
+  // o telão do cinema e o da pista mostram sempre a mesma coisa
+  const pinned = state.main !== 'media' ? state.users.get(state.main) : null;
+  for (const ms of world.telaoes) {
+    ms.owner = null;
+    ms.setLabel(null);
+    if (pinned) {
+      ms.owner = pinned.id;
+      ms.setLabel(pinned.isSelf ? 'Você' : pinned.name, pinned.color);
+      const v = shareVideoOf(pinned);
+      if (v) ms.setMode('share', v);
+      else {
+        ms.setMode('empty');
+        ms.setPlaceholder(pinned.name, 'Conectando à tela…');
+      }
+    } else if (tv?.state.id) {
+      // o cartaz só aparece no telão que não está com o player (o mais longe de você)
+      ms.setPlaceholder(tv.title || tv.label, 'Tocando no outro telão — chegue mais perto');
+      ms.setMode('media');
+    } else {
       ms.setMode('empty');
-      ms.setPlaceholder(pinned.name, 'Conectando à tela…');
+      ms.setPlaceholder('Telão', 'Cole um link (YouTube, Twitch, Kick…) ou fixe a tela de alguém aqui');
     }
-  } else if (yt?.state.videoId) {
-    ms.setMode('youtube');
-  } else {
-    ms.setMode('empty');
-    ms.setPlaceholder('Telão', 'Cole um link do YouTube ou fixe a tela de alguém aqui');
   }
-  yt?.setHidden(ms.mode !== 'youtube');
+  const ms = world.mainScreen;
+  tv?.setHidden(ms.mode !== 'media');
 
-  if (state.focus?.kind === 'yt' && ms.mode !== 'youtube') exitFocus();
+  if (state.focus?.kind === 'tv' && ms.mode !== 'media') exitFocus();
   if (state.focus?.kind === 'share' && !shareVideoOf(state.users.get(state.focus.userId))) exitFocus();
   renderMainSources();
 }
@@ -925,37 +1107,62 @@ function updateVolumes() {
   }
 }
 
-// ------------------------------------------------------------------ YouTube
-function onYtChange(s) {
+// ------------------------------------------------------------------ telão
+function onTvChange(s) {
   refreshScreens();
-  renderYt();
-  if (s.action === 'load' && s.by && s.by !== settings.name) toast(`${s.by} colocou um vídeo no telão`, 'info', 4000, '#ff4d5e');
+  renderTv();
+  if (s.action === 'load' && s.by && s.by !== settings.name) {
+    const meta = PROVIDERS[s.provider];
+    toast(`${s.by} colocou ${meta?.live ? 'uma live' : 'um vídeo'} no telão · ${meta?.label ?? 'Vídeo'}`, 'info', 4000, meta?.color);
+  }
   if (s.action) s.action = null;
 }
 
-function renderYt() {
-  if (!yt) return;
-  const s = yt.state;
-  $('#yt-now').hidden = !s.videoId;
-  $('#yt-title').textContent = yt.title || (s.videoId ? 'Carregando vídeo…' : '—');
-  $('#yt-by').textContent = s.by ? `Última ação por ${s.by}` : '';
-  $('#yt-play').innerHTML = icon(s.playing ? 'pause' : 'play', 22);
-  $('#yt-volume').value = settings.yt;
+function renderTv() {
+  if (!tv) return;
+  const s = tv.state;
+  const on = !!s.id;
+  $('#tv-now').hidden = !on;
+  if (on) {
+    const meta = PROVIDERS[s.provider];
+    $('#tv-now').style.setProperty('--fill', meta.color);
+    const badge = $('#tv-badge');
+    badge.textContent = meta.label;
+    badge.style.setProperty('--c', meta.color);
+    // o navegador é um só para todos: nem "ao vivo" nem "pausar vale só para você" se aplicam
+    const browser = s.provider === 'browser';
+    $('#tv-live').hidden = !tv.live || browser;
+    // ao vivo não tem linha do tempo; sem API não tem nem play/pause compartilhado
+    $('#tv-timeline').hidden = !tv.canSeek;
+    for (const id of ['#tv-back', '#tv-fwd', '#tv-sync']) $(id).hidden = !tv.canSeek;
+    $('#tv-play').hidden = !tv.controllable;
+    $('#tv-noapi').hidden = tv.controllable || browser;
+  }
+  $('#tv-title').textContent = tv.title || (on ? 'Carregando vídeo…' : '—');
+  $('#tv-by').textContent = s.by ? `Última ação por ${s.by}` : '';
+  $('#tv-play').innerHTML = icon(s.playing ? 'pause' : 'play', 22);
+  $('#tv-volume').value = settings.tv;
+  const browserOn = s.provider === 'browser';
+  $('#browser-open').innerHTML = icon('globe', 18) + (browserOn ? 'Navegador no telão' : 'Pôr o navegador no telão');
+  $('#browser-open').classList.toggle('on', browserOn);
 }
 
-function showYtError(msg) {
-  const el = $('#yt-error');
+function showTvError(msg) {
+  const el = $('#tv-error');
   el.textContent = msg;
   el.hidden = false;
-  setTimeout(() => { el.hidden = true; }, 7000);
+  clearTimeout(showTvError.timer);
+  showTvError.timer = setTimeout(() => { el.hidden = true; }, 9000);
 }
 
 function renderMainSources() {
   const sharers = [...state.users.values()].filter((u) => u.slot != null);
-  const ytLabel = yt?.state.videoId ? (yt.title || 'Vídeo do YouTube') : 'Nenhum vídeo';
+  const playing = !!tv?.state.id;
+  const color = playing ? PROVIDERS[tv.state.provider]?.color : 'var(--muted)';
+  const sub = playing ? (tv.title || 'Carregando…') : 'Nada tocando';
   $('#main-sources').innerHTML = [
-    `<button type="button" class="source${state.main === 'youtube' ? ' on' : ''}" data-src="youtube"><span class="sdot" style="--c:#ff4d5e"></span>YouTube<small>${esc(ytLabel.slice(0, 26))}</small></button>`,
-    ...sharers.map((u) => `<button type="button" class="source${state.main === u.id ? ' on' : ''}" data-src="${esc(u.id)}"><span class="sdot" style="--c:${esc(u.color)}"></span>Tela de ${esc(u.isSelf ? 'você' : u.name)}<small>Tela ${u.slot + 1}</small></button>`),
+    `<button type="button" class="source${state.main === 'media' ? ' on' : ''}" data-src="media"><span class="sdot" style="--c:${color}"></span>${playing ? esc(tv.label) : 'Player'}<small>${esc(sub.slice(0, 26))}</small></button>`,
+    ...sharers.map((u) => `<button type="button" class="source${state.main === u.id ? ' on' : ''}" data-src="${esc(u.id)}"><span class="sdot" style="--c:${esc(u.color)}"></span>${u.isSelf && state.casting ? 'Seu vídeo' : `Tela de ${esc(u.isSelf ? 'você' : u.name)}`}<small>Tela ${u.slot + 1}</small></button>`),
   ].join('');
 }
 
@@ -964,43 +1171,82 @@ $('#main-sources').addEventListener('click', (e) => {
   if (b && b.dataset.src !== state.main) socket.emit('main', b.dataset.src);
 });
 
-$('#yt-form').addEventListener('submit', (e) => {
+$('#tv-form').addEventListener('submit', (e) => {
   e.preventDefault();
-  const input = $('#yt-url');
-  if (!yt.load(input.value)) {
-    showYtError('Link inválido. Cole um link do YouTube (youtube.com/watch?v=…, youtu.be/…, shorts…).');
+  const input = $('#tv-url');
+  const r = tv.load(input.value);
+  if (r.error) {
+    showTvError(r.error);
     return;
   }
   input.value = '';
   input.blur();
-  $('#yt-error').hidden = true;
-  yt.unblock();
+  $('#tv-error').hidden = true;
+  tv.unblock();
 });
-$('#yt-play').addEventListener('click', () => yt.togglePlay());
-$('#yt-back').addEventListener('click', () => yt.seekBy(-10));
-$('#yt-fwd').addEventListener('click', () => yt.seekBy(10));
-$('#yt-stop').addEventListener('click', () => yt.stop());
-$('#yt-sync').addEventListener('click', () => {
-  yt.send('seek', { time: yt.currentTime() });
+// Atalhos: o ícone vem do próprio site; se não carregar, fica a inicial do nome.
+function renderBrowserSites(sites) {
+  const box = $('#browser-sites');
+  box.innerHTML = sites.map((s) => `<button type="button" class="site-btn" data-site="${esc(s.id)}" title="Abrir ${esc(s.label)} no navegador do telão">`
+    + `<img src="https://${esc(s.host)}/favicon.ico" alt="" referrerpolicy="no-referrer" loading="lazy">${esc(s.label)}</button>`).join('');
+  for (const img of box.querySelectorAll('img')) {
+    img.addEventListener('error', () => {
+      const letra = document.createElement('span');
+      letra.className = 'site-letter';
+      letra.textContent = img.parentElement.textContent.trim()[0] || '?';
+      img.replaceWith(letra);
+    }, { once: true });
+  }
+}
+
+$('#browser-sites').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-site]');
+  if (!b || b.disabled) return;
+  // o atalho abre o site no navegador compartilhado; se o telão está com outra coisa, troca
+  if (tv.state.provider !== 'browser') tv.send('load', { provider: 'browser', id: 'shared' });
+  else if (state.main !== 'media') socket.emit('main', 'media');
+  b.disabled = true;
+  socket.emit('browser-open', b.dataset.site, (res) => {
+    b.disabled = false;
+    if (!res?.ok) toast(res?.error || 'Não consegui abrir esse site.', 'warn');
+  });
+});
+
+$('#browser-open').addEventListener('click', () => {
+  if (tv.state.provider === 'browser') {
+    if (state.main !== 'media') socket.emit('main', 'media');
+    toast('O navegador já está no telão: olhe para ele e aperte E para usar.');
+    return;
+  }
+  tv.send('load', { provider: 'browser', id: 'shared' });
+});
+$('#tv-play').addEventListener('click', () => tv.togglePlay());
+$('#tv-back').addEventListener('click', () => tv.seekBy(-10));
+$('#tv-fwd').addEventListener('click', () => tv.seekBy(10));
+$('#tv-stop').addEventListener('click', () => tv.stop());
+$('#tv-sync').addEventListener('click', () => {
+  if (!tv.canSeek) return;
+  tv.send('seek', { time: tv.currentTime() });
   toast('Todo mundo sincronizado com o seu tempo.');
 });
-$('#yt-progress').addEventListener('click', (e) => {
-  const dur = yt.duration();
-  if (!dur) return;
+$('#tv-progress').addEventListener('click', (e) => {
+  const dur = tv.duration();
+  if (!dur || !tv.canSeek) return;
   const r = e.currentTarget.getBoundingClientRect();
-  yt.send('seek', { time: ((e.clientX - r.left) / r.width) * dur });
+  tv.send('seek', { time: ((e.clientX - r.left) / r.width) * dur });
 });
-$('#yt-volume').addEventListener('input', (e) => {
-  settings.yt = Number(e.target.value);
-  yt?.setVolume(settings.yt);
+$('#tv-volume').addEventListener('input', (e) => {
+  settings.tv = Number(e.target.value);
+  tv?.setVolume(settings.tv);
+  castVideo.volume = settings.tv / 100;
   saveSettings();
 });
-$('#yt-unblock-btn').addEventListener('click', () => {
-  yt?.unblock();
+$('#tv-unblock-btn').addEventListener('click', () => {
+  tv?.unblock();
   liberarSomDasTelas();
 });
 // qualquer clique real na página já serve para liberar o som do telão
-document.addEventListener('pointerdown', () => { if (yt?.blocked) yt.unblock(); }, true);
+document.addEventListener('pointerdown', () => { if (tv?.blocked) tv.unblock(); }, true);
 
 function mmss(sec) {
   sec = Math.max(0, Math.floor(sec || 0));
@@ -1202,18 +1448,40 @@ function setFightBoard(board) {
 // ------------------------------------------------------------------ pista de corrida
 $('#rh-setores').innerHTML = '<i></i>'.repeat(PISTA.setores);
 
+// o painel da volta aparece de carro na pista, e continua aparecendo se sair dela com a
+// volta valendo (o relógio não para fora da pista)
+function atualizarHudCorrida() {
+  $('#race-hud').hidden = !(player.veiculo && (corrida.naPista || corrida.ativa));
+}
+
 const corrida = new Corrida({
   onPista: (dentro) => {
-    $('#race-hud').hidden = !(dentro && player.veiculo);
+    atualizarHudCorrida();
+    if (!dentro && corrida.ativa && player.veiculo) flashRace('Fora da pista — o tempo continua correndo');
   },
   onLargada: () => {
+    $('#race-hud').classList.remove('invalida');
     flashRace('Valendo!');
     sfx.checkpoint();
   },
   onSetor: (n) => setRaceSetores(n),
-  onCortou: () => flashRace('Volta não contou: faltou passar por setores'),
-  onCancelar: () => { setRaceSetores(0); $('#rh-msg').textContent = ''; },
+  onInvalida: () => {
+    $('#race-hud').classList.add('invalida');
+    flashRace('Cortou caminho: esta volta não vai valer');
+  },
+  onCortou: () => {
+    $('#race-hud').classList.remove('invalida');
+    setRaceSetores(0);
+    flashRace('Volta não contou: cortou caminho');
+  },
+  onCancelar: () => {
+    $('#race-hud').classList.remove('invalida');
+    setRaceSetores(0);
+    $('#rh-msg').textContent = '';
+    atualizarHudCorrida();
+  },
   onVolta: (tempo, n, recorde) => {
+    $('#race-hud').classList.remove('invalida');
     setRaceSetores(0);
     sfx.finish();
     socket?.emit('volta', tempo);
@@ -1256,7 +1524,7 @@ function toggleVeiculo() {
   if (!virou) return;
   sfx.teleport();
   if (player.veiculo) toast('Modo carro: W acelera, S freia, A/D viram. Shift é turbo.', 'info', 4200);
-  $('#race-hud').hidden = !(player.veiculo && corrida.naPista);
+  atualizarHudCorrida();
   if (touchPad) touchPad.showCarro?.(player.veiculo);
 }
 
@@ -1344,8 +1612,10 @@ const screenCenter = new THREE.Vector2(0, 0);
 
 function screenInfo(screen) {
   if (!screen) return null;
-  if (screen === world.mainScreen) {
-    if (screen.mode === 'youtube') return { kind: 'yt', label: 'Focar no telão (YouTube)' };
+  if (world.telaoes.includes(screen)) {
+    if (screen.mode === 'media') {
+      return { kind: 'tv', screen, label: tv?.state.provider === 'browser' ? 'Usar o navegador' : `Focar no telão (${tv?.label ?? 'vídeo'})` };
+    }
     if (screen.mode === 'share' && screen.owner) {
       const u = state.users.get(screen.owner);
       return { kind: 'share', userId: screen.owner, label: `Ver a tela de ${u?.isSelf ? 'você' : u?.name}` };
@@ -1403,12 +1673,19 @@ function enterFocus(info) {
   if (!info) return;
   exitFocus();
   if (document.pointerLockElement) document.exitPointerLock();
-  if (info.kind === 'yt') {
-    state.focus = { kind: 'yt' };
-    player.override = world.mainScreen.focusPose(world.camera, 1.02);
-    document.body.classList.add('yt-focus');
-    yt.interactive = true;
-    $('#yt-focus-hud').hidden = false;
+  if (info.kind === 'tv') {
+    state.focus = { kind: 'tv' };
+    // o telão em foco fica com o player, mesmo que o outro esteja mais perto
+    const alvo = info.screen || world.mainScreen;
+    world.travarTelao(alvo);
+    player.override = alvo.focusPose(world.camera, 1.02);
+    document.body.classList.add('tv-focus');
+    tv.interactive = true;
+    // no navegador o teclado fica com ele (para digitar), então o Esc não chega aqui
+    $('#tv-focus-text').textContent = tv.state.provider === 'browser'
+      ? 'Clique no navegador para pegar o controle. Para voltar a andar, use o botão ao lado.'
+      : 'Clique no vídeo para usar os controles do player';
+    $('#tv-focus-hud').hidden = false;
     $('#crosshair').hidden = true;
     $('#hover-hint').hidden = true;
     return;
@@ -1434,11 +1711,14 @@ function updateFocusPin() {
 
 function exitFocus() {
   if (!state.focus) return;
-  if (state.focus.kind === 'yt') {
+  if (state.focus.kind === 'tv') {
     player.override = null;
-    document.body.classList.remove('yt-focus');
-    yt.interactive = false;
-    $('#yt-focus-hud').hidden = true;
+    world.travarTelao(null);
+    document.body.classList.remove('tv-focus');
+    tv.interactive = false;
+    // o iframe do navegador segura o teclado: devolve para o jogo
+    if (document.activeElement?.tagName === 'IFRAME') document.activeElement.blur();
+    $('#tv-focus-hud').hidden = true;
     $('#crosshair').hidden = false;
   } else {
     $('#focus').hidden = true;
@@ -1450,7 +1730,7 @@ function exitFocus() {
 }
 
 $('#focus-close').addEventListener('click', exitFocus);
-$('#yt-focus-exit').addEventListener('click', exitFocus);
+$('#tv-focus-exit').addEventListener('click', exitFocus);
 $('#focus-full').addEventListener('click', () => {
   if (document.fullscreenElement) document.exitFullscreen();
   else $('#focus').requestFullscreen().catch(() => {});
@@ -1474,7 +1754,10 @@ function openPanel(name) {
     const list = $('#chat-list');
     list.scrollTop = list.scrollHeight;
   }
-  if (name === 'youtube') renderYt();
+  if (name === 'telao') {
+    renderTv();
+    renderCast();
+  }
   if (name === 'people') renderPeople();
   if (name === 'settings') populateDevices();
   syncTouchVisibility();
@@ -1795,14 +2078,15 @@ function slowUpdate() {
   }
   updateUnblockButton();
 
-  if (state.panel === 'youtube' && yt?.state.videoId) {
-    const cur = yt.currentTime();
-    const dur = yt.duration();
-    $('#yt-cur').textContent = mmss(cur);
-    $('#yt-dur').textContent = mmss(dur);
-    $('#yt-fill').style.width = dur ? `${Math.min(100, (cur / dur) * 100)}%` : '0%';
-    if (yt.title && $('#yt-title').textContent !== yt.title) $('#yt-title').textContent = yt.title;
+  if (state.panel === 'telao' && tv?.state.id) {
+    const cur = tv.currentTime();
+    const dur = tv.duration();
+    $('#tv-cur').textContent = mmss(cur);
+    $('#tv-dur').textContent = mmss(dur);
+    $('#tv-fill').style.width = dur ? `${Math.min(100, (cur / dur) * 100)}%` : '0%';
+    if (tv.title && $('#tv-title').textContent !== tv.title) $('#tv-title').textContent = tv.title;
   }
+  if (state.panel === 'telao' && state.casting) updateCastProgress();
 }
 
 function frame() {
@@ -1843,7 +2127,7 @@ function frame() {
 }
 
 // atalho para depuração no console do navegador
-window.sala = { state, world, player, run, settings, get yt() { return yt; }, get rtc() { return rtc; }, get socket() { return socket; } };
+window.sala = { state, world, player, run, settings, get tv() { return tv; }, get rtc() { return rtc; }, get socket() { return socket; } };
 
 function updateClock() {
   const d = new Date();

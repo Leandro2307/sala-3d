@@ -1,0 +1,36 @@
+# Navegador compartilhado (neko): um Firefox de verdade rodando num container, com imagem e som
+# indo para todos por WebRTC. Quem estiver no controle navega para a sala inteira.
+#
+# Não precisa rodar isto na mão: "npm run navegador" cria o .env com as senhas, descobre o IP
+# da rede e sobe o container antes do servidor. Docs: https://neko.m1k1o.net/docs/v3
+services:
+  neko:
+    image: ghcr.io/m1k1o/neko/firefox:latest
+    container_name: sala3d-navegador # o servidor da sala usa esse nome para os atalhos (YouTube etc.)
+    restart: unless-stopped
+    shm_size: 2gb # sem isso o navegador trava em página pesada
+    ports:
+      - "8080:8080" # página do neko (vai num iframe dentro do telão)
+      - "59000:59000/udp" # vídeo e som; tem que ser a mesma porta dos dois lados
+      - "59000:59000/tcp" # reserva para rede que bloqueia UDP
+    volumes:
+      # o login (YouTube Premium etc.) sobrevive a reiniciar o container
+      - ./perfil:/home/neko/.mozilla/firefox/profile.default
+      # Política do Firefox: cópia da que vem na imagem, com uma diferença — ao fechar ele NÃO
+      # apaga cookies e dados dos sites (é o que mantém o login de um dia para o outro).
+      # Histórico, formulários e cache continuam sendo apagados, e salvar senha continua
+      # desligado (PasswordManagerEnabled: false): nenhuma senha vai para o disco.
+      - ./firefox-policies.json:/usr/lib/firefox/distribution/policies.json:ro
+    environment:
+      # 720p: o telão tem 1280x720 de qualquer jeito, e 1080p custa 2,25x mais CPU para o
+      # Firefox desenhar e para o neko comprimir (sem placa de vídeo, é tudo no processador)
+      NEKO_DESKTOP_SCREEN: 1280x720@30
+      NEKO_MEMBER_PROVIDER: multiuser
+      NEKO_MEMBER_MULTIUSER_USER_PASSWORD: ${BROWSER_PASSWORD:?rode "npm run navegador" para criar o .env}
+      NEKO_MEMBER_MULTIUSER_ADMIN_PASSWORD: ${BROWSER_ADMIN_PASSWORD:?rode "npm run navegador" para criar o .env}
+      # clicou no navegador, ganhou o controle (o admin pode travar pelo menu do neko)
+      NEKO_SESSION_IMPLICIT_HOSTING: "true"
+      NEKO_WEBRTC_UDPMUX: 59000
+      NEKO_WEBRTC_TCPMUX: 59000
+      # IP pelo qual os navegadores alcançam esta máquina (o script põe o IP da rede local)
+      NEKO_WEBRTC_NAT1TO1: ${BROWSER_IP:?defina o IP da máquina}

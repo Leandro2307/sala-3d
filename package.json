@@ -8,14 +8,17 @@
     "start": "node server.js",
     "https": "node server.js --https",
     "tunnel": "cloudflared.exe tunnel --url http://localhost:3000 --no-autoupdate",
-    "publico": "node scripts/publico.js"
+    "publico": "node scripts/publico.js",
+    "navegador": "node scripts/navegador.js"
   },
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
     "compression": "^1.8.2",
+    "dashjs": "^5.2.1",
     "express": "^5.2.1",
+    "hls.js": "^1.7.3",
     "selfsigned": "^5.5.0",
     "socket.io": "^4.8.4",
     "three": "^0.186.1"
