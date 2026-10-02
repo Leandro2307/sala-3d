@@ -1,6 +1,8 @@
 // Controles de toque para celular: analógico de movimento, botões de ação e tela cheia.
 
 export const isTouch = (() => {
+  // ?toque=1 força a interface de celular no computador (para testar sem um aparelho)
+  if (new URLSearchParams(window.location.search).get('toque') === '1') return true;
   try {
     return window.matchMedia('(hover: none) and (pointer: coarse)').matches
       || (navigator.maxTouchPoints > 0 && !window.matchMedia('(pointer: fine)').matches);
@@ -56,7 +58,7 @@ function setupStick(el, player) {
     cx = r.left + r.width / 2;
     cy = r.top + r.height / 2;
     radius = r.width / 2;
-    el.setPointerCapture(e.pointerId);
+    try { el.setPointerCapture(e.pointerId); } catch { /* ponteiro já solto */ }
     el.classList.add('active');
     apply(e.clientX, e.clientY);
     e.preventDefault();
@@ -83,7 +85,8 @@ function setupButton(el, { onPress, onRelease, noSoltar }) {
   el.addEventListener('pointerdown', (e) => {
     if (id !== null) return;
     id = e.pointerId;
-    el.setPointerCapture(e.pointerId);
+    // a captura é um extra (o dedo pode escorregar para fora): se falhar, o botão funciona igual
+    try { el.setPointerCapture(e.pointerId); } catch { /* ponteiro já solto */ }
     el.classList.add('held');
     onPress?.();
     e.preventDefault();
@@ -151,12 +154,25 @@ export function setupTouchControls(player, actions = {}) {
     },
   });
 
+  // pedais do carro: segurar acelera ou freia (e dá ré parado); soltar volta a deslizar
+  const pedais = { acelera: false, freio: false };
+  const atualizarPedal = () => { player.pedal = pedais.acelera ? 1 : pedais.freio ? -1 : 0; };
+  for (const [id, nome] of [['#tb-acelera', 'acelera'], ['#tb-freio', 'freio']]) {
+    const el = root.querySelector(id);
+    if (!el) continue;
+    setupButton(el, {
+      onPress: () => { pedais[nome] = true; atualizarPedal(); },
+      onRelease: () => { pedais[nome] = false; atualizarPedal(); },
+    });
+  }
+
   for (const [id, fn] of Object.entries({
     '#tb-use': actions.use,
     '#tb-view': actions.view,
     '#tb-respawn': actions.respawn,
     '#tb-punch': actions.punch,
     '#tb-sit': actions.sit,
+    '#tb-car': actions.car,
   })) {
     const el = root.querySelector(id);
     if (el && fn) setupButton(el, { onPress: fn });
@@ -170,9 +186,32 @@ export function setupTouchControls(player, actions = {}) {
     cheia.addEventListener('click', (e) => e.preventDefault());
   }
 
+  const $b = (id) => root.querySelector(id);
   return {
-    reset: () => { stick.reset(); player.jumpHeld = false; },
+    reset: () => {
+      stick.reset();
+      player.jumpHeld = false;
+      pedais.acelera = pedais.freio = false;
+      atualizarPedal();
+    },
     show(on) { root.hidden = !on; },
+    // modo carro: pedais no lugar do pulo, o botão de correr vira turbo
+    showCarro(on) {
+      root.classList.toggle('carro', on);
+      $b('#tb-acelera').hidden = !on;
+      $b('#tb-freio').hidden = !on;
+      $b('#tb-jump').hidden = on;
+      const car = $b('#tb-car');
+      car.classList.toggle('on', on);
+      car.setAttribute('aria-pressed', String(on));
+      car.setAttribute('aria-label', on ? 'Voltar a andar' : 'Virar carro');
+      $b('#tb-run').setAttribute('aria-label', on ? 'Turbo' : 'Correr');
+      $b('#tb-respawn').setAttribute('aria-label', on ? 'Voltar para a pista' : 'Voltar ao checkpoint');
+      if (!on) {
+        pedais.acelera = pedais.freio = false;
+        atualizarPedal();
+      }
+    },
     showPunch(on) {
       const el = root.querySelector('#tb-punch');
       if (el) el.hidden = !on;

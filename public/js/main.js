@@ -9,7 +9,7 @@ import { MediaSync, PROVIDERS, preloadYouTube } from './media.js';
 import { ParkourRun, formatTime, CHECKPOINT_COUNT } from './parkour.js';
 import { Combat } from './combat.js';
 import { RING, COMBAT, ringCorners } from './arena.js';
-import { Corrida, PISTA, largada, formatarVolta } from './pista.js';
+import { Corrida, PISTA, largada, formatarVolta, projetar, pontoEm } from './pista.js';
 import { sfx, audioContext, setSfxEnabled } from './sfx.js';
 import { icon, hydrateIcons } from './icons.js';
 import { isTouch, setupTouchControls, toggleFullscreen, isFullscreen, temTelaCheia } from './touch.js';
@@ -40,6 +40,8 @@ if (stored.tv === undefined && stored.yt !== undefined) settings.tv = stored.yt;
 delete settings.yt;
 // celular: sombra custa caro e quase não se vê na tela pequena — só se o usuário nunca escolheu
 if (isTouch && stored.shadows === undefined) settings.shadows = false;
+// celular: a ajuda começa recolhida (a tela é pequena), mas continua a um toque
+if (isTouch && stored.helpCollapsed === undefined) settings.helpCollapsed = true;
 function saveSettings() {
   try { localStorage.setItem('sala3d', JSON.stringify(settings)); } catch { /* modo privado */ }
 }
@@ -378,6 +380,7 @@ async function join() {
       respawn: () => { if (!state.focus) respawn(); },
       punch: () => punch(),
       sit: () => toggleSit(),
+      car: () => toggleVeiculo(),
       fullscreen: async () => {
         const r = await toggleFullscreen();
         updateFullscreenButton();
@@ -1401,7 +1404,21 @@ player.on('sit', (sentado) => {
   if (sentado) sfx.message();
 });
 
+// No carro, "voltar" põe o carro de novo na pista, no ponto mais perto e virado para a frente
+// (atolou na grama, bateu numa árvore, se perdeu). Teleportar para onde já estava na pista
+// não conta como cortar caminho.
+function voltarParaPista() {
+  const { t } = projetar(player.pos.x, player.pos.z);
+  const p = pontoEm(t);
+  player.teleport([p.x, PISTA.y, p.z], p.angulo + Math.PI);
+  flashRace('De volta à pista');
+}
+
 function respawn() {
+  if (player.veiculo) {
+    voltarParaPista();
+    return;
+  }
   if (run.state !== 'idle' && run.checkpoint && run.checkpoint.data.type !== 'start') {
     teleportToCollider(run.checkpoint);
     flashPk('De volta ao checkpoint');
@@ -1523,7 +1540,11 @@ function toggleVeiculo() {
   const virou = player.setVeiculo(!player.veiculo);
   if (!virou) return;
   sfx.teleport();
-  if (player.veiculo) toast('Modo carro: W acelera, S freia, A/D viram. Shift é turbo.', 'info', 4200);
+  if (player.veiculo) {
+    toast(isTouch
+      ? 'Modo carro: pedais à direita aceleram e freiam, o analógico é o volante. O botão de correr é o turbo.'
+      : 'Modo carro: W acelera, S freia, A/D viram. Shift é turbo. R volta para a pista.', 'info', 5000);
+  }
   atualizarHudCorrida();
   if (touchPad) touchPad.showCarro?.(player.veiculo);
 }
@@ -1770,10 +1791,11 @@ function closePanel() {
   syncTouchVisibility();
 }
 
-// o analógico e os botões só aparecem quando dá pra andar de verdade
+// o analógico e os botões só aparecem quando dá pra andar de verdade (com o telão em foco
+// eles ficariam por cima do vídeo, atrapalhando tocar nos controles do player)
 function syncTouchVisibility() {
   if (!touchPad) return;
-  const livre = state.joined && !state.panel && state.focus?.kind !== 'share';
+  const livre = state.joined && !state.panel && !state.focus;
   touchPad.show(livre);
   if (!livre) touchPad.reset();
 }

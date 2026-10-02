@@ -1093,6 +1093,14 @@ body.touch .rh-time { font-size: 20px; }
   color: #fb7185;
 }
 .tb.punch.held { background: rgba(244, 63, 94, 0.45); }
+/* pedais do carro: freio vermelho, acelerador verde, os dois com o rótulo embaixo do ícone */
+.tb.pedal { width: 64px; height: 64px; border-radius: 22px; }
+.tb.big.pedal { width: 82px; height: 82px; border-radius: 26px; }
+#tb-freio { background: rgba(244, 63, 94, 0.18); border-color: rgba(244, 63, 94, 0.5); color: #fb7185; }
+#tb-freio.held { background: rgba(244, 63, 94, 0.42); }
+#tb-acelera.held { background: rgba(110, 231, 200, 0.4); }
+/* no celular não tem Esc: o botão já diz o que faz */
+body.touch #pk-quit kbd, body.touch #tv-focus-exit kbd { display: none; }
 
 #pk-quit {
   margin-top: 8px;
@@ -1152,7 +1160,9 @@ body.touch #gl, body.touch #css3d { touch-action: none; }
 body.touch #bar {
   top: 0;
   bottom: auto;
-  grid-template-columns: auto 1fr;
+  /* uma linha só: sala | ícones dos painéis (rolam se não couberem) | botões redondos.
+     Antes eram duas linhas, e a de baixo ficava atrás da ajuda e dos placares. */
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 6px;
   padding: calc(8px + env(safe-area-inset-top)) 10px 8px;
   background: linear-gradient(180deg, rgba(8, 9, 13, 0.92), rgba(8, 9, 13, 0));
@@ -1163,7 +1173,8 @@ body.touch .bar-center, body.touch .bar-right { gap: 4px; }
 body.touch .bar-right { overflow-x: auto; scrollbar-width: none; }
 body.touch .bar-right::-webkit-scrollbar { display: none; }
 body.touch .ghost { flex: none; }
-body.touch .bar-center { justify-content: flex-end; }
+body.touch .bar-center { justify-content: flex-end; order: 3; }
+body.touch .bar-right { order: 2; justify-content: flex-start; }
 body.touch .round, body.touch .ghost { width: 40px; height: 40px; }
 body.touch #btn-view { display: none; } /* já existe no painel de toque */
 body.touch .room-chip { display: none; } /* o nome da sala já aparece na barra */
@@ -1195,7 +1206,11 @@ body.touch #panel {
   body.touch .stick-knob { width: 44px; height: 44px; margin: -22px 0 0 -22px; }
   body.touch .tb.big { width: 62px; height: 62px; }
   body.touch .tb.small { width: 40px; height: 40px; }
-  body.touch #controls-help { display: none; }
+  body.touch .tb.pedal { width: 56px; height: 56px; }
+  body.touch .tb.big.pedal { width: 70px; height: 70px; }
+  body.touch .touch-actions { gap: 8px; }
+  /* paisagem baixinha: a ajuda fica só como etiqueta recolhida (abre quando tocar) */
+  body.touch #controls-help:not(.collapsed) { max-height: calc(100vh - 150px); overflow-y: auto; }
 }
 
 @media (prefers-reduced-motion: reduce) {

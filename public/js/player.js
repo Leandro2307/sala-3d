@@ -46,6 +46,7 @@ export class Player {
     this.runInput = false; // analógico empurrado até a borda
     this.runLock = false; // botão "correr" fixado
     this.jumpHeld = false; // botão de pulo mantido pressionado
+    this.pedal = 0; // pedais do celular no modo carro: 1 acelera, -1 freia/ré
     this.touchLook = 1; // multiplicador do arrasto com o dedo
     this.sitting = false; // sentado num sofá/pufe
     this.veiculo = false; // transformado em carro
@@ -214,6 +215,7 @@ export class Player {
   teleport(pos, yaw = null) {
     this.pos.set(pos[0], pos[1] + 0.05, pos[2]);
     this.vel.set(0, 0, 0);
+    this.velocidade = 0; // o carro não chega embalado
     if (yaw !== null) {
       this.yaw = yaw;
       this.bodyYaw = Math.atan2(-Math.sin(yaw), -Math.cos(yaw));
@@ -287,6 +289,8 @@ export class Player {
       f = this.moveInput.y;
       r = this.moveInput.x;
     }
+    // no carro, os pedais do celular mandam no acelerador; o analógico fica só de volante
+    if (this.veiculo && this.pedal) f = this.pedal;
     const running = k.has('ShiftLeft') || k.has('ShiftRight') || this.runInput || this.runLock;
 
     if (this.veiculo) {
