@@ -1271,6 +1271,7 @@ body.touch .bar-right::-webkit-scrollbar { display: none; }
 body.touch .ghost { flex: none; }
 body.touch .bar-center { justify-content: flex-end; order: 3; }
 body.touch .bar-right { order: 2; justify-content: flex-start; }
+body.touch #btn-full { display: none; } /* no celular a tela cheia fica no canto (#tb-full) */
 body.touch .round, body.touch .ghost { width: 40px; height: 40px; }
 body.touch #btn-view { display: none; } /* já existe no painel de toque */
 body.touch .room-chip { display: none; } /* o nome da sala já aparece na barra */

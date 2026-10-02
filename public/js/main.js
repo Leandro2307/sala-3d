@@ -2088,10 +2088,22 @@ function syncTouchVisibility() {
 }
 
 function updateFullscreenButton() {
-  const b = $('#tb-full');
-  if (b) b.classList.toggle('on', isFullscreen());
+  const cheia = isFullscreen();
+  $('#tb-full')?.classList.toggle('on', cheia);
+  const b = $('#btn-full');
+  b.classList.toggle('on', cheia);
+  b.dataset.tip = cheia ? 'Sair da tela cheia (Esc)' : 'Tela cheia (esconde as barras do Chrome)';
 }
 document.addEventListener('fullscreenchange', updateFullscreenButton);
+
+// Tela cheia no computador. Além de dar mais espaço, some com as barras "Compartilhando …
+// com esta guia" que o Chrome põe no topo a cada aba compartilhada — site nenhum consegue
+// tirar essas barras, mas em tela cheia o Chrome esconde tudo lá de cima.
+if (!temTelaCheia) $('#btn-full').hidden = true;
+$('#btn-full').addEventListener('click', async () => {
+  const r = await toggleFullscreen();
+  if (!r.ok) toast('O navegador não deixou entrar em tela cheia. Tente a tecla F11.', 'warn', 5000);
+});
 
 const helpBox = $('#controls-help');
 const helpBtn = $('#help-toggle');
