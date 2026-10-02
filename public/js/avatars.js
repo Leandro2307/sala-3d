@@ -1,6 +1,7 @@
 // Bonecos: tronco em cápsula, cabeça redonda (ou com a foto da pessoa), braços e
 // pernas articulados em dois segmentos, e camiseta opcional estampada no peito.
 import * as THREE from 'three';
+import { criarPersonagem } from './modelo.js';
 
 const FONT = "'Plus Jakarta Sans', system-ui, sans-serif";
 const EMOJI_FONT = "'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', sans-serif";
@@ -220,6 +221,7 @@ export class Avatar {
     this.swing = 0; // animação do soco
     this.ko = false;
     this.sitting = false;
+    this.personagem = null; // modelo glTF, quando a pessoa escolhe um
     // pescoço e ombros, para a cabeça não flutuar solta
     this.neck = new THREE.Mesh(shared.pescoco, this.material);
     this.neck.position.y = 1.27;
@@ -343,6 +345,36 @@ export class Avatar {
       ctx.fill();
     }
     tex.needsUpdate = true;
+  }
+
+  // Troca o corpo padrão por um modelo glTF animado. Se o arquivo falhar, o
+  // boneco original volta — nunca fica sem nada na tela.
+  async setPersonagem(def) {
+    if (this.personagem) {
+      this.inner.remove(this.personagem.grupo);
+      this.personagem.dispose();
+      this.personagem = null;
+    }
+    this.mostrarCorpoPadrao(true);
+    if (!def || !def.url) return { ok: true, padrao: true };
+    try {
+      const p = await criarPersonagem(def);
+      if (!p) return { ok: true, padrao: true };
+      this.personagem = p;
+      this.inner.add(p.grupo);
+      this.mostrarCorpoPadrao(false);
+      return { ok: true, padrao: false, animado: p.temAnimacao, clipes: p.clips.length };
+    } catch (err) {
+      console.warn('[modelo] não carregou', err);
+      this.mostrarCorpoPadrao(true);
+      return { ok: false, erro: err?.message || String(err) };
+    }
+  }
+
+  mostrarCorpoPadrao(ligado) {
+    for (const m of [this.body, this.hip, this.shoulders, this.neck, this.head]) m.visible = ligado;
+    for (const { raiz } of this.legs) raiz.visible = ligado;
+    for (const { raiz } of this.arms) raiz.visible = ligado;
   }
 
   setName(name) { this.name = name; this.drawTag(); }
@@ -519,91 +551,98 @@ export class Avatar {
       this.inner.rotation.y += d * k;
     }
 
-    // animação procedural
-    const moving = this.anim === 1 || this.anim === 2;
-    const airborne = this.anim === 3;
-    const speed = this.anim === 2 ? 15 : 10;
-    if (moving) this.phase += dt * speed;
-    else this.phase += dt * 2;
-    const s = Math.sin(this.phase);
-    const bob = moving ? Math.abs(s) * 0.12 : Math.sin(t * 2 + this.phase) * 0.015;
+    // Com modelo glTF, quem anima é o AnimationMixer; o corpo procedural é pulado.
+    if (this.personagem) {
+      this.personagem.update(dt, this.anim, this.anim === 2 ? 1.6 : 1);
+      this.halo.position.y = 1.5;
+    } else {
+      // animação procedural
+      const moving = this.anim === 1 || this.anim === 2;
+      const airborne = this.anim === 3;
+      const speed = this.anim === 2 ? 15 : 10;
+      if (moving) this.phase += dt * speed;
+      else this.phase += dt * 2;
+      const s = Math.sin(this.phase);
+      const bob = moving ? Math.abs(s) * 0.12 : Math.sin(t * 2 + this.phase) * 0.015;
 
-    const sentado = this.anim === 4;
-    const alturaSentado = sentado ? -0.34 : 0;
+      const sentado = this.anim === 4;
+      const alturaSentado = sentado ? -0.34 : 0;
 
-    this.body.position.y = ALTURA.troncoY + bob + alturaSentado;
-    this.hip.position.y = ALTURA.perna + bob * 0.8 + alturaSentado;
-    this.head.position.y = ALTURA.cabecaY + bob * 1.1 + alturaSentado;
-    this.body.rotation.z = moving && !sentado ? s * 0.06 : 0;
-    this.body.rotation.x = sentado ? -0.12 : moving ? (this.anim === 2 ? 0.16 : 0.08) : 0;
-    this.halo.position.y = this.head.position.y;
+      this.body.position.y = ALTURA.troncoY + bob + alturaSentado;
+      this.hip.position.y = ALTURA.perna + bob * 0.8 + alturaSentado;
+      this.head.position.y = ALTURA.cabecaY + bob * 1.1 + alturaSentado;
+      this.body.rotation.z = moving && !sentado ? s * 0.06 : 0;
+      this.body.rotation.x = sentado ? -0.12 : moving ? (this.anim === 2 ? 0.16 : 0.08) : 0;
+      this.halo.position.y = this.head.position.y;
 
-    this.neck.position.y = 1.27 + bob + alturaSentado;
-    this.shoulders.position.y = 1.16 + bob + alturaSentado;
+      this.neck.position.y = 1.27 + bob + alturaSentado;
+      this.shoulders.position.y = 1.16 + bob + alturaSentado;
 
-    // pernas: coxa gira no quadril, canela dobra no joelho
-    const passo = moving ? s * (this.anim === 2 ? 0.95 : 0.6) : 0;
-    this.legs.forEach(({ raiz, joelho }, i) => {
-      const lado = i === 0 ? 1 : -1;
-      raiz.position.y = ALTURA.perna + bob * 0.8 + alturaSentado;
-      if (sentado) {
-        raiz.rotation.x = -1.45;
-        joelho.rotation.x = 1.4; // joelho dobrado: canela desce reta
-      } else if (airborne) {
-        raiz.rotation.x = lado > 0 ? -0.5 : 0.28;
-        joelho.rotation.x = lado > 0 ? 0.75 : 0.2;
-      } else {
-        const g = passo * lado;
-        raiz.rotation.x = g;
-        // o joelho só dobra na perna que está voltando, como numa passada real
-        joelho.rotation.x = Math.max(0, -g) * 1.5 + (moving ? 0.1 : 0.04);
+      // pernas: coxa gira no quadril, canela dobra no joelho
+      const passo = moving ? s * (this.anim === 2 ? 0.95 : 0.6) : 0;
+      this.legs.forEach(({ raiz, joelho }, i) => {
+        const lado = i === 0 ? 1 : -1;
+        raiz.position.y = ALTURA.perna + bob * 0.8 + alturaSentado;
+        if (sentado) {
+          raiz.rotation.x = -1.45;
+          joelho.rotation.x = 1.4; // joelho dobrado: canela desce reta
+        } else if (airborne) {
+          raiz.rotation.x = lado > 0 ? -0.5 : 0.28;
+          joelho.rotation.x = lado > 0 ? 0.75 : 0.2;
+        } else {
+          const g = passo * lado;
+          raiz.rotation.x = g;
+          // o joelho só dobra na perna que está voltando, como numa passada real
+          joelho.rotation.x = Math.max(0, -g) * 1.5 + (moving ? 0.1 : 0.04);
+        }
+      });
+
+      // braços: balançam ao contrário das pernas
+      this.arms.forEach(({ raiz, cotovelo, lado }, i) => {
+        raiz.position.y = 1.18 + bob + alturaSentado;
+        if (this.swing > 0 && lado > 0) return; // o braço do soco é tratado abaixo
+        if (sentado) {
+          raiz.rotation.set(-0.5, 0, lado * 0.24);
+          cotovelo.rotation.x = 0.75;
+        } else if (airborne) {
+          raiz.rotation.set(-2.2, 0, lado * 0.3);
+          cotovelo.rotation.x = 0.3;
+        } else {
+          raiz.rotation.set(-passo * lado * 0.85, 0, lado * 0.22);
+          cotovelo.rotation.x = 0.18 + Math.abs(passo) * 0.5;
+        }
+      });
+
+      this.body.scale.set(1, 1, 1);
+      if (airborne) this.body.scale.set(0.96, 1.05, 0.96);
+      if (this.waveTime > 0) {
+        this.waveTime -= dt;
+        const dir = this.arms[1];
+        dir.raiz.rotation.set(-2.6, 0, 0.5 + Math.sin(t * 14) * 0.25);
+        dir.cotovelo.rotation.x = 0.35;
       }
-    });
 
-    // braços: balançam ao contrário das pernas
-    this.arms.forEach(({ raiz, cotovelo, lado }, i) => {
-      raiz.position.y = 1.18 + bob + alturaSentado;
-      if (this.swing > 0 && lado > 0) return; // o braço do soco é tratado abaixo
-      if (sentado) {
-        raiz.rotation.set(-0.5, 0, lado * 0.24);
-        cotovelo.rotation.x = 0.75;
-      } else if (airborne) {
-        raiz.rotation.set(-2.2, 0, lado * 0.3);
-        cotovelo.rotation.x = 0.3;
-      } else {
-        raiz.rotation.set(-passo * lado * 0.85, 0, lado * 0.22);
-        cotovelo.rotation.x = 0.18 + Math.abs(passo) * 0.5;
+      // soco: o braço direito dispara para frente e volta
+      if (this.swing > 0) {
+        this.swing = Math.max(0, this.swing - dt / 0.26);
+        const golpe = Math.sin((1 - this.swing) * Math.PI);
+        const dir = this.arms[1];
+        // o braço parte recolhido e estica para a frente
+        dir.raiz.rotation.set(-1.5 - golpe * 0.25, 0, 0.1);
+        dir.cotovelo.rotation.x = 1.5 - golpe * 1.45;
+        const esq = this.arms[0];
+        esq.raiz.rotation.set(-1.1, 0, -0.2);
+        esq.cotovelo.rotation.x = 1.3;
+        this.body.rotation.y = -golpe * 0.28;
+      } else if (!this.ko) {
+        this.body.rotation.y = 0;
       }
-    });
 
-    this.body.scale.set(1, 1, 1);
-    if (airborne) this.body.scale.set(0.96, 1.05, 0.96);
-    if (this.waveTime > 0) {
-      this.waveTime -= dt;
-      const dir = this.arms[1];
-      dir.raiz.rotation.set(-2.6, 0, 0.5 + Math.sin(t * 14) * 0.25);
-      dir.cotovelo.rotation.x = 0.35;
+      // nocauteado: cai de lado
+      const alvoKo = this.ko ? Math.PI / 2.1 : 0;
+      this.inner.rotation.z += (alvoKo - this.inner.rotation.z) * Math.min(1, dt * 9);
+
     }
-
-    // soco: o braço direito dispara para frente e volta
-    if (this.swing > 0) {
-      this.swing = Math.max(0, this.swing - dt / 0.26);
-      const golpe = Math.sin((1 - this.swing) * Math.PI);
-      const dir = this.arms[1];
-      // o braço parte recolhido e estica para a frente
-      dir.raiz.rotation.set(-1.5 - golpe * 0.25, 0, 0.1);
-      dir.cotovelo.rotation.x = 1.5 - golpe * 1.45;
-      const esq = this.arms[0];
-      esq.raiz.rotation.set(-1.1, 0, -0.2);
-      esq.cotovelo.rotation.x = 1.3;
-      this.body.rotation.y = -golpe * 0.28;
-    } else if (!this.ko) {
-      this.body.rotation.y = 0;
-    }
-
-    // nocauteado: cai de lado
-    const alvoKo = this.ko ? Math.PI / 2.1 : 0;
-    this.inner.rotation.z += (alvoKo - this.inner.rotation.z) * Math.min(1, dt * 9);
 
     // fala
     const targetLevel = this.speaking ? 1 : 0;

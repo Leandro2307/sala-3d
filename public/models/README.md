@@ -1,0 +1,74 @@
+# Personagens em 3D
+
+Coloque aqui arquivos **`.glb`** e registre-os em `public/js/modelo.js`, dentro de
+`PERSONAGENS`:
+
+```js
+export const PERSONAGENS = {
+  padrao: { id: 'padrao', label: 'Boneco', url: null },
+  leao: {
+    id: 'leao',
+    label: 'Leão alado',
+    url: '/models/leao.glb',
+    altura: 1.8,          // o sistema redimensiona sozinho para esta altura
+    giro: 0,              // radianos, se o modelo não nascer virado para +Z
+    credito: 'iRahulRajput (CC BY) — sketchfab.com/...',
+  },
+};
+```
+
+O sistema já cuida de: **escalar** para a altura certa, **assentar os pés em y=0**,
+centralizar em x/z, ligar as animações aos estados do jogo e **misturar** uma na
+outra na troca.
+
+## O modelo precisa estar rigado E animado
+
+Sem esqueleto e sem animação, o personagem vira uma **estátua deslizando** pelo
+chão. Um `.glb` bonito não basta: ele precisa ter os clipes dentro.
+
+Os clipes são encontrados pelo nome, sem diferenciar maiúsculas:
+
+| Estado no jogo | Nomes aceitos no clipe |
+|---|---|
+| parado | `idle`, `breath`, `stand`, `parado` |
+| andando | `walk`, `andar`, `caminh` |
+| correndo | `run`, `sprint`, `corr` |
+| no ar | `jump`, `fall`, `air`, `pul` |
+| sentado | `sit`, `sent` |
+
+Faltou algum? Ele cai no mais parecido (correr vira andar, no ar vira parado), e
+o jogo não quebra. Se o arquivo não carregar, o boneco padrão volta sozinho.
+
+## Como transformar um modelo parado em animado
+
+A maioria dos modelos de banco (inclusive os gerados por IA) **não tem rig**.
+O caminho usual é o [Mixamo](https://www.mixamo.com) — grátis, da Adobe:
+
+1. Envie o modelo (`.fbx` ou `.obj`) em **Upload Character**.
+2. O auto-rigger marca queixo, pulsos, cotovelos e joelhos. Funciona bem com
+   **humanoides bípedes**; quadrúpedes ele não rigga.
+3. Baixe uma animação de cada estado (Idle, Walking, Running, Jump) em **FBX**.
+4. Junte tudo num `.glb` com animações (Blender: importe os FBX, renomeie as
+   *actions* para `Idle`/`Walk`/`Run`/`Jump`, exporte em glTF marcando
+   **Animation → Export all armature actions**).
+
+## Orçamento de peso
+
+A sala inteira hoje baixa cerca de **1 MB por visitante**, e precisa rodar em
+celular. Para o jogo continuar fluido:
+
+| | Limite recomendado |
+|---|---|
+| Triângulos | até ~30.000 por personagem |
+| Arquivo `.glb` | até ~5 MB (com as texturas dentro) |
+| Texturas | 1024 px costuma bastar |
+
+Modelos de vitrine passam fácil de 250.000 triângulos — isso derruba o celular e
+estoura a banda. Vale reduzir no Blender (*Decimate*) antes de usar.
+
+## Direitos
+
+Confira a licença de cada modelo. **CC BY** exige crédito ao autor — use o campo
+`credito` e mantenha o nome visível. Personagens de jogos e filmes continuam
+pertencendo a quem os criou, mesmo quando alguém publica um modelo deles num
+banco gratuito: quem fez o upload não detém esse direito.
