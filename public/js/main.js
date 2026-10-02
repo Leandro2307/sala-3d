@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { World, SPAWN } from './world.js';
 import { Avatar } from './avatars.js';
+import { PERSONAGENS } from './modelo.js';
 import { Player } from './player.js';
 import { RTC, SHARE_PRESETS } from './rtc.js';
 import { YouTubeSync } from './youtube.js';
@@ -27,7 +28,7 @@ const PANEL_TITLES = { people: 'Pessoas', chat: 'Chat da sala', youtube: 'YouTub
 // ------------------------------------------------------------------ ajustes salvos
 const DEFAULTS = {
   name: '', color: COLORS[0], mic: true, voice: 100, screen: 90, yt: 80, spatial: false,
-  shareMode: 'detail', sens: 100, shadows: true, sfx: true, micDevice: '', helpCollapsed: false, photo: null, shirt: 'none',
+  shareMode: 'detail', sens: 100, shadows: true, sfx: true, micDevice: '', helpCollapsed: false, photo: null, shirt: 'none', char: 'padrao',
 };
 const stored = (() => {
   try { return JSON.parse(localStorage.getItem('sala3d') || '{}'); } catch { return {}; }
@@ -226,6 +227,35 @@ function applyPhoto(dataUrl) {
 renderPhotoPreview();
 if (settings.photo) localAvatar.setPhoto(settings.photo);
 
+// ---------------------------------------------------------------- personagem
+$('#in-char').innerHTML = Object.values(PERSONAGENS)
+  .map((p) => `<button type="button" data-char="${p.id}">${esc(p.label)}</button>`).join('');
+
+async function aplicarPersonagem() {
+  const def = PERSONAGENS[settings.char] || PERSONAGENS.padrao;
+  $$('#in-char button').forEach((b) => b.classList.toggle('on', b.dataset.char === settings.char));
+  // camiseta e foto só existem no boneco padrão: o modelo 3D tem o corpo dele
+  const ehPadrao = !def.url;
+  $('#campo-camiseta').hidden = !ehPadrao;
+  $('#campo-foto').hidden = !ehPadrao;
+  const linha = [];
+  if (def.aviso) linha.push(def.aviso);
+  if (def.credito) linha.push('Modelo: ' + def.credito);
+  $('#char-credito').textContent = linha.join(' · ');
+  const r = await localAvatar.setPersonagem(def);
+  if (r && r.ok === false) toast('Não consegui carregar esse personagem.', 'error');
+}
+aplicarPersonagem();
+
+$('#in-char').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-char]');
+  if (!b) return;
+  settings.char = b.dataset.char;
+  saveSettings();
+  await aplicarPersonagem();
+  if (socket && state.joined) socket.emit('char', settings.char);
+});
+
 // ---------------------------------------------------------------- camiseta
 function renderShirt() {
   $$('#in-shirt button').forEach((b) => b.classList.toggle('on', b.dataset.shirt === settings.shirt));
@@ -370,6 +400,7 @@ function emitJoin() {
       mic: state.micOn && state.micAvailable,
       photo: settings.photo,
       shirt: settings.shirt,
+      char: settings.char,
     }, resolve);
   });
 }
@@ -443,7 +474,7 @@ function bindSocket() {
     u.avatar.speaking = !!s;
   });
 
-  socket.on('user-update', ({ id, mic, photo, shirt, health, ko }) => {
+  socket.on('user-update', ({ id, mic, photo, shirt, char, health, ko }) => {
     const u = state.users.get(id);
     if (!u) return;
     if (mic !== undefined) {
@@ -458,6 +489,10 @@ function bindSocket() {
     if (shirt !== undefined) {
       u.shirt = shirt;
       u.avatar.setShirt(shirt);
+    }
+    if (char !== undefined) {
+      u.char = char;
+      u.avatar.setPersonagem(PERSONAGENS[char]);
     }
     if (health !== undefined) u.avatar.setHealth(health);
     if (ko !== undefined) u.avatar.setKo(ko);
@@ -535,6 +570,7 @@ function addUser(data) {
   avatar.setStatus({ mic: data.mic, sharing: data.slot != null });
   if (data.photo) avatar.setPhoto(data.photo);
   if (data.shirt && data.shirt !== 'none') avatar.setShirt(data.shirt);
+  if (data.char && data.char !== 'padrao') avatar.setPersonagem(PERSONAGENS[data.char]);
   if (data.health != null) avatar.setHealth(data.health);
   if (data.ko) avatar.setKo(true);
   avatar.setNetworkState(data.p, data.r, data.a);

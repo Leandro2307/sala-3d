@@ -21,6 +21,26 @@ O sistema já cuida de: **escalar** para a altura certa, **assentar os pés em y
 centralizar em x/z, ligar as animações aos estados do jogo e **misturar** uma na
 outra na troca.
 
+
+## Personagens que já vêm no jogo
+
+| Personagem | Origem | Licença | Arquivo |
+|---|---|---|---|
+| Robô | Tomás Laulhé (Quaternius), ajustes de Don McCurdy | CC0 | `robo.glb` (453 KB) |
+| Cavaleiro, Bárbaro, Mago, Ladino | KayKit Adventurers, de Kay Lousberg | CC0 | ~2 MB cada |
+
+Os quatro do KayKit vêm com 76 animações; o jogo usa 7. Foram podados com
+`@gltf-transform` (remover os clipes extras + `meshopt`), o que cortou **74%**
+do tamanho — e o servidor ainda serve tudo com gzip.
+
+Para repetir a poda em outro pacote, use `scripts/podar-modelo.js` — ele mantém
+só os clipes listados, roda `dedup`, `resample`, `prune`, `sparse` e `meshopt`.
+As dependências não ficam no projeto; o cabeçalho do script traz a linha `npx`
+que as baixa na hora.
+
+O carregador já tem o decodificador meshopt ligado, então `.glb` comprimido
+funciona direto.
+
 ## O modelo precisa estar rigado E animado
 
 Sem esqueleto e sem animação, o personagem vira uma **estátua deslizando** pelo

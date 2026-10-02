@@ -447,7 +447,10 @@ export class Avatar {
     this.ko = !!on;
   }
 
-  punch() { this.swing = 1; }
+  punch() {
+    this.swing = 1;
+    this.personagem?.tocarGesto('punch'); // o robô tem clipe de soco de verdade
+  }
 
   setColor(color) {
     this.color = color;
@@ -526,7 +529,10 @@ export class Avatar {
     e.life = 0;
     this.emotes.push(e);
     this.group.add(e.sprite);
-    if (kind === 'wave') this.waveTime = 1.6;
+    if (kind === 'wave') {
+      this.waveTime = 1.6;
+      this.personagem?.tocarGesto('wave');
+    }
   }
 
   // posição/rotação recebidas pela rede

@@ -6,6 +6,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { Server } = require('socket.io');
+const compression = require('compression');
 
 const PORT = Number(process.env.PORT) || 3000;
 const HTTPS_PORT = Number(process.env.HTTPS_PORT) || 3443;
@@ -15,6 +16,7 @@ const MAX_CHAT = 60;
 const MAX_PHOTO = 60_000; // data URL da foto do rosto (128x128 jpeg dá ~12 kB)
 const PUNCH_RANGE = 4.5; // metros: folga sobre o alcance real, só para barrar absurdo
 const SHIRTS = ['none', 'lula', 'bolsonaro'];
+const PERSONAGENS = ['padrao', 'robo', 'cavaleiro', 'barbaro', 'mago', 'ladino'];
 
 // STUN público + TURN opcional via variáveis de ambiente (necessário em algumas redes 4G/corporativas).
 const iceServers = [
@@ -29,6 +31,9 @@ if (process.env.TURN_URL) {
 }
 
 const app = express();
+// Sem isto o navegador baixa tudo cru: só o three.js são 662 kB, e o cabeçalho
+// JSON dos modelos 3D comprime a mais de 5x.
+app.use(compression());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/vendor/three', express.static(path.join(__dirname, 'node_modules', 'three')));
 app.get('/config', (_req, res) => res.json({ iceServers, shareSlots: SHARE_SLOTS }));
@@ -69,7 +74,7 @@ function publicUser(u) {
   return {
     id: u.id, name: u.name, color: u.color, mic: u.mic,
     slot: u.slot, screenStreamId: u.screenStreamId,
-    p: u.p, r: u.r, a: u.a, photo: u.photo, shirt: u.shirt, health: u.health, ko: u.ko,
+    p: u.p, r: u.r, a: u.a, photo: u.photo, shirt: u.shirt, char: u.char, health: u.health, ko: u.ko,
   };
 }
 
@@ -129,6 +134,7 @@ function attachSockets(io) {
         screenStreamId: null,
         photo: cleanPhoto(data?.photo),
         shirt: SHIRTS.includes(data?.shirt) ? data.shirt : 'none',
+        char: PERSONAGENS.includes(data?.char) ? data.char : 'padrao',
         health: 1,
         ko: false,
         p: [0, 0, -4], r: Math.PI, a: 0,
@@ -250,6 +256,12 @@ function attachSockets(io) {
       if (!user) return;
       user.shirt = SHIRTS.includes(kind) ? kind : 'none';
       io.to(room.id).emit('user-update', { id: user.id, shirt: user.shirt });
+    });
+
+    socket.on('char', (kind) => {
+      if (!user) return;
+      user.char = PERSONAGENS.includes(kind) ? kind : 'padrao';
+      io.to(room.id).emit('user-update', { id: user.id, char: user.char });
     });
 
     // ------------------------------------------------------------ ringue

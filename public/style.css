@@ -931,6 +931,11 @@ body.touch .help-grid[data-input="touch"] { display: grid; }
   white-space: nowrap;
 }
 
+/* seletor de personagem: pode ter vários, então quebra linha */
+.segmented.chars { flex-wrap: wrap; }
+.segmented.chars button { flex: 1 1 auto; min-width: 72px; }
+#char-credito { display: block; margin-top: 6px; line-height: 1.45; }
+
 /* camisetas: cada botão mostra a cor do time */
 .segmented.shirts button { position: relative; padding-left: 26px; }
 .segmented.shirts button::before {
