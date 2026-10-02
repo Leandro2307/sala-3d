@@ -10,8 +10,8 @@ const JUMP = 11.5;
 const WALK = 7.5;
 const RUN = 11.5;
 // carro: anda muito mais rápido, mas acelera e freia com inércia
-const CARRO_TOPO = 27;
-const CARRO_TURBO = 36;
+const CARRO_TOPO = 46;
+const CARRO_TURBO = 64;
 const CARRO_RE = 9;
 const CARRO_ACEL = 17;
 const CARRO_FREIO = 26;

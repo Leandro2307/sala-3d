@@ -3,72 +3,104 @@
 import * as THREE from 'three';
 
 export const PISTA = {
-  // O circuito fica num setor próprio, a leste da sala: assim o traçado pode ter
-  // o desenho que tem sem esbarrar no parkour, no ringue nem na plateia.
-  cx: 152,
-  cz: 30,
-  escala: 0.37, // converte as coordenadas do desenho para metros
-  largura: 9,
+  // O autódromo fica numa ala própria, a nordeste do cinema.
+  // Encostada na ala do cinema: o circuito é girado para a reta principal correr
+  // ao lado da plateia, com o telão à vista de quem está nela.
+  // Autódromo de verdade, em escala de verdade: ~2 km de volta e faixas bem
+  // separadas. Fica numa ala própria, longe o bastante do cinema para nada se
+  // sobrepor — a ligação com o telão é feita pelo telão da pista, não pela
+  // proximidade.
+  cx: 321,
+  cz: 252,
+  escala: 1.05, // coordenadas do desenho -> metros
+  giro: -0.95,
+  largura: 16,
   y: 0.14,
-  setores: 10,
-  cores: {
-    asfalto: 0x1b1f2b,
-    borda: 0xf1f5f9,
-    bordaAlt: 0xef4444,
-    largada: 0xf8fafc,
-  },
+  setores: 12,
 };
 
-// Traçado do Autódromo Internacional Ayrton Senna (Goiânia), ponto a ponto a
-// partir do desenho do circuito. As coordenadas são as do desenho; o centro
-// (230, 230) vira o centro do setor da pista.
+// Traçado do Autódromo Internacional Ayrton Senna (Goiânia).
+// Os pontos são densos de propósito: com poucos pontos a suavização "inventa"
+// a curva e o traçado chega a passar por cima de si mesmo nos grampos.
 const DESENHO = [
-  [290, 262], // largada/chegada
-  [260, 300], [220, 352],
-  [175, 400], // Curva 1
-  [100, 382],
-  [25, 295], // Curva 2
-  [52, 300], [88, 330], // Curva VIP
-  [112, 300], [138, 233], // Curva 3
-  [162, 240], [182, 265],
-  [250, 230], [310, 190],
-  [342, 148], // Parabólica Interior
-  [300, 150], [240, 166], [190, 186],
-  [160, 198], // Orelha
-  [150, 160], [170, 128],
-  [214, 114], [250, 115], // Gancho
-  [236, 84], [192, 62],
-  [248, 46], [284, 62], // Esses
-  [302, 88],
-  [350, 70], [408, 75], // Parabólica Ayrton Senna
-  [434, 118], [418, 180],
-  [372, 222], [326, 248],
+  // A largada fica no trecho mais perto do cinema: dá para ver o telão da reta.
+  [237.4, 17.9], [265.4, 31.2], [283.1, 55.6], [303.4, 78.6],
+  [333.9, 83.3], [360.3, 67.4], [389.2, 58.6], [417.6, 72.1],
+  [430.8, 98.7], [432.0, 130.0], [424.0, 164.0], [406.0, 198.0],
+  [382.1, 223.6], [356.6, 239.5], [327.4, 245.5], [291.9, 264.6],
+  [259.2, 293.5], [219.5, 323.7], [191.7, 354.2], [179.9, 388.1],
+  [158.1, 409.9], [126.1, 410.1], [89.0, 392.9], [48.3, 354.3],
+  [28.0, 318.8], [18.0, 290.2], [33.5, 262.2], [64.5, 264.2],
+  [77.8, 292.1], [79.7, 321.8], [97.5, 350.0], [130.0, 345.1],
+  [138.2, 314.1], [131.3, 286.4], [114.6, 256.7], [131.9, 230.0],
+  [163.1, 234.0], [182.1, 258.0], [205.8, 282.9], [240.0, 257.7],
+  [270.4, 226.7], [304.7, 201.4], [333.4, 180.9], [358.2, 155.3],
+  [345.1, 125.0], [313.7, 124.0], [293.2, 148.1], [262.4, 166.3],
+  [228.0, 172.9], [198.5, 179.5], [171.2, 190.7], [141.5, 186.6],
+  [125.7, 160.7], [135.7, 132.2], [159.9, 114.2], [189.7, 110.7],
+  [218.3, 117.7], [245.5, 132.4], [272.9, 111.0], [246.3, 79.3],
+  [217.0, 76.4], [187.8, 70.3], [172.2, 40.5], [204.5, 17.7],
 ];
 
 export const CURVAS = [
-  { nome: 'Curva 1', i: 3 },
-  { nome: 'Curva 2', i: 5 },
-  { nome: 'Curva VIP', i: 7 },
-  { nome: 'Curva 3', i: 9 },
-  { nome: 'Parabólica Interior', i: 14 },
-  { nome: 'Orelha', i: 18 },
-  { nome: 'Gancho', i: 22 },
-  { nome: 'Esses', i: 26 },
-  { nome: 'Parabólica Ayrton Senna', i: 29 },
+  { nome: 'Esses', t: 2 / 64 },
+  { nome: 'Parabólica Ayrton Senna', t: 6 / 64 },
+  { nome: 'Curva 1', t: 20 / 64 },
+  { nome: 'Curva 2', t: 25 / 64 },
+  { nome: 'Curva VIP', t: 30 / 64 },
+  { nome: 'Curva 3', t: 35 / 64 },
+  { nome: 'Parabólica Interior', t: 43 / 64 },
+  { nome: 'Orelha', t: 50 / 64 },
+  { nome: 'Gancho', t: 57 / 64 },
+  { nome: 'Curva 10', t: 61 / 64 },
 ];
 
 // Suaviza os pontos do desenho numa curva fechada e amostra a linha central.
-function construirCaminho(amostras = 420) {
-  const ctrl = DESENHO.map(([ix, iy]) => new THREE.Vector3(
-    (ix - 230) * PISTA.escala,
-    0,
-    (iy - 230) * PISTA.escala,
-  ));
+function construirCaminho(amostras = 700) {
+  const cos = Math.cos(PISTA.giro || 0);
+  const sen = Math.sin(PISTA.giro || 0);
+  const ctrl = DESENHO.map(([ix, iy]) => {
+    const x = (ix - 230) * PISTA.escala;
+    const z = (iy - 230) * PISTA.escala;
+    return new THREE.Vector3(x * cos - z * sen, 0, x * sen + z * cos);
+  });
   const curva = new THREE.CatmullRomCurve3(ctrl, true, 'centripetal', 0.5);
   return curva.getPoints(amostras).slice(0, amostras).map((p) => new THREE.Vector2(p.x, p.z));
 }
 
 export const CAMINHO = construirCaminho();
+
+// Confere se o traçado passa por cima de si mesmo. É a checagem que faltava:
+// sem ela dá para publicar uma pista com as zebras se cruzando em X.
+export function validarTracado(folgaExtra = 2) {
+  const n = CAMINHO.length;
+  const preciso = PISTA.largura + folgaExtra;
+  let pior = { d: Infinity, i: 0, j: 0 };
+  let cruzamentos = 0;
+  const vizinhos = Math.ceil(n * 0.02);
+  const cruza = (p1, p2, p3, p4) => {
+    const d = (p2.x - p1.x) * (p4.y - p3.y) - (p2.y - p1.y) * (p4.x - p3.x);
+    if (Math.abs(d) < 1e-9) return false;
+    const u = ((p3.x - p1.x) * (p4.y - p3.y) - (p3.y - p1.y) * (p4.x - p3.x)) / d;
+    const v = ((p3.x - p1.x) * (p2.y - p1.y) - (p3.y - p1.y) * (p2.x - p1.x)) / d;
+    return u > 0 && u < 1 && v > 0 && v < 1;
+  };
+  for (let i = 0; i < n; i++) {
+    for (let j = i + vizinhos; j < n - (i < vizinhos ? vizinhos : 0); j++) {
+      const d = CAMINHO[i].distanceTo(CAMINHO[j]);
+      if (d < pior.d) pior = { d, i, j };
+      if (cruza(CAMINHO[i], CAMINHO[(i + 1) % n], CAMINHO[j], CAMINHO[(j + 1) % n])) cruzamentos++;
+    }
+  }
+  return {
+    comprimento: COMPRIMENTO,
+    cruzamentos,
+    aproximacao: pior.d,
+    folga: pior.d - PISTA.largura,
+    ok: cruzamentos === 0 && pior.d >= preciso,
+    onde: { t1: (pior.i / n).toFixed(3), t2: (pior.j / n).toFixed(3) },
+  };
+}
 
 // Tabela de comprimento acumulado: permite perguntar "que fração da volta é este
 // ponto?", que é o que decide se a volta foi completa ou se cortaram caminho.
@@ -149,7 +181,7 @@ export function pontoEm(t) {
 // Onde o carro nasce: na linha de largada, olhando para a frente da pista.
 export function largada(faixa = 0) {
   const p = pontoEm(0.002);
-  const lateral = p.angulo + Math.PI / 2;
+  const lateral = p.angulo;
   const desl = (faixa - 1) * 3;
   return {
     pos: [p.x + Math.cos(lateral) * desl, PISTA.y, p.z - Math.sin(lateral) * desl],

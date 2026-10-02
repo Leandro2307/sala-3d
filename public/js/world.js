@@ -5,12 +5,12 @@ import { CSS3DRenderer, CSS3DObject } from 'three/addons/renderers/CSS3DRenderer
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { COURSE, RAILS, FUN_PADS } from './parkour.js';
 import { RING } from './arena.js';
-import { PISTA, CAMINHO } from './pista.js';
+import { PISTA, CAMINHO, CURVAS, pontoEm } from './pista.js';
 
 // O galpão tem duas alas: a do cinema (em torno da origem, com o telão em minZ)
 // e a do autódromo, a leste. O telão continua em minZ para não se afastar da
 // plateia; quem cresceu foi o resto.
-export const ROOM = { minX: -52, maxX: 235, minZ: -40, maxZ: 100, height: 34 };
+export const ROOM = { minX: -52, maxX: 480, minZ: -40, maxZ: 530, height: 60 };
 export const SPAWN = { pos: [0, 0, -2], yaw: 0 };
 
 const FONT = "'Plus Jakarta Sans', system-ui, sans-serif";
@@ -375,6 +375,7 @@ export class World {
     this.checkpointLabels = new Map();
     this.fadeLabels = []; // placas do parkour somem quando a câmera chega perto
 
+    this.buildCeu();
     this.buildLights();
     this.buildRoom();
     this.buildAudience();
@@ -387,8 +388,31 @@ export class World {
   }
 
   // -------------------------------------------------------------- construção
+  buildCeu() {
+    const tex = canvasTexture(8, 256, (ctx, w, h) => {
+      const g = ctx.createLinearGradient(0, 0, 0, h);
+      g.addColorStop(0.00, '#05070f'); // zênite
+      g.addColorStop(0.45, '#0d1426');
+      g.addColorStop(0.72, '#1b2440');
+      g.addColorStop(0.88, '#2a2f53'); // o brilho baixo que dá a linha do horizonte
+      g.addColorStop(1.00, '#0b0d18');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, w, h);
+    });
+    const raio = Math.max(ROOM.maxX - ROOM.minX, ROOM.maxZ - ROOM.minZ) * 0.9;
+    const ceu = new THREE.Mesh(
+      new THREE.SphereGeometry(raio, 24, 16),
+      new THREE.MeshBasicMaterial({ map: tex, side: THREE.BackSide, depthWrite: false, toneMapped: false }),
+    );
+    ceu.position.set((ROOM.minX + ROOM.maxX) / 2, 0, (ROOM.minZ + ROOM.maxZ) / 2);
+    ceu.renderOrder = -1;
+    this.scene.add(ceu);
+    // névoa: some com a borda do mundo em vez de cortar no preto
+    this.scene.fog = new THREE.Fog(0x141a2e, 180, raio * 1.1);
+  }
+
   buildLights() {
-    const hemi = new THREE.HemisphereLight(0xc9d3ff, 0x1d1a2a, 1.1);
+    const hemi = new THREE.HemisphereLight(0xc9d3ff, 0x252036, 1.45);
     this.scene.add(hemi);
 
     const sun = new THREE.DirectionalLight(0xfff3e6, 1.5);
@@ -764,13 +788,16 @@ export class World {
     this.scene.add(grupo);
     const meia = PISTA.largura / 2;
 
-    const asfaltoTex = canvasTexture(64, 256, (ctx, w, h) => {
-      ctx.fillStyle = '#1b1f2b';
+    const asfaltoTex = canvasTexture(128, 256, (ctx, w, h) => {
+      ctx.fillStyle = '#20242f';
       ctx.fillRect(0, 0, w, h);
-      ctx.fillStyle = 'rgba(255,255,255,0.10)';
-      ctx.fillRect(w / 2 - 2, 0, 4, h * 0.45); // tracejado central
-      ctx.fillStyle = 'rgba(255,255,255,0.05)';
-      ctx.fillRect(0, 0, w, 2);
+      // granulado do asfalto, para não ficar um borrão chapado
+      for (let i = 0; i < 2600; i++) {
+        ctx.fillStyle = 'rgba(255,255,255,' + (Math.random() * 0.035).toFixed(3) + ')';
+        ctx.fillRect(Math.random() * w, Math.random() * h, 1.6, 1.6);
+      }
+      ctx.fillStyle = 'rgba(255,255,255,0.08)';
+      ctx.fillRect(w / 2 - 1.5, 0, 3, h * 0.4); // tracejado central
     });
     asfaltoTex.wrapS = asfaltoTex.wrapT = THREE.RepeatWrapping;
 
@@ -822,63 +849,226 @@ export class World {
     asfaltoTex.repeat.set(1, 1);
     fita(-meia, meia, PISTA.y, new THREE.MeshStandardMaterial({
       map: asfaltoTex, roughness: 0.95, metalness: 0.0,
-    }), 8);
+    }), 14);
 
-    const zebraMat = new THREE.MeshStandardMaterial({ map: zebraTex, roughness: 0.7 });
-    fita(meia, meia + 0.9, PISTA.y + 0.01, zebraMat, 3);
-    fita(-meia - 0.9, -meia, PISTA.y + 0.01, zebraMat, 3);
+    const zebraMat = new THREE.MeshStandardMaterial({
+      map: zebraTex, roughness: 0.55, emissiveMap: zebraTex, emissive: 0xffffff, emissiveIntensity: 0.22,
+    });
+    const zebra = Math.max(0.8, PISTA.largura * 0.085); // acompanha a largura da pista
+    fita(meia, meia + zebra, PISTA.y + 0.01, zebraMat, 5);
+    fita(-meia - zebra, -meia, PISTA.y + 0.01, zebraMat, 5);
+    // faixa branca contínua na borda do asfalto, por baixo da zebra
+    const bordaMat = new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.8 });
+    fita(meia - 0.45, meia, PISTA.y + 0.005, bordaMat, 1);
+    fita(-meia, -meia + 0.45, PISTA.y + 0.005, bordaMat, 1);
 
-    // linha de largada/chegada
-    const xadrez = canvasTexture(64, 64, (ctx, w, h) => {
-      const c = w / 8;
+    // linha de largada/chegada — alinhada com a pista, não com o eixo X do mundo
+    const xadrez = canvasTexture(128, 64, (ctx, w, h) => {
+      const c = w / 16;
       for (let y = 0; y < 8; y++) {
-        for (let x = 0; x < 8; x++) {
+        for (let x = 0; x < 16; x++) {
           ctx.fillStyle = (x + y) % 2 ? '#0b0d12' : '#f8fafc';
           ctx.fillRect(x * c, y * c, c, c);
         }
       }
     });
-    const inicio = CAMINHO[0];
+    const larg = pontoEm(0);
     const linha = new THREE.Mesh(
-      new THREE.PlaneGeometry(PISTA.largura, 2.4),
+      new THREE.PlaneGeometry(PISTA.largura, 3.2),
       new THREE.MeshStandardMaterial({ map: xadrez, roughness: 0.8 }),
     );
     linha.rotation.x = -Math.PI / 2;
-    linha.position.set(PISTA.cx + inicio.x, PISTA.y + 0.02, PISTA.cz + inicio.y);
+    linha.rotation.z = -larg.angulo;
+    linha.position.set(larg.x, PISTA.y + 0.02, larg.z);
     grupo.add(linha);
 
-    // pórtico sobre a largada, para dar o ponto de referência de longe
-    const posteMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.6 });
+    // pórtico: os postes vão para os LADOS da pista, usando a perpendicular
+    const latL = larg.angulo;
+    const lx = Math.cos(latL);
+    const lz = -Math.sin(latL);
+    const posteMatL = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.6 });
     for (const lado of [-1, 1]) {
-      const poste = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.26, 6.4, 10), posteMat);
-      poste.position.set(PISTA.cx + inicio.x + lado * (meia + 0.9), 3.2, PISTA.cz + inicio.y);
+      const poste = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.36, 9, 10), posteMatL);
+      poste.position.set(larg.x + lx * (meia + 2.5) * lado, 4.5, larg.z + lz * (meia + 2.5) * lado);
       poste.castShadow = true;
       grupo.add(poste);
     }
     const travessa = new THREE.Mesh(
-      new RoundedBoxGeometry(PISTA.largura + 2.6, 1.1, 0.5, 2, 0.12),
+      new RoundedBoxGeometry(PISTA.largura + 7, 1.6, 0.6, 2, 0.14),
       new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.5, emissive: 0x1e293b, emissiveIntensity: 0.6 }),
     );
-    travessa.position.set(PISTA.cx + inicio.x, 6.2, PISTA.cz + inicio.y);
+    travessa.position.set(larg.x, 8.6, larg.z);
+    travessa.rotation.y = -larg.angulo;
     grupo.add(travessa);
 
-    const placa = canvasTexture(512, 128, (ctx, w, h) => {
+    const placaL = canvasTexture(512, 128, (ctx, w, h) => {
       ctx.fillStyle = '#0f172a';
       ctx.fillRect(0, 0, w, h);
       ctx.fillStyle = '#fbbf24';
-      ctx.font = 'bold 72px system-ui, sans-serif';
+      ctx.font = 'bold 76px system-ui, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText('LARGADA', w / 2, h / 2 + 4);
     });
     const letreiro = new THREE.Mesh(
-      new THREE.PlaneGeometry(PISTA.largura + 2, 1),
-      new THREE.MeshBasicMaterial({ map: placa, toneMapped: false }),
+      new THREE.PlaneGeometry(PISTA.largura + 6, 1.5),
+      new THREE.MeshBasicMaterial({ map: placaL, toneMapped: false }),
     );
-    letreiro.position.set(PISTA.cx + inicio.x, 6.2, PISTA.cz + inicio.y + 0.3);
+    letreiro.position.set(larg.x - Math.sin(larg.angulo) * 0.4, 8.6, larg.z - Math.cos(larg.angulo) * 0.4);
+    letreiro.rotation.y = -larg.angulo + Math.PI;
     grupo.add(letreiro);
 
+    this.decorarPista(grupo, fita);
     this.trackGroup = grupo;
+  }
+
+  // A ala do autódromo estava um breu de chão cinza. Isto dá a ela o mesmo
+  // tratamento que a sala do cinema tem: chão com cor, luz e coisas para olhar.
+  decorarPista(grupo, fita) {
+    const meia = PISTA.largura / 2;
+
+    // 1) tapete de grama/asfalto em volta, com grade neon como no parkour
+    const apronTex = canvasTexture(256, 256, (ctx, w, h) => {
+      ctx.fillStyle = '#141a2b';
+      ctx.fillRect(0, 0, w, h);
+      ctx.strokeStyle = 'rgba(96,165,250,0.30)';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(0, 0, w, h);
+      ctx.strokeStyle = 'rgba(96,165,250,0.10)';
+      ctx.lineWidth = 1.5;
+      for (let i = 1; i < 4; i++) {
+        ctx.beginPath(); ctx.moveTo((w / 4) * i, 0); ctx.lineTo((w / 4) * i, h); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, (h / 4) * i); ctx.lineTo(w, (h / 4) * i); ctx.stroke();
+      }
+    });
+    apronTex.wrapS = apronTex.wrapT = THREE.RepeatWrapping;
+    const apronMat = new THREE.MeshStandardMaterial({ map: apronTex, roughness: 0.9 });
+    fita(meia + 1.2, meia + 22, 0.04, apronMat, 10);
+    fita(-meia - 22, -meia - 1.2, 0.04, apronMat, 10);
+    // tira de neon acompanhando a pista: é o que dá a linha de luz no horizonte
+    const neonMat = new THREE.MeshBasicMaterial({ color: 0x4f8bff, toneMapped: false });
+    fita(meia + 21.3, meia + 22, 0.06, neonMat, 1);
+    fita(-meia - 22, -meia - 21.3, 0.06, neonMat, 1);
+
+    // 2) postes de luz: cabeça acesa (de graça) e algumas luzes de verdade
+    const posteGeo = new THREE.CylinderGeometry(0.22, 0.3, 11, 10);
+    const posteMat = new THREE.MeshStandardMaterial({ color: 0x2b3245, roughness: 0.6 });
+    const luminariaGeo = new RoundedBoxGeometry(2.6, 0.4, 1.1, 2, 0.12);
+    const luminariaMat = new THREE.MeshBasicMaterial({ color: 0xfff1c9, toneMapped: false });
+    const POSTES = 28;
+    for (let i = 0; i < POSTES; i++) {
+      const t = i / POSTES;
+      const p = pontoEm(t);
+      const lateral = p.angulo;
+      const lado = i % 2 ? 1 : -1;
+      const px = p.x + Math.cos(lateral) * (meia + 9) * lado;
+      const pz = p.z - Math.sin(lateral) * (meia + 9) * lado;
+      const poste = new THREE.Mesh(posteGeo, posteMat);
+      poste.position.set(px, 5.5, pz);
+      poste.castShadow = true;
+      grupo.add(poste);
+      const lum = new THREE.Mesh(luminariaGeo, luminariaMat);
+      lum.position.set(px, 11, pz);
+      lum.lookAt(p.x, 10, p.z);
+      grupo.add(lum);
+      // só alguns pontos de luz reais: cada um custa caro no desenho
+      if (i % 2 === 0) {
+        const luz = new THREE.PointLight(0xe8eeff, 170, 58, 1.7);
+        luz.position.set(px, 10.4, pz);
+        grupo.add(luz);
+      }
+    }
+
+    // 3) pilhas de pneu nas curvas, nas cores da casa
+    const pneuGeo = new THREE.TorusGeometry(0.62, 0.26, 8, 16);
+    const pneuMat = new THREE.MeshStandardMaterial({ color: 0x14161d, roughness: 0.9 });
+    const coresPilha = [0xf43f5e, 0xfbbf24, 0x60a5fa, 0x6ee7c8];
+    CURVAS.forEach((curva, ci) => {
+      const cor = coresPilha[ci % coresPilha.length];
+      const topoMat = new THREE.MeshStandardMaterial({ color: cor, roughness: 0.6, emissive: cor, emissiveIntensity: 0.35 });
+      // Do lado de FORA da zebra. Antes ficavam a 3,2 m da linha central, ou
+      // seja, em cima do asfalto — dava para bater de frente numa pilha de pneu
+      // no meio da reta.
+      const afastamento = meia + Math.max(0.8, PISTA.largura * 0.085) + 3.5;
+      for (let k = -3; k <= 3; k++) {
+        const t = (curva.t + k * 0.0035 + 1) % 1;
+        const p = pontoEm(t);
+        const lateral = p.angulo;
+        const px = p.x + Math.cos(lateral) * afastamento;
+        const pz = p.z - Math.sin(lateral) * afastamento;
+        for (let a = 0; a < 3; a++) {
+          const pneu = new THREE.Mesh(pneuGeo, a === 2 ? topoMat : pneuMat);
+          pneu.rotation.x = Math.PI / 2;
+          pneu.position.set(px, 0.3 + a * 0.5, pz);
+          pneu.castShadow = true;
+          grupo.add(pneu);
+        }
+      }
+
+      // 4) placa com o nome da curva
+      const p = pontoEm(curva.t);
+      const lateral = p.angulo;
+      const px = p.x + Math.cos(lateral) * (meia + 13);
+      const pz = p.z - Math.sin(lateral) * (meia + 13);
+      const tex = canvasTexture(512, 128, (ctx, w, h) => {
+        ctx.fillStyle = '#0f172a';
+        ctx.fillRect(0, 0, w, h);
+        ctx.fillStyle = '#' + cor.toString(16).padStart(6, '0');
+        ctx.fillRect(0, h - 12, w, 12);
+        ctx.fillStyle = '#f8fafc';
+        ctx.font = 'bold 54px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(curva.nome, w / 2, h / 2 - 4);
+      });
+      const placa = new THREE.Mesh(
+        new THREE.PlaneGeometry(11, 2.75),
+        new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }),
+      );
+      placa.position.set(px, 3.6, pz);
+      placa.lookAt(p.x, 3.2, p.z);
+      grupo.add(placa);
+      const pe = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.22, 3.6, 8), posteMat);
+      pe.position.set(px, 1.8, pz);
+      grupo.add(pe);
+    });
+
+    // 5) arquibancada na reta da largada
+    const inicio = pontoEm(0.02);
+    const ang = inicio.angulo;
+    const lateral = ang;
+    const bx = inicio.x + Math.cos(lateral) * (meia + 26);
+    const bz = inicio.z - Math.sin(lateral) * (meia + 26);
+    const arquibancada = new THREE.Group();
+    for (let d = 0; d < 5; d++) {
+      const degrau = new THREE.Mesh(
+        new RoundedBoxGeometry(34, 1.1, 2.6, 2, 0.1),
+        new THREE.MeshStandardMaterial({ color: 0x232a3d, roughness: 0.85 }),
+      );
+      degrau.position.set(0, 0.55 + d * 1.0, -d * 2.4);
+      degrau.castShadow = true;
+      degrau.receiveShadow = true;
+      arquibancada.add(degrau);
+      // fileira de "público" em blocos coloridos
+      for (let k = -7; k <= 7; k++) {
+        if (Math.random() < 0.35) continue;
+        const cor = coresPilha[(k + d * 3 + 14) % coresPilha.length];
+        const pessoa = new THREE.Mesh(
+          new THREE.CapsuleGeometry(0.28, 0.4, 4, 8),
+          new THREE.MeshStandardMaterial({ color: cor, roughness: 0.7 }),
+        );
+        pessoa.position.set(k * 2.2, 1.6 + d * 1.0, -d * 2.4 - 0.2);
+        arquibancada.add(pessoa);
+      }
+    }
+    arquibancada.position.set(bx, 0, bz);
+    arquibancada.rotation.y = -ang + Math.PI;
+    grupo.add(arquibancada);
+
+    // luz quente sobre a arquibancada e a largada
+    const luzLargada = new THREE.PointLight(0xffe6c0, 280, 70, 1.6);
+    luzLargada.position.set(inicio.x, 13, inicio.z);
+    grupo.add(luzLargada);
   }
   buildCourse() {
     const matCache = new Map();
