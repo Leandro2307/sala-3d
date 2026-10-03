@@ -13,6 +13,7 @@ import { Corrida, PISTA, largada, formatarVolta, projetar, pontoEm } from './pis
 import { sfx, audioContext, setSfxEnabled } from './sfx.js';
 import { Jogos } from './jogos.js';
 import { Controle } from './controle.js';
+import { Dados, MESA_DADOS } from './dados.js';
 import { icon, hydrateIcons } from './icons.js';
 import { isTouch, setupTouchControls, toggleFullscreen, isFullscreen, temTelaCheia } from './touch.js';
 
@@ -26,7 +27,7 @@ const typing = () => {
 
 const COLORS = ['#7c9cff', '#6ee7c8', '#f472b6', '#fbbf24', '#a78bfa', '#fb7185', '#38bdf8', '#a3e635', '#f97316', '#e2e8f0'];
 const EMOTE_KEYS = ['wave', 'party', 'laugh', 'heart', 'clap', 'fire'];
-const PANEL_TITLES = { people: 'Pessoas', chat: 'Chat da sala', telao: 'Telão', parkour: 'Parkour', ringue: 'Ringue de luta', corrida: 'Pista de corrida', jogos: 'Xadrez de bruxo e dama', settings: 'Ajustes' };
+const PANEL_TITLES = { people: 'Pessoas', chat: 'Chat da sala', telao: 'Telão', parkour: 'Parkour', ringue: 'Ringue de luta', corrida: 'Pista de corrida', jogos: 'Jogos, dados e moedas', settings: 'Ajustes' };
 
 // ------------------------------------------------------------------ ajustes salvos
 const DEFAULTS = {
@@ -476,6 +477,8 @@ function applyJoined(data) {
   setFightBoard(data.fights);
   setRaceBoard(data.voltas);
   jogos.sincronizar(data.jogos);
+  self().moedas = data.moedas ?? 0;
+  mostrarMoedas();
 
   for (const u of data.users) rtc.getPeer(u.id);
 
@@ -638,6 +641,21 @@ function bindSocket() {
   socket.on('emote', ({ id, kind }) => state.users.get(id)?.avatar.emote(kind));
   socket.on('jogo', (msg) => jogos.receber(msg));
   socket.on('controle', (msg) => controle.receber(self()?.shares.get(msg.key), msg));
+  socket.on('moedas', ({ id, moedas, delta, motivo }) => {
+    const u = state.users.get(id);
+    if (!u) return;
+    u.moedas = moedas;
+    if (u.isSelf) {
+      mostrarMoedas(true);
+      sfx.moeda();
+      toast(`+${delta} moedas · ${motivo}`, 'success', 4500);
+    } else if (delta >= 50) {
+      toast(`${u.name} ganhou ${delta} moedas (${motivo})`, 'info', 4000, u.color);
+    }
+    renderPeople();
+  });
+  // o saldo novo só aparece quando os dados param (ver dados.aoTerminar)
+  socket.on('dados', (ev) => dados.receber(ev));
 
   socket.on('parkour-finish', ({ name, color, time, record, leaderboard }) => {
     setLeaderboard(leaderboard);
@@ -724,7 +742,7 @@ function renderPeople() {
     return `<li class="person${u.speaking ? ' speaking' : ''}" data-id="${esc(u.id)}">
       <span class="avatar-dot" style="--c:${esc(u.color)}">${esc((u.name[0] || '?').toUpperCase())}</span>
       <div class="person-info">
-        <div class="person-name">${esc(u.name)}${u.isSelf ? ' <small>(você)</small>' : ''}</div>
+        <div class="person-name">${esc(u.name)}${u.isSelf ? ' <small>(você)</small>' : ''}<span class="moedas" title="Moedas">${icon('moeda', 12)} ${u.moedas ?? 0}</span></div>
         <div class="person-sub${telas.length ? ' sharing' : ''}">${esc(sub)}</div>
       </div>
       <div class="person-actions">
@@ -1998,6 +2016,49 @@ function irParaMesa(mesa) {
 }
 $('#jogos-xadrez').addEventListener('click', () => irParaMesa('xadrez'));
 $('#jogos-dama').addEventListener('click', () => irParaMesa('dama'));
+$('#jogos-velha').addEventListener('click', () => irParaMesa('velha'));
+$('#jogos-dados').addEventListener('click', () => {
+  run.abandon();
+  if (player.veiculo) toggleVeiculo();
+  exitFocus();
+  player.teleport([MESA_DADOS.x, 0.15, MESA_DADOS.z + 6.5], 0);
+  sfx.teleport();
+  closePanel();
+});
+
+// ------------------------------------------------------------------ moedas e mesa de dados
+function mostrarMoedas(pulo = false) {
+  const n = self()?.moedas ?? 0;
+  $('#moedas-n').textContent = n;
+  $('#moedas-n2').textContent = n;
+  if (dados.ativo) dados.atualizarHud();
+  if (pulo) {
+    const chip = $('#moedas-chip');
+    chip.classList.remove('pulo');
+    void chip.offsetWidth; // reinicia a animação
+    chip.classList.add('pulo');
+  }
+}
+
+const dados = new Dados({
+  world,
+  player,
+  toast,
+  emitir: (ev, data, ack) => socket?.emit(ev, data, ack),
+  selfId: () => state.selfId,
+  saldo: () => self()?.moedas ?? 0,
+  aoTerminar: (ev) => {
+    const u = state.users.get(ev.id);
+    if (!u) return;
+    if (ev.aposta) u.moedas = ev.moedas;
+    if (u.isSelf && ev.aposta) {
+      mostrarMoedas(true);
+      toast(ev.ganhou ? `Deu ${ev.a + ev.b}! Você ganhou ${ev.delta} moedas` : `Deu ${ev.a + ev.b}. Perdeu ${-ev.delta} moedas`, ev.ganhou ? 'success' : 'info', 4000);
+    }
+    renderPeople();
+  },
+});
+$('#dh-sair').addEventListener('click', exitFocus);
 $('#pk-quit').addEventListener('click', () => run.abandon());
 
 player.on('jump', () => sfx.jump());
@@ -2068,7 +2129,10 @@ function pickScreen() {
 
 function updateHover() {
   const mesa = state.focus ? null : jogos.maisPerto(player.pos);
-  const info = state.focus ? null : mesa ? { kind: 'jogo', mesa, label: jogos.rotulo(mesa) } : screenInfo(pickScreen());
+  const naMesaDeDados = !state.focus && !mesa && dados.perto(player.pos);
+  const info = state.focus ? null
+    : mesa ? { kind: 'jogo', mesa, label: jogos.rotulo(mesa) }
+      : naMesaDeDados ? { kind: 'dados', label: 'Apostar nos dados' } : screenInfo(pickScreen());
   const changed = (info?.label ?? null) !== (state.hovered?.label ?? null);
   state.hovered = info;
   if (changed) {
@@ -2084,6 +2148,15 @@ function enterFocus(info) {
   if (!info) return;
   exitFocus();
   if (document.pointerLockElement) document.exitPointerLock();
+  if (info.kind === 'dados') {
+    state.focus = { kind: 'dados' };
+    if (player.sitting) toggleSit();
+    if (player.veiculo) toggleVeiculo();
+    dados.entrar();
+    $('#hover-hint').hidden = true;
+    syncTouchVisibility();
+    return;
+  }
   if (info.kind === 'jogo') {
     state.focus = { kind: 'jogo' };
     if (player.sitting) toggleSit();
@@ -2134,6 +2207,8 @@ function exitFocus() {
   if (!state.focus) return;
   if (state.focus.kind === 'jogo') {
     jogos.sair();
+  } else if (state.focus.kind === 'dados') {
+    dados.sair();
   } else if (state.focus.kind === 'tv') {
     player.override = null;
     world.travarTelao(null);
@@ -2382,7 +2457,7 @@ window.addEventListener('keydown', (e) => {
   }
   if (typing() || e.repeat) return;
   // comandando um tabuleiro: as teclas de andar/voar/socar ficam com o jogo
-  if (state.focus?.kind === 'jogo' && !['KeyE', 'KeyM', 'KeyT', 'Enter'].includes(e.code)) return;
+  if ((state.focus?.kind === 'jogo' || state.focus?.kind === 'dados') && !['KeyE', 'KeyM', 'KeyT', 'Enter'].includes(e.code)) return;
   switch (e.code) {
     case 'KeyE':
       if (state.focus) exitFocus();
@@ -2462,7 +2537,7 @@ document.addEventListener('mousedown', (e) => {
 if (params.get('debug') === '1') {
   window.__sala3d = {
     state, player, combat, run, corrida, world, settings, punch, goToRing, respawn,
-    toggleVeiculo, irParaLargada, jogos, irParaMesa, exitFocus,
+    toggleVeiculo, irParaLargada, jogos, irParaMesa, exitFocus, dados,
     tocarTela, telasMudas, liberarSomDasTelas, makeVideo,
     publishShare, stopShare, acharTela, telasNoAr, get rtc() { return rtc; },
   };
@@ -2569,6 +2644,7 @@ function frame() {
     if (run.state === 'running') setPkTime(run.time);
     combat.update(dt);
     jogos.update(dt, t);
+    dados.update(dt);
     atualizarTiros(dt);
     localAvatar.setKo(combat.knockedOut);
     corrida.update(dt, player.pos.x, player.pos.z, player.veiculo);

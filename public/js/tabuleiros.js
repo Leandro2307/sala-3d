@@ -1,23 +1,24 @@
 // Tabuleiros gigantes do lado de fora do cinema: xadrez de bruxo (como em Harry Potter, as peças
-// andam sozinhas e a que é tomada se despedaça) e um jogo de damas no mesmo tamanho.
+// andam sozinhas e a que é tomada se despedaça), um jogo de damas no mesmo tamanho e um jogo
+// da velha em que o X e o O caem do céu.
 // Aqui fica só a parte 3D: tabuleiro, peças, animações e estilhaços. As regras ficam em
 // xadrez.js/dama.js e a partida (rede, comandos, HUD) em jogos.js.
 import * as THREE from 'three';
 import { sfx } from './sfx.js';
 
-export const Q = 2.6; // lado de uma casa, em metros
 const BORDA = 1.3;
-const LADO = Q * 8 + BORDA * 2;
 const Y = 0.16; // altura do tabuleiro (em cima da praça)
 const FONT = "'Plus Jakarta Sans', system-ui, sans-serif";
 
 // Ficam a sudeste da porta do cinema, longe da estrada do autódromo.
+// n = casas por lado, q = lado de uma casa em metros
 export const MESAS = {
-  xadrez: { x: 90, z: -12, nome: 'Xadrez de bruxo', lados: ['Brancas', 'Pretas'] },
-  dama: { x: 122, z: -12, nome: 'Dama gigante', lados: ['Claras', 'Escuras'] },
+  xadrez: { x: 90, z: -12, n: 8, q: 2.6, nome: 'Xadrez de bruxo', lados: ['Brancas', 'Pretas'] },
+  dama: { x: 122, z: -12, n: 8, q: 2.6, nome: 'Dama gigante', lados: ['Claras', 'Escuras'] },
+  velha: { x: 152, z: -12, n: 3, q: 4.2, nome: 'Jogo da velha', lados: ['X', 'O'] },
 };
-// para a natureza não plantar árvore em cima
-export const RESERVA_JOGOS = { x: 106, z: -12, r: 38 };
+// para a natureza não plantar árvore em cima (a segunda cobre a velha e a mesa de dados)
+export const RESERVAS_JOGOS = [{ x: 106, z: -12, r: 38 }, { x: 166, z: -12, r: 26 }];
 
 const ease = (t) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
 const _v = new THREE.Vector3();
@@ -36,7 +37,7 @@ function* esperar(s) {
   while (t < s) t += yield;
 }
 
-function texturaTabuleiro(tipo) {
+function texturaTabuleiro(tipo, n, Q, LADO) {
   const px = 1280;
   const cv = document.createElement('canvas');
   cv.width = cv.height = px;
@@ -44,15 +45,17 @@ function texturaTabuleiro(tipo) {
   const k = px / LADO;
   const b = BORDA * k;
   const q = Q * k;
-  const [claro, escuro, moldura, letra] = tipo === 'xadrez'
-    ? ['#ddd6c6', '#26252d', '#17161c', '#c9b98f']
-    : ['#e8d6ae', '#2f5d45', '#3a2417', '#f3dfb5'];
+  const [claro, escuro, moldura, letra] = {
+    xadrez: ['#ddd6c6', '#26252d', '#17161c', '#c9b98f'],
+    dama: ['#e8d6ae', '#2f5d45', '#3a2417', '#f3dfb5'],
+    velha: ['#1d2340', '#1d2340', '#0e1122', '#a5b4fc'],
+  }[tipo];
   ctx.fillStyle = moldura;
   ctx.fillRect(0, 0, px, px);
-  for (let l = 0; l < 8; l++) {
-    for (let c = 0; c < 8; c++) {
+  for (let l = 0; l < n; l++) {
+    for (let c = 0; c < n; c++) {
       const x = b + c * q;
-      const y = b + (7 - l) * q;
+      const y = b + (n - 1 - l) * q;
       ctx.fillStyle = (c + l) % 2 === 0 ? escuro : claro;
       ctx.fillRect(x, y, q, q);
       // veios de mármore: riscos finos e tortos, cada casa com os seus
@@ -79,12 +82,29 @@ function texturaTabuleiro(tipo) {
   }
   ctx.strokeStyle = letra;
   ctx.lineWidth = 4;
-  ctx.strokeRect(b - 3, b - 3, q * 8 + 6, q * 8 + 6);
+  ctx.strokeRect(b - 3, b - 3, q * n + 6, q * n + 6);
+  if (tipo === 'velha') {
+    // o "#" do jogo da velha, em neon
+    ctx.strokeStyle = '#c4b5fd';
+    ctx.lineWidth = 16;
+    ctx.lineCap = 'round';
+    ctx.shadowColor = '#a78bfa';
+    ctx.shadowBlur = 28;
+    for (const i of [1, 2]) {
+      ctx.beginPath();
+      ctx.moveTo(b + i * q, b + 18);
+      ctx.lineTo(b + i * q, b + q * n - 18);
+      ctx.moveTo(b + 18, b + i * q);
+      ctx.lineTo(b + q * n - 18, b + i * q);
+      ctx.stroke();
+    }
+    ctx.shadowBlur = 0;
+  }
   ctx.fillStyle = letra;
   ctx.font = `800 ${Math.round(b * 0.55)}px ${FONT}`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < n; i++) {
     const L = 'abcdefgh'[i];
     ctx.fillText(L, b + i * q + q / 2, px - b / 2);
     ctx.save();
@@ -92,9 +112,9 @@ function texturaTabuleiro(tipo) {
     ctx.rotate(Math.PI);
     ctx.fillText(L, 0, 0);
     ctx.restore();
-    ctx.fillText(String(i + 1), b / 2, b + (7 - i) * q + q / 2);
+    ctx.fillText(String(i + 1), b / 2, b + (n - 1 - i) * q + q / 2);
     ctx.save();
-    ctx.translate(px - b / 2, b + (7 - i) * q + q / 2);
+    ctx.translate(px - b / 2, b + (n - 1 - i) * q + q / 2);
     ctx.rotate(Math.PI);
     ctx.fillText(String(i + 1), 0, 0);
     ctx.restore();
@@ -187,6 +207,8 @@ const MATERIAIS = {
   dw: new THREE.MeshStandardMaterial({ color: 0xf1e2bf, roughness: 0.4 }),
   db: new THREE.MeshStandardMaterial({ color: 0x5a1717, roughness: 0.35, metalness: 0.05 }),
   ouro: new THREE.MeshStandardMaterial({ color: 0xf5c451, roughness: 0.25, metalness: 0.8, emissive: 0x3a2600 }),
+  x: new THREE.MeshStandardMaterial({ color: 0xff5d73, roughness: 0.3, emissive: 0x7a1020 }),
+  o: new THREE.MeshStandardMaterial({ color: 0x6ee7c8, roughness: 0.3, emissive: 0x0b5a48 }),
 };
 
 function pecaXadrez(p) {
@@ -226,6 +248,27 @@ function pecaDama(p) {
   return corpo;
 }
 
+// jogo da velha: X de duas barras cruzadas, O de um anel grosso — deitados no tabuleiro
+function pecaVelha(p) {
+  const corpo = new THREE.Group();
+  if (p === 'x') {
+    for (const a of [Math.PI / 4, -Math.PI / 4]) {
+      const barra = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.7, 0.75), MATERIAIS.x);
+      barra.rotation.y = a;
+      barra.position.y = 0.35;
+      barra.castShadow = true;
+      corpo.add(barra);
+    }
+  } else {
+    const anel = new THREE.Mesh(new THREE.TorusGeometry(1.25, 0.36, 14, 40), MATERIAIS.o);
+    anel.rotation.x = Math.PI / 2;
+    anel.position.y = 0.36;
+    anel.castShadow = true;
+    corpo.add(anel);
+  }
+  return corpo;
+}
+
 function coroar(corpo, mat) {
   const g = geometrias();
   const d2 = new THREE.Mesh(g.disco, mat);
@@ -243,10 +286,14 @@ export class Mesa {
     this.tipo = tipo;
     this.def = MESAS[tipo];
     this.world = world;
+    this.n = this.def.n;
+    this.q = this.def.q;
+    this.lado = this.q * this.n + BORDA * 2;
+    this.linha = null; // casas da linha vencedora (jogo da velha), que ficam pulsando
     this.grupo = new THREE.Group();
     this.grupo.position.set(this.def.x, 0, this.def.z);
     world.fora.add(this.grupo);
-    this.pecas = new Array(64).fill(null);
+    this.pecas = new Array(this.n * this.n).fill(null);
     this.fila = [];
     this.atual = null;
     this.cacos = [];
@@ -256,6 +303,7 @@ export class Mesa {
 
   construir() {
     const { x, z } = this.def;
+    const { q: Q, lado: LADO } = this;
     // praça de pedra em volta, um degrau acima da grama (dá para subir andando)
     const praca = LADO + 9;
     const pedra = new THREE.Mesh(new THREE.BoxGeometry(praca, 0.15, praca), new THREE.MeshStandardMaterial({ color: 0x4b4f5c, roughness: 0.95 }));
@@ -264,7 +312,7 @@ export class Mesa {
     this.grupo.add(pedra);
     this.world.addBox({ min: [x - praca / 2, 0, z - praca / 2], max: [x + praca / 2, 0.15, z + praca / 2] });
 
-    const tab = new THREE.Mesh(new THREE.PlaneGeometry(LADO, LADO), new THREE.MeshStandardMaterial({ map: texturaTabuleiro(this.tipo), roughness: 0.42, metalness: 0.05 }));
+    const tab = new THREE.Mesh(new THREE.PlaneGeometry(LADO, LADO), new THREE.MeshStandardMaterial({ map: texturaTabuleiro(this.tipo, this.n, Q, LADO), roughness: 0.42, metalness: 0.05 }));
     tab.rotation.x = -Math.PI / 2;
     tab.position.y = Y;
     tab.receiveShadow = true;
@@ -272,7 +320,7 @@ export class Mesa {
     this.tab = tab;
 
     // placas nos dois lados
-    const cor = this.tipo === 'xadrez' ? '#a78bfa' : '#fbbf24';
+    const cor = { xadrez: '#a78bfa', dama: '#fbbf24', velha: '#ff5d73' }[this.tipo];
     const tex = placaTexto(this.def.nome.toUpperCase(), cor);
     const ferroPlaca = new THREE.MeshStandardMaterial({ color: 0x1b1f2a });
     const face = new THREE.MeshBasicMaterial({ map: tex, toneMapped: false });
@@ -325,7 +373,7 @@ export class Mesa {
     }
     const ultMat = new THREE.MeshBasicMaterial({ color: 0xfbbf24, transparent: true, opacity: 0.28, depthWrite: false });
     this.ultimo = [0, 1].map(() => {
-      const m = new THREE.Mesh(new THREE.PlaneGeometry(Q, Q), ultMat);
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(Q * 0.98, Q * 0.98), ultMat);
       m.rotation.x = -Math.PI / 2;
       m.visible = false;
       this.grupo.add(m);
@@ -340,7 +388,8 @@ export class Mesa {
 
   // centro da casa, em coordenadas do grupo (coluna a = -x, fileira 1 = +z)
   local(i, out = new THREE.Vector3()) {
-    return out.set(((i & 7) - 3.5) * Q, Y, (3.5 - (i >> 3)) * Q);
+    const m = (this.n - 1) / 2;
+    return out.set(((i % this.n) - m) * this.q, Y, (m - Math.floor(i / this.n)) * this.q);
   }
   mundo(i, out = new THREE.Vector3()) {
     return this.local(i, out).add(this.grupo.position);
@@ -348,19 +397,20 @@ export class Mesa {
   get centro() { return this.grupo.position; }
   // a pessoa está na praça?
   perto(p, folga = 5.5) {
-    const m = LADO / 2 + folga;
+    const m = this.lado / 2 + folga;
     return Math.abs(p.x - this.def.x) < m && Math.abs(p.z - this.def.z) < m;
   }
   // onde fica de pé quem comanda cada lado
   posComandante(lado) {
     const s = lado === 0 ? 1 : -1;
-    return [this.def.x, 0.15, this.def.z + s * (LADO / 2 + 1.6)];
+    return [this.def.x, 0.15, this.def.z + s * (this.lado / 2 + 1.6)];
   }
   // câmera de quem comanda (lado 0/1) ou assiste (null)
   pose(lado, zoom = 1, giro = 0) {
     const ang = (lado === 1 ? Math.PI : 0) + giro;
-    const d = 19 * zoom;
-    const pos = new THREE.Vector3(Math.sin(ang) * d, 22 * zoom, Math.cos(ang) * d).add(this.grupo.position);
+    const k = Math.max(0.62, this.lado / 23.4); // tabuleiro menor, câmera mais perto
+    const d = 19 * zoom * k;
+    const pos = new THREE.Vector3(Math.sin(ang) * d, 22 * zoom * k, Math.cos(ang) * d).add(this.grupo.position);
     const alvo = new THREE.Vector3(Math.sin(ang) * 1.5, 0, Math.cos(ang) * 1.5).add(this.grupo.position);
     return { position: pos, target: alvo };
   }
@@ -369,14 +419,15 @@ export class Mesa {
     const hit = raycaster.intersectObject(this.tab, false)[0];
     if (!hit) return -1;
     const p = hit.point.sub(this.grupo.position);
-    const c = Math.floor(p.x / Q + 4);
-    const l = Math.floor(4 - p.z / Q);
-    return c >= 0 && c < 8 && l >= 0 && l < 8 ? l * 8 + c : -1;
+    const n = this.n;
+    const c = Math.floor(p.x / this.q + n / 2);
+    const l = Math.floor(n / 2 - p.z / this.q);
+    return c >= 0 && c < n && l >= 0 && l < n ? l * n + c : -1;
   }
 
   // ---------------------------------------------------------------- estado
   novaPeca(p) {
-    const corpo = this.tipo === 'xadrez' ? pecaXadrez(p) : pecaDama(p);
+    const corpo = this.tipo === 'xadrez' ? pecaXadrez(p) : this.tipo === 'dama' ? pecaDama(p) : pecaVelha(p);
     const peca = new THREE.Group();
     peca.add(corpo);
     peca.userData = { p, corpo };
@@ -388,6 +439,7 @@ export class Mesa {
   reconstruir(b, ultimo = null) {
     this.fila = [];
     this.atual = null;
+    this.linha = null;
     for (const m of this.pecas) if (m) this.grupo.remove(m);
     this.pecas = b.map((p, i) => {
       if (!p) return null;
@@ -424,6 +476,34 @@ export class Mesa {
   // ---------------------------------------------------------------- animação
   animarXadrez(v) { this.fila.push(() => this.lanceXadrez(v)); }
   animarDama(v) { this.fila.push(() => this.lanceDama(v)); }
+  animarVelha(v) { this.fila.push(() => this.lanceVelha(v)); }
+
+  // o X ou o O despenca do céu na casa e quica
+  *lanceVelha({ casa, p }) {
+    const peca = this.novaPeca(p);
+    this.pecas[casa] = peca;
+    const alvo = this.local(casa);
+    peca.position.set(alvo.x, Y + 16, alvo.z);
+    peca.rotation.y = Math.random() * 0.6 - 0.3;
+    this.marcarUltimo([casa]);
+    yield* tween(0.7, (t) => {
+      peca.position.y = Y + 16 * (1 - t * t);
+      peca.userData.corpo.rotation.y = (1 - t) * 3;
+    });
+    sfx.pedraPasso?.(this.volume(alvo) * 1.4);
+    yield* tween(0.35, (t) => {
+      const amassa = Math.sin(Math.PI * t) * 0.35;
+      peca.scale.set(1 + amassa, 1 - amassa, 1 + amassa);
+      peca.position.y = Y + Math.sin(Math.PI * t) * 0.6;
+    });
+    peca.scale.set(1, 1, 1);
+    peca.position.y = Y;
+  }
+
+  // linha vencedora da velha: as três peças pulsam
+  destacar(casas) {
+    this.linha = casas;
+  }
 
   volume(pos) {
     return Math.max(0, 1 - this.camPos.distanceTo(_v.copy(pos).add(this.grupo.position)) / 90);
@@ -492,7 +572,7 @@ export class Mesa {
     if (vitima) {
       // chega perto da vítima, bate, e só então ocupa a casa
       const dir = vitima.position.clone().sub(peca.position).setY(0);
-      const perto = vitima.position.clone().addScaledVector(dir.normalize(), -Q * 0.7);
+      const perto = vitima.position.clone().addScaledVector(dir.normalize(), -this.q * 0.7);
       perto.y = Y;
       yield* this.andar(peca, perto, { salto: cavalo });
       yield* this.golpe(peca, vitima);
@@ -609,6 +689,12 @@ export class Mesa {
   update(dt, t, camPos) {
     this.camPos.copy(camPos);
     for (const [k, c] of this.chamas.entries()) c.scale.set(1, 0.85 + Math.sin(t * 9 + k * 2) * 0.15, 1);
+    if (this.linha && !this.ocupada) {
+      for (const i of this.linha) {
+        const p = this.pecas[i];
+        if (p) p.position.y = Y + Math.abs(Math.sin(t * 4)) * 1.2;
+      }
+    }
     // animações: uma de cada vez, na ordem dos lances
     let resto = dt;
     while (resto > 0) {

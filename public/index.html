@@ -30,6 +30,8 @@
       <span id="room-name">principal</span>
       <span class="sep">·</span>
       <span id="room-count">1 pessoa</span>
+      <span class="sep">·</span>
+      <span class="moedas-chip" id="moedas-chip" title="Suas moedas"><i data-icon="moeda" data-size="15"></i><b id="moedas-n">0</b></span>
       <button id="copy-invite" class="chip-btn" type="button"><i data-icon="link" data-size="15"></i>Copiar convite</button>
     </div>
 
@@ -97,6 +99,43 @@
       </form>
       <div class="jh-msg" id="jh-msg"></div>
       <div class="jh-dica">Clique na peça e na casa · <kbd>Espaço</kbd> fala · <kbd>A</kbd>/<kbd>D</kbd> giram · roda do mouse aproxima</div>
+    </div>
+
+    <div id="dados-hud" hidden>
+      <div class="jh-head">
+        <b>Mesa de dados</b>
+        <button type="button" id="dh-sair" class="chip-btn"><kbd>Esc</kbd> Sair</button>
+      </div>
+      <div class="dh-saldo"><i data-icon="moeda" data-size="18"></i><b id="dh-saldo">0</b> moedas</div>
+      <div class="dh-tipos" id="dh-tipos">
+        <button type="button" data-tipo="baixo">Baixo<small>2 a 6 · 1:1</small></button>
+        <button type="button" data-tipo="sete">Sete<small>4:1</small></button>
+        <button type="button" data-tipo="alto">Alto<small>8 a 12 · 1:1</small></button>
+        <button type="button" data-tipo="dupla">Dupla<small>iguais · 4:1</small></button>
+        <button type="button" data-tipo="soma" class="dh-soma-btn">Soma exata
+          <select id="dh-soma" aria-label="Soma">
+            <option>2</option><option>3</option><option>4</option><option>5</option><option>6</option>
+            <option selected>7</option><option>8</option><option>9</option><option>10</option><option>11</option><option>12</option>
+          </select>
+        </button>
+      </div>
+      <div class="dh-aposta">
+        <input id="dh-qtd" type="number" min="1" step="1" value="10" aria-label="Quanto apostar">
+        <div class="dh-rapidos" id="dh-rapidos">
+          <button type="button" class="chip-btn" data-qtd="10">10</button>
+          <button type="button" class="chip-btn" data-qtd="50">50</button>
+          <button type="button" class="chip-btn" data-qtd="metade">½</button>
+          <button type="button" class="chip-btn" data-qtd="tudo">Tudo</button>
+        </div>
+      </div>
+      <div class="dh-paga" id="dh-paga"></div>
+      <div class="jh-acoes">
+        <button type="button" class="primary small" id="dh-rolar"><i data-icon="dado" data-size="16"></i>Apostar e rolar</button>
+        <button type="button" class="secondary small" id="dh-so">Só rolar</button>
+      </div>
+      <div class="jh-msg" id="dh-msg"></div>
+      <ul class="dh-hist" id="dh-hist"></ul>
+      <div class="jh-dica"><kbd>Espaço</kbd> rola · ganhe moedas no parkour, na pista, no xadrez, na dama e na velha</div>
     </div>
 
     <div id="tv-unblock" hidden>
@@ -212,7 +251,7 @@
       <button type="button" class="ghost" data-panel="parkour" data-tip="Parkour"><i data-icon="trophy"></i></button>
       <button type="button" class="ghost" data-panel="ringue" data-tip="Ringue de luta"><i data-icon="fist"></i></button>
       <button type="button" class="ghost" data-panel="corrida" data-tip="Pista de corrida"><i data-icon="car"></i></button>
-      <button type="button" class="ghost" data-panel="jogos" data-tip="Xadrez de bruxo e dama"><i data-icon="xadrez"></i></button>
+      <button type="button" class="ghost" data-panel="jogos" data-tip="Jogos, dados e moedas"><i data-icon="xadrez"></i></button>
       <button type="button" class="ghost" data-panel="settings" data-tip="Ajustes"><i data-icon="settings"></i></button>
       <!-- tela cheia também some com os avisos "Compartilhando … com esta guia" do Chrome -->
       <button type="button" class="ghost" id="btn-full" data-tip="Tela cheia (esconde as barras do Chrome)"><i data-icon="maximize"></i></button>
@@ -353,7 +392,16 @@
     </section>
 
     <section data-section="jogos">
-      <p class="lead">Lá fora, saindo pela porta do cinema e virando à esquerda, tem um xadrez de bruxo e uma dama em tamanho gigante. Você comanda as peças — elas andam sozinhas, e a que é tomada vira pó.</p>
+      <p class="lead">Lá fora, saindo pela porta do cinema e virando à esquerda, tem xadrez de bruxo, dama, jogo da velha gigante e uma mesa de dados. Você comanda as peças — elas andam sozinhas, e a que é tomada vira pó.</p>
+      <div class="sub-block moedas-tabela">
+        <h3>Moedas <span class="moedas-chip"><i data-icon="moeda" data-size="15"></i><b id="moedas-n2">0</b></span></h3>
+        <ul class="rules">
+          <li>Parkour completo: <b>+50</b> · volta na pista: <b>+30</b></li>
+          <li>Vencer xadrez: <b>+100</b> (contra o computador: 20 / 50 / 100 por nível)</li>
+          <li>Vencer dama: <b>+60</b> (computador: 15 / 40 / 80) · jogo da velha: <b>+15</b> (computador: 2 / 5)</li>
+          <li>Na mesa de dados você aposta contra a banca. Todo mundo começa com 100.</li>
+        </ul>
+      </div>
       <ul class="rules">
         <li>Chegue na praça do tabuleiro e aperte <kbd>E</kbd> para comandar (ou assistir, se os dois lados já tiverem dono).</li>
         <li>Clique na peça e depois na casa. Ou fale (botão do microfone ou <kbd>Espaço</kbd>): "cavalo f3", "peão e4", "bispo toma c6", "roque".</li>
@@ -362,6 +410,8 @@
       </ul>
       <button type="button" class="primary" id="jogos-xadrez"><i data-icon="xadrez" data-size="18"></i>Ir para o xadrez de bruxo</button>
       <button type="button" class="secondary" id="jogos-dama" style="margin-top:8px"><i data-icon="goto" data-size="18"></i>Ir para a dama</button>
+      <button type="button" class="secondary" id="jogos-velha" style="margin-top:8px"><i data-icon="goto" data-size="18"></i>Ir para o jogo da velha</button>
+      <button type="button" class="secondary" id="jogos-dados" style="margin-top:8px"><i data-icon="dado" data-size="18"></i>Ir para a mesa de dados</button>
     </section>
 
     <section data-section="corrida">

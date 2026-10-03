@@ -480,6 +480,58 @@ body.jogo-on #crosshair, body.jogo-on #hover-hint, body.jogo-on #controls-help {
 #focus-ctrl.on { background: var(--accent); color: var(--accent-ink); }
 .sp-btn.ctrl.on { background: var(--accent); color: var(--accent-ink); }
 
+/* moedas */
+.moedas-chip { display: inline-flex; align-items: center; gap: 5px; color: #fbbf24; font-weight: 700; }
+.moedas-chip b { font-variant-numeric: tabular-nums; }
+.moedas-chip.pulo { animation: moeda-pulo 0.6s var(--ease); }
+@keyframes moeda-pulo { 40% { transform: scale(1.35); } }
+.person-name .moedas { color: #fbbf24; font-weight: 700; margin-left: 6px; font-size: 12px; }
+
+/* mesa de dados */
+#dados-hud {
+  position: absolute;
+  top: 16px;
+  right: max(16px, env(safe-area-inset-right));
+  width: min(340px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-radius: var(--radius);
+  background: var(--glass-strong);
+  border: 1px solid var(--line);
+  pointer-events: auto;
+  font-size: 13px;
+  max-height: calc(100dvh - 120px);
+  overflow: auto;
+}
+.dh-saldo { display: flex; align-items: center; gap: 6px; color: #fbbf24; font-size: 15px; }
+.dh-saldo b { font-size: 22px; font-variant-numeric: tabular-nums; }
+.dh-tipos { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.dh-tipos button {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line-strong);
+  background: rgba(255, 255, 255, 0.04); color: var(--text); font: 700 13px var(--font); text-align: left; cursor: pointer;
+}
+.dh-tipos button small { color: var(--muted); font-weight: 500; font-size: 11px; }
+.dh-tipos button.on { border-color: #fbbf24; background: rgba(251, 191, 36, 0.12); }
+.dh-soma-btn { grid-column: span 2; flex-direction: row !important; align-items: center !important; justify-content: space-between; }
+.dh-soma-btn select { height: 28px; border-radius: 8px; border: 1px solid var(--line-strong); background: #141826; color: var(--text); font: inherit; }
+.dh-aposta { display: flex; gap: 8px; align-items: center; }
+#dh-qtd { width: 90px; height: 36px; border-radius: 10px; border: 1px solid var(--line-strong); background: rgba(255, 255, 255, 0.05); color: var(--text); padding: 0 10px; font: 700 15px var(--font); }
+.dh-rapidos { display: flex; gap: 4px; flex-wrap: wrap; }
+.dh-paga { color: var(--muted); font-size: 12px; }
+.dh-hist { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.dh-hist li { display: flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
+.dh-hist li.vazio { color: var(--muted); }
+.dh-hist small { color: var(--muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dh-hist .g { color: #6ee7c8; }
+.dh-hist .p { color: #ff8a9a; }
+.dh-dado { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 5px; background: #fbf7ee; color: #171923; font-weight: 800; font-size: 12px; }
+@media (max-width: 640px) {
+  #dados-hud { top: auto; bottom: calc(84px + env(safe-area-inset-bottom)); right: 16px; max-height: 50vh; }
+}
+
 #tv-unblock { position: absolute; top: 72px; left: 50%; transform: translateX(-50%); pointer-events: auto; }
 
 /* hub de controles — fica sempre na tela (só recolhe se o usuário pedir) */

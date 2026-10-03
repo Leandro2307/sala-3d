@@ -8,7 +8,7 @@ import { COURSE, RAILS, FUN_PADS } from './parkour.js';
 import { RING } from './arena.js';
 import { PISTA, CAMINHO, CURVAS, pontoEm, projetar } from './pista.js';
 import { criarNatureza } from './natureza.js';
-import { RESERVA_JOGOS } from './tabuleiros.js';
+import { RESERVAS_JOGOS } from './tabuleiros.js';
 
 // Área jogável inteira (cercada): a sala do cinema num canto, em volta da origem, e o
 // autódromo ao ar livre a leste. O telão do cinema continua em minZ, perto da plateia.
@@ -407,8 +407,8 @@ export class World {
     this.buildRing();
     this.buildTrack();
     // praça do xadrez de bruxo e da dama (as peças em si ficam em jogos.js)
-    this.reservas.push(RESERVA_JOGOS);
-    this.placaDirecao(SALA.maxX + 9, SALA.porta.z0 + 2, -Math.PI / 2, '↖  XADREZ E DAMA', '#a78bfa');
+    this.reservas.push(...RESERVAS_JOGOS);
+    this.placaDirecao(SALA.maxX + 9, SALA.porta.z0 + 2, -Math.PI / 2, '↖  JOGOS E DADOS', '#a78bfa');
     this.natureza = criarNatureza(this.scene, this.renderer, {
       area: ROOM, sala: SALA, reservas: this.reservas, estradas: this.estradas, addBox: (o) => this.addBox(o), grupo: this.fora,
     });

@@ -92,6 +92,17 @@ export const sfx = {
     for (let i = 0; i < 5; i++) ruido({ dur: 0.05, gain: 0.05 * vol, type: 'bandpass', freq: 2500 + Math.random() * 2500, q: 2, delay: 0.25 + i * 0.07 + Math.random() * 0.05 });
   },
 
+  // dado batendo no feltro: estalo seco e curto
+  dado: (vol = 1) => {
+    ruido({ dur: 0.04, gain: 0.09 * vol, type: 'bandpass', freq: 2200 + Math.random() * 900, q: 1.4 });
+    tone({ freq: 320, to: 180, dur: 0.05, type: 'triangle', gain: 0.03 * vol });
+  },
+  // moedas: dois "plins" metálicos
+  moeda: () => {
+    tone({ freq: 1568, dur: 0.12, type: 'triangle', gain: 0.05 });
+    tone({ freq: 2093, dur: 0.22, type: 'triangle', gain: 0.05, delay: 0.07 });
+  },
+
   // ------------------------------------------------------------ ringue
   // Soco no vazio: só o deslocamento de ar, agudo e curto.
   punchSwing: () => ruido({ dur: 0.13, gain: 0.05, type: 'bandpass', freq: 1700, toFreq: 480, q: 1.1 }),

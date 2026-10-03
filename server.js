@@ -8,6 +8,7 @@ const path = require('path');
 const { Server } = require('socket.io');
 const compression = require('compression');
 const { execFile } = require('child_process');
+const crypto = require('crypto');
 
 const PORT = Number(process.env.PORT) || 3000;
 const HTTPS_PORT = Number(process.env.HTTPS_PORT) || 3443;
@@ -152,6 +153,65 @@ function getBoards(id) {
   return b;
 }
 
+// ------------------------------------------------------------------ moedas
+// Carteira por nome (minúsculo), guardada em dados/moedas.json. Quem chega pela primeira vez
+// ganha MOEDAS_INICIAIS. No plano grátis do Render o disco é apagado a cada reinício, então lá
+// as moedas duram enquanto o serviço estiver de pé (como os recordes).
+const MOEDAS_INICIAIS = 100;
+const MOEDAS_ARQ = path.join(__dirname, 'dados', 'moedas.json');
+const carteiras = new Map((() => {
+  try { return Object.entries(JSON.parse(fs.readFileSync(MOEDAS_ARQ, 'utf8'))); } catch { return []; }
+})());
+let salvarTimer = null;
+function salvarMoedas() {
+  if (salvarTimer) return;
+  salvarTimer = setTimeout(() => {
+    salvarTimer = null;
+    fs.mkdir(path.dirname(MOEDAS_ARQ), { recursive: true }, () => {
+      fs.writeFile(MOEDAS_ARQ, JSON.stringify(Object.fromEntries(carteiras)), () => {});
+    });
+  }, 2000);
+}
+const chaveNome = (nome) => String(nome).trim().toLowerCase();
+function saldoDe(nome) {
+  const k = chaveNome(nome);
+  if (!carteiras.has(k)) {
+    carteiras.set(k, MOEDAS_INICIAIS);
+    salvarMoedas();
+  }
+  return carteiras.get(k);
+}
+function mudarSaldo(nome, delta) {
+  const novo = Math.max(0, saldoDe(nome) + Math.round(delta));
+  carteiras.set(chaveNome(nome), novo);
+  salvarMoedas();
+  return novo;
+}
+
+// Prêmios. Cada um tem um intervalo mínimo por pessoa, para ninguém "farmar" repetindo.
+const PREMIOS = {
+  parkour: { qtd: 50, intervalo: 90_000, motivo: 'parkour completo' },
+  volta: { qtd: 30, intervalo: 40_000, motivo: 'volta na pista' },
+};
+// vitória numa mesa: contra gente, ou contra o computador por nível (fácil, médio, difícil)
+const PREMIO_JOGO = {
+  xadrez: { gente: 100, bot: [20, 50, 100] },
+  dama: { gente: 60, bot: [15, 40, 80] },
+  velha: { gente: 15, bot: [2, 5, 10] },
+};
+const ultimoPremio = new Map(); // "nome:tipo" -> quando
+
+// Mesa de dados: dois d6, aposta contra a banca. Pagamento = quanto ganha por moeda apostada.
+const PAGA_SOMA = { 2: 30, 3: 15, 4: 10, 5: 7, 6: 6, 7: 4, 8: 6, 9: 7, 10: 10, 11: 15, 12: 30 };
+const APOSTAS = {
+  baixo: { paga: 1, ganha: (a, b) => a + b <= 6 },
+  alto: { paga: 1, ganha: (a, b) => a + b >= 8 },
+  sete: { paga: 4, ganha: (a, b) => a + b === 7 },
+  dupla: { paga: 4, ganha: (a, b) => a === b },
+  soma: { paga: (v) => PAGA_SOMA[v], ganha: (a, b, v) => a + b === v },
+};
+const APOSTA_MAX = 10_000;
+
 function getRoom(id) {
   let room = rooms.get(id);
   if (!room) {
@@ -172,11 +232,19 @@ function getRoom(id) {
 // Xadrez de bruxo e dama gigante. O servidor guarda só os lances e quem senta em cada lado
 // (0 = brancas/claras, que começam). Quem confere as regras é o cliente — aqui só se garante que
 // cada um joga na sua vez e no lado em que está sentado. 'bot' = computador, jogado pelo botDono.
-const JOGOS = ['xadrez', 'dama'];
-const LANCE_RE = { xadrez: /^[a-h][1-8][a-h][1-8][qrbn]?$/, dama: /^[a-h][1-8]([-x][a-h][1-8]){1,12}$/ };
+const JOGOS = ['xadrez', 'dama', 'velha'];
+const LANCE_RE = { xadrez: /^[a-h][1-8][a-h][1-8][qrbn]?$/, dama: /^[a-h][1-8]([-x][a-h][1-8]){1,12}$/, velha: /^[a-c][1-3]$/ };
+const COR = ['w', 'b'];
+// As mesmas regras do cliente (módulos ES em public/js): com elas o servidor recusa lance
+// ilegal e sabe quem ganhou, para pagar as moedas. Carrega em segundo plano.
+let REGRAS = null;
+Promise.all(JOGOS.map((j) => import(`./public/js/${j}.js`)))
+  .then((ms) => { REGRAS = Object.fromEntries(JOGOS.map((j, i) => [j, ms[i]])); })
+  .catch((err) => console.warn('  Regras dos jogos não carregaram (lances sem conferência):', err.message));
 const MAX_LANCES = 600;
 function novosJogos() {
-  return Object.fromEntries(JOGOS.map((j) => [j, { lances: [], lugares: [null, null], botDono: null }]));
+  // desde: em que lance cada lado sentou (só vale moeda quem jogou a partida inteira)
+  return Object.fromEntries(JOGOS.map((j) => [j, { lances: [], lugares: [null, null], botDono: null, st: null, fim: null, desde: [0, 0], nivel: 1, nivelMin: 1 }]));
 }
 const jogoPublico = (j) => ({ lances: j.lances, lugares: j.lugares, botDono: j.botDono });
 // tira a pessoa das mesas (saiu da sala); devolve as mesas que mudaram
@@ -211,11 +279,42 @@ function eventoDeControle(raw) {
   return null;
 }
 
+function darMoedas(io, room, user, qtd, motivo) {
+  if (!qtd) return;
+  user.moedas = mudarSaldo(user.name, qtd);
+  io.to(room.id).emit('moedas', { id: user.id, moedas: user.moedas, delta: qtd, motivo });
+}
+
+// prêmio com intervalo mínimo (parkour, volta)
+function premiar(io, room, user, tipo) {
+  const p = PREMIOS[tipo];
+  const k = `${chaveNome(user.name)}:${tipo}`;
+  const agora = Date.now();
+  if (agora - (ultimoPremio.get(k) || 0) < p.intervalo) return;
+  ultimoPremio.set(k, agora);
+  darMoedas(io, room, user, p.qtd, p.motivo);
+}
+
+// Fim de partida: paga quem venceu (contra outra pessoa ou contra o computador). Jogar contra
+// si mesmo, ou sentar no meio da partida, não vale.
+function premiarJogo(io, room, mesa, j) {
+  const v = j.fim?.vencedor;
+  if (!v) return;
+  const lado = COR.indexOf(v);
+  const ganhador = room.users.get(j.lugares[lado]);
+  const perdedor = j.lugares[1 - lado];
+  if (!ganhador || !perdedor || perdedor === ganhador.id) return;
+  if (j.desde[0] > 1 || j.desde[1] > 1) return;
+  const tabela = PREMIO_JOGO[mesa];
+  const qtd = perdedor === 'bot' ? tabela.bot[j.nivelMin] : tabela.gente;
+  darMoedas(io, room, ganhador, qtd, `vitória ${mesa === 'velha' ? 'no jogo da velha' : mesa === 'dama' ? 'na dama' : 'no xadrez'}${perdedor === 'bot' ? ' contra o computador' : ''}`);
+}
+
 function publicUser(u) {
   return {
     id: u.id, name: u.name, color: u.color, mic: u.mic,
     shares: [...u.shares.values()],
-    p: u.p, r: u.r, a: u.a, photo: u.photo, shirt: u.shirt, char: u.char, health: u.health, ko: u.ko,
+    p: u.p, r: u.r, a: u.a, photo: u.photo, shirt: u.shirt, char: u.char, health: u.health, ko: u.ko, moedas: u.moedas,
   };
 }
 
@@ -309,8 +408,10 @@ function attachSockets(io) {
         char: PERSONAGENS.includes(data?.char) ? data.char : 'padrao',
         health: 1,
         ko: false,
+        ultimoDado: 0,
         p: [0, 0, -4], r: Math.PI, a: 0,
       };
+      user.moedas = saldoDe(user.name);
       room.users.set(socket.id, user);
       socket.join(roomId);
 
@@ -325,6 +426,7 @@ function attachSockets(io) {
         fights: getBoards(roomId).fights,
         voltas: getBoards(roomId).voltas,
         jogos: Object.fromEntries(Object.entries(room.jogos).map(([k, j]) => [k, jogoPublico(j)])),
+        moedas: user.moedas,
       });
       socket.to(roomId).emit('user-joined', publicUser(user));
     });
@@ -580,12 +682,14 @@ function attachSockets(io) {
       placar.sort((a, b) => a.time - b.time);
       placar.length = Math.min(placar.length, 10);
       io.to(room.id).emit('volta', { name: user.name, color: user.color, time: t, recorde, voltas: placar });
+      premiar(io, room, user, 'volta');
     });
 
     socket.on('parkour-finish', (time) => {
       if (!user) return;
       const t = Number(time);
       if (!Number.isFinite(t) || t < 8 || t > 3600) return;
+      premiar(io, room, user, 'parkour');
       const board = getBoards(room.id).parkour;
       const existing = board.find((e) => e.name === user.name);
       if (existing && existing.time <= t) {
@@ -627,6 +731,7 @@ function attachSockets(io) {
       const lado = Number(msg?.lado);
       if (!j || (lado !== 0 && lado !== 1)) return ack?.({ erro: 'Mesa inválida' });
       if (j.lugares[lado] && j.lugares[lado] !== user.id) return ack?.({ erro: 'Esse lado já tem dono' });
+      if (j.lugares[lado] !== user.id) j.desde[lado] = j.lances.length;
       j.lugares[lado] = user.id;
       ack?.({ ok: true });
       mandarJogo(msg.mesa);
@@ -651,19 +756,51 @@ function attachSockets(io) {
       if (j.lugares[lado]) return ack?.({ erro: 'Esse lado já tem dono' });
       j.lugares[lado] = 'bot';
       j.botDono = user.id;
+      j.desde[lado] = j.lances.length;
+      j.nivel = [0, 1, 2].includes(msg.nivel) ? msg.nivel : 1;
+      j.nivelMin = j.nivel;
       ack?.({ ok: true });
       mandarJogo(msg.mesa);
     });
 
+    // trocou o nível do computador no meio da partida: vale o mais fácil que ele jogou
+    socket.on('jogo-nivel', (msg) => {
+      const j = mesaDe(msg);
+      if (!j || j.botDono !== user.id || ![0, 1, 2].includes(msg.nivel)) return;
+      j.nivel = msg.nivel;
+      j.nivelMin = j.lances.length ? Math.min(j.nivelMin, msg.nivel) : msg.nivel;
+    });
+
     socket.on('jogo-lance', (msg) => {
       const j = mesaDe(msg);
-      if (!j) return;
+      if (!j || j.fim) return;
       const lance = String(msg.lance || '');
       if (!LANCE_RE[msg.mesa].test(lance) || Number(msg.n) !== j.lances.length || j.lances.length >= MAX_LANCES) return;
       const quem = j.lugares[j.lances.length % 2];
       if (quem !== user.id && !(quem === 'bot' && j.botDono === user.id)) return;
+      const R = REGRAS?.[msg.mesa];
+      if (R) {
+        if (!j.st) {
+          // lances guardados antes das regras carregarem: refaz; se algum não fecha, para nele
+          let st = R.novo();
+          for (const l of j.lances) {
+            const m0 = R.deTexto(st, l);
+            if (!m0) break;
+            st = R.aplicar(st, m0);
+          }
+          j.st = st;
+        }
+        const m = R.deTexto(j.st, lance);
+        if (!m) return; // lance ilegal
+        j.st = R.aplicar(j.st, m);
+      }
       j.lances.push(lance);
       mandarJogo(msg.mesa);
+      const sit = R?.situacao(j.st);
+      if (sit?.fim) {
+        j.fim = sit;
+        premiarJogo(io, room, msg.mesa, j);
+      }
     });
 
     // partida nova: quem está sentado, ou qualquer um se só o computador (ou ninguém) está na mesa
@@ -673,7 +810,44 @@ function attachSockets(io) {
       const gente = j.lugares.filter((l) => l && l !== 'bot');
       if (gente.length && !gente.includes(user.id)) return;
       j.lances = [];
+      j.st = null;
+      j.fim = null;
+      j.desde = [0, 0];
+      j.nivelMin = j.nivel;
       mandarJogo(msg.mesa);
+    });
+
+    // Mesa de dados: o servidor rola (crypto), cobra e paga. Todo mundo vê os dados rolando.
+    socket.on('dados-rolar', (msg, ack) => {
+      const reply = typeof ack === 'function' ? ack : () => {};
+      if (!user) return;
+      const agora = Date.now();
+      if (agora - user.ultimoDado < 2500) return reply({ erro: 'Espere os dados pararem.' });
+      const tipo = String(msg?.tipo || '');
+      const regra = APOSTAS[tipo];
+      const qtd = Math.floor(Number(msg?.qtd) || 0);
+      const valor = Math.floor(Number(msg?.valor) || 0);
+      if (qtd < 0 || qtd > APOSTA_MAX) return reply({ erro: 'Aposta inválida.' });
+      if (qtd > 0 && !regra) return reply({ erro: 'Escolha em que apostar.' });
+      if (tipo === 'soma' && !PAGA_SOMA[valor]) return reply({ erro: 'Escolha uma soma de 2 a 12.' });
+      user.moedas = saldoDe(user.name);
+      if (qtd > user.moedas) return reply({ erro: `Você só tem ${user.moedas} moedas.` });
+      user.ultimoDado = agora;
+      const a = crypto.randomInt(1, 7);
+      const b = crypto.randomInt(1, 7);
+      let delta = 0;
+      let ganhou = false;
+      if (qtd > 0) {
+        ganhou = regra.ganha(a, b, valor);
+        const paga = typeof regra.paga === 'function' ? regra.paga(valor) : regra.paga;
+        delta = ganhou ? qtd * paga : -qtd;
+        user.moedas = mudarSaldo(user.name, delta);
+      }
+      reply({ ok: true });
+      io.to(room.id).emit('dados', {
+        id: user.id, nome: user.name, cor: user.color, a, b,
+        aposta: qtd > 0 ? { tipo, valor, qtd } : null, ganhou, delta, moedas: user.moedas,
+      });
     });
 
     socket.on('emote', (kind) => {

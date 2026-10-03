@@ -10,6 +10,9 @@ cloudflared
 # navegador compartilhado: o perfil guarda os logins (cookies do YouTube etc.) e o .env as senhas
 neko/perfil/
 
+# moedas guardadas pelo servidor
+dados/
+
 # lixo de sistema / editor
 .DS_Store
 Thumbs.db
