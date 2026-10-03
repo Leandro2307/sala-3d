@@ -11,6 +11,7 @@ import { Combat } from './combat.js';
 import { RING, COMBAT, ringCorners } from './arena.js';
 import { Corrida, PISTA, largada, formatarVolta, projetar, pontoEm } from './pista.js';
 import { sfx, audioContext, setSfxEnabled } from './sfx.js';
+import { Jogos } from './jogos.js';
 import { icon, hydrateIcons } from './icons.js';
 import { isTouch, setupTouchControls, toggleFullscreen, isFullscreen, temTelaCheia } from './touch.js';
 
@@ -24,7 +25,7 @@ const typing = () => {
 
 const COLORS = ['#7c9cff', '#6ee7c8', '#f472b6', '#fbbf24', '#a78bfa', '#fb7185', '#38bdf8', '#a3e635', '#f97316', '#e2e8f0'];
 const EMOTE_KEYS = ['wave', 'party', 'laugh', 'heart', 'clap', 'fire'];
-const PANEL_TITLES = { people: 'Pessoas', chat: 'Chat da sala', telao: 'Telão', parkour: 'Parkour', ringue: 'Ringue de luta', corrida: 'Pista de corrida', settings: 'Ajustes' };
+const PANEL_TITLES = { people: 'Pessoas', chat: 'Chat da sala', telao: 'Telão', parkour: 'Parkour', ringue: 'Ringue de luta', corrida: 'Pista de corrida', jogos: 'Xadrez de bruxo e dama', settings: 'Ajustes' };
 
 // ------------------------------------------------------------------ ajustes salvos
 const DEFAULTS = {
@@ -473,6 +474,7 @@ function applyJoined(data) {
   setLeaderboard(data.leaderboard);
   setFightBoard(data.fights);
   setRaceBoard(data.voltas);
+  jogos.sincronizar(data.jogos);
 
   for (const u of data.users) rtc.getPeer(u.id);
 
@@ -631,6 +633,7 @@ function bindSocket() {
   });
 
   socket.on('emote', ({ id, kind }) => state.users.get(id)?.avatar.emote(kind));
+  socket.on('jogo', (msg) => jogos.receber(msg));
 
   socket.on('parkour-finish', ({ name, color, time, record, leaderboard }) => {
     setLeaderboard(leaderboard);
@@ -1896,6 +1899,27 @@ function goToRing() {
   player.teleport(c, Math.atan2(RING.x - c[0], RING.z - c[2]) + Math.PI);
 }
 $('#ring-go').addEventListener('click', () => { goToRing(); closePanel(); });
+
+// ------------------------------------------------------------------ xadrez de bruxo e dama
+const jogos = new Jogos({
+  world,
+  player,
+  toast,
+  emitir: (ev, data, ack) => (ack ? socket?.emit(ev, data, ack) : socket?.emit(ev, data)),
+  selfId: () => state.selfId,
+  nomeDe: (id) => state.users.get(id)?.name,
+});
+function irParaMesa(mesa) {
+  run.abandon();
+  if (player.veiculo) toggleVeiculo();
+  exitFocus();
+  const [x, y, z] = jogos.mesas[mesa].posComandante(0);
+  player.teleport([x, y, z + 2.5], 0);
+  sfx.teleport();
+  closePanel();
+}
+$('#jogos-xadrez').addEventListener('click', () => irParaMesa('xadrez'));
+$('#jogos-dama').addEventListener('click', () => irParaMesa('dama'));
 $('#pk-quit').addEventListener('click', () => run.abandon());
 
 player.on('jump', () => sfx.jump());
@@ -1965,7 +1989,8 @@ function pickScreen() {
 }
 
 function updateHover() {
-  const info = state.focus ? null : screenInfo(pickScreen());
+  const mesa = state.focus ? null : jogos.maisPerto(player.pos);
+  const info = state.focus ? null : mesa ? { kind: 'jogo', mesa, label: jogos.rotulo(mesa) } : screenInfo(pickScreen());
   const changed = (info?.label ?? null) !== (state.hovered?.label ?? null);
   state.hovered = info;
   if (changed) {
@@ -1981,6 +2006,15 @@ function enterFocus(info) {
   if (!info) return;
   exitFocus();
   if (document.pointerLockElement) document.exitPointerLock();
+  if (info.kind === 'jogo') {
+    state.focus = { kind: 'jogo' };
+    if (player.sitting) toggleSit();
+    if (player.veiculo) toggleVeiculo();
+    jogos.entrar(info.mesa);
+    $('#hover-hint').hidden = true;
+    syncTouchVisibility();
+    return;
+  }
   if (info.kind === 'tv') {
     state.focus = { kind: 'tv' };
     // o telão em foco fica com o player, mesmo que o outro esteja mais perto
@@ -2019,7 +2053,9 @@ function updateFocusPin() {
 
 function exitFocus() {
   if (!state.focus) return;
-  if (state.focus.kind === 'tv') {
+  if (state.focus.kind === 'jogo') {
+    jogos.sair();
+  } else if (state.focus.kind === 'tv') {
     player.override = null;
     world.travarTelao(null);
     document.body.classList.remove('tv-focus');
@@ -2038,6 +2074,7 @@ function exitFocus() {
 }
 
 $('#focus-close').addEventListener('click', exitFocus);
+$('#jh-sair').addEventListener('click', exitFocus);
 $('#tv-focus-exit').addEventListener('click', exitFocus);
 $('#focus-full').addEventListener('click', () => {
   if (document.fullscreenElement) document.exitFullscreen();
@@ -2261,6 +2298,8 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   if (typing() || e.repeat) return;
+  // comandando um tabuleiro: as teclas de andar/voar/socar ficam com o jogo
+  if (state.focus?.kind === 'jogo' && !['KeyE', 'KeyM', 'KeyT', 'Enter'].includes(e.code)) return;
   switch (e.code) {
     case 'KeyE':
       if (state.focus) exitFocus();
@@ -2340,7 +2379,7 @@ document.addEventListener('mousedown', (e) => {
 if (params.get('debug') === '1') {
   window.__sala3d = {
     state, player, combat, run, corrida, world, settings, punch, goToRing, respawn,
-    toggleVeiculo, irParaLargada,
+    toggleVeiculo, irParaLargada, jogos, irParaMesa, exitFocus,
     tocarTela, telasMudas, liberarSomDasTelas, makeVideo,
     publishShare, stopShare, acharTela, telasNoAr, get rtc() { return rtc; },
   };
@@ -2446,6 +2485,7 @@ function frame() {
     }
     if (run.state === 'running') setPkTime(run.time);
     combat.update(dt);
+    jogos.update(dt, t);
     atualizarTiros(dt);
     localAvatar.setKo(combat.knockedOut);
     corrida.update(dt, player.pos.x, player.pos.z, player.veiculo);

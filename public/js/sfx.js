@@ -76,6 +76,22 @@ export const sfx = {
   message: () => tone({ freq: 880, dur: 0.08, gain: 0.03 }),
   teleport: () => tone({ freq: 900, to: 220, dur: 0.3, type: 'sine', gain: 0.05 }),
 
+  // ------------------------------------------------------------ xadrez de bruxo e dama
+  // peça de pedra assentando na casa: baque surdo
+  pedraPasso: (vol = 1) => {
+    if (vol <= 0.02) return;
+    ruido({ dur: 0.12, gain: 0.07 * vol, type: 'lowpass', freq: 700, toFreq: 160 });
+    tone({ freq: 90, to: 45, dur: 0.14, type: 'sine', gain: 0.09 * vol });
+  },
+  // peça tomada se despedaçando: estalo, corpo grave e cascalho caindo
+  pedraQuebra: (vol = 1) => {
+    if (vol <= 0.02) return;
+    ruido({ dur: 0.09, gain: 0.16 * vol, type: 'highpass', freq: 1800, q: 0.6 });
+    ruido({ dur: 0.45, gain: 0.12 * vol, type: 'lowpass', freq: 2400, toFreq: 300, q: 0.8 });
+    tone({ freq: 120, to: 38, dur: 0.35, type: 'sine', gain: 0.18 * vol });
+    for (let i = 0; i < 5; i++) ruido({ dur: 0.05, gain: 0.05 * vol, type: 'bandpass', freq: 2500 + Math.random() * 2500, q: 2, delay: 0.25 + i * 0.07 + Math.random() * 0.05 });
+  },
+
   // ------------------------------------------------------------ ringue
   // Soco no vazio: só o deslocamento de ar, agudo e curto.
   punchSwing: () => ruido({ dur: 0.13, gain: 0.05, type: 'bandpass', freq: 1700, toFreq: 480, q: 1.1 }),

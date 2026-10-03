@@ -162,10 +162,36 @@ function getRoom(id) {
       main: 'media', // 'media' (o player do telão) ou a chave do compartilhamento fixado nele
       media: { provider: null, id: null, playing: false, time: 0, updatedAt: Date.now(), by: null },
       chat: [],
+      jogos: novosJogos(),
     };
     rooms.set(id, room);
   }
   return room;
+}
+
+// Xadrez de bruxo e dama gigante. O servidor guarda só os lances e quem senta em cada lado
+// (0 = brancas/claras, que começam). Quem confere as regras é o cliente — aqui só se garante que
+// cada um joga na sua vez e no lado em que está sentado. 'bot' = computador, jogado pelo botDono.
+const JOGOS = ['xadrez', 'dama'];
+const LANCE_RE = { xadrez: /^[a-h][1-8][a-h][1-8][qrbn]?$/, dama: /^[a-h][1-8]([-x][a-h][1-8]){1,12}$/ };
+const MAX_LANCES = 600;
+function novosJogos() {
+  return Object.fromEntries(JOGOS.map((j) => [j, { lances: [], lugares: [null, null], botDono: null }]));
+}
+const jogoPublico = (j) => ({ lances: j.lances, lugares: j.lugares, botDono: j.botDono });
+// tira a pessoa das mesas (saiu da sala); devolve as mesas que mudaram
+function levantarDeTudo(room, id) {
+  const mudou = [];
+  for (const [nome, j] of Object.entries(room.jogos)) {
+    let m = false;
+    j.lugares = j.lugares.map((l) => {
+      if (l === id || (l === 'bot' && j.botDono === id)) { m = true; return null; }
+      return l;
+    });
+    if (!j.lugares.includes('bot')) j.botDono = null;
+    if (m) mudou.push(nome);
+  }
+  return mudou;
 }
 
 function publicUser(u) {
@@ -281,6 +307,7 @@ function attachSockets(io) {
         leaderboard: getBoards(roomId).parkour,
         fights: getBoards(roomId).fights,
         voltas: getBoards(roomId).voltas,
+        jogos: Object.fromEntries(Object.entries(room.jogos).map(([k, j]) => [k, jogoPublico(j)])),
       });
       socket.to(roomId).emit('user-joined', publicUser(user));
     });
@@ -553,6 +580,63 @@ function attachSockets(io) {
       });
     });
 
+    const mandarJogo = (mesa) => io.to(room.id).emit('jogo', { mesa, ...jogoPublico(room.jogos[mesa]) });
+    const mesaDe = (msg) => (user && JOGOS.includes(msg?.mesa) ? room.jogos[msg.mesa] : null);
+
+    socket.on('jogo-sentar', (msg, ack) => {
+      const j = mesaDe(msg);
+      const lado = Number(msg?.lado);
+      if (!j || (lado !== 0 && lado !== 1)) return ack?.({ erro: 'Mesa inválida' });
+      if (j.lugares[lado] && j.lugares[lado] !== user.id) return ack?.({ erro: 'Esse lado já tem dono' });
+      j.lugares[lado] = user.id;
+      ack?.({ ok: true });
+      mandarJogo(msg.mesa);
+    });
+
+    socket.on('jogo-levantar', (msg) => {
+      const j = mesaDe(msg);
+      const lado = Number(msg?.lado);
+      if (!j || (lado !== 0 && lado !== 1)) return;
+      const l = j.lugares[lado];
+      if (l !== user.id && !(l === 'bot' && j.botDono === user.id)) return;
+      j.lugares[lado] = null;
+      if (!j.lugares.includes('bot')) j.botDono = null;
+      mandarJogo(msg.mesa);
+    });
+
+    socket.on('jogo-bot', (msg, ack) => {
+      const j = mesaDe(msg);
+      const lado = Number(msg?.lado);
+      if (!j || (lado !== 0 && lado !== 1)) return ack?.({ erro: 'Mesa inválida' });
+      if (j.lugares[1 - lado] !== user.id) return ack?.({ erro: 'Sente do outro lado primeiro' });
+      if (j.lugares[lado]) return ack?.({ erro: 'Esse lado já tem dono' });
+      j.lugares[lado] = 'bot';
+      j.botDono = user.id;
+      ack?.({ ok: true });
+      mandarJogo(msg.mesa);
+    });
+
+    socket.on('jogo-lance', (msg) => {
+      const j = mesaDe(msg);
+      if (!j) return;
+      const lance = String(msg.lance || '');
+      if (!LANCE_RE[msg.mesa].test(lance) || Number(msg.n) !== j.lances.length || j.lances.length >= MAX_LANCES) return;
+      const quem = j.lugares[j.lances.length % 2];
+      if (quem !== user.id && !(quem === 'bot' && j.botDono === user.id)) return;
+      j.lances.push(lance);
+      mandarJogo(msg.mesa);
+    });
+
+    // partida nova: quem está sentado, ou qualquer um se só o computador (ou ninguém) está na mesa
+    socket.on('jogo-novo', (msg) => {
+      const j = mesaDe(msg);
+      if (!j) return;
+      const gente = j.lugares.filter((l) => l && l !== 'bot');
+      if (gente.length && !gente.includes(user.id)) return;
+      j.lances = [];
+      mandarJogo(msg.mesa);
+    });
+
     socket.on('emote', (kind) => {
       if (!user) return;
       socket.to(room.id).emit('emote', { id: user.id, kind: cleanText(kind, 12) });
@@ -563,6 +647,7 @@ function attachSockets(io) {
       const hadSlot = freeShares(room, user).length > 0;
       room.users.delete(user.id);
       io.to(room.id).emit('user-left', { id: user.id });
+      for (const mesa of levantarDeTudo(room, user.id)) io.to(room.id).emit('jogo', { mesa, ...jogoPublico(room.jogos[mesa]) });
       if (hadSlot) {
         const t = encaixarSemTela(room);
         if (t) io.to(room.id).emit('share-update', { id: t.user.id, ...t.share });

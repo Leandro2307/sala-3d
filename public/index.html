@@ -70,6 +70,34 @@
       <button type="button" id="tv-focus-exit" class="chip-btn"><kbd>Esc</kbd> Sair do foco</button>
     </div>
 
+    <div id="jogo-hud" hidden>
+      <div class="jh-head">
+        <b id="jh-titulo">Xadrez de bruxo</b>
+        <button type="button" id="jh-sair" class="chip-btn"><kbd>Esc</kbd> Sair</button>
+      </div>
+      <div class="jh-status" id="jh-status">—</div>
+      <div class="jh-lados">
+        <div class="jh-lado" id="jh-lado0"><i class="jh-peca claro"></i><b>Brancas</b><span>livre</span><button type="button" class="chip-btn">Sentar</button></div>
+        <div class="jh-lado" id="jh-lado1"><i class="jh-peca escuro"></i><b>Pretas</b><span>livre</span><button type="button" class="chip-btn">Sentar</button></div>
+      </div>
+      <div class="jh-acoes">
+        <button type="button" class="primary small" id="jh-bot" hidden>Jogar contra o computador</button>
+        <select id="jh-nivel" hidden aria-label="Nível do computador">
+          <option value="0">Fácil</option>
+          <option value="1" selected>Médio</option>
+          <option value="2">Difícil</option>
+        </select>
+        <button type="button" class="secondary small" id="jh-novo">Novo jogo</button>
+      </div>
+      <form id="jh-form" autocomplete="off">
+        <button type="button" id="jh-voz" class="icon-btn" title="Comandar por voz (Espaço)"><i data-icon="mic" data-size="18"></i></button>
+        <input id="jh-cmd" placeholder='Comande: "cavalo f3", "e2 e4", "roque"' maxlength="80">
+        <button type="submit" class="icon-btn accent" title="Mandar"><i data-icon="send" data-size="16"></i></button>
+      </form>
+      <div class="jh-msg" id="jh-msg"></div>
+      <div class="jh-dica">Clique na peça e na casa · <kbd>Espaço</kbd> fala · <kbd>A</kbd>/<kbd>D</kbd> giram · roda do mouse aproxima</div>
+    </div>
+
     <div id="tv-unblock" hidden>
       <button type="button" class="primary small" id="tv-unblock-btn"><i data-icon="volume" data-size="16"></i>Ativar o som do telão</button>
     </div>
@@ -183,6 +211,7 @@
       <button type="button" class="ghost" data-panel="parkour" data-tip="Parkour"><i data-icon="trophy"></i></button>
       <button type="button" class="ghost" data-panel="ringue" data-tip="Ringue de luta"><i data-icon="fist"></i></button>
       <button type="button" class="ghost" data-panel="corrida" data-tip="Pista de corrida"><i data-icon="car"></i></button>
+      <button type="button" class="ghost" data-panel="jogos" data-tip="Xadrez de bruxo e dama"><i data-icon="xadrez"></i></button>
       <button type="button" class="ghost" data-panel="settings" data-tip="Ajustes"><i data-icon="settings"></i></button>
       <!-- tela cheia também some com os avisos "Compartilhando … com esta guia" do Chrome -->
       <button type="button" class="ghost" id="btn-full" data-tip="Tela cheia (esconde as barras do Chrome)"><i data-icon="maximize"></i></button>
@@ -320,6 +349,18 @@
         <h3>Placar da porradaria</h3>
         <ol class="leaderboard fights" id="fight-board"><li class="empty">Ninguém se pegou ainda.</li></ol>
       </div>
+    </section>
+
+    <section data-section="jogos">
+      <p class="lead">Lá fora, saindo pela porta do cinema e virando à esquerda, tem um xadrez de bruxo e uma dama em tamanho gigante. Você comanda as peças — elas andam sozinhas, e a que é tomada vira pó.</p>
+      <ul class="rules">
+        <li>Chegue na praça do tabuleiro e aperte <kbd>E</kbd> para comandar (ou assistir, se os dois lados já tiverem dono).</li>
+        <li>Clique na peça e depois na casa. Ou fale (botão do microfone ou <kbd>Espaço</kbd>): "cavalo f3", "peão e4", "bispo toma c6", "roque".</li>
+        <li>Na dama vale a regra brasileira: comer é obrigatório, e pela maioria. Diga as casas: "c3 d4".</li>
+        <li>Sem adversário? Chame o computador.</li>
+      </ul>
+      <button type="button" class="primary" id="jogos-xadrez"><i data-icon="xadrez" data-size="18"></i>Ir para o xadrez de bruxo</button>
+      <button type="button" class="secondary" id="jogos-dama" style="margin-top:8px"><i data-icon="goto" data-size="18"></i>Ir para a dama</button>
     </section>
 
     <section data-section="corrida">
