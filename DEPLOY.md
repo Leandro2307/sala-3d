@@ -63,6 +63,9 @@ funciona; em redes diferentes, muita internet no Brasil (fibra com CGNAT, 4G) e 
 a conexão direta — a tela fica preta e a sala avisa "Não deu para conectar voz e vídeo". O TURN é
 a ponte que resolve.
 
+**Já vem configurado:** o `server.js` usa por padrão a conta grátis da Metered do dono da sala.
+Só mexa nisto se quiser trocar de conta (ou a cota de 20 GB/mês acabar):
+
 1. Crie uma conta grátis em [metered.ca](https://www.metered.ca/stun-turn) (plano free: 20 GB/mês).
 2. No painel, crie um app e abra **TURN Credentials**: ele mostra um usuário, uma senha e a lista
    de endereços.

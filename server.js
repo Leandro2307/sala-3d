@@ -109,17 +109,20 @@ const MEDIA_IDS = {
   browser: (id) => !!BROWSER && id === 'shared', // só existe um, e só se estiver configurado
 };
 
-// STUN público + TURN opcional via variáveis de ambiente (necessário em algumas redes 4G/corporativas).
+// STUN público + TURN. Sem TURN, amigos em redes diferentes (CGNAT da fibra, 4G, Brave) ficam
+// com a tela preta e sem voz: a conexão direta não fecha. O padrão é a conta grátis da Metered
+// do dono da sala (20 GB/mês); TURN_URL/TURN_USER/TURN_PASS no ambiente trocam por outro.
+// A senha do TURN não é segredo de verdade: ela vai para o navegador de todo mundo na sala.
+const METERED = 'global.relay.metered.ca';
+const TURN = {
+  urls: (process.env.TURN_URL || `turn:${METERED}:80,turn:${METERED}:80?transport=tcp,turn:${METERED}:443,turns:${METERED}:443?transport=tcp`).split(','),
+  username: process.env.TURN_USER || 'e78fbefbb1d65a8ea146708b',
+  credential: process.env.TURN_PASS || 'syadTyT5gu9HJnrT',
+};
 const iceServers = [
   { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+  TURN,
 ];
-if (process.env.TURN_URL) {
-  iceServers.push({
-    urls: process.env.TURN_URL.split(','),
-    username: process.env.TURN_USER || '',
-    credential: process.env.TURN_PASS || '',
-  });
-}
 
 const app = express();
 // Sem isto o navegador baixa tudo cru: só o three.js são 662 kB, e o cabeçalho
