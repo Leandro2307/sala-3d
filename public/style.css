@@ -475,6 +475,11 @@ body.jogo-on #crosshair, body.jogo-on #hover-hint, body.jogo-on #controls-help {
   .jh-dica { display: none; }
 }
 
+/* controle remoto de aba: a imagem em foco recebe mouse e teclado */
+#focus video.controlando { cursor: default; outline: 2px solid var(--accent); outline-offset: -2px; }
+#focus-ctrl.on { background: var(--accent); color: var(--accent-ink); }
+.sp-btn.ctrl.on { background: var(--accent); color: var(--accent-ink); }
+
 #tv-unblock { position: absolute; top: 72px; left: 50%; transform: translateX(-50%); pointer-events: auto; }
 
 /* hub de controles — fica sempre na tela (só recolhe se o usuário pedir) */

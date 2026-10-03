@@ -194,6 +194,23 @@ function levantarDeTudo(room, id) {
   return mudou;
 }
 
+// Evento de mouse/teclado vindo de quem controla: só os campos esperados, com limites.
+function eventoDeControle(raw) {
+  const e = obj(raw);
+  const n = (v, a, b) => Math.min(b, Math.max(a, Number(v) || 0));
+  const mod = n(e.mod, 0, 15) | 0;
+  if (e.t === 'mouse' && ['down', 'up', 'move'].includes(e.a)) {
+    return { t: 'mouse', a: e.a, x: n(e.x, 0, 1), y: n(e.y, 0, 1), b: ['left', 'right', 'middle'].includes(e.b) ? e.b : 'left', n: n(e.n, 1, 3) | 0, arrastando: !!e.arrastando, mod };
+  }
+  if (e.t === 'wheel') return { t: 'wheel', x: n(e.x, 0, 1), y: n(e.y, 0, 1), dx: n(e.dx, -3000, 3000), dy: n(e.dy, -3000, 3000), mod };
+  if (e.t === 'tecla' && (e.a === 'down' || e.a === 'up')) {
+    // sem trim: a tecla de espaço é ' '
+    return { t: 'tecla', a: e.a, key: String(e.key ?? '').replace(/[\u0000-\u001f]/g, '').slice(0, 24), code: cleanText(e.code, 24), kc: n(e.kc, 0, 255) | 0, mod };
+  }
+  if (e.t === 'texto') return { t: 'texto', s: String(e.s ?? '').slice(0, 2000) };
+  return null;
+}
+
 function publicUser(u) {
   return {
     id: u.id, name: u.name, color: u.color, mic: u.mic,
@@ -345,7 +362,7 @@ function attachSockets(io) {
         slot = null; // vai direto para o telão
       }
       const key = `${user.id}~${++user.shareSeq}`;
-      const share = { key, slot, streamId: sid };
+      const share = { key, slot, streamId: sid, controle: false };
       if (slot != null) room.slots[slot] = key;
       user.shares.set(key, share);
       // Telão vazio? Fixa a tela compartilhada nele automaticamente.
@@ -364,6 +381,28 @@ function attachSockets(io) {
       const t = encaixarSemTela(room);
       if (t) io.to(room.id).emit('share-update', { id: t.user.id, ...t.share });
       io.to(room.id).emit('main', { source: room.main, by: null });
+    });
+
+    // Controle remoto de aba (precisa da extensão do lado de quem compartilha). Só repassa para
+    // telas em que o dono ligou "Permitir controle", e só eventos de mouse/teclado bem formados.
+    socket.on('controle-permitir', (msg) => {
+      const sh = user?.shares.get(msg?.key);
+      if (!sh) return;
+      sh.controle = !!msg.on;
+      io.to(room.id).emit('share-update', { id: user.id, ...sh });
+    });
+
+    let ctrlJanela = 0;
+    let ctrlConta = 0;
+    socket.on('controle', (msg) => {
+      if (!user || typeof msg?.key !== 'string') return;
+      const dono = room.users.get(donoDaChave(msg.key));
+      if (!dono?.shares.get(msg.key)?.controle) return;
+      const agora = Date.now();
+      if (agora - ctrlJanela > 1000) { ctrlJanela = agora; ctrlConta = 0; }
+      if (++ctrlConta > 120) return; // mais de 120 eventos por segundo é abuso
+      const ev = eventoDeControle(msg.ev);
+      if (ev) io.to(dono.id).emit('controle', { key: msg.key, ev, de: user.name, deId: user.id });
     });
 
     socket.on('main', (source) => {

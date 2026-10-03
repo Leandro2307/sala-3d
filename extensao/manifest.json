@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Sala 3D — controle das abas",
+  "version": "1.0.0",
+  "description": "Deixa os amigos da Sala 3D clicarem e digitarem nas abas que você compartilha (só nas que você liberar).",
+  "permissions": ["debugger", "tabs", "scripting", "storage"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "fundo.js" },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["conteudo.js"],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ],
+  "action": { "default_title": "Sala 3D — controle das abas", "default_popup": "popup.html" }
+}
