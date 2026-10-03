@@ -6,7 +6,8 @@
 // extensão dele repete tudo na aba de verdade.
 //
 // A extensão marca cada aba com um capture handle "sala3d-aba:<id>" — é assim que daqui se sabe
-// qual aba do Chrome está por trás de cada vídeo capturado.
+// qual aba do Chrome está por trás de cada vídeo capturado. Janela ou tela inteira não é aba: aí
+// quem clica é o ajudante nativo da extensão (extensao/nativo), que move o mouse de verdade.
 
 const MOD = (e) => (e.altKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.metaKey ? 4 : 0) | (e.shiftKey ? 8 : 0);
 const BOTAO = ['left', 'middle', 'right'];
@@ -28,13 +29,13 @@ export class Controle {
       if (e.source !== window || !e.data?.sala3dExt) return;
       const m = e.data;
       if (m.sala3dExt === 'oi') {
-        this.ext = { ok: true, liberado: !!m.liberado, versao: m.versao };
+        this.ext = { ok: true, liberado: !!m.liberado, nativo: !!m.nativo, versao: m.versao };
         this.onExtensao?.(this.ext);
       } else if (m.sala3dExt === 'resposta') {
         this.pedidos.get(m.id)?.(m.r);
         this.pedidos.delete(m.id);
       } else if (m.sala3dExt === 'desligou') {
-        this.onDesligou?.(m.aba, m.motivo);
+        this.onDesligou?.(m.aba, m.motivo, !!m.janela);
       }
     });
     window.postMessage({ sala3d: 'ping' }, location.origin);
@@ -42,11 +43,11 @@ export class Controle {
   }
 
   // ---------------------------------------------------------------- ponte com a extensão
-  pedir(tipo, aba, ev) {
+  pedir(tipo, aba, ev, alvo) {
     return new Promise((resolve) => {
       const id = ++this.seq;
       this.pedidos.set(id, resolve);
-      window.postMessage({ sala3d: tipo, aba, ev, id }, location.origin);
+      window.postMessage({ sala3d: tipo, aba, ev, alvo, id }, location.origin);
       setTimeout(() => {
         if (this.pedidos.delete(id)) resolve({ erro: 'sem-resposta' });
       }, 4000);
@@ -66,15 +67,33 @@ export class Controle {
     return ler();
   }
 
+  // Janela ou tela inteira (não é aba): quem clica é o ajudante nativo. O Chrome põe no rótulo do
+  // vídeo algo como "window:263318:0" ou "screen:0:0", e o ajudante acha a janela/monitor por ele.
+  alvoDe(stream) {
+    const track = stream.getVideoTracks()[0];
+    const sup = track?.getSettings?.().displaySurface;
+    if (sup !== 'window' && sup !== 'monitor') return null;
+    return { superficie: sup, rotulo: track.label };
+  }
+
   soltar(aba) {
     if (aba != null && this.ext.ok) this.pedir('soltar', aba);
+  }
+
+  soltarJanela() {
+    if (this.ext.ok) this.pedir('janela-soltar');
+  }
+
+  // liberou de novo: destrava o ajudante (depois de um Ctrl+Alt+End ele fica parado)
+  retomarJanela() {
+    return this.pedir('janela-retomar');
   }
 
   // ---------------------------------------------------------------- quem compartilha
   // Chegou um clique/tecla de alguém para uma das minhas telas.
   async receber(sh, { ev, de, deId }) {
-    if (!sh?.controle || sh.aba == null) return;
-    const r = await this.pedir('entrada', sh.aba, ev);
+    if (!sh?.controle || (sh.aba == null && !sh.alvo)) return;
+    const r = sh.aba != null ? await this.pedir('entrada', sh.aba, ev) : await this.pedir('janela', null, ev, sh.alvo);
     if (r?.erro) {
       if (r.erro !== 'sem-resposta') console.warn('[controle]', r.erro);
       return;

@@ -11,9 +11,22 @@ Só precisa dela **quem compartilha**. Quem só controla não instala nada.
 4. Abra a Sala 3D, clique no ícone de quebra-cabeça do Chrome → **Sala 3D — controle das abas**
    → **Liberar este site**. Só libere o endereço da sua sala.
 
+## Janelas e tela inteira (opcional, só Windows)
+
+Sozinha, a extensão só controla **abas**. Para deixarem mexer numa **janela** qualquer (um jogo,
+o Explorer, outro programa) ou na **tela inteira**:
+
+1. Dê dois cliques em `nativo\instalar.bat` (não precisa de administrador).
+2. Em `chrome://extensions`, clique em **Recarregar** na extensão e recarregue a página da sala.
+
+Aí quem controla mexe no **mouse e no teclado de verdade** do seu PC, sempre dentro da janela
+ou tela compartilhada. A tecla Windows nunca é enviada. **Ctrl+Alt+End** no seu teclado corta o
+controle na hora (só volta quando você liberar de novo). Para tirar: `nativo\desinstalar.bat`.
+Se mover a pasta do projeto, rode o `instalar.bat` de novo.
+
 ## Usar
 
-1. Compartilhe uma **aba** do Chrome (janela ou tela inteira não dão para controlar).
+1. Compartilhe uma **aba** do Chrome — ou uma janela/tela, se instalou o ajudante acima.
 2. No botão de compartilhar → **Suas telas**, clique no ícone de cursor da tela para
    **permitir controle**. Clique de novo para tirar.
 3. Quem quiser mexer abre a sua tela (E ou clique) e aperta **Controlar a aba**.

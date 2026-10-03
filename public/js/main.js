@@ -911,7 +911,9 @@ async function publishShare(stream, { file = false, height = 0 } = {}) {
     if (s.controle && nova == null) socket.emit('controle-permitir', { key: res.key, on: false });
     renderSharePop();
   });
-  self().shares.set(res.key, { key: res.key, slot: res.slot ?? null, streamId: stream.id, video, file, aba, controle: false });
+  // não é aba (janela ou tela inteira): quem clica é o ajudante nativo da extensão
+  const alvo = file || aba != null ? null : controle.alvoDe(stream);
+  self().shares.set(res.key, { key: res.key, slot: res.slot ?? null, streamId: stream.id, video, file, aba, alvo, controle: false });
   rtc.addScreen(res.key, stream, { file, height });
   // captura: a trilha acaba quando a pessoa clica em "Parar" na barra do navegador.
   // Arquivo: acaba toda vez que o vídeo chega ao fim, e isso não é motivo para parar.
@@ -929,6 +931,7 @@ function stopShare(key, notify) {
   if (!sh) return;
   rtc.stopScreen(key);
   controle.soltar(sh.aba);
+  if (sh.alvo && sh.controle) controle.soltarJanela();
   if (sh.file) stopCastVideo();
   if (notify) socket.emit('share-stop', key);
   me.shares.delete(key);
@@ -978,7 +981,7 @@ function renderSharePop() {
       const noTelao = state.main === sh.key;
       return `<div class="sp-row" data-key="${esc(sh.key)}">
         <span class="sp-name">${esc(tipoDaTela(sh))}<small>${ondeEsta(sh)}${noTelao && sh.slot != null ? ' · no telão' : ''}</small></span>
-        ${sh.file ? '' : `<button type="button" class="sp-btn ctrl${sh.controle ? ' on' : ''}" data-act="ctrl" title="${sh.controle ? 'Parar de deixar controlar' : 'Permitir que mexam nesta aba'}">${icon('cursor', 16)}</button>`}
+        ${sh.file ? '' : `<button type="button" class="sp-btn ctrl${sh.controle ? ' on' : ''}" data-act="ctrl" title="${sh.controle ? 'Parar de deixar controlar' : 'Permitir que mexam nesta tela'}">${icon('cursor', 16)}</button>`}
         <button type="button" class="sp-btn${noTelao ? ' on' : ''}" data-act="pin" title="${noTelao ? 'Tirar do telão' : 'Pôr no telão'}">${icon('pin', 16)}</button>
         <button type="button" class="sp-btn danger" data-act="stop" title="Parar esta tela">${icon('x', 16)}</button>
       </div>`;
@@ -1029,40 +1032,55 @@ const controle = new Controle({
   toast,
   onExtensao: () => renderSharePop(),
 });
-controle.onDesligou = (aba) => {
+// janela: Ctrl+Alt+End no teclado de quem compartilha. Aba: fechou a barra amarela do Chrome.
+controle.onDesligou = (aba, motivo, janela) => {
   for (const sh of self()?.shares.values() || []) {
-    if (sh.aba !== aba || !sh.controle) continue;
+    if (!sh.controle || (janela ? !sh.alvo : sh.aba !== aba)) continue;
     socket.emit('controle-permitir', { key: sh.key, on: false });
-    toast('O controle da aba foi desligado (a barra amarela do Chrome foi fechada).', 'info', 5000);
+    toast(janela ? 'Controle cortado pelo Ctrl+Alt+End.' : 'O controle da aba foi desligado (a barra amarela do Chrome foi fechada).', 'info', 5000);
   }
 };
 
-function permitirControle(key) {
+async function permitirControle(key) {
   const sh = self()?.shares.get(key);
   if (!sh) return;
   if (sh.controle) {
     socket.emit('controle-permitir', { key, on: false });
     controle.soltar(sh.aba);
-    toast('Ninguém mais mexe nessa aba.');
+    if (sh.alvo) controle.soltarJanela();
+    toast('Ninguém mais mexe nessa tela.');
     return;
   }
   if (!controle.ext.ok) {
-    toast('Para deixarem mexer na sua aba, instale a extensão "Sala 3D — controle das abas" (pasta extensao do projeto) e recarregue esta página.', 'warn', 9000);
+    toast('Para deixarem mexer na sua tela, instale a extensão "Sala 3D — controle das abas" (pasta extensao do projeto) e recarregue esta página.', 'warn', 9000);
     return;
   }
   if (!controle.ext.liberado) {
     toast('Falta liberar este site: clique no ícone da extensão (quebra-cabeça do Chrome) aqui nesta aba e em "Liberar este site".', 'warn', 9000);
     return;
   }
-  if (sh.aba == null) {
-    toast('Só dá para controlar uma ABA do Chrome (não janela nem tela inteira). Se a aba já estava aberta antes da extensão, recarregue-a e compartilhe de novo.', 'warn', 9000);
+  if (sh.aba == null && !sh.alvo) {
+    toast('Não reconheci a aba. Se ela já estava aberta antes da extensão, recarregue-a e compartilhe de novo.', 'warn', 9000);
     return;
   }
+  if (sh.aba == null && !controle.ext.nativo) {
+    toast('Para controlarem uma JANELA ou a TELA inteira, rode extensao\\nativo\\instalar.bat (uma vez), recarregue a extensão e esta página. Abas funcionam sem isso.', 'warn', 11000);
+    return;
+  }
+  if (sh.aba == null) {
+    const r = await controle.retomarJanela();
+    if (r?.erro) {
+      toast('O ajudante de janelas não respondeu. Rode extensao\\nativo\\instalar.bat de novo e recarregue a extensão.', 'error', 9000);
+      return;
+    }
+  }
   socket.emit('controle-permitir', { key, on: true });
-  toast('Pronto: quem abrir essa tela pode clicar em "Controlar a aba". O Chrome mostra uma barra amarela de depuração enquanto isso — é normal.', 'success', 8000);
+  toast(sh.aba != null
+    ? 'Pronto: quem abrir essa tela pode clicar em "Controlar". O Chrome mostra uma barra amarela de depuração enquanto isso — é normal.'
+    : 'Pronto: quem abrir essa tela vai mexer no mouse e no teclado de verdade do seu PC, dentro dela. Ctrl+Alt+End corta na hora.', 'success', 9000);
 }
 
-// botão "Controlar a aba" na tela em foco
+// botão "Controlar" na tela em foco
 function updateFocusCtrl() {
   const btn = $('#focus-ctrl');
   const t = state.focus?.kind === 'share' ? acharTela(state.focus.key) : null;
@@ -1070,13 +1088,13 @@ function updateFocusCtrl() {
   if (!pode && controle.ativo) controle.desligar();
   btn.hidden = !pode;
   btn.classList.toggle('on', controle.ativo);
-  btn.innerHTML = `${icon('cursor', 16)}${controle.ativo ? 'Parar de controlar (Esc)' : 'Controlar a aba'}`;
+  btn.innerHTML = `${icon('cursor', 16)}${controle.ativo ? 'Parar de controlar (Esc)' : 'Controlar'}`;
 }
 $('#focus-ctrl').addEventListener('click', () => {
   if (controle.ativo) controle.desligar();
   else if (state.focus?.kind === 'share') {
     controle.ligar(state.focus.key, $('#focus-video'));
-    toast('Controlando: mouse, roda e teclado vão para a aba. Esc para parar.', 'info', 4000);
+    toast('Controlando: mouse, roda e teclado vão para a tela de quem compartilha. Esc para parar.', 'info', 4000);
   }
   $('#focus-ctrl').blur();
   updateFocusCtrl();

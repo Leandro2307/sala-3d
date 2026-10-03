@@ -19,15 +19,17 @@
   // diz ao site que a extensão está aqui, e se este site já foi liberado no ícone dela
   const avisar = () => chrome.runtime.sendMessage({ tipo: 'status' }, (r) => {
     if (chrome.runtime.lastError) return;
-    window.postMessage({ sala3dExt: 'oi', versao: VERSAO, liberado: !!r?.liberado }, location.origin);
+    // nativo: o ajudante para janelas/telas (nativo/instalar.bat) está instalado
+    window.postMessage({ sala3dExt: 'oi', versao: VERSAO, liberado: !!r?.liberado, nativo: !!r?.nativo }, location.origin);
   });
 
+  const PEDIDOS = ['entrada', 'soltar', 'aba-info', 'janela', 'janela-retomar', 'janela-soltar'];
   window.addEventListener('message', (e) => {
     if (e.source !== window || !e.data || typeof e.data.sala3d !== 'string' || !ehSala()) return;
     const m = e.data;
     if (m.sala3d === 'ping') return avisar();
-    if (m.sala3d === 'entrada' || m.sala3d === 'soltar' || m.sala3d === 'aba-info') {
-      chrome.runtime.sendMessage({ tipo: m.sala3d, aba: m.aba, ev: m.ev, id: m.id }, (r) => {
+    if (PEDIDOS.includes(m.sala3d)) {
+      chrome.runtime.sendMessage({ tipo: m.sala3d, aba: m.aba, alvo: m.alvo, ev: m.ev, id: m.id }, (r) => {
         if (chrome.runtime.lastError) return;
         if (m.id != null) window.postMessage({ sala3dExt: 'resposta', id: m.id, r }, location.origin);
       });
@@ -37,7 +39,7 @@
   // o fundo avisa quando o controle de uma aba caiu (o usuário fechou a barra amarela, por exemplo)
   chrome.runtime.onMessage.addListener((m) => {
     if (m?.tipo === 'status-mudou' && ehSala()) return avisar();
-    if (m?.tipo === 'desligou' && ehSala()) window.postMessage({ sala3dExt: 'desligou', aba: m.aba, motivo: m.motivo }, location.origin);
+    if (m?.tipo === 'desligou' && ehSala()) window.postMessage({ sala3dExt: 'desligou', aba: m.aba, janela: !!m.janela, motivo: m.motivo }, location.origin);
   });
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => ehSala() && avisar());

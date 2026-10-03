@@ -92,10 +92,78 @@ async function despachar(aba, ev) {
   if (ev.t === 'texto') return cdp(aba, 'Input.insertText', { text: String(ev.s || '').slice(0, 2000) });
 }
 
+// ------------------------------------------------------------------ janelas e telas
+// O Chrome só deixa a extensão clicar em ABAS. Para janela ou tela inteira ela passa os eventos ao
+// ajudante nativo (pasta nativo/, instalado pelo instalar.bat), que mexe no mouse e no teclado
+// de verdade, sempre dentro da janela/tela compartilhada.
+const NATIVO = 'com.sala3d.controle';
+let nativo = null; // { porta, pronto: Promise<boolean>, alvo, sala }
+
+function conectarNativo() {
+  if (nativo) return nativo;
+  let porta;
+  try {
+    porta = chrome.runtime.connectNative(NATIVO);
+  } catch {
+    return null;
+  }
+  let avisarPronto;
+  const n = { porta, alvo: null, sala: null, pronto: new Promise((r) => { avisarPronto = r; }) };
+  setTimeout(() => avisarPronto(false), 5000); // compilar o ajudante leva 1-2 s na primeira vez
+  porta.onMessage.addListener((m) => {
+    if (m?.tipo === 'oi') avisarPronto(true);
+    // Ctrl+Alt+End no teclado de quem compartilha: avisa a sala para desligar a permissão
+    if (m?.tipo === 'parado' && n.sala != null) chrome.tabs.sendMessage(n.sala, { tipo: 'desligou', janela: true }).catch(() => {});
+  });
+  porta.onDisconnect.addListener(() => {
+    void chrome.runtime.lastError; // "host não encontrado" quando o ajudante não foi instalado
+    avisarPronto(false);
+    if (nativo === n) nativo = null;
+  });
+  nativo = n;
+  return n;
+}
+
+async function nativoPronto() {
+  const n = conectarNativo();
+  return !!n && (await n.pronto) && nativo === n;
+}
+
+// alvo = { superficie: 'window'|'monitor', rotulo } — o rótulo do vídeo capturado
+async function janela(alvo, ev, sala) {
+  if (!(await nativoPronto())) return { erro: 'ajudante-ausente' };
+  const rotulo = String(alvo?.rotulo || '').slice(0, 300);
+  if (!rotulo) return { erro: 'alvo-invalido' };
+  nativo.sala = sala;
+  if (nativo.alvo !== rotulo) {
+    nativo.porta.postMessage({ tipo: 'alvo', rotulo, superficie: alvo.superficie === 'monitor' ? 'monitor' : 'window' });
+    nativo.alvo = rotulo;
+  }
+  if (ev) nativo.porta.postMessage({ tipo: 'entrada', ev });
+  return { ok: true };
+}
+
 async function tratar(m, sender) {
   if (m.tipo === 'meu-id') return { aba: sender.tab?.id };
-  if (m.tipo === 'status') return { liberado: await liberado(sender.url) };
+  if (m.tipo === 'status') {
+    const ok = await liberado(sender.url);
+    return { liberado: ok, nativo: ok ? await nativoPronto() : false };
+  }
   if (!sender.tab || !(await liberado(sender.url))) return { erro: 'site-nao-liberado' };
+  if (m.tipo === 'janela') return janela(m.alvo, m.ev && typeof m.ev === 'object' ? m.ev : null, sender.tab.id);
+  // quem compartilha ligou "permitir controle" (de novo): destrava depois de um Ctrl+Alt+End
+  if (m.tipo === 'janela-retomar') {
+    if (!(await nativoPronto())) return { erro: 'ajudante-ausente' };
+    nativo.porta.postMessage({ tipo: 'retomar' });
+    return { ok: true };
+  }
+  if (m.tipo === 'janela-soltar') {
+    if (nativo) {
+      nativo.porta.postMessage({ tipo: 'soltar' });
+      nativo.alvo = null;
+    }
+    return { ok: true };
+  }
   const aba = Number(m.aba);
   if (!Number.isInteger(aba) || aba === sender.tab.id) return { erro: 'aba-invalida' };
   if (m.tipo === 'soltar') {
