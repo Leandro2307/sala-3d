@@ -56,20 +56,29 @@ Todo `git push` na branch `main` faz o Render redeployar sozinho:
 git add -A && git commit -m "o que mudou" && git push
 ```
 
-## Opcional: TURN, se algum amigo não conseguir conectar
+## TURN: necessário para amigos em redes diferentes
 
-O WebRTC é P2P e às vezes 4G ou rede de empresa bloqueia. Aí vale um TURN.
-No Render: **Environment → Add Environment Variable**:
+O vídeo e a voz vão direto de um computador para o outro (WebRTC). Na mesma rede isso sempre
+funciona; em redes diferentes, muita internet no Brasil (fibra com CGNAT, 4G) e o Brave bloqueiam
+a conexão direta — a tela fica preta e a sala avisa "Não deu para conectar voz e vídeo". O TURN é
+a ponte que resolve.
+
+1. Crie uma conta grátis em [metered.ca](https://www.metered.ca/stun-turn) (plano free: 20 GB/mês).
+2. No painel, crie um app e abra **TURN Credentials**: ele mostra um usuário, uma senha e a lista
+   de endereços.
+3. No Render: **Environment → Add Environment Variable**:
 
 | Chave | Valor |
 |---|---|
-| `TURN_URL` | `turn:standard.relay.metered.ca:80` |
-| `TURN_USER` | (seu usuário do Open Relay) |
-| `TURN_PASS` | (sua senha do Open Relay) |
+| `TURN_URL` | `turn:global.relay.metered.ca:80,turn:global.relay.metered.ca:80?transport=tcp,turn:global.relay.metered.ca:443,turns:global.relay.metered.ca:443?transport=tcp` |
+| `TURN_USER` | (o usuário mostrado no painel) |
+| `TURN_PASS` | (a senha mostrada no painel) |
 
-Pegue as credenciais grátis em [metered.ca/tools/openrelay](https://www.metered.ca/tools/openrelay/)
-— 20 GB/mês. Atenção: TURN repassa o vídeo inteiro, e tela em 1080p gasta cerca de
-1 GB por hora. Ele só entra como último recurso, quando o P2P falha.
+Se o painel mostrar outro endereço (por exemplo `a.relay.metered.ca`), use o dele no lugar de
+`global.relay.metered.ca`. Salvar as variáveis reinicia o serviço sozinho.
+
+O TURN só entra como último recurso, quando a conexão direta falha. Ele repassa o vídeo inteiro:
+uma tela em 1080p gasta cerca de 1 GB por hora por pessoa assistindo.
 
 ## Enquanto isso: link na hora, sem deploy
 

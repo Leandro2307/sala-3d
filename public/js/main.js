@@ -365,7 +365,19 @@ async function join() {
 
   socket = window.io();
   combat.socket = socket;
-  rtc = new RTC(socket, { iceServers: config.iceServers, onTrack: handleTrack });
+  rtc = new RTC(socket, {
+    iceServers: config.iceServers,
+    onTrack: handleTrack,
+    onFalha: (id, temTurn) => {
+      const u = state.users.get(id);
+      if (!u || u.avisoFalha) return;
+      u.avisoFalha = true;
+      renderPeople();
+      toast(temTurn
+        ? `Não deu para conectar voz e vídeo com ${u.name}. Peça para ${u.name} recarregar a página.`
+        : `Não deu para conectar voz e vídeo com ${u.name}: vocês estão em redes que bloqueiam conexão direta. O dono da sala precisa configurar o TURN (veja DEPLOY.md).`, 'error', 12000);
+    },
+  });
   rtc.shareMode = settings.shareMode;
   preloadYouTube();
   $('#browser-block').hidden = !config.browser;
@@ -1063,14 +1075,11 @@ async function permitirControle(key) {
     toast('Não reconheci a aba. Se ela já estava aberta antes da extensão, recarregue-a e compartilhe de novo.', 'warn', 9000);
     return;
   }
-  if (sh.aba == null && !controle.ext.nativo) {
-    toast('Para controlarem uma JANELA ou a TELA inteira, rode extensao\\nativo\\instalar.bat (uma vez), recarregue a extensão e esta página. Abas funcionam sem isso.', 'warn', 11000);
-    return;
-  }
+  // janela/tela: o ajudante nativo sobe agora (se não estiver instalado, a extensão avisa)
   if (sh.aba == null) {
     const r = await controle.retomarJanela();
     if (r?.erro) {
-      toast('O ajudante de janelas não respondeu. Rode extensao\\nativo\\instalar.bat de novo e recarregue a extensão.', 'error', 9000);
+      toast('Para controlarem uma JANELA ou a TELA inteira, rode extensao\\nativo\\instalar.bat (uma vez) e clique em Recarregar na extensão. Abas funcionam sem isso.', 'warn', 11000);
       return;
     }
   }

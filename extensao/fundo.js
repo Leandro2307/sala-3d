@@ -145,10 +145,8 @@ async function janela(alvo, ev, sala) {
 
 async function tratar(m, sender) {
   if (m.tipo === 'meu-id') return { aba: sender.tab?.id };
-  if (m.tipo === 'status') {
-    const ok = await liberado(sender.url);
-    return { liberado: ok, nativo: ok ? await nativoPronto() : false };
-  }
+  // não abre o ajudante aqui: ele só sobe quando alguém liga o controle de uma janela
+  if (m.tipo === 'status') return { liberado: await liberado(sender.url) };
   if (!sender.tab || !(await liberado(sender.url))) return { erro: 'site-nao-liberado' };
   if (m.tipo === 'janela') return janela(m.alvo, m.ev && typeof m.ev === 'object' ? m.ev : null, sender.tab.id);
   // quem compartilha ligou "permitir controle" (de novo): destrava depois de um Ctrl+Alt+End

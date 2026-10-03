@@ -38,11 +38,13 @@ export const SHARE_PRESETS = {
 };
 
 export class RTC {
-  constructor(socket, { iceServers, onTrack, onPeerGone }) {
+  constructor(socket, { iceServers, onTrack, onPeerGone, onFalha }) {
     this.socket = socket;
     this.iceServers = iceServers;
     this.onTrack = onTrack;
     this.onPeerGone = onPeerGone;
+    this.onFalha = onFalha; // (id, temTurn) — conexão de voz/vídeo com alguém não fechou
+    this.temTurn = iceServers.some((s) => [].concat(s.urls).some((u) => /^turns?:/.test(u)));
     this.selfId = null;
     this.peers = new Map();
     this.micStream = null;
@@ -274,6 +276,11 @@ export class RTC {
     };
     pc.oniceconnectionstatechange = () => {
       if (pc.iceConnectionState === 'failed') pc.restartIce();
+    };
+    // Redes diferentes atrás de CGNAT (comum em fibra e 4G) não fecham conexão direta: sem TURN
+    // a tela fica preta e a voz muda. Avisa em vez de deixar a pessoa adivinhando.
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === 'failed') this.onFalha?.(id, this.temTurn);
     };
     pc.ontrack = (ev) => {
       const stream = ev.streams[0] || new MediaStream([ev.track]);
