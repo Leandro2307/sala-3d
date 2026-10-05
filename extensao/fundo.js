@@ -6,6 +6,7 @@
 // própria aba da sala.
 
 const anexadas = new Map(); // aba -> { sala, vp: { w, h }, medido }
+const ultimoToque = new Map(); // aba -> quando chegou o último clique/Enter de quem controla
 
 async function sitesLiberados() {
   const { sites = [] } = await chrome.storage.local.get('sites');
@@ -61,6 +62,7 @@ const num = (v, min, max) => Math.min(max, Math.max(min, Number(v) || 0));
 async function despachar(aba, ev) {
   const info = anexadas.get(aba);
   const modifiers = num(ev.mod, 0, 15) | 0;
+  if ((ev.t === 'mouse' && ev.a === 'down') || (ev.t === 'tecla' && ev.a === 'down' && ev.key === 'Enter')) ultimoToque.set(aba, Date.now());
   if (ev.t === 'mouse' || ev.t === 'wheel') {
     if (ev.a === 'down' || Date.now() - info.medido > 2000) await medir(aba);
     const x = num(ev.x, 0, 1) * info.vp.w;
@@ -91,6 +93,102 @@ async function despachar(aba, ev) {
   }
   if (ev.t === 'texto') return cdp(aba, 'Input.insertText', { text: String(ev.s || '').slice(0, 2000) });
 }
+
+// ------------------------------------------------------------------ abas compartilhadas
+// A sala avisa quais abas está compartilhando (pedido "abas"). Fica no storage.session porque o
+// service worker dorme e esquece o que está só na memória.
+async function compartilhadas() {
+  const { compartilhadas: mapa = {} } = await chrome.storage.session.get('compartilhadas');
+  return mapa; // { [aba]: aba da sala }
+}
+
+const siteDe = (url) => {
+  try {
+    const u = new URL(url);
+    return u.protocol === 'http:' || u.protocol === 'https:' ? u.hostname : null;
+  } catch {
+    return null;
+  }
+};
+
+// conta para a sala em que página a aba está (só o domínio e o título)
+function contarPagina(t, sala) {
+  chrome.tabs.sendMessage(sala, { tipo: 'aba-mudou', aba: t.id, site: siteDe(t.url || ''), titulo: t.title || '' }).catch(() => {});
+}
+
+async function registrarAbas(sala, abas) {
+  const mapa = await compartilhadas();
+  for (const [aba, s] of Object.entries(mapa)) if (s === sala) delete mapa[aba];
+  const novas = abas.filter((a) => Number.isInteger(a) && a !== sala);
+  for (const aba of novas) mapa[aba] = sala;
+  await chrome.storage.session.set({ compartilhadas: mapa });
+  for (const aba of novas) chrome.tabs.get(aba).then((t) => contarPagina(t, sala), () => {});
+}
+
+chrome.tabs.onUpdated.addListener(async (aba, mudou, t) => {
+  if (!('url' in mudou) && !('title' in mudou)) return;
+  const sala = (await compartilhadas())[aba];
+  if (sala != null) contarPagina(t, sala);
+});
+
+// barra de navegação de quem controla
+async function navegar(aba, ev) {
+  if (ev.a === 'voltar') return chrome.tabs.goBack(aba).catch(() => {}); // sem histórico: nada
+  if (ev.a === 'avancar') return chrome.tabs.goForward(aba).catch(() => {});
+  if (ev.a === 'recarregar') return chrome.tabs.reload(aba);
+  if (ev.a === 'abrir' && siteDe(String(ev.url || ''))) return chrome.tabs.update(aba, { url: String(ev.url) });
+}
+
+// Qual aba estava na frente em cada janela, e qual estava antes dela: depois de fechar a aba que
+// um link abriu, a pessoa volta para onde estava (e não para a aba compartilhada).
+chrome.tabs.onActivated.addListener(async ({ tabId, windowId }) => {
+  const { ativas = {} } = await chrome.storage.session.get('ativas');
+  const j = ativas[windowId] || {};
+  if (j.atual === tabId) return;
+  ativas[windowId] = { atual: tabId, anterior: j.atual ?? null };
+  await chrome.storage.session.set({ ativas });
+});
+
+// endereço da aba nova (às vezes ela nasce em branco e só depois ganha o endereço)
+function primeiroEndereco(aba) {
+  return new Promise((resolve) => {
+    const fim = (url) => {
+      chrome.tabs.onUpdated.removeListener(ouvir);
+      clearTimeout(limite);
+      resolve(url);
+    };
+    const ouvir = (id, mudou) => {
+      if (id === aba && siteDe(mudou.url || '')) fim(mudou.url);
+    };
+    const limite = setTimeout(() => fim(null), 3000);
+    chrome.tabs.onUpdated.addListener(ouvir);
+  });
+}
+
+// Link que abre aba nova a partir da aba compartilhada: quem está vendo não enxergaria a aba nova,
+// porque o compartilhamento é só daquela aba. Então o endereço abre na própria aba compartilhada
+// e a nova fecha — como numa janela. Ficam como sempre: aba aberta em segundo plano pelo dono
+// (Ctrl+clique, botão do meio), janela nova (Shift+clique) e janelinha (login com Google,
+// pagamento), que precisam ser separadas.
+chrome.tabs.onCreated.addListener(async (nova) => {
+  const origem = nova.openerTabId;
+  if (origem == null) return;
+  if ((await compartilhadas())[origem] == null) return;
+  const deQuemControla = Date.now() - (ultimoToque.get(origem) || 0) < 1500;
+  if (!nova.active && !deQuemControla) return;
+  const dona = await chrome.tabs.get(origem).catch(() => null);
+  if (!dona || dona.windowId !== nova.windowId) return;
+  const pronto = nova.pendingUrl || nova.url || '';
+  const url = siteDe(pronto) ? pronto : await primeiroEndereco(nova.id);
+  if (!url) return;
+  // quem estava na frente antes da aba nova aparecer
+  const { ativas = {} } = await chrome.storage.session.get('ativas');
+  const j = ativas[nova.windowId] || {};
+  const voltarPara = j.atual === nova.id ? j.anterior : j.atual;
+  await chrome.tabs.update(origem, { url });
+  await chrome.tabs.remove(nova.id).catch(() => {});
+  if (nova.active && voltarPara != null && voltarPara !== nova.id) chrome.tabs.update(voltarPara, { active: true }).catch(() => {});
+});
 
 // ------------------------------------------------------------------ janelas e telas
 // O Chrome só deixa a extensão clicar em ABAS. Para janela ou tela inteira ela passa os eventos ao
@@ -148,6 +246,10 @@ async function tratar(m, sender) {
   // não abre o ajudante aqui: ele só sobe quando alguém liga o controle de uma janela
   if (m.tipo === 'status') return { liberado: await liberado(sender.url) };
   if (!sender.tab || !(await liberado(sender.url))) return { erro: 'site-nao-liberado' };
+  if (m.tipo === 'abas') {
+    await registrarAbas(sender.tab.id, Array.isArray(m.abas) ? m.abas.map(Number) : []);
+    return { ok: true };
+  }
   if (m.tipo === 'janela') return janela(m.alvo, m.ev && typeof m.ev === 'object' ? m.ev : null, sender.tab.id);
   // quem compartilha ligou "permitir controle" (de novo): destrava depois de um Ctrl+Alt+End
   if (m.tipo === 'janela-retomar') {
@@ -173,6 +275,10 @@ async function tratar(m, sender) {
     return t ? { titulo: t.title, controlando: anexadas.has(aba) } : { erro: 'aba-fechada' };
   }
   if (m.tipo === 'entrada' && m.ev && typeof m.ev === 'object') {
+    if (m.ev.t === 'nav') {
+      await navegar(aba, m.ev);
+      return { ok: true };
+    }
     await anexar(aba, sender.tab.id);
     await despachar(aba, m.ev);
     return { ok: true };
@@ -191,7 +297,20 @@ chrome.debugger.onDetach.addListener(({ tabId }, motivo) => {
   anexadas.delete(tabId);
   if (info) chrome.tabs.sendMessage(info.sala, { tipo: 'desligou', aba: tabId, motivo }).catch(() => {});
 });
-chrome.tabs.onRemoved.addListener((aba) => anexadas.delete(aba));
+chrome.tabs.onRemoved.addListener(async (aba) => {
+  anexadas.delete(aba);
+  ultimoToque.delete(aba);
+  // fechou a aba compartilhada ou a da sala: esquece as duas pontas
+  const mapa = await compartilhadas();
+  let mudou = false;
+  for (const [a, s] of Object.entries(mapa)) {
+    if (Number(a) === aba || s === aba) {
+      delete mapa[a];
+      mudou = true;
+    }
+  }
+  if (mudou) await chrome.storage.session.set({ compartilhadas: mapa });
+});
 
 // Acabou de instalar: as abas que já estavam abertas não têm o script ainda. Injeta nelas,
 // para não precisar recarregar tudo antes de compartilhar.

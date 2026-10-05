@@ -482,6 +482,13 @@
     <video id="focus-video" playsinline autoplay muted></video>
     <div class="focus-bar">
       <div class="focus-name"><span class="live-dot"></span><span id="focus-name">Tela</span></div>
+      <!-- navegação da aba controlada (a mesa tem uma igual em cada monitor) -->
+      <form class="nav-aba" id="focus-nav" hidden autocomplete="off">
+        <button type="button" class="nav-btn" data-nav="voltar" title="Voltar"><i data-icon="esq" data-size="16"></i></button>
+        <button type="button" class="nav-btn" data-nav="avancar" title="Avançar"><i data-icon="dir" data-size="16"></i></button>
+        <button type="button" class="nav-btn" data-nav="recarregar" title="Recarregar"><i data-icon="fwd" data-size="15"></i></button>
+        <input name="endereco" placeholder="Endereço ou pesquisa" spellcheck="false" enterkeyhint="go">
+      </form>
       <div class="focus-actions">
         <button type="button" class="secondary small" id="focus-ctrl" hidden><i data-icon="cursor" data-size="16"></i>Controlar</button>
         <button type="button" class="secondary small" id="focus-mesa" title="Todas as telas lado a lado (Tab)"><i data-icon="monitores" data-size="16"></i>Mesa</button>

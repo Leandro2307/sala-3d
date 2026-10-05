@@ -28,9 +28,10 @@ function melhorGrade(n, W, H, aspecto) {
 }
 
 export class Mesa {
-  // telas(): [{ key, nome, onde, cor, minha, controle, semControle, stream }] na ordem dos
-  // monitores. semControle: o que a etiqueta diz quando a tela não aceita controle daqui.
-  constructor({ raiz, controle, telas, aoCompartilhar, aoTelaCheia, aoFechar }) {
+  // telas(): [{ key, nome, onde, cor, minha, controle, semControle, navega, site, titulo, stream }]
+  // na ordem dos monitores. semControle: o que a etiqueta diz quando a tela não aceita controle
+  // daqui. navega: é uma aba que dá para navegar (voltar, endereço) — ganha a barra de navegação.
+  constructor({ raiz, controle, telas, aoNavegar, aoCompartilhar, aoTelaCheia, aoFechar }) {
     this.raiz = raiz;
     this.controle = controle;
     this.telas = telas;
@@ -68,9 +69,30 @@ export class Mesa {
       this.ativar(el.dataset.key);
     });
     this.area.addEventListener('dblclick', (e) => {
-      if (e.target.closest('.mon-tag') && !e.target.closest('.mon-max')) this.alternarAmpliar();
+      if (e.target.closest('.mon-tag') && !e.target.closest('.mon-max, .nav-aba')) this.alternarAmpliar();
+    });
+    // barra de navegação de cada monitor (aba): voltar, avançar, recarregar, endereço
+    this.area.addEventListener('submit', (e) => {
+      const form = e.target.closest('.nav-aba');
+      if (!form) return;
+      e.preventDefault();
+      aoNavegar(form.closest('.monitor').dataset.key, 'abrir', form.elements.endereco.value);
+      form.elements.endereco.blur();
+    });
+    this.area.addEventListener('focusin', (e) => {
+      if (e.target.name === 'endereco') e.target.select();
+    });
+    // saiu do campo sem dar Enter: volta a mostrar o site em que a aba está
+    this.area.addEventListener('focusout', (e) => {
+      if (e.target.name === 'endereco') setTimeout(() => this.marcar(), 0);
     });
     this.area.addEventListener('click', (e) => {
+      const nav = e.target.closest('[data-nav]');
+      if (nav) {
+        nav.blur();
+        aoNavegar(nav.closest('.monitor').dataset.key, nav.dataset.nav);
+        return;
+      }
       const b = e.target.closest('.mon-max');
       if (!b) return;
       b.blur();
@@ -136,7 +158,9 @@ export class Mesa {
       else this.controle.remover(m.video);
       m.el.querySelector('.mon-n').textContent = i + 1;
       m.el.querySelector('.mon-cor').style.setProperty('--c', t.cor);
-      m.el.querySelector('.mon-nome').textContent = `${t.nome} · ${t.onde}`;
+      // com a barra de navegação o site aparece no campo de endereço; sem ela, junto do nome
+      m.el.querySelector('.mon-nome').textContent = `${t.nome} · ${t.onde}${!t.navega && t.site ? ` · ${t.site}` : ''}`;
+      m.el.querySelector('.nav-aba').hidden = !t.navega;
     });
     this.ordem = lista.map((t) => t.key);
     if (this.ativa && !this.monitores.has(this.ativa)) {
@@ -161,6 +185,12 @@ export class Mesa {
     el.dataset.key = key;
     el.innerHTML = `<header class="mon-tag">
         <span class="mon-n"></span><i class="mon-cor"></i><span class="mon-nome"></span>
+        <form class="nav-aba" hidden autocomplete="off">
+          <button type="button" class="nav-btn" data-nav="voltar" title="Voltar">${icon('esq', 15)}</button>
+          <button type="button" class="nav-btn" data-nav="avancar" title="Avançar">${icon('dir', 15)}</button>
+          <button type="button" class="nav-btn" data-nav="recarregar" title="Recarregar">${icon('fwd', 14)}</button>
+          <input name="endereco" placeholder="Endereço ou pesquisa" spellcheck="false" enterkeyhint="go">
+        </form>
         <span class="mon-st"></span>
         <button type="button" class="mon-max" title="Ampliar (Alt+Enter)">${icon('maximize', 14)}</button>
       </header>
@@ -221,6 +251,11 @@ export class Mesa {
       const st = !m.dados.controle ? esc(m.dados.semControle || 'só ver')
         : comTeclado ? `${icon('teclado', 13)} teclado aqui` : `${icon('cursor', 12)} controle`;
       m.el.querySelector('.mon-st').innerHTML = st;
+      const end = m.el.querySelector('.nav-aba').elements.endereco;
+      if (m.dados.navega && document.activeElement !== end) {
+        end.value = m.dados.site || '';
+        end.title = m.dados.titulo || m.dados.site || '';
+      }
       const max = m.el.querySelector('.mon-max');
       const desfaz = this.ampliada && ativa;
       max.innerHTML = icon(desfaz ? 'grade' : 'maximize', 14);
@@ -230,7 +265,7 @@ export class Mesa {
       const m = this.monitores.get(key);
       const d = m.dados;
       const cls = [key === this.ativa ? 'on' : '', d.controle ? 'ctrl' : ''].join(' ');
-      return `<button type="button" class="mon-chip ${cls}" data-key="${esc(key)}" title="${esc(`${d.nome} · ${d.onde}`)} (Alt+${i + 1})">
+      return `<button type="button" class="mon-chip ${cls}" data-key="${esc(key)}" title="${esc(`${d.nome} · ${d.onde}${d.titulo ? ` — ${d.titulo}` : ''}`)} (Alt+${i + 1})">
         <span class="mon-n">${i + 1}</span><i class="mon-cor" style="--c:${esc(d.cor)}"></i><span>${esc(d.nome)}</span><small>${esc(d.onde)}</small></button>`;
     }).join('');
     this.btnAmpliar.hidden = !this.ordem.length;

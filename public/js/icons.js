@@ -47,6 +47,8 @@ const P = {
   chair: '<path d="M6 19v2"/><path d="M18 21v-2"/><path d="M5 16h14"/><path d="M6 16V7a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v9"/><path d="M8 16v-5h8v5"/>',
   xadrez: '<path d="M9 4h6"/><path d="M12 2v4"/><path d="M8.5 9c0-1.9 1.6-3 3.5-3s3.5 1.1 3.5 3c0 1.5-.8 2.6-1.5 3.5L15 18H9l1-5.5C9.3 11.6 8.5 10.5 8.5 9z"/><path d="M6 21h12"/><path d="M7.5 18h9l.5 3H7z"/>',
   cursor: '<path d="M4 3l7.5 18 2.6-7.4L21.5 11z"/>',
+  esq: '<path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>',
+  dir: '<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
   monitores: '<rect width="9" height="7" x="2" y="5" rx="1.5"/><rect width="9" height="7" x="13" y="5" rx="1.5"/><path d="M6.5 12v4"/><path d="M17.5 12v4"/><path d="M4 16h5"/><path d="M15 16h5"/>',
   grade: '<rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/>',
   teclado: '<rect width="20" height="16" x="2" y="4" rx="2"/><path d="M6 8h.01"/><path d="M10 8h.01"/><path d="M14 8h.01"/><path d="M18 8h.01"/><path d="M8 12h.01"/><path d="M12 12h.01"/><path d="M16 12h.01"/><path d="M7 16h10"/>',

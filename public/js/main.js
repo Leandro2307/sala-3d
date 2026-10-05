@@ -609,13 +609,15 @@ function bindSocket() {
   // uma tela de alguém entrou (slot) ou saiu (slot null). As minhas eu registro na resposta do
   // share-start e apago no stopShare: aqui só chegam de volta.
   // A que estava só no telão pode ganhar uma tela quando outra sai (mesma chave, slot novo).
-  socket.on('share-update', ({ id, key, slot, streamId, gone, controle: podeControlar }) => {
+  socket.on('share-update', ({ id, key, slot, streamId, gone, controle: podeControlar, site, titulo }) => {
     const u = state.users.get(id);
     if (!u || typeof key !== 'string') return;
     const tinha = u.shares.get(key);
     if (tinha && !gone) {
       tinha.slot = slot ?? null;
       tinha.controle = !!podeControlar;
+      tinha.site = site ?? null;
+      tinha.titulo = titulo ?? null;
       updateFocusCtrl();
     } else if (u.isSelf) {
       return;
@@ -625,7 +627,7 @@ function bindSocket() {
       soltarVideo(tinha);
       u.shares.delete(key);
     } else {
-      const sh = { key, slot: slot ?? null, streamId, video: null, controle: !!podeControlar };
+      const sh = { key, slot: slot ?? null, streamId, video: null, controle: !!podeControlar, site: site ?? null, titulo: titulo ?? null };
       u.shares.set(key, sh);
       toast(`${u.name} começou a compartilhar (${ondeEsta(sh)})`, 'info', 4500, u.color);
     }
@@ -916,18 +918,11 @@ async function publishShare(stream, { file = false, height = 0 } = {}) {
   const video = makeVideo(true);
   video.srcObject = stream;
   video.play().catch(() => {});
-  const aba = file ? null : controle.abaDe(stream, (nova) => {
-    const s = self()?.shares.get(res.key);
-    if (!s) return;
-    // trocou a aba pelo botão do Chrome: a antiga deixa de ser controlada
-    if (s.aba != null && s.aba !== nova) controle.soltar(s.aba);
-    s.aba = nova;
-    if (s.controle && nova == null) socket.emit('controle-permitir', { key: res.key, on: false });
-    renderSharePop();
-  });
+  const aba = file ? null : controle.abaDe(stream, (nova) => marcaDaAba(res.key, nova));
   // não é aba (janela ou tela inteira): quem clica é o ajudante nativo da extensão
   const alvo = file || aba != null ? null : controle.alvoDe(stream);
-  self().shares.set(res.key, { key: res.key, slot: res.slot ?? null, streamId: stream.id, video, file, aba, alvo, controle: false });
+  self().shares.set(res.key, { key: res.key, slot: res.slot ?? null, streamId: stream.id, video, file, aba, alvo, controle: false, site: null, titulo: null });
+  avisarAbas();
   rtc.addScreen(res.key, stream, { file, height });
   // captura: a trilha acaba quando a pessoa clica em "Parar" na barra do navegador.
   // Arquivo: acaba toda vez que o vídeo chega ao fim, e isso não é motivo para parar.
@@ -939,16 +934,65 @@ async function publishShare(stream, { file = false, height = 0 } = {}) {
   return res.key;
 }
 
+// A extensão marca a aba compartilhada ("sala3d-aba:<id>"), mas a marca é da PÁGINA: o Chrome a
+// apaga a cada navegação e ela volta quando a página nova carrega. Sumir, então, quase sempre é
+// só um link clicado: o controle pausa (os eventos que chegam são ignorados) e segue sozinho
+// quando a marca volta com a mesma aba. Marca de outra aba = a pessoa trocou pelo "Compartilhar
+// esta aba" do Chrome, e o controle vai junto. Sem marca por muito tempo (página onde a extensão
+// não roda, como as do Chrome), o controle desliga — e religa se a mesma aba voltar a ter marca.
+const ESPERA_MARCA = 8000;
+
+function marcaDaAba(key, nova) {
+  const s = self()?.shares.get(key);
+  if (!s) return;
+  clearTimeout(s.semMarca);
+  s.semMarca = null;
+  if (nova == null) {
+    if (s.aba == null) return;
+    s.semMarca = setTimeout(() => {
+      s.semMarca = null;
+      controle.soltar(s.aba);
+      s.religar = s.controle ? s.aba : null;
+      s.aba = null;
+      if (s.religar != null) {
+        socket.emit('controle-permitir', { key, on: false });
+        toast('Controle da aba pausado: a página aberta não aceita controle (ex.: páginas do próprio Chrome). Ele volta sozinho quando a aba abrir um site comum.', 'info', 8000);
+      }
+      avisarAbas();
+      renderSharePop();
+    }, ESPERA_MARCA);
+    return;
+  }
+  if (s.aba != null && s.aba !== nova) controle.soltar(s.aba);
+  const religar = s.religar === nova && !s.controle;
+  s.religar = null;
+  s.aba = nova;
+  if (religar) {
+    socket.emit('controle-permitir', { key, on: true });
+    toast('O controle da aba voltou.', 'success', 3000);
+  }
+  avisarAbas();
+  renderSharePop();
+}
+
+// diz à extensão quais abas estou compartilhando (ela abre nelas os links de aba nova e conta em
+// que site estão)
+function avisarAbas() {
+  controle.informarAbas([...(self()?.shares.values() || [])].map((s) => s.aba).filter((a) => a != null));
+}
+
 function stopShare(key, notify) {
   const me = self();
   const sh = me?.shares.get(key);
   if (!sh) return;
+  clearTimeout(sh.semMarca);
   rtc.stopScreen(key);
   controle.soltar(sh.aba);
   if (sh.alvo && sh.controle) controle.soltarJanela();
   if (sh.file) stopCastVideo();
   if (notify) socket.emit('share-stop', key);
   me.shares.delete(key);
+  avisarAbas();
   soltarVideo(sh);
   localAvatar.setStatus({ sharing: me.shares.size > 0 });
   updateShareButton();
@@ -1044,8 +1088,29 @@ $('#share-pop').addEventListener('click', (e) => {
 const controle = new Controle({
   emitir: (ev, data, volatil) => (volatil ? socket?.volatile.emit(ev, data) : socket?.emit(ev, data)),
   toast,
-  onExtensao: () => renderSharePop(),
+  onExtensao: () => {
+    renderSharePop();
+    avisarAbas();
+  },
 });
+
+// A aba compartilhada mudou de página: conta à sala o site e o título (para a barra de navegação).
+// Um envio por segundo no máximo — tem site que fica piscando o título ("(1) Nova mensagem").
+const infoPendente = new Map(); // key -> { site, titulo, timer }
+controle.onAbaMudou = (aba, site, titulo) => {
+  for (const s of self()?.shares.values() || []) {
+    if (s.aba !== aba) continue;
+    const p = infoPendente.get(s.key) || {};
+    Object.assign(p, { site, titulo });
+    infoPendente.set(s.key, p);
+    if (p.timer) continue;
+    socket.emit('share-info', { key: s.key, site, titulo });
+    p.timer = setTimeout(() => {
+      infoPendente.delete(s.key);
+      if (p.site !== site || p.titulo !== titulo) socket.emit('share-info', { key: s.key, site: p.site, titulo: p.titulo });
+    }, 1000);
+  }
+};
 // janela: Ctrl+Alt+End no teclado de quem compartilha. Aba: fechou a barra amarela do Chrome.
 controle.onDesligou = (aba, motivo, janela) => {
   for (const sh of self()?.shares.values() || []) {
@@ -1089,6 +1154,9 @@ async function permitirControle(key) {
   toast(sh.aba != null
     ? 'Pronto: quem abrir essa tela pode clicar em "Controlar". O Chrome mostra uma barra amarela de depuração enquanto isso — é normal.'
     : 'Pronto: quem abrir essa tela vai mexer no mouse e no teclado de verdade do seu PC, dentro dela. Ctrl+Alt+End corta na hora.', 'success', 9000);
+  if (sh.aba != null && !controle.navega) {
+    toast('Sua extensão é a versão antiga: sem barra de navegação e com links de aba nova fora da tela. Em chrome://extensions, clique em Recarregar na "Sala 3D — controle das abas".', 'warn', 11000);
+  }
 }
 
 // Dá para mexer nesta tela daqui? As dos outros, se o dono liberou. As suas, só se for aba: quem
@@ -1103,12 +1171,63 @@ function porqueNaoControla({ user: u, share: sh }) {
   return 'sua aba · libere o controle';
 }
 
+// ------------------------------------------------------------------ navegação da aba
+// Voltar, avançar, recarregar e endereço numa aba controlada (precisa da extensão 1.2 do lado de
+// quem compartilha — é ela que conta o site, então "tem site" = dá para navegar).
+const navegavel = (t) => podeControlar(t) && !!t.share.site;
+
+// texto que não parece endereço vira pesquisa no Google
+function enderecoDigitado(texto) {
+  const s = String(texto || '').trim();
+  if (!s) return null;
+  if (/^https?:\/\//i.test(s)) return s;
+  if (/^localhost(:\d+)?([/?#]\S*)?$/i.test(s)) return `http://${s}`;
+  if (/^[\p{L}\p{N}_-]+(\.[\p{L}\p{N}_-]+)+(:\d+)?([/?#]\S*)?$/iu.test(s)) return `https://${s}`;
+  return `https://www.google.com/search?q=${encodeURIComponent(s)}`;
+}
+
+function navegar(key, a, texto) {
+  const ev = { t: 'nav', a };
+  if (a === 'abrir') {
+    ev.url = enderecoDigitado(texto);
+    if (!ev.url) return;
+  }
+  controle.mandar(key, ev);
+}
+
+// barra da tela em foco (a da mesa é montada em mesa.js)
+const focusNav = $('#focus-nav');
+focusNav.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-nav]');
+  if (!b || state.focus?.kind !== 'share') return;
+  b.blur();
+  navegar(state.focus.key, b.dataset.nav);
+});
+focusNav.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const input = focusNav.elements.endereco;
+  if (state.focus?.kind === 'share') navegar(state.focus.key, 'abrir', input.value);
+  input.blur();
+});
+focusNav.elements.endereco.addEventListener('focus', (e) => e.target.select());
+
 // botão da tela em foco: "Controlar", ou "Permitir controle" na sua aba que ainda não liberou
 function updateFocusCtrl() {
   const btn = $('#focus-ctrl');
   const fv = $('#focus-video');
   const t = state.focus?.kind === 'share' ? acharTela(state.focus.key) : null;
   const pode = !!t && podeControlar(t);
+  const nav = !!t && navegavel(t);
+  focusNav.hidden = !nav;
+  const end = focusNav.elements.endereco;
+  if (nav && document.activeElement !== end) {
+    end.value = t.share.site;
+    end.title = t.share.titulo || t.share.site;
+  }
+  if (t) {
+    const dono = t.user.isSelf ? 'Sua tela' : `Tela de ${t.user.name}`;
+    $('#focus-name').textContent = `${dono} · ${ondeEsta(t.share)}${!nav && t.share.site ? ` · ${t.share.site}` : ''}`;
+  }
   if (!pode) controle.remover(fv);
   const liberar = !!t && !pode && t.user.isSelf && !t.share.file && t.share.aba != null;
   const on = controle.tem(fv);
@@ -1151,8 +1270,12 @@ const mesa = new Mesa({
       minha: t.user.isSelf,
       controle: podeControlar(t),
       semControle: porqueNaoControla(t),
+      navega: navegavel(t),
+      site: t.share.site,
+      titulo: t.share.titulo,
       stream: shareVideo(t.share)?.srcObject ?? null,
     })),
+  aoNavegar: navegar,
   aoCompartilhar: () => novaTela(),
   aoTelaCheia: async () => {
     const r = await toggleFullscreen();
@@ -2295,7 +2418,6 @@ function enterFocus(info) {
   const fv = $('#focus-video');
   fv.srcObject = v.srcObject;
   fv.play().catch(() => {});
-  $('#focus-name').textContent = `${t.user.isSelf ? 'Sua tela' : `Tela de ${t.user.name}`} · ${ondeEsta(t.share)}`;
   updateFocusPin();
   updateFocusCtrl();
   $('#focus').hidden = false;
@@ -2664,7 +2786,7 @@ if (params.get('debug') === '1') {
   window.__sala3d = {
     state, player, combat, run, corrida, world, settings, punch, goToRing, respawn,
     toggleVeiculo, irParaLargada, jogos, irParaMesa, exitFocus, dados,
-    tocarTela, telasMudas, liberarSomDasTelas, makeVideo, mesa, controle, abrirMesa, fecharMesa,
+    tocarTela, telasMudas, liberarSomDasTelas, makeVideo, mesa, controle, abrirMesa, fecharMesa, marcaDaAba,
     publishShare, stopShare, acharTela, telasNoAr, get rtc() { return rtc; },
   };
 }

@@ -38,6 +38,21 @@ Se mover a pasta do projeto, rode o `instalar.bat` de novo.
    As suas **abas** também dá para controlar daqui (bom para testar sozinho). Janela e tela
    inteira, não: o ajudante moveria o seu próprio mouse e ele brigaria com ele mesmo.
 
+Numa aba compartilhada (versão 1.2 da extensão):
+
+- **Navegar não corta o controle.** Clicar num link ou trocar de site pausa o controle só
+  enquanto a página nova carrega. Em páginas do próprio Chrome (`chrome://…`) ele desliga e
+  volta sozinho quando a aba abre um site comum.
+- **Link que abriria aba nova abre na própria aba compartilhada** — quem está vendo não
+  enxergaria a aba nova. Ctrl+clique (aba em segundo plano), Shift+clique (janela nova) e
+  janelinhas de login ficam como sempre.
+- **Barra de navegação** para quem controla, na mesa e no foco: voltar, avançar, recarregar e
+  endereço (texto que não é endereço vira pesquisa no Google). A sala vê só o domínio do site
+  aberto, nunca o endereço completo.
+
+**Atualizou a pasta?** Em `chrome://extensions`, clique em **Recarregar** na extensão. Sem isso
+o Chrome continua rodando a versão antiga.
+
    Nos dois, **Esc** volta para a sala com o mouse já girando a visão do boneco, e
    **Shift+Esc** manda um Esc para a tela. Ctrl+V cola texto.
 

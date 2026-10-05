@@ -53,6 +53,8 @@ export class Controle {
         this.pedidos.delete(m.id);
       } else if (m.sala3dExt === 'desligou') {
         this.onDesligou?.(m.aba, m.motivo, !!m.janela);
+      } else if (m.sala3dExt === 'aba-mudou') {
+        this.onAbaMudou?.(m.aba, m.site || null, m.titulo || '');
       }
     });
     window.postMessage({ sala3d: 'ping' }, location.origin);
@@ -93,6 +95,18 @@ export class Controle {
     return { superficie: sup, rotulo: track.label };
   }
 
+  // A extensão 1.2 navega a aba (voltar, endereço), abre nela os links de aba nova e conta em
+  // que site ela está. A 1.1 só clica e digita.
+  get navega() {
+    const [a, b] = String(this.ext.versao || '0').split('.').map(Number);
+    return this.ext.ok && (a > 1 || (a === 1 && b >= 2));
+  }
+
+  // quais abas estou compartilhando agora (a extensão segue elas: links de aba nova, site aberto)
+  informarAbas(abas) {
+    if (this.ext.ok && this.ext.liberado) window.postMessage({ sala3d: 'abas', abas }, location.origin);
+  }
+
   soltar(aba) {
     if (aba != null && this.ext.ok) this.pedir('soltar', aba);
   }
@@ -110,6 +124,10 @@ export class Controle {
   // Chegou um clique/tecla de alguém para uma das minhas telas.
   async receber(sh, { ev, de, deId }) {
     if (!sh?.controle || (sh.aba == null && !sh.alvo)) return;
+    // aba trocando de página (sem marca por um instante): ignora até a página nova aparecer
+    if (sh.semMarca) return;
+    // voltar/endereço só existe em aba; numa janela quem clica é o ajudante nativo
+    if (ev?.t === 'nav' && sh.aba == null) return;
     const r = sh.aba != null ? await this.pedir('entrada', sh.aba, ev) : await this.pedir('janela', null, ev, sh.alvo);
     if (r?.erro) {
       if (r.erro !== 'sem-resposta') console.warn('[controle]', r.erro);

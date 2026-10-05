@@ -23,13 +23,13 @@
     window.postMessage({ sala3dExt: 'oi', versao: VERSAO, liberado: !!r?.liberado, nativo: !!r?.nativo }, location.origin);
   });
 
-  const PEDIDOS = ['entrada', 'soltar', 'aba-info', 'janela', 'janela-retomar', 'janela-soltar'];
+  const PEDIDOS = ['entrada', 'soltar', 'aba-info', 'janela', 'janela-retomar', 'janela-soltar', 'abas'];
   window.addEventListener('message', (e) => {
     if (e.source !== window || !e.data || typeof e.data.sala3d !== 'string' || !ehSala()) return;
     const m = e.data;
     if (m.sala3d === 'ping') return avisar();
     if (PEDIDOS.includes(m.sala3d)) {
-      chrome.runtime.sendMessage({ tipo: m.sala3d, aba: m.aba, alvo: m.alvo, ev: m.ev, id: m.id }, (r) => {
+      chrome.runtime.sendMessage({ tipo: m.sala3d, aba: m.aba, abas: m.abas, alvo: m.alvo, ev: m.ev, id: m.id }, (r) => {
         if (chrome.runtime.lastError) return;
         if (m.id != null) window.postMessage({ sala3dExt: 'resposta', id: m.id, r }, location.origin);
       });
@@ -40,6 +40,8 @@
   chrome.runtime.onMessage.addListener((m) => {
     if (m?.tipo === 'status-mudou' && ehSala()) return avisar();
     if (m?.tipo === 'desligou' && ehSala()) window.postMessage({ sala3dExt: 'desligou', aba: m.aba, janela: !!m.janela, motivo: m.motivo }, location.origin);
+    // a aba compartilhada abriu outra página: a sala mostra o site na barra de navegação
+    if (m?.tipo === 'aba-mudou' && ehSala()) window.postMessage({ sala3dExt: 'aba-mudou', aba: m.aba, site: m.site, titulo: m.titulo }, location.origin);
   });
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => ehSala() && avisar());

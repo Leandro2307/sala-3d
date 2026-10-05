@@ -279,7 +279,22 @@ function eventoDeControle(raw) {
     return { t: 'tecla', a: e.a, key: String(e.key ?? '').replace(/[\u0000-\u001f]/g, '').slice(0, 24), code: cleanText(e.code, 24), kc: n(e.kc, 0, 255) | 0, mod };
   }
   if (e.t === 'texto') return { t: 'texto', s: String(e.s ?? '').slice(0, 2000) };
+  // barra de navegação da aba: voltar, avançar, recarregar ou abrir um endereço (só http/https)
+  if (e.t === 'nav') {
+    if (['voltar', 'avancar', 'recarregar'].includes(e.a)) return { t: 'nav', a: e.a };
+    const url = enderecoWeb(e.url);
+    return e.a === 'abrir' && url ? { t: 'nav', a: 'abrir', url } : null;
+  }
   return null;
+}
+
+function enderecoWeb(raw) {
+  try {
+    const u = new URL(String(raw ?? '').slice(0, 2000));
+    return u.protocol === 'http:' || u.protocol === 'https:' ? u.href : null;
+  } catch {
+    return null;
+  }
 }
 
 function darMoedas(io, room, user, qtd, motivo) {
@@ -467,7 +482,8 @@ function attachSockets(io) {
         slot = null; // vai direto para o telão
       }
       const key = `${user.id}~${++user.shareSeq}`;
-      const share = { key, slot, streamId: sid, controle: false };
+      // site/titulo: em que página a aba compartilhada está (só o domínio, nunca o endereço inteiro)
+      const share = { key, slot, streamId: sid, controle: false, site: null, titulo: null };
       if (slot != null) room.slots[slot] = key;
       user.shares.set(key, share);
       // Telão vazio? Fixa a tela compartilhada nele automaticamente.
@@ -494,6 +510,18 @@ function attachSockets(io) {
       const sh = user?.shares.get(msg?.key);
       if (!sh) return;
       sh.controle = !!msg.on;
+      io.to(room.id).emit('share-update', { id: user.id, ...sh });
+    });
+
+    // A aba compartilhada mudou de página: mostra o site na barra de navegação de quem controla.
+    // Só o domínio vai para a sala — o endereço completo pode ter código de login, token etc.
+    socket.on('share-info', (msg) => {
+      const sh = user?.shares.get(obj(msg).key);
+      if (!sh) return;
+      const site = /^[a-z0-9.-]{1,100}$/i.test(String(msg.site ?? '')) ? String(msg.site).toLowerCase() : null;
+      const titulo = cleanText(msg.titulo, 120) || null;
+      if (site === sh.site && titulo === sh.titulo) return;
+      Object.assign(sh, { site, titulo });
       io.to(room.id).emit('share-update', { id: user.id, ...sh });
     });
 
