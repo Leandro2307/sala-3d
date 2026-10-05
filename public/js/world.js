@@ -446,14 +446,16 @@ export class World {
     // não dá para ver a porta: a serra e a floresta não precisam ser desenhadas atrás da parede.
     this.fora = new THREE.Group();
     this.scene.add(this.fora);
+    this.areas = new Map(); // ver area()
 
     this.buildLights();
     this.buildRoom();
     this.buildAudience();
     this.buildScreens();
-    this.buildCourse();
-    this.buildRing();
-    this.buildTrack();
+    // cada jogo é uma área: o dono da sala pode desligar (ver ligarArea)
+    this.area('parkour', () => this.buildCourse());
+    this.area('ringue', () => this.buildRing());
+    this.area('corrida', () => this.buildTrack());
     // praça do xadrez de bruxo e da dama (as peças em si ficam em jogos.js)
     this.reservas.push(...RESERVAS_JOGOS);
     this.placaDirecao(SALA.maxX + 9, SALA.porta.z0 + 2, -Math.PI / 2, '↖  JOGOS E DADOS', '#a78bfa');
@@ -1875,6 +1877,44 @@ export class World {
     this.natureza?.update(time);
   }
 
+  // -------------------------------------------------------------- áreas
+  // Uma área é tudo o que um pedaço do mundo criou: objetos na cena, colisões e luzes. O dono da
+  // sala pode desligar um jogo inteiro (ringue, pista, parkour, mesas): some da vista e deixa de
+  // ter parede invisível. Captura o que construir() acrescentou na cena e no grupo de fora.
+  area(nome, construir) {
+    const cena = new Set(this.scene.children);
+    const fora = new Set(this.fora.children);
+    const nColisoes = this.colliders.length;
+    const nBloqueios = this.cameraBlockers.length;
+    const r = construir();
+    const a = this.areas.get(nome) || { objetos: [], colisoes: [], bloqueios: [], ligada: true };
+    a.objetos.push(...this.scene.children.filter((o) => !cena.has(o)), ...this.fora.children.filter((o) => !fora.has(o)));
+    a.colisoes.push(...this.colliders.slice(nColisoes));
+    a.bloqueios.push(...this.cameraBlockers.slice(nBloqueios));
+    this.areas.set(nome, a);
+    return r;
+  }
+
+  ligarArea(nome, ligar) {
+    const a = this.areas.get(nome);
+    if (!a || a.ligada === ligar) return false;
+    a.ligada = ligar;
+    for (const o of a.objetos) {
+      o.visible = ligar;
+      // marca tudo dentro: luzes e placas que outro código liga sozinho respeitam isso
+      o.traverse((x) => { x.userData.areaDesligada = !ligar; });
+    }
+    if (ligar) {
+      this.colliders.push(...a.colisoes);
+      this.cameraBlockers.push(...a.bloqueios);
+    } else {
+      const sai = new Set([...a.colisoes, ...a.bloqueios]);
+      this.colliders = this.colliders.filter((c) => !sai.has(c));
+      this.cameraBlockers = this.cameraBlockers.filter((m) => !sai.has(m));
+    }
+    return true;
+  }
+
   // -------------------------------------------------------------- qualidade
   // luzes: quantas luzes pontuais ficam acesas; sombra: tamanho do mapa (0 = sem sombra);
   // pixelMax: teto da densidade de pixels; densidade: fração da vegetação de longe;
@@ -1924,6 +1964,11 @@ export class World {
     const lista = [];
     this.scene.traverse((o) => {
       if (!o.isPointLight) return;
+      // luz de um jogo desligado pelo dono da sala: apagada de vez
+      if (o.userData.areaDesligada) {
+        o.visible = false;
+        return;
+      }
       // luz dentro de um grupo escondido já está apagada para o three: fica de fora da conta
       for (let p = o.parent; p; p = p.parent) if (!p.visible) return;
       if (!o.userData.cor) o.userData.cor = o.color.clone();
@@ -1982,6 +2027,10 @@ export class World {
     this.atualizarLuzes(); // depois do cullFora: ele esconde grupos, e luz escondida não conta
     this.atualizarTelas();
     for (const label of this.fadeLabels) {
+      if (label.userData.areaDesligada) {
+        label.visible = false;
+        continue;
+      }
       label.getWorldPosition(_tmp);
       const d = _tmp.distanceTo(this.camera.position);
       label.material.opacity = THREE.MathUtils.clamp((d - 5) / 5, 0, 1);

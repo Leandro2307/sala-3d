@@ -34,7 +34,8 @@ export class Jogos {
     this.mesas = {};
     this.partidas = {};
     for (const tipo of Object.keys(MESAS)) {
-      this.mesas[tipo] = new Mesa(tipo, world);
+      // cada mesa é uma área do mundo: o dono da sala pode desligar o jogo (World.ligarArea)
+      this.mesas[tipo] = world.area(tipo, () => new Mesa(tipo, world));
       this.partidas[tipo] = { lances: [], lugares: [null, null], botDono: null, st: REGRAS[tipo].novo(), sit: { fim: false } };
       this.mesas[tipo].reconstruir(this.partidas[tipo].st.b);
     }

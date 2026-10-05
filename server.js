@@ -9,6 +9,7 @@ const { Server } = require('socket.io');
 const compression = require('compression');
 const { execFile } = require('child_process');
 const crypto = require('crypto');
+const banco = require('./banco');
 
 const PORT = Number(process.env.PORT) || 3000;
 const HTTPS_PORT = Number(process.env.HTTPS_PORT) || 3443;
@@ -173,38 +174,102 @@ function getBoards(id) {
 }
 
 // ------------------------------------------------------------------ moedas
-// Carteira por nome (minúsculo), guardada em dados/moedas.json. Quem chega pela primeira vez
-// ganha MOEDAS_INICIAIS. No plano grátis do Render o disco é apagado a cada reinício, então lá
-// as moedas duram enquanto o serviço estiver de pé (como os recordes).
+// Carteira por nome (minúsculo), guardada pelo banco.js (MySQL, ou dados/moedas.json sem ele).
+// Quem chega pela primeira vez ganha MOEDAS_INICIAIS. A memória é o cache: lê do banco ao entrar
+// e grava a cada mudança.
 const MOEDAS_INICIAIS = 100;
-const MOEDAS_ARQ = path.join(__dirname, 'dados', 'moedas.json');
-const carteiras = new Map((() => {
-  try { return Object.entries(JSON.parse(fs.readFileSync(MOEDAS_ARQ, 'utf8'))); } catch { return []; }
-})());
-let salvarTimer = null;
-function salvarMoedas() {
-  if (salvarTimer) return;
-  salvarTimer = setTimeout(() => {
-    salvarTimer = null;
-    fs.mkdir(path.dirname(MOEDAS_ARQ), { recursive: true }, () => {
-      fs.writeFile(MOEDAS_ARQ, JSON.stringify(Object.fromEntries(carteiras)), () => {});
-    });
-  }, 2000);
-}
+const carteiras = new Map();
 const chaveNome = (nome) => String(nome).trim().toLowerCase();
-function saldoDe(nome) {
+async function carregarCarteira(nome) {
   const k = chaveNome(nome);
   if (!carteiras.has(k)) {
-    carteiras.set(k, MOEDAS_INICIAIS);
-    salvarMoedas();
+    let saldo = MOEDAS_INICIAIS;
+    try {
+      saldo = await banco.lerSaldo(k, MOEDAS_INICIAIS);
+    } catch (err) {
+      console.warn('[banco] lendo moedas', err.code || err.message);
+    }
+    if (!carteiras.has(k)) carteiras.set(k, saldo); // outra conexão pode ter chegado antes
   }
   return carteiras.get(k);
 }
+const saldoDe = (nome) => carteiras.get(chaveNome(nome)) ?? MOEDAS_INICIAIS;
 function mudarSaldo(nome, delta) {
   const novo = Math.max(0, saldoDe(nome) + Math.round(delta));
   carteiras.set(chaveNome(nome), novo);
-  salvarMoedas();
+  banco.guardarSaldo(chaveNome(nome), novo);
   return novo;
+}
+
+// ------------------------------------------------------------------ salas das empresas
+// Cada sala pode ter um dono (senha) que escolhe o ambiente (módulo), quais jogos aparecem, o nome
+// da empresa e o placar de metas da Sala Comercial. Guardado pelo banco.js.
+const MODULOS = ['lazer', 'ti', 'comercial', 'reuniao'];
+const JOGOS_SALA = ['parkour', 'ringue', 'corrida', 'xadrez', 'dama', 'velha', 'dados', 'poderes', 'armas'];
+const configPadrao = () => ({
+  modulo: 'lazer',
+  jogos: Object.fromEntries(JOGOS_SALA.map((j) => [j, true])),
+  empresa: '',
+  placar: { titulo: 'Metas do mês', itens: [] },
+});
+
+// o que vier do cliente (ou do banco) passa por aqui antes de valer
+function limparConfig(raw, base = configPadrao()) {
+  const c = obj(raw);
+  const jogos = obj(c.jogos);
+  const placar = obj(c.placar);
+  return {
+    modulo: MODULOS.includes(c.modulo) ? c.modulo : base.modulo,
+    jogos: Object.fromEntries(JOGOS_SALA.map((j) => [j, typeof jogos[j] === 'boolean' ? jogos[j] : base.jogos[j]])),
+    empresa: typeof c.empresa === 'string' ? cleanText(c.empresa, 40) : base.empresa,
+    placar: c.placar === undefined ? base.placar : {
+      titulo: cleanText(placar.titulo, 40) || 'Metas do mês',
+      itens: (Array.isArray(placar.itens) ? placar.itens : []).slice(0, 12).map((it) => ({
+        nome: cleanText(obj(it).nome, 24),
+        valor: Math.max(0, Math.min(1e12, Number(obj(it).valor) || 0)),
+        meta: Math.max(0, Math.min(1e12, Number(obj(it).meta) || 0)),
+      })).filter((it) => it.nome),
+    },
+  };
+}
+
+// lê a configuração uma vez por sala (várias pessoas entrando juntas esperam a mesma leitura)
+function carregarSala(room) {
+  room.carregando ??= banco.lerSala(room.id).then((s) => {
+    room.config = limparConfig(s?.config || {});
+    room.senhaHash = s?.senhaHash || null;
+  }).catch((err) => {
+    console.warn('[banco] lendo sala', room.id, err.code || err.message);
+    room.config = configPadrao();
+    room.senhaHash = null;
+    room.carregando = null; // tenta ler de novo na próxima entrada
+  });
+  return room.carregando;
+}
+
+const salaPublica = (room) => ({ ...room.config, temDono: !!room.senhaHash });
+const jogoLigado = (room, jogo) => room?.config?.jogos?.[jogo] !== false;
+
+// senha do dono: scrypt com sal, nunca a senha em si
+function hashSenha(senha) {
+  const sal = crypto.randomBytes(16);
+  return `scrypt$${sal.toString('hex')}$${crypto.scryptSync(senha, sal, 32).toString('hex')}`;
+}
+function confereSenha(senha, hash) {
+  const [tipo, sal, h] = String(hash || '').split('$');
+  if (tipo !== 'scrypt' || !sal || !h) return false;
+  const esperado = Buffer.from(h, 'hex');
+  const veio = crypto.scryptSync(senha, Buffer.from(sal, 'hex'), esperado.length);
+  return crypto.timingSafeEqual(esperado, veio);
+}
+// tentativas de senha por endereço: 6 a cada 5 minutos
+const tentativas = new Map();
+function podeTentar(ip) {
+  const agora = Date.now();
+  const lista = (tentativas.get(ip) || []).filter((t) => agora - t < 5 * 60_000);
+  lista.push(agora);
+  tentativas.set(ip, lista);
+  return lista.length <= 6;
 }
 
 // Prêmios. Cada um tem um intervalo mínimo por pessoa, para ninguém "farmar" repetindo.
@@ -499,13 +564,21 @@ function attachSockets(io) {
     let room = null;
     let user = null;
 
-    socket.on('join', (data, ack) => {
-      if (room) return;
+    let entrando = false;
+    let dono = false; // esta conexão provou ser o dono da sala (senha)
+    socket.on('join', async (data, ack) => {
+      if (room || entrando) return;
+      entrando = true;
       const roomId = cleanText(data?.room, 40).toLowerCase().replace(/[^a-z0-9-_]/g, '') || 'principal';
-      room = getRoom(roomId);
+      const nome = cleanText(data?.name, 20) || 'Visitante';
+      // configuração da sala e carteira vêm do banco: espera antes de entrar
+      const sala = getRoom(roomId);
+      await Promise.all([carregarSala(sala), carregarCarteira(nome)]);
+      if (!socket.connected) return;
+      room = sala;
       user = {
         id: socket.id,
-        name: cleanText(data?.name, 20) || 'Visitante',
+        name: nome,
         color: /^#[0-9a-f]{6}$/i.test(data?.color) ? data.color : '#7c9cff',
         mic: !!data?.mic,
         shares: new Map(), // chave -> { key, slot, streamId }
@@ -534,8 +607,77 @@ function attachSockets(io) {
         voltas: getBoards(roomId).voltas,
         jogos: Object.fromEntries(Object.entries(room.jogos).map(([k, j]) => [k, jogoPublico(j)])),
         moedas: user.moedas,
+        sala: salaPublica(room),
       });
       socket.to(roomId).emit('user-joined', publicUser(user));
+    });
+
+    // ---------------------------------------------------------- dono da sala
+    // Sala sem dono: quem chegar primeiro e criar a senha vira o dono. Com dono: só com a senha.
+    const ipDe = () => String(socket.handshake.headers['x-forwarded-for'] || socket.handshake.address || '').split(',')[0].trim();
+    const resposta = (ack) => (typeof ack === 'function' ? ack : () => {});
+    const senhaValida = (s) => typeof s === 'string' && s.length >= 6 && s.length <= 100;
+
+    socket.on('sala-dono', async (msg, ack) => {
+      const r = resposta(ack);
+      if (!room) return r({ ok: false, erro: 'Entre na sala primeiro.' });
+      if (room.senhaHash) return r({ ok: false, erro: 'Esta sala já tem dono.' });
+      const { senha } = obj(msg);
+      if (!senhaValida(senha)) return r({ ok: false, erro: 'A senha precisa ter pelo menos 6 caracteres.' });
+      room.senhaHash = hashSenha(senha);
+      try {
+        await banco.salvarSala(room.id, room.config, room.senhaHash);
+      } catch (err) {
+        room.senhaHash = null;
+        console.warn('[banco] salvando dono', err.code || err.message);
+        return r({ ok: false, erro: 'Não deu para guardar a senha agora. Tente de novo.' });
+      }
+      dono = true;
+      r({ ok: true });
+      io.to(room.id).emit('sala', salaPublica(room));
+    });
+
+    socket.on('sala-entrar', (msg, ack) => {
+      const r = resposta(ack);
+      if (!room?.senhaHash) return r({ ok: false, erro: 'Esta sala ainda não tem dono.' });
+      if (!podeTentar(ipDe())) return r({ ok: false, erro: 'Muitas tentativas. Espere alguns minutos.' });
+      const { senha } = obj(msg);
+      if (!senhaValida(senha) || !confereSenha(senha, room.senhaHash)) return r({ ok: false, erro: 'Senha errada.' });
+      dono = true;
+      r({ ok: true });
+    });
+
+    socket.on('sala-config', async (msg, ack) => {
+      const r = resposta(ack);
+      if (!room || !dono) return r({ ok: false, erro: 'Só o dono da sala muda isso.' });
+      const antes = room.config;
+      room.config = limparConfig(msg, antes);
+      try {
+        await banco.salvarSala(room.id, room.config, room.senhaHash);
+      } catch (err) {
+        room.config = antes;
+        console.warn('[banco] salvando sala', err.code || err.message);
+        return r({ ok: false, erro: 'Não deu para guardar agora. Tente de novo.' });
+      }
+      r({ ok: true });
+      io.to(room.id).emit('sala', { ...salaPublica(room), por: user.name });
+    });
+
+    socket.on('sala-senha', async (msg, ack) => {
+      const r = resposta(ack);
+      if (!room || !dono) return r({ ok: false, erro: 'Só o dono da sala muda isso.' });
+      const { nova } = obj(msg);
+      if (!senhaValida(nova)) return r({ ok: false, erro: 'A senha precisa ter pelo menos 6 caracteres.' });
+      const antes = room.senhaHash;
+      room.senhaHash = hashSenha(nova);
+      try {
+        await banco.salvarSala(room.id, room.config, room.senhaHash);
+      } catch (err) {
+        room.senhaHash = antes;
+        console.warn('[banco] trocando senha', err.code || err.message);
+        return r({ ok: false, erro: 'Não deu para guardar agora. Tente de novo.' });
+      }
+      r({ ok: true });
     });
 
     socket.on('state', (s) => {
@@ -705,13 +847,13 @@ function attachSockets(io) {
 
     // ------------------------------------------------------------ ringue
     socket.on('punch', () => {
-      if (!user) return;
+      if (!user || !jogoLigado(room, 'ringue')) return;
       socket.to(room.id).emit('punch', { id: user.id });
     });
 
     socket.on('hit', (msg) => {
       const { to, dir } = obj(msg);
-      if (!user) return;
+      if (!user || !jogoLigado(room, 'ringue')) return;
       const alvo = room.users.get(to);
       if (!alvo || alvo.id === user.id) return;
       // confere a distância no servidor: impede socar alguém do outro lado da sala
@@ -725,7 +867,7 @@ function attachSockets(io) {
     // tiro saiu de perto de quem atirou e o alcance; o traçante vai para todo mundo ver.
     socket.on('tiro', (msg) => {
       const { to, dir, de, ate } = obj(msg);
-      if (!user || user.shirt !== 'bolsonaro') return;
+      if (!user || user.shirt !== 'bolsonaro' || !jogoLigado(room, 'armas')) return;
       const agora = Date.now();
       if (agora - (user.ultimoTiro || 0) < TIRO.cadenciaMs) return;
       user.ultimoTiro = agora;
@@ -787,7 +929,7 @@ function attachSockets(io) {
     });
 
     socket.on('volta', (tempo) => {
-      if (!user) return;
+      if (!user || !jogoLigado(room, 'corrida')) return;
       const t = Number(tempo);
       if (!Number.isFinite(t) || t < VOLTA_MIN || t > VOLTA_MAX) return;
       const placar = getBoards(room.id).voltas;
@@ -806,7 +948,7 @@ function attachSockets(io) {
     });
 
     socket.on('parkour-finish', (time) => {
-      if (!user) return;
+      if (!user || !jogoLigado(room, 'parkour')) return;
       const t = Number(time);
       if (!Number.isFinite(t) || t < 8 || t > 3600) return;
       premiar(io, room, user, 'parkour');
@@ -844,7 +986,8 @@ function attachSockets(io) {
     });
 
     const mandarJogo = (mesa) => io.to(room.id).emit('jogo', { mesa, ...jogoPublico(room.jogos[mesa]) });
-    const mesaDe = (msg) => (user && JOGOS.includes(msg?.mesa) ? room.jogos[msg.mesa] : null);
+    // mesa de jogo desligada pelo dono da sala não aceita nada
+    const mesaDe = (msg) => (user && JOGOS.includes(msg?.mesa) && jogoLigado(room, msg.mesa) ? room.jogos[msg.mesa] : null);
 
     socket.on('jogo-sentar', (msg, ack) => {
       const j = mesaDe(msg);
@@ -941,6 +1084,7 @@ function attachSockets(io) {
     socket.on('dados-rolar', (msg, ack) => {
       const reply = typeof ack === 'function' ? ack : () => {};
       if (!user) return;
+      if (!jogoLigado(room, 'dados')) return reply({ ok: false, erro: 'A mesa de dados está desligada nesta sala.' });
       const agora = Date.now();
       if (agora - user.ultimoDado < 2500) return reply({ erro: 'Espere os dados pararem.' });
       const tipo = String(msg?.tipo || '');
@@ -1023,6 +1167,8 @@ async function loadCert() {
 }
 
 async function main() {
+  // o banco antes de abrir a porta: quem entrar já encontra a sala e as moedas no lugar
+  await banco.iniciar();
   const io = new Server({ cors: { origin: true }, maxHttpBufferSize: 1e6 });
   attachSockets(io);
 

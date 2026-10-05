@@ -30,7 +30,7 @@ const typing = () => {
 
 const COLORS = ['#7c9cff', '#6ee7c8', '#f472b6', '#fbbf24', '#a78bfa', '#fb7185', '#38bdf8', '#a3e635', '#f97316', '#e2e8f0'];
 const EMOTE_KEYS = ['wave', 'party', 'laugh', 'heart', 'clap', 'fire'];
-const PANEL_TITLES = { people: 'Pessoas', chat: 'Chat da sala', telao: 'Telão', parkour: 'Parkour', ringue: 'Ringue de luta', corrida: 'Pista de corrida', jogos: 'Jogos, dados e moedas', settings: 'Ajustes' };
+const PANEL_TITLES = { people: 'Pessoas', chat: 'Chat da sala', telao: 'Telão', parkour: 'Parkour', ringue: 'Ringue de luta', corrida: 'Pista de corrida', jogos: 'Jogos, dados e moedas', sala: 'Sala da empresa', settings: 'Ajustes' };
 
 // ------------------------------------------------------------------ ajustes salvos
 const DEFAULTS = {
@@ -511,6 +511,8 @@ function applyJoined(data) {
   jogos.sincronizar(data.jogos);
   self().moedas = data.moedas ?? 0;
   mostrarMoedas();
+  aplicarSala(data.sala);
+  reentrarComoDono();
 
   for (const u of data.users) rtc.getPeer(u.id);
 
@@ -680,6 +682,10 @@ function bindSocket() {
     if (sh?.controle) turboDaTela(msg.key);
     controle.receber(sh, msg.deId === state.selfId ? { ...msg, deId: null } : msg);
   });
+  socket.on('sala', (cfg) => {
+    aplicarSala(cfg);
+    if (cfg.por && cfg.por !== settings.name) toast(`${cfg.por} atualizou a sala`, 'info', 3500);
+  });
   socket.on('moedas', ({ id, moedas, delta, motivo }) => {
     const u = state.users.get(id);
     if (!u) return;
@@ -746,8 +752,9 @@ function removeUser(id, quiet = false) {
 
 function updateRoomInfo() {
   const n = state.users.size;
-  $('#room-name').textContent = state.room;
-  $('#bar-room').textContent = `#${state.room}`;
+  const empresa = state.sala?.empresa;
+  $('#room-name').textContent = empresa || state.room;
+  $('#bar-room').textContent = empresa ? `${empresa} · #${state.room}` : `#${state.room}`;
   $('#room-count').textContent = `${n} ${n === 1 ? 'pessoa' : 'pessoas'}`;
   $('#people-badge').textContent = n;
   $('#invite-url').textContent = inviteUrl();
@@ -1352,6 +1359,158 @@ $('#focus-ctrl').addEventListener('click', async () => {
   updateFocusCtrl();
 });
 
+// ------------------------------------------------------------------ sala da empresa
+// O dono da sala (quem criou a senha) escolhe o ambiente, quais jogos aparecem e o nome da
+// empresa — vale para todo mundo que entrar. O servidor guarda (banco.js) e também barra os jogos
+// desligados; aqui eles somem do mundo (World.ligarArea), da barra, da ajuda e das teclas.
+const AMBIENTES = [
+  { id: 'lazer', nome: 'Lazer', desc: 'Cinema, parque e todos os jogos', pronto: true },
+  { id: 'ti', nome: 'Sala do TI', desc: 'Parede de monitoramento e bancadas', pronto: false },
+  { id: 'comercial', nome: 'Sala Comercial', desc: 'Telão, placar de metas e mesa de reunião', pronto: false },
+  { id: 'reuniao', nome: 'Sala de Reunião', desc: 'Mesa oval e uma tela grande', pronto: false },
+];
+const JOGOS_DA_SALA = [
+  ['parkour', 'Parkour', 'Circuito até o camarote'],
+  ['ringue', 'Ringue', 'Luta e socos'],
+  ['corrida', 'Pista de corrida', 'Virar carro e dar voltas'],
+  ['xadrez', 'Xadrez de bruxo', ''],
+  ['dama', 'Dama gigante', ''],
+  ['velha', 'Jogo da velha', ''],
+  ['dados', 'Mesa de dados', 'Apostas com moedas'],
+  ['poderes', 'Poderes', 'Voar e pulo alto'],
+  ['armas', 'Arma da camiseta 22', ''],
+];
+const AREAS_DE_JOGO = ['parkour', 'ringue', 'corrida', 'xadrez', 'dama', 'velha', 'dados'];
+const jogoLigado = (nome) => state.sala?.jogos?.[nome] !== false;
+let senhaDono = null; // só na memória: se a conexão cair, entra como dono de novo sozinho
+let formSujo = false; // o dono está mexendo no formulário: o que chega do servidor não apaga
+
+function aplicarSala(cfg) {
+  if (!cfg) return;
+  state.sala = cfg;
+  let mudou = false;
+  for (const j of AREAS_DE_JOGO) mudou = world.ligarArea(j, jogoLigado(j)) || mudou;
+  if (mudou) world.aquecerShaders(); // o número de luzes pode ter mudado
+  // desligou o que alguém estava usando agora
+  if (!jogoLigado('poderes')) {
+    if (player.voando) toggleVoar();
+    if (player.puloAlto) togglePuloAlto();
+  }
+  if (!jogoLigado('corrida') && player.veiculo) toggleVeiculo();
+  if (!jogoLigado('parkour') && run.state !== 'idle') {
+    run.cancel();
+    hideParkourHud();
+  }
+  if ((state.focus?.kind === 'jogo' && jogos.ativa && !jogoLigado(jogos.ativa)) || (state.focus?.kind === 'dados' && !jogoLigado('dados'))) exitFocus();
+  // botões da barra, teclas da ajuda e botões de toque de cada jogo
+  $$('[data-jogo]').forEach((el) => { el.hidden = !el.dataset.jogo.split(' ').some(jogoLigado); });
+  if (state.panel && $(`#bar [data-panel="${state.panel}"]`)?.hidden) closePanel();
+  poderesMudaram(); // arma (camiseta 22) na ajuda e no toque
+  updateRoomInfo();
+  renderSala();
+}
+
+function renderSala() {
+  const cfg = state.sala;
+  if (!cfg) return;
+  const amb = AMBIENTES.find((a) => a.id === cfg.modulo) || AMBIENTES[0];
+  const desligados = JOGOS_DA_SALA.filter(([j]) => !jogoLigado(j)).length;
+  $('#sala-resumo').innerHTML = `<div class="sala-chip">${icon('predio', 18)}<span>
+    <b>${esc(cfg.empresa || 'Sem nome de empresa')}</b>
+    <small>Ambiente: ${esc(amb.nome)} · ${desligados ? `${desligados} ${desligados === 1 ? 'jogo desligado' : 'jogos desligados'}` : 'todos os jogos ligados'}</small>
+  </span></div>${state.donoDaSala ? '<p class="hint">Você é o dono desta sala.</p>' : ''}`;
+  $('#sala-criar').hidden = cfg.temDono || state.donoDaSala;
+  $('#sala-entrar').hidden = !cfg.temDono || state.donoDaSala;
+  $('#sala-config').hidden = !state.donoDaSala;
+  if (state.donoDaSala) preencherConfig();
+}
+
+function preencherConfig(forcar = false) {
+  if (formSujo && !forcar) return;
+  const cfg = state.sala;
+  $('#sala-config').elements.empresa.value = cfg.empresa || '';
+  $('#sala-modulos').innerHTML = AMBIENTES.map((a) => `<label class="modulo${a.pronto ? '' : ' breve'}">
+      <input type="radio" name="modulo" value="${a.id}"${cfg.modulo === a.id ? ' checked' : ''}${a.pronto ? '' : ' disabled'}>
+      <b>${a.nome}</b><small>${a.pronto ? a.desc : `${a.desc} · em breve`}</small>
+    </label>`).join('');
+  $('#sala-jogos').innerHTML = JOGOS_DA_SALA.map(([j, nome, desc]) => `<label class="toggle-row compact">
+      <span><b>${nome}</b>${desc ? `<small>${desc}</small>` : ''}</span>
+      <input type="checkbox" class="switch" value="${j}"${jogoLigado(j) ? ' checked' : ''}>
+    </label>`).join('');
+}
+
+// a conexão caiu e voltou: o servidor esqueceu quem era dono, então prova de novo com a senha
+function reentrarComoDono() {
+  state.donoDaSala = false;
+  if (!senhaDono) return renderSala();
+  socket.emit('sala-entrar', { senha: senhaDono }, (r) => {
+    state.donoDaSala = !!r?.ok;
+    if (!r?.ok) senhaDono = null;
+    renderSala();
+  });
+}
+
+$('#sala-criar').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const form = e.currentTarget;
+  const senha = form.elements.senha.value;
+  socket.emit('sala-dono', { senha }, (r) => {
+    if (!r?.ok) return toast(r?.erro || 'Não deu para criar a senha.', 'error');
+    senhaDono = senha;
+    state.donoDaSala = true;
+    form.reset();
+    formSujo = false;
+    renderSala();
+    toast('Pronto: você é o dono desta sala. Guarde a senha — é com ela que se muda a sala depois.', 'success', 7000);
+  });
+});
+
+$('#sala-entrar').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const form = e.currentTarget;
+  const senha = form.elements.senha.value;
+  socket.emit('sala-entrar', { senha }, (r) => {
+    if (!r?.ok) return toast(r?.erro || 'Senha errada.', 'error');
+    senhaDono = senha;
+    state.donoDaSala = true;
+    form.reset();
+    formSujo = false;
+    renderSala();
+  });
+});
+
+$('#sala-config').addEventListener('input', () => { formSujo = true; });
+$('#sala-config').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-todos]');
+  if (!b) return;
+  $$('#sala-jogos input').forEach((i) => { i.checked = b.dataset.todos === '1'; });
+  formSujo = true;
+});
+$('#sala-config').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const form = e.currentTarget;
+  const cfg = {
+    empresa: form.elements.empresa.value.trim(),
+    modulo: form.querySelector('[name="modulo"]:checked')?.value || 'lazer',
+    jogos: Object.fromEntries($$('#sala-jogos input').map((i) => [i.value, i.checked])),
+  };
+  socket.emit('sala-config', cfg, (r) => {
+    if (!r?.ok) return toast(r?.erro || 'Não deu para salvar.', 'error');
+    formSujo = false;
+    toast('Sala atualizada para todo mundo.', 'success');
+  });
+});
+$('#sala-trocar').addEventListener('click', () => {
+  const campo = $('#sala-config').elements.nova;
+  const nova = campo.value;
+  socket.emit('sala-senha', { nova }, (r) => {
+    if (!r?.ok) return toast(r?.erro || 'Não deu para trocar a senha.', 'error');
+    senhaDono = nova;
+    campo.value = '';
+    toast('Senha de dono trocada.', 'success');
+  });
+});
+
 // ------------------------------------------------------------------ mesa de trabalho
 // Todas as telas lado a lado, como monitores. Ver mesa.js.
 const mesa = new Mesa({
@@ -1943,6 +2102,10 @@ function teleportToCollider(c, yaw = null) {
 }
 
 function goToStart() {
+  if (!jogoLigado('parkour')) {
+    toast('O parkour está desligado nesta sala.', 'info', 2600);
+    return;
+  }
   const start = world.colliders.find((c) => c.data.type === 'start');
   teleportToCollider(start, Math.PI);
 }
@@ -2119,6 +2282,10 @@ function setRaceBoard(board) {
 }
 
 function toggleVeiculo() {
+  if (!player.veiculo && !jogoLigado('corrida')) {
+    toast('A pista de corrida está desligada nesta sala.', 'info', 2600);
+    return;
+  }
   const virou = player.setVeiculo(!player.veiculo);
   if (!virou) return;
   if (player.veiculo && player.voando) {
@@ -2136,6 +2303,10 @@ function toggleVeiculo() {
 }
 
 function irParaLargada() {
+  if (!jogoLigado('corrida')) {
+    toast('A pista de corrida está desligada nesta sala.', 'info', 2600);
+    return;
+  }
   const l = largada(Math.floor(Math.random() * 3));
   if (!player.veiculo) toggleVeiculo();
   player.teleport(l.pos, l.yaw);
@@ -2163,7 +2334,8 @@ const combat = new Combat({
   },
 });
 
-function updateFightHud(health, inRing) {
+function updateFightHud(health, emRingue) {
+  const inRing = emRingue && jogoLigado('ringue'); // ringue desligado: lá é chão como outro qualquer
   const hud = $('#fight-hud');
   const v = Math.max(0, Math.min(1, health / COMBAT.maxHealth));
   // a porradaria vale no mapa todo: fora do ringue a barra aparece quando você apanha
@@ -2183,7 +2355,7 @@ function updateFightHud(health, inRing) {
 
 // ------------------------------------------------------------------ arma (camiseta 22)
 // O servidor confere a camiseta de novo: isto aqui é só para não mostrar o que não vale.
-function temArma() { return settings.shirt === 'bolsonaro'; }
+function temArma() { return settings.shirt === 'bolsonaro' && jogoLigado('armas'); }
 
 const _tmpTiro = new THREE.Vector3();
 const _camDir = new THREE.Vector3();
@@ -2274,6 +2446,10 @@ function atirar() {
 
 // ------------------------------------------------------------------ poderes
 function toggleVoar() {
+  if (!player.voando && !jogoLigado('poderes')) {
+    toast('Os poderes estão desligados nesta sala.', 'info', 2600);
+    return;
+  }
   if (player.veiculo) {
     toast('Saia do carro para voar.', 'info', 2600);
     return;
@@ -2287,6 +2463,10 @@ function toggleVoar() {
 }
 
 function togglePuloAlto() {
+  if (!player.puloAlto && !jogoLigado('poderes')) {
+    toast('Os poderes estão desligados nesta sala.', 'info', 2600);
+    return;
+  }
   player.puloAlto = !player.puloAlto;
   poderesMudaram();
   toast(player.puloAlto ? `Pulo alto ligado${isTouch ? '' : ' (J desliga)'}.` : 'Pulo alto desligado.', 'info', 2600);
@@ -2308,6 +2488,7 @@ function poderesMudaram() {
 }
 
 function punch() {
+  if (!jogoLigado('ringue')) return;
   if (combat.punch()) {
     localAvatar.punch();
     sfx.punchSwing(); // o som de acerto vem depois, pelo onHitLanded
@@ -2315,6 +2496,10 @@ function punch() {
 }
 
 function goToRing() {
+  if (!jogoLigado('ringue')) {
+    toast('O ringue está desligado nesta sala.', 'info', 2600);
+    return;
+  }
   const c = ringCorners()[0];
   run.abandon();
   player.teleport(c, Math.atan2(RING.x - c[0], RING.z - c[2]) + Math.PI);
@@ -2331,6 +2516,10 @@ const jogos = new Jogos({
   nomeDe: (id) => state.users.get(id)?.name,
 });
 function irParaMesa(mesa) {
+  if (!jogoLigado(mesa)) {
+    toast('Esse jogo está desligado nesta sala.', 'info', 2600);
+    return;
+  }
   run.abandon();
   if (player.veiculo) toggleVeiculo();
   exitFocus();
@@ -2365,7 +2554,8 @@ function mostrarMoedas(pulo = false) {
   }
 }
 
-const dados = new Dados({
+// a mesa de dados é uma área do mundo: o dono da sala pode desligar (World.ligarArea)
+const dados = world.area('dados', () => new Dados({
   world,
   player,
   toast,
@@ -2382,7 +2572,7 @@ const dados = new Dados({
     }
     renderPeople();
   },
-});
+}));
 $('#dh-sair').addEventListener('click', sairDoFoco);
 $('#pk-quit').addEventListener('click', () => run.abandon());
 
@@ -2453,8 +2643,9 @@ function pickScreen() {
 }
 
 function updateHover() {
-  const mesa = state.focus ? null : jogos.maisPerto(player.pos);
-  const naMesaDeDados = !state.focus && !mesa && dados.perto(player.pos);
+  const perto = state.focus ? null : jogos.maisPerto(player.pos);
+  const mesa = perto && jogoLigado(perto) ? perto : null; // mesa desligada pelo dono da sala some
+  const naMesaDeDados = !state.focus && !mesa && jogoLigado('dados') && dados.perto(player.pos);
   const info = state.focus ? null
     : mesa ? { kind: 'jogo', mesa, label: jogos.rotulo(mesa) }
       : naMesaDeDados ? { kind: 'dados', label: 'Apostar nos dados' } : screenInfo(pickScreen());
@@ -3018,7 +3209,7 @@ function frame() {
         run.cancel();
         hideParkourHud();
       }
-    } else {
+    } else if (jogoLigado('parkour')) {
       run.update(dt, player.grounded ? player.ground : null);
     }
     if (run.state === 'running') setPkTime(run.time);
@@ -3027,7 +3218,7 @@ function frame() {
     dados.update(dt);
     atualizarTiros(dt);
     localAvatar.setKo(combat.knockedOut);
-    corrida.update(dt, player.pos.x, player.pos.z, player.veiculo);
+    if (jogoLigado('corrida')) corrida.update(dt, player.pos.x, player.pos.z, player.veiculo);
     if (corrida.ativa) $('#rh-time').textContent = formatarVolta(corrida.tempo);
     detectSpeaking(dt);
     sendState(dt);
