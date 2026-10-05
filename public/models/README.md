@@ -75,13 +75,143 @@ o jogo não quebra. Se o arquivo não carregar, o boneco padrão volta sozinho.
 A maioria dos modelos de banco (inclusive os gerados por IA) **não tem rig**.
 O caminho usual é o [Mixamo](https://www.mixamo.com) — grátis, da Adobe:
 
-1. Envie o modelo (`.fbx` ou `.obj`) em **Upload Character**.
-2. O auto-rigger marca queixo, pulsos, cotovelos e joelhos. Funciona bem com
+1. Se o modelo passa de ~30.000 triângulos, reduza **antes** (passo 1 do
+   Blender, abaixo). Depois de riggado, cortar dá mais trabalho.
+2. Envie o modelo em **Upload Character**: um `.fbx`, ou um `.zip` com o `.obj`,
+   o `.mtl` e as texturas.
+3. O auto-rigger marca queixo, pulsos, cotovelos e joelhos. Funciona bem com
    **humanoides bípedes**; quadrúpedes ele não rigga.
-3. Baixe uma animação de cada estado (Idle, Walking, Running, Jump) em **FBX**.
-4. Junte tudo num `.glb` com animações (Blender: importe os FBX, renomeie as
-   *actions* para `Idle`/`Walk`/`Run`/`Jump`, exporte em glTF marcando
-   **Animation → Export all armature actions**).
+4. Baixe uma animação de cada estado (Idle, Walking, Running, Jump; Sitting e
+   Punching são opcionais), **todas do mesmo upload** para os ossos terem os
+   mesmos nomes:
+   - Format **FBX Binary (.fbx)**, 30 fps;
+   - a primeira (Idle) com **Skin: With Skin**, porque é ela que traz a malha;
+     as outras com **Without Skin**, que são mais leves;
+   - quando a animação tiver a opção **In Place**, marque. Quem move o
+     personagem é o jogo. Sem isso ele anda para a frente e volta a cada ciclo.
+5. Junte tudo num `.glb` no Blender, conforme o passo a passo abaixo.
+
+## Passo a passo no Blender
+
+As opções de exportação foram conferidas no Blender 5.2 (`winget install
+BlenderFoundation.Blender`). Os outros menus valem para 4.x e 5.x, mas podem
+mudar um pouco de uma versão para outra.
+
+### 1. Reduzir os triângulos (antes do Mixamo)
+
+1. **File → Import** no formato do modelo.
+2. Ligue a contagem: menu **Overlays** (canto superior direito da viewport) →
+   **Statistics**.
+3. Selecione a malha → aba da chave inglesa (**Modifiers**) → **Add Modifier →
+   Generate → Decimate**.
+4. Modo **Collapse**. Baixe o **Ratio** (0,3 = sobram 30%) até ficar abaixo de
+   30.000 triângulos. Confira rosto e mãos, que são os primeiros a deformar.
+   Troque a viewport para **Material Preview** (tecla **Z**) e veja se a
+   textura continua no lugar.
+
+   > **Modelo gerado por IA** (image-to-3D, como os do Sketchfab marcados
+   > *supavoxel*, Meshy, Tripo…): a textura vem picotada em centenas de pedaços,
+   > e o Decimate **embaralha** tudo. Nesse caso faça a redução numa cópia, crie
+   > um mapa UV novo nela (**UV → Smart UV Project**) e passe a cor da original
+   > para a cópia com **bake** (Cycles, *Selected to Active*).
+5. Aplique: setinha do modificador → **Apply** (ou **Ctrl+A** com o mouse em
+   cima dele).
+6. **File → Export → FBX**. Em **Path Mode** escolha **Copy** e ligue o ícone ao
+   lado (**Embed Textures**) para as texturas irem junto. Esse arquivo é o que
+   vai para o Mixamo.
+
+### 2. Importar os FBX do Mixamo
+
+1. Comece de uma cena vazia: **File → New → General**, **A** para selecionar
+   tudo e **X → Delete** (some o cubo, a câmera e a luz).
+2. **File → Import → FBX** → o arquivo **With Skin** (Idle). Entra um
+   `Armature` com a malha dentro. Para ver as texturas, troque a viewport para
+   **Material Preview** (tecla **Z**).
+3. Importe os outros FBX, um por vez. Cada um cria um armature novo, sem malha,
+   só com a animação.
+
+O tamanho não importa: o jogo redimensiona pela `altura` do cadastro.
+
+### 3. Dar nome às animações
+
+Cada FBX traz uma *action* chamada `Armature|mixamo.com|Layer0`, que o jogo não
+reconhece. Faça isto em cada armature:
+
+1. Clique no armature no **Outliner** (lista de objetos, canto superior direito).
+2. Troque o painel de baixo (Timeline) para **Dope Sheet** e, no cabeçalho dele,
+   mude o modo para **Action Editor**.
+3. Dê dois cliques no nome da action e renomeie para o estado que ela
+   representa: `Idle`, `Walk`, `Run`, `Jump` ou `Sit`. Gestos opcionais:
+   `Punch` (soco) e `Wave` (aceno).
+4. Clique no **escudo** ao lado do nome (**Fake User**). Sem ele, a action é
+   descartada quando você apagar o armature extra no passo 4.
+
+Use nomes curtos e únicos. O jogo acha o parado procurando `idle`, `stand`… em
+qualquer clipe, então um sentado chamado `Sitting Idle` pode acabar sendo usado
+como parado.
+
+### 4. Ficar com um armature só
+
+1. No Outliner, selecione os armatures extras (os que vieram sem malha) e apague
+   com **X → Delete**. As actions ficam guardadas por causa do escudo.
+2. Selecione o armature que sobrou. No Action Editor, abra a lista de actions
+   (ícone à esquerda do nome), escolha cada uma e aperte **Espaço** para ver se
+   ela toca no personagem. No Blender 4.4 ou mais novo, se o boneco não se
+   mexer, escolha o *slot* no campo ao lado do nome da action. Termine com `Idle`
+   escolhida.
+3. Aperte **1** no teclado numérico (vista **Front**): o personagem tem que
+   estar **olhando para você**, porque essa é a frente que vira +Z no jogo. Se
+   estiver de costas ou de lado, é mais simples usar `giro` no cadastro
+   (`Math.PI` = meia volta, `Math.PI / 2` = um quarto) do que girar no Blender.
+
+### 5. Exportar o `.glb`
+
+**File → Export → glTF 2.0 (.glb/.gltf)**. Como a cena só tem o personagem, não
+precisa selecionar nada. No painel da direita:
+
+| Seção | Opção | Valor |
+|---|---|---|
+| (topo) | Format | **glTF Binary (.glb)** |
+| Transform | +Y Up | ligado (padrão) |
+| Data → Mesh | Apply Modifiers | ligado |
+| Data → Material | Images | **JPEG** se a textura não tiver transparência (arquivo bem menor); senão, Automatic |
+| Data → Draco Compression | caixinha no título | **desligada**: o jogo não tem o decodificador Draco e o modelo não carrega |
+| Data → Meshopt Compression | caixinha no título | **ligada**, extensão `EXT_meshopt_compression` (padrão): o jogo lê e a malha encolhe |
+| Animation | Animation Mode | **Actions** |
+| Animation → Armature | Export all Armature Actions | **ligado** (padrão): sem isso só sai a action escolhida |
+| Animation → Rest & Ranges | Limit to Playback Range | **desligado** (padrão): senão as animações são cortadas no tamanho da timeline |
+
+Salve direto em `public/models/`, com nome curto, sem espaço nem acento
+(`meuheroi.glb`).
+
+### 6. Conferir antes de cadastrar
+
+1. Arraste o `.glb` para o [glTF Viewer](https://gltf-viewer.donmccurdy.com). No
+   painel **Animation** os clipes têm que aparecer como `Idle`, `Walk`… e não
+   como `Armature|mixamo.com|Layer0`. Toque cada um.
+2. Veja o tamanho do arquivo. O teto é ~5 MB (ver *Orçamento de peso*).
+3. Cadastre em `PERSONAGENS` (exemplo no topo) e abra a sala.
+
+### 7. Comprimir mais (opcional)
+
+O Meshopt da exportação só comprime a malha. Se o arquivo ainda passar do teto,
+`scripts/podar-modelo.js` também enxuga as animações (`resample` + `meshopt`).
+Ele lê de `models-brutos/<nome>.glb` e grava `public/models/<nome>.min.glb`.
+
+**Atenção:** ele mantém **só** os clipes da lista `MANTER`, que hoje tem os
+nomes do KayKit. Coloque lá os seus (`Idle`, `Walk`…) antes de rodar, senão ele
+apaga todas as animações.
+
+### Quando dá errado
+
+| Sintoma | Causa provável |
+|---|---|
+| Aparece o boneco padrão | o arquivo não carregou: `url` errada, ou exportado com Draco |
+| Estátua deslizando (em T ou parado) | o `.glb` saiu sem animação: confira o glTF Viewer |
+| Só uma animação funciona | as outras perderam o escudo (Fake User) e foram descartadas, ou *Export all Armature Actions* estava desligado |
+| Uma animação não mexe o boneco | foi baixada de outro upload no Mixamo e os ossos têm outros nomes |
+| Anda e volta para trás a cada passo | animação baixada sem **In Place** |
+| De costas ou de lado | ajuste `giro` no cadastro |
 
 ## Orçamento de peso
 
@@ -95,7 +225,7 @@ celular. Para o jogo continuar fluido:
 | Texturas | 1024 px costuma bastar |
 
 Modelos de vitrine passam fácil de 250.000 triângulos — isso derruba o celular e
-estoura a banda. Vale reduzir no Blender (*Decimate*) antes de usar.
+estoura a banda. Reduza no Blender antes de usar (passo 1 do Blender, acima).
 
 ## Direitos
 
