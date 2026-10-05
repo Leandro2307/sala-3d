@@ -6,8 +6,15 @@
 // 2. O three.js num endereço com a versão (/vendor/three@0.186.1/...), que pode ficar no cache
 //    do navegador por um ano: quando a versão mudar, o endereço muda junto.
 //
-// Imports dinâmicos (import('./x.js')) ficam de fora de propósito: são os que só carregam quando
-// alguém precisa (a prévia do modal de personagem, por exemplo).
+// 3. Em produção, os nossos módulos com uma impressão digital do conteúdo no endereço
+//    (/js/world.js?v=3fa9c1…), também em cache por um ano: o servidor reescreve os imports de
+//    cada arquivo com a impressão de quem ele importa. Mudou um arquivo, muda a impressão dele
+//    e, em cascata, a de quem o importa — o navegador nunca usa uma versão velha. Sem isso eram
+//    31 perguntas "mudou?" ao servidor a cada visita (~1,8 s no Render, que atende ~6 por vez).
+//
+// Imports dinâmicos (import('./x.js')) ficam fora do modulepreload de propósito: são os que só
+// carregam quando alguém precisa (a prévia do modal de personagem, por exemplo).
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
@@ -54,10 +61,57 @@ function grafo(inicio) {
   return [...vistos];
 }
 
+const PRODUCAO = !!(process.env.RENDER || process.env.NODE_ENV === 'production');
+
+// imports relativos (estáticos, side-effect e dinâmicos) que terminam em .js
+const RELATIVOS = /((?:\bfrom|\bimport)\s*\(?\s*)(['"])(\.{1,2}\/[^'"]+?\.js)\2/g;
+const impressao = (codigo) => crypto.createHash('sha1').update(codigo).digest('hex').slice(0, 10);
+
+// /js/x.js -> { codigo (com os imports já versionados), hash }
+function versionarModulos() {
+  const prontos = new Map();
+  const abertos = new Set();
+  const processar = (url) => {
+    if (prontos.has(url)) return prontos.get(url);
+    let codigo;
+    try {
+      codigo = fs.readFileSync(arquivo(url), 'utf8');
+    } catch {
+      return null;
+    }
+    if (abertos.has(url)) return { hash: impressao(codigo) }; // import em ciclo: usa o conteúdo cru
+    abertos.add(url);
+    const novo = codigo.replace(RELATIVOS, (tudo, antes, aspas, espec) => {
+      const destino = new URL(espec, `http://x${url}`).pathname;
+      const d = destino.startsWith('/js/') ? processar(destino) : null;
+      return d ? `${antes}${aspas}${espec}?v=${d.hash}${aspas}` : tudo;
+    });
+    abertos.delete(url);
+    const r = { codigo: novo, hash: impressao(novo) };
+    prontos.set(url, r);
+    return r;
+  };
+  for (const f of fs.readdirSync(path.join(PUBLICO, 'js'))) if (f.endsWith('.js')) processar(`/js/${f}`);
+  return prontos;
+}
+
+let modulos = null;
+// o módulo /js/... versionado (só em produção; no PC de quem desenvolve, os arquivos crus)
+function moduloVersionado(url) {
+  if (!PRODUCAO) return null;
+  modulos ??= versionarModulos();
+  return modulos.get(url) || null;
+}
+
 function montar() {
   let html = fs.readFileSync(path.join(PUBLICO, 'index.html'), 'utf8');
   html = html.split('"/vendor/three/').join(`"${PREFIXO_THREE}/`);
-  const links = grafo('/js/main.js').map((u) => `  <link rel="modulepreload" href="${u}">`).join('\n');
+  const comVersao = (u) => {
+    const m = moduloVersionado(u);
+    return m ? `${u}?v=${m.hash}` : u;
+  };
+  html = html.replace('src="/js/main.js"', `src="${comVersao('/js/main.js')}"`);
+  const links = grafo('/js/main.js').map((u) => `  <link rel="modulepreload" href="${comVersao(u)}">`).join('\n');
   // depois do mapa de imports: módulo pedido antes dele faria o navegador ignorar o mapa
   return html.replace('</head>', `${links}\n</head>`);
 }
@@ -65,8 +119,8 @@ function montar() {
 let pronta = null;
 // Em produção monta uma vez; no PC de quem desenvolve, a cada pedido (os arquivos mudam).
 function paginaInicial() {
-  if (process.env.RENDER || process.env.NODE_ENV === 'production') return (pronta ??= montar());
+  if (PRODUCAO) return (pronta ??= montar());
   return montar();
 }
 
-module.exports = { paginaInicial, PREFIXO_THREE, THREE_DIR };
+module.exports = { paginaInicial, moduloVersionado, PREFIXO_THREE, THREE_DIR };

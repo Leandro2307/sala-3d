@@ -570,7 +570,7 @@ export class World {
       : Promise.resolve().then(() => this.renderer.compile(this.scene, this.camera));
     return compilar
       .then(() => this.subirTexturas(this.scene, desistir))
-      .then(() => this.subirMalhas(desistir))
+      .then(() => this.subirMalhas(desistir, fim))
       .then(() => { if (!desistir()) this.aquecerSombras(); })
       .catch(() => {})
       .then(fim);
@@ -589,31 +589,61 @@ export class World {
   // navegador a cada ~12 ms. Por objeto, e não em lotes fixos: na placa Intel, o primeiro desenho
   // de cada material custa 30-120 ms (o driver ainda monta o shader), e um lote de 40 chegava a
   // 1 s parado. Sombra fica de fora aqui.
-  async subirMalhas(desistir) {
+  // O que está na frente da câmera sobe primeiro, com a tela esperando (fatias de ~12 ms); aí
+  // aoVisiveis() libera o desenho e o resto do mapa sobe sem pressa, uma fatia de ~6 ms por
+  // quadro, enquanto a pessoa já vê e anda.
+  async subirMalhas(desistir, aoVisiveis = () => {}) {
     const objs = [];
+    const foraAntes = this.fora.visible;
     this.fora.visible = true;
     this.scene.traverseVisible((o) => { if (o.isMesh || o.isLine || o.isPoints || o.isSprite) objs.push(o); });
+    this.fora.visible = foraAntes;
+    this.camera.updateMatrixWorld();
+    _m4.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
+    _frustum.setFromProjectionMatrix(_m4);
+    const naVista = (o) => !o.frustumCulled || (o.isSprite ? _frustum.intersectsSprite(o) : _frustum.intersectsObject(o));
+    const frente = [];
+    const resto = [];
+    for (const o of objs) (naVista(o) ? frente : resto).push(o);
+
     const cam = this.cameraDeCima();
     cam.layers.set(31);
     const alvo = new THREE.WebGLRenderTarget(4, 4);
-    const auto = this.renderer.shadowMap.autoUpdate;
-    this.renderer.shadowMap.autoUpdate = false;
+    const subir = (o) => {
+      const fora = this.fora.visible;
+      const auto = this.renderer.shadowMap.autoUpdate;
+      this.fora.visible = true;
+      this.renderer.shadowMap.autoUpdate = false;
+      o.layers.enable(31);
+      this.renderer.setRenderTarget(alvo);
+      this.renderer.render(this.scene, cam);
+      this.renderer.setRenderTarget(null);
+      o.layers.disable(31);
+      this.renderer.shadowMap.autoUpdate = auto;
+      this.fora.visible = fora;
+    };
+    const proximoQuadro = () => new Promise((r) => requestAnimationFrame(() => r()));
     try {
       let desde = performance.now();
-      for (const o of objs) {
-        if (desistir()) break;
-        o.layers.enable(31);
-        this.renderer.setRenderTarget(alvo);
-        this.renderer.render(this.scene, cam);
-        this.renderer.setRenderTarget(null);
-        o.layers.disable(31);
+      for (const o of frente) {
+        if (desistir()) return;
+        subir(o);
         if (performance.now() - desde > 12) {
           await ceder();
           desde = performance.now();
         }
       }
+      aoVisiveis();
+      desde = performance.now();
+      for (const o of resto) {
+        if (desistir()) return;
+        subir(o);
+        if (performance.now() - desde > 6) {
+          await proximoQuadro();
+          desde = performance.now();
+        }
+      }
     } finally {
-      this.renderer.shadowMap.autoUpdate = auto;
       alvo.dispose();
     }
   }

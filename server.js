@@ -7,7 +7,7 @@ const os = require('os');
 const path = require('path');
 const { Server } = require('socket.io');
 const compression = require('compression');
-const { paginaInicial, PREFIXO_THREE, THREE_DIR } = require('./pagina.js');
+const { paginaInicial, moduloVersionado, PREFIXO_THREE, THREE_DIR } = require('./pagina.js');
 const { execFile } = require('child_process');
 const crypto = require('crypto');
 const banco = require('./banco');
@@ -136,6 +136,14 @@ app.use(compression());
 app.get(['/', '/index.html'], (_req, res) => {
   res.set('Cache-Control', 'no-cache');
   res.type('html').send(paginaInicial());
+});
+// nossos módulos em produção, com os imports versionados (ver pagina.js): pedido com a
+// impressão certa fica um ano no cache; sem ela, o navegador confere a cada visita
+app.get('/js/:arquivo', (req, res, next) => {
+  const m = moduloVersionado(req.path);
+  if (!m) return next();
+  res.set('Cache-Control', req.query.v === m.hash ? 'public, max-age=31536000, immutable' : 'no-cache');
+  res.type('application/javascript').send(m.codigo);
 });
 app.use(express.static(path.join(__dirname, 'public'), {
   // modelos 3D e miniaturas quase nunca mudam: um dia sem nem perguntar ao servidor
