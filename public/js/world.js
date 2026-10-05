@@ -25,6 +25,10 @@ const _tmp = new THREE.Vector3();
 const _m4 = new THREE.Matrix4();
 const _frustum = new THREE.Frustum();
 const _esfera = new THREE.Sphere();
+// devolve a vez ao navegador (para ele pintar, responder a cliques) e continua logo depois. O
+// setTimeout(0) seria freado para 1 s com a aba em segundo plano; isto não.
+const ceder = () => (globalThis.scheduler?.yield ? globalThis.scheduler.yield()
+  : new Promise((r) => { const c = new MessageChannel(); c.port1.onmessage = () => r(); c.port2.postMessage(0); }));
 const TV_PX = { w: 1280, h: 720 }; // superfície CSS3D do player do telão (iframe/<video>)
 
 // Parede de telas: telão no centro, 4 telas de compartilhamento nas laterais (levemente viradas para o centro).
@@ -497,6 +501,9 @@ export class World {
     this.fora = new THREE.Group();
     this.scene.add(this.fora);
     this.areas = new Map(); // ver area()
+    this.compilando = false;
+    // resolve quando os shaders da abertura estiverem compilados (ver aquecerShaders)
+    this.pronto = new Promise((r) => { this.avisarPronto = r; });
 
     this.buildLights();
     // O cinema (casca, plateia e parede de telas) é do modo Lazer. No modo escritório ele some e o
@@ -536,30 +543,141 @@ export class World {
   // Compila tudo agora (no lobby, ou logo depois de trocar a qualidade).
   // Depois, um quadro invisível visto do alto manda terreno, árvores e texturas para a
   // placa de vídeo — senão o primeiro passo para fora ainda engasgava uns 300 ms.
+  // Compila os shaders em segundo plano (KHR_parallel_shader_compile). Enquanto isso o mundo
+  // não é desenhado (render() espera): desenhar antes obrigaria o Chrome a compilar tudo na
+  // hora, travando a página — eram 0,3 s na abertura e 0,7 s ao montar o escritório, e várias
+  // vezes isso num celular. A primeira vez resolve this.pronto.
   aquecerShaders() {
+    const vez = (this.aquecimentos = (this.aquecimentos || 0) + 1);
+    this.compilando = true;
+    const fim = () => {
+      if (vez !== this.aquecimentos) return; // outro aquecimento começou depois deste
+      this.compilando = false;
+      this.avisarPronto?.();
+    };
+    setTimeout(fim, 6000); // compilação que não responde não pode deixar a tela parada
     this.fora.visible = true;
     // o shader é compilado para um número de luzes: tem que ser o mesmo de todo quadro
     this.atualizarLuzes();
-    const aquecer = () => {
-      const alvo = new THREE.WebGLRenderTarget(64, 64);
-      const cam = new THREE.PerspectiveCamera(120, 1, 1, 4000);
-      cam.position.set((ROOM.minX + ROOM.maxX) / 2, 700, (ROOM.minZ + ROOM.maxZ) / 2);
-      cam.lookAt(cam.position.x, 0, cam.position.z);
-      const vis = this.fora.visible;
-      const solAntes = this.sun.target.position.clone();
-      this.fora.visible = true;
-      this.focarSol(200, 120); // a sombra também: árvores e torcida têm shader de sombra próprio
-      this.renderer.setRenderTarget(alvo);
-      this.renderer.render(this.scene, cam);
-      this.renderer.setRenderTarget(null);
-      this.focarSol(solAntes.x, solAntes.z);
-      this.fora.visible = vis;
+    const desistir = () => vez !== this.aquecimentos;
+    // Depois dos shaders, o que também pesa no primeiro quadro: texturas (cartazes, placas, telas
+    // em canvas de 1024 px) e malhas indo para a placa de vídeo. Desenhar o mapa inteiro de uma
+    // vez para adiantar isso parava a página por 1,1 s; agora vai em lotes, devolvendo a vez ao
+    // navegador entre um e outro. Por último, com sombra ligada, um quadro que compila os
+    // shaders de sombra (árvores e torcida têm o seu), que o compileAsync não faz.
+    const compilar = this.renderer.compileAsync
+      ? this.renderer.compileAsync(this.scene, this.camera)
+      : Promise.resolve().then(() => this.renderer.compile(this.scene, this.camera));
+    return compilar
+      .then(() => this.subirTexturas(this.scene, desistir))
+      .then(() => this.subirMalhas(desistir))
+      .then(() => { if (!desistir()) this.aquecerSombras(); })
+      .catch(() => {})
+      .then(fim);
+  }
+
+  // câmera bem alta, olhando para baixo, que enxerga o mapa inteiro (para os quadros de aquecer)
+  cameraDeCima() {
+    const cam = new THREE.PerspectiveCamera(120, 1, 1, 4000);
+    cam.position.set((ROOM.minX + ROOM.maxX) / 2, 700, (ROOM.minZ + ROOM.maxZ) / 2);
+    cam.lookAt(cam.position.x, 0, cam.position.z);
+    return cam;
+  }
+
+  // Manda as malhas para a placa de vídeo, um objeto por vez num quadro invisível de 4x4 px (a
+  // câmera só enxerga a camada 31, e cada objeto entra nela na sua vez), devolvendo a vez ao
+  // navegador a cada ~12 ms. Por objeto, e não em lotes fixos: na placa Intel, o primeiro desenho
+  // de cada material custa 30-120 ms (o driver ainda monta o shader), e um lote de 40 chegava a
+  // 1 s parado. Sombra fica de fora aqui.
+  async subirMalhas(desistir) {
+    const objs = [];
+    this.fora.visible = true;
+    this.scene.traverseVisible((o) => { if (o.isMesh || o.isLine || o.isPoints || o.isSprite) objs.push(o); });
+    const cam = this.cameraDeCima();
+    cam.layers.set(31);
+    const alvo = new THREE.WebGLRenderTarget(4, 4);
+    const auto = this.renderer.shadowMap.autoUpdate;
+    this.renderer.shadowMap.autoUpdate = false;
+    try {
+      let desde = performance.now();
+      for (const o of objs) {
+        if (desistir()) break;
+        o.layers.enable(31);
+        this.renderer.setRenderTarget(alvo);
+        this.renderer.render(this.scene, cam);
+        this.renderer.setRenderTarget(null);
+        o.layers.disable(31);
+        if (performance.now() - desde > 12) {
+          await ceder();
+          desde = performance.now();
+        }
+      }
+    } finally {
+      this.renderer.shadowMap.autoUpdate = auto;
       alvo.dispose();
-    };
-    if (this.renderer.compileAsync) this.renderer.compileAsync(this.scene, this.camera).then(aquecer).catch(() => {});
-    else {
-      this.renderer.compile(this.scene, this.camera);
-      aquecer();
+    }
+  }
+
+  aquecerSombras() {
+    if (!this.renderer.shadowMap.enabled) return;
+    // tudo já está na placa de vídeo (subirMalhas): este quadro só custa os desenhos e compila
+    // os shaders de sombra. (O mapa de sombra do three filtra pelas camadas da câmera principal.)
+    const cam = this.cameraDeCima();
+    const alvo = new THREE.WebGLRenderTarget(4, 4);
+    const vis = this.fora.visible;
+    const solAntes = this.sun.target.position.clone();
+    this.fora.visible = true;
+    this.focarSol(200, 120); // onde ficam árvores e torcida, que têm shader de sombra próprio
+    this.renderer.setRenderTarget(alvo);
+    this.renderer.render(this.scene, cam);
+    this.renderer.setRenderTarget(null);
+    this.focarSol(solAntes.x, solAntes.z);
+    this.fora.visible = vis;
+    alvo.dispose();
+  }
+
+  // Compila os shaders de um objeto que vai entrar na cena (um personagem que acabou de
+  // carregar), em segundo plano, com as luzes da cena — sem travar o quadro em que ele aparece.
+  // O objeto entra na cena só durante a compilação: compilado de fora (compileAsync com
+  // targetScene) o shader saía com outra configuração e o Chrome compilava de novo na hora.
+  async aquecerObjeto(obj) {
+    if (!this.renderer.compileAsync) return;
+    const pai = obj.parent;
+    const y = obj.position.y;
+    obj.position.y = -50000; // longe da câmera enquanto compila: ninguém vê o modelo no meio do mapa
+    this.scene.add(obj);
+    try {
+      await this.renderer.compileAsync(this.scene, this.camera);
+      await this.subirTexturas(obj);
+    } catch {
+      // sem pré-compilação: compila no primeiro quadro, como antes
+    } finally {
+      obj.position.y = y;
+      if (pai) pai.add(obj);
+      else this.scene.remove(obj);
+    }
+  }
+
+  // manda as texturas (visíveis) de um objeto para a placa de vídeo, devolvendo a vez ao
+  // navegador a cada ~12 ms; desistir(): parar no meio (veio outro pedido)
+  async subirTexturas(raiz, desistir = () => false) {
+    const texturas = new Set();
+    raiz.traverseVisible((o) => {
+      for (const m of [].concat(o.material || [])) {
+        for (const k of ['map', 'emissiveMap', 'alphaMap', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap']) {
+          const t = m[k];
+          if (t?.isTexture && !t.isVideoTexture) texturas.add(t);
+        }
+      }
+    });
+    let desde = performance.now();
+    for (const t of texturas) {
+      if (desistir()) return;
+      this.renderer.initTexture(t);
+      if (performance.now() - desde > 12) {
+        await ceder();
+        desde = performance.now();
+      }
     }
   }
 
@@ -2225,6 +2343,7 @@ export class World {
   }
 
   render() {
+    if (this.compilando) return; // ver aquecerShaders: o quadro anterior fica na tela
     this.natureza?.seguirCamera(this.camera, performance.now() / 1000);
     this.atualizarTelao();
     this.cullFora();

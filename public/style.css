@@ -1776,8 +1776,148 @@ body.touch .help-grid[data-input="touch"] { display: grid; }
 }
 
 /* seletor de personagem: pode ter vários, então quebra linha */
-.segmented.chars { flex-wrap: wrap; }
-.segmented.chars button { flex: 1 1 auto; min-width: 72px; }
+/* personagem escolhido, no formulário de entrada: abre o modal (escolher-personagem.js) */
+.char-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 6px 12px 6px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.char-card:hover { border-color: var(--accent); background: rgba(110, 231, 200, 0.06); }
+.char-card img {
+  flex: none;
+  width: 48px;
+  height: 60px;
+  object-fit: contain;
+  border-radius: 8px;
+  background: radial-gradient(circle at 50% 70%, rgba(110, 231, 200, 0.18), transparent 70%);
+}
+.char-txt { display: grid; flex: 1; gap: 2px; min-width: 0; }
+.char-txt b { font-size: 14px; }
+.char-txt small { overflow: hidden; color: var(--muted); font-size: 12px; white-space: nowrap; text-overflow: ellipsis; }
+.char-trocar { color: var(--accent); font-size: 13px; font-weight: 700; }
+
+/* ------------------------------------------------------------ modal de personagem */
+.ep-fundo {
+  position: fixed;
+  inset: 0;
+  z-index: 16;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(5, 6, 9, 0.72);
+  animation: ep-entra 160ms ease both;
+}
+@keyframes ep-entra { from { opacity: 0; } }
+.ep-card {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 14px;
+  width: min(940px, 100%);
+  max-height: calc(100dvh - 32px);
+  padding: 18px 20px 20px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--glass-strong);
+}
+.ep-corpo { display: grid; grid-template-columns: 1fr 320px; gap: 18px; min-height: 0; }
+.ep-grade {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  align-content: start;
+  gap: 10px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px;
+}
+.ep-item {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  padding: 8px 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 120ms, background 120ms, transform 120ms var(--ease);
+}
+.ep-item:hover { border-color: var(--line-strong); background: rgba(255, 255, 255, 0.06); transform: translateY(-2px); }
+.ep-item.on { border-color: var(--accent); background: rgba(110, 231, 200, 0.08); }
+.ep-item img {
+  width: 100%;
+  max-width: 96px;
+  aspect-ratio: 4 / 5;
+  height: auto;
+  object-fit: contain;
+  background: radial-gradient(circle at 50% 72%, rgba(110, 231, 200, 0.16), transparent 68%);
+}
+.ep-item span { font-size: 12.5px; font-weight: 600; text-align: center; line-height: 1.25; }
+.ep-item.em-uso::after {
+  content: 'em uso';
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 10.5px;
+  font-weight: 800;
+}
+.ep-palco { display: grid; grid-template-rows: auto auto auto auto auto; align-content: start; gap: 10px; min-width: 0; }
+.ep-tela {
+  position: relative;
+  height: min(340px, 42dvh);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: radial-gradient(circle at 50% 78%, rgba(110, 231, 200, 0.14), transparent 60%), rgba(255, 255, 255, 0.02);
+  overflow: hidden;
+}
+.ep-tela canvas { display: block; width: 100%; height: 100%; }
+.ep-carregando {
+  position: absolute;
+  inset: auto 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.ep-giro {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.18);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: ep-gira 700ms linear infinite;
+}
+@keyframes ep-gira { to { transform: rotate(1turn); } }
+.ep-info { display: grid; gap: 2px; }
+.ep-info b { font-size: 17px; }
+.ep-info small { color: var(--muted); font-size: 13px; line-height: 1.4; }
+.ep-acoes { display: flex; flex-wrap: wrap; gap: 6px; }
+.ep-acoes .chip-btn.on { background: rgba(110, 231, 200, 0.16); color: var(--accent); }
+.ep-credito { color: var(--muted); font-size: 11.5px; line-height: 1.4; }
+.ep-usar:disabled, #ep-usar:disabled { opacity: 0.55; cursor: default; }
+@media (max-width: 720px) {
+  .ep-card { padding: 14px; overflow-y: auto; }
+  .ep-corpo { grid-template-columns: 1fr; }
+  .ep-palco { order: -1; }
+  .ep-tela { height: 220px; }
+  .ep-grade { grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); overflow: visible; }
+}
 #char-credito { display: block; margin-top: 6px; line-height: 1.45; }
 
 /* camisetas: cada botão mostra a cor do time */

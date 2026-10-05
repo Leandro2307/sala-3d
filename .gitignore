@@ -21,3 +21,6 @@ Thumbs.db
 .env.*
 .vscode/
 .idea/
+
+# modelos originais para o scripts/podar-modelo.js (baixe de novo quando precisar)
+models-brutos/

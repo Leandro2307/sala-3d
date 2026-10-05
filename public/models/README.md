@@ -1,7 +1,7 @@
 # Personagens em 3D
 
-Coloque aqui arquivos **`.glb`** e registre-os em `public/js/modelo.js`, dentro de
-`PERSONAGENS`:
+Coloque aqui arquivos **`.glb`** e registre-os em `public/js/personagens.js`, dentro de
+`PERSONAGENS` (o servidor lê a mesma lista para saber quais ids aceitar):
 
 ```js
 export const PERSONAGENS = {
@@ -12,10 +12,19 @@ export const PERSONAGENS = {
     url: '/models/leao.glb',
     altura: 1.8,          // o sistema redimensiona sozinho para esta altura
     giro: 0,              // radianos, se o modelo não nascer virado para +Z
+    resumo: 'Voa e cospe fogo',  // aparece no modal de escolha
     credito: 'iRahulRajput (CC BY) — sketchfab.com/...',
   },
 };
 ```
+
+Depois gere a miniatura do modal de escolha (com a sala rodando em `localhost:3000`):
+
+```
+node scripts/miniaturas.js leao
+```
+
+Ela vai para `public/img/personagens/leao.webp`. Sem ela o modal mostra o espaço vazio.
 
 O sistema já cuida de: **escalar** para a altura certa, **assentar os pés em y=0**,
 centralizar em x/z, ligar as animações aos estados do jogo e **misturar** uma na
@@ -27,7 +36,8 @@ outra na troca.
 | Personagem | Origem | Licença | Arquivo |
 |---|---|---|---|
 | Robô | Tomás Laulhé (Quaternius), ajustes de Don McCurdy | CC0 | `robo.glb` (453 KB) |
-| Cavaleiro, Bárbaro, Mago, Ladino | KayKit Adventurers, de Kay Lousberg | CC0 | ~2 MB cada |
+| Cavaleiro, Bárbaro, Mago, Ladino, Encapuzado | KayKit Adventurers, de Kay Lousberg | CC0 | ~400 KB cada |
+| Esqueleto, Esqueleto Guerreiro, Esqueleto Ladino, Esqueleto Mago | KayKit Skeletons, de Kay Lousberg | CC0 | ~400 KB cada |
 | Optimus, Solus Prime | OrangeSauceu, a partir de *Transformers: Earth Wars* | marcado CC BY pelo autor do envio | 706 KB / 1,1 MB |
 
 Os dois últimos trazem a animação de **transformar em veículo** — é o que faz o
@@ -40,9 +50,16 @@ código. Em compensação não têm ciclo de andar: deslizam ao caminhar.
 > sobre o personagem. Ficam aqui por escolha do dono do projeto; se a página for
 > divulgada, o risco prático é uma notificação de remoção.
 
-Os quatro do KayKit vêm com 76 animações; o jogo usa 7. Foram podados com
-`@gltf-transform` (remover os clipes extras + `meshopt`), o que cortou **74%**
-do tamanho — e o servidor ainda serve tudo com gzip.
+Os do KayKit vêm com 76 a 95 animações; o jogo usa 7. Foram podados com
+`@gltf-transform` (remover os clipes extras + `meshopt`): de 3,5–4,7 MB para
+**~400 KB** cada — e o servidor ainda serve tudo com gzip. (Até outubro de 2026 eles
+tinham 2 MB: a poda apagava a animação mas deixava os dados dela no arquivo.)
+
+O "Sitting" do robô é o movimento de **sentar** (0,4 s), não a pose sentada: no
+cadastro ele está em `poses`, que toca uma vez e segura o último quadro. Sem isso
+o robô descia e subia sem parar. Sentado, o jogo desce cada modelo até o osso do
+quadril encostar no assento — serve para quem senta como no chão e para quem senta
+como numa cadeira.
 
 Para repetir a poda em outro pacote, use `scripts/podar-modelo.js` — ele mantém
 só os clipes listados, roda `dedup`, `resample`, `prune`, `sparse` e `meshopt`.
@@ -196,7 +213,9 @@ Salve direto em `public/models/`, com nome curto, sem espaço nem acento
 
 O Meshopt da exportação só comprime a malha. Se o arquivo ainda passar do teto,
 `scripts/podar-modelo.js` também enxuga as animações (`resample` + `meshopt`).
-Ele lê de `models-brutos/<nome>.glb` e grava `public/models/<nome>.min.glb`.
+Ele lê de `models-brutos/<nome>.glb` e grava `public/models/<nome>.min.glb` (ou, com
+`<nome>:<saida>`, `public/models/<saida>.glb`). Instruções de instalação no
+cabeçalho do script.
 
 **Atenção:** ele mantém **só** os clipes da lista `MANTER`, que hoje tem os
 nomes do KayKit. Coloque lá os seus (`Idle`, `Walk`…) antes de rodar, senão ele

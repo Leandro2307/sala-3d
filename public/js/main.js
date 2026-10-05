@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { World, SPAWN } from './world.js';
 import { Avatar } from './avatars.js';
 import { PERSONAGENS } from './modelo.js';
+import { EscolherPersonagem } from './escolher-personagem.js';
 import { Player } from './player.js';
 import { RTC, SHARE_PRESETS } from './rtc.js';
 import { MediaSync, PROVIDERS, preloadYouTube } from './media.js';
@@ -86,6 +87,7 @@ const localAvatar = new Avatar({ name: settings.name || 'Você', color: settings
 localAvatar.group.position.set(...SPAWN.pos);
 world.scene.add(localAvatar.group);
 const player = new Player(world, localAvatar);
+localAvatar.aquecer = (obj) => world.aquecerObjeto(obj);
 player.sensitivity = settings.sens / 100;
 
 const state = {
@@ -293,12 +295,13 @@ renderPhotoPreview();
 if (settings.photo) localAvatar.setPhoto(settings.photo);
 
 // ---------------------------------------------------------------- personagem
-$('#in-char').innerHTML = Object.values(PERSONAGENS)
-  .map((p) => `<button type="button" data-char="${p.id}">${esc(p.label)}</button>`).join('');
-
-async function aplicarPersonagem() {
+// Cartão do personagem no formulário de entrada; carregar = baixar o modelo agora (na abertura
+// do site ele espera o mundo 3D ficar pronto, para não disputar com ele).
+async function aplicarPersonagem({ carregar = true } = {}) {
   const def = PERSONAGENS[settings.char] || PERSONAGENS.padrao;
-  $$('#in-char button').forEach((b) => b.classList.toggle('on', b.dataset.char === settings.char));
+  $('#char-mini').src = def.miniatura;
+  $('#char-nome').textContent = def.label;
+  $('#char-resumo').textContent = def.resumo || '';
   // camiseta e foto só existem no boneco padrão: o modelo 3D tem o corpo dele
   const ehPadrao = !def.url;
   $('#campo-camiseta').hidden = !ehPadrao;
@@ -307,19 +310,36 @@ async function aplicarPersonagem() {
   if (def.aviso) linha.push(def.aviso);
   if (def.credito) linha.push('Modelo: ' + def.credito);
   $('#char-credito').textContent = linha.join(' · ');
+  if (!carregar) return;
   const r = await localAvatar.setPersonagem(def);
   if (r && r.ok === false) toast('Não consegui carregar esse personagem.', 'error');
 }
-aplicarPersonagem();
+aplicarPersonagem({ carregar: false });
 
-$('#in-char').addEventListener('click', async (e) => {
-  const b = e.target.closest('[data-char]');
-  if (!b) return;
-  settings.char = b.dataset.char;
-  saveSettings();
-  await aplicarPersonagem();
-  if (socket && state.joined) socket.emit('char', settings.char);
+// Modal com as miniaturas e a prévia ao vivo (escolher-personagem.js): no formulário de entrada
+// e no botão da barra, dentro da sala.
+const escolha = new EscolherPersonagem({
+  raiz: $('#escolher-personagem'),
+  aparencia: () => ({ cor: settings.color, camiseta: settings.shirt, foto: settings.photo }),
+  aoEscolher: async (id) => {
+    settings.char = id;
+    saveSettings();
+    await aplicarPersonagem();
+    if (socket && state.joined) socket.emit('char', settings.char);
+  },
+  aoAbrir: () => {
+    if (document.pointerLockElement) document.exitPointerLock();
+    player.enabled = false; // W/A/S/D não andam com o boneco por trás do modal
+    player.keys.clear();
+  },
+  aoFechar: () => {
+    if (state.joined) player.enabled = true;
+  },
 });
+$('#in-char').addEventListener('click', () => escolha.abrir(settings.char));
+// o modelo 3D do personagem só baixa depois que o mundo ficou pronto: não disputa a abertura
+world.pronto.then(() => aplicarPersonagem());
+$('#btn-personagem').addEventListener('click', () => escolha.abrir(settings.char));
 
 // ---------------------------------------------------------------- camiseta
 function renderShirt() {
@@ -730,6 +750,7 @@ function bindSocket() {
 function addUser(data) {
   if (state.users.has(data.id)) return state.users.get(data.id);
   const avatar = new Avatar({ name: data.name, color: data.color });
+  avatar.aquecer = (obj) => world.aquecerObjeto(obj);
   avatar.setStatus({ mic: data.mic, sharing: data.shares?.length > 0 });
   if (data.photo) avatar.setPhoto(data.photo);
   if (data.shirt && data.shirt !== 'none') avatar.setShirt(data.shirt);
@@ -3166,6 +3187,7 @@ window.addEventListener('keydown', (e) => {
     // Esc sai de vez (mesmo controlando a tela) e devolve o mouse para a visão do boneco
     if (typing()) document.activeElement.blur();
     else if (guia.aberto) guia.fechar();
+    else if (escolha.aberto) escolha.fechar();
     else if (mesa.aberta) fecharMesa(true);
     else if (state.focus) sairDoFoco();
     else if (!$('#react-pop').hidden) $('#react-pop').hidden = true;
@@ -3173,7 +3195,7 @@ window.addEventListener('keydown', (e) => {
     else run.abandon(); // preso no parkour? Esc sai da corrida
     return;
   }
-  if (typing() || e.repeat || guia.aberto) return;
+  if (typing() || e.repeat || guia.aberto || escolha.aberto) return;
   // comandando um tabuleiro: as teclas de andar/voar/socar ficam com o jogo
   if ((state.focus?.kind === 'jogo' || state.focus?.kind === 'dados') && !['KeyE', 'KeyM', 'KeyT', 'Enter'].includes(e.code)) return;
   switch (e.code) {
@@ -3409,7 +3431,7 @@ function frame() {
 
   // a mesa e a tela em foco cobrem tudo: sem desenhar o 3D sobra placa de vídeo para as telas
   const desenhando = !mesa.aberta && state.focus?.kind !== 'share';
-  qualidade.quadro(dtMs, desenhando);
+  qualidade.quadro(dtMs, desenhando && !world.compilando); // compilando: quadro vazio não conta
   if (desenhando) world.render();
   requestAnimationFrame(frame);
 }

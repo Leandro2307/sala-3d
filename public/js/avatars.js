@@ -373,6 +373,8 @@ export class Avatar {
     try {
       const p = await criarPersonagem(def);
       if (!p) return { ok: true, padrao: true };
+      // shaders do modelo compilados antes de ele aparecer (ver World.aquecerObjeto)
+      if (this.aquecer) await this.aquecer(p.grupo);
       this.personagem = p;
       this.inner.add(p.grupo);
       this.mostrarCorpoPadrao(false);

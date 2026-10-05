@@ -7,6 +7,7 @@ const os = require('os');
 const path = require('path');
 const { Server } = require('socket.io');
 const compression = require('compression');
+const { paginaInicial, PREFIXO_THREE, THREE_DIR } = require('./pagina.js');
 const { execFile } = require('child_process');
 const crypto = require('crypto');
 const banco = require('./banco');
@@ -22,7 +23,7 @@ const MAX_PHOTO = 60_000; // data URL da foto do rosto (128x128 jpeg dá ~12 kB)
 const PUNCH_RANGE = 4.5; // metros: folga sobre o alcance real, só para barrar absurdo
 const TIRO = { alcance: 85, cadenciaMs: 250 }; // arma da camiseta 22 (o cliente usa 80 m e 300 ms)
 const SHIRTS = ['none', 'lula', 'bolsonaro'];
-const PERSONAGENS = ['padrao', 'robo', 'cavaleiro', 'barbaro', 'mago', 'ladino', 'optimus', 'solus'];
+let PERSONAGENS = ['padrao']; // ids do catálogo (public/js/personagens.js), lido no main()
 const VOLTA_MIN = 6; // segundos: abaixo disso é atravessar a pista, não dar a volta
 const VOLTA_MAX = 600;
 
@@ -131,8 +132,20 @@ const app = express();
 // Sem isto o navegador baixa tudo cru: só o three.js são 662 kB, e o cabeçalho
 // JSON dos modelos 3D comprime a mais de 5x.
 app.use(compression());
-app.use(express.static(path.join(__dirname, 'public')));
-app.use('/vendor/three', express.static(path.join(__dirname, 'node_modules', 'three')));
+// a página inicial vai montada (ver pagina.js): com a lista de scripts para baixar de uma vez
+app.get(['/', '/index.html'], (_req, res) => {
+  res.set('Cache-Control', 'no-cache');
+  res.type('html').send(paginaInicial());
+});
+app.use(express.static(path.join(__dirname, 'public'), {
+  // modelos 3D e miniaturas quase nunca mudam: um dia sem nem perguntar ao servidor
+  setHeaders: (res, arq) => {
+    if (/[\\/](models|img)[\\/]/.test(arq)) res.setHeader('Cache-Control', 'public, max-age=86400');
+  },
+}));
+// three.js com a versão no endereço: pode ficar um ano no cache (versão nova = endereço novo)
+app.use(PREFIXO_THREE, express.static(THREE_DIR, { immutable: true, maxAge: '365d' }));
+app.use('/vendor/three', express.static(THREE_DIR)); // endereço sem versão (scripts/miniaturas.js)
 // players de HLS (.m3u8) e DASH (.mpd): só são baixados quando alguém cola um link desses
 app.use('/vendor/hls', express.static(path.join(__dirname, 'node_modules', 'hls.js', 'dist')));
 app.use('/vendor/dash', express.static(path.join(__dirname, 'node_modules', 'dashjs', 'dist', 'modern', 'esm')));
@@ -1320,6 +1333,7 @@ async function loadCert() {
 
 async function main() {
   ESCRITORIO = await import('./public/js/escritorio.js');
+  PERSONAGENS = (await import('./public/js/personagens.js')).IDS_PERSONAGENS;
   // o banco antes de abrir a porta: quem entrar já encontra a sala e as moedas no lugar
   await banco.iniciar();
   const io = new Server({ cors: { origin: true }, maxHttpBufferSize: 1e6 });

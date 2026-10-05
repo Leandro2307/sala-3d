@@ -12,7 +12,7 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='9' fill='%230b0d12'/><rect x='6' y='8' width='20' height='13' rx='3' fill='none' stroke='%236ee7c8' stroke-width='2.4'/><circle cx='16' cy='25' r='2.2' fill='%236ee7c8'/></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
   <link rel="stylesheet" href="/style.css">
   <script type="importmap">
     { "imports": { "three": "/vendor/three/build/three.module.js", "three/addons/": "/vendor/three/examples/jsm/" } }
@@ -258,6 +258,7 @@
       <button type="button" class="ghost" data-panel="ringue" data-jogo="ringue" data-tip="Ringue de luta"><i data-icon="fist"></i></button>
       <button type="button" class="ghost" data-panel="corrida" data-jogo="corrida" data-tip="Pista de corrida"><i data-icon="car"></i></button>
       <button type="button" class="ghost" data-panel="jogos" data-jogo="xadrez dama velha dados" data-tip="Jogos, dados e moedas"><i data-icon="xadrez"></i></button>
+      <button type="button" class="ghost" id="btn-personagem" data-tip="Trocar de personagem"><i data-icon="user"></i></button>
       <button type="button" class="ghost" data-panel="settings" data-tip="Ajustes"><i data-icon="settings"></i></button>
       <!-- tela cheia também some com os avisos "Compartilhando … com esta guia" do Chrome -->
       <button type="button" class="ghost" id="btn-full" data-tip="Tela cheia (esconde as barras do Chrome)"><i data-icon="maximize"></i></button>
@@ -578,6 +579,37 @@
     </div>
   </div>
 
+  <!-- ============================================================ escolher personagem (ver escolher-personagem.js) -->
+  <div id="escolher-personagem" class="ep-fundo" hidden>
+    <div class="ep-card" role="dialog" aria-modal="true" aria-labelledby="ep-titulo">
+      <header class="guia-head">
+        <h2 id="ep-titulo">Escolha seu personagem</h2>
+        <button type="button" class="icon-btn" data-ep="fechar" aria-label="Fechar"><i data-icon="x"></i></button>
+      </header>
+      <div class="ep-corpo">
+        <div class="ep-grade" id="ep-grade"></div>
+        <section class="ep-palco" aria-label="Prévia do personagem">
+          <div class="ep-tela">
+            <canvas id="ep-canvas"></canvas>
+            <div class="ep-carregando" id="ep-carregando" hidden><span class="ep-giro"></span>Carregando…</div>
+          </div>
+          <div class="ep-info"><b id="ep-nome"></b><small id="ep-resumo"></small></div>
+          <div class="ep-acoes" id="ep-acoes" role="group" aria-label="Ver animação">
+            <button type="button" class="chip-btn on" data-anim="0">Parado</button>
+            <button type="button" class="chip-btn" data-anim="1">Andar</button>
+            <button type="button" class="chip-btn" data-anim="2">Correr</button>
+            <button type="button" class="chip-btn" data-anim="3">Pular</button>
+            <button type="button" class="chip-btn" data-anim="4">Sentar</button>
+            <button type="button" class="chip-btn" data-anim="wave">Acenar</button>
+            <button type="button" class="chip-btn" data-anim="punch">Soco</button>
+          </div>
+          <small class="ep-credito" id="ep-credito"></small>
+          <button type="button" class="primary block" id="ep-usar">Usar</button>
+        </section>
+      </div>
+    </div>
+  </div>
+
   <!-- ============================================================ guia da extensão (ver guia-extensao.js) -->
   <div id="guia-ext" hidden>
     <div class="guia-card" role="dialog" aria-modal="true" aria-labelledby="guia-titulo" tabindex="-1">
@@ -642,7 +674,11 @@
 
       <div class="field">
         <span>Personagem</span>
-        <div class="segmented chars" id="in-char"></div>
+        <button type="button" class="char-card" id="in-char" aria-haspopup="dialog">
+          <img id="char-mini" alt="" width="48" height="60">
+          <span class="char-txt"><b id="char-nome">Boneco</b><small id="char-resumo"></small></span>
+          <span class="char-trocar">Trocar</span>
+        </button>
         <small class="hint" id="char-credito"></small>
       </div>
 
@@ -687,7 +723,7 @@
 
   <div id="reconnecting" hidden><div class="spinner"></div>Reconectando…</div>
 
-  <script src="/socket.io/socket.io.js"></script>
+  <script src="/socket.io/socket.io.js" defer></script>
   <script type="module" src="/js/main.js"></script>
 </body>
 </html>

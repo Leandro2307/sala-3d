@@ -6,99 +6,22 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneComEsqueleto } from 'three/addons/utils/SkeletonUtils.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+import { PERSONAGENS } from './personagens.js';
 
 // Os modelos são comprimidos com meshopt na preparação (corta ~45% do arquivo),
 // então o carregador precisa do decodificador para abri-los.
 const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
 
 const _qPasso = new THREE.Quaternion();
+const _quadril = new THREE.Vector3();
+// do osso do quadril até o assento, sentado (o osso fica no meio da bacia)
+const FOLGA_QUADRIL = 0.14;
 const _eixoPasso = new THREE.Vector3();
 const EIXOS = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] };
 const cache = new Map(); // url -> Promise<gltf>
 
-// Catálogo. `url` aponta para um .glb dentro de /models.
-// Para entrar aqui, o modelo precisa estar RIGADO E ANIMADO — ver README em /models.
-export const PERSONAGENS = {
-  padrao: { id: 'padrao', label: 'Boneco', url: null },
-  robo: {
-    id: 'robo',
-    label: 'Robô',
-    url: '/models/robo.glb',
-    altura: 1.8,
-    // 14 animações, incluindo Punch e Sitting — encaixa em tudo que o jogo tem
-    credito: 'Tomás Laulhé (Quaternius), ajustes de Don McCurdy — CC0',
-  },
-  ...['cavaleiro', 'barbaro', 'mago', 'ladino'].reduce((acc, id, i) => {
-    acc[id] = {
-      id,
-      label: ['Cavaleiro', 'Bárbaro', 'Mago', 'Ladino'][i],
-      url: '/models/' + id + '.glb',
-      // altura medida na pose de repouso do arquivo; de pé eles esticam um pouco,
-      // então o alvo é menor que a altura final desejada
-      altura: 1.55,
-      // o pacote traz 76 clipes; estes são os que o jogo usa, escolhidos à mão
-      // porque o palpite automático pegava a pose de combate com arma na mão
-      clipes: {
-        idle: 'Unarmed_Idle',
-        walk: 'Walking_A',
-        run: 'Running_A',
-        air: 'Jump_Idle',
-        sit: 'Sit_Chair_Idle',
-        punch: 'Unarmed_Melee_Attack_Punch_A',
-        wave: 'Cheer',
-      },
-      credito: 'KayKit Adventurers, de Kay Lousberg — CC0',
-    };
-    return acc;
-  }, {}),
-
-  // Estes dois trazem a animação de transformar em veículo — é o que faz a
-  // transformação acontecer de verdade, em vez de trocar pelo carro desenhado
-  // em código. Em compensação não têm ciclo de andar: deslizam ao caminhar.
-  optimus: {
-    id: 'optimus',
-    label: 'Optimus',
-    url: '/models/optimus.glb',
-    // a pose de repouso deste arquivo é bem mais baixa que o robô de pé: ele
-    // estica 2,1x ao assumir a pose, então o alvo tem que ser proporcionalmente menor
-    altura: 1.34,
-    clipes: {
-      idle: 'transform_to_robot',
-      walk: 'transform_to_robot',
-      run: 'transform_to_robot',
-      air: 'transform_to_robot',
-      sit: 'transform_to_robot',
-      punch: 'fire_gun01',
-    },
-    poses: ['transform_to_robot'],
-    transforma: { paraVeiculo: 'transform_to_vehicle', paraRobo: 'transform_to_robot' },
-    andarProcedural: true,
-    // eixo medido no próprio rig: é o que faz a perna ir para a frente e para
-    // trás, e não abrir para o lado. Cada modelo tem o seu.
-    eixoPasso: 'y',
-    credito: 'OrangeSauceu (Transformers: Earth Wars)',
-    aviso: 'transforma em caminhão de verdade',
-  },
-  solus: {
-    id: 'solus',
-    label: 'Solus Prime',
-    url: '/models/solus.glb',
-    altura: 2.3,
-    clipes: {
-      idle: 'idle',
-      walk: 'idle',
-      run: 'idle',
-      air: 'idle',
-      sit: 'idle',
-      punch: 'Main_Hammer_Attack',
-      wave: 'Forge_Solus_Prime_Equip',
-    },
-    transforma: { paraVeiculo: 'main_to_alt', paraRobo: 'alt_to_main' },
-    andarProcedural: true,
-    eixoPasso: 'z',
-    credito: 'OrangeSauceu (Transformers: Earth Wars)',
-  },
-};
+// O catálogo fica em personagens.js (só dados: o servidor usa também).
+export { PERSONAGENS };
 
 export function registrarPersonagem(def) {
   PERSONAGENS[def.id] = def;
@@ -226,6 +149,14 @@ export class Personagem {
       };
       if (o.coxaE && o.coxaD) this.ossos = o;
     }
+    // Sentado, cada modelo tem o quadril numa altura (o robô senta como no chão, os do KayKit
+    // como numa cadeira). O jogo põe o boneco com os pés na altura do assento: sem descer o
+    // modelo até o quadril encostar nele, ele fica sentado no ar.
+    this.quadril = null;
+    this.raiz.traverse((o) => { if (!this.quadril && o.isBone && /hips?$|pelvis/i.test(o.name)) this.quadril = o; });
+    this.descida = 0;
+    // Optimus e Solus "sentam" com a pose de pé: esses não descem
+    this.sentaDeVerdade = !!this.mapa.sit && /sit|sent/i.test(this.mapa.sit.name);
     this.eixoPasso = def.eixoPasso || 'x';
     this.fasePasso = Math.random() * 6;
     this.pesoPasso = 0;
@@ -378,6 +309,19 @@ export class Personagem {
     }
     this.mixer.update(dt);
     this.aplicarPasso(dt, anim);
+    this.encaixarNoAssento(dt);
+  }
+
+  // Desce o modelo até o quadril encostar no assento (e volta ao levantar), com suavidade
+  encaixarNoAssento(dt) {
+    let alvo = 0;
+    if (this.estadoAtual === 'sit' && this.quadril && this.sentaDeVerdade) {
+      this.quadril.updateWorldMatrix(true, false);
+      this.grupo.worldToLocal(this.quadril.getWorldPosition(_quadril));
+      alvo = Math.max(-1, Math.min(0, FOLGA_QUADRIL - _quadril.y)); // _quadril: no espaço do grupo
+    }
+    this.descida += (alvo - this.descida) * Math.min(1, dt * 10);
+    this.grupo.position.y = this.descida;
   }
 
   dispose() {
