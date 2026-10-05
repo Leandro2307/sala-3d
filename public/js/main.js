@@ -13,6 +13,7 @@ import { Combat } from './combat.js';
 import { RING, COMBAT, ringCorners } from './arena.js';
 import { Corrida, PISTA, largada, formatarVolta, projetar, pontoEm } from './pista.js';
 import { sfx, audioContext, setSfxEnabled } from './sfx.js';
+import { Clima, CLIMAS, HORARIOS } from './clima.js';
 import { ARMAS, IDS_ARMAS, ARMA_PADRAO, defArma, VisaoArma, iniciarCapsulas, atualizarCapsulas, preCarregarArma } from './armas.js';
 import { Jogos } from './jogos.js';
 import { Controle } from './controle.js';
@@ -73,6 +74,8 @@ if (!NIVEIS[settings.qualidade]) settings.qualidade = 'auto';
 const nivelDePartida = settings.qualidade !== 'auto' ? settings.qualidade
   : NIVEIS[settings.nivelAuto] ? settings.nivelAuto : nivelInicial();
 const world = new World($('#gl'), $('#css3d'), { antialias: NIVEIS[nivelDePartida].antialias, qualidade: NIVEIS[nivelDePartida] });
+// sol, lua, chuva e tempestade (clima.js): o dono da sala pode fixar, senão muda sozinho
+const clima = new Clima(world);
 const qualidade = new Qualidade(world, {
   modo: settings.qualidade,
   nivel: settings.nivelAuto,
@@ -571,6 +574,7 @@ async function join() {
   btn.disabled = true;
   btn.textContent = 'Entrando…';
   audioContext();
+  clima.ligarSom();
 
   if (!(await liberarSala(idDaSala(state.roomRequested), $('#in-senha-sala').value))) {
     btn.disabled = false;
@@ -653,6 +657,7 @@ async function join() {
       voar: () => toggleVoar(),
       puloAlto: () => togglePuloAlto(),
       tiro: () => puxarGatilho(),
+      luneta: () => ligarLuneta(!luneta),
       soltarTiro: () => soltarGatilho(),
       fullscreen: async () => {
         const r = await toggleFullscreen();
@@ -1636,6 +1641,7 @@ let formSujo = false; // o dono está mexendo no formulário: o que chega do ser
 function aplicarSala(cfg) {
   if (!cfg) return;
   state.sala = cfg;
+  clima.setConfig(cfg);
   if (state.room) salas.visitar(state.room, { empresa: cfg.empresa, temSenha: cfg.temSenha });
   let mudou = false;
   for (const j of AREAS_DE_JOGO) mudou = world.ligarArea(j, jogoLigado(j)) || mudou;
@@ -1694,6 +1700,9 @@ function preencherConfig(forcar = false) {
   if (formSujo && !forcar) return;
   const cfg = state.sala;
   $('#sala-config').elements.empresa.value = cfg.empresa || '';
+  const opcoes = (lista, atual) => Object.entries(lista).map(([id, o]) => `<option value="${id}"${id === atual ? ' selected' : ''}>${o.nome}</option>`).join('');
+  $('#sala-config').elements.clima.innerHTML = opcoes(CLIMAS, cfg.clima || 'auto');
+  $('#sala-config').elements.horario.innerHTML = opcoes(HORARIOS, cfg.horario || 'ciclo');
   $('#sala-modulos').innerHTML = MODOS.map((a) => `<label class="modulo">
       <input type="radio" name="modulo" value="${a.id}"${cfg.modulo === a.id ? ' checked' : ''}>
       <b>${a.nome}</b><small>${a.desc}</small>
@@ -1860,6 +1869,8 @@ $('#sala-config').addEventListener('submit', (e) => {
     departamentos: $$('#sala-deptos input:checked').map((i) => i.value),
     jogos: Object.fromEntries($$('#sala-jogos input').map((i) => [i.value, i.checked])),
     placar: lerPlacar(),
+    clima: form.elements.clima.value,
+    horario: form.elements.horario.value,
   };
   socket.emit('sala-config', cfg, (r) => {
     if (!r?.ok) return toast(r?.erro || 'Não deu para salvar.', 'error');
@@ -2806,7 +2817,7 @@ document.addEventListener('mouseup', (e) => { if (e.button === 0) soltarGatilho(
 window.addEventListener('blur', soltarGatilho);
 
 function atualizarArmas(dt) {
-  const fp = player.mode === 'first' && temArma() && !player.veiculo && !player.sitting && !state.focus && !combat.knockedOut && !player.override;
+  const fp = player.mode === 'first' && !luneta && temArma() && !player.veiculo && !player.sitting && !state.focus && !combat.knockedOut && !player.override;
   if (fp && visaoArma.tipo !== settings.arma) visaoArma.setTipo(settings.arma);
   visaoArma.update(dt, {
     visivel: fp,
@@ -2830,10 +2841,63 @@ function mudarArma(tipo) {
   if (!IDS_ARMAS.includes(tipo) || tipo === settings.arma) return;
   settings.arma = tipo;
   saveSettings();
+  if (tipo !== 'sniper') ligarLuneta(false);
   localAvatar.setArma(localAvatar.armado, tipo);
   renderArmas();
+  poderesMudaram();
   if (socket && state.joined) socket.emit('arma', tipo);
 }
+// ------------------------------------------------------------------ luneta da sniper
+// Segurar o botão direito (ou Z, que liga e desliga; no toque, o botão da mira): a câmera vai
+// para a 1ª pessoa com zoom de luneta, a mira fica mais fina e balança de leve com a respiração.
+const FOV_LUNETA = 13;
+let luneta = false;
+let antesDaLuneta = null; // { modo, fov, sens }
+let balancoLuneta = { x: 0, y: 0 };
+const temSniper = () => temArma() && settings.arma === 'sniper';
+function ligarLuneta(on) {
+  if (on && (luneta || !temSniper() || state.focus || player.veiculo || player.sitting || combat.knockedOut || !state.joined)) return;
+  if (!on && !luneta) return;
+  luneta = on;
+  const cam = world.camera;
+  if (on) {
+    antesDaLuneta = { modo: player.mode, fov: cam.fov, sens: player.sensitivity };
+    player.mode = 'first';
+    cam.fov = FOV_LUNETA;
+    player.sensitivity = antesDaLuneta.sens * 0.22;
+    balancoLuneta = { x: 0, y: 0 };
+    sfx.engatilhar(0.35);
+  } else {
+    player.mode = antesDaLuneta.modo;
+    cam.fov = antesDaLuneta.fov;
+    player.sensitivity = antesDaLuneta.sens;
+    // tira o balanço que ficou somado na mira
+    player.yaw -= balancoLuneta.x;
+    player.pitch -= balancoLuneta.y;
+  }
+  cam.updateProjectionMatrix();
+  $('#luneta').hidden = !on;
+  $('#crosshair').classList.toggle('luneta-on', on);
+  document.body.classList.toggle('com-luneta', on);
+  touchPad?.setPoderes({ voando: player.voando, puloAlto: player.puloAlto, armado: temArma(), sniper: temSniper(), luneta });
+}
+// respiração: um oito bem lento somado à mira (e tirado ao sair)
+function balancarLuneta(t) {
+  if (!luneta) return;
+  const x = Math.sin(t * 0.9) * 0.0022 + Math.sin(t * 2.3) * 0.0007;
+  const y = Math.sin(t * 1.8) * 0.0014;
+  player.yaw += x - balancoLuneta.x;
+  player.pitch += y - balancoLuneta.y;
+  balancoLuneta = { x, y };
+  // a luneta não combina com sentar, dirigir, focar numa tela ou cair nocauteado
+  if (!temSniper() || state.focus || player.veiculo || player.sitting || combat.knockedOut) ligarLuneta(false);
+}
+document.addEventListener('mousedown', (e) => {
+  if (e.button === 2 && document.pointerLockElement === world.canvas && temSniper()) ligarLuneta(true);
+});
+document.addEventListener('mouseup', (e) => { if (e.button === 2) ligarLuneta(false); });
+world.canvas.addEventListener('contextmenu', (e) => { if (temSniper()) e.preventDefault(); });
+
 $('#ep-arma').addEventListener('click', (e) => {
   const b = e.target.closest('[data-arma]');
   if (b) mudarArma(b.dataset.arma);
@@ -2970,7 +3034,9 @@ function poderesMudaram() {
     world.resetCheckpoints();
     toast('Com poder ligado o parkour não conta: corrida cancelada.', 'warn', 4000);
   }
-  touchPad?.setPoderes({ voando: player.voando, puloAlto: player.puloAlto, armado: temArma() });
+  if (!temSniper()) ligarLuneta(false);
+  touchPad?.setPoderes({ voando: player.voando, puloAlto: player.puloAlto, armado: temArma(), sniper: temSniper(), luneta });
+  $('#help-luneta').hidden = !temSniper();
   const ativos = [player.voando && '🪽 Voando', player.puloAlto && '⬆ Pulo alto'].filter(Boolean);
   $('#poderes-hud').hidden = !ativos.length;
   $('#poderes-hud').textContent = ativos.join('  ·  ');
@@ -3392,6 +3458,7 @@ $('#copy-invite').addEventListener('click', copyInvite);
 $('#copy-invite-2').addEventListener('click', copyInvite);
 
 function toggleView() {
+  ligarLuneta(false);
   const mode = player.toggleMode();
   $('#btn-view').classList.toggle('on', mode === 'first');
 }
@@ -3551,6 +3618,9 @@ window.addEventListener('keydown', (e) => {
     case 'KeyX':
       puxarGatilho();
       break;
+    case 'KeyZ':
+      if (temSniper()) ligarLuneta(!luneta);
+      break;
     case 'KeyG':
       toggleVeiculo();
       break;
@@ -3617,7 +3687,7 @@ if (params.get('debug') === '1') {
     state, player, combat, run, corrida, world, settings, punch, goToRing, respawn,
     toggleVeiculo, irParaLargada, jogos, irParaMesa, exitFocus, dados,
     tocarTela, telasMudas, liberarSomDasTelas, makeVideo, mesa, controle, abrirMesa, fecharMesa, marcaDaAba,
-    publishShare, stopShare, acharTela, telasNoAr, get rtc() { return rtc; },
+    publishShare, stopShare, acharTela, telasNoAr, get rtc() { return rtc; }, clima, ligarLuneta,
   };
 }
 
@@ -3682,6 +3752,7 @@ function sendState(dt) {
 }
 
 function slowUpdate() {
+  $('#clima-chip').textContent = clima.rotulo();
   updateVolumes();
   if (settings.mostrarFps) {
     const res = qualidade.escala < 0.999 ? ` ${Math.round(qualidade.escala * 100)}%` : '';
@@ -3712,6 +3783,8 @@ function frame() {
   elapsed += dt;
   const t = elapsed;
   world.update(t);
+  clima.update(dt, t);
+  balancarLuneta(t);
 
   if (state.joined) {
     player.update(dt);

@@ -276,6 +276,9 @@ function mudarSaldo(nome, delta) {
 // departamentos que a empresa tem —, quais jogos aparecem, o nome da empresa e o placar de metas
 // do Comercial. Guardado pelo banco.js.
 const MODULOS = ['lazer', 'escritorio'];
+// clima e hora do dia (public/js/clima.js): auto/ciclo = muda sozinho, igual para todos
+const CLIMAS_SALA = ['auto', 'sol', 'nublado', 'chuva', 'tempestade'];
+const HORARIOS_SALA = ['ciclo', 'manha', 'dia', 'tarde', 'noite'];
 const JOGOS_SALA = ['parkour', 'ringue', 'corrida', 'xadrez', 'dama', 'velha', 'dados', 'poderes', 'armas'];
 const configPadrao = () => ({
   modulo: 'lazer',
@@ -283,6 +286,8 @@ const configPadrao = () => ({
   jogos: Object.fromEntries(JOGOS_SALA.map((j) => [j, true])),
   empresa: '',
   placar: { titulo: 'Metas do mês', itens: [] },
+  clima: 'auto',
+  horario: 'ciclo',
 });
 
 // o que vier do cliente (ou do banco) passa por aqui antes de valer
@@ -298,6 +303,8 @@ function limparConfig(raw, base = configPadrao()) {
     departamentos: antigo ? [c.modulo] : c.departamentos === undefined ? base.departamentos : limpar(c.departamentos),
     jogos: Object.fromEntries(JOGOS_SALA.map((j) => [j, typeof jogos[j] === 'boolean' ? jogos[j] : base.jogos[j]])),
     empresa: typeof c.empresa === 'string' ? cleanText(c.empresa, 40) : base.empresa,
+    clima: CLIMAS_SALA.includes(c.clima) ? c.clima : base.clima || 'auto',
+    horario: HORARIOS_SALA.includes(c.horario) ? c.horario : base.horario || 'ciclo',
     placar: c.placar === undefined ? base.placar : {
       titulo: cleanText(placar.titulo, 40) || 'Metas do mês',
       itens: (Array.isArray(placar.itens) ? placar.itens : []).slice(0, 12).map((it) => ({

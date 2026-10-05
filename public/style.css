@@ -2412,3 +2412,49 @@ body.touch .sala-rotulo small { color: var(--muted); font-size: 11.5px; }
 body.touch .salas-sep { align-self: center; }
 body.touch .salas-add { align-self: center; }
 body.touch .salas-nova { left: 8px; right: 8px; width: auto; bottom: 60px; }
+
+/* clima (clima.js): indicador no topo e escolha no painel da sala */
+.clima-chip { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.clima-linha { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+/* luneta da sniper: tudo escuro em volta de uma lente redonda com retículo */
+#luneta {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+.luneta-lente {
+  position: relative;
+  width: min(84vh, 84vw);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  /* a sombra enorme é o "tubo" preto que tapa o resto da tela */
+  box-shadow: 0 0 0 200vmax #000, inset 0 0 60px 22px rgba(0, 0, 0, 0.85);
+  background: radial-gradient(circle, transparent 62%, rgba(0, 0, 0, 0.25) 100%);
+}
+.luneta-h, .luneta-v { position: absolute; background: rgba(0, 0, 0, 0.85); }
+.luneta-h { left: 0; right: 0; top: 50%; height: 2px; margin-top: -1px; }
+.luneta-v { top: 0; bottom: 0; left: 50%; width: 2px; margin-left: -1px; }
+/* perto do centro o fio afina e ganha marcas de distância */
+.luneta-h::before, .luneta-v::before {
+  content: '';
+  position: absolute;
+  background: repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.9) 0 2px, transparent 2px 9%);
+}
+.luneta-h::before { left: 30%; right: 30%; top: -5px; height: 12px; }
+.luneta-v::before { top: 30%; bottom: 30%; left: -5px; width: 12px; background: repeating-linear-gradient(180deg, rgba(0, 0, 0, 0.9) 0 2px, transparent 2px 9%); }
+.luneta-ponto {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 50%;
+  background: #ff3b30;
+  box-shadow: 0 0 6px rgba(255, 59, 48, 0.9);
+}
+#crosshair.luneta-on { display: none; }
+body.com-luneta #controls-help, body.com-luneta #salas, body.com-luneta .room-chip { visibility: hidden; }

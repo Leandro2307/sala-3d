@@ -715,6 +715,7 @@ export class World {
   buildLights() {
     const hemi = new THREE.HemisphereLight(0xc9d3ff, 0x252036, 1.45);
     this.scene.add(hemi);
+    this.hemi = hemi; // o clima (clima.js) muda a cor e a força com a hora e o tempo
 
     const sun = new THREE.DirectionalLight(0xfff3e6, 1.5);
     sun.position.set(16, 60, 22);

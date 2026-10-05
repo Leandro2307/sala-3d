@@ -47,12 +47,18 @@
       <span class="sep">·</span>
       <span id="room-count">1 pessoa</span>
       <span class="sep">·</span>
+      <span class="clima-chip" id="clima-chip" title="Clima e hora na sala"></span>
+      <span class="sep">·</span>
       <span class="moedas-chip" id="moedas-chip" title="Suas moedas"><i data-icon="moeda" data-size="15"></i><b id="moedas-n">0</b></span>
       <button id="copy-invite" class="chip-btn" type="button"><i data-icon="link" data-size="15"></i>Copiar convite</button>
     </div>
 
     <div id="fps" hidden></div>
     <div id="crosshair"></div>
+    <!-- luneta da sniper (ver "luneta" no main.js): zoom e retículo -->
+    <div id="luneta" hidden aria-hidden="true">
+      <div class="luneta-lente"><i class="luneta-h"></i><i class="luneta-v"></i><i class="luneta-ponto"></i></div>
+    </div>
     <div id="hover-hint" hidden><kbd>E</kbd><span></span></div>
     <div id="sit-hint" hidden><kbd>C</kbd><span>Sentar</span></div>
 
@@ -184,6 +190,7 @@
           <span data-jogo="poderes"><kbd>Q</kbd> voar</span>
           <span data-jogo="poderes"><kbd>J</kbd> pulo alto</span>
           <span id="help-tiro" hidden><kbd>X</kbd> atirar</span>
+          <span id="help-luneta" hidden><kbd>Z</kbd> ou <kbd>botão direito</kbd> luneta</span>
           <span><kbd>1</kbd>–<kbd>6</kbd> reações</span>
         </div>
         <div class="help-grid" data-input="touch">
@@ -229,6 +236,7 @@
       <button type="button" class="tb small" id="tb-voar" data-jogo="poderes" aria-pressed="false" aria-label="Voar"><i data-icon="asa" data-size="18"></i></button>
       <button type="button" class="tb small" id="tb-pulo" data-jogo="poderes" aria-pressed="false" aria-label="Pulo alto"><i data-icon="mola" data-size="18"></i></button>
       <button type="button" class="tb small" id="tb-descer" hidden aria-label="Descer"><i data-icon="desce" data-size="18"></i></button>
+      <button type="button" class="tb small" id="tb-luneta" hidden aria-pressed="false" aria-label="Mira da sniper"><i data-icon="luneta" data-size="18"></i></button>
       <button type="button" class="tb tiro" id="tb-tiro" hidden aria-label="Atirar"><i data-icon="mira" data-size="22"></i></button>
     </div>
   </div>
@@ -473,6 +481,13 @@
           <div class="modulos" id="sala-modulos"></div>
           <small class="hint" id="deptos-hint" hidden>Marque os departamentos da empresa: cada um vira uma sala com a cara do setor, e elas se encaixam dos dois lados de um corredor, com a recepção na entrada.</small>
           <div class="deptos" id="sala-deptos" hidden></div>
+        </div>
+        <div class="field">
+          <span>Clima e hora <small class="opt">(todo mundo vê igual)</small></span>
+          <div class="clima-linha">
+            <select name="clima" aria-label="Clima"></select>
+            <select name="horario" aria-label="Hora do dia"></select>
+          </div>
         </div>
         <div class="field" id="placar-editor" hidden>
           <span>Placar de metas <small class="opt">(Sala Comercial)</small></span>

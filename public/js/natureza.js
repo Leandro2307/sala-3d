@@ -152,6 +152,7 @@ function criarCeu(scene, solDir) {
       base: { value: new THREE.Color('#4d4f7e') },
       brilho: { value: new THREE.Color('#ffb06a') },
       solDir: { value: solDir.clone() },
+      disco: { value: new THREE.Color(1.6, 1.38, 1.06) }, // sol (ou lua, de noite); preto = encoberto
     },
     vertexShader: /* glsl */ `
       varying vec3 vDir;
@@ -167,6 +168,7 @@ function criarCeu(scene, solDir) {
       uniform vec3 base;
       uniform vec3 brilho;
       uniform vec3 solDir;
+      uniform vec3 disco;
       varying vec3 vDir;
       void main() {
         vec3 d = normalize(vDir);
@@ -176,7 +178,7 @@ function criarCeu(scene, solDir) {
         float s = max(dot(d, solDir), 0.0);
         // halo do pôr do sol perto do horizonte e o disco do sol
         c += brilho * pow(s, 7.0) * (1.0 - smoothstep(0.0, 0.5, h)) * 0.6;
-        c += vec3(1.0, 0.86, 0.66) * smoothstep(0.99935, 0.9997, s) * 1.6;
+        c += disco * smoothstep(0.99935, 0.9997, s);
         c = mix(c, base, smoothstep(0.0, -0.1, h));
         gl_FragColor = vec4(c, 1.0);
         #include <colorspace_fragment>
@@ -207,17 +209,18 @@ function criarCeu(scene, solDir) {
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   geo.setAttribute('tam', new THREE.BufferAttribute(tam, 1));
   const estrelasMat = new THREE.ShaderMaterial({
-    uniforms: { tempo: { value: 0 } },
+    uniforms: { tempo: { value: 0 }, visivel: { value: 1 } },
     vertexShader: /* glsl */ `
       attribute float tam;
       uniform float tempo;
+      uniform float visivel;
       varying float vAlpha;
       void main() {
         vec4 mv = modelViewMatrix * vec4(position, 1.0);
         gl_Position = projectionMatrix * mv;
         gl_Position.z = gl_Position.w;
         float altura = normalize(position).y;
-        vAlpha = smoothstep(0.2, 0.6, altura) * (0.55 + 0.45 * sin(tempo * 1.7 + position.x * 0.37));
+        vAlpha = smoothstep(0.2, 0.6, altura) * (0.55 + 0.45 * sin(tempo * 1.7 + position.x * 0.37)) * visivel;
         gl_PointSize = tam;
       }`,
     fragmentShader: /* glsl */ `
@@ -240,6 +243,7 @@ function criarCeu(scene, solDir) {
 
   return {
     mat,
+    estrelasMat,
     seguir(cam, t) {
       ceu.position.copy(cam.position);
       estrelas.position.copy(cam.position);
@@ -474,6 +478,7 @@ function criarLago(scene, renderer, ceuMat, x, z, raio, decorar) {
 }
 
 // ------------------------------------------------------------------ nuvens e pássaros
+let nuvensMat = null; // o clima (clima.js) escurece as nuvens na chuva e de noite
 function criarNuvens(scene, centro, decorar) {
   const rnd = semente(31);
   const mat = new THREE.MeshLambertMaterial({ color: '#f4dfe3', emissive: '#4a3550', emissiveIntensity: 0.55, flatShading: true });
@@ -496,6 +501,7 @@ function criarNuvens(scene, centro, decorar) {
     scene.add(nuvem);
     nuvens.push({ nuvem, vel: 1.5 + rnd() * 2.5 });
   }
+  nuvensMat = mat;
   decorar.push((t, dt) => {
     for (const n of nuvens) {
       n.nuvem.position.x += n.vel * dt;
@@ -708,6 +714,8 @@ export function criarNatureza(scene, renderer, { area, sala, reservas = [], estr
   let anterior = null;
   return {
     lago,
+    // o clima (clima.js) muda as cores do céu, as estrelas e as nuvens
+    ceu: { mat: ceu.mat, estrelasMat: ceu.estrelasMat, get nuvensMat() { return nuvensMat; } },
     seguirCamera: (cam, t) => ceu.seguir(cam, t),
     // qualidade: fração de árvores/arbustos/pedras desenhadas, e se as árvores fazem sombra
     ajustar({ densidade = 1, sombras = true }) {

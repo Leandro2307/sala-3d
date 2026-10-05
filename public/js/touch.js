@@ -170,6 +170,9 @@ export function setupTouchControls(player, actions = {}) {
   // tiro: segurar o botão dispara sem parar nas armas automáticas
   const tiro = root.querySelector('#tb-tiro');
   if (tiro && actions.tiro) setupButton(tiro, { onPress: actions.tiro, onRelease: actions.soltarTiro });
+  // luneta da sniper: um toque liga, outro desliga
+  const luneta = root.querySelector('#tb-luneta');
+  if (luneta && actions.luneta) setupButton(luneta, { onPress: actions.luneta });
 
   const descer = root.querySelector('#tb-descer');
   if (descer) {
@@ -211,7 +214,7 @@ export function setupTouchControls(player, actions = {}) {
     },
     show(on) { root.hidden = !on; },
     // estado dos poderes nos botões (aceso = ligado); "descer" só aparece voando
-    setPoderes({ voando, puloAlto, armado }) {
+    setPoderes({ voando, puloAlto, armado, sniper = false, luneta = false }) {
       const marcar = (sel, on) => {
         const el = $b(sel);
         el.classList.toggle('on', on);
@@ -221,6 +224,8 @@ export function setupTouchControls(player, actions = {}) {
       marcar('#tb-pulo', puloAlto);
       $b('#tb-descer').hidden = !voando;
       $b('#tb-tiro').hidden = !armado;
+      $b('#tb-luneta').hidden = !sniper;
+      marcar('#tb-luneta', luneta);
       if (!voando) player.descerHeld = false;
     },
     // modo carro: pedais no lugar do pulo, o botão de correr vira turbo
