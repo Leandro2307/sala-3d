@@ -1618,7 +1618,7 @@ $('#sala-config').addEventListener('submit', (e) => {
   const cfg = {
     empresa: form.elements.empresa.value.trim(),
     modulo: form.querySelector('[name="modulo"]:checked')?.value || 'lazer',
-    departamentos: $('#sala-deptos input:checked').map((i) => i.value),
+    departamentos: $$('#sala-deptos input:checked').map((i) => i.value),
     jogos: Object.fromEntries($$('#sala-jogos input').map((i) => [i.value, i.checked])),
     placar: lerPlacar(),
   };
