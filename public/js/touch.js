@@ -167,6 +167,10 @@ export function setupTouchControls(player, actions = {}) {
   }
 
   // voando, "descer" é segurar (como o pulo, que sobe)
+  // tiro: segurar o botão dispara sem parar nas armas automáticas
+  const tiro = root.querySelector('#tb-tiro');
+  if (tiro && actions.tiro) setupButton(tiro, { onPress: actions.tiro, onRelease: actions.soltarTiro });
+
   const descer = root.querySelector('#tb-descer');
   if (descer) {
     setupButton(descer, {
@@ -179,7 +183,6 @@ export function setupTouchControls(player, actions = {}) {
     '#tb-use': actions.use,
     '#tb-voar': actions.voar,
     '#tb-pulo': actions.puloAlto,
-    '#tb-tiro': actions.tiro,
     '#tb-view': actions.view,
     '#tb-respawn': actions.respawn,
     '#tb-punch': actions.punch,

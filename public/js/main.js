@@ -4,6 +4,7 @@ import { World, SPAWN } from './world.js';
 import { Avatar } from './avatars.js';
 import { PERSONAGENS } from './modelo.js';
 import { EscolherPersonagem } from './escolher-personagem.js';
+import { SalasLaterais } from './salas.js';
 import { Player } from './player.js';
 import { RTC, SHARE_PRESETS } from './rtc.js';
 import { MediaSync, PROVIDERS, preloadYouTube } from './media.js';
@@ -12,6 +13,7 @@ import { Combat } from './combat.js';
 import { RING, COMBAT, ringCorners } from './arena.js';
 import { Corrida, PISTA, largada, formatarVolta, projetar, pontoEm } from './pista.js';
 import { sfx, audioContext, setSfxEnabled } from './sfx.js';
+import { ARMAS, IDS_ARMAS, ARMA_PADRAO, defArma, VisaoArma, iniciarCapsulas, atualizarCapsulas, preCarregarArma } from './armas.js';
 import { Jogos } from './jogos.js';
 import { Controle } from './controle.js';
 import { Mesa } from './mesa.js';
@@ -37,7 +39,7 @@ const PANEL_TITLES = { people: 'Pessoas', chat: 'Chat da sala', telao: 'Telão',
 // ------------------------------------------------------------------ ajustes salvos
 const DEFAULTS = {
   name: '', color: COLORS[0], mic: true, voice: 100, screen: 90, tv: 80, spatial: false,
-  shareMode: 'detail', sens: 100, sfx: true, micDevice: '', helpCollapsed: false, photo: null, shirt: 'none', char: 'padrao',
+  shareMode: 'detail', sens: 100, sfx: true, micDevice: '', helpCollapsed: false, photo: null, shirt: 'none', char: 'padrao', arma: ARMA_PADRAO,
   // qualidade gráfica: 'auto' ou um nível fixo; nivelAuto: onde o automático parou da última vez
   qualidade: 'auto', nivelAuto: null, mostrarFps: false,
 };
@@ -84,6 +86,8 @@ const qualidade = new Qualidade(world, {
   },
 });
 const localAvatar = new Avatar({ name: settings.name || 'Você', color: settings.color, isLocal: true });
+if (!IDS_ARMAS.includes(settings.arma)) settings.arma = ARMA_PADRAO;
+localAvatar.tipoArma = settings.arma;
 localAvatar.group.position.set(...SPAWN.pos);
 world.scene.add(localAvatar.group);
 const player = new Player(world, localAvatar);
@@ -325,17 +329,32 @@ function senhaRecusada() {
   window.location.replace(url);
 }
 
+// cores: no formulário de entrada e no modal do personagem (que também abre dentro da sala)
 function renderSwatches() {
-  $('#swatches').innerHTML = COLORS.map((c) => `<button type="button" role="radio" aria-label="Cor ${c}" aria-checked="${c === settings.color}" style="--c:${c}" data-color="${c}"></button>`).join('');
+  const html = COLORS.map((c) => `<button type="button" role="radio" aria-label="Cor ${c}" aria-checked="${c === settings.color}" style="--c:${c}" data-color="${c}"></button>`).join('');
+  $('#swatches').innerHTML = html;
+  $('#ep-cores').innerHTML = html;
 }
 renderSwatches();
-$('#swatches').addEventListener('click', (e) => {
-  const b = e.target.closest('[data-color]');
-  if (!b) return;
-  settings.color = b.dataset.color;
-  localAvatar.setColor(settings.color);
+function mudarCor(cor) {
+  if (cor === settings.color) return;
+  settings.color = cor;
+  saveSettings();
+  localAvatar.setColor(cor);
   renderSwatches();
-});
+  escolha.reverPrevia();
+  if (socket && state.joined) {
+    socket.emit('color', cor);
+    self().color = cor;
+    renderPeople();
+  }
+}
+for (const sel of ['#swatches', '#ep-cores']) {
+  $(sel).addEventListener('click', (e) => {
+    const b = e.target.closest('[data-color]');
+    if (b) mudarCor(b.dataset.color);
+  });
+}
 nameInput.addEventListener('input', () => localAvatar.setName(nameInput.value.trim() || 'Você'));
 if (settings.name) localAvatar.setName(settings.name);
 
@@ -429,27 +448,45 @@ const escolha = new EscolherPersonagem({
   aoFechar: () => {
     if (state.joined) player.enabled = true;
   },
+  // camiseta só existe no boneco padrão; a arma, para quem pode andar armado
+  aoSelecionar: (def) => {
+    $('#ep-linha-camiseta').hidden = !!def.url;
+    renderArmas();
+  },
 });
 $('#in-char').addEventListener('click', () => escolha.abrir(settings.char));
 // o modelo 3D do personagem só baixa depois que o mundo ficou pronto: não disputa a abertura
 world.pronto.then(() => aplicarPersonagem());
 $('#btn-personagem').addEventListener('click', () => escolha.abrir(settings.char));
+// P abre o personagem dentro da sala (trocar de boneco, cor, camiseta e arma sem sair)
+window.addEventListener('keydown', (e) => {
+  if (e.code !== 'KeyP' || !state.joined || state.focus || escolha.aberto || e.repeat) return;
+  if (['INPUT', 'TEXTAREA', 'SELECT', 'IFRAME'].includes(document.activeElement?.tagName)) return;
+  escolha.abrir(settings.char);
+});
 
 // ---------------------------------------------------------------- camiseta
 function renderShirt() {
-  $$('#in-shirt button').forEach((b) => b.classList.toggle('on', b.dataset.shirt === settings.shirt));
+  $$('#in-shirt button, #ep-camiseta button').forEach((b) => b.classList.toggle('on', b.dataset.shirt === settings.shirt));
   localAvatar.setShirt(settings.shirt);
 }
 renderShirt();
-$('#in-shirt').addEventListener('click', (e) => {
-  const b = e.target.closest('[data-shirt]');
-  if (!b) return;
-  settings.shirt = b.dataset.shirt;
+function mudarCamiseta(kind) {
+  if (kind === settings.shirt) return;
+  settings.shirt = kind;
   saveSettings();
   renderShirt();
+  renderArmas();
+  escolha.reverPrevia();
   if (state.joined) poderesMudaram();
   if (socket && state.joined) socket.emit('shirt', settings.shirt);
-});
+}
+for (const sel of ['#in-shirt', '#ep-camiseta']) {
+  $(sel).addEventListener('click', (e) => {
+    const b = e.target.closest('[data-shirt]');
+    if (b) mudarCamiseta(b.dataset.shirt);
+  });
+}
 $('#photo-pick').addEventListener('click', () => $('#photo-file').click());
 $('#photo-file').addEventListener('change', async (e) => {
   const file = e.target.files?.[0];
@@ -475,6 +512,46 @@ setTimeout(() => localAvatar.emote('wave'), 900);
 $('#lobby-form').addEventListener('submit', (e) => {
   e.preventDefault();
   join();
+});
+
+// ------------------------------------------------------------------ salas (lista lateral)
+// Trocar de sala recarrega a página já entrando na outra (?entrar=1): voz, telas e jogos começam
+// do zero, do mesmo jeito que na primeira entrada. Sala com senha sem passe para no saguão.
+const salas = new SalasLaterais({
+  raiz: $('#salas'),
+  atual: () => state.room,
+  passes: lerPasses,
+  aoTrocar: (id) => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('sala', id);
+    url.searchParams.set('entrar', '1');
+    window.location.href = url;
+  },
+});
+if (params.get('entrar') === '1') {
+  const url = new URL(window.location.href);
+  url.searchParams.delete('entrar');
+  window.history.replaceState(null, '', url);
+  // depois do resto do módulo: o join usa coisas declaradas mais abaixo
+  if (nameInput.value.trim()) setTimeout(join, 0);
+}
+document.body.classList.toggle('sem-salas', !isTouch && !!settings.salasOcultas);
+function abrirSalas(abrir) {
+  document.body.classList.toggle('salas-abertas', abrir);
+  $('#btn-salas').classList.toggle('on', abrir);
+  if (abrir) salas.atualizar();
+  syncTouchVisibility();
+}
+$('#btn-salas').addEventListener('click', () => {
+  if (isTouch) return abrirSalas(!document.body.classList.contains('salas-abertas'));
+  settings.salasOcultas = !settings.salasOcultas;
+  saveSettings();
+  document.body.classList.toggle('sem-salas', settings.salasOcultas);
+});
+// no toque, tocar fora da gaveta fecha
+document.addEventListener('pointerdown', (e) => {
+  if (!isTouch || !document.body.classList.contains('salas-abertas')) return;
+  if (!e.target.closest('#salas, #btn-salas')) abrirSalas(false);
 });
 
 // ------------------------------------------------------------------ entrar na sala
@@ -575,7 +652,8 @@ async function join() {
       car: () => toggleVeiculo(),
       voar: () => toggleVoar(),
       puloAlto: () => togglePuloAlto(),
-      tiro: () => atirar(),
+      tiro: () => puxarGatilho(),
+      soltarTiro: () => soltarGatilho(),
       fullscreen: async () => {
         const r = await toggleFullscreen();
         updateFullscreenButton();
@@ -606,6 +684,7 @@ function emitJoin() {
       photo: settings.photo,
       shirt: settings.shirt,
       char: settings.char,
+      arma: settings.arma,
       passe: state.passe,
     }, resolve);
   });
@@ -637,6 +716,7 @@ function applyJoined(data) {
   mostrarMoedas();
   aplicarSala(data.sala);
   reentrarComoDono();
+  salas.iniciar();
 
   for (const u of data.users) rtc.getPeer(u.id);
 
@@ -671,6 +751,7 @@ function bindSocket() {
     toast(`${u.name} entrou na sala`, 'info', 3500, u.color);
     renderPeople();
     updateRoomInfo();
+    salas.atualizar();
   });
 
   socket.on('user-left', ({ id }) => {
@@ -679,6 +760,7 @@ function bindSocket() {
     sfx.leave();
     toast(`${u.name} saiu`, 'info', 3000, u.color);
     removeUser(id);
+    salas.atualizar();
   });
 
   socket.on('state', ({ id, p, r, a, s }) => {
@@ -689,7 +771,7 @@ function bindSocket() {
     u.avatar.speaking = !!s;
   });
 
-  socket.on('user-update', ({ id, mic, photo, shirt, char, health, ko }) => {
+  socket.on('user-update', ({ id, mic, photo, shirt, char, color, arma, health, ko }) => {
     const u = state.users.get(id);
     if (!u) return;
     if (mic !== undefined) {
@@ -704,6 +786,12 @@ function bindSocket() {
     if (shirt !== undefined) {
       u.shirt = shirt;
       u.avatar.setShirt(shirt);
+    }
+    if (arma !== undefined && IDS_ARMAS.includes(arma)) u.avatar.setArma(u.avatar.armado, arma);
+    if (color !== undefined) {
+      u.color = color;
+      u.avatar.setColor(color);
+      renderPeople();
     }
     if (char !== undefined) {
       u.char = char;
@@ -727,13 +815,17 @@ function bindSocket() {
     sfx.punchSwing();
   });
 
-  socket.on('tiro', ({ id, de, ate }) => {
+  socket.on('tiro', ({ id, de, ate, mais, arma }) => {
     const u = state.users.get(id);
     if (!u || u.isSelf) return;
     desenharTiro(de, ate);
+    for (const p of mais || []) desenharTiro(de, p, true);
     u.avatar.atirar();
+    const def = defArma(IDS_ARMAS.includes(arma) ? arma : u.avatar.tipoArma);
     const d = localAvatar.group.position.distanceTo(_tmpTiro.set(de[0], de[1], de[2]));
-    sfx.tiro(THREE.MathUtils.clamp(1 - d / 90, 0.06, 1));
+    const vol = THREE.MathUtils.clamp(1 - d / 90, 0.06, 1);
+    sfx.tiro(vol, def.som);
+    if (def.engatilhar) setTimeout(() => sfx.engatilhar(vol), 170);
   });
 
   socket.on('hit', ({ from, fromName, dir, arma }) => {
@@ -863,6 +955,7 @@ function addUser(data) {
   avatar.aquecer = (obj) => world.aquecerObjeto(obj);
   avatar.setStatus({ mic: data.mic, sharing: data.shares?.length > 0 });
   if (data.photo) avatar.setPhoto(data.photo);
+  avatar.tipoArma = IDS_ARMAS.includes(data.arma) ? data.arma : ARMA_PADRAO;
   if (data.shirt && data.shirt !== 'none') avatar.setShirt(data.shirt);
   if (data.char && data.char !== 'padrao') avatar.setPersonagem(PERSONAGENS[data.char]);
   if (data.health != null) avatar.setHealth(data.health);
@@ -1543,6 +1636,7 @@ let formSujo = false; // o dono está mexendo no formulário: o que chega do ser
 function aplicarSala(cfg) {
   if (!cfg) return;
   state.sala = cfg;
+  if (state.room) salas.visitar(state.room, { empresa: cfg.empresa, temSenha: cfg.temSenha });
   let mudou = false;
   for (const j of AREAS_DE_JOGO) mudou = world.ligarArea(j, jogoLigado(j)) || mudou;
   if (mudou) world.aquecerShaders(); // o número de luzes pode ter mudado
@@ -2691,6 +2785,63 @@ const _direita = new THREE.Vector3();
 const _raioTiro = new THREE.Raycaster();
 const tiros = [];
 const tiroGeo = new THREE.BoxGeometry(0.05, 0.05, 1);
+
+// ------------------------------------------------------------------ armas (armas.js)
+// A arma na tela em 1ª pessoa precisa da câmera na cena (filhos da câmera só aparecem assim).
+world.scene.add(world.camera);
+const visaoArma = new VisaoArma(world.camera);
+iniciarCapsulas(world.scene);
+// gatilho: segurar X (ou o botão esquerdo com o mouse preso, ou o botão de tiro no toque)
+// dispara sem parar nas automáticas; nas outras, um tiro por aperto
+let gatilho = false;
+function puxarGatilho() {
+  atirar();
+  gatilho = true;
+}
+function soltarGatilho() {
+  gatilho = false;
+}
+window.addEventListener('keyup', (e) => { if (e.code === 'KeyX') soltarGatilho(); });
+document.addEventListener('mouseup', (e) => { if (e.button === 0) soltarGatilho(); });
+window.addEventListener('blur', soltarGatilho);
+
+function atualizarArmas(dt) {
+  const fp = player.mode === 'first' && temArma() && !player.veiculo && !player.sitting && !state.focus && !combat.knockedOut && !player.override;
+  if (fp && visaoArma.tipo !== settings.arma) visaoArma.setTipo(settings.arma);
+  visaoArma.update(dt, {
+    visivel: fp,
+    andando: player.grounded ? Math.min(1, Math.hypot(player.vel.x, player.vel.z) / 7) : 0.2,
+    yaw: player.yaw,
+    pitch: player.pitch,
+    chao: player.pos.y,
+  });
+  atualizarCapsulas(dt);
+  if (gatilho && temArma() && defArma(settings.arma).auto) atirar();
+}
+
+// escolha da arma no modal do personagem (só aparece para quem anda armado)
+function renderArmas() {
+  const linha = $('#ep-linha-arma');
+  linha.hidden = settings.shirt !== 'bolsonaro' || (state.sala && !jogoLigado('armas'));
+  if (linha.hidden) return;
+  $('#ep-arma').innerHTML = IDS_ARMAS.map((id) => `<button type="button" data-arma="${id}" class="${id === settings.arma ? 'on' : ''}" title="${ARMAS[id].auto ? 'Automática: segure para rajada' : 'Um tiro por aperto'}">${ARMAS[id].nome}</button>`).join('');
+}
+function mudarArma(tipo) {
+  if (!IDS_ARMAS.includes(tipo) || tipo === settings.arma) return;
+  settings.arma = tipo;
+  saveSettings();
+  localAvatar.setArma(localAvatar.armado, tipo);
+  renderArmas();
+  if (socket && state.joined) socket.emit('arma', tipo);
+}
+$('#ep-arma').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-arma]');
+  if (b) mudarArma(b.dataset.arma);
+});
+$('#ep-arma').addEventListener('pointerover', (e) => {
+  const b = e.target.closest('[data-arma]');
+  if (b) preCarregarArma(b.dataset.arma);
+});
 const flashTex = (() => {
   const c = document.createElement('canvas');
   c.width = c.height = 64;
@@ -2704,8 +2855,9 @@ const flashTex = (() => {
   return new THREE.CanvasTexture(c);
 })();
 
-// traçante amarelo da arma até onde a bala parou, mais o clarão na ponta do cano
-function desenharTiro(de, ate) {
+// traçante amarelo da arma até onde a bala parou (o clarão de verdade sai do modelo da arma;
+// este brilho pequeno só marca a origem). semClarao: os outros chumbos da escopeta
+function desenharTiro(de, ate, semClarao = false) {
   const a = new THREE.Vector3(...de);
   const b = new THREE.Vector3(...ate);
   const risco = new THREE.Mesh(tiroGeo, new THREE.MeshBasicMaterial({ color: 0xfff1a8, transparent: true, toneMapped: false }));
@@ -2714,7 +2866,7 @@ function desenharTiro(de, ate) {
   risco.lookAt(b);
   const clarao = new THREE.Sprite(new THREE.SpriteMaterial({ map: flashTex, transparent: true, depthWrite: false, toneMapped: false }));
   clarao.position.copy(a);
-  clarao.scale.setScalar(0.9);
+  clarao.scale.setScalar(semClarao ? 0.001 : 0.45);
   world.scene.add(risco, clarao);
   tiros.push({ risco, clarao, vida: 0.12 });
 }
@@ -2747,9 +2899,11 @@ function atirar() {
   // atrás, e acertaria quem estivesse entre ela e você
   const frente = Math.max(0, _tmpTiro.copy(player.pos).sub(cam.position).dot(_camDir));
   _origemTiro.copy(cam.position).addScaledVector(_camDir, frente);
+  const def = defArma(settings.arma);
   const r = combat.atirar({
     origem: _origemTiro,
     dir: _camDir,
+    arma: def.id,
     bloqueado: (o, d, max) => {
       _raioTiro.set(o, d);
       _raioTiro.far = max;
@@ -2761,14 +2915,23 @@ function atirar() {
   // vira o corpo para onde atirou: os outros veem o braço apontando para lá
   player.bodyYaw = Math.atan2(-Math.sin(player.yaw), -Math.cos(player.yaw));
   localAvatar.atirar();
-  // o traçante sai da frente do peito, um pouco à direita (onde fica a arma)
+  visaoArma.disparar();
+  player.addShake(def.coice * 0.18);
+  // o traçante sai da boca do cano: na 1ª pessoa, a da arma na tela; na 3ª, da frente do peito,
+  // à direita, tão longe quanto o cano da arma
   _direita.crossVectors(_camDir, cam.up).normalize();
-  const de = new THREE.Vector3(player.pos.x, player.pos.y + 1.3, player.pos.z).addScaledVector(_camDir, 0.6).addScaledVector(_direita, 0.3);
+  const de = new THREE.Vector3();
+  if (visaoArma.raiz.visible && visaoArma.arma) visaoArma.arma.userData.ponta.getWorldPosition(de);
+  else de.set(player.pos.x, player.pos.y + (def.apoio ? 1.38 : 1.3), player.pos.z).addScaledVector(_camDir, 0.3 + def.comprimento * 0.75).addScaledVector(_direita, def.apoio ? 0.2 : 0.3);
   const arred = (v) => v.toArray().map((n) => Math.round(n * 100) / 100);
   desenharTiro(arred(de), arred(r.ponto));
-  sfx.tiro();
+  const mais = r.pontos.slice(1).map(arred);
+  for (const p of mais) desenharTiro(arred(de), p, true);
+  sfx.tiro(1, def.som);
+  if (def.engatilhar) setTimeout(() => sfx.engatilhar(), 170);
+  sfx.capsula(0.8);
   if (r.alvo) sfx.punchHit();
-  socket?.emit('tiro', { to: r.alvo?.id ?? null, dir: r.dirXZ, de: arred(de), ate: arred(r.ponto) });
+  socket?.emit('tiro', { to: r.alvo?.id ?? null, dir: r.dirXZ, de: arred(de), ate: arred(r.ponto), mais, n: r.n });
 }
 
 // ------------------------------------------------------------------ poderes
@@ -3142,7 +3305,7 @@ function closePanel() {
 // eles ficariam por cima do vídeo, atrapalhando tocar nos controles do player)
 function syncTouchVisibility() {
   if (!touchPad) return;
-  const livre = state.joined && !state.panel && !state.focus && !mesa.aberta;
+  const livre = state.joined && !state.panel && !state.focus && !mesa.aberta && !document.body.classList.contains('salas-abertas');
   touchPad.show(livre);
   if (!livre) touchPad.reset();
 }
@@ -3386,7 +3549,7 @@ window.addEventListener('keydown', (e) => {
       togglePuloAlto();
       break;
     case 'KeyX':
-      atirar();
+      puxarGatilho();
       break;
     case 'KeyG':
       toggleVeiculo();
@@ -3444,7 +3607,7 @@ document.addEventListener('mousedown', (e) => {
   // dentro do ringue o botão esquerdo é o soco; fora dele continua focando telas
   if (combat.inRing && !state.focus) punch();
   else if (state.hovered) enterFocus(state.hovered);
-  else if (temArma()) atirar();
+  else if (temArma()) puxarGatilho();
 });
 
 // Ponto de inspeção para testes automatizados. Só existe com ?debug=1 na URL —
@@ -3566,6 +3729,7 @@ function frame() {
     jogos.update(dt, t);
     dados.update(dt);
     atualizarTiros(dt);
+    atualizarArmas(dt);
     localAvatar.setKo(combat.knockedOut);
     if (jogoLigado('corrida')) corrida.update(dt, player.pos.x, player.pos.z, player.veiculo);
     if (corrida.ativa) $('#rh-time').textContent = formatarVolta(corrida.tempo);

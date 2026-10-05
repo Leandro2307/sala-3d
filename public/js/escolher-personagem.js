@@ -7,12 +7,14 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 export class EscolherPersonagem {
   // aparencia(): { cor, camiseta, foto } — o boneco padrão aparece como a pessoa o deixou
-  constructor({ raiz, aoEscolher, aparencia, aoAbrir, aoFechar }) {
+  // aoSelecionar(def): clicou num personagem (a camiseta do modal só vale para o boneco padrão)
+  constructor({ raiz, aoEscolher, aparencia, aoAbrir, aoFechar, aoSelecionar }) {
     this.raiz = raiz;
     this.aoEscolher = aoEscolher;
     this.aparencia = aparencia;
     this.aoAbrir = aoAbrir;
     this.aoFechar = aoFechar;
+    this.aoSelecionar = aoSelecionar;
     this.vitrine = null;
     this.atual = 'padrao';
     this.selecionado = null;
@@ -98,6 +100,7 @@ export class EscolherPersonagem {
     if (!def) return;
     this.selecionado = id;
     this.grade.querySelectorAll('[data-id]').forEach((b) => b.classList.toggle('on', b.dataset.id === id));
+    this.aoSelecionar?.(def);
     this.raiz.querySelector('#ep-nome').textContent = def.label;
     this.raiz.querySelector('#ep-resumo').textContent = def.resumo || '';
     const linha = [];
@@ -106,8 +109,8 @@ export class EscolherPersonagem {
     this.raiz.querySelector('#ep-credito').textContent = linha.join(' · ');
     const usar = this.raiz.querySelector('#ep-usar');
     const emUso = id === this.atual;
-    usar.disabled = emUso;
-    usar.textContent = emUso ? 'Em uso' : `Usar ${def.label}`;
+    // cor, camiseta e arma já valem na hora: no personagem em uso o botão só fecha
+    usar.textContent = emUso ? 'Pronto' : `Usar ${def.label}`;
     // volta para "parado" a cada troca
     this.raiz.querySelectorAll('[data-anim]').forEach((x) => x.classList.toggle('on', x.dataset.anim === '0'));
     if (!this.vitrine) return;
@@ -121,6 +124,12 @@ export class EscolherPersonagem {
     } finally {
       if (this.selecionado === id) carregando.hidden = true;
     }
+  }
+
+  // mudou a cor ou a camiseta: a prévia redesenha o selecionado com o visual novo
+  reverPrevia() {
+    const def = PERSONAGENS[this.selecionado];
+    if (def && this.vitrine) this.vitrine.mostrar(def, this.aparencia()).catch(() => {});
   }
 
   usar(id) {

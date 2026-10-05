@@ -62,6 +62,8 @@ const P = {
   lock: '<rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
   minimizar: '<path d="m18 15-6-6-6 6"/>',
   instalar: '<rect width="14" height="20" x="5" y="2" rx="2"/><path d="M12 7v7"/><path d="m9 11 3 3 3-3"/><path d="M10 18h4"/>',
+  mais: '<path d="M5 12h14"/><path d="M12 5v14"/>',
+  salas: '<rect width="7" height="7" x="3" y="3" rx="3.5"/><rect width="7" height="7" x="3" y="14" rx="3.5"/><path d="M14 6.5h7"/><path d="M14 17.5h7"/>',
   link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
 };
 

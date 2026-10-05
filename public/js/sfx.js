@@ -62,10 +62,21 @@ function ruido({ dur = 0.1, gain = 0.08, type = 'lowpass', freq = 1200, toFreq =
 
 export const sfx = {
   // estampido: rajada de ruído grave e curta + um "tum" (vol cai com a distância)
-  tiro: (vol = 1) => {
-    ruido({ dur: 0.18, gain: 0.12 * vol, type: 'lowpass', freq: 3600, toFreq: 260, q: 0.7 });
-    tone({ freq: 150, to: 55, dur: 0.14, type: 'square', gain: 0.03 * vol });
+  // som: { grave, corte, dur, vol } do catálogo (armas-dados.js) — cada arma tem o seu estalo
+  tiro: (vol = 1, som = { grave: 150, corte: 3600, dur: 0.18, vol: 1 }) => {
+    const v = vol * som.vol;
+    ruido({ dur: som.dur, gain: 0.12 * v, type: 'lowpass', freq: som.corte, toFreq: 220, q: 0.7 });
+    tone({ freq: som.grave, to: som.grave * 0.36, dur: som.dur * 0.8, type: 'square', gain: 0.03 * v });
+    // eco curto das armas grandes
+    if (som.vol > 1.1) ruido({ dur: som.dur * 1.6, gain: 0.03 * v, type: 'lowpass', freq: 900, toFreq: 120, q: 0.5, delay: 0.07 });
   },
+  // bombada da escopeta / ferrolho da sniper: dois estalos metálicos
+  engatilhar: (vol = 1) => {
+    ruido({ dur: 0.05, gain: 0.07 * vol, type: 'bandpass', freq: 2600, q: 4 });
+    ruido({ dur: 0.06, gain: 0.08 * vol, type: 'bandpass', freq: 1900, q: 4, delay: 0.16 });
+  },
+  // cápsula batendo no chão
+  capsula: (vol = 1) => tone({ freq: 3400 + Math.random() * 900, to: 2600, dur: 0.05, type: 'triangle', gain: 0.012 * vol, delay: 0.35 }),
   jump: () => tone({ freq: 320, to: 520, dur: 0.1, type: 'triangle', gain: 0.035 }),
   pad: () => tone({ freq: 180, to: 760, dur: 0.32, type: 'sine', gain: 0.07 }),
   checkpoint: () => [660, 880, 1320].forEach((f, i) => tone({ freq: f, dur: 0.16, type: 'triangle', gain: 0.05, delay: i * 0.08 })),

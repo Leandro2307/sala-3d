@@ -4,9 +4,13 @@
 // confiança do resto da sala — é um jogo entre amigos, não um competitivo valendo nada.
 import * as THREE from 'three';
 import { COMBAT, RING, insideRing, ringCorners } from './arena.js';
+import { ARMAS, ARMA_PADRAO } from './armas-dados.js';
 
 const _a = new THREE.Vector3();
 const _b = new THREE.Vector3();
+const _d = new THREE.Vector3();
+const _lado = new THREE.Vector3();
+const _cima = new THREE.Vector3();
 
 export class Combat {
   constructor({ player, socket, getOthers, onState, onHitLanded, onKo, onDamage }) {
@@ -79,40 +83,63 @@ export class Combat {
   }
 
   // ------------------------------------------------------------------ atirar
-  // O raio sai da mira (origem/dir) e acerta o primeiro jogador no caminho — cada boneco vira
-  // três esferas empilhadas — se nenhuma parede (bloqueado) estiver antes. Devolve onde a bala
-  // parou, para desenhar o traçante, e quem levou, se alguém levou.
-  atirar({ origem, dir, bloqueado }) {
+  // Cada chumbo (a escopeta tem vários, as outras um) sai da mira (origem/dir), espalhado pela
+  // abertura da arma, e acerta o primeiro jogador no caminho — cada boneco vira três esferas
+  // empilhadas — se nenhuma parede (bloqueado) estiver antes. Devolve onde cada chumbo parou
+  // (para os traçantes) e o jogador que levou mais chumbos, com quantos.
+  atirar({ origem, dir, bloqueado, arma = ARMA_PADRAO }) {
+    const def = ARMAS[arma] || ARMAS[ARMA_PADRAO];
     if (this.cooldownTiro > 0 || this.knockedOut) return null;
-    this.cooldownTiro = COMBAT.cadenciaTiro;
-    let melhor = null;
-    for (const o of this.getOthers()) {
-      for (const altura of [0.45, 0.95, 1.45]) {
-        _a.set(o.position.x, o.position.y + altura, o.position.z).sub(origem);
-        const t = _a.dot(dir);
-        if (t < 0 || t > COMBAT.alcanceTiro) continue;
-        if (_a.lengthSq() - t * t > 0.42 * 0.42) continue;
-        if (!melhor || t < melhor.t) melhor = { alvo: o, t };
+    this.cooldownTiro = def.cadencia;
+    _lado.crossVectors(dir, _cima.set(0, 1, 0));
+    if (_lado.lengthSq() < 1e-6) _lado.set(1, 0, 0); // mirando reto para cima ou para baixo
+    _lado.normalize();
+    _cima.crossVectors(_lado, dir).normalize();
+    const pontos = [];
+    const acertos = new Map(); // alvo -> chumbos
+    for (let i = 0; i < def.chumbos; i++) {
+      _d.copy(dir);
+      if (def.abertura) {
+        const a = Math.random() * Math.PI * 2;
+        const r = Math.sqrt(Math.random()) * def.abertura;
+        _d.addScaledVector(_lado, Math.cos(a) * r).addScaledVector(_cima, Math.sin(a) * r).normalize();
       }
+      let melhor = null;
+      for (const o of this.getOthers()) {
+        for (const altura of [0.45, 0.95, 1.45]) {
+          _a.set(o.position.x, o.position.y + altura, o.position.z).sub(origem);
+          const t = _a.dot(_d);
+          if (t < 0 || t > def.alcance) continue;
+          if (_a.lengthSq() - t * t > 0.42 * 0.42) continue;
+          if (!melhor || t < melhor.t) melhor = { alvo: o, t };
+        }
+      }
+      const longe = melhor ? melhor.t : def.alcance;
+      const parede = bloqueado?.(origem, _d, longe);
+      if (parede != null && parede < longe) melhor = null;
+      pontos.push(origem.clone().addScaledVector(_d, melhor ? melhor.t : parede ?? def.alcance));
+      if (melhor) acertos.set(melhor.alvo, (acertos.get(melhor.alvo) || 0) + 1);
     }
-    const longe = melhor ? melhor.t : COMBAT.alcanceTiro;
-    const parede = bloqueado?.(origem, dir, longe);
-    if (parede != null && parede < longe) melhor = null;
-    const ponto = origem.clone().addScaledVector(dir, melhor ? melhor.t : parede ?? COMBAT.alcanceTiro);
-    if (!melhor) return { alvo: null, ponto, dirXZ: null };
-    _b.copy(melhor.alvo.position).sub(origem);
+    let alvo = null;
+    let n = 0;
+    for (const [o, q] of acertos) if (q > n) [alvo, n] = [o, q];
+    if (!alvo) return { alvo: null, n: 0, ponto: pontos[0], pontos, dirXZ: null };
+    _b.copy(alvo.position).sub(origem);
     _b.y = 0;
     _b.normalize();
-    return { alvo: melhor.alvo, ponto, dirXZ: [_b.x, _b.z] };
+    return { alvo, n, ponto: pontos[0], pontos, dirXZ: [_b.x, _b.z] };
   }
 
   // ------------------------------------------------------------------ apanhar
-  takeHit({ dir, from, fromName, arma }) {
+  // arma: id da arma (ou true, de quem ainda manda o formato antigo); n: chumbos que pegaram
+  takeHit({ dir, from, fromName, arma, n = 1 }) {
     if (this.knockedOut) return;
     const [dx, dz] = Array.isArray(dir) ? dir : [0, 0];
-    const dano = arma ? COMBAT.danoTiro : COMBAT.damage;
+    const def = arma ? ARMAS[arma] || ARMAS[ARMA_PADRAO] : null;
+    const chumbos = Math.max(1, Math.min(def?.chumbos || 1, Number(n) || 1));
+    const dano = def ? def.dano * chumbos : COMBAT.damage;
     const forte = this.health <= dano;
-    const push = forte ? COMBAT.koKnockback : arma ? COMBAT.empurraoTiro : COMBAT.knockback;
+    const push = forte ? COMBAT.koKnockback : def ? def.empurrao * Math.sqrt(chumbos) : COMBAT.knockback;
     this.player.vel.x += dx * push;
     this.player.vel.z += dz * push;
     this.player.vel.y = Math.max(this.player.vel.y, forte ? COMBAT.koLift : COMBAT.lift);

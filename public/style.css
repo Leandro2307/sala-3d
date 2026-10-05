@@ -1930,7 +1930,7 @@ body.touch .help-grid[data-input="touch"] { display: grid; }
   font-size: 10.5px;
   font-weight: 800;
 }
-.ep-palco { display: grid; grid-template-rows: auto auto auto auto auto; align-content: start; gap: 10px; min-width: 0; }
+.ep-palco { display: grid; align-content: start; gap: 10px; min-width: 0; min-height: 0; overflow-y: auto; }
 .ep-tela {
   position: relative;
   height: min(340px, 42dvh);
@@ -1973,9 +1973,18 @@ body.touch .help-grid[data-input="touch"] { display: grid; }
   .ep-tela { height: 220px; }
   .ep-grade { grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); overflow: visible; }
 }
+/* visual dentro do modal (cor, camiseta, arma): muda na hora, até dentro da sala */
+.ep-visual { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255, 255, 255, 0.02); }
+.ep-linha { display: grid; gap: 6px; }
+.ep-linha > span { font-size: 12px; font-weight: 600; color: var(--muted); }
+.swatches.mini { gap: 6px; }
+.swatches.mini button { width: 24px; height: 24px; }
+.segmented.armas { grid-template-columns: repeat(3, 1fr); gap: 2px; }
+.segmented.armas button { font-size: 12.5px; }
 #char-credito { display: block; margin-top: 6px; line-height: 1.45; }
 
 /* camisetas: cada botão mostra a cor do time */
+.segmented.shirts { grid-template-columns: repeat(3, 1fr); }
 .segmented.shirts button { position: relative; padding-left: 26px; }
 .segmented.shirts button::before {
   content: '';
@@ -2223,3 +2232,183 @@ body.touch #panel {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 1ms !important; transition-duration: 1ms !important; }
 }
+
+/* ------------------------------------------------------------ salas (salas.js), no jeito do Discord */
+#salas {
+  position: absolute;
+  top: 16px;
+  bottom: 88px;
+  left: max(12px, env(safe-area-inset-left));
+  width: 64px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: var(--glass-strong);
+  pointer-events: auto;
+}
+body.sem-salas #salas { display: none; }
+.salas-lista {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+  padding: 2px 0;
+  width: 100%;
+}
+.salas-lista::-webkit-scrollbar { display: none; }
+.sala-it {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  text-align: left;
+}
+/* o tracinho branco à esquerda: maior na sala atual, pequeno onde tem gente */
+.sala-it::before {
+  content: '';
+  position: absolute;
+  left: -10px;
+  top: 50%;
+  width: 4px;
+  height: 0;
+  border-radius: 0 4px 4px 0;
+  background: var(--text);
+  transform: translateY(-50%);
+  transition: height 160ms var(--ease);
+}
+.sala-it.viva::before { height: 8px; }
+.sala-it:hover::before { height: 20px; }
+.sala-it.on::before { height: 36px; }
+.sala-ic {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--c);
+  color: #fff;
+  font-weight: 800;
+  font-size: 14px;
+  letter-spacing: 0.02em;
+  transition: border-radius 160ms var(--ease), filter 160ms;
+}
+.sala-it:hover .sala-ic, .sala-it.on .sala-ic { border-radius: 14px; }
+.sala-it:not(.on):not(:hover) .sala-ic { filter: saturate(0.75) brightness(0.9); }
+.sala-qtd {
+  position: absolute;
+  right: -5px;
+  bottom: -4px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 10px;
+  border: 3px solid #12151d;
+  background: #23a55a;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 14px;
+  text-align: center;
+}
+.sala-cadeado {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid #12151d;
+  background: #2b3140;
+  color: #fbbf24;
+}
+.sala-rotulo { display: none; }
+.salas-sep { flex: none; width: 32px; height: 2px; border-radius: 1px; background: var(--line-strong); }
+.salas-add {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+  color: #23a55a;
+  transition: border-radius 160ms var(--ease), background-color 160ms, color 160ms;
+}
+.salas-add:hover { border-radius: 14px; background: #23a55a; color: #fff; }
+.salas-nova {
+  position: absolute;
+  left: calc(100% + 10px);
+  bottom: 0;
+  display: grid;
+  gap: 8px;
+  width: 240px;
+  padding: 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  background: var(--glass-strong);
+}
+.salas-nova > b { font-size: 13px; }
+.salas-nova .input-prefix input { height: 38px; }
+.salas-tip {
+  position: fixed;
+  z-index: 20;
+  max-width: 240px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #0d0f15;
+  border: 1px solid var(--line-strong);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  transform: translateY(-50%);
+  pointer-events: none;
+  font-size: 12.5px;
+  display: grid;
+  gap: 3px;
+}
+.salas-tip b { font-size: 14px; }
+.salas-tip small { color: var(--muted); }
+.salas-tip em { font-style: normal; color: #23a55a; font-weight: 600; }
+.salas-tip ul { list-style: none; margin: 4px 0 0; padding: 6px 0 0; border-top: 1px solid var(--line); display: grid; gap: 3px; }
+.salas-tip li { display: flex; align-items: center; gap: 6px; }
+.salas-tip li i { width: 8px; height: 8px; border-radius: 50%; background: var(--c); }
+.salas-tip li.mais { color: var(--muted); }
+/* o que ficava no canto esquerdo anda para o lado da coluna */
+body:not(.sem-salas):not(.touch) .room-chip { left: 88px; }
+body:not(.sem-salas):not(.touch) #controls-help { left: 88px; }
+#btn-salas.on { color: var(--accent); }
+
+/* toque: a coluna vira uma gaveta, aberta pelo botão da barra, com o nome ao lado de cada sala */
+body.touch #salas {
+  display: none;
+  top: calc(56px + env(safe-area-inset-top));
+  bottom: calc(8px + env(safe-area-inset-bottom));
+  left: max(8px, env(safe-area-inset-left));
+  width: min(260px, 70vw);
+  align-items: stretch;
+  padding: 10px 12px 10px 16px;
+  z-index: 6;
+  background: rgba(12, 14, 20, 0.97);
+}
+body.touch.salas-abertas #salas { display: flex; }
+body.touch .salas-lista { align-items: stretch; }
+body.touch .sala-rotulo { display: grid; gap: 1px; min-width: 0; }
+body.touch .sala-rotulo b { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body.touch .sala-rotulo small { color: var(--muted); font-size: 11.5px; }
+body.touch .salas-sep { align-self: center; }
+body.touch .salas-add { align-self: center; }
+body.touch .salas-nova { left: 8px; right: 8px; width: auto; bottom: 60px; }

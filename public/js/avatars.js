@@ -3,6 +3,11 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { criarPersonagem } from './modelo.js';
+import { criarArma, capsulaDa, ARMA_PADRAO } from './armas.js';
+
+// a arma na mão do boneco padrão: cano (+X da arma) para onde o braço aponta (-Y da mão) e o
+// "cima" da arma (+Y) para o +Z da mão, que vira o alto quando o braço está esticado à frente
+const BASE_MAO = new THREE.Matrix4().makeBasis(new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, 0, 1), new THREE.Vector3(-1, 0, 0));
 
 const FONT = "'Plus Jakarta Sans', system-ui, sans-serif";
 const EMOJI_FONT = "'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', sans-serif";
@@ -232,6 +237,7 @@ export class Avatar {
     this.ko = false;
     this.sitting = false;
     this.armado = false; // camiseta 22: anda com a arma na mão
+    this.tipoArma = ARMA_PADRAO;
     this.mira = 0; // segundos com o braço apontando (depois de um tiro)
     this.coice = 0;
     this.personagem = null; // modelo glTF, quando a pessoa escolhe um
@@ -532,38 +538,46 @@ export class Avatar {
     }
   }
 
-  // Arma de brinquedo: cano escuro, coronha amarela e faixa verde. Vai na mão do boneco
-  // padrão; nos personagens 3D (sem braço procedural) fica presa ao lado do corpo.
-  setArma(on) {
+  // Arma de verdade (armas.js): na mão direita do boneco padrão; nos personagens 3D (sem braço
+  // procedural) fica à frente do peito, apontada para a frente. tipo: pistola, fuzil...
+  setArma(on, tipo = this.tipoArma) {
     this.armado = !!on;
-    if (!on || this.armaMao) return;
-    const criar = () => {
-      const g = new THREE.Group();
-      const metal = new THREE.MeshStandardMaterial({ color: 0x2a2f3a, roughness: 0.35, metalness: 0.7 });
-      const cano = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.3, 0.07), metal);
-      cano.position.y = -0.15; // o braço aponta para -Y da mão: o cano segue o braço
-      const cabo = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.07, 0.15), new THREE.MeshStandardMaterial({ color: 0xfacc15, roughness: 0.5 }));
-      cabo.position.set(0, -0.04, -0.07);
-      const faixa = new THREE.Mesh(new THREE.BoxGeometry(0.065, 0.05, 0.075), new THREE.MeshStandardMaterial({ color: 0x16a34a, roughness: 0.5 }));
-      faixa.position.y = -0.2;
-      const ponta = new THREE.Object3D();
-      ponta.position.y = -0.31;
-      g.add(cano, cabo, faixa, ponta);
-      for (const m of [cano, cabo, faixa]) m.castShadow = true;
-      g.userData.ponta = ponta;
-      return g;
-    };
-    this.armaMao = criar();
-    this.arms[1].mao.add(this.armaMao);
-    this.armaSolta = criar();
-    this.armaSolta.position.set(0.36, 1.05, 0.28);
-    this.armaSolta.rotation.x = -Math.PI / 2; // cano para a frente (+Z do boneco)
-    this.inner.add(this.armaSolta);
+    if (tipo !== this.tipoArma) {
+      this.tipoArma = tipo;
+      this.removerArmas();
+    }
+    if (!on || this.armaMao || this.carregandoArma === tipo) return;
+    this.carregandoArma = tipo;
+    Promise.all([criarArma(tipo), criarArma(tipo)]).then(([mao, solta]) => {
+      if (this.tipoArma !== tipo) return; // trocou de arma enquanto baixava
+      this.carregandoArma = null;
+      this.removerArmas();
+      mao.quaternion.setFromRotationMatrix(BASE_MAO);
+      this.arms[1].mao.add(mao);
+      solta.rotation.y = -Math.PI / 2; // cano (+X) para a frente do boneco (+Z)
+      solta.position.set(0.2, 1.12, 0.34);
+      this.inner.add(solta);
+      this.armaMao = mao;
+      this.armaSolta = solta;
+    }).catch(() => { this.carregandoArma = null; });
+  }
+
+  removerArmas() {
+    this.armaMao?.removeFromParent();
+    this.armaSolta?.removeFromParent();
+    this.armaMao = null;
+    this.armaSolta = null;
+  }
+
+  // a arma que aparece agora (na mão ou à frente do peito)
+  get armaAtiva() {
+    return this.personagem ? this.armaSolta : this.armaMao;
   }
 
   atirar() {
     this.mira = 1.4;
     this.coice = 1;
+    this.armaAtiva?.userData.animador.disparar();
   }
 
   // ponta do cano em coordenadas do mundo (de onde sai o traçante)
@@ -691,6 +705,9 @@ export class Avatar {
     if (this.armaMao) {
       this.armaMao.visible = this.armado && !this.personagem && !this.veiculo;
       this.armaSolta.visible = this.armado && !!this.personagem && !this.veiculo;
+      const arma = this.armaAtiva;
+      // coice, clarão e engatilhar; a cápsula só pula se dá para ver o boneco
+      if (arma.userData.animador.update(dt) && arma.visible && this.inner.visible && this.group.visible) capsulaDa(arma, this.group.position.y);
     }
     if (!this.isLocal && this.hasTarget) {
       const k = 1 - Math.exp(-dt * 12);
@@ -790,13 +807,26 @@ export class Avatar {
         dir.cotovelo.rotation.x = 0.35;
       }
 
-      // depois de um tiro, o braço da arma fica apontando para a frente (com o coice)
-      if (this.mira > 0 && this.armado && !sentado && this.swing <= 0) {
-        this.mira -= dt;
+      // armado: arma longa fica no ombro, com a mão esquerda no guarda-mão; a pistola fica
+      // baixa, pronta, e sobe apontando por um tempo depois de cada tiro
+      if (this.armado && this.armaMao && !sentado && this.swing <= 0 && !(this.waveTime > 0)) {
+        const def = this.armaMao.userData.def;
+        if (this.mira > 0) this.mira -= dt;
         this.coice = Math.max(0, this.coice - dt * 7);
+        const k = this.coice * Math.min(1, def.coice);
         const dir = this.arms[1];
-        dir.raiz.rotation.set(-1.52 - this.coice * 0.35, 0, 0.1);
-        dir.cotovelo.rotation.x = 0.05 + this.coice * 0.25;
+        if (this.mira > 0 || def.apoio) {
+          dir.raiz.rotation.set(-1.52 - k * 0.3, 0, def.apoio ? 0.02 : 0.1);
+          dir.cotovelo.rotation.x = 0.05 + k * 0.2;
+        } else {
+          dir.raiz.rotation.set(-0.55, 0, 0.14);
+          dir.cotovelo.rotation.x = -0.75;
+        }
+        if (def.apoio) {
+          const esq = this.arms[0];
+          esq.raiz.rotation.set(-1.42 - k * 0.25, 0, 0.62);
+          esq.cotovelo.rotation.x = -0.12;
+        }
       }
 
       // soco: o braço direito dispara para frente e volta

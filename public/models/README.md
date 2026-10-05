@@ -252,3 +252,11 @@ Confira a licença de cada modelo. **CC BY** exige crédito ao autor — use o c
 `credito` e mantenha o nome visível. Personagens de jogos e filmes continuam
 pertencendo a quem os criou, mesmo quando alguém publica um modelo deles num
 banco gratuito: quem fez o upload não detém esse direito.
+
+## Armas
+
+`armas/*.glb` vêm do **Ultimate Guns Pack** de [Quaternius](https://quaternius.com)
+(baixados do [poly.pizza](https://poly.pizza/bundle/Ultimate-Guns-Pack-cpgUfI4t2F)), em domínio
+público (CC0). As medidas de cada uma (empunhadura, boca do cano, janela de ejeção) e os números
+de jogo (cadência, dano, alcance) ficam em `public/js/armas-dados.js`; coice, clarão, cápsulas e
+a visão em 1ª pessoa, em `public/js/armas.js`.

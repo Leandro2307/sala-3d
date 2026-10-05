@@ -21,7 +21,10 @@ const SHARE_SLOTS = 4;
 const MAX_CHAT = 60;
 const MAX_PHOTO = 60_000; // data URL da foto do rosto (128x128 jpeg dá ~12 kB)
 const PUNCH_RANGE = 4.5; // metros: folga sobre o alcance real, só para barrar absurdo
-const TIRO = { alcance: 85, cadenciaMs: 250 }; // arma da camiseta 22 (o cliente usa 80 m e 300 ms)
+// armas da camiseta 22 (public/js/armas-dados.js, lido no main()): cadência, alcance e chumbos
+// de cada uma. O servidor aceita 15% de folga na cadência (a rede não entrega no compasso exato).
+let ARMAS = { pistola: { cadencia: 0.3, alcance: 70, chumbos: 1 } };
+const armaDe = (u) => (Object.hasOwn(ARMAS, u.arma) ? ARMAS[u.arma] : ARMAS.pistola);
 const SHIRTS = ['none', 'lula', 'bolsonaro'];
 let PERSONAGENS = ['padrao']; // ids do catálogo (public/js/personagens.js), lido no main()
 const VOLTA_MIN = 6; // segundos: abaixo disso é atravessar a pista, não dar a volta
@@ -192,6 +195,29 @@ app.post('/sala-acesso', express.json({ limit: '2kb' }), async (req, res) => {
     return res.json({ ok: false, protegida: true, erro: 'Senha da sala errada.' });
   }
   res.json({ ok: true, protegida: true, passe: passeDa(sala) });
+});
+
+// Lista lateral de salas (salas.js): quantas pessoas há em cada sala que a pessoa já visitou.
+// Os nomes de quem está dentro só vão para salas abertas ou para quem tem o passe da sala.
+// Só consulta o que já está na memória: sala que ninguém abriu desde o reinício tem 0 pessoas.
+app.post('/salas-status', express.json({ limit: '8kb' }), (req, res) => {
+  const b = obj(req.body);
+  const passes = obj(b.passes);
+  const ids = [...new Set((Array.isArray(b.ids) ? b.ids : []).slice(0, 30).map(idDaSala))];
+  res.json({
+    salas: ids.map((id) => {
+      const room = rooms.get(id);
+      if (!room?.config) return { id, pessoas: 0 };
+      const pode = passeValido(room, passes[id]);
+      return {
+        id,
+        pessoas: room.users.size,
+        temSenha: !!room.entradaHash,
+        empresa: room.config.empresa || '',
+        nomes: pode ? [...room.users.values()].slice(0, 8).map((u) => ({ nome: u.name, cor: u.color })) : [],
+      };
+    }),
+  });
 });
 
 app.get('/config', (_req, res) => res.json({
@@ -556,7 +582,7 @@ function publicUser(u) {
     id: u.id, name: u.name, color: u.color, mic: u.mic,
     shares: [...u.shares.values()],
     posto: u.posto,
-    p: u.p, r: u.r, a: u.a, photo: u.photo, shirt: u.shirt, char: u.char, health: u.health, ko: u.ko, moedas: u.moedas,
+    p: u.p, r: u.r, a: u.a, photo: u.photo, shirt: u.shirt, char: u.char, arma: u.arma, health: u.health, ko: u.ko, moedas: u.moedas,
   };
 }
 
@@ -764,6 +790,7 @@ function attachSockets(io) {
         photo: cleanPhoto(data?.photo),
         shirt: SHIRTS.includes(data?.shirt) ? data.shirt : 'none',
         char: PERSONAGENS.includes(data?.char) ? data.char : 'padrao',
+        arma: Object.hasOwn(ARMAS, data?.arma ?? '') ? data.arma : 'pistola',
         health: 1,
         ko: false,
         ultimoDado: 0,
@@ -1080,6 +1107,18 @@ function attachSockets(io) {
       io.to(room.id).emit('user-update', { id: user.id, shirt: user.shirt });
     });
 
+    socket.on('arma', (tipo) => {
+      if (!user || typeof tipo !== 'string' || !Object.hasOwn(ARMAS, tipo)) return;
+      user.arma = tipo;
+      io.to(room.id).emit('user-update', { id: user.id, arma: tipo });
+    });
+
+    socket.on('color', (cor) => {
+      if (!user || !/^#[0-9a-f]{6}$/i.test(cor)) return;
+      user.color = cor;
+      io.to(room.id).emit('user-update', { id: user.id, color: cor });
+    });
+
     socket.on('char', (kind) => {
       if (!user) return;
       user.char = PERSONAGENS.includes(kind) ? kind : 'padrao';
@@ -1107,21 +1146,26 @@ function attachSockets(io) {
     // Tiro: só quem está com a camiseta 22. O servidor confere a camiseta, a cadência, que o
     // tiro saiu de perto de quem atirou e o alcance; o traçante vai para todo mundo ver.
     socket.on('tiro', (msg) => {
-      const { to, dir, de, ate } = obj(msg);
+      const { to, dir, de, ate, mais, n } = obj(msg);
       if (!user || user.shirt !== 'bolsonaro' || !jogoLigado(room, 'armas')) return;
+      const arma = armaDe(user);
       const agora = Date.now();
-      if (agora - (user.ultimoTiro || 0) < TIRO.cadenciaMs) return;
+      if (agora - (user.ultimoTiro || 0) < arma.cadencia * 1000 * 0.85) return;
       user.ultimoTiro = agora;
       const ponto = (v) => (Array.isArray(v) && v.length === 3 && v.every((n) => Number.isFinite(Number(n))) ? v.map(Number) : null);
       const a = ponto(de);
       const b = ponto(ate);
-      if (!a || !b || dist(a, user.p) > 6 || dist(a, b) > TIRO.alcance) return;
-      socket.to(room.id).emit('tiro', { id: user.id, de: a, ate: b });
+      const alcance = arma.alcance + 5;
+      if (!a || !b || dist(a, user.p) > 6 || dist(a, b) > alcance) return;
+      // os outros chumbos da escopeta, só para desenhar
+      const extras = (Array.isArray(mais) ? mais : []).slice(0, arma.chumbos - 1).map(ponto).filter((p) => p && dist(a, p) <= alcance);
+      socket.to(room.id).emit('tiro', { id: user.id, de: a, ate: b, mais: extras, arma: user.arma });
       const alvo = room.users.get(to);
-      if (!alvo || alvo.id === user.id || dist(user.p, alvo.p) > TIRO.alcance) return;
+      if (!alvo || alvo.id === user.id || dist(user.p, alvo.p) > alcance) return;
       const d = Array.isArray(dir) ? dir.slice(0, 2).map(Number) : [0, 0];
       if (!d.every(Number.isFinite)) return;
-      io.to(to).emit('hit', { from: user.id, fromName: user.name, dir: d, arma: true });
+      const chumbos = Math.max(1, Math.min(arma.chumbos, Math.floor(Number(n)) || 1));
+      io.to(to).emit('hit', { from: user.id, fromName: user.name, dir: d, arma: user.arma, n: chumbos });
     });
 
     socket.on('health', (v) => {
@@ -1410,6 +1454,7 @@ async function loadCert() {
 async function main() {
   ESCRITORIO = await import('./public/js/escritorio.js');
   PERSONAGENS = (await import('./public/js/personagens.js')).IDS_PERSONAGENS;
+  ARMAS = (await import('./public/js/armas-dados.js')).ARMAS;
   // o banco antes de abrir a porta: quem entrar já encontra a sala e as moedas no lugar
   await banco.iniciar();
   const io = new Server({ cors: { origin: true }, maxHttpBufferSize: 1e6 });
