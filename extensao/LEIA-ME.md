@@ -29,8 +29,14 @@ Se mover a pasta do projeto, rode o `instalar.bat` de novo.
 1. Compartilhe uma **aba** do Chrome — ou uma janela/tela, se instalou o ajudante acima.
 2. No botão de compartilhar → **Suas telas**, clique no ícone de cursor da tela para
    **permitir controle**. Clique de novo para tirar.
-3. Quem quiser mexer abre a sua tela (E ou clique) e aperta **Controlar a aba**.
-   Mouse, roda e teclado vão para a aba; **Esc** para de controlar. Ctrl+V cola texto.
+3. Quem quiser mexer tem dois jeitos:
+   - **Mesa** (tecla **Tab**): todas as telas da sala lado a lado, como monitores. Nas telas
+     liberadas não precisa apertar nada: o mouse mexe na tela que está embaixo dele e o
+     teclado vai para a última clicada. **Alt+1…9** troca de monitor, **Alt+Enter** amplia.
+   - **Uma tela só**: abre a sua tela (E ou clique) e aperta **Controlar**.
+
+   Nos dois, **Esc** volta para a sala com o mouse já girando a visão do boneco, e
+   **Shift+Esc** manda um Esc para a tela. Ctrl+V cola texto.
 
 Enquanto alguém controla, o Chrome mostra uma barra amarela dizendo que a extensão está
 depurando o navegador. É assim que ela consegue clicar na aba. Fechar essa barra corta o

@@ -155,6 +155,7 @@
           <span><kbd>Shift</kbd> correr</span>
           <span class="wide"><kbd>Clique</kbd> olhar com o mouse</span>
           <span><kbd>E</kbd> focar na tela</span>
+          <span><kbd>Tab</kbd> mesa de telas</span>
           <span><kbd>V</kbd> 1ª/3ª pessoa</span>
           <span><kbd>R</kbd> voltar ao checkpoint</span>
           <span><kbd>T</kbd> chat</span>
@@ -245,6 +246,7 @@
     </div>
 
     <div class="bar-right">
+      <button type="button" class="ghost" id="btn-mesa" data-tip="Mesa: todas as telas lado a lado (Tab)"><i data-icon="monitores"></i></button>
       <button type="button" class="ghost" data-panel="telao" data-tip="Telão: vídeos e lives"><i data-icon="tv"></i></button>
       <button type="button" class="ghost" data-panel="people" data-tip="Pessoas"><i data-icon="users"></i><span class="badge" id="people-badge">1</span></button>
       <button type="button" class="ghost" data-panel="chat" data-tip="Chat (T)"><i data-icon="chat"></i><span class="dot" id="chat-dot" hidden></span></button>
@@ -482,10 +484,32 @@
       <div class="focus-name"><span class="live-dot"></span><span id="focus-name">Tela</span></div>
       <div class="focus-actions">
         <button type="button" class="secondary small" id="focus-ctrl" hidden><i data-icon="cursor" data-size="16"></i>Controlar</button>
+        <button type="button" class="secondary small" id="focus-mesa" title="Todas as telas lado a lado (Tab)"><i data-icon="monitores" data-size="16"></i>Mesa</button>
         <button type="button" class="secondary small" id="focus-pin"><i data-icon="pin" data-size="16"></i>Pôr no telão</button>
         <button type="button" class="secondary small" id="focus-full"><i data-icon="maximize" data-size="16"></i>Tela cheia</button>
-        <button type="button" class="icon-btn" id="focus-close" aria-label="Fechar"><i data-icon="x"></i></button>
+        <button type="button" class="icon-btn" id="focus-close" aria-label="Fechar (Esc)"><i data-icon="x"></i></button>
       </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ mesa de trabalho (ver mesa.js) -->
+  <div id="mesa" hidden>
+    <header class="mesa-bar">
+      <div class="mesa-titulo"><i data-icon="monitores" data-size="18"></i><b>Mesa</b></div>
+      <nav class="mesa-tarefas" aria-label="Monitores"></nav>
+      <div class="mesa-acoes">
+        <span class="mesa-dica">Clique numa tela para digitar nela · <kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>9</kbd> troca · <kbd>Shift</kbd>+<kbd>Esc</kbd> manda Esc</span>
+        <button type="button" class="secondary small" data-mesa="ampliar" hidden></button>
+        <button type="button" class="icon-btn" data-mesa="cheia" title="Tela cheia (esconde as barras do Chrome)"><i data-icon="maximize" data-size="18"></i></button>
+        <button type="button" class="chip-btn" data-mesa="sair"><kbd>Esc</kbd> Voltar à sala</button>
+      </div>
+    </header>
+    <div class="mesa-area"></div>
+    <div class="mesa-vazia" hidden>
+      <i data-icon="monitores" data-size="40"></i>
+      <b>Ninguém está compartilhando agora</b>
+      <span>Quando alguém compartilhar uma aba, janela ou a tela inteira, ela aparece aqui como um monitor.</span>
+      <button type="button" class="primary small" data-mesa="compartilhar"><i data-icon="share" data-size="16"></i>Compartilhar minha tela</button>
     </div>
   </div>
 

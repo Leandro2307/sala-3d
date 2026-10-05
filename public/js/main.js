@@ -13,6 +13,7 @@ import { Corrida, PISTA, largada, formatarVolta, projetar, pontoEm } from './pis
 import { sfx, audioContext, setSfxEnabled } from './sfx.js';
 import { Jogos } from './jogos.js';
 import { Controle } from './controle.js';
+import { Mesa } from './mesa.js';
 import { Dados, MESA_DADOS } from './dados.js';
 import { icon, hydrateIcons } from './icons.js';
 import { isTouch, setupTouchControls, toggleFullscreen, isFullscreen, temTelaCheia } from './touch.js';
@@ -1092,22 +1093,75 @@ async function permitirControle(key) {
 // botão "Controlar" na tela em foco
 function updateFocusCtrl() {
   const btn = $('#focus-ctrl');
+  const fv = $('#focus-video');
   const t = state.focus?.kind === 'share' ? acharTela(state.focus.key) : null;
-  const pode = !!t?.share.controle;
-  if (!pode && controle.ativo) controle.desligar();
+  const pode = !!t?.share.controle && !t.user.isSelf;
+  if (!pode) controle.remover(fv);
+  const on = controle.tem(fv);
   btn.hidden = !pode;
-  btn.classList.toggle('on', controle.ativo);
-  btn.innerHTML = `${icon('cursor', 16)}${controle.ativo ? 'Parar de controlar (Esc)' : 'Controlar'}`;
+  btn.classList.toggle('on', on);
+  btn.innerHTML = `${icon('cursor', 16)}${on ? 'Parar de controlar' : 'Controlar'}`;
 }
 $('#focus-ctrl').addEventListener('click', () => {
-  if (controle.ativo) controle.desligar();
+  const fv = $('#focus-video');
+  if (controle.tem(fv)) controle.remover(fv);
   else if (state.focus?.kind === 'share') {
-    controle.ligar(state.focus.key, $('#focus-video'));
-    toast('Controlando: mouse, roda e teclado vão para a tela de quem compartilha. Esc para parar.', 'info', 4000);
+    controle.adicionar(fv, state.focus.key);
+    controle.focar(fv);
+    toast('Controlando: mouse, roda e teclado vão para a tela de quem compartilha. Esc volta para a sala.', 'info', 4000);
   }
   $('#focus-ctrl').blur();
   updateFocusCtrl();
 });
+
+// ------------------------------------------------------------------ mesa de trabalho
+// Todas as telas lado a lado, como monitores. Ver mesa.js.
+const mesa = new Mesa({
+  raiz: $('#mesa'),
+  controle,
+  // os outros primeiro (agrupados por pessoa), as suas no fim
+  telas: () => telasNoAr()
+    .sort((a, b) => (a.user.isSelf - b.user.isSelf) || a.user.name.localeCompare(b.user.name) || ordemDasTelas(a.share, b.share))
+    .map(({ user: u, share: sh }) => ({
+      key: sh.key,
+      nome: u.isSelf ? 'Você' : u.name,
+      onde: ondeEsta(sh),
+      cor: u.color,
+      minha: u.isSelf,
+      controle: !u.isSelf && !!sh.controle,
+      stream: shareVideo(sh)?.srcObject ?? null,
+    })),
+  aoCompartilhar: () => novaTela(),
+  aoTelaCheia: async () => {
+    const r = await toggleFullscreen();
+    if (!r.ok) toast('O navegador não deixou entrar em tela cheia. Tente a tecla F11.', 'warn', 5000);
+  },
+  aoFechar: () => fecharMesa(true),
+});
+controle.atalho = (e, a) => mesa.atalho(e, a);
+
+function abrirMesa() {
+  if (!state.joined || mesa.aberta) return;
+  if (state.focus) exitFocus();
+  if (state.panel) closePanel();
+  $('#share-pop').hidden = true;
+  $('#react-pop').hidden = true;
+  if (document.pointerLockElement) document.exitPointerLock();
+  player.keys.clear(); // tecla que estava apertada não fica andando por trás
+  mesa.abrir();
+  syncTouchVisibility();
+}
+
+// olhar: devolve o mouse para a visão do boneco (Esc e o botão de voltar)
+function fecharMesa(olhar) {
+  if (!mesa.aberta) return;
+  mesa.fechar();
+  syncTouchVisibility();
+  if (olhar) voltarAOlhar();
+}
+
+$('#btn-mesa').addEventListener('click', () => (mesa.aberta ? fecharMesa(true) : abrirMesa()));
+$('#focus-mesa').addEventListener('click', abrirMesa);
 
 // ------------------------------------------------------------------ vídeo do computador
 // O arquivo toca num <video> escondido e o captureStream() dele vira a "tela" que vai para
@@ -1376,6 +1430,7 @@ function refreshScreens() {
   if (state.focus?.kind === 'tv' && !midiaVisivel) exitFocus();
   if (state.focus?.kind === 'share' && !shareVideo(acharTela(state.focus.key)?.share)) exitFocus();
   renderMainSources();
+  mesa.atualizar();
 }
 
 function updateVolumes() {
@@ -2085,7 +2140,7 @@ const dados = new Dados({
     renderPeople();
   },
 });
-$('#dh-sair').addEventListener('click', exitFocus);
+$('#dh-sair').addEventListener('click', sairDoFoco);
 $('#pk-quit').addEventListener('click', () => run.abandon());
 
 player.on('jump', () => sfx.jump());
@@ -2174,6 +2229,7 @@ function updateHover() {
 function enterFocus(info) {
   if (!info) return;
   exitFocus();
+  fecharMesa(false);
   if (document.pointerLockElement) document.exitPointerLock();
   if (info.kind === 'dados') {
     state.focus = { kind: 'dados' };
@@ -2246,18 +2302,25 @@ function exitFocus() {
     $('#tv-focus-hud').hidden = true;
     $('#crosshair').hidden = false;
   } else {
-    controle.desligar();
+    controle.remover($('#focus-video'));
     $('#focus').hidden = true;
     $('#focus-video').srcObject = null;
-    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    if (document.fullscreenElement === $('#focus')) document.exitFullscreen().catch(() => {});
   }
   state.focus = null;
   syncTouchVisibility();
 }
 
-$('#focus-close').addEventListener('click', exitFocus);
-$('#jh-sair').addEventListener('click', exitFocus);
-$('#tv-focus-exit').addEventListener('click', exitFocus);
+// Saída pedida pela pessoa (Esc, E, botão de fechar): além de sair, o mouse já volta a girar a
+// visão do boneco, sem precisar clicar na sala de novo.
+function sairDoFoco() {
+  exitFocus();
+  voltarAOlhar();
+}
+
+$('#focus-close').addEventListener('click', sairDoFoco);
+$('#jh-sair').addEventListener('click', sairDoFoco);
+$('#tv-focus-exit').addEventListener('click', sairDoFoco);
 $('#focus-full').addEventListener('click', () => {
   if (document.fullscreenElement) document.exitFullscreen();
   else $('#focus').requestFullscreen().catch(() => {});
@@ -2301,7 +2364,7 @@ function closePanel() {
 // eles ficariam por cima do vídeo, atrapalhando tocar nos controles do player)
 function syncTouchVisibility() {
   if (!touchPad) return;
-  const livre = state.joined && !state.panel && !state.focus;
+  const livre = state.joined && !state.panel && !state.focus && !mesa.aberta;
   touchPad.show(livre);
   if (!livre) touchPad.reset();
 }
@@ -2472,11 +2535,10 @@ $('#set-mic-device').addEventListener('change', async (e) => {
 window.addEventListener('keydown', (e) => {
   if (!state.joined) return;
   if (e.code === 'Escape') {
+    // Esc sai de vez (mesmo controlando a tela) e devolve o mouse para a visão do boneco
     if (typing()) document.activeElement.blur();
-    else if (controle.ativo) {
-      controle.desligar();
-      updateFocusCtrl();
-    } else if (state.focus) exitFocus();
+    else if (mesa.aberta) fecharMesa(true);
+    else if (state.focus) sairDoFoco();
     else if (!$('#react-pop').hidden) $('#react-pop').hidden = true;
     else if (state.panel) closePanel();
     else run.abandon(); // preso no parkour? Esc sai da corrida
@@ -2487,8 +2549,12 @@ window.addEventListener('keydown', (e) => {
   if ((state.focus?.kind === 'jogo' || state.focus?.kind === 'dados') && !['KeyE', 'KeyM', 'KeyT', 'Enter'].includes(e.code)) return;
   switch (e.code) {
     case 'KeyE':
-      if (state.focus) exitFocus();
+      if (state.focus) sairDoFoco();
       else if (state.hovered) enterFocus(state.hovered);
+      break;
+    case 'Tab':
+      e.preventDefault();
+      abrirMesa();
       break;
     case 'KeyR':
       if (!state.focus) respawn();
@@ -2544,11 +2610,22 @@ player.on('click', () => {
   if (!state.focus) lockPointer();
 });
 
-function lockPointer() {
+function lockPointer(avisar = false) {
   try {
     const p = world.canvas.requestPointerLock?.();
-    p?.catch?.(() => {});
+    p?.catch?.(() => {
+      if (avisar) toast('Clique na sala para voltar a mexer a visão.', 'info', 2600);
+    });
   } catch { /* ignorado */ }
+}
+
+// Depois de sair de uma tela, mesa ou jogo: trava o mouse de novo na visão do boneco.
+// O Chrome deixa travar sem clique quando foi a própria página que destravou (e foi: entrar
+// numa tela destrava). Se mesmo assim ele recusar, o aviso pede um clique.
+function voltarAOlhar() {
+  if (isTouch || !state.joined || state.panel || state.focus || mesa.aberta) return;
+  if (document.pointerLockElement === world.canvas) return;
+  lockPointer(true);
 }
 
 document.addEventListener('mousedown', (e) => {
@@ -2565,7 +2642,7 @@ if (params.get('debug') === '1') {
   window.__sala3d = {
     state, player, combat, run, corrida, world, settings, punch, goToRing, respawn,
     toggleVeiculo, irParaLargada, jogos, irParaMesa, exitFocus, dados,
-    tocarTela, telasMudas, liberarSomDasTelas, makeVideo,
+    tocarTela, telasMudas, liberarSomDasTelas, makeVideo, mesa, controle, abrirMesa, fecharMesa,
     publishShare, stopShare, acharTela, telasNoAr, get rtc() { return rtc; },
   };
 }
@@ -2693,7 +2770,8 @@ function frame() {
   localAvatar.update(dt, t);
   for (const u of state.users.values()) if (!u.isSelf) u.avatar.update(dt, t);
 
-  world.render();
+  // a mesa cobre tudo: sem desenhar o 3D sobra placa de vídeo para as telas
+  if (!mesa.aberta) world.render();
   requestAnimationFrame(frame);
 }
 
