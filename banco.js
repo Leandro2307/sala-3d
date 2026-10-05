@@ -29,6 +29,23 @@ function arquivo(nome) {
   };
 }
 
+const TABELAS = [
+  `CREATE TABLE IF NOT EXISTS sala3d_salas (
+    nome        VARCHAR(40)  NOT NULL,
+    config      TEXT         NOT NULL,
+    senha_hash  VARCHAR(200) NULL,
+    criada_em   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    mudou_em    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (nome)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  `CREATE TABLE IF NOT EXISTS sala3d_moedas (
+    nome      VARCHAR(40) NOT NULL,
+    saldo     INT         NOT NULL DEFAULT 100,
+    mudou_em  TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (nome)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+];
+
 const salasArq = arquivo('salas.json');
 const moedasArq = arquivo('moedas.json');
 let pool = null;
@@ -52,6 +69,8 @@ async function iniciar() {
     enableKeepAlive: true,
   });
   try {
+    // cria as tabelas se ainda não existirem (o mesmo de banco/sala3d.sql): não precisa do phpMyAdmin
+    for (const sql of TABELAS) await pool.query(sql);
     await pool.query('SELECT 1 FROM sala3d_salas LIMIT 1');
     await pool.query('SELECT 1 FROM sala3d_moedas LIMIT 1');
     console.log(`  Dados:         MySQL em ${DB_HOST}`);

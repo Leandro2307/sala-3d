@@ -1,4 +1,5 @@
--- Sala 3D: tabelas do MySQL (ver banco.js). Rode uma vez no phpMyAdmin do banco da sala.
+-- Sala 3D: tabelas do MySQL (ver banco.js). O servidor cria sozinho ao conectar; este arquivo
+-- é para quem preferir criar na mão pelo phpMyAdmin.
 -- No Render, em Environment: DB_HOST, DB_PORT (3306), DB_USER, DB_PASS, DB_NAME.
 -- No cPanel, em "MySQL remoto", libere o host % (o Render grátis não tem IP fixo).
 
