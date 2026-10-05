@@ -14,6 +14,7 @@ import { sfx, audioContext, setSfxEnabled } from './sfx.js';
 import { Jogos } from './jogos.js';
 import { Controle } from './controle.js';
 import { Mesa } from './mesa.js';
+import { Qualidade, NIVEIS, nivelInicial } from './qualidade.js';
 import { Dados, MESA_DADOS } from './dados.js';
 import { icon, hydrateIcons } from './icons.js';
 import { isTouch, setupTouchControls, toggleFullscreen, isFullscreen, temTelaCheia } from './touch.js';
@@ -33,7 +34,9 @@ const PANEL_TITLES = { people: 'Pessoas', chat: 'Chat da sala', telao: 'Telão',
 // ------------------------------------------------------------------ ajustes salvos
 const DEFAULTS = {
   name: '', color: COLORS[0], mic: true, voice: 100, screen: 90, tv: 80, spatial: false,
-  shareMode: 'detail', sens: 100, shadows: true, sfx: true, micDevice: '', helpCollapsed: false, photo: null, shirt: 'none', char: 'padrao',
+  shareMode: 'detail', sens: 100, sfx: true, micDevice: '', helpCollapsed: false, photo: null, shirt: 'none', char: 'padrao',
+  // qualidade gráfica: 'auto' ou um nível fixo; nivelAuto: onde o automático parou da última vez
+  qualidade: 'auto', nivelAuto: null, mostrarFps: false,
 };
 const stored = (() => {
   try { return JSON.parse(localStorage.getItem('sala3d') || '{}'); } catch { return {}; }
@@ -42,8 +45,8 @@ const settings = { ...DEFAULTS, ...stored };
 // o volume do telão se chamava "yt" quando ele só tocava YouTube
 if (stored.tv === undefined && stored.yt !== undefined) settings.tv = stored.yt;
 delete settings.yt;
-// celular: sombra custa caro e quase não se vê na tela pequena — só se o usuário nunca escolheu
-if (isTouch && stored.shadows === undefined) settings.shadows = false;
+// a chave "shadows" (liga/desliga sombra) virou a qualidade gráfica
+delete settings.shadows;
 // celular: a ajuda começa recolhida (a tela é pequena), mas continua a um toque
 if (isTouch && stored.helpCollapsed === undefined) settings.helpCollapsed = true;
 function saveSettings() {
@@ -60,8 +63,23 @@ if (isTouch) {
 let touchPad = null; // controles de toque (só no celular)
 
 // ------------------------------------------------------------------ mundo
-const world = new World($('#gl'), $('#css3d'));
-world.setShadows(settings.shadows);
+// O nível de partida decide o antialias, que só dá para escolher ao criar o renderizador.
+if (!NIVEIS[settings.qualidade]) settings.qualidade = 'auto';
+const nivelDePartida = settings.qualidade !== 'auto' ? settings.qualidade
+  : NIVEIS[settings.nivelAuto] ? settings.nivelAuto : nivelInicial();
+const world = new World($('#gl'), $('#css3d'), { antialias: NIVEIS[nivelDePartida].antialias, qualidade: NIVEIS[nivelDePartida] });
+const qualidade = new Qualidade(world, {
+  modo: settings.qualidade,
+  nivel: settings.nivelAuto,
+  aoMudar: (q) => {
+    // guarda onde o automático parou: a próxima visita já começa ali (com o antialias certo)
+    if (q.modo === 'auto' && settings.nivelAuto !== q.nivel) {
+      settings.nivelAuto = q.nivel;
+      saveSettings();
+    }
+    renderQualidade();
+  },
+});
 const localAvatar = new Avatar({ name: settings.name || 'Você', color: settings.color, isLocal: true });
 localAvatar.group.position.set(...SPAWN.pos);
 world.scene.add(localAvatar.group);
@@ -656,7 +674,11 @@ function bindSocket() {
   socket.on('emote', ({ id, kind }) => state.users.get(id)?.avatar.emote(kind));
   socket.on('jogo', (msg) => jogos.receber(msg));
   // mexendo na própria aba: sem o aviso de "fulano está mexendo na sua aba"
-  socket.on('controle', (msg) => controle.receber(self()?.shares.get(msg.key), msg.deId === state.selfId ? { ...msg, deId: null } : msg));
+  socket.on('controle', (msg) => {
+    const sh = self()?.shares.get(msg.key);
+    if (sh?.controle) turboDaTela(msg.key);
+    controle.receber(sh, msg.deId === state.selfId ? { ...msg, deId: null } : msg);
+  });
   socket.on('moedas', ({ id, moedas, delta, motivo }) => {
     const u = state.users.get(id);
     if (!u) return;
@@ -975,6 +997,18 @@ function marcaDaAba(key, nova) {
   renderSharePop();
 }
 
+// Alguém está controlando esta tela: ela vai a 60 quadros por segundo (cursor e rolagem fluidos)
+// e volta ao normal 5 s depois do último movimento — parada, 60 quadros só gastariam banda.
+const turbos = new Map(); // key -> timer
+function turboDaTela(key) {
+  if (!turbos.has(key)) rtc.turbo(key, true);
+  clearTimeout(turbos.get(key));
+  turbos.set(key, setTimeout(() => {
+    turbos.delete(key);
+    rtc.turbo(key, false);
+  }, 5000));
+}
+
 // diz à extensão quais abas estou compartilhando (ela abre nelas os links de aba nova e conta em
 // que site estão)
 function avisarAbas() {
@@ -986,6 +1020,8 @@ function stopShare(key, notify) {
   const sh = me?.shares.get(key);
   if (!sh) return;
   clearTimeout(sh.semMarca);
+  clearTimeout(turbos.get(key));
+  turbos.delete(key);
   rtc.stopScreen(key);
   controle.soltar(sh.aba);
   if (sh.alvo && sh.controle) controle.soltarJanela();
@@ -2629,14 +2665,42 @@ const bindToggle = (sel, key, apply) => {
   });
 };
 bindToggle('#set-spatial', 'spatial', updateVolumes);
-bindToggle('#set-shadows', 'shadows', (on) => world.setShadows(on));
 bindToggle('#set-sfx', 'sfx', (on) => setSfxEnabled(on));
+bindToggle('#set-fps', 'mostrarFps', (on) => { $('#fps').hidden = !on; });
+$('#fps').hidden = !settings.mostrarFps;
+
+// qualidade gráfica (ver qualidade.js)
+const DICAS_QUALIDADE = {
+  alta: 'Tudo no máximo: sombra nítida, mais luzes e a floresta inteira.',
+  media: 'Sombra mais simples, menos luzes e menos mato ao longe.',
+  baixa: 'Para PC fraco e celular: sem sombra, resolução menor e floresta rala.',
+};
+function renderQualidade() {
+  $$('#set-qualidade button').forEach((b) => b.classList.toggle('on', b.dataset.value === qualidade.modo));
+  const n = NIVEIS[qualidade.efetivo];
+  const res = qualidade.escala < 0.999 ? ` · resolução em ${Math.round(qualidade.escala * 100)}%` : '';
+  let dica = qualidade.modo === 'auto'
+    ? `Agora: ${n.nome}${res}. Ajusta sozinha para ficar em 60 quadros por segundo.`
+    : DICAS_QUALIDADE[qualidade.modo];
+  // antialias (bordas sem serrilhado) só muda ao recarregar
+  if (n.antialias !== world.renderer.getContextAttributes().antialias) dica += ' As bordas mudam ao recarregar a página.';
+  $('#qualidade-hint').textContent = dica;
+}
+renderQualidade();
+$('#set-qualidade').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-value]');
+  if (!b) return;
+  settings.qualidade = b.dataset.value;
+  saveSettings();
+  qualidade.definirModo(b.dataset.value);
+  renderQualidade();
+});
 
 function renderShareMode() {
   $$('#set-share-mode button').forEach((b) => b.classList.toggle('on', b.dataset.value === settings.shareMode));
   const preset = SHARE_PRESETS[settings.shareMode] || SHARE_PRESETS.detail;
   const dicas = {
-    detail: 'Para código, planilhas, slides: imagem parada e nítida.',
+    detail: 'Para código, planilhas, slides: imagem nítida a 30 quadros — e 60 enquanto alguém controla a tela.',
     motion: 'Para filme e vídeo: 30 quadros por segundo em 1080p.',
     game: 'Para jogo pesado: Full HD a 60 quadros por segundo. Se a internet apertar, ele derruba '
       + 'a resolução em vez dos quadros — é o que evita engasgo quando a placa de vídeo já está ocupada.',
@@ -2853,6 +2917,10 @@ function sendState(dt) {
 
 function slowUpdate() {
   updateVolumes();
+  if (settings.mostrarFps) {
+    const res = qualidade.escala < 0.999 ? ` ${Math.round(qualidade.escala * 100)}%` : '';
+    $('#fps').textContent = `${Math.round(qualidade.fps)} FPS · ${NIVEIS[qualidade.efetivo].nome}${res}`;
+  }
   for (const li of $$('#people-list .person')) {
     const u = state.users.get(li.dataset.id);
     li.classList.toggle('speaking', !!u?.speaking);
@@ -2872,7 +2940,8 @@ function slowUpdate() {
 
 function frame() {
   const now = performance.now();
-  const dt = Math.min((now - lastFrame) / 1000, 0.05);
+  const dtMs = now - lastFrame;
+  const dt = Math.min(dtMs / 1000, 0.05);
   lastFrame = now;
   elapsed += dt;
   const t = elapsed;
@@ -2914,8 +2983,10 @@ function frame() {
   localAvatar.update(dt, t);
   for (const u of state.users.values()) if (!u.isSelf) u.avatar.update(dt, t);
 
-  // a mesa cobre tudo: sem desenhar o 3D sobra placa de vídeo para as telas
-  if (!mesa.aberta) world.render();
+  // a mesa e a tela em foco cobrem tudo: sem desenhar o 3D sobra placa de vídeo para as telas
+  const desenhando = !mesa.aberta && state.focus?.kind !== 'share';
+  qualidade.quadro(dtMs, desenhando);
+  if (desenhando) world.render();
   requestAnimationFrame(frame);
 }
 

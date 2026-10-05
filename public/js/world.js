@@ -139,6 +139,47 @@ export class Collider {
 }
 
 // ------------------------------------------------------------------ telas
+// Textura de tela compartilhada que só manda quadro novo para a placa de vídeo quando vale a pena.
+// Cada envio é uma cópia da imagem inteira (8 MB em 1080p): a tela lá longe, pequena na imagem,
+// não precisa disso 60 vezes por segundo. O World decide o intervalo pela distância e pela
+// qualidade (atualizar()). Sem requestVideoFrameCallback, sobe no ritmo do intervalo.
+// Continua sendo VideoTexture: o three aloca vídeo de um jeito que aceita mudar de tamanho (o
+// WebRTC troca a resolução no meio do caminho conforme a rede).
+class TexturaDeTela extends THREE.VideoTexture {
+  constructor(video) {
+    super(video);
+    // o VideoTexture já pediu para marcar todo quadro novo para subir: quem decide agora é atualizar()
+    if (this._requestVideoFrameCallbackId) video.cancelVideoFrameCallback(this._requestVideoFrameCallbackId);
+    this._requestVideoFrameCallbackId = 0;
+    this.colorSpace = THREE.SRGBColorSpace;
+    this.novo = true;
+    this.ultimo = 0;
+    this.temRvfc = 'requestVideoFrameCallback' in video;
+    const pedir = () => {
+      this.rvfc = video.requestVideoFrameCallback(() => {
+        this.novo = true;
+        pedir();
+      });
+    };
+    if (this.temRvfc) pedir();
+  }
+
+  update() {} // o renderizador chama todo quadro; aqui não faz nada
+
+  atualizar(agora, intervalo) {
+    if ((this.temRvfc && !this.novo) || agora - this.ultimo < intervalo) return;
+    if (this.image.readyState < this.image.HAVE_CURRENT_DATA) return;
+    this.novo = false;
+    this.ultimo = agora;
+    this.needsUpdate = true;
+  }
+
+  dispose() {
+    if (this.rvfc) this.image.cancelVideoFrameCallback(this.rvfc);
+    super.dispose();
+  }
+}
+
 class ScreenDisplay {
   constructor({ w, h, title, subtitle, icon = 'monitor', accent = '#6ee7c8' }) {
     this.w = w;
@@ -291,8 +332,7 @@ class ScreenDisplay {
     if (this.video === video) return;
     this.clearVideo();
     this.video = video;
-    this.texture = new THREE.VideoTexture(video);
-    this.texture.colorSpace = THREE.SRGBColorSpace;
+    this.texture = new TexturaDeTela(video);
     this.videoMesh.material.map = this.texture;
     this.videoMesh.material.needsUpdate = true;
     this._fit = () => this.fitAspect();
@@ -363,11 +403,19 @@ class Telao extends ScreenDisplay {
 
 // ------------------------------------------------------------------ mundo
 export class World {
-  constructor(canvas, cssContainer) {
+  // antialias só dá para escolher ao criar o renderizador: vem do nível de qualidade salvo.
+  // qualidade: o nível de partida (ver setQualidade), aplicado antes de pré-compilar os shaders.
+  constructor(canvas, cssContainer, { antialias = true, qualidade = null } = {}) {
     this.canvas = canvas;
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: 'high-performance' });
-    // telas de celular têm DPR 3: renderizar nisso tudo derruba o fps sem ganho visível
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, isTouch ? 1.25 : 1.75));
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias, alpha: true, powerPreference: 'high-performance' });
+    // Resolução = densidade de pixels da tela, limitada pela qualidade (pixelMax), vezes a escala
+    // dinâmica (escala: a qualidade automática baixa um pouco quando o quadro passa do tempo).
+    // Telas de celular têm DPR 3: renderizar nisso tudo derruba o fps sem ganho visível.
+    this.pixelMax = isTouch ? 1.25 : 1.75;
+    this.escala = 1;
+    this.maxLuzes = 8;
+    this.videoFps = 60;
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.pixelMax));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -414,12 +462,22 @@ export class World {
     });
     const P = SALA.porta;
     this.portaBox = new THREE.Box3(new THREE.Vector3(SALA.maxX - 1, 0, P.z0), new THREE.Vector3(SALA.maxX + 1, P.altura, P.z1));
-    // O lado de fora só é desenhado quando alguém olha pela porta ou sai, e é aí que o
-    // navegador compilaria os shaders dele: a primeira olhada travava a tela por segundos.
-    // Compila tudo agora, enquanto a pessoa ainda está no lobby.
-    // Depois, um quadro invisível visto do alto manda terreno, árvores e texturas para a
-    // placa de vídeo — senão o primeiro passo para fora ainda engasgava uns 300 ms.
+    // qualidade antes do aquecimento: quantas luzes e se tem sombra fazem parte do shader
+    if (qualidade) this.setQualidade(qualidade, { aquecer: false });
+    this.aquecerShaders();
+
+    window.addEventListener('resize', () => this.resize());
+  }
+
+  // O lado de fora só é desenhado quando alguém olha pela porta ou sai, e é aí que o
+  // navegador compilaria os shaders dele: a primeira olhada travava a tela por segundos.
+  // Compila tudo agora (no lobby, ou logo depois de trocar a qualidade).
+  // Depois, um quadro invisível visto do alto manda terreno, árvores e texturas para a
+  // placa de vídeo — senão o primeiro passo para fora ainda engasgava uns 300 ms.
+  aquecerShaders() {
     this.fora.visible = true;
+    // o shader é compilado para um número de luzes: tem que ser o mesmo de todo quadro
+    this.atualizarLuzes();
     const aquecer = () => {
       const alvo = new THREE.WebGLRenderTarget(64, 64);
       const cam = new THREE.PerspectiveCamera(120, 1, 1, 4000);
@@ -441,8 +499,6 @@ export class World {
       this.renderer.compile(this.scene, this.camera);
       aquecer();
     }
-
-    window.addEventListener('resize', () => this.resize());
   }
 
   // -------------------------------------------------------------- construção
@@ -1819,10 +1875,80 @@ export class World {
     this.natureza?.update(time);
   }
 
-  setShadows(on) {
-    this.renderer.shadowMap.enabled = on;
-    this.sun.castShadow = on;
-    this.scene.traverse((o) => { if (o.material) o.material.needsUpdate = true; });
+  // -------------------------------------------------------------- qualidade
+  // luzes: quantas luzes pontuais ficam acesas; sombra: tamanho do mapa (0 = sem sombra);
+  // pixelMax: teto da densidade de pixels; densidade: fração da vegetação de longe;
+  // sombraArvores: árvores fazem sombra; videoFps: teto de quadros das telas no 3D.
+  setQualidade({ luzes, sombra, pixelMax, densidade, sombraArvores, videoFps }, { aquecer = true } = {}) {
+    // número de luzes e sombra ligada fazem parte do shader: mudou, pré-compila tudo de novo
+    const recompila = luzes !== this.maxLuzes || (sombra > 0) !== this.renderer.shadowMap.enabled;
+    this.maxLuzes = luzes;
+    const ligar = sombra > 0;
+    if (ligar !== this.renderer.shadowMap.enabled) {
+      this.renderer.shadowMap.enabled = ligar;
+      this.sun.castShadow = ligar;
+      // ligar/desligar sombra muda o shader de todos os materiais
+      this.scene.traverse((o) => {
+        for (const m of [].concat(o.material || [])) m.needsUpdate = true;
+      });
+    }
+    if (ligar && this.sun.shadow.mapSize.x !== sombra) {
+      this.sun.shadow.mapSize.set(sombra, sombra);
+      this.sun.shadow.map?.dispose();
+      this.sun.shadow.map = null; // o three cria de novo no tamanho novo
+    }
+    this.pixelMax = pixelMax;
+    this.aplicarResolucao();
+    this.natureza?.ajustar({ densidade, sombras: sombraArvores });
+    this.videoFps = videoFps;
+    if (recompila && aquecer) this.aquecerShaders();
+  }
+
+  setEscala(e) {
+    this.escala = e;
+    this.aplicarResolucao();
+  }
+
+  aplicarResolucao() {
+    const pr = Math.min(window.devicePixelRatio, this.pixelMax) * this.escala;
+    if (Math.abs(pr - this.renderer.getPixelRatio()) > 0.01) this.renderer.setPixelRatio(pr);
+  }
+
+  // Cada luz pontual custa em todo pixel de material padrão, e são vinte e poucas (postes da
+  // pista, cinema, mesas, brilho do xadrez). Só as mais perto da câmera ficam acesas — sempre
+  // exatamente maxLuzes, porque mudar a quantidade faz o three recompilar todos os shaders
+  // (engasgo de segundos). A última da lista vai apagando conforme a próxima se aproxima, para a
+  // troca não piscar. A cor é que escurece (a intensidade é animada por quem criou a luz).
+  atualizarLuzes() {
+    const cam = this.camera.position;
+    const lista = [];
+    this.scene.traverse((o) => {
+      if (!o.isPointLight) return;
+      // luz dentro de um grupo escondido já está apagada para o three: fica de fora da conta
+      for (let p = o.parent; p; p = p.parent) if (!p.visible) return;
+      if (!o.userData.cor) o.userData.cor = o.color.clone();
+      lista.push({ luz: o, d: o.getWorldPosition(_tmp).distanceTo(cam) });
+    });
+    lista.sort((a, b) => a.d - b.d);
+    const n = Math.min(this.maxLuzes, lista.length);
+    const proxima = lista[n]?.d ?? Infinity;
+    lista.forEach(({ luz, d }, i) => {
+      luz.visible = i < n;
+      const f = i < n ? THREE.MathUtils.clamp((proxima - d) / 12, 0, 1) : 0;
+      luz.color.copy(luz.userData.cor).multiplyScalar(f);
+    });
+  }
+
+  // quadros das telas compartilhadas no 3D: perto, no ritmo da qualidade; longe, bem menos
+  atualizarTelas() {
+    const agora = performance.now();
+    const base = 1000 / this.videoFps;
+    for (const s of this.screens || []) {
+      if (!s.texture) continue;
+      const d = s.group.getWorldPosition(_tmp).distanceTo(this.camera.position);
+      const intervalo = d < 35 ? base : d < 80 ? Math.max(base, 1000 / 30) : 100;
+      s.texture.atualizar(agora, intervalo - 2); // 2 ms de folga: quadro de 16,6 ms não pode cair para 30 fps
+    }
   }
 
   // Dentro da sala do cinema, só a porta deixa ver o lado de fora.
@@ -1853,6 +1979,8 @@ export class World {
     this.natureza?.seguirCamera(this.camera, performance.now() / 1000);
     this.atualizarTelao();
     this.cullFora();
+    this.atualizarLuzes(); // depois do cullFora: ele esconde grupos, e luz escondida não conta
+    this.atualizarTelas();
     for (const label of this.fadeLabels) {
       label.getWorldPosition(_tmp);
       const d = _tmp.distanceTo(this.camera.position);

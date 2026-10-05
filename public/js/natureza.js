@@ -372,6 +372,9 @@ function geoFrondosa() {
 
 // Agrupa instâncias por pedaço do mapa: assim o three descarta (frustum culling) os pedaços
 // fora da tela e fora da sombra, em vez de desenhar a floresta inteira todo quadro.
+// A ordem dentro de cada pedaço é embaralhada: na qualidade baixa desenha só as primeiras N
+// instâncias (InstancedMesh.count), e assim o que some é um ralear espalhado, não uma faixa.
+const densas = []; // malhas que a qualidade pode ralear
 function instanciar(scene, geo, mat, itens, { pedaco = 320, sombra = true } = {}) {
   const grupos = new Map();
   for (const it of itens) {
@@ -386,7 +389,15 @@ function instanciar(scene, geo, mat, itens, { pedaco = 320, sombra = true } = {}
   const cor = new THREE.Color();
   const eixoY = new THREE.Vector3(0, 1, 0);
   const malhas = [];
+  const sorteio = semente(itens.length);
   for (const lista of grupos.values()) {
+    for (let i = lista.length - 1; i > 0; i--) {
+      const j = Math.floor(sorteio() * (i + 1));
+      [lista[i], lista[j]] = [lista[j], lista[i]];
+    }
+    // árvore com tronco sólido (dentro da área jogável) vem primeiro e nunca some: sumir com
+    // ela deixaria uma parede invisível no lugar
+    lista.sort((a, b) => (b.fixa ? 1 : 0) - (a.fixa ? 1 : 0));
     const malha = new THREE.InstancedMesh(geo, mat, lista.length);
     lista.forEach((it, i) => {
       q.setFromAxisAngle(eixoY, it.rot);
@@ -401,8 +412,12 @@ function instanciar(scene, geo, mat, itens, { pedaco = 320, sombra = true } = {}
     malha.computeBoundingSphere();
     malha.castShadow = sombra;
     malha.receiveShadow = true;
+    malha.userData.total = lista.length;
+    malha.userData.fixas = lista.filter((it) => it.fixa).length;
+    malha.userData.sombra = sombra;
     scene.add(malha);
     malhas.push(malha);
+    densas.push(malha);
   }
   return malhas;
 }
@@ -669,6 +684,7 @@ export function criarNatureza(scene, renderer, { area, sala, reservas = [], estr
 
   // dois lados: os cones e troncos não têm tampa embaixo, e quem olha de baixo veria através
   const matPlanta = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, side: THREE.DoubleSide });
+  for (const a of [...pinheiros, ...frondosas]) a.fixa = dentro(a.x, a.z);
   instanciar(grupo, geoPinheiro(), matPlanta, pinheiros);
   instanciar(grupo, geoFrondosa(), matPlanta, frondosas);
   instanciar(grupo, pintar(new THREE.IcosahedronGeometry(1.1, 0).scale(1.3, 0.8, 1.3), '#4e7f39'), matPlanta, arbustos, { sombra: false });
@@ -693,6 +709,13 @@ export function criarNatureza(scene, renderer, { area, sala, reservas = [], estr
   return {
     lago,
     seguirCamera: (cam, t) => ceu.seguir(cam, t),
+    // qualidade: fração de árvores/arbustos/pedras desenhadas, e se as árvores fazem sombra
+    ajustar({ densidade = 1, sombras = true }) {
+      for (const m of densas) {
+        m.count = Math.max(1, m.userData.fixas, Math.ceil(m.userData.total * densidade));
+        m.castShadow = sombras && m.userData.sombra;
+      }
+    },
     update(t) {
       const dt = anterior == null ? 0 : Math.min(0.1, t - anterior);
       anterior = t;

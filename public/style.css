@@ -327,6 +327,20 @@ body.touch #hud, body.touch #bar, body.touch #touch { -webkit-user-select: none;
 }
 .room-chip .sep, .bar-left .sep { color: var(--muted); }
 #room-count { color: var(--muted); }
+/* contador de quadros por segundo (Ajustes → Mostrar FPS) */
+#fps {
+  position: absolute;
+  top: 62px;
+  left: 16px;
+  padding: 3px 9px;
+  border-radius: 8px;
+  background: var(--glass);
+  border: 1px solid var(--line);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
 .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px rgba(110, 231, 200, 0.15); }
 
 #crosshair {

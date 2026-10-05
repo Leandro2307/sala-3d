@@ -35,6 +35,7 @@
       <button id="copy-invite" class="chip-btn" type="button"><i data-icon="link" data-size="15"></i>Copiar convite</button>
     </div>
 
+    <div id="fps" hidden></div>
     <div id="crosshair"></div>
     <div id="hover-hint" hidden><kbd>E</kbd><span></span></div>
     <div id="sit-hint" hidden><kbd>C</kbd><span>Sentar</span></div>
@@ -466,9 +467,19 @@
         <span>Sensibilidade do mouse</span>
         <input type="range" id="set-sens" min="20" max="250" value="100">
       </label>
+      <div class="field">
+        <span>Qualidade gráfica</span>
+        <div class="segmented" id="set-qualidade">
+          <button type="button" data-value="auto">Automática</button>
+          <button type="button" data-value="alta">Alta</button>
+          <button type="button" data-value="media">Média</button>
+          <button type="button" data-value="baixa">Leve</button>
+        </div>
+        <small class="hint" id="qualidade-hint"></small>
+      </div>
       <label class="toggle-row">
-        <span><b>Sombras</b><small>Desligue se ficar lento</small></span>
-        <input type="checkbox" id="set-shadows" class="switch" checked>
+        <span><b>Mostrar FPS</b><small>Quadros por segundo, no canto da tela</small></span>
+        <input type="checkbox" id="set-fps" class="switch">
       </label>
       <label class="toggle-row">
         <span><b>Efeitos sonoros</b><small>Pulos, checkpoints, entradas</small></span>

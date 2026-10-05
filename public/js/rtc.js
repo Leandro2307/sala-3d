@@ -7,7 +7,7 @@
 export const SHARE_PRESETS = {
   detail: {
     label: 'Texto nítido',
-    fps: 15,
+    fps: 30, // com o "maintain-resolution", se faltar banda ele derruba quadros e não a nitidez
     width: 1920,
     height: 1080,
     maxBitrate: 3_500_000,
@@ -95,11 +95,42 @@ export class RTC {
     return SHARE_PRESETS[this.screens.get(key)?.preset || this.shareMode] || SHARE_PRESETS.detail;
   }
 
+  // Quadros e prioridade de cada tela agora: em turbo (alguém controlando) vai a 60 quadros e deixa
+  // o navegador baixar um pouco a resolução se apertar, em vez de engasgar o cursor e a rolagem.
+  envio(key) {
+    const scr = this.screens.get(key);
+    const preset = this.preset(key);
+    return scr?.turbo
+      ? { fps: 60, degradation: 'balanced', hint: 'motion' }
+      : { fps: preset.fps, degradation: preset.degradation, hint: preset.hint };
+  }
+
+  // Alguém está mexendo nesta tela (eventos de controle chegando): turbo liga. Quem chama desliga
+  // depois de uns segundos parado. Preset que já é 60 (jogo) não muda nada.
+  turbo(key, on) {
+    const scr = this.screens.get(key);
+    if (!scr || !!scr.turbo === on || this.preset(key).fps >= 60) return;
+    scr.turbo = on;
+    const preset = this.preset(key);
+    const { fps, hint } = this.envio(key);
+    const video = scr.stream.getVideoTracks()[0];
+    if (video && video.readyState === 'live') {
+      // "detail" faz o codificador entrar no modo de tela, que segura os quadros: para o turbo, "motion"
+      video.contentHint = hint;
+      video.applyConstraints({ frameRate: { ideal: fps, max: fps }, width: { ideal: preset.width }, height: { ideal: preset.height } })
+        .catch((err) => console.warn('[rtc] quadros da captura', err));
+    }
+    this.retuneAll();
+  }
+
   // Várias telas saindo ao mesmo tempo dividem a banda de quem compartilha: cada uma fica com
   // uma parte do teto do preset (nunca abaixo de 1,2 Mbps, para o texto continuar legível).
   bitrate(key) {
     const n = Math.max(1, this.screens.size);
-    return Math.max(1_200_000, Math.round(this.preset(key).maxBitrate / n));
+    const teto = this.preset(key).maxBitrate;
+    // turbo: 60 quadros com a banda de 30 deixaria cada quadro borrado
+    const total = this.screens.get(key)?.turbo ? Math.max(teto, SHARE_PRESETS.motion.maxBitrate) : teto;
+    return Math.max(1_200_000, Math.round(total / n));
   }
 
   // pede a aba/janela/tela ao navegador; quem chama decide se publica (addScreen)
@@ -160,7 +191,7 @@ export class RTC {
         if (track.kind === 'video') {
           init.sendEncodings = [{
             maxBitrate: this.bitrate(key),
-            maxFramerate: preset.fps,
+            maxFramerate: this.envio(key).fps,
             scaleResolutionDownBy: preset.scale * scr.extraScale,
             networkPriority: 'high',
             priority: 'high',
@@ -188,10 +219,11 @@ export class RTC {
         try {
           const params = sender.getParameters();
           if (!params.encodings || !params.encodings.length) params.encodings = [{}];
-          params.degradationPreference = preset.degradation;
+          const envio = this.envio(key);
+          params.degradationPreference = envio.degradation;
           Object.assign(params.encodings[0], {
             maxBitrate: this.bitrate(key),
-            maxFramerate: preset.fps,
+            maxFramerate: envio.fps,
             scaleResolutionDownBy: preset.scale * scr.extraScale,
             networkPriority: 'high',
             priority: 'high',
