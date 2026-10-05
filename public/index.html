@@ -463,6 +463,10 @@
         </div>
         <small class="hint" id="share-mode-hint">Vale para o próximo compartilhamento.</small>
       </div>
+      <div class="toggle-row" id="ext-row">
+        <span><b>Extensão de controle</b><small id="ext-status">Para deixarem mexer nas suas abas</small></span>
+        <button type="button" class="secondary small" id="ext-guia">Instalar</button>
+      </div>
       <label class="slider-row">
         <span>Sensibilidade do mouse</span>
         <input type="range" id="set-sens" min="20" max="250" value="100">
@@ -528,6 +532,47 @@
       <b>Ninguém está compartilhando agora</b>
       <span>Quando alguém compartilhar uma aba, janela ou a tela inteira, ela aparece aqui como um monitor.</span>
       <button type="button" class="primary small" data-mesa="compartilhar"><i data-icon="share" data-size="16"></i>Compartilhar minha tela</button>
+    </div>
+  </div>
+
+  <!-- ============================================================ guia da extensão (ver guia-extensao.js) -->
+  <div id="guia-ext" hidden>
+    <div class="guia-card" role="dialog" aria-modal="true" aria-labelledby="guia-titulo" tabindex="-1">
+      <header class="guia-head">
+        <h2 id="guia-titulo">Instalar a extensão de controle</h2>
+        <button type="button" class="icon-btn" data-guia="fechar" aria-label="Fechar"><i data-icon="x"></i></button>
+      </header>
+      <p class="guia-sub">Com ela, quem está na sala pode clicar e digitar nas abas que você compartilhar. Leva um minuto e é uma vez só, no Chrome ou no Edge do computador.</p>
+      <div class="guia-status" id="guia-status"></div>
+      <ol class="guia-passos">
+        <li data-passo="baixar">
+          <b>Baixe a extensão</b>
+          <a class="primary small" href="/sala3d-extensao.zip" download><i data-icon="baixar" data-size="15"></i>Baixar sala3d-extensao.zip</a>
+          <small>Depois, clique com o botão direito no arquivo baixado → <b>Extrair tudo</b> → <b>Extrair</b>.</small>
+        </li>
+        <li data-passo="abrir">
+          <b>Abra as extensões do Chrome</b>
+          <span class="guia-linha">Numa aba nova, cole na barra de endereço: <code>chrome://extensions</code>
+            <button type="button" class="chip-btn" data-guia="copiar"><i data-icon="copy" data-size="14"></i>Copiar</button></span>
+        </li>
+        <li data-passo="dev">
+          <p><b>Ligue o “Modo do desenvolvedor”</b>, no canto de cima, à direita</p>
+          <span class="guia-mock"><span>Modo do desenvolvedor</span><i class="guia-toggle"></i></span>
+        </li>
+        <li data-passo="carregar">
+          <p><b>Clique em “Carregar sem compactação”</b> e escolha a pasta <code>sala3d-extensao</code> que você extraiu</p>
+          <span class="guia-mock"><span class="guia-mock-btn">Carregar sem compactação</span><span class="guia-mock-btn apagado">Compactar extensão</span></span>
+        </li>
+        <li data-passo="liberar">
+          <b>Libere este site</b>
+          <small>Volte para esta aba, clique no ícone de quebra-cabeça do Chrome (ao lado da barra de endereço) → <b>Sala 3D — controle das abas</b> → <b>Liberar este site</b>. Dica: fixe a extensão no alfinete para ela ficar sempre à mão.</small>
+        </li>
+      </ol>
+      <details class="guia-extra" id="guia-janelas">
+        <summary>Controlar janelas e a tela inteira (opcional)</summary>
+        <p>Abas funcionam só com a extensão. Para deixarem mexer numa <b>janela</b> ou na <b>tela inteira</b>, é preciso o ajudante do Windows: na pasta extraída, abra <code>nativo</code> e dê dois cliques em <code>instalar.bat</code>. Depois, em <code>chrome://extensions</code>, clique em <b>Recarregar</b> na Sala 3D.</p>
+        <p>O ajudante mexe no mouse e no teclado de verdade, só dentro do que você compartilhou. <b>Ctrl+Alt+End</b> corta o controle na hora.</p>
+      </details>
     </div>
   </div>
 

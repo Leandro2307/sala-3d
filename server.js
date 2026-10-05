@@ -133,6 +133,22 @@ app.use('/vendor/three', express.static(path.join(__dirname, 'node_modules', 'th
 // players de HLS (.m3u8) e DASH (.mpd): só são baixados quando alguém cola um link desses
 app.use('/vendor/hls', express.static(path.join(__dirname, 'node_modules', 'hls.js', 'dist')));
 app.use('/vendor/dash', express.static(path.join(__dirname, 'node_modules', 'dashjs', 'dist', 'modern', 'esm')));
+// A extensão de controle para baixar (guia de instalação da sala). O .zip é montado aqui mesmo a
+// partir da pasta extensao/, uma vez só. Os arquivos ficam na raiz do .zip: o "Extrair tudo" do
+// Windows já cria a pasta "sala3d-extensao" com o manifest.json dentro — com uma pasta a mais lá
+// dentro, o Chrome reclamaria que não acha o manifesto.
+let extensaoZip = null;
+app.get('/sala3d-extensao.zip', (_req, res) => {
+  try {
+    extensaoZip ??= zipDaPasta(path.join(__dirname, 'extensao'));
+  } catch (err) {
+    console.warn('[extensão] não deu para montar o .zip', err);
+    return res.status(500).send('Não deu para montar a extensão.');
+  }
+  res.set({ 'Content-Type': 'application/zip', 'Content-Disposition': 'attachment; filename="sala3d-extensao.zip"' });
+  res.send(extensaoZip);
+});
+
 app.get('/config', (_req, res) => res.json({
   iceServers,
   shareSlots: SHARE_SLOTS,
@@ -286,6 +302,79 @@ function eventoDeControle(raw) {
     return e.a === 'abrir' && url ? { t: 'nav', a: 'abrir', url } : null;
   }
   return null;
+}
+
+// ZIP mínimo (deflate), só o que o "Extrair tudo" do Windows e o Chrome precisam.
+const CRC = Array.from({ length: 256 }, (_, n) => {
+  let c = n;
+  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  return c >>> 0;
+});
+function crc32(buf) {
+  let c = 0xffffffff;
+  for (const b of buf) c = CRC[(c ^ b) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+function zipDaPasta(raiz) {
+  const zlib = require('zlib');
+  const arquivos = [];
+  const andar = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) andar(p);
+      else arquivos.push(p);
+    }
+  };
+  andar(raiz);
+  const agora = new Date();
+  const hora = (agora.getHours() << 11) | (agora.getMinutes() << 5) | (agora.getSeconds() >> 1);
+  const dia = ((agora.getFullYear() - 1980) << 9) | ((agora.getMonth() + 1) << 5) | agora.getDate();
+  const locais = [];
+  const centrais = [];
+  let pos = 0;
+  for (const arq of arquivos.sort()) {
+    const nome = Buffer.from(path.relative(raiz, arq).split(path.sep).join('/'), 'utf8');
+    const dados = fs.readFileSync(arq);
+    const comp = zlib.deflateRawSync(dados, { level: 9 });
+    const crc = crc32(dados);
+    const loc = Buffer.alloc(30);
+    loc.writeUInt32LE(0x04034b50, 0);
+    loc.writeUInt16LE(20, 4); // versão para extrair
+    loc.writeUInt16LE(0x0800, 6); // nomes em UTF-8
+    loc.writeUInt16LE(8, 8); // deflate
+    loc.writeUInt16LE(hora, 10);
+    loc.writeUInt16LE(dia, 12);
+    loc.writeUInt32LE(crc, 14);
+    loc.writeUInt32LE(comp.length, 18);
+    loc.writeUInt32LE(dados.length, 22);
+    loc.writeUInt16LE(nome.length, 26);
+    loc.writeUInt16LE(0, 28);
+    const cen = Buffer.alloc(46);
+    cen.writeUInt32LE(0x02014b50, 0);
+    cen.writeUInt16LE(20, 4); // feito com
+    cen.writeUInt16LE(20, 6);
+    cen.writeUInt16LE(0x0800, 8);
+    cen.writeUInt16LE(8, 10);
+    cen.writeUInt16LE(hora, 12);
+    cen.writeUInt16LE(dia, 14);
+    cen.writeUInt32LE(crc, 16);
+    cen.writeUInt32LE(comp.length, 20);
+    cen.writeUInt32LE(dados.length, 24);
+    cen.writeUInt16LE(nome.length, 28);
+    cen.writeUInt32LE(pos, 42); // onde começa o cabeçalho local
+    locais.push(loc, nome, comp);
+    centrais.push(cen, nome);
+    pos += loc.length + nome.length + comp.length;
+  }
+  const central = Buffer.concat(centrais);
+  const fim = Buffer.alloc(22);
+  fim.writeUInt32LE(0x06054b50, 0);
+  fim.writeUInt16LE(arquivos.length, 8);
+  fim.writeUInt16LE(arquivos.length, 10);
+  fim.writeUInt32LE(central.length, 12);
+  fim.writeUInt32LE(pos, 16);
+  return Buffer.concat([...locais, central, fim]);
 }
 
 function enderecoWeb(raw) {

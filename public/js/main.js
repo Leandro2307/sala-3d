@@ -15,6 +15,7 @@ import { Jogos } from './jogos.js';
 import { Controle } from './controle.js';
 import { Mesa } from './mesa.js';
 import { Qualidade, NIVEIS, nivelInicial } from './qualidade.js';
+import { GuiaExtensao } from './guia-extensao.js';
 import { Dados, MESA_DADOS } from './dados.js';
 import { icon, hydrateIcons } from './icons.js';
 import { isTouch, setupTouchControls, toggleFullscreen, isFullscreen, temTelaCheia } from './touch.js';
@@ -1070,7 +1071,13 @@ function renderSharePop() {
   }
   const cabe = cabeMaisUma();
   const vaiProTelao = cabe && telasNoAr().filter((t) => t.share.slot != null).length >= world.slots.length;
-  pop.innerHTML = '<div class="sp-title">Suas telas</div>'
+  // um clique libera (ou tira) o controle de todas as telas que aceitam controle
+  const controlaveis = telas.filter((sh) => !sh.file);
+  const todasLiberadas = controlaveis.length > 0 && controlaveis.every((sh) => sh.controle);
+  const botaoTodas = controlaveis.length > 1 || (controlaveis.length === 1 && !todasLiberadas)
+    ? `<button type="button" class="sp-all${todasLiberadas ? ' on' : ''}" data-act="ctrl-all">${icon('cursor', 15)}${todasLiberadas ? 'Tirar o controle de todas' : 'Permitir controle em todas'}</button>`
+    : '';
+  pop.innerHTML = `<div class="sp-title">Suas telas</div>${botaoTodas}`
     + telas.map((sh) => {
       const noTelao = state.main === sh.key;
       return `<div class="sp-row" data-key="${esc(sh.key)}">
@@ -1111,6 +1118,9 @@ $('#share-pop').addEventListener('click', (e) => {
     case 'ctrl':
       permitirControle(key);
       break;
+    case 'ctrl-all':
+      controleEmTodas();
+      break;
     case 'stop-all':
       pararTodasAsTelas(true);
       break;
@@ -1127,8 +1137,63 @@ const controle = new Controle({
   onExtensao: () => {
     renderSharePop();
     avisarAbas();
+    guia.atualizar();
+    renderExtensao();
   },
 });
+
+// Guia de instalação da extensão (ver guia-extensao.js). Abre sozinho quando alguém tenta liberar
+// o controle sem ela, e fica em Ajustes → Extensão de controle.
+const guia = new GuiaExtensao({ raiz: $('#guia-ext'), controle });
+const abrirGuiaExtensao = (foco) => guia.abrir(foco);
+
+function renderExtensao() {
+  const { ok, liberado, versao } = controle.ext;
+  $('#ext-status').textContent = ok && liberado ? `Instalada e liberada neste site${versao ? ` · versão ${versao}` : ''}`
+    : ok ? 'Instalada, mas falta liberar este site'
+      : 'Para deixarem mexer nas suas abas';
+  $('#ext-guia').textContent = ok && liberado ? 'Ver guia' : ok ? 'Liberar' : 'Instalar';
+}
+renderExtensao();
+if (isTouch) $('#ext-row').hidden = true; // celular não compartilha tela
+$('#ext-guia').addEventListener('click', () => abrirGuiaExtensao());
+
+// A extensão está instalada e liberada neste site? Se não, abre o guia (no passo que falta).
+function extensaoPronta() {
+  if (controle.ext.ok && controle.ext.liberado) return true;
+  abrirGuiaExtensao();
+  return false;
+}
+
+// "Permitir controle em todas" do menu Suas telas — ou tira de todas, se já estão todas liberadas
+async function controleEmTodas() {
+  const telas = [...(self()?.shares.values() || [])].filter((s) => !s.file);
+  if (!telas.length) return;
+  if (telas.every((s) => s.controle)) {
+    for (const s of telas) {
+      socket.emit('controle-permitir', { key: s.key, on: false });
+      controle.soltar(s.aba);
+    }
+    if (telas.some((s) => s.alvo)) controle.soltarJanela();
+    toast('Ninguém mais mexe nas suas telas.');
+    return;
+  }
+  if (!extensaoPronta()) return;
+  const faltam = telas.filter((s) => !s.controle);
+  const abas = faltam.filter((s) => s.aba != null);
+  const janelas = faltam.filter((s) => s.aba == null && s.alvo);
+  const semAba = faltam.length - abas.length - janelas.length;
+  // janela e tela inteira: o ajudante nativo precisa estar instalado (sobe agora)
+  const janelasOk = janelas.length > 0 && !(await controle.retomarJanela())?.erro;
+  const liberar = janelasOk ? [...abas, ...janelas] : abas;
+  for (const s of liberar) socket.emit('controle-permitir', { key: s.key, on: true });
+  if (liberar.length) toast(`Controle liberado em ${liberar.length} ${liberar.length === 1 ? 'tela' : 'telas'}: quem abrir já pode mexer.`, 'success', 5000);
+  if (janelas.length && !janelasOk) {
+    toast('Janela e tela inteira precisam do ajudante do Windows — veja no guia.', 'warn', 8000);
+    abrirGuiaExtensao('janelas');
+  }
+  if (semAba) toast('Não reconheci uma das abas. Se ela já estava aberta antes da extensão, recarregue-a e compartilhe de novo.', 'warn', 8000);
+}
 
 // A aba compartilhada mudou de página: conta à sala o site e o título (para a barra de navegação).
 // Um envio por segundo no máximo — tem site que fica piscando o título ("(1) Nova mensagem").
@@ -1166,14 +1231,7 @@ async function permitirControle(key) {
     toast('Ninguém mais mexe nessa tela.');
     return;
   }
-  if (!controle.ext.ok) {
-    toast('Para deixarem mexer na sua tela, instale a extensão "Sala 3D — controle das abas" (pasta extensao do projeto) e recarregue esta página.', 'warn', 9000);
-    return;
-  }
-  if (!controle.ext.liberado) {
-    toast('Falta liberar este site: clique no ícone da extensão (quebra-cabeça do Chrome) aqui nesta aba e em "Liberar este site".', 'warn', 9000);
-    return;
-  }
+  if (!extensaoPronta()) return;
   if (sh.aba == null && !sh.alvo) {
     toast('Não reconheci a aba. Se ela já estava aberta antes da extensão, recarregue-a e compartilhe de novo.', 'warn', 9000);
     return;
@@ -1182,13 +1240,14 @@ async function permitirControle(key) {
   if (sh.aba == null) {
     const r = await controle.retomarJanela();
     if (r?.erro) {
-      toast('Para controlarem uma JANELA ou a TELA inteira, rode extensao\\nativo\\instalar.bat (uma vez) e clique em Recarregar na extensão. Abas funcionam sem isso.', 'warn', 11000);
+      toast('Janela e tela inteira precisam do ajudante do Windows — veja no guia. Abas funcionam sem isso.', 'warn', 8000);
+      abrirGuiaExtensao('janelas');
       return;
     }
   }
   socket.emit('controle-permitir', { key, on: true });
   toast(sh.aba != null
-    ? 'Pronto: quem abrir essa tela pode clicar em "Controlar". O Chrome mostra uma barra amarela de depuração enquanto isso — é normal.'
+    ? 'Pronto: quem abrir essa tela já pode mexer nela. O Chrome mostra uma barra amarela de depuração enquanto isso — é normal.'
     : 'Pronto: quem abrir essa tela vai mexer no mouse e no teclado de verdade do seu PC, dentro dela. Ctrl+Alt+End corta na hora.', 'success', 9000);
   if (sh.aba != null && !controle.navega) {
     toast('Sua extensão é a versão antiga: sem barra de navegação e com links de aba nova fora da tela. Em chrome://extensions, clique em Recarregar na "Sala 3D — controle das abas".', 'warn', 11000);
@@ -1265,12 +1324,19 @@ function updateFocusCtrl() {
     $('#focus-name').textContent = `${dono} · ${ondeEsta(t.share)}${!nav && t.share.site ? ` · ${t.share.site}` : ''}`;
   }
   if (!pode) controle.remover(fv);
+  // Liberada, já entra controlando — igual à mesa, sem botão no meio do caminho. "Só assistir"
+  // para de mexer até fechar o foco (state.focus.soAssistir).
+  else if (!controle.tem(fv) && !state.focus.soAssistir) {
+    controle.adicionar(fv, state.focus.key);
+    controle.focar(fv);
+  }
   const liberar = !!t && !pode && t.user.isSelf && !t.share.file && t.share.aba != null;
   const on = controle.tem(fv);
   btn.hidden = !pode && !liberar;
   btn.dataset.modo = liberar ? 'liberar' : 'controlar';
   btn.classList.toggle('on', on);
-  btn.innerHTML = `${icon('cursor', 16)}${liberar ? 'Permitir controle' : on ? 'Parar de controlar' : 'Controlar'}`;
+  btn.innerHTML = `${icon(liberar || !on ? 'cursor' : 'eye', 16)}${liberar ? 'Permitir controle' : on ? 'Só assistir' : 'Controlar'}`;
+  btn.title = on ? 'Parar de mexer nesta tela (continua vendo)' : '';
 }
 $('#focus-ctrl').addEventListener('click', async () => {
   const btn = $('#focus-ctrl');
@@ -1279,14 +1345,10 @@ $('#focus-ctrl').addEventListener('click', async () => {
   if (state.focus?.kind !== 'share') return;
   if (btn.dataset.modo === 'liberar') {
     await permitirControle(state.focus.key);
-    return; // o botão vira "Controlar" quando o servidor confirmar (share-update)
+    return; // vira controle direto quando o servidor confirmar (share-update)
   }
-  if (controle.tem(fv)) controle.remover(fv);
-  else {
-    controle.adicionar(fv, state.focus.key);
-    controle.focar(fv);
-    toast('Controlando: mouse, roda e teclado vão para a tela. Esc volta para a sala.', 'info', 4000);
-  }
+  state.focus.soAssistir = controle.tem(fv);
+  if (state.focus.soAssistir) controle.remover(fv);
   updateFocusCtrl();
 });
 
@@ -2745,6 +2807,7 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'Escape') {
     // Esc sai de vez (mesmo controlando a tela) e devolve o mouse para a visão do boneco
     if (typing()) document.activeElement.blur();
+    else if (guia.aberto) guia.fechar();
     else if (mesa.aberta) fecharMesa(true);
     else if (state.focus) sairDoFoco();
     else if (!$('#react-pop').hidden) $('#react-pop').hidden = true;
@@ -2752,7 +2815,7 @@ window.addEventListener('keydown', (e) => {
     else run.abandon(); // preso no parkour? Esc sai da corrida
     return;
   }
-  if (typing() || e.repeat) return;
+  if (typing() || e.repeat || guia.aberto) return;
   // comandando um tabuleiro: as teclas de andar/voar/socar ficam com o jogo
   if ((state.focus?.kind === 'jogo' || state.focus?.kind === 'dados') && !['KeyE', 'KeyM', 'KeyT', 'Enter'].includes(e.code)) return;
   switch (e.code) {
