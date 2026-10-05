@@ -6,17 +6,23 @@
 // estavam abertas) e marca os passos sozinha: instalada, liberada, pronta.
 
 import { icon } from './icons.js';
+import { VideoGuia, CENA_DO_PASSO } from './guia-video.js';
 
 const PASSOS = ['baixar', 'abrir', 'dev', 'carregar', 'liberar'];
+const semMovimento = matchMedia('(prefers-reduced-motion: reduce)');
 
 export class GuiaExtensao {
   constructor({ raiz, controle }) {
     this.raiz = raiz;
     this.controle = controle;
     this.timer = 0;
+    this.video = new VideoGuia(raiz.querySelector('#guia-video'));
     raiz.addEventListener('click', (e) => {
       if (e.target === raiz || e.target.closest('[data-guia="fechar"]')) this.fechar();
       if (e.target.closest('[data-guia="copiar"]')) this.copiar(e.target.closest('[data-guia="copiar"]'));
+      // clicar num passo mostra ele no vídeo (menos nos botões e links de dentro dele)
+      const passo = e.target.closest('[data-passo]');
+      if (passo && !e.target.closest('a, button')) this.video.tocar(CENA_DO_PASSO[passo.dataset.passo]);
     });
     raiz.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
@@ -33,6 +39,11 @@ export class GuiaExtensao {
     this.raiz.hidden = false;
     this.raiz.querySelector('#guia-janelas').open = foco === 'janelas';
     this.atualizar();
+    // o vídeo começa no passo que falta (quem pede menos movimento no sistema dá o play)
+    const { ok, liberado } = this.controle.ext;
+    const cena = CENA_DO_PASSO[!ok ? 'baixar' : !liberado ? 'liberar' : 'baixar'];
+    if (semMovimento.matches) this.video.mostrar(cena);
+    else this.video.tocar(cena);
     clearInterval(this.timer);
     this.timer = setInterval(() => window.postMessage({ sala3d: 'ping' }, location.origin), 1500);
     window.postMessage({ sala3d: 'ping' }, location.origin);
@@ -42,6 +53,7 @@ export class GuiaExtensao {
   fechar() {
     this.raiz.hidden = true;
     clearInterval(this.timer);
+    this.video.parar();
   }
 
   async copiar(btn) {
