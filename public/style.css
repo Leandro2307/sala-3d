@@ -1214,6 +1214,9 @@ body.touch .help-grid[data-input="touch"] { display: grid; }
 .modulo:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
 .modulo.breve { opacity: 0.55; cursor: default; }
 .jogos-lista { display: grid; }
+.deptos { display: grid; margin-top: 4px; }
+.deptos .toggle-row.compact { padding: 8px 0; }
+.depto b { display: inline-flex; align-items: center; gap: 8px; }
 .jogos-lista .toggle-row.compact { padding: 8px 0; }
 #placar-editor input[name="placarTitulo"] { width: 100%; }
 .placar-linhas { display: grid; gap: 6px; }

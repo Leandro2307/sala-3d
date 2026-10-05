@@ -449,7 +449,12 @@
       </form>
       <form id="sala-config" hidden autocomplete="off">
         <label class="field"><span>Nome da empresa</span><input name="empresa" maxlength="40" placeholder="Aparece no topo da sala"></label>
-        <div class="field"><span>Ambiente</span><div class="modulos" id="sala-modulos"></div></div>
+        <div class="field">
+          <span>Ambiente</span>
+          <div class="modulos" id="sala-modulos"></div>
+          <small class="hint" id="deptos-hint" hidden>Marque os departamentos da empresa: cada um vira uma sala com a cara do setor, e elas se encaixam dos dois lados de um corredor, com a recepção na entrada.</small>
+          <div class="deptos" id="sala-deptos" hidden></div>
+        </div>
         <div class="field" id="placar-editor" hidden>
           <span>Placar de metas <small class="opt">(Sala Comercial)</small></span>
           <input name="placarTitulo" maxlength="40" placeholder="Título — ex.: Metas de outubro">

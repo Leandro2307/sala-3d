@@ -16,6 +16,7 @@ import { Controle } from './controle.js';
 import { Mesa } from './mesa.js';
 import { Qualidade, NIVEIS, nivelInicial } from './qualidade.js';
 import { GuiaExtensao } from './guia-extensao.js';
+import { DEPARTAMENTOS, IDS_DEPARTAMENTOS } from './escritorio.js';
 import { Dados, MESA_DADOS } from './dados.js';
 import { icon, hydrateIcons } from './icons.js';
 import { isTouch, setupTouchControls, toggleFullscreen, isFullscreen, temTelaCheia } from './touch.js';
@@ -189,7 +190,7 @@ function acharTela(key) {
 const shareVideo = (sh) => (sh?.video?.srcObject ? sh.video : null);
 const compartilhando = () => (self()?.shares.size ?? 0) > 0;
 // slot null: com as 4 telas ocupadas, mais uma vai direto para o telão (só uma assim por sala)
-const ondeEsta = (sh) => (sh.slot == null ? 'Telão' : `Tela ${sh.slot + 1}`);
+const ondeEsta = (sh) => (sh.slot == null ? 'Telão' : world.rotuloTela(sh.slot));
 const ordemDasTelas = (a, b) => (a.slot ?? -1) - (b.slot ?? -1);
 const cabeMaisUma = () => {
   const telas = telasNoAr();
@@ -433,8 +434,7 @@ async function join() {
   $('#hud').hidden = false;
   $('#bar').hidden = false;
   localAvatar.setName(name);
-  const spawn = [SPAWN.pos[0] + (Math.random() - 0.5) * 8, 0, SPAWN.pos[2] + Math.random() * 3];
-  player.teleport(spawn, SPAWN.yaw);
+  irParaEntrada();
   player.enabled = true;
   updateMicButton();
   poderesMudaram(); // mostra o X (atirar) na ajuda de quem veste a 22
@@ -689,7 +689,7 @@ function bindSocket() {
   socket.on('sino', ({ nome, cor }) => {
     ultimoSino = Date.now();
     sfx.sino();
-    world.ambientes.comercial?.tocarSino();
+    world.escritorio?.tocarSino();
     toast(`${nome === settings.name ? 'Você' : nome} fechou uma venda!`, 'success', 5000, cor);
   });
   socket.on('moedas', ({ id, moedas, delta, motivo }) => {
@@ -945,7 +945,9 @@ async function novaTela() {
 // Reserva uma tela no servidor e manda o stream (captura ou arquivo) para todo mundo.
 // Devolve a chave da tela, ou null se não deu.
 async function publishShare(stream, { file = false, height = 0 } = {}) {
-  const res = await new Promise((resolve) => socket.emit('share-start', { streamId: stream.id }, resolve));
+  // no escritório, numa tela da sala onde a pessoa está
+  const sala = world.salaEm(player.pos.x, player.pos.z);
+  const res = await new Promise((resolve) => socket.emit('share-start', { streamId: stream.id, sala }, resolve));
   if (!res?.ok) {
     if (!file) for (const t of stream.getTracks()) t.stop();
     toast(res?.error || 'Não foi possível compartilhar.', 'error');
@@ -1369,11 +1371,9 @@ $('#focus-ctrl').addEventListener('click', async () => {
 // O dono da sala (quem criou a senha) escolhe o ambiente, quais jogos aparecem e o nome da
 // empresa — vale para todo mundo que entrar. O servidor guarda (banco.js) e também barra os jogos
 // desligados; aqui eles somem do mundo (World.ligarArea), da barra, da ajuda e das teclas.
-const AMBIENTES = [
-  { id: 'lazer', nome: 'Lazer', desc: 'Cinema, parque e todos os jogos', pronto: true },
-  { id: 'ti', nome: 'Sala do TI', desc: '8 telas na parede, bancadas e racks', pronto: true },
-  { id: 'comercial', nome: 'Sala Comercial', desc: 'Placar de metas, mesa e sino de venda', pronto: true },
-  { id: 'reuniao', nome: 'Sala de Reunião', desc: 'Mesa oval para 12 e o telão', pronto: true },
+const MODOS = [
+  { id: 'lazer', nome: 'Lazer', desc: 'Cinema, parque e todos os jogos' },
+  { id: 'escritorio', nome: 'Escritório', desc: 'Uma sala por departamento, ligadas por um corredor' },
 ];
 const JOGOS_DA_SALA = [
   ['parkour', 'Parkour', 'Circuito até o camarote'],
@@ -1387,7 +1387,18 @@ const JOGOS_DA_SALA = [
   ['armas', 'Arma da camiseta 22', ''],
 ];
 const AREAS_DE_JOGO = ['parkour', 'ringue', 'corrida', 'xadrez', 'dama', 'velha', 'dados'];
-const jogoLigado = (nome) => state.sala?.jogos?.[nome] !== false;
+// parkour e ringue ficam dentro do cinema: no escritório não existem
+const SO_NO_CINEMA = ['parkour', 'ringue'];
+const modoEscritorio = () => state.sala?.modulo === 'escritorio' && state.sala.departamentos?.length > 0;
+const jogoLigado = (nome) => state.sala?.jogos?.[nome] !== false && !(modoEscritorio() && SO_NO_CINEMA.includes(nome));
+const temSino = () => modoEscritorio() && state.sala.departamentos.includes('comercial');
+
+// onde a pessoa nasce e para onde volta: recepção do escritório, ou a frente do cinema
+function irParaEntrada() {
+  const e = world.entrada();
+  if (player.veiculo) toggleVeiculo();
+  player.teleport([e.pos[0] + (Math.random() - 0.5) * 4, 0, e.pos[2] + (Math.random() - 0.5) * 3], e.yaw);
+}
 let senhaDono = null; // só na memória: se a conexão cair, entra como dono de novo sozinho
 let formSujo = false; // o dono está mexendo no formulário: o que chega do servidor não apaga
 
@@ -1397,11 +1408,15 @@ function aplicarSala(cfg) {
   let mudou = false;
   for (const j of AREAS_DE_JOGO) mudou = world.ligarArea(j, jogoLigado(j)) || mudou;
   if (mudou) world.aquecerShaders(); // o número de luzes pode ter mudado
-  // ambiente do setor: mobília e quantidade de telas na parede (o TI tem 8)
-  if (world.setModulo(cfg.modulo)) refreshScreens();
-  world.ambientes.comercial?.placar(cfg.placar);
-  $('#sino').hidden = cfg.modulo !== 'comercial';
-  atualizarStatusTI();
+  // o cinema (Lazer) ou o prédio do escritório com os departamentos escolhidos
+  if (world.setModo(cfg)) {
+    refreshScreens();
+    // a planta mudou com gente dentro: volta para a entrada (senão alguém fica dentro de uma parede)
+    if (state.joined) irParaEntrada();
+  }
+  world.escritorio?.placar(cfg.placar);
+  $('#sino').hidden = !temSino();
+  atualizarPaineis();
   // desligou o que alguém estava usando agora
   if (!jogoLigado('poderes')) {
     if (player.voando) toggleVoar();
@@ -1424,7 +1439,9 @@ function aplicarSala(cfg) {
 function renderSala() {
   const cfg = state.sala;
   if (!cfg) return;
-  const amb = AMBIENTES.find((a) => a.id === cfg.modulo) || AMBIENTES[0];
+  const amb = modoEscritorio()
+    ? { nome: `Escritório (${cfg.departamentos.map((d) => DEPARTAMENTOS[d].nome).join(', ')})` }
+    : MODOS[0];
   const desligados = JOGOS_DA_SALA.filter(([j]) => !jogoLigado(j)).length;
   $('#sala-resumo').innerHTML = `<div class="sala-chip">${icon('predio', 18)}<span>
     <b>${esc(cfg.empresa || 'Sem nome de empresa')}</b>
@@ -1440,10 +1457,18 @@ function preencherConfig(forcar = false) {
   if (formSujo && !forcar) return;
   const cfg = state.sala;
   $('#sala-config').elements.empresa.value = cfg.empresa || '';
-  $('#sala-modulos').innerHTML = AMBIENTES.map((a) => `<label class="modulo${a.pronto ? '' : ' breve'}">
-      <input type="radio" name="modulo" value="${a.id}"${cfg.modulo === a.id ? ' checked' : ''}${a.pronto ? '' : ' disabled'}>
-      <b>${a.nome}</b><small>${a.pronto ? a.desc : `${a.desc} · em breve`}</small>
+  $('#sala-modulos').innerHTML = MODOS.map((a) => `<label class="modulo">
+      <input type="radio" name="modulo" value="${a.id}"${cfg.modulo === a.id ? ' checked' : ''}>
+      <b>${a.nome}</b><small>${a.desc}</small>
     </label>`).join('');
+  // departamentos do escritório: cada um vira uma sala (a ordem é a das vagas, a partir da recepção)
+  $('#sala-deptos').innerHTML = IDS_DEPARTAMENTOS.map((id) => {
+    const d = DEPARTAMENTOS[id];
+    return `<label class="toggle-row compact depto">
+      <span><b><i class="mon-cor" style="--c:${d.cor}"></i>${d.nome}</b><small>${d.descricao}</small></span>
+      <input type="checkbox" class="switch" value="${id}"${cfg.departamentos?.includes(id) ? ' checked' : ''}>
+    </label>`;
+  }).join('');
   $('#sala-jogos').innerHTML = JOGOS_DA_SALA.map(([j, nome, desc]) => `<label class="toggle-row compact">
       <span><b>${nome}</b>${desc ? `<small>${desc}</small>` : ''}</span>
       <input type="checkbox" class="switch" value="${j}"${jogoLigado(j) ? ' checked' : ''}>
@@ -1470,10 +1495,15 @@ function linhaDoPlacar(it = { nome: '', valor: '', meta: '' }) {
   div.querySelector('[name="pmeta"]').value = it.meta === '' ? '' : it.meta;
   lista.appendChild(div);
 }
+// o que aparece no formulário depende do modo e dos departamentos marcados
 const mostrarEditorDoPlacar = () => {
-  $('#placar-editor').hidden = $('#sala-config').querySelector('[name="modulo"]:checked')?.value !== 'comercial';
+  const escritorio = $('#sala-config').querySelector('[name="modulo"]:checked')?.value === 'escritorio';
+  $('#sala-deptos').hidden = !escritorio;
+  $('#deptos-hint').hidden = !escritorio;
+  $('#placar-editor').hidden = !(escritorio && $('#sala-deptos input[value="comercial"]')?.checked);
 };
 $('#sala-modulos').addEventListener('change', mostrarEditorDoPlacar);
+$('#sala-deptos').addEventListener('change', mostrarEditorDoPlacar);
 $('#placar-add').addEventListener('click', () => {
   linhaDoPlacar();
   formSujo = true;
@@ -1496,7 +1526,7 @@ const lerPlacar = () => ({
 // ---------------------------------------------------- sino (Sala Comercial)
 let ultimoSino = 0;
 function tocarSino() {
-  if (state.sala?.modulo !== 'comercial') return;
+  if (!temSino()) return;
   if (Date.now() - ultimoSino < 8000) {
     toast('O sino acabou de tocar — espere uns segundos.', 'info', 2500);
     return;
@@ -1508,18 +1538,32 @@ $('#sino').addEventListener('click', (e) => {
   tocarSino();
 });
 
-// ---------------------------------------------------- quadro de status (Sala do TI)
-function atualizarStatusTI() {
-  if (world.modulo !== 'ti') return;
+// ---------------------------------------------------- painéis do escritório (TI e central de telemarketing)
+// dados de verdade: quantas pessoas estão em cada sala e quantas telas cada sala tem no ar
+function atualizarPaineis() {
+  if (!world.escritorio) return;
+  const porSala = {};
+  for (const u of state.users.values()) {
+    const p = u.isSelf ? player.pos : u.avatar.group.position;
+    const sala = world.salaEm(p.x, p.z);
+    if (sala) porSala[sala] = (porSala[sala] || 0) + 1;
+  }
+  const telasPorSala = {};
+  for (const t of telasNoAr()) {
+    if (t.share.slot == null) continue;
+    const sala = world.planta?.salas.find((s) => t.share.slot >= s.primeiraTela && t.share.slot < s.primeiraTela + s.telas)?.id;
+    if (sala) telasPorSala[sala] = (telasPorSala[sala] || 0) + 1;
+  }
   const d = new Date();
-  world.ambientes.ti?.atualizar({
+  world.escritorio.status({
     empresa: state.sala?.empresa || '',
     pessoas: state.users.size,
-    telas: telasNoAr().filter((t) => t.share.slot != null).length,
+    porSala,
+    telasPorSala,
     hora: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`,
   });
 }
-setInterval(atualizarStatusTI, 5000);
+setInterval(atualizarPaineis, 5000);
 
 // a conexão caiu e voltou: o servidor esqueceu quem era dono, então prova de novo com a senha
 function reentrarComoDono() {
@@ -1574,6 +1618,7 @@ $('#sala-config').addEventListener('submit', (e) => {
   const cfg = {
     empresa: form.elements.empresa.value.trim(),
     modulo: form.querySelector('[name="modulo"]:checked')?.value || 'lazer',
+    departamentos: $('#sala-deptos input:checked').map((i) => i.value),
     jogos: Object.fromEntries($$('#sala-jogos input').map((i) => [i.value, i.checked])),
     placar: lerPlacar(),
   };
@@ -2250,6 +2295,8 @@ function respawn() {
   if (run.state !== 'idle' && run.checkpoint && run.checkpoint.data.type !== 'start') {
     teleportToCollider(run.checkpoint);
     flashPk('De volta ao checkpoint');
+  } else if (world.modo === 'escritorio') {
+    irParaEntrada();
   } else {
     goToStart();
   }

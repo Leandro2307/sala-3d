@@ -9,7 +9,8 @@ import { RING } from './arena.js';
 import { PISTA, CAMINHO, CURVAS, pontoEm, projetar } from './pista.js';
 import { criarNatureza } from './natureza.js';
 import { RESERVAS_JOGOS } from './tabuleiros.js';
-import { construirAmbiente } from './ambientes.js';
+import { construirEscritorio } from './escritorio3d.js';
+import { planta, salaEm, rotuloDaTela } from './escritorio.js';
 
 // Área jogável inteira (cercada): a sala do cinema num canto, em volta da origem, e o
 // autódromo ao ar livre a leste. O telão do cinema continua em minZ, perto da plateia.
@@ -32,14 +33,6 @@ const SLOT_LAYOUT = [
   { x: 24.6, y: 7.4, z: ROOM.minZ + 2.4, rotY: -0.26 },
   { x: -24.6, y: 17.6, z: ROOM.minZ + 2.4, rotY: 0.26 },
   { x: 24.6, y: 17.6, z: ROOM.minZ + 2.4, rotY: -0.26 },
-].map((s) => ({ ...s, w: 16, h: 9 }));
-// Sala do TI: mais 4 telas, uma coluna a mais de cada lado. Mais viradas para o centro (0,42) e
-// um pouco mais à frente, para a ponta de dentro não entrar na parede.
-const SLOT_LAYOUT_TI = [
-  { x: -42.6, y: 7.4, z: ROOM.minZ + 3.6, rotY: 0.42 },
-  { x: 42.6, y: 7.4, z: ROOM.minZ + 3.6, rotY: -0.42 },
-  { x: -42.6, y: 17.6, z: ROOM.minZ + 3.6, rotY: 0.42 },
-  { x: 42.6, y: 17.6, z: ROOM.minZ + 3.6, rotY: -0.42 },
 ].map((s) => ({ ...s, w: 16, h: 9 }));
 
 // ------------------------------------------------------------------ utilitários de textura
@@ -458,11 +451,18 @@ export class World {
     this.areas = new Map(); // ver area()
 
     this.buildLights();
-    this.buildRoom();
-    // a plateia de cinema é do ambiente Lazer; os outros ambientes trocam ela pela mobília do setor
+    // O cinema (casca, plateia e parede de telas) é do modo Lazer. No modo escritório ele some e o
+    // prédio do escritório aparece no mesmo terreno (ver setModo).
+    this.area('cinema', () => this.buildRoom());
+    const cinema = this.areas.get('cinema');
+    cinema.objetos.push(...this.luzesCinema);
+    // o chão de física e a cerca da área jogável (começam em y = -4) são do mundo todo: ficam sempre
+    cinema.colisoes = cinema.colisoes.filter((c) => c.min.y >= 0);
     this.area('plateia', () => this.buildAudience());
-    this.modulo = 'lazer';
-    this.ambientes = {}; // ti, comercial, reuniao: construídos na primeira vez que são escolhidos
+    this.modo = 'lazer';
+    this.escritorio = null;
+    this.slotsEscritorio = [];
+    this.telaoesEscritorio = [];
     this.buildScreens();
     // cada jogo é uma área: o dono da sala pode desligar (ver ligarArea)
     this.area('parkour', () => this.buildCourse());
@@ -542,6 +542,7 @@ export class World {
     const backGlow = new THREE.PointLight(0xd08bff, 180, 60, 1.2);
     backGlow.position.set(0, 18, 26);
     this.scene.add(backGlow);
+    this.luzesCinema = [screenGlow, backGlow]; // apagam junto com o cinema (modo escritório)
   }
 
   // O galpão ficou grande demais para uma sombra só: em vez de esticar o mapa de
@@ -822,7 +823,7 @@ export class World {
     this.slotMidia = null;
     this.setMidiaHost(this.mainScreen);
 
-    this.todosSlots = [...SLOT_LAYOUT, ...SLOT_LAYOUT_TI].map((l, i) => {
+    this.slotsCinema = SLOT_LAYOUT.map((l, i) => {
       const s = new ScreenDisplay({
         w: l.w, h: l.h,
         title: `Tela ${i + 1}`, subtitle: 'Livre — clique em "Compartilhar tela"',
@@ -831,18 +832,17 @@ export class World {
       s.group.position.set(l.x, l.y, l.z);
       s.group.rotation.y = l.rotY;
       s.aoMudar = () => { if (s.isHost) this.tvCss.visible = s.mostraMidia; };
-      s.group.visible = i < SLOT_LAYOUT.length; // as 4 extras só aparecem na Sala do TI
       this.scene.add(s.group);
       return s;
     });
-    this.slots = this.todosSlots.slice(0, SLOT_LAYOUT.length);
+    this.slots = this.slotsCinema;
 
     this.screens = [this.mainScreen, ...this.slots];
   }
 
   criarTelao(opts) {
     const t = new Telao(opts);
-    t.aoMudar = () => { if (t.isHost) this.tvCss.visible = t.mostraMidia; };
+    t.aoMudar = () => { if (t.isHost) this.tvCss.visible = t.mostraMidia && this.telaoVisivel(t); };
     this.scene.add(t.group);
     this.telaoes = this.telaoes || [];
     this.telaoes.push(t);
@@ -863,7 +863,8 @@ export class World {
     t.hole.getWorldPosition(this.tvCss.position);
     t.hole.getWorldQuaternion(this.tvCss.quaternion);
     this.tvCss.scale.setScalar(t.w / TV_PX.w);
-    this.tvCss.visible = t.mostraMidia;
+    // telão escondido (cinema no modo escritório): o player não fica flutuando no lugar dele
+    this.tvCss.visible = t.mostraMidia && this.telaoVisivel(t);
   }
 
   // Modo foco: a tela em foco fica com o player até sair do foco, perto ou longe.
@@ -884,22 +885,25 @@ export class World {
 
   telaoMaisPerto() {
     const cam = this.camera.position;
-    return this.telaoes.reduce((a, b) => (b.group.position.distanceTo(cam) < a.group.position.distanceTo(cam) ? b : a));
+    // só os que aparecem (no escritório o do cinema some; com a pista desligada, o dela também)
+    const vivos = this.telaoes.filter((t) => this.telaoVisivel(t));
+    return (vivos.length ? vivos : this.telaoes).reduce((a, b) => (b.group.position.distanceTo(cam) < a.group.position.distanceTo(cam) ? b : a));
   }
 
   // O player vai para o telão mais perto da câmera. A folga de 15% evita ficar trocando
   // quando alguém para bem no meio do caminho entre os dois.
   atualizarTelao() {
     if (this.telaoTravado || this.slotMidia || !this.telaoes) return;
-    if (!this.telaoes.includes(this.tvHost)) {
-      this.setMidiaHost(this.telaoMaisPerto());
+    if (!this.telaoes.includes(this.tvHost) || !this.telaoVisivel(this.tvHost)) {
+      const t = this.telaoMaisPerto();
+      if (t !== this.tvHost) this.setMidiaHost(t);
       return;
     }
     if (this.telaoes.length < 2) return;
     const cam = this.camera.position;
     const dist = (s) => s.group.position.distanceTo(cam);
     let perto = this.tvHost;
-    for (const s of this.telaoes) if (dist(s) < dist(perto) * 0.85) perto = s;
+    for (const s of this.telaoes) if (this.telaoVisivel(s) && dist(s) < dist(perto) * 0.85) perto = s;
     if (perto !== this.tvHost) this.setMidiaHost(perto);
   }
 
@@ -1889,28 +1893,99 @@ export class World {
     }
     for (const fn of this.decorAnimated) fn(time);
     this.natureza?.update(time);
-    this.ambientes[this.modulo]?.update?.(time);
+    this.escritorio?.update(time);
   }
 
-  // Ambiente da sala (escolhido pelo dono): troca a mobília da frente da parede de telas e,
-  // na Sala do TI, mostra 8 telas em vez de 4. Quem chama atualiza o que está em cada tela.
-  setModulo(modulo) {
-    if (this.modulo === modulo) return false;
-    this.modulo = modulo;
-    this.ligarArea('plateia', modulo === 'lazer');
-    for (const m of ['ti', 'comercial', 'reuniao']) {
-      if (m === modulo && !this.ambientes[m]) this.ambientes[m] = this.area(`ambiente-${m}`, () => construirAmbiente(m, this));
-      this.ligarArea(`ambiente-${m}`, m === modulo);
+  // -------------------------------------------------------------- modo da sala
+  // Lazer: o cinema de sempre. Escritório: o prédio com os departamentos que o dono escolheu (ver
+  // escritorio.js / escritorio3d.js), no mesmo terreno do cinema — o parque lá fora continua.
+  // Devolve true se mudou alguma coisa (aí quem chama atualiza o que está em cada tela).
+  setModo({ modulo, departamentos = [], empresa = '' }) {
+    const escritorio = modulo === 'escritorio' && departamentos.length > 0;
+    const chave = escritorio ? `escritorio:${departamentos.join(',')}:${empresa}` : 'lazer';
+    if (chave === this.chaveModo) return false;
+    this.chaveModo = chave;
+    this.modo = escritorio ? 'escritorio' : 'lazer';
+    this.desmontarEscritorio();
+    this.ligarArea('cinema', !escritorio);
+    this.ligarArea('plateia', !escritorio);
+    this.mainScreen.group.visible = !escritorio;
+    for (const s of this.slotsCinema) {
+      s.group.visible = !escritorio;
+      if (escritorio) s.clearVideo();
     }
-    const n = modulo === 'ti' ? this.todosSlots.length : SLOT_LAYOUT.length;
-    this.todosSlots.forEach((s, i) => {
-      s.group.visible = i < n;
-      if (i >= n) s.clearVideo(); // tela que sumiu não fica segurando vídeo
-    });
-    this.slots = this.todosSlots.slice(0, n);
+    if (escritorio) this.montarEscritorio(departamentos, empresa);
+    this.slots = escritorio ? this.slotsEscritorio : this.slotsCinema;
     this.screens = [...this.telaoes, ...this.slots];
-    this.aquecerShaders(); // mobília nova: compila agora, não na primeira olhada
+    if (!this.telaoVisivel(this.tvHost)) this.setMidiaHost(this.telaoMaisPerto());
+    this.aquecerShaders(); // salas novas: compila agora, não na primeira olhada
     return true;
+  }
+
+  montarEscritorio(departamentos, empresa) {
+    this.planta = planta(departamentos);
+    this.escritorio = this.area('escritorio', () => construirEscritorio(this, this.planta, { empresa }));
+    // as telas de compartilhar, na ordem das salas (é a mesma ordem das telas no servidor)
+    this.slotsEscritorio = this.escritorio.telas.map((t, i) => {
+      const s = new ScreenDisplay({ w: t.w, h: t.h, title: t.rotulo, subtitle: 'Livre — clique em "Compartilhar tela"' });
+      s.index = i;
+      s.group.position.set(...t.pos);
+      s.group.rotation.y = t.rotY;
+      s.aoMudar = () => { if (s.isHost) this.tvCss.visible = s.mostraMidia; };
+      this.scene.add(s.group);
+      return s;
+    });
+    this.telaoesEscritorio = this.escritorio.telaoes.map((t) => {
+      const tel = this.criarTelao({ w: t.w, h: t.h, title: 'Telão', subtitle: 'Cole um link (YouTube, Twitch, Kick…) ou fixe a tela de alguém aqui', accent: '#a78bfa' });
+      tel.group.position.set(...t.pos);
+      tel.group.rotation.y = t.rotY;
+      return tel;
+    });
+  }
+
+  // tira o prédio inteiro: objetos (e a memória deles na placa), colisões, telas e telões
+  desmontarEscritorio() {
+    if (!this.escritorio) return;
+    this.ligarArea('escritorio', false);
+    for (const o of this.areas.get('escritorio').objetos) {
+      this.scene.remove(o);
+      o.traverse((x) => {
+        x.geometry?.dispose();
+        for (const m of [].concat(x.material || [])) {
+          m.map?.dispose();
+          m.dispose();
+        }
+      });
+    }
+    this.areas.delete('escritorio');
+    for (const s of [...this.slotsEscritorio, ...this.telaoesEscritorio]) {
+      s.clearVideo();
+      this.scene.remove(s.group);
+    }
+    this.telaoes = this.telaoes.filter((t) => !this.telaoesEscritorio.includes(t));
+    this.slotsEscritorio = [];
+    this.telaoesEscritorio = [];
+    this.escritorio = null;
+    this.planta = null;
+  }
+
+  // onde a pessoa nasce e para onde volta (R)
+  entrada() {
+    return this.escritorio?.entrada || SPAWN;
+  }
+
+  // em que sala do escritório está um ponto (id do departamento, 'corredor', 'recepcao'...) ou null
+  salaEm(x, z) {
+    return this.planta ? salaEm(this.planta, x, z) : null;
+  }
+
+  // nome da tela N ("TI · Tela 2" no escritório, "Tela 3" no cinema)
+  rotuloTela(i) {
+    return this.planta ? rotuloDaTela(this.planta, i) : `Tela ${i + 1}`;
+  }
+
+  telaoVisivel(t) {
+    return !!t && t.group.visible && !t.group.userData.areaDesligada;
   }
 
   // -------------------------------------------------------------- áreas
@@ -2036,13 +2111,14 @@ export class World {
   cullFora() {
     const cam = this.camera;
     const p = cam.position;
-    const dentro = p.x > SALA.minX && p.x < SALA.maxX && p.z > SALA.minZ && p.z < SALA.maxZ;
+    const L = this.escritorio?.limites || SALA; // no modo escritório, o prédio do escritório
+    const dentro = p.x > L.minX && p.x < L.maxX && p.z > L.minZ && p.z < L.maxZ;
     let ver = !dentro;
     if (dentro) {
       cam.updateMatrixWorld();
       _m4.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
       _frustum.setFromProjectionMatrix(_m4);
-      ver = _frustum.intersectsBox(this.portaBox);
+      ver = _frustum.intersectsBox(this.escritorio?.porta || this.portaBox);
     }
     this.fora.visible = ver;
   }

@@ -10,6 +10,8 @@ const compression = require('compression');
 const { execFile } = require('child_process');
 const crypto = require('crypto');
 const banco = require('./banco');
+// a planta do escritório é a mesma do navegador (public/js/escritorio.js); carrega em main()
+let ESCRITORIO = null;
 
 const PORT = Number(process.env.PORT) || 3000;
 const HTTPS_PORT = Number(process.env.HTTPS_PORT) || 3443;
@@ -202,12 +204,14 @@ function mudarSaldo(nome, delta) {
 }
 
 // ------------------------------------------------------------------ salas das empresas
-// Cada sala pode ter um dono (senha) que escolhe o ambiente (módulo), quais jogos aparecem, o nome
-// da empresa e o placar de metas da Sala Comercial. Guardado pelo banco.js.
-const MODULOS = ['lazer', 'ti', 'comercial', 'reuniao'];
+// Cada sala pode ter um dono (senha) que escolhe o modo — Lazer (o cinema) ou Escritório, com os
+// departamentos que a empresa tem —, quais jogos aparecem, o nome da empresa e o placar de metas
+// do Comercial. Guardado pelo banco.js.
+const MODULOS = ['lazer', 'escritorio'];
 const JOGOS_SALA = ['parkour', 'ringue', 'corrida', 'xadrez', 'dama', 'velha', 'dados', 'poderes', 'armas'];
 const configPadrao = () => ({
   modulo: 'lazer',
+  departamentos: [],
   jogos: Object.fromEntries(JOGOS_SALA.map((j) => [j, true])),
   empresa: '',
   placar: { titulo: 'Metas do mês', itens: [] },
@@ -218,8 +222,12 @@ function limparConfig(raw, base = configPadrao()) {
   const c = obj(raw);
   const jogos = obj(c.jogos);
   const placar = obj(c.placar);
+  // ambiente antigo (um setor só, na frente do cinema) vira o escritório com aquele setor
+  const antigo = ['ti', 'comercial', 'reuniao'].includes(c.modulo);
+  const limpar = ESCRITORIO?.limparDepartamentos ?? (() => []);
   return {
-    modulo: MODULOS.includes(c.modulo) ? c.modulo : base.modulo,
+    modulo: antigo ? 'escritorio' : MODULOS.includes(c.modulo) ? c.modulo : base.modulo,
+    departamentos: antigo ? [c.modulo] : c.departamentos === undefined ? base.departamentos : limpar(c.departamentos),
     jogos: Object.fromEntries(JOGOS_SALA.map((j) => [j, typeof jogos[j] === 'boolean' ? jogos[j] : base.jogos[j]])),
     empresa: typeof c.empresa === 'string' ? cleanText(c.empresa, 40) : base.empresa,
     placar: c.placar === undefined ? base.placar : {
@@ -238,7 +246,7 @@ function carregarSala(room) {
   room.carregando ??= banco.lerSala(room.id).then((s) => {
     room.config = limparConfig(s?.config || {});
     room.senhaHash = s?.senhaHash || null;
-    ajustarTelas(room); // a Sala do TI tem mais telas na parede
+    ajustarTelas(room); // cada departamento do escritório tem as suas telas
   }).catch((err) => {
     console.warn('[banco] lendo sala', room.id, err.code || err.message);
     room.config = configPadrao();
@@ -550,28 +558,47 @@ function semTela(room) {
   return null;
 }
 
-// Quantas telas a parede tem depende do ambiente: a Sala do TI tem 8, as outras 4. Trocou de
-// ambiente com telas no ar: as que ficaram sem lugar vão para uma tela livre, ou para o telão.
-// Devolve as chaves que mudaram de tela (para avisar todo mundo).
-const TELAS_POR_MODULO = { lazer: 4, ti: 8, comercial: 4, reuniao: 4 };
-function ajustarTelas(room) {
-  const n = TELAS_POR_MODULO[room.config?.modulo] ?? SHARE_SLOTS;
+// As telas da sala: no Lazer, as 4 da parede do cinema; no escritório, as de cada departamento,
+// na ordem das salas (a mesma planta que o navegador desenha).
+function layoutTelas(cfg) {
+  if (cfg?.modulo === 'escritorio' && cfg.departamentos?.length && ESCRITORIO) {
+    const p = ESCRITORIO.planta(cfg.departamentos);
+    return {
+      total: p.totalTelas,
+      salaDa: (i) => p.salas.find((s) => i >= s.primeiraTela && i < s.primeiraTela + s.telas)?.id ?? null,
+      faixa: (id) => ESCRITORIO.faixaDeTelas(p, id),
+      temSala: (id) => p.salas.some((s) => s.id === id),
+    };
+  }
+  return { total: SHARE_SLOTS, salaDa: () => null, faixa: () => [0, SHARE_SLOTS], temSala: () => false };
+}
+
+// primeira tela livre entre [a, b)
+function telaLivre(room, [a, b]) {
+  for (let i = a; i < b; i++) if (room.slots[i] === null) return i;
+  return -1;
+}
+
+// Mudou o modo ou os departamentos: refaz as telas. Cada compartilhamento tenta ficar no mesmo
+// departamento, senão vai para qualquer tela livre, senão para o telão. Devolve as chaves que
+// mudaram de tela (para avisar todo mundo).
+function ajustarTelas(room, antes = layoutTelas(null)) {
+  const depois = layoutTelas(room.config);
+  const telas = [];
+  for (const u of room.users.values()) {
+    for (const sh of u.shares.values()) if (sh.slot != null) telas.push({ sh, sala: antes.salaDa(sh.slot), era: sh.slot });
+  }
+  telas.sort((a, b) => a.era - b.era);
+  room.slots = new Array(depois.total).fill(null);
   const mudaram = [];
-  while (room.slots.length < n) room.slots.push(null);
-  const sobrando = [];
-  while (room.slots.length > n) {
-    const key = room.slots.pop();
-    if (key) sobrando.push(key);
+  for (const t of telas) {
+    let slot = depois.temSala(t.sala) ? telaLivre(room, depois.faixa(t.sala)) : -1;
+    if (slot === -1) slot = room.slots.indexOf(null);
+    t.sh.slot = slot === -1 ? null : slot;
+    if (slot !== -1) room.slots[slot] = t.sh.key;
+    if (t.sh.slot !== t.era) mudaram.push(t.sh.key);
   }
-  for (const key of sobrando) {
-    const sh = room.users.get(donoDaChave(key))?.shares.get(key);
-    if (!sh) continue;
-    const livre = room.slots.indexOf(null);
-    sh.slot = livre === -1 ? null : livre;
-    if (livre !== -1) room.slots[livre] = key;
-    mudaram.push(key);
-  }
-  // cresceu: quem estava só no telão ganha uma tela
+  // quem estava só no telão ganha uma tela, se sobrou
   for (let t = encaixarSemTela(room); t; t = encaixarSemTela(room)) mudaram.push(t.share.key);
   return mudaram;
 }
@@ -688,17 +715,17 @@ function attachSockets(io) {
       }
       r({ ok: true });
       io.to(room.id).emit('sala', { ...salaPublica(room), por: user.name });
-      // outro ambiente, outra quantidade de telas: quem mudou de tela fica sabendo
-      for (const key of ajustarTelas(room)) {
+      // outro modo ou outros departamentos, outras telas: quem mudou de tela fica sabendo
+      for (const key of ajustarTelas(room, layoutTelas(antes))) {
         const dono = room.users.get(donoDaChave(key));
         const sh = dono?.shares.get(key);
         if (sh) io.to(room.id).emit('share-update', { id: dono.id, ...sh });
       }
     });
 
-    // Sala Comercial: alguém fechou uma venda e toca o sino para todo mundo (no máximo a cada 8 s)
+    // Comercial: alguém fechou uma venda e toca o sino para todo mundo (no máximo a cada 8 s)
     socket.on('sino', () => {
-      if (!user || room.config?.modulo !== 'comercial') return;
+      if (!user || room.config?.modulo !== 'escritorio' || !room.config.departamentos?.includes('comercial')) return;
       const agora = Date.now();
       if (agora - (room.ultimoSino || 0) < 8000) return;
       room.ultimoSino = agora;
@@ -742,14 +769,17 @@ function attachSockets(io) {
       io.to(room.id).emit('user-update', { id: user.id, mic: user.mic });
     });
 
-    // cada chamada é mais uma aba/janela (ou um arquivo) numa tela livre
+    // Cada chamada é mais uma aba/janela (ou um arquivo) numa tela livre. No escritório, numa tela
+    // da sala onde a pessoa está (sala = id do departamento), se tiver alguma livre.
     socket.on('share-start', (msg, ack) => {
-      const { streamId } = obj(msg);
+      const { streamId, sala } = obj(msg);
       const reply = typeof ack === 'function' ? ack : () => {};
       if (!user) return;
       const sid = cleanText(streamId, 80);
       if (!sid) return reply({ ok: false, error: 'Compartilhamento inválido.' });
-      let slot = room.slots.indexOf(null);
+      const layout = layoutTelas(room.config);
+      const naSala = typeof sala === 'string' && layout.temSala(sala) ? telaLivre(room, layout.faixa(sala)) : -1;
+      let slot = naSala !== -1 ? naSala : room.slots.indexOf(null);
       if (slot === -1) {
         if (semTela(room)) return reply({ ok: false, error: 'Todas as telas e o telão já estão ocupados.' });
         slot = null; // vai direto para o telão
@@ -1209,6 +1239,7 @@ async function loadCert() {
 }
 
 async function main() {
+  ESCRITORIO = await import('./public/js/escritorio.js');
   // o banco antes de abrir a porta: quem entrar já encontra a sala e as moedas no lugar
   await banco.iniciar();
   const io = new Server({ cors: { origin: true }, maxHttpBufferSize: 1e6 });
