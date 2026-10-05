@@ -231,6 +231,100 @@ nameInput.value = settings.name;
 roomInput.value = params.get('sala') || '';
 $('#in-mic').checked = settings.mic;
 
+// ------------------------------------------------------------------ app (PWA)
+// O service worker (public/sw.js) guarda o que não muda, para o app abrir rápido. O botão
+// "Instalar o app" aparece quando o navegador deixa instalar; no iPhone ele só explica o caminho.
+if ('serviceWorker' in navigator && window.isSecureContext) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
+const instalado = window.matchMedia('(display-mode: fullscreen), (display-mode: standalone)').matches || navigator.standalone;
+const ehIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+let pedidoDeInstalacao = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  pedidoDeInstalacao = e;
+  $('#btn-instalar').hidden = false;
+});
+window.addEventListener('appinstalled', () => {
+  pedidoDeInstalacao = null;
+  $('#btn-instalar').hidden = true;
+});
+if (ehIOS && !instalado) $('#btn-instalar').hidden = false;
+$('#btn-instalar').addEventListener('click', async () => {
+  if (!pedidoDeInstalacao) {
+    toast('No Safari, toque em Compartilhar (o quadrado com a seta) e depois em "Adicionar à Tela de Início".', 'info', 9000);
+    return;
+  }
+  pedidoDeInstalacao.prompt();
+  const { outcome } = await pedidoDeInstalacao.userChoice;
+  if (outcome === 'accepted') $('#btn-instalar').hidden = true;
+  pedidoDeInstalacao = null;
+});
+
+// ------------------------------------------------------------------ senha da sala
+// Sala com senha de entrada: quem acerta ganha um "passe" do servidor, guardado por sala aqui no
+// navegador — recarregar a página ou reconectar não pede a senha de novo. Ver /sala-acesso.
+const idDaSala = (raw) => String(raw || '').trim().slice(0, 40).toLowerCase().replace(/[^a-z0-9-_]/g, '') || 'principal';
+function lerPasses() {
+  try { return JSON.parse(localStorage.getItem('sala3d-passes') || '{}'); } catch { return {}; }
+}
+function guardarPasse(sala, passe) {
+  const passes = lerPasses();
+  if (passe) passes[sala] = passe;
+  else delete passes[sala];
+  try { localStorage.setItem('sala3d-passes', JSON.stringify(passes)); } catch { /* modo privado */ }
+}
+function pedirSenhaDaSala(erro = '') {
+  $('#campo-senha-sala').hidden = false;
+  $('#senha-sala-erro').hidden = !erro;
+  $('#senha-sala-erro').textContent = erro;
+  $('#in-senha-sala').focus();
+}
+// false = a sala pediu senha (o campo aparece); true = pode entrar
+async function liberarSala(sala, senha) {
+  let r;
+  try {
+    const resp = await fetch('/sala-acesso', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sala, senha: senha || undefined, passe: lerPasses()[sala] }),
+    });
+    r = await resp.json();
+  } catch {
+    return true; // sem resposta: tenta entrar assim mesmo, o servidor confere de novo
+  }
+  if (r.ok) {
+    state.passe = r.passe || null;
+    guardarPasse(sala, r.passe);
+    return true;
+  }
+  guardarPasse(sala, null);
+  pedirSenhaDaSala(r.erro || (senha ? '' : 'Esta sala tem senha. Peça a quem te convidou.'));
+  return false;
+}
+// trocou o nome da sala: a senha digitada era de outra
+roomInput.addEventListener('input', () => {
+  $('#campo-senha-sala').hidden = true;
+  $('#in-senha-sala').value = '';
+});
+// veio por um convite de sala com senha: já mostra o campo (sem gastar tentativa)
+if (params.get('sala')) {
+  fetch('/sala-acesso', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sala: idDaSala(params.get('sala')), passe: lerPasses()[idDaSala(params.get('sala'))] }),
+  }).then((r) => r.json()).then((r) => {
+    if (r.protegida && !r.ok) pedirSenhaDaSala();
+  }).catch(() => {});
+}
+// o servidor recusou o passe (senha trocada no meio do caminho): volta ao saguão desta sala
+function senhaRecusada() {
+  guardarPasse(idDaSala(state.roomRequested), null);
+  const url = new URL(window.location.href);
+  url.searchParams.set('sala', state.roomRequested);
+  window.location.replace(url);
+}
+
 function renderSwatches() {
   $('#swatches').innerHTML = COLORS.map((c) => `<button type="button" role="radio" aria-label="Cor ${c}" aria-checked="${c === settings.color}" style="--c:${c}" data-color="${c}"></button>`).join('');
 }
@@ -401,6 +495,12 @@ async function join() {
   btn.textContent = 'Entrando…';
   audioContext();
 
+  if (!(await liberarSala(idDaSala(state.roomRequested), $('#in-senha-sala').value))) {
+    btn.disabled = false;
+    btn.textContent = 'Entrar na sala';
+    return;
+  }
+
   let config = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
   try { config = await (await fetch('/config')).json(); } catch { /* usa o padrão */ }
 
@@ -437,6 +537,7 @@ async function join() {
   bindSocket();
 
   const data = await emitJoin();
+  if (data?.erro) return senhaRecusada();
   applyJoined(data);
   // pede o microfone sem travar a entrada; a voz entra nas conexões assim que liberada
   if (state.micOn) {
@@ -505,6 +606,7 @@ function emitJoin() {
       photo: settings.photo,
       shirt: settings.shirt,
       char: settings.char,
+      passe: state.passe,
     }, resolve);
   });
 }
@@ -513,6 +615,8 @@ function applyJoined(data) {
   state.selfId = data.selfId;
   rtc.selfId = data.selfId;
   state.room = data.room;
+  state.passe = data.passe || null;
+  guardarPasse(data.room, data.passe);
   state.users.clear();
   state.users.set(data.selfId, {
     id: data.selfId, name: settings.name, color: settings.color, mic: state.micOn && state.micAvailable,
@@ -555,6 +659,7 @@ function bindSocket() {
     pararTodasAsTelas(false);
     for (const id of [...state.users.keys()]) if (id !== state.selfId) removeUser(id, true);
     const data = await emitJoin();
+    if (data?.erro) return senhaRecusada();
     applyJoined(data);
     toast('Reconectado!');
   });
@@ -708,6 +813,11 @@ function bindSocket() {
     const sh = self()?.shares.get(msg.key);
     if (sh?.controle) turboDaTela(msg.key);
     controle.receber(sh, msg.deId === state.selfId ? { ...msg, deId: null } : msg);
+  });
+  // o dono pôs, trocou ou tirou a senha: quem está dentro recebe o passe novo
+  socket.on('passe', (passe) => {
+    state.passe = passe;
+    guardarPasse(state.room, passe);
   });
   socket.on('sala', (cfg) => {
     aplicarSala(cfg);
@@ -1473,11 +1583,16 @@ function renderSala() {
   const desligados = JOGOS_DA_SALA.filter(([j]) => !jogoLigado(j)).length;
   $('#sala-resumo').innerHTML = `<div class="sala-chip">${icon('predio', 18)}<span>
     <b>${esc(cfg.empresa || 'Sem nome de empresa')}</b>
-    <small>Ambiente: ${esc(amb.nome)} · ${desligados ? `${desligados} ${desligados === 1 ? 'jogo desligado' : 'jogos desligados'}` : 'todos os jogos ligados'}</small>
+    <small>Ambiente: ${esc(amb.nome)} · ${desligados ? `${desligados} ${desligados === 1 ? 'jogo desligado' : 'jogos desligados'}` : 'todos os jogos ligados'}${cfg.temSenha ? ' · com senha' : ''}</small>
   </span></div>${state.donoDaSala ? '<p class="hint">Você é o dono desta sala.</p>' : ''}`;
   $('#sala-criar').hidden = cfg.temDono || state.donoDaSala;
   $('#sala-entrar').hidden = !cfg.temDono || state.donoDaSala;
   $('#sala-config').hidden = !state.donoDaSala;
+  $('#entrada-status').textContent = cfg.temSenha
+    ? 'Ligada: quem chega pelo link precisa digitar a senha.'
+    : 'Sala aberta: qualquer um com o link entra.';
+  $('#entrada-salvar').textContent = cfg.temSenha ? 'Trocar' : 'Pôr senha';
+  $('#entrada-tirar').hidden = !cfg.temSenha;
   if (state.donoDaSala) preencherConfig();
 }
 
@@ -1634,7 +1749,8 @@ $('#sala-entrar').addEventListener('submit', (e) => {
   });
 });
 
-$('#sala-config').addEventListener('input', () => { formSujo = true; });
+// as senhas têm botão próprio: digitar nelas não segura a config que chega dos outros
+$('#sala-config').addEventListener('input', (e) => { if (e.target.type !== 'password') formSujo = true; });
 $('#sala-config').addEventListener('click', (e) => {
   const b = e.target.closest('[data-todos]');
   if (!b) return;
@@ -1667,6 +1783,30 @@ $('#sala-trocar').addEventListener('click', () => {
     toast('Senha de dono trocada.', 'success');
   });
 });
+
+// senha de entrada: vale na hora, sem esperar o "Salvar para todos"
+function mudarSenhaDeEntrada(senha) {
+  const campo = $('#sala-config').elements.entrada;
+  socket.emit('sala-entrada', { senha }, (r) => {
+    if (!r?.ok) return toast(r?.erro || 'Não deu para mudar a senha da sala.', 'error');
+    campo.value = '';
+    toast(senha ? 'Senha da sala ligada. Mande a senha junto com o convite.' : 'Senha tirada: a sala está aberta.', 'success', 6000);
+  });
+}
+$('#entrada-salvar').addEventListener('click', () => {
+  const senha = $('#sala-config').elements.entrada.value;
+  if (senha.length < 4) return toast('A senha da sala precisa ter pelo menos 4 caracteres.', 'warn');
+  mudarSenhaDeEntrada(senha);
+});
+$('#entrada-tirar').addEventListener('click', () => mudarSenhaDeEntrada(''));
+// Enter nos campos de senha aperta o botão ao lado, não o "Salvar para todos"
+for (const [campo, botao] of [['entrada', '#entrada-salvar'], ['nova', '#sala-trocar']]) {
+  $('#sala-config').elements[campo].addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    $(botao).click();
+  });
+}
 
 // ------------------------------------------------------------------ mesa de trabalho
 // Todas as telas lado a lado, como monitores. Ver mesa.js.
@@ -2858,6 +2998,7 @@ function enterFocus(info) {
     if (player.sitting) toggleSit();
     if (player.veiculo) toggleVeiculo();
     dados.entrar();
+    recolherPainel('#dados-hud', isTouch);
     $('#hover-hint').hidden = true;
     syncTouchVisibility();
     return;
@@ -2867,6 +3008,7 @@ function enterFocus(info) {
     if (player.sitting) toggleSit();
     if (player.veiculo) toggleVeiculo();
     jogos.entrar(info.mesa);
+    recolherPainel('#jogo-hud', isTouch);
     $('#hover-hint').hidden = true;
     syncTouchVisibility();
     return;
@@ -2899,6 +3041,21 @@ function enterFocus(info) {
   updateFocusCtrl();
   $('#focus').hidden = false;
   syncTouchVisibility();
+}
+
+// Painel do jogo recolhido: só título, vez e mensagem — o resto do tabuleiro fica livre para tocar.
+// No celular ele abre recolhido; o botão ao lado do Sair (ou tocar no título) abre e fecha.
+function recolherPainel(sel, recolher) {
+  const hud = $(sel);
+  hud.classList.toggle('min', recolher);
+  const b = hud.querySelector('.hud-min');
+  b.setAttribute('aria-expanded', String(!recolher));
+  b.title = recolher ? 'Abrir o painel' : 'Recolher o painel';
+}
+for (const sel of ['#jogo-hud', '#dados-hud']) {
+  $(sel).addEventListener('click', (e) => {
+    if (e.target.closest('.hud-min, .jh-head > b')) recolherPainel(sel, !$(sel).classList.contains('min'));
+  });
 }
 
 function updateFocusPin() {

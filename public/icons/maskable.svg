@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- versão "maskable": fundo até a borda e o desenho dentro da zona segura (80% do centro) -->
+  <defs>
+    <linearGradient id="fundo" x1="0" y1="0" x2="0.6" y2="1">
+      <stop offset="0" stop-color="#1a2030"/>
+      <stop offset="1" stop-color="#07080c"/>
+    </linearGradient>
+    <radialGradient id="luz" cx="0.5" cy="0.42" r="0.5">
+      <stop offset="0" stop-color="#6ee7c8" stop-opacity="0.3"/>
+      <stop offset="1" stop-color="#6ee7c8" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="borda" gradientUnits="userSpaceOnUse" x1="0" y1="84" x2="0" y2="334">
+      <stop offset="0" stop-color="#a5f5e0"/>
+      <stop offset="1" stop-color="#3cc4a6"/>
+    </linearGradient>
+    <linearGradient id="chao" gradientUnits="userSpaceOnUse" x1="0" y1="338" x2="0" y2="450">
+      <stop offset="0" stop-color="#6ee7c8" stop-opacity="0.05"/>
+      <stop offset="1" stop-color="#6ee7c8" stop-opacity="0.5"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#fundo)"/>
+  <rect width="512" height="512" fill="url(#luz)"/>
+  <g transform="translate(76.8 76.8) scale(0.7)">
+    <g stroke="url(#chao)" stroke-width="5" stroke-linecap="round" fill="none">
+      <path d="M140 352 H372"/>
+      <path d="M112 386 H400"/>
+      <path d="M78 428 H434"/>
+      <path d="M256 340 V448"/>
+      <path d="M206 340 L172 448"/>
+      <path d="M306 340 L340 448"/>
+      <path d="M156 340 L88 448"/>
+      <path d="M356 340 L424 448"/>
+    </g>
+    <rect x="104" y="92" width="304" height="196" rx="30" fill="#0b0d12" stroke="url(#borda)" stroke-width="18"/>
+    <rect x="128" y="116" width="256" height="148" rx="16" fill="#6ee7c8" fill-opacity="0.1"/>
+    <path d="M232 152 Q232 140 243 146 L302 182 Q312 190 302 198 L243 234 Q232 240 232 228 Z" fill="#6ee7c8"/>
+    <path d="M256 288 V322" stroke="url(#borda)" stroke-width="16" stroke-linecap="round"/>
+    <path d="M214 326 H298" stroke="url(#borda)" stroke-width="14" stroke-linecap="round"/>
+  </g>
+</svg>

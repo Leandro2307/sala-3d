@@ -59,6 +59,9 @@ const P = {
   moeda: '<circle cx="12" cy="12" r="9"/><path d="M14.5 9.5c-.5-1-1.4-1.5-2.5-1.5-1.5 0-2.5.8-2.5 2s1 1.7 2.5 2 2.5.8 2.5 2-1 2-2.5 2c-1.1 0-2-.5-2.5-1.5"/><path d="M12 6.5V8"/><path d="M12 16v1.5"/>',
   dado: '<rect width="18" height="18" x="3" y="3" rx="3"/><circle cx="8" cy="8" r="1.2"/><circle cx="16" cy="16" r="1.2"/><circle cx="12" cy="12" r="1.2"/>',
   car: '<path d="M19 17h2v-5l-2.5-5.5A2 2 0 0 0 16.7 5H7.3a2 2 0 0 0-1.8 1.5L3 12v5h2"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/><path d="M5 12h14"/>',
+  lock: '<rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+  minimizar: '<path d="m18 15-6-6-6 6"/>',
+  instalar: '<rect width="14" height="20" x="5" y="2" rx="2"/><path d="M12 7v7"/><path d="m9 11 3 3 3-3"/><path d="M10 18h4"/>',
   link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
 };
 

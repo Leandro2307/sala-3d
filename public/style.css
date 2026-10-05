@@ -146,7 +146,7 @@ body.tv-focus #css3d { z-index: 2; pointer-events: auto; }
 .field { display: grid; gap: 8px; margin-bottom: 16px; }
 .field > span { font-size: 12px; font-weight: 600; color: var(--muted); letter-spacing: 0.02em; }
 .field .hint { color: var(--muted); font-size: 12px; }
-input:not([type]), input[type='text'], select {
+input:not([type]), input[type='text'], input[type='password'], input[type='number'], select {
   width: 100%;
   height: 44px;
   padding: 0 14px;
@@ -156,7 +156,7 @@ input:not([type]), input[type='text'], select {
   outline: none;
   transition: border-color 140ms, box-shadow 140ms;
 }
-input:not([type]):focus, select:focus {
+input:not([type]):focus, input[type='text']:focus, input[type='password']:focus, input[type='number']:focus, select:focus {
   border-color: rgba(110, 231, 200, 0.6);
   box-shadow: 0 0 0 3px rgba(110, 231, 200, 0.15);
 }
@@ -171,6 +171,8 @@ select option { background: #151821; }
   padding-left: 14px;
 }
 .input-prefix b { color: var(--muted); font-weight: 600; }
+.input-prefix > i { display: inline-flex; color: var(--muted); }
+.field .hint.erro { color: var(--warn); }
 .input-prefix input { border: 0; background: transparent; padding-left: 6px; box-shadow: none !important; }
 .input-prefix:focus-within { border-color: rgba(110, 231, 200, 0.6); box-shadow: 0 0 0 3px rgba(110, 231, 200, 0.15); }
 
@@ -724,6 +726,30 @@ video.controlavel { cursor: default; }
   #dados-hud { top: auto; bottom: calc(84px + env(safe-area-inset-bottom)); right: 16px; max-height: 50vh; }
 }
 
+/* painéis dos jogos recolhidos: só o essencial, o tabuleiro fica livre (no toque abrem assim) */
+.jh-botoes { display: inline-flex; align-items: center; gap: 4px; }
+.hud-min { width: 32px; height: 32px; }
+.hud-min .ic { transition: transform 160ms; }
+.min .hud-min .ic { transform: rotate(180deg); }
+#jogo-hud.min > :not(.jh-head, .jh-status, .jh-msg) { display: none; }
+#dados-hud.min > :not(.jh-head, .dh-saldo, .jh-acoes, .jh-msg) { display: none; }
+#jogo-hud.min .jh-msg:empty, #dados-hud.min .jh-msg:empty { display: none; }
+body.touch #jogo-hud, body.touch #dados-hud {
+  top: calc(58px + env(safe-area-inset-top));
+  bottom: auto;
+  right: max(8px, env(safe-area-inset-right));
+  width: min(300px, 42vw);
+  max-height: calc(100dvh - 66px - env(safe-area-inset-top));
+  overflow: auto;
+  padding: 10px 12px;
+  gap: 8px;
+  font-size: 12.5px;
+}
+body.touch .jh-dica, body.touch #jh-sair kbd, body.touch #dh-sair kbd { display: none; }
+@media (max-width: 640px) {
+  body.touch #jogo-hud, body.touch #dados-hud { left: 8px; right: 8px; width: auto; max-height: 52dvh; }
+}
+
 #tv-unblock { position: absolute; top: 72px; left: 50%; transform: translateX(-50%); pointer-events: auto; }
 
 /* hub de controles — fica sempre na tela (só recolhe se o usuário pedir) */
@@ -1221,14 +1247,43 @@ body.touch .help-grid[data-input="touch"] { display: grid; }
 #placar-editor input[name="placarTitulo"] { width: 100%; }
 .placar-linhas { display: grid; gap: 6px; }
 .placar-linha { display: grid; grid-template-columns: 1.4fr 1fr 1fr auto; gap: 6px; align-items: center; }
-.placar-linha input { width: 100%; min-width: 0; padding: 8px 10px; }
+.placar-linha input { width: 100%; min-width: 0; height: 36px; padding: 0 10px; border-radius: 10px; }
 .placar-linha .icon-btn { width: 30px; height: 30px; }
 #placar-add { justify-self: start; }
 #bar .round.sino { color: #fbbf24; }
 #bar .round.sino:hover { background: rgba(251, 191, 36, 0.16); }
-.sala-senha { margin-top: 12px; font-size: 13px; }
-.sala-senha summary { cursor: pointer; color: var(--muted); }
-.sala-senha input { width: 100%; margin: 8px 0; }
+/* senha de entrada e senha de dono: cartões iguais, campo e botão lado a lado */
+.sala-bloco {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.03);
+}
+.sala-bloco-topo, .sala-senha summary { display: flex; align-items: center; gap: 10px; }
+.sala-bloco-topo > span:last-child { display: grid; gap: 2px; min-width: 0; }
+.sala-bloco b { font-size: 13px; }
+.sala-bloco small { color: var(--muted); font-size: 12px; line-height: 1.35; }
+.sala-bloco-ic {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: rgba(110, 231, 200, 0.1);
+  color: var(--accent);
+}
+.senha-linha { display: flex; gap: 8px; align-items: center; }
+.senha-linha input { flex: 1; min-width: 0; height: 40px; }
+.senha-linha button { flex: none; height: 40px; }
+#entrada-tirar { justify-self: start; }
+.sala-senha summary { cursor: pointer; list-style: none; }
+.sala-senha summary::-webkit-details-marker { display: none; }
+.sala-senha .sala-seta { margin-left: auto; display: inline-flex; color: var(--muted); transition: transform 160ms; }
+.sala-senha[open] .sala-seta { transform: rotate(180deg); }
 #sala-config .primary.block { margin-top: 4px; }
 
 /* ------------------------------------------------------------ vídeo do guia (guia-video.js) */

@@ -173,6 +173,27 @@ app.get('/sala3d-extensao.zip', (_req, res) => {
   res.send(extensaoZip);
 });
 
+// Antes de entrar: a sala tem senha? Com a senha certa (ou um passe ainda válido) devolve o passe
+// que o "join" do socket exige. É POST para a senha não ficar no log de endereços.
+app.post('/sala-acesso', express.json({ limit: '2kb' }), async (req, res) => {
+  const b = obj(req.body);
+  const id = idDaSala(b.sala);
+  // sala que ainda não existia e ninguém chegou a entrar: some como as que esvaziam
+  if (!rooms.has(id)) setTimeout(() => { if (rooms.get(id)?.users.size === 0) rooms.delete(id); }, 30 * 60 * 1000);
+  const sala = getRoom(id);
+  await carregarSala(sala);
+  if (!sala.entradaHash) return res.json({ ok: true, protegida: false });
+  if (b.passe && passeValido(sala, b.passe)) return res.json({ ok: true, protegida: true, passe: passeDa(sala) });
+  if (!b.senha) return res.json({ ok: false, protegida: true });
+  const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+  if (bloqueado(ip)) return res.json({ ok: false, protegida: true, erro: 'Muitas tentativas. Espere alguns minutos.' });
+  if (typeof b.senha !== 'string' || b.senha.length > 100 || !confereSenha(b.senha, sala.entradaHash)) {
+    podeTentar(ip);
+    return res.json({ ok: false, protegida: true, erro: 'Senha da sala errada.' });
+  }
+  res.json({ ok: true, protegida: true, passe: passeDa(sala) });
+});
+
 app.get('/config', (_req, res) => res.json({
   iceServers,
   shareSlots: SHARE_SLOTS,
@@ -267,17 +288,34 @@ function carregarSala(room) {
   room.carregando ??= banco.lerSala(room.id).then((s) => {
     room.config = limparConfig(s?.config || {});
     room.senhaHash = s?.senhaHash || null;
+    room.entradaHash = s?.config?.entradaHash || null; // vem junto da config, mas não vai para ninguém
     ajustarTelas(room); // cada departamento do escritório tem as suas telas
   }).catch((err) => {
     console.warn('[banco] lendo sala', room.id, err.code || err.message);
     room.config = configPadrao();
     room.senhaHash = null;
+    room.entradaHash = null;
     room.carregando = null; // tenta ler de novo na próxima entrada
   });
   return room.carregando;
 }
 
-const salaPublica = (room) => ({ ...room.config, temDono: !!room.senhaHash });
+const salaPublica = (room) => ({ ...room.config, temDono: !!room.senhaHash, temSenha: !!room.entradaHash });
+// a senha de entrada viaja dentro do JSON da config (sem mudar a tabela); a pública não a leva
+const guardarSala = (room) => banco.salvarSala(room.id, { ...room.config, entradaHash: room.entradaHash || undefined }, room.senhaHash);
+const idDaSala = (raw) => cleanText(raw, 40).toLowerCase().replace(/[^a-z0-9-_]/g, '') || 'principal';
+
+// Senha de entrada (opcional). Quem acerta recebe um "passe" — o HMAC da sala com a senha atual —
+// que o navegador guarda: recarregar a página ou reconectar não pede a senha de novo. Trocar a
+// senha invalida os passes antigos (quem está dentro recebe o novo na hora).
+const SEGREDO_PASSE = process.env.PASSE_SECRET || crypto.randomBytes(32).toString('hex');
+const passeDa = (room) => crypto.createHmac('sha256', SEGREDO_PASSE).update(`${room.id}|${room.entradaHash}`).digest('hex').slice(0, 32);
+function passeValido(room, passe) {
+  if (!room.entradaHash) return true;
+  const certo = Buffer.from(passeDa(room));
+  const veio = Buffer.from(String(passe || ''));
+  return veio.length === certo.length && crypto.timingSafeEqual(veio, certo);
+}
 const jogoLigado = (room, jogo) => room?.config?.jogos?.[jogo] !== false;
 
 // senha do dono: scrypt com sal, nunca a senha em si
@@ -294,6 +332,7 @@ function confereSenha(senha, hash) {
 }
 // tentativas de senha por endereço: 6 a cada 5 minutos
 const tentativas = new Map();
+const bloqueado = (ip) => (tentativas.get(ip) || []).filter((t) => Date.now() - t < 5 * 60_000).length >= 6;
 function podeTentar(ip) {
   const agora = Date.now();
   const lista = (tentativas.get(ip) || []).filter((t) => agora - t < 5 * 60_000);
@@ -703,12 +742,17 @@ function attachSockets(io) {
     socket.on('join', async (data, ack) => {
       if (room || entrando) return;
       entrando = true;
-      const roomId = cleanText(data?.room, 40).toLowerCase().replace(/[^a-z0-9-_]/g, '') || 'principal';
+      const roomId = idDaSala(data?.room);
       const nome = cleanText(data?.name, 20) || 'Visitante';
       // configuração da sala e carteira vêm do banco: espera antes de entrar
       const sala = getRoom(roomId);
       await Promise.all([carregarSala(sala), carregarCarteira(nome)]);
       if (!socket.connected) return;
+      // sala com senha: só entra com o passe (ver /sala-acesso)
+      if (!passeValido(sala, data?.passe)) {
+        entrando = false;
+        return ack?.({ erro: 'senha' });
+      }
       room = sala;
       user = {
         id: socket.id,
@@ -743,6 +787,7 @@ function attachSockets(io) {
         jogos: Object.fromEntries(Object.entries(room.jogos).map(([k, j]) => [k, jogoPublico(j)])),
         moedas: user.moedas,
         sala: salaPublica(room),
+        passe: room.entradaHash ? passeDa(room) : null,
       });
       socket.to(roomId).emit('user-joined', publicUser(user));
     });
@@ -761,7 +806,7 @@ function attachSockets(io) {
       if (!senhaValida(senha)) return r({ ok: false, erro: 'A senha precisa ter pelo menos 6 caracteres.' });
       room.senhaHash = hashSenha(senha);
       try {
-        await banco.salvarSala(room.id, room.config, room.senhaHash);
+        await guardarSala(room);
       } catch (err) {
         room.senhaHash = null;
         console.warn('[banco] salvando dono', err.code || err.message);
@@ -788,7 +833,7 @@ function attachSockets(io) {
       const antes = room.config;
       room.config = limparConfig(msg, antes);
       try {
-        await banco.salvarSala(room.id, room.config, room.senhaHash);
+        await guardarSala(room);
       } catch (err) {
         room.config = antes;
         console.warn('[banco] salvando sala', err.code || err.message);
@@ -824,13 +869,36 @@ function attachSockets(io) {
       const antes = room.senhaHash;
       room.senhaHash = hashSenha(nova);
       try {
-        await banco.salvarSala(room.id, room.config, room.senhaHash);
+        await guardarSala(room);
       } catch (err) {
         room.senhaHash = antes;
         console.warn('[banco] trocando senha', err.code || err.message);
         return r({ ok: false, erro: 'Não deu para guardar agora. Tente de novo.' });
       }
       r({ ok: true });
+    });
+
+    // senha de entrada: o dono põe, troca ou tira (vazia = sala aberta)
+    socket.on('sala-entrada', async (msg, ack) => {
+      const r = resposta(ack);
+      if (!room || !dono) return r({ ok: false, erro: 'Só o dono da sala muda isso.' });
+      const { senha } = obj(msg);
+      if (senha && (typeof senha !== 'string' || senha.length < 4 || senha.length > 100)) {
+        return r({ ok: false, erro: 'A senha da sala precisa ter pelo menos 4 caracteres.' });
+      }
+      const antes = room.entradaHash;
+      room.entradaHash = senha ? hashSenha(senha) : null;
+      try {
+        await guardarSala(room);
+      } catch (err) {
+        room.entradaHash = antes;
+        console.warn('[banco] senha de entrada', err.code || err.message);
+        return r({ ok: false, erro: 'Não deu para guardar agora. Tente de novo.' });
+      }
+      r({ ok: true });
+      // quem já está dentro continua podendo voltar (recarregar, reconectar) sem digitar nada
+      io.to(room.id).emit('passe', room.entradaHash ? passeDa(room) : null);
+      io.to(room.id).emit('sala', { ...salaPublica(room), por: user.name });
     });
 
     socket.on('state', (s) => {

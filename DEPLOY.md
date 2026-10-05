@@ -83,6 +83,13 @@ Se o painel mostrar outro endereço (por exemplo `a.relay.metered.ca`), use o de
 O TURN só entra como último recurso, quando a conexão direta falha. Ele repassa o vídeo inteiro:
 uma tela em 1080p gasta cerca de 1 GB por hora por pessoa assistindo.
 
+## Salas com senha de entrada (opcional)
+
+O dono da sala pode pôr uma senha para entrar (painel **Sala da empresa → Senha para entrar**).
+Quem acerta a senha não precisa digitá-la de novo naquele navegador. Para isso continuar valendo
+depois de um reinício do servidor, crie no Render a variável `PASSE_SECRET` com um texto
+aleatório longo (sem ela, depois de cada reinício a senha é pedida mais uma vez).
+
 ## Enquanto isso: link na hora, sem deploy
 
 ```bash

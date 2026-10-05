@@ -9,7 +9,11 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Sala 3D</title>
   <meta name="description" content="Compartilhe a tela com som, converse e assista YouTube, Twitch, Kick e mais junto numa sala 3D — com parkour.">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='9' fill='%230b0d12'/><rect x='6' y='8' width='20' height='13' rx='3' fill='none' stroke='%236ee7c8' stroke-width='2.4'/><circle cx='16' cy='25' r='2.2' fill='%236ee7c8'/></svg>">
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Sala 3D">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
@@ -77,7 +81,7 @@
     <div id="jogo-hud" hidden>
       <div class="jh-head">
         <b id="jh-titulo">Xadrez de bruxo</b>
-        <button type="button" id="jh-sair" class="chip-btn"><kbd>Esc</kbd> Sair</button>
+        <span class="jh-botoes"><button type="button" class="icon-btn hud-min" data-min="jogo-hud" title="Recolher o painel" aria-expanded="true"><i data-icon="minimizar" data-size="16"></i></button><button type="button" id="jh-sair" class="chip-btn"><kbd>Esc</kbd> Sair</button></span>
       </div>
       <div class="jh-status" id="jh-status">—</div>
       <div class="jh-lados">
@@ -105,7 +109,7 @@
     <div id="dados-hud" hidden>
       <div class="jh-head">
         <b>Mesa de dados</b>
-        <button type="button" id="dh-sair" class="chip-btn"><kbd>Esc</kbd> Sair</button>
+        <span class="jh-botoes"><button type="button" class="icon-btn hud-min" data-min="dados-hud" title="Recolher o painel" aria-expanded="true"><i data-icon="minimizar" data-size="16"></i></button><button type="button" id="dh-sair" class="chip-btn"><kbd>Esc</kbd> Sair</button></span>
       </div>
       <div class="dh-saldo"><i data-icon="moeda" data-size="18"></i><b id="dh-saldo">0</b> moedas</div>
       <div class="dh-tipos" id="dh-tipos">
@@ -468,10 +472,24 @@
           <div class="jogos-lista" id="sala-jogos"></div>
         </div>
         <button type="submit" class="primary block">Salvar para todos</button>
-        <details class="sala-senha">
-          <summary>Trocar a senha de dono</summary>
-          <input type="password" name="nova" minlength="6" maxlength="100" autocomplete="new-password" placeholder="Nova senha (6+ caracteres)">
-          <button type="button" class="secondary small" id="sala-trocar">Trocar senha</button>
+        <!-- senha de entrada: vale na hora (não espera o "Salvar para todos") -->
+        <div class="sala-bloco">
+          <div class="sala-bloco-topo">
+            <span class="sala-bloco-ic"><i data-icon="lock" data-size="16"></i></span>
+            <span><b>Senha para entrar</b><small id="entrada-status">Sala aberta: qualquer um com o link entra.</small></span>
+          </div>
+          <div class="senha-linha">
+            <input type="password" name="entrada" maxlength="100" autocomplete="new-password" placeholder="Nova senha (4+ caracteres)">
+            <button type="button" class="secondary small" id="entrada-salvar">Pôr senha</button>
+          </div>
+          <button type="button" class="ghost-btn small" id="entrada-tirar" hidden>Tirar a senha e abrir a sala</button>
+        </div>
+        <details class="sala-bloco sala-senha">
+          <summary><span class="sala-bloco-ic"><i data-icon="settings" data-size="16"></i></span><b>Trocar a senha de dono</b><i data-icon="chevron" data-size="16" class="sala-seta"></i></summary>
+          <div class="senha-linha">
+            <input type="password" name="nova" minlength="6" maxlength="100" autocomplete="new-password" placeholder="Nova senha (6+ caracteres)">
+            <button type="button" class="secondary small" id="sala-trocar">Trocar</button>
+          </div>
         </details>
       </form>
     </section>
@@ -710,12 +728,21 @@
         <div class="input-prefix"><b>#</b><input id="in-room" maxlength="40" placeholder="principal"></div>
       </label>
 
+      <!-- aparece quando a sala pedida tem senha de entrada (ver /sala-acesso no server.js) -->
+      <label class="field" id="campo-senha-sala" hidden>
+        <span>Senha da sala</span>
+        <div class="input-prefix"><i data-icon="lock" data-size="16"></i><input type="password" id="in-senha-sala" maxlength="100" autocomplete="current-password" placeholder="Esta sala pede senha"></div>
+        <small class="hint erro" id="senha-sala-erro" hidden></small>
+      </label>
+
       <label class="toggle-row compact">
         <span><b>Entrar com microfone ligado</b></span>
         <input type="checkbox" id="in-mic" class="switch" checked>
       </label>
 
       <button type="submit" class="primary block" id="btn-join">Entrar na sala</button>
+      <!-- aparece quando o navegador deixa instalar (Chrome/Edge/Android); ver "app" no main.js -->
+      <button type="button" class="secondary block" id="btn-instalar" hidden><i data-icon="instalar" data-size="18"></i>Instalar o app</button>
       <p class="lobby-note" id="lobby-note">Para mandar o som da tela, marque <b>“Compartilhar áudio”</b> quando o navegador perguntar.</p>
       <p class="lobby-note" id="lobby-note-touch" hidden>No celular você anda com o <b>analógico</b>, olha <b>arrastando o dedo</b> e fala pelo microfone. Só o <b>compartilhar tela</b> exige um computador.</p>
     </form>
