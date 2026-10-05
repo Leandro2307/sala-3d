@@ -653,7 +653,8 @@ function bindSocket() {
 
   socket.on('emote', ({ id, kind }) => state.users.get(id)?.avatar.emote(kind));
   socket.on('jogo', (msg) => jogos.receber(msg));
-  socket.on('controle', (msg) => controle.receber(self()?.shares.get(msg.key), msg));
+  // mexendo na própria aba: sem o aviso de "fulano está mexendo na sua aba"
+  socket.on('controle', (msg) => controle.receber(self()?.shares.get(msg.key), msg.deId === state.selfId ? { ...msg, deId: null } : msg));
   socket.on('moedas', ({ id, moedas, delta, motivo }) => {
     const u = state.users.get(id);
     if (!u) return;
@@ -1090,27 +1091,47 @@ async function permitirControle(key) {
     : 'Pronto: quem abrir essa tela vai mexer no mouse e no teclado de verdade do seu PC, dentro dela. Ctrl+Alt+End corta na hora.', 'success', 9000);
 }
 
-// botão "Controlar" na tela em foco
+// Dá para mexer nesta tela daqui? As dos outros, se o dono liberou. As suas, só se for aba: quem
+// clica nela é a extensão, sem tocar no mouse. Janela e tela inteira são o ajudante nativo
+// movendo o seu mouse de verdade — controladas de você para você, ele brigaria com ele mesmo.
+const podeControlar = ({ user: u, share: sh }) => !!sh.controle && (!u.isSelf || sh.aba != null);
+
+function porqueNaoControla({ user: u, share: sh }) {
+  if (!u.isSelf) return 'só ver';
+  if (sh.file) return 'seu vídeo';
+  if (sh.aba == null) return 'sua janela · os outros controlam';
+  return 'sua aba · libere o controle';
+}
+
+// botão da tela em foco: "Controlar", ou "Permitir controle" na sua aba que ainda não liberou
 function updateFocusCtrl() {
   const btn = $('#focus-ctrl');
   const fv = $('#focus-video');
   const t = state.focus?.kind === 'share' ? acharTela(state.focus.key) : null;
-  const pode = !!t?.share.controle && !t.user.isSelf;
+  const pode = !!t && podeControlar(t);
   if (!pode) controle.remover(fv);
+  const liberar = !!t && !pode && t.user.isSelf && !t.share.file && t.share.aba != null;
   const on = controle.tem(fv);
-  btn.hidden = !pode;
+  btn.hidden = !pode && !liberar;
+  btn.dataset.modo = liberar ? 'liberar' : 'controlar';
   btn.classList.toggle('on', on);
-  btn.innerHTML = `${icon('cursor', 16)}${on ? 'Parar de controlar' : 'Controlar'}`;
+  btn.innerHTML = `${icon('cursor', 16)}${liberar ? 'Permitir controle' : on ? 'Parar de controlar' : 'Controlar'}`;
 }
-$('#focus-ctrl').addEventListener('click', () => {
+$('#focus-ctrl').addEventListener('click', async () => {
+  const btn = $('#focus-ctrl');
   const fv = $('#focus-video');
+  btn.blur();
+  if (state.focus?.kind !== 'share') return;
+  if (btn.dataset.modo === 'liberar') {
+    await permitirControle(state.focus.key);
+    return; // o botão vira "Controlar" quando o servidor confirmar (share-update)
+  }
   if (controle.tem(fv)) controle.remover(fv);
-  else if (state.focus?.kind === 'share') {
+  else {
     controle.adicionar(fv, state.focus.key);
     controle.focar(fv);
-    toast('Controlando: mouse, roda e teclado vão para a tela de quem compartilha. Esc volta para a sala.', 'info', 4000);
+    toast('Controlando: mouse, roda e teclado vão para a tela. Esc volta para a sala.', 'info', 4000);
   }
-  $('#focus-ctrl').blur();
   updateFocusCtrl();
 });
 
@@ -1122,14 +1143,15 @@ const mesa = new Mesa({
   // os outros primeiro (agrupados por pessoa), as suas no fim
   telas: () => telasNoAr()
     .sort((a, b) => (a.user.isSelf - b.user.isSelf) || a.user.name.localeCompare(b.user.name) || ordemDasTelas(a.share, b.share))
-    .map(({ user: u, share: sh }) => ({
-      key: sh.key,
-      nome: u.isSelf ? 'Você' : u.name,
-      onde: ondeEsta(sh),
-      cor: u.color,
-      minha: u.isSelf,
-      controle: !u.isSelf && !!sh.controle,
-      stream: shareVideo(sh)?.srcObject ?? null,
+    .map((t) => ({
+      key: t.share.key,
+      nome: t.user.isSelf ? 'Você' : t.user.name,
+      onde: ondeEsta(t.share),
+      cor: t.user.color,
+      minha: t.user.isSelf,
+      controle: podeControlar(t),
+      semControle: porqueNaoControla(t),
+      stream: shareVideo(t.share)?.srcObject ?? null,
     })),
   aoCompartilhar: () => novaTela(),
   aoTelaCheia: async () => {

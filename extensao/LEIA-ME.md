@@ -35,6 +35,9 @@ Se mover a pasta do projeto, rode o `instalar.bat` de novo.
      teclado vai para a última clicada. **Alt+1…9** troca de monitor, **Alt+Enter** amplia.
    - **Uma tela só**: abre a sua tela (E ou clique) e aperta **Controlar**.
 
+   As suas **abas** também dá para controlar daqui (bom para testar sozinho). Janela e tela
+   inteira, não: o ajudante moveria o seu próprio mouse e ele brigaria com ele mesmo.
+
    Nos dois, **Esc** volta para a sala com o mouse já girando a visão do boneco, e
    **Shift+Esc** manda um Esc para a tela. Ctrl+V cola texto.
 

@@ -28,7 +28,8 @@ function melhorGrade(n, W, H, aspecto) {
 }
 
 export class Mesa {
-  // telas(): [{ key, nome, onde, cor, minha, controle, stream }] na ordem dos monitores
+  // telas(): [{ key, nome, onde, cor, minha, controle, semControle, stream }] na ordem dos
+  // monitores. semControle: o que a etiqueta diz quando a tela não aceita controle daqui.
   constructor({ raiz, controle, telas, aoCompartilhar, aoTelaCheia, aoFechar }) {
     this.raiz = raiz;
     this.controle = controle;
@@ -131,7 +132,6 @@ export class Mesa {
         if (t.stream) m.video.play().catch(() => {});
       }
       m.el.querySelector('.mon-espera').hidden = !!t.stream;
-      // a própria tela não se controla daqui (seria o seu mouse mexendo nele mesmo)
       if (t.controle && t.stream) this.controle.adicionar(m.video, t.key);
       else this.controle.remover(m.video);
       m.el.querySelector('.mon-n').textContent = i + 1;
@@ -218,9 +218,8 @@ export class Mesa {
       m.el.classList.toggle('ativa', ativa);
       m.el.classList.toggle('teclado', comTeclado);
       m.el.hidden = this.ampliada && !ativa;
-      const st = m.dados.minha ? 'sua tela'
-        : !m.dados.controle ? 'só ver'
-          : comTeclado ? `${icon('teclado', 13)} teclado aqui` : `${icon('cursor', 12)} controle`;
+      const st = !m.dados.controle ? esc(m.dados.semControle || 'só ver')
+        : comTeclado ? `${icon('teclado', 13)} teclado aqui` : `${icon('cursor', 12)} controle`;
       m.el.querySelector('.mon-st').innerHTML = st;
       const max = m.el.querySelector('.mon-max');
       const desfaz = this.ampliada && ativa;
