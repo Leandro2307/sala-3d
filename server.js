@@ -238,6 +238,7 @@ function carregarSala(room) {
   room.carregando ??= banco.lerSala(room.id).then((s) => {
     room.config = limparConfig(s?.config || {});
     room.senhaHash = s?.senhaHash || null;
+    ajustarTelas(room); // a Sala do TI tem mais telas na parede
   }).catch((err) => {
     console.warn('[banco] lendo sala', room.id, err.code || err.message);
     room.config = configPadrao();
@@ -549,6 +550,32 @@ function semTela(room) {
   return null;
 }
 
+// Quantas telas a parede tem depende do ambiente: a Sala do TI tem 8, as outras 4. Trocou de
+// ambiente com telas no ar: as que ficaram sem lugar vão para uma tela livre, ou para o telão.
+// Devolve as chaves que mudaram de tela (para avisar todo mundo).
+const TELAS_POR_MODULO = { lazer: 4, ti: 8, comercial: 4, reuniao: 4 };
+function ajustarTelas(room) {
+  const n = TELAS_POR_MODULO[room.config?.modulo] ?? SHARE_SLOTS;
+  const mudaram = [];
+  while (room.slots.length < n) room.slots.push(null);
+  const sobrando = [];
+  while (room.slots.length > n) {
+    const key = room.slots.pop();
+    if (key) sobrando.push(key);
+  }
+  for (const key of sobrando) {
+    const sh = room.users.get(donoDaChave(key))?.shares.get(key);
+    if (!sh) continue;
+    const livre = room.slots.indexOf(null);
+    sh.slot = livre === -1 ? null : livre;
+    if (livre !== -1) room.slots[livre] = key;
+    mudaram.push(key);
+  }
+  // cresceu: quem estava só no telão ganha uma tela
+  for (let t = encaixarSemTela(room); t; t = encaixarSemTela(room)) mudaram.push(t.share.key);
+  return mudaram;
+}
+
 // liberou uma tela: o compartilhamento que estava só no telão ganha ela
 function encaixarSemTela(room) {
   const t = semTela(room);
@@ -661,6 +688,21 @@ function attachSockets(io) {
       }
       r({ ok: true });
       io.to(room.id).emit('sala', { ...salaPublica(room), por: user.name });
+      // outro ambiente, outra quantidade de telas: quem mudou de tela fica sabendo
+      for (const key of ajustarTelas(room)) {
+        const dono = room.users.get(donoDaChave(key));
+        const sh = dono?.shares.get(key);
+        if (sh) io.to(room.id).emit('share-update', { id: dono.id, ...sh });
+      }
+    });
+
+    // Sala Comercial: alguém fechou uma venda e toca o sino para todo mundo (no máximo a cada 8 s)
+    socket.on('sino', () => {
+      if (!user || room.config?.modulo !== 'comercial') return;
+      const agora = Date.now();
+      if (agora - (room.ultimoSino || 0) < 8000) return;
+      room.ultimoSino = agora;
+      io.to(room.id).emit('sino', { nome: user.name, cor: user.color });
     });
 
     socket.on('sala-senha', async (msg, ack) => {

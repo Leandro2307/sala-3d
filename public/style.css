@@ -1215,6 +1215,14 @@ body.touch .help-grid[data-input="touch"] { display: grid; }
 .modulo.breve { opacity: 0.55; cursor: default; }
 .jogos-lista { display: grid; }
 .jogos-lista .toggle-row.compact { padding: 8px 0; }
+#placar-editor input[name="placarTitulo"] { width: 100%; }
+.placar-linhas { display: grid; gap: 6px; }
+.placar-linha { display: grid; grid-template-columns: 1.4fr 1fr 1fr auto; gap: 6px; align-items: center; }
+.placar-linha input { width: 100%; min-width: 0; padding: 8px 10px; }
+.placar-linha .icon-btn { width: 30px; height: 30px; }
+#placar-add { justify-self: start; }
+#bar .round.sino { color: #fbbf24; }
+#bar .round.sino:hover { background: rgba(251, 191, 36, 0.16); }
 .sala-senha { margin-top: 12px; font-size: 13px; }
 .sala-senha summary { cursor: pointer; color: var(--muted); }
 .sala-senha input { width: 100%; margin: 8px 0; }

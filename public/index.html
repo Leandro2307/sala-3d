@@ -243,6 +243,8 @@
         </div>
       </div>
       <button type="button" class="round" id="btn-view" data-tip="Câmera 1ª/3ª pessoa (V)"><i data-icon="view"></i></button>
+      <!-- Sala Comercial: quem fecha uma venda toca o sino para todo mundo -->
+      <button type="button" class="round sino" id="sino" data-tip="Fechei uma venda! Tocar o sino (B)" hidden><i data-icon="sino"></i></button>
       <button type="button" class="round danger wide" id="btn-leave" data-tip="Sair da sala"><i data-icon="leave"></i></button>
     </div>
 
@@ -448,6 +450,13 @@
       <form id="sala-config" hidden autocomplete="off">
         <label class="field"><span>Nome da empresa</span><input name="empresa" maxlength="40" placeholder="Aparece no topo da sala"></label>
         <div class="field"><span>Ambiente</span><div class="modulos" id="sala-modulos"></div></div>
+        <div class="field" id="placar-editor" hidden>
+          <span>Placar de metas <small class="opt">(Sala Comercial)</small></span>
+          <input name="placarTitulo" maxlength="40" placeholder="Título — ex.: Metas de outubro">
+          <div class="placar-linhas" id="placar-linhas"></div>
+          <button type="button" class="chip-btn" id="placar-add">+ Pessoa no placar</button>
+          <small class="hint">Vendido e meta em números (ex.: 15000). Até 12 pessoas — o placar ordena pelo % da meta.</small>
+        </div>
         <div class="field">
           <span class="field-linha">Jogos e diversão <span><button type="button" class="chip-btn" data-todos="1">Todos</button> <button type="button" class="chip-btn" data-todos="0">Nenhum</button></span></span>
           <div class="jogos-lista" id="sala-jogos"></div>

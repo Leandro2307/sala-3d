@@ -9,6 +9,7 @@ import { RING } from './arena.js';
 import { PISTA, CAMINHO, CURVAS, pontoEm, projetar } from './pista.js';
 import { criarNatureza } from './natureza.js';
 import { RESERVAS_JOGOS } from './tabuleiros.js';
+import { construirAmbiente } from './ambientes.js';
 
 // Área jogável inteira (cercada): a sala do cinema num canto, em volta da origem, e o
 // autódromo ao ar livre a leste. O telão do cinema continua em minZ, perto da plateia.
@@ -31,6 +32,14 @@ const SLOT_LAYOUT = [
   { x: 24.6, y: 7.4, z: ROOM.minZ + 2.4, rotY: -0.26 },
   { x: -24.6, y: 17.6, z: ROOM.minZ + 2.4, rotY: 0.26 },
   { x: 24.6, y: 17.6, z: ROOM.minZ + 2.4, rotY: -0.26 },
+].map((s) => ({ ...s, w: 16, h: 9 }));
+// Sala do TI: mais 4 telas, uma coluna a mais de cada lado. Mais viradas para o centro (0,42) e
+// um pouco mais à frente, para a ponta de dentro não entrar na parede.
+const SLOT_LAYOUT_TI = [
+  { x: -42.6, y: 7.4, z: ROOM.minZ + 3.6, rotY: 0.42 },
+  { x: 42.6, y: 7.4, z: ROOM.minZ + 3.6, rotY: -0.42 },
+  { x: -42.6, y: 17.6, z: ROOM.minZ + 3.6, rotY: 0.42 },
+  { x: 42.6, y: 17.6, z: ROOM.minZ + 3.6, rotY: -0.42 },
 ].map((s) => ({ ...s, w: 16, h: 9 }));
 
 // ------------------------------------------------------------------ utilitários de textura
@@ -450,7 +459,10 @@ export class World {
 
     this.buildLights();
     this.buildRoom();
-    this.buildAudience();
+    // a plateia de cinema é do ambiente Lazer; os outros ambientes trocam ela pela mobília do setor
+    this.area('plateia', () => this.buildAudience());
+    this.modulo = 'lazer';
+    this.ambientes = {}; // ti, comercial, reuniao: construídos na primeira vez que são escolhidos
     this.buildScreens();
     // cada jogo é uma área: o dono da sala pode desligar (ver ligarArea)
     this.area('parkour', () => this.buildCourse());
@@ -810,7 +822,7 @@ export class World {
     this.slotMidia = null;
     this.setMidiaHost(this.mainScreen);
 
-    this.slots = SLOT_LAYOUT.map((l, i) => {
+    this.todosSlots = [...SLOT_LAYOUT, ...SLOT_LAYOUT_TI].map((l, i) => {
       const s = new ScreenDisplay({
         w: l.w, h: l.h,
         title: `Tela ${i + 1}`, subtitle: 'Livre — clique em "Compartilhar tela"',
@@ -819,9 +831,11 @@ export class World {
       s.group.position.set(l.x, l.y, l.z);
       s.group.rotation.y = l.rotY;
       s.aoMudar = () => { if (s.isHost) this.tvCss.visible = s.mostraMidia; };
+      s.group.visible = i < SLOT_LAYOUT.length; // as 4 extras só aparecem na Sala do TI
       this.scene.add(s.group);
       return s;
     });
+    this.slots = this.todosSlots.slice(0, SLOT_LAYOUT.length);
 
     this.screens = [this.mainScreen, ...this.slots];
   }
@@ -1875,6 +1889,28 @@ export class World {
     }
     for (const fn of this.decorAnimated) fn(time);
     this.natureza?.update(time);
+    this.ambientes[this.modulo]?.update?.(time);
+  }
+
+  // Ambiente da sala (escolhido pelo dono): troca a mobília da frente da parede de telas e,
+  // na Sala do TI, mostra 8 telas em vez de 4. Quem chama atualiza o que está em cada tela.
+  setModulo(modulo) {
+    if (this.modulo === modulo) return false;
+    this.modulo = modulo;
+    this.ligarArea('plateia', modulo === 'lazer');
+    for (const m of ['ti', 'comercial', 'reuniao']) {
+      if (m === modulo && !this.ambientes[m]) this.ambientes[m] = this.area(`ambiente-${m}`, () => construirAmbiente(m, this));
+      this.ligarArea(`ambiente-${m}`, m === modulo);
+    }
+    const n = modulo === 'ti' ? this.todosSlots.length : SLOT_LAYOUT.length;
+    this.todosSlots.forEach((s, i) => {
+      s.group.visible = i < n;
+      if (i >= n) s.clearVideo(); // tela que sumiu não fica segurando vídeo
+    });
+    this.slots = this.todosSlots.slice(0, n);
+    this.screens = [...this.telaoes, ...this.slots];
+    this.aquecerShaders(); // mobília nova: compila agora, não na primeira olhada
+    return true;
   }
 
   // -------------------------------------------------------------- áreas

@@ -97,6 +97,17 @@ export const sfx = {
     ruido({ dur: 0.04, gain: 0.09 * vol, type: 'bandpass', freq: 2200 + Math.random() * 900, q: 1.4 });
     tone({ freq: 320, to: 180, dur: 0.05, type: 'triangle', gain: 0.03 * vol });
   },
+  // Sino da Sala Comercial (venda fechada): três badaladas, cada uma com o som fundamental e os
+  // harmônicos "tortos" de sino (2,76x e 5,4x), que é o que tira o jeito de bipe.
+  sino: () => {
+    for (const [i, base] of [[0, 784], [1, 988], [2, 1175]]) {
+      const delay = i * 0.22;
+      tone({ freq: base, dur: 1.1, type: 'sine', gain: 0.07, delay });
+      tone({ freq: base * 2.76, dur: 0.6, type: 'sine', gain: 0.025, delay });
+      tone({ freq: base * 5.4, dur: 0.25, type: 'sine', gain: 0.012, delay });
+    }
+  },
+
   // moedas: dois "plins" metálicos
   moeda: () => {
     tone({ freq: 1568, dur: 0.12, type: 'triangle', gain: 0.05 });

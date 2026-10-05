@@ -686,6 +686,12 @@ function bindSocket() {
     aplicarSala(cfg);
     if (cfg.por && cfg.por !== settings.name) toast(`${cfg.por} atualizou a sala`, 'info', 3500);
   });
+  socket.on('sino', ({ nome, cor }) => {
+    ultimoSino = Date.now();
+    sfx.sino();
+    world.ambientes.comercial?.tocarSino();
+    toast(`${nome === settings.name ? 'Você' : nome} fechou uma venda!`, 'success', 5000, cor);
+  });
   socket.on('moedas', ({ id, moedas, delta, motivo }) => {
     const u = state.users.get(id);
     if (!u) return;
@@ -1365,9 +1371,9 @@ $('#focus-ctrl').addEventListener('click', async () => {
 // desligados; aqui eles somem do mundo (World.ligarArea), da barra, da ajuda e das teclas.
 const AMBIENTES = [
   { id: 'lazer', nome: 'Lazer', desc: 'Cinema, parque e todos os jogos', pronto: true },
-  { id: 'ti', nome: 'Sala do TI', desc: 'Parede de monitoramento e bancadas', pronto: false },
-  { id: 'comercial', nome: 'Sala Comercial', desc: 'Telão, placar de metas e mesa de reunião', pronto: false },
-  { id: 'reuniao', nome: 'Sala de Reunião', desc: 'Mesa oval e uma tela grande', pronto: false },
+  { id: 'ti', nome: 'Sala do TI', desc: '8 telas na parede, bancadas e racks', pronto: true },
+  { id: 'comercial', nome: 'Sala Comercial', desc: 'Placar de metas, mesa e sino de venda', pronto: true },
+  { id: 'reuniao', nome: 'Sala de Reunião', desc: 'Mesa oval para 12 e o telão', pronto: true },
 ];
 const JOGOS_DA_SALA = [
   ['parkour', 'Parkour', 'Circuito até o camarote'],
@@ -1391,6 +1397,11 @@ function aplicarSala(cfg) {
   let mudou = false;
   for (const j of AREAS_DE_JOGO) mudou = world.ligarArea(j, jogoLigado(j)) || mudou;
   if (mudou) world.aquecerShaders(); // o número de luzes pode ter mudado
+  // ambiente do setor: mobília e quantidade de telas na parede (o TI tem 8)
+  if (world.setModulo(cfg.modulo)) refreshScreens();
+  world.ambientes.comercial?.placar(cfg.placar);
+  $('#sino').hidden = cfg.modulo !== 'comercial';
+  atualizarStatusTI();
   // desligou o que alguém estava usando agora
   if (!jogoLigado('poderes')) {
     if (player.voando) toggleVoar();
@@ -1437,7 +1448,78 @@ function preencherConfig(forcar = false) {
       <span><b>${nome}</b>${desc ? `<small>${desc}</small>` : ''}</span>
       <input type="checkbox" class="switch" value="${j}"${jogoLigado(j) ? ' checked' : ''}>
     </label>`).join('');
+  const placar = cfg.placar || { titulo: '', itens: [] };
+  $('#sala-config').elements.placarTitulo.value = placar.titulo || '';
+  $('#placar-linhas').innerHTML = '';
+  for (const it of placar.itens) linhaDoPlacar(it);
+  mostrarEditorDoPlacar();
 }
+
+// ---------------------------------------------------- placar de metas (Sala Comercial)
+function linhaDoPlacar(it = { nome: '', valor: '', meta: '' }) {
+  const lista = $('#placar-linhas');
+  if (lista.children.length >= 12) return;
+  const div = document.createElement('div');
+  div.className = 'placar-linha';
+  div.innerHTML = `<input name="pnome" maxlength="24" placeholder="Nome">
+    <input name="pvalor" type="number" min="0" step="any" placeholder="Vendido">
+    <input name="pmeta" type="number" min="0" step="any" placeholder="Meta">
+    <button type="button" class="icon-btn" data-remover aria-label="Tirar do placar">${icon('x', 14)}</button>`;
+  div.querySelector('[name="pnome"]').value = it.nome || '';
+  div.querySelector('[name="pvalor"]').value = it.valor === '' ? '' : it.valor;
+  div.querySelector('[name="pmeta"]').value = it.meta === '' ? '' : it.meta;
+  lista.appendChild(div);
+}
+const mostrarEditorDoPlacar = () => {
+  $('#placar-editor').hidden = $('#sala-config').querySelector('[name="modulo"]:checked')?.value !== 'comercial';
+};
+$('#sala-modulos').addEventListener('change', mostrarEditorDoPlacar);
+$('#placar-add').addEventListener('click', () => {
+  linhaDoPlacar();
+  formSujo = true;
+  $('#placar-linhas').lastElementChild?.querySelector('input')?.focus();
+});
+$('#placar-linhas').addEventListener('click', (e) => {
+  if (!e.target.closest('[data-remover]')) return;
+  e.target.closest('.placar-linha').remove();
+  formSujo = true;
+});
+const lerPlacar = () => ({
+  titulo: $('#sala-config').elements.placarTitulo.value.trim(),
+  itens: $$('#placar-linhas .placar-linha').map((l) => ({
+    nome: l.querySelector('[name="pnome"]').value.trim(),
+    valor: Number(l.querySelector('[name="pvalor"]').value) || 0,
+    meta: Number(l.querySelector('[name="pmeta"]').value) || 0,
+  })).filter((it) => it.nome),
+});
+
+// ---------------------------------------------------- sino (Sala Comercial)
+let ultimoSino = 0;
+function tocarSino() {
+  if (state.sala?.modulo !== 'comercial') return;
+  if (Date.now() - ultimoSino < 8000) {
+    toast('O sino acabou de tocar — espere uns segundos.', 'info', 2500);
+    return;
+  }
+  socket.emit('sino');
+}
+$('#sino').addEventListener('click', (e) => {
+  e.currentTarget.blur();
+  tocarSino();
+});
+
+// ---------------------------------------------------- quadro de status (Sala do TI)
+function atualizarStatusTI() {
+  if (world.modulo !== 'ti') return;
+  const d = new Date();
+  world.ambientes.ti?.atualizar({
+    empresa: state.sala?.empresa || '',
+    pessoas: state.users.size,
+    telas: telasNoAr().filter((t) => t.share.slot != null).length,
+    hora: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`,
+  });
+}
+setInterval(atualizarStatusTI, 5000);
 
 // a conexão caiu e voltou: o servidor esqueceu quem era dono, então prova de novo com a senha
 function reentrarComoDono() {
@@ -1493,6 +1575,7 @@ $('#sala-config').addEventListener('submit', (e) => {
     empresa: form.elements.empresa.value.trim(),
     modulo: form.querySelector('[name="modulo"]:checked')?.value || 'lazer',
     jogos: Object.fromEntries($$('#sala-jogos input').map((i) => [i.value, i.checked])),
+    placar: lerPlacar(),
   };
   socket.emit('sala-config', cfg, (r) => {
     if (!r?.ok) return toast(r?.erro || 'Não deu para salvar.', 'error');
@@ -3023,6 +3106,9 @@ window.addEventListener('keydown', (e) => {
       break;
     case 'KeyV':
       toggleView();
+      break;
+    case 'KeyB':
+      tocarSino(); // Sala Comercial: fechei uma venda
       break;
     case 'KeyF':
       punch();
