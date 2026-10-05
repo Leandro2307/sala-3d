@@ -169,6 +169,7 @@ export class Player {
   // Senta no assento em que o jogador está pisando.
   sit(assento) {
     if (!assento) return false;
+    this.sitYaw = null;
     this.sitting = true;
     this.vel.set(0, 0, 0);
     this.pos.y = assento.max.y;
@@ -177,9 +178,34 @@ export class Player {
     return true;
   }
 
+  // Senta num lugar marcado (cadeira de escritório, sofá): vai para o assento, virado para onde
+  // ele está virado. Na cadeira de um posto a câmera vai para primeira pessoa, para ver os
+  // monitores sem a própria cabeça na frente; ao levantar volta como estava.
+  sentarEm(lugar) {
+    this.pos.set(lugar.x, lugar.y, lugar.z);
+    this.vel.set(0, 0, 0);
+    this.yaw = lugar.yaw;
+    this.pitch = lugar.posto ? -0.12 : 0;
+    this.sitYaw = Math.atan2(-Math.sin(lugar.yaw), -Math.cos(lugar.yaw));
+    this.bodyYaw = this.sitYaw;
+    this.jumpBuffer = 0;
+    if (lugar.posto && this.mode !== 'first') {
+      this.modoAntes = this.mode;
+      this.mode = 'first';
+    }
+    this.sitting = true;
+    this.emit('sit', true);
+    return true;
+  }
+
   stand() {
     if (!this.sitting) return false;
     this.sitting = false;
+    this.sitYaw = null;
+    if (this.modoAntes) {
+      this.mode = this.modoAntes;
+      this.modoAntes = null;
+    }
     this.emit('sit', false);
     return true;
   }
@@ -203,7 +229,7 @@ export class Player {
   setVeiculo(on) {
     if (this.veiculo === !!on) return false;
     this.veiculo = !!on;
-    this.sitting = false;
+    this.stand();
     this.velocidade = 0;
     this.volante = 0;
     this.vel.set(0, this.vel.y, 0);
@@ -212,6 +238,7 @@ export class Player {
   }
 
   toggleMode() {
+    this.modoAntes = null; // trocou na mão: ao levantar fica como escolheu
     this.mode = this.mode === 'third' ? 'first' : 'third';
     return this.mode;
   }
@@ -437,6 +464,8 @@ export class Player {
     const hs = Math.hypot(this.vel.x, this.vel.z);
     if (this.veiculo) {
       this.bodyYaw = Math.atan2(-Math.sin(this.yaw), -Math.cos(this.yaw));
+    } else if (this.sitting && this.sitYaw != null) {
+      this.bodyYaw = this.sitYaw; // na cadeira o corpo fica virado para a mesa
     } else if (this.mode === 'first' || this.sitting) {
       this.bodyYaw = Math.atan2(-Math.sin(this.yaw), -Math.cos(this.yaw));
     } else if (hs > 0.6) {
@@ -485,7 +514,7 @@ export class Player {
 
     const dir = this.lookDirection(_dir);
     if (this.mode === 'first') {
-      cam.position.set(this.pos.x, this.pos.y + 1.62, this.pos.z);
+      cam.position.set(this.pos.x, this.pos.y + (this.sitting ? 1.28 : 1.62), this.pos.z);
       this.applyShake(cam);
       this.lookPoint.copy(cam.position).add(dir);
       cam.lookAt(this.lookPoint);

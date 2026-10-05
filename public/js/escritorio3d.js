@@ -126,6 +126,11 @@ function plantas(grupo, lugares) {
   ], lugares);
 }
 
+// os 3 lugares de um sofá (centro x/z, virado para ry): chama f(x, z) para cada um
+function lugaresDoSofa(x, z, ry, f) {
+  for (const dx of [-0.95, 0, 0.95]) f(x + dx * Math.cos(ry) - 0.1 * Math.sin(ry), z - dx * Math.sin(ry) - 0.1 * Math.cos(ry));
+}
+
 function sofa(grupo, cor, lugares) {
   const tecido = mat(cor, { roughness: 0.9 });
   const almofada = mat(new THREE.Color(cor).offsetHSL(0, 0, 0.08), { roughness: 0.95 });
@@ -192,10 +197,34 @@ function painel(titulo, corTopo) {
   });
 }
 
+// três monitores lado a lado: o do meio de frente, os dos lados virados para quem senta (o
+// canto de dentro de cada lateral encosta no do meio). cx/z: centro da tela do meio; w: largura.
+function tresMonitores(cx, z, y, w) {
+  const a = 0.38;
+  const h = (w * 9) / 16;
+  const lado = w / 2 + (w / 2) * Math.cos(a) + 0.03;
+  const frente = (w / 2) * Math.sin(a);
+  return [
+    { x: cx - lado, z: z + frente, y, ry: a, w, h },
+    { x: cx, z, y, ry: 0, w, h },
+    { x: cx + lado, z: z + frente, y, ry: -a, w, h },
+  ];
+}
+
+// moldura, haste e pé de cada monitor (a tela em si é do World, que põe o vídeo nela)
+function molduras(g, monitores, corpo) {
+  const { w, h, y } = monitores[0];
+  repetir(g, [
+    { geo: new THREE.BoxGeometry(w + 0.06, h + 0.06, 0.04), mat: corpo, pos: [0, y, -0.03] },
+    { geo: new THREE.BoxGeometry(0.06, 0.3, 0.05), mat: corpo, pos: [0, y - h / 2 - 0.1, -0.06], sombra: false },
+    { geo: new THREE.BoxGeometry(0.34, 0.025, 0.22), mat: corpo, pos: [0, y - h / 2 - 0.25, -0.05], sombra: false },
+  ], monitores.map((m) => [m.x, m.z, m.ry]));
+}
+
 // ------------------------------------------------------------------ sala genérica
 // Um "marco" é o sistema de coordenadas da sala: g é o grupo (já girado e no lugar), mundo()
 // converte um ponto local para o mundo e bloco() cria a colisão (sempre de eixo) já convertida.
-function marco(world, raiz, s, telas, telaoes) {
+function marco(world, raiz, s, telas, telaoes, postos, assentos) {
   const cx = (s.x0 + s.x1) / 2;
   const cz = (s.z0 + s.z1) / 2;
   const giro = s.lado === 'norte' ? 0 : Math.PI;
@@ -224,6 +253,24 @@ function marco(world, raiz, s, telas, telaoes) {
     telao(lx, y, lz, ry, w, h) {
       const [x, z] = mundo(lx, lz);
       telaoes.push({ pos: [x, y, z], rotY: ry + giro, w, h });
+    },
+    // Lugar onde dá para sentar (tecla C perto dele). y: altura do assento; ry: para onde quem
+    // senta olha (0 = -z local, para o fundo da sala).
+    assento(lx, lz, y, ry = 0, posto = null) {
+      const [x, z] = mundo(lx, lz);
+      assentos.push({ x, z, y, yaw: ry + giro, posto });
+    },
+    // posto de trabalho n: a cadeira (já vira assento) e os 3 monitores dele
+    posto(n, cadeira, monitores) {
+      const id = `${s.id}-${n}`;
+      this.assento(cadeira.x, cadeira.z, cadeira.y, cadeira.ry ?? 0, id);
+      postos.push({
+        id,
+        monitores: monitores.map((mo) => {
+          const [x, z] = mundo(mo.x, mo.z);
+          return { pos: [x, mo.y, z], rotY: mo.ry + giro, w: mo.w, h: mo.h };
+        }),
+      });
     },
   };
 }
@@ -267,18 +314,22 @@ function salaTI(m) {
   // parede de monitoramento: 8 telas, 2 fileiras × 4
   for (const y of [2.3, 4.95]) for (const lx of [-8.1, -2.7, 2.7, 8.1]) m.tela(lx, y, -D + 0.25, 0, 4.6, 2.59);
 
-  // bancadas: 2 fileiras × 2 blocos × 3 lugares, de frente para a parede de telas
+  // 12 postos: 2 fileiras × 2 bancadas × 3 lugares, de frente para a parede de telas.
+  // Cada posto tem 3 monitores e uma cadeira gamer.
   const mesa = mat(0x1f2937, { roughness: 0.5 });
   const tampo = mat(0x0b0f17, { roughness: 0.35 });
   const blocos = [];
   const monitores = [];
   const cadeiras = [];
+  let n = 0;
   for (const lz of [-2.5, 4.5]) {
     for (const lx of [-7, 7]) {
       blocos.push([lx, lz]);
       for (const dx of [-3.6, 0, 3.6]) {
-        monitores.push([lx + dx - 0.6, lz - 0.35, 0.16], [lx + dx + 0.6, lz - 0.35, -0.16]);
+        const mons = tresMonitores(lx + dx, lz - 0.32, 1.58, 1.0);
+        monitores.push(...mons);
         cadeiras.push([lx + dx, lz + 1.3]);
+        m.posto(n++, { x: lx + dx, z: lz + 1.3, y: 0.66 }, mons);
       }
       m.bloco([lx - 5.5, 0, lz - 0.65], [lx + 5.5, 1.05, lz + 0.65], { data: { type: 'mesa' } });
     }
@@ -290,27 +341,7 @@ function salaTI(m) {
     { geo: new THREE.BoxGeometry(0.06, 0.95, 1.26), mat: mesa, pos: [5.47, 0.5, 0] },
     { geo: new THREE.BoxGeometry(11, 0.03, 0.03), mat: brilho(0x22d3ee), pos: [0, 0.97, 0.66], sombra: false },
   ], blocos);
-  const codigo = quadro(256, 160, (ctx, w, h) => {
-    ctx.fillStyle = '#0b1220';
-    ctx.fillRect(0, 0, w, h);
-    const cores = ['#38bdf8', '#6ee7c8', '#a78bfa', '#fbbf24', '#f472b6'];
-    for (let y = 14; y < h - 8; y += 12) {
-      let x = 12 + (y % 3) * 10;
-      while (x < w - 30) {
-        const len = 12 + ((x * 7 + y * 13) % 46);
-        ctx.fillStyle = cores[(x + y) % cores.length];
-        ctx.fillRect(x, y, len, 4);
-        x += len + 8;
-      }
-    }
-  });
-  const corpo = mat(0x0b0d12, { roughness: 0.4 });
-  repetir(g, [
-    { geo: new THREE.BoxGeometry(1.15, 0.7, 0.05), mat: corpo, pos: [0, 1.52, 0] },
-    { geo: new THREE.PlaneGeometry(1.07, 0.62), mat: new THREE.MeshBasicMaterial({ map: codigo.tex, toneMapped: false }), pos: [0, 1.52, 0.03], sombra: false },
-    { geo: new THREE.BoxGeometry(0.07, 0.35, 0.07), mat: corpo, pos: [0, 1.17, -0.05] },
-    { geo: new THREE.BoxGeometry(0.4, 0.03, 0.26), mat: corpo, pos: [0, 1.04, -0.05] },
-  ], monitores);
+  molduras(g, monitores, mat(0x0b0d12, { roughness: 0.4 }));
   repetir(g, partesCadeiraGamer(0x22d3ee), cadeiras);
   for (const [lx, lz] of cadeiras) m.bloco([lx - 0.33, 0, lz - 0.32], [lx + 0.33, 0.62, lz + 0.32], { data: { type: 'sofa' } });
 
@@ -362,30 +393,33 @@ function salaComercial(m) {
   vestirSala(m, { piso: mat(0x3a2b31, { roughness: 1 }), parede: 0xe9e1d4, faixa: 0xfbbf24, luz: 0xfff1d6, intensidade: 60 });
   for (const lx of [-8.1, -2.7, 2.7, 8.1]) m.tela(lx, 3.1, -D + 0.25, 0, 4.6, 2.59);
 
-  // ilhas de venda: 4 lugares cada, dois de frente para dois
+  // 8 postos de venda: 2 fileiras × 2 bancadas de madeira × 2 lugares, cada um com 3 monitores
   const madeira = mat(0xb08a62, { roughness: 0.5 });
   const branco = mat(0xf3f4f6, { roughness: 0.6 });
-  const ilhas = [[-6.5, 2], [6.5, 2]];
-  repetir(g, [
-    { geo: new RoundedBoxGeometry(3.4, 0.08, 2.6, 2, 0.03), mat: madeira, pos: [0, 1.0, 0] },
-    { geo: new THREE.BoxGeometry(3.3, 0.95, 0.06), mat: branco, pos: [0, 0.5, 0] },
-    { geo: new THREE.BoxGeometry(3.4, 0.5, 0.05), mat: mat(0xfbbf24, { roughness: 0.7 }), pos: [0, 1.28, 0] },
-  ], ilhas);
+  const bancadas = [];
   const monitores = [];
   const cadeiras = [];
-  for (const [ix, iz] of ilhas) {
-    for (const dx of [-0.85, 0.85]) {
-      monitores.push([ix + dx, iz + 0.45, Math.PI], [ix + dx, iz - 0.45, 0]);
-      cadeiras.push([ix + dx, iz - 1.75, Math.PI], [ix + dx, iz + 1.75, 0]);
+  let n = 0;
+  for (const lz of [-2, 4.5]) {
+    for (const lx of [-6.5, 6.5]) {
+      bancadas.push([lx, lz]);
+      for (const dx of [-2.2, 2.2]) {
+        const mons = tresMonitores(lx + dx, lz - 0.3, 1.56, 0.95);
+        monitores.push(...mons);
+        cadeiras.push([lx + dx, lz + 1.3]);
+        m.posto(n++, { x: lx + dx, z: lz + 1.3, y: 0.62 }, mons);
+      }
+      m.bloco([lx - 4.5, 0, lz - 0.65], [lx + 4.5, 1.05, lz + 0.65], { data: { type: 'mesa' } });
     }
-    m.bloco([ix - 1.7, 0, iz - 1.3], [ix + 1.7, 1.05, iz + 1.3], { data: { type: 'mesa' } });
   }
-  const corpo = mat(0x111827, { roughness: 0.4 });
   repetir(g, [
-    { geo: new THREE.BoxGeometry(0.95, 0.58, 0.05), mat: corpo, pos: [0, 1.45, 0] },
-    { geo: new THREE.PlaneGeometry(0.88, 0.5), mat: brilho(0x1e3a5f), pos: [0, 1.45, -0.03], giro: [0, Math.PI, 0], sombra: false },
-    { geo: new THREE.BoxGeometry(0.06, 0.3, 0.06), mat: corpo, pos: [0, 1.15, 0] },
-  ], monitores);
+    { geo: new RoundedBoxGeometry(9, 0.08, 1.3, 2, 0.03), mat: madeira, pos: [0, 1.0, 0] },
+    { geo: new THREE.BoxGeometry(8.9, 0.95, 0.06), mat: branco, pos: [0, 0.5, -0.6] },
+    { geo: new THREE.BoxGeometry(0.06, 0.95, 1.26), mat: branco, pos: [-4.45, 0.5, 0] },
+    { geo: new THREE.BoxGeometry(0.06, 0.95, 1.26), mat: branco, pos: [4.45, 0.5, 0] },
+    { geo: new THREE.BoxGeometry(9, 0.04, 0.04), mat: brilho(0xfbbf24), pos: [0, 0.97, 0.66], sombra: false },
+  ], bancadas);
+  molduras(g, monitores, mat(0x111827, { roughness: 0.4 }));
   repetir(g, partesCadeira({ tecido: mat(0x1c1c1c, { roughness: 0.6 }), metal: mat(0xa1a1aa, { roughness: 0.3, metalness: 0.7 }), encosto: 0.95 }), cadeiras);
   for (const [lx, lz] of cadeiras) m.bloco([lx - 0.32, 0, lz - 0.32], [lx + 0.32, 0.6, lz + 0.32], { data: { type: 'sofa' } });
 
@@ -475,32 +509,35 @@ function salaTelemarketing(m) {
   plano(g, [8, 4.5], [0, 3.3, -D + 0.31], new THREE.MeshBasicMaterial({ map: central.tex, toneMapped: false }));
   for (const lx of [-10.2, 10.2]) for (const y of [2.1, 4.75]) m.tela(lx, y, -D + 0.25, 0, 4.4, 2.48);
 
-  // baias: 2 fileiras × 4, com divisórias, monitor e headset
+  // 8 baias (postos): 2 fileiras × 4, com divisórias, 3 monitores e headset
   const tampo = mat(0xf8fafc, { roughness: 0.5 });
   const divisoria = mat(0x7c3aed, { roughness: 0.95 });
   const baias = [];
+  const monitores = [];
   const cadeiras = [];
+  let n = 0;
   for (const lz of [-2, 5]) {
     for (const lx of [-9, -3, 3, 9]) {
       baias.push([lx, lz]);
       cadeiras.push([lx, lz + 1.25]);
+      const mons = tresMonitores(lx, lz - 0.3, 1.47, 0.75);
+      monitores.push(...mons);
+      m.posto(n++, { x: lx, z: lz + 1.25, y: 0.62 }, mons);
     }
     m.bloco([-11.6, 0, lz - 0.7], [11.6, 1.6, lz + 0.5], { data: { type: 'mesa' } });
   }
-  const corpo = mat(0x111827, { roughness: 0.4 });
   const fone = mat(0x1f2937, { roughness: 0.5 });
   repetir(g, [
-    { geo: new THREE.BoxGeometry(2.4, 0.06, 1.1), mat: tampo, pos: [0, 0.98, 0] },
-    { geo: new THREE.BoxGeometry(2.4, 0.95, 0.05), mat: mat(0xd4d4d8), pos: [0, 0.5, -0.52] },
-    { geo: new RoundedBoxGeometry(2.6, 1.55, 0.08, 2, 0.03), mat: divisoria, pos: [0, 0.78, -0.62] },
-    { geo: new RoundedBoxGeometry(0.08, 1.55, 1.2, 2, 0.03), mat: divisoria, pos: [-1.3, 0.78, -0.05] },
-    { geo: new THREE.BoxGeometry(0.95, 0.58, 0.05), mat: corpo, pos: [0, 1.4, -0.35] },
-    { geo: new THREE.PlaneGeometry(0.88, 0.5), mat: brilho(0x3b0764), pos: [0, 1.4, -0.32], sombra: false },
+    { geo: new THREE.BoxGeometry(3.0, 0.06, 1.1), mat: tampo, pos: [0, 0.98, 0] },
+    { geo: new THREE.BoxGeometry(3.0, 0.95, 0.05), mat: mat(0xd4d4d8), pos: [0, 0.5, -0.52] },
+    { geo: new RoundedBoxGeometry(3.2, 1.55, 0.08, 2, 0.03), mat: divisoria, pos: [0, 0.78, -0.62] },
+    { geo: new RoundedBoxGeometry(0.08, 1.55, 1.2, 2, 0.03), mat: divisoria, pos: [-1.6, 0.78, -0.05] },
     // headset: arco + dois fones, apoiado na mesa
-    { geo: new THREE.TorusGeometry(0.14, 0.018, 6, 16, Math.PI), mat: fone, pos: [0.75, 1.17, 0.1], sombra: false },
-    { geo: new THREE.CylinderGeometry(0.06, 0.06, 0.04, 12), mat: fone, pos: [0.61, 1.05, 0.1], giro: [0, 0, Math.PI / 2], sombra: false },
-    { geo: new THREE.CylinderGeometry(0.06, 0.06, 0.04, 12), mat: fone, pos: [0.89, 1.05, 0.1], giro: [0, 0, Math.PI / 2], sombra: false },
+    { geo: new THREE.TorusGeometry(0.14, 0.018, 6, 16, Math.PI), mat: fone, pos: [1.1, 1.17, 0.2], sombra: false },
+    { geo: new THREE.CylinderGeometry(0.06, 0.06, 0.04, 12), mat: fone, pos: [0.96, 1.05, 0.2], giro: [0, 0, Math.PI / 2], sombra: false },
+    { geo: new THREE.CylinderGeometry(0.06, 0.06, 0.04, 12), mat: fone, pos: [1.24, 1.05, 0.2], giro: [0, 0, Math.PI / 2], sombra: false },
   ], baias);
+  molduras(g, monitores, mat(0x111827, { roughness: 0.4 }));
   repetir(g, partesCadeira({ tecido: mat(0x312e81, { roughness: 0.85 }), metal: mat(0x52525b, { roughness: 0.35, metalness: 0.6 }) }), cadeiras);
   for (const [lx, lz] of cadeiras) m.bloco([lx - 0.32, 0, lz - 0.32], [lx + 0.32, 0.6, lz + 0.32], { data: { type: 'sofa' } });
 
@@ -561,7 +598,10 @@ function salaReuniao(m) {
     cadeiras.push([x, z, Math.atan2(x, z - 1.5)]);
   }
   repetir(g, partesCadeira({ tecido: mat(0x9ca3af, { roughness: 0.85 }), metal: mat(0x374151, { roughness: 0.35, metalness: 0.6 }), encosto: 0.85 }), cadeiras);
-  for (const [x, z] of cadeiras) m.bloco([x - 0.32, 0, z - 0.32], [x + 0.32, 0.6, z + 0.32], { data: { type: 'sofa' } });
+  for (const [x, z, ry] of cadeiras) {
+    m.bloco([x - 0.32, 0, z - 0.32], [x + 0.32, 0.6, z + 0.32], { data: { type: 'sofa' } });
+    m.assento(x, z, 0.6, ry);
+  }
   // luminárias pendentes
   repetir(g, [
     { geo: new THREE.CylinderGeometry(0.02, 0.02, 2.2, 4), mat: brilho(0x111827), pos: [0, H - 1.1, 1.5], sombra: false },
@@ -586,6 +626,7 @@ function lounge(m) {
   m.bloco([-1.6, 0, -3.15], [1.6, 0.8, -2.05], { data: { type: 'sofa' } });
   m.bloco([-4.15, 0, -1], [-3.05, 0.8, 2.2], { data: { type: 'sofa' } });
   m.bloco([3.05, 0, -1], [4.15, 0.8, 2.2], { data: { type: 'sofa' } });
+  for (const [x, z, ry] of [[0, -2.6, Math.PI], [-3.6, 0.6, -Math.PI / 2], [3.6, 0.6, Math.PI / 2]]) lugaresDoSofa(x, z, ry, (lx, lz) => m.assento(lx, lz, 0.8, ry));
   caixa(g, [2.4, 0.4, 1.2], [0, 0.2, 0.5], mat(0x3b2618, { roughness: 0.4 }));
   // balcão de café no fundo
   caixa(g, [8, 1.05, 0.9], [0, 0.52, -D + 0.75], mat(0xe5e7eb, { roughness: 0.5 }));
@@ -688,6 +729,8 @@ export function construirEscritorio(world, p, { empresa = '' } = {}) {
   raiz.add(esperaSofa);
   sofa(esperaSofa, 0x334155, [[47, 52, 0], [53, 52, 0]]); // de frente para o balcão
   world.addBox({ min: [45.4, 0, 51.45], max: [54.6, 0.8, 52.55], data: { type: 'sofa' } });
+  const assentos = [];
+  for (const x of [47, 53]) lugaresDoSofa(x, 52, 0, (lx, lz) => assentos.push({ x: lx, z: lz, y: 0.8, yaw: 0, posto: null }));
   plantas(raiz, [[41.5, 4], [58.5, 4], [41.5, 56], [58.5, 56], [58, 22], [58, 38]]);
   const lr = new THREE.PointLight(0xffffff, 55, 30, 1.4);
   lr.position.set(50, H - 0.8, 30);
@@ -696,13 +739,16 @@ export function construirEscritorio(world, p, { empresa = '' } = {}) {
   // salas
   const telas = [];
   const telaoes = [];
+  const postos = [];
   const salas = {};
-  for (const s of p.salas) salas[s.id] = SALAS[s.id](marco(world, raiz, s, telas, telaoes));
-  for (const l of p.lounges) lounge(marco(world, raiz, l, telas, telaoes));
+  for (const s of p.salas) salas[s.id] = SALAS[s.id](marco(world, raiz, s, telas, telaoes, postos, assentos));
+  for (const l of p.lounges) lounge(marco(world, raiz, l, telas, telaoes, postos, assentos));
 
   return {
     telas,
     telaoes,
+    postos, // [{ id: 'ti-0', monitores: [3 × { pos, rotY, w, h }] }], na ordem da planta
+    assentos, // [{ x, z, y, yaw, posto }]: onde dá para sentar com C
     entrada: { pos: [55, 0, (c0 + c1) / 2], yaw: Math.PI / 2 }, // olhando para o corredor
     limites: { minX, maxX, minZ: z0, maxZ: z1 },
     porta: new THREE.Box3(new THREE.Vector3(maxX - 1, 0, c0), new THREE.Vector3(maxX + 1, 3.6, c1)),

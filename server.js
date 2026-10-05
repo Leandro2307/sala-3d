@@ -495,6 +495,7 @@ function publicUser(u) {
   return {
     id: u.id, name: u.name, color: u.color, mic: u.mic,
     shares: [...u.shares.values()],
+    posto: u.posto,
     p: u.p, r: u.r, a: u.a, photo: u.photo, shirt: u.shirt, char: u.char, health: u.health, ko: u.ko, moedas: u.moedas,
   };
 }
@@ -558,19 +559,69 @@ function semTela(room) {
   return null;
 }
 
-// As telas da sala: no Lazer, as 4 da parede do cinema; no escritório, as de cada departamento,
-// na ordem das salas (a mesma planta que o navegador desenha).
+// As telas da sala: no Lazer, as 4 da parede do cinema; no escritório, as de parede de cada
+// departamento, na ordem das salas, e depois os 3 monitores de cada posto de trabalho (a mesma
+// planta que o navegador desenha). parede: quantas são de parede — as dos postos são só do dono.
 function layoutTelas(cfg) {
   if (cfg?.modulo === 'escritorio' && cfg.departamentos?.length && ESCRITORIO) {
     const p = ESCRITORIO.planta(cfg.departamentos);
     return {
       total: p.totalTelas,
+      parede: p.telasParede,
       salaDa: (i) => p.salas.find((s) => i >= s.primeiraTela && i < s.primeiraTela + s.telas)?.id ?? null,
       faixa: (id) => ESCRITORIO.faixaDeTelas(p, id),
       temSala: (id) => p.salas.some((s) => s.id === id),
+      postoDa: (i) => ESCRITORIO.postoDaTela(p, i)?.id ?? null,
+      faixaPosto: (id) => ESCRITORIO.faixaDoPosto(p, id),
     };
   }
-  return { total: SHARE_SLOTS, salaDa: () => null, faixa: () => [0, SHARE_SLOTS], temSala: () => false };
+  return {
+    total: SHARE_SLOTS, parede: SHARE_SLOTS, salaDa: () => null, faixa: () => [0, SHARE_SLOTS], temSala: () => false,
+    postoDa: () => null, faixaPosto: () => null,
+  };
+}
+
+const salaDoPosto = (id) => String(id).split('-')[0];
+
+function donoDoPosto(room, id) {
+  for (const u of room.users.values()) if (u.posto === id) return u;
+  return null;
+}
+
+// Sentou num posto livre: fica com ele. Vão para os 3 monitores as telas que estavam no posto
+// antigo, nas telas de parede da sala do posto ou só no telão (nessa ordem, enquanto couber).
+// Devolve os compartilhamentos que mudaram de tela, de quem forem.
+function pegarPosto(room, user, id) {
+  const layout = layoutTelas(room.config);
+  const antigo = user.posto ? layout.faixaPosto(user.posto) : null;
+  const naFaixa = (slot, f) => slot != null && !!f && slot >= f[0] && slot < f[1];
+  const sala = salaDoPosto(id);
+  const ordem = (sh) => (naFaixa(sh.slot, antigo) ? 0 : sh.slot != null ? 1 : 2);
+  const levar = [...user.shares.values()]
+    .filter((sh) => sh.slot == null || naFaixa(sh.slot, antigo) || layout.salaDa(sh.slot) === sala)
+    .sort((a, b) => ordem(a) - ordem(b));
+  user.posto = id;
+  const faixa = layout.faixaPosto(id);
+  const mudaram = [];
+  for (const sh of levar) {
+    const livre = telaLivre(room, faixa);
+    if (livre === -1) break;
+    if (sh.slot != null && room.slots[sh.slot] === sh.key) room.slots[sh.slot] = null;
+    sh.slot = livre;
+    room.slots[livre] = sh.key;
+    mudaram.push({ user, share: sh });
+  }
+  // o que sobrou no posto antigo (não coube) volta para uma tela de parede ou para o telão
+  for (const sh of user.shares.values()) {
+    if (!naFaixa(sh.slot, antigo)) continue;
+    room.slots[sh.slot] = null;
+    const livre = telaLivre(room, [0, layout.parede]);
+    sh.slot = livre === -1 ? null : livre;
+    if (livre !== -1) room.slots[livre] = sh.key;
+    mudaram.push({ user, share: sh });
+  }
+  for (let t = encaixarSemTela(room); t; t = encaixarSemTela(room)) mudaram.push(t);
+  return mudaram;
 }
 
 // primeira tela livre entre [a, b)
@@ -584,16 +635,24 @@ function telaLivre(room, [a, b]) {
 // mudaram de tela (para avisar todo mundo).
 function ajustarTelas(room, antes = layoutTelas(null)) {
   const depois = layoutTelas(room.config);
+  // posto que deixou de existir (tirou o departamento, voltou para o Lazer): fica sem posto
+  for (const u of room.users.values()) if (u.posto && !depois.faixaPosto(u.posto)) u.posto = null;
   const telas = [];
   for (const u of room.users.values()) {
-    for (const sh of u.shares.values()) if (sh.slot != null) telas.push({ sh, sala: antes.salaDa(sh.slot), era: sh.slot });
+    for (const sh of u.shares.values()) {
+      if (sh.slot == null) continue;
+      const posto = antes.postoDa(sh.slot);
+      // tela de um posto: continua no posto (se ainda é dele); senão, na sala do posto
+      telas.push({ sh, era: sh.slot, posto: posto && u.posto === posto ? posto : null, sala: posto ? salaDoPosto(posto) : antes.salaDa(sh.slot) });
+    }
   }
   telas.sort((a, b) => a.era - b.era);
   room.slots = new Array(depois.total).fill(null);
   const mudaram = [];
   for (const t of telas) {
-    let slot = depois.temSala(t.sala) ? telaLivre(room, depois.faixa(t.sala)) : -1;
-    if (slot === -1) slot = room.slots.indexOf(null);
+    let slot = t.posto ? telaLivre(room, depois.faixaPosto(t.posto)) : -1;
+    if (slot === -1 && depois.temSala(t.sala)) slot = telaLivre(room, depois.faixa(t.sala));
+    if (slot === -1) slot = telaLivre(room, [0, depois.parede]);
     t.sh.slot = slot === -1 ? null : slot;
     if (slot !== -1) room.slots[slot] = t.sh.key;
     if (t.sh.slot !== t.era) mudaram.push(t.sh.key);
@@ -606,7 +665,7 @@ function ajustarTelas(room, antes = layoutTelas(null)) {
 // liberou uma tela: o compartilhamento que estava só no telão ganha ela
 function encaixarSemTela(room) {
   const t = semTela(room);
-  const livre = room.slots.indexOf(null);
+  const livre = t ? telaLivre(room, [0, layoutTelas(room.config).parede]) : -1;
   if (!t || livre === -1) return null;
   t.share.slot = livre;
   room.slots[livre] = t.share.key;
@@ -643,6 +702,7 @@ function attachSockets(io) {
         health: 1,
         ko: false,
         ultimoDado: 0,
+        posto: null, // posto de trabalho do escritório ("ti-3"), se sentou num
         p: [0, 0, -4], r: Math.PI, a: 0,
       };
       user.moedas = saldoDe(user.name);
@@ -716,7 +776,10 @@ function attachSockets(io) {
       r({ ok: true });
       io.to(room.id).emit('sala', { ...salaPublica(room), por: user.name });
       // outro modo ou outros departamentos, outras telas: quem mudou de tela fica sabendo
-      for (const key of ajustarTelas(room, layoutTelas(antes))) {
+      const postos = new Map([...room.users.values()].map((u) => [u.id, u.posto]));
+      const mudaram = ajustarTelas(room, layoutTelas(antes));
+      for (const u of room.users.values()) if (u.posto !== postos.get(u.id)) io.to(room.id).emit('posto', { id: u.id, posto: u.posto });
+      for (const key of mudaram) {
         const dono = room.users.get(donoDaChave(key));
         const sh = dono?.shares.get(key);
         if (sh) io.to(room.id).emit('share-update', { id: dono.id, ...sh });
@@ -778,8 +841,10 @@ function attachSockets(io) {
       const sid = cleanText(streamId, 80);
       if (!sid) return reply({ ok: false, error: 'Compartilhamento inválido.' });
       const layout = layoutTelas(room.config);
-      const naSala = typeof sala === 'string' && layout.temSala(sala) ? telaLivre(room, layout.faixa(sala)) : -1;
-      let slot = naSala !== -1 ? naSala : room.slots.indexOf(null);
+      // na sala do próprio posto: nos monitores dele; senão numa tela de parede da sala
+      const noPosto = user.posto && sala === salaDoPosto(user.posto) ? telaLivre(room, layout.faixaPosto(user.posto)) : -1;
+      const naSala = noPosto === -1 && typeof sala === 'string' && layout.temSala(sala) ? telaLivre(room, layout.faixa(sala)) : -1;
+      let slot = noPosto !== -1 ? noPosto : naSala !== -1 ? naSala : telaLivre(room, [0, layout.parede]);
       if (slot === -1) {
         if (semTela(room)) return reply({ ok: false, error: 'Todas as telas e o telão já estão ocupados.' });
         slot = null; // vai direto para o telão
@@ -794,6 +859,21 @@ function attachSockets(io) {
       io.to(room.id).emit('share-update', { id: user.id, ...share });
       io.to(room.id).emit('main', { source: room.main, by: null });
       reply({ ok: true, slot, key });
+    });
+
+    // Sentou na cadeira de um posto de trabalho do escritório: se está livre, fica sendo dele.
+    socket.on('posto', (msg, ack) => {
+      const r = resposta(ack);
+      if (!user) return r({ ok: false });
+      const id = typeof msg?.id === 'string' ? msg.id : '';
+      if (!layoutTelas(room.config).faixaPosto(id)) return r({ ok: false, erro: 'Esse posto não existe mais.' });
+      if (user.posto === id) return r({ ok: true });
+      const outro = donoDoPosto(room, id);
+      if (outro) return r({ ok: false, dono: outro.name });
+      const mudaram = pegarPosto(room, user, id);
+      io.to(room.id).emit('posto', { id: user.id, posto: id });
+      for (const t of mudaram) io.to(room.id).emit('share-update', { id: t.user.id, ...t.share });
+      r({ ok: true });
     });
 
     // sem chave: para todas as telas da pessoa

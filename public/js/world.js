@@ -10,7 +10,7 @@ import { PISTA, CAMINHO, CURVAS, pontoEm, projetar } from './pista.js';
 import { criarNatureza } from './natureza.js';
 import { RESERVAS_JOGOS } from './tabuleiros.js';
 import { construirEscritorio } from './escritorio3d.js';
-import { planta, salaEm, rotuloDaTela } from './escritorio.js';
+import { planta, salaEm, rotuloDaTela, postoDaTela, DEPARTAMENTOS } from './escritorio.js';
 
 // Área jogável inteira (cercada): a sala do cinema num canto, em volta da origem, e o
 // autódromo ao ar livre a leste. O telão do cinema continua em minZ, perto da plateia.
@@ -24,6 +24,7 @@ const FONT = "'Plus Jakarta Sans', system-ui, sans-serif";
 const _tmp = new THREE.Vector3();
 const _m4 = new THREE.Matrix4();
 const _frustum = new THREE.Frustum();
+const _esfera = new THREE.Sphere();
 const TV_PX = { w: 1280, h: 720 }; // superfície CSS3D do player do telão (iframe/<video>)
 
 // Parede de telas: telão no centro, 4 telas de compartilhamento nas laterais (levemente viradas para o centro).
@@ -182,20 +183,45 @@ class TexturaDeTela extends THREE.VideoTexture {
   }
 }
 
+// Cartaz de monitor de posto desligado: um só por cor, para todos (são dezenas de monitores).
+const _apagados = new Map();
+function monitorApagado(accent) {
+  if (!_apagados.has(accent)) {
+    const tex = canvasTexture(256, 144, (ctx, w, h) => {
+      const g = ctx.createLinearGradient(0, 0, w, h);
+      g.addColorStop(0, '#111827');
+      g.addColorStop(1, '#05070d');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, w, h);
+      ctx.globalAlpha = 0.55;
+      drawMonitorIcon(ctx, w / 2, h * 0.46, h * 0.2, accent);
+    });
+    const m = new THREE.MeshBasicMaterial({ map: tex, toneMapped: false });
+    m.userData.compartilhado = true;
+    _apagados.set(accent, m);
+  }
+  return _apagados.get(accent);
+}
+
 class ScreenDisplay {
-  constructor({ w, h, title, subtitle, icon = 'monitor', accent = '#6ee7c8' }) {
+  // leve: monitor de posto de trabalho — sem moldura (a mesa já tem), com o cartaz de desligado
+  // em comum e sem texto próprio. A etiqueta com o nome só é criada quando aparece pela 1ª vez.
+  constructor({ w, h, title, subtitle, icon = 'monitor', accent = '#6ee7c8', leve = false }) {
     this.w = w;
     this.h = h;
+    this.leve = leve;
     this.group = new THREE.Group();
     this.accent = accent;
 
-    const frame = new THREE.Mesh(
-      new RoundedBoxGeometry(w + 0.7, h + 0.7, 0.5, 4, 0.22),
-      new THREE.MeshStandardMaterial({ color: 0x0c0e13, roughness: 0.55, metalness: 0.3 }),
-    );
-    frame.position.z = -0.27;
-    frame.castShadow = true;
-    this.group.add(frame);
+    if (!leve) {
+      const frame = new THREE.Mesh(
+        new RoundedBoxGeometry(w + 0.7, h + 0.7, 0.5, 4, 0.22),
+        new THREE.MeshStandardMaterial({ color: 0x0c0e13, roughness: 0.55, metalness: 0.3 }),
+      );
+      frame.position.z = -0.27;
+      frame.castShadow = true;
+      this.group.add(frame);
+    }
 
     // linha de LED em volta da tela
     const glow = new THREE.Mesh(
@@ -203,6 +229,7 @@ class ScreenDisplay {
       new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: 0.18, toneMapped: false }),
     );
     glow.position.z = -0.53;
+    glow.visible = !leve;
     this.glow = glow;
     this.group.add(glow);
 
@@ -213,7 +240,7 @@ class ScreenDisplay {
     this.surface.userData.screen = this;
     this.group.add(this.surface);
 
-    this.placeholderTex = canvasTexture(1024, Math.round((1024 * h) / w), (ctx, cw, ch, t = title, s = subtitle) => {
+    this.placeholderTex = leve ? null : canvasTexture(1024, Math.round((1024 * h) / w), (ctx, cw, ch, t = title, s = subtitle) => {
       screenBackground(ctx, cw, ch);
       if (icon === 'play') drawPlayIcon(ctx, cw / 2, ch * 0.4, ch * 0.24, '#ff4d5e');
       else drawMonitorIcon(ctx, cw / 2, ch * 0.38, ch * 0.24, 'rgba(255,255,255,0.55)');
@@ -227,7 +254,7 @@ class ScreenDisplay {
     });
     this.placeholder = new THREE.Mesh(
       new THREE.PlaneGeometry(w, h),
-      new THREE.MeshBasicMaterial({ map: this.placeholderTex, toneMapped: false }),
+      leve ? monitorApagado(accent) : new THREE.MeshBasicMaterial({ map: this.placeholderTex, toneMapped: false }),
     );
     this.placeholder.position.z = 0.01;
     this.placeholder.userData.screen = this;
@@ -242,33 +269,8 @@ class ScreenDisplay {
     this.videoMesh.userData.screen = this;
     this.group.add(this.videoMesh);
 
-    // etiqueta com o nome de quem está na tela (canto inferior esquerdo, estilo Meet)
-    const lw = Math.min(w * 0.46, 8);
-    const lh = lw / 6.4;
-    this.labelTex = canvasTexture(1024, 160, (ctx, cw, ch, t = title, dot = null) => {
-      ctx.font = `700 70px ${FONT}`;
-      const tw = Math.min(ctx.measureText(t).width, cw - 150);
-      const pw = tw + (dot ? 124 : 72);
-      ctx.fillStyle = 'rgba(10,12,18,0.78)';
-      roundRect(ctx, 0, 14, pw, 132, 66);
-      ctx.fill();
-      if (dot) {
-        ctx.fillStyle = dot;
-        ctx.beginPath();
-        ctx.arc(62, 80, 18, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.fillStyle = '#fff';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(t, dot ? 98 : 36, 84, cw - 150);
-    });
-    this.label = new THREE.Mesh(
-      new THREE.PlaneGeometry(lw, lh),
-      new THREE.MeshBasicMaterial({ map: this.labelTex, transparent: true, toneMapped: false, depthWrite: false }),
-    );
-    this.label.position.set(-w / 2 + lw / 2 + 0.3, -h / 2 + lh / 2 + 0.25, 0.05);
-    this.label.visible = false;
-    this.group.add(this.label);
+    this.title = title;
+    this.label = null; // etiqueta com o nome: criada em setLabel, quando precisar
 
     this.video = null;
     this.texture = null;
@@ -292,6 +294,39 @@ class ScreenDisplay {
     this.aoMudar = null;
   }
 
+  // etiqueta com o nome de quem está na tela (canto inferior esquerdo, estilo Meet)
+  criarEtiqueta() {
+    const { w, h, title } = this;
+    const lw = this.leve ? w * 0.62 : Math.min(w * 0.46, 8);
+    const lh = lw / 6.4;
+    const mx = Math.min(0.3, w * 0.03);
+    const my = Math.min(0.25, h * 0.04);
+    this.labelTex = canvasTexture(1024, 160, (ctx, cw, ch, t = title, dot = null) => {
+      ctx.font = `700 70px ${FONT}`;
+      const tw = Math.min(ctx.measureText(t).width, cw - 150);
+      const pw = tw + (dot ? 124 : 72);
+      ctx.fillStyle = 'rgba(10,12,18,0.78)';
+      roundRect(ctx, 0, 14, pw, 132, 66);
+      ctx.fill();
+      if (dot) {
+        ctx.fillStyle = dot;
+        ctx.beginPath();
+        ctx.arc(62, 80, 18, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.fillStyle = '#fff';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(t, dot ? 98 : 36, 84, cw - 150);
+    });
+    this.label = new THREE.Mesh(
+      new THREE.PlaneGeometry(lw, lh),
+      new THREE.MeshBasicMaterial({ map: this.labelTex, transparent: true, toneMapped: false, depthWrite: false }),
+    );
+    this.label.position.set(-w / 2 + lw / 2 + mx, -h / 2 + lh / 2 + my, 0.05);
+    this.label.visible = false;
+    this.group.add(this.label);
+  }
+
   // esta tela deveria estar mostrando o player do telão?
   get mostraMidia() { return this.midia; }
 
@@ -313,16 +348,17 @@ class ScreenDisplay {
   }
 
   setPlaceholder(title, subtitle) {
-    if (this._phKey === title + subtitle) return;
+    if (!this.placeholderTex || this._phKey === title + subtitle) return;
     this._phKey = title + subtitle;
     this.placeholderTex.userData.redraw(title, subtitle);
   }
 
   setLabel(text, dotColor = null) {
     if (text == null) {
-      this.label.visible = false;
+      if (this.label) this.label.visible = false;
       return;
     }
+    if (!this.label) this.criarEtiqueta();
     if (this._labelKey !== text + dotColor) {
       this._labelKey = text + dotColor;
       this.labelTex.userData.redraw(text, dotColor);
@@ -367,6 +403,18 @@ class ScreenDisplay {
     this.videoMesh.visible = false;
     this.placeholder.visible = true;
     this.glow.material.opacity = 0.18;
+  }
+
+  // devolve a memória (geometrias, texturas) — o cartaz de desligado é de todos, fica
+  dispose() {
+    this.clearVideo();
+    this.group.traverse((o) => {
+      if (!o.isMesh) return;
+      o.geometry.dispose();
+      if (o.material.userData.compartilhado) return;
+      o.material.map?.dispose();
+      o.material.dispose();
+    });
   }
 
   // ponto em frente à tela, a uma distância que faz a tela preencher a câmera
@@ -1935,6 +1983,21 @@ export class World {
       this.scene.add(s.group);
       return s;
     });
+    // os 3 monitores de cada posto, depois das telas de parede (mesma numeração do servidor)
+    const monitores = new Map(this.escritorio.postos.map((po) => [po.id, po.monitores]));
+    for (const po of this.planta.postos) {
+      (monitores.get(po.id) || []).forEach((m, j) => {
+        const s = new ScreenDisplay({ w: m.w, h: m.h, leve: true, accent: DEPARTAMENTOS[po.sala].cor });
+        s.index = po.primeiraTela + j;
+        s.posto = po.id;
+        s.meio = j === 1;
+        s.group.position.set(...m.pos);
+        s.group.rotation.y = m.rotY;
+        s.aoMudar = () => { if (s.isHost) this.tvCss.visible = s.mostraMidia; };
+        this.scene.add(s.group);
+        this.slotsEscritorio[s.index] = s;
+      });
+    }
     this.telaoesEscritorio = this.escritorio.telaoes.map((t) => {
       const tel = this.criarTelao({ w: t.w, h: t.h, title: 'Telão', subtitle: 'Cole um link (YouTube, Twitch, Kick…) ou fixe a tela de alguém aqui', accent: '#a78bfa' });
       tel.group.position.set(...t.pos);
@@ -1959,7 +2022,7 @@ export class World {
     }
     this.areas.delete('escritorio');
     for (const s of [...this.slotsEscritorio, ...this.telaoesEscritorio]) {
-      s.clearVideo();
+      s.dispose();
       this.scene.remove(s.group);
     }
     this.telaoes = this.telaoes.filter((t) => !this.telaoesEscritorio.includes(t));
@@ -1977,6 +2040,25 @@ export class World {
   // em que sala do escritório está um ponto (id do departamento, 'corredor', 'recepcao'...) ou null
   salaEm(x, z) {
     return this.planta ? salaEm(this.planta, x, z) : null;
+  }
+
+  // posto de trabalho de que a tela N faz parte ({ id, sala, ... }) ou null
+  postoDaTela(i) {
+    return this.planta ? postoDaTela(this.planta, i) : null;
+  }
+
+  // lugar para sentar (cadeira, sofá do escritório) mais perto de x/z, até `raio` metros
+  assentoPerto(x, z, raio = 1.1) {
+    let melhor = null;
+    let dm = raio * raio;
+    for (const a of this.escritorio?.assentos || []) {
+      const d = (a.x - x) ** 2 + (a.z - z) ** 2;
+      if (d < dm) {
+        dm = d;
+        melhor = a;
+      }
+    }
+    return melhor;
   }
 
   // nome da tela N ("TI · Tela 2" no escritório, "Tela 3" no cinema)
@@ -2099,10 +2181,20 @@ export class World {
   atualizarTelas() {
     const agora = performance.now();
     const base = 1000 / this.videoFps;
+    const cam = this.camera;
+    cam.updateMatrixWorld();
+    _m4.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+    _frustum.setFromProjectionMatrix(_m4);
     for (const s of this.screens || []) {
       if (!s.texture) continue;
-      const d = s.group.getWorldPosition(_tmp).distanceTo(this.camera.position);
-      const intervalo = d < 35 ? base : d < 80 ? Math.max(base, 1000 / 30) : 100;
+      s.group.getWorldPosition(_tmp);
+      // fora da vista não sobe quadro novo (é o que mais pesa): virou para ela, atualiza na hora
+      if (!_frustum.intersectsSphere(_esfera.set(_tmp, Math.max(s.w, s.h) * 0.75))) continue;
+      const d = _tmp.distanceTo(cam.position);
+      // monitor de mesa é pequeno: de longe é um borrão, não precisa de 60 quadros
+      const intervalo = s.w < 3
+        ? d < 7 ? base : d < 16 ? Math.max(base, 1000 / 20) : 1000 / 8
+        : d < 35 ? base : d < 80 ? Math.max(base, 1000 / 30) : 100;
       s.texture.atualizar(agora, intervalo - 2); // 2 ms de folga: quadro de 16,6 ms não pode cair para 30 fps
     }
   }

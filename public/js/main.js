@@ -16,7 +16,7 @@ import { Controle } from './controle.js';
 import { Mesa } from './mesa.js';
 import { Qualidade, NIVEIS, nivelInicial } from './qualidade.js';
 import { GuiaExtensao } from './guia-extensao.js';
-import { DEPARTAMENTOS, IDS_DEPARTAMENTOS } from './escritorio.js';
+import { DEPARTAMENTOS, IDS_DEPARTAMENTOS, rotuloDoPosto } from './escritorio.js';
 import { Dados, MESA_DADOS } from './dados.js';
 import { icon, hydrateIcons } from './icons.js';
 import { isTouch, setupTouchControls, toggleFullscreen, isFullscreen, temTelaCheia } from './touch.js';
@@ -630,6 +630,13 @@ function bindSocket() {
   // uma tela de alguém entrou (slot) ou saiu (slot null). As minhas eu registro na resposta do
   // share-start e apago no stopShare: aqui só chegam de volta.
   // A que estava só no telão pode ganhar uma tela quando outra sai (mesma chave, slot novo).
+  socket.on('posto', ({ id, posto }) => {
+    const u = state.users.get(id);
+    if (!u) return;
+    u.posto = posto;
+    refreshScreens();
+  });
+
   socket.on('share-update', ({ id, key, slot, streamId, gone, controle: podeControlar, site, titulo }) => {
     const u = state.users.get(id);
     if (!u || typeof key !== 'string') return;
@@ -1551,7 +1558,8 @@ function atualizarPaineis() {
   const telasPorSala = {};
   for (const t of telasNoAr()) {
     if (t.share.slot == null) continue;
-    const sala = world.planta?.salas.find((s) => t.share.slot >= s.primeiraTela && t.share.slot < s.primeiraTela + s.telas)?.id;
+    const sala = world.postoDaTela(t.share.slot)?.sala
+      ?? world.planta?.salas.find((s) => t.share.slot >= s.primeiraTela && t.share.slot < s.primeiraTela + s.telas)?.id;
     if (sala) telasPorSala[sala] = (telasPorSala[sala] || 0) + 1;
   }
   const d = new Date();
@@ -1906,7 +1914,7 @@ function refreshScreens() {
     slot.owner = dono?.share.key ?? null;
     if (slot === slotMidia) {
       const meta = PROVIDERS[tv.state.provider];
-      slot.setLabel(`${tv.label} · Tela ${i + 1}`, meta?.color);
+      slot.setLabel(`${tv.label} · ${world.rotuloTela(i)}`, meta?.color);
       slot.setPlaceholder(tv.title || tv.label, 'Tocando aqui — chegue mais perto');
       slot.setMidia(true);
       return;
@@ -1914,12 +1922,15 @@ function refreshScreens() {
     slot.setMidia(false);
     if (!dono) {
       slot.clearVideo();
-      slot.setPlaceholder(`Tela ${i + 1}`, 'Livre — clique em “Compartilhar tela”');
-      slot.setLabel(null);
+      slot.setPlaceholder(world.rotuloTela(i), 'Livre — clique em “Compartilhar tela”');
+      // posto com dono: o monitor do meio mostra de quem é
+      const dp = slot.posto && slot.meio ? donoDoPosto(slot.posto) : null;
+      slot.setLabel(dp ? (dp.isSelf ? 'Seu posto' : `Posto de ${dp.name}`) : null, dp?.color);
       return;
     }
     const { user: u, share: sh } = dono;
-    slot.setLabel(`${u.isSelf ? 'Você' : u.name} · Tela ${i + 1}`, u.color);
+    const quem = u.isSelf ? 'Você' : u.name;
+    slot.setLabel(slot.posto ? quem : `${quem} · ${world.rotuloTela(i)}`, u.color);
     const v = shareVideo(sh);
     if (v) slot.setVideo(v);
     else {
@@ -2245,18 +2256,43 @@ function assentoAtual() {
   return TIPOS_ASSENTO.has(player.ground?.data?.type) ? player.ground : null;
 }
 
+// No escritório dá para sentar só chegando perto da cadeira ou do sofá (não precisa subir nele).
+function lugarPerto() {
+  if (!player.grounded || player.veiculo) return null;
+  return world.assentoPerto(player.pos.x, player.pos.z);
+}
+
 function toggleSit() {
   if (player.sitting) {
     player.stand();
     return;
   }
+  const lugar = lugarPerto();
+  if (lugar) return sentarNoLugar(lugar);
   const assento = assentoAtual();
   if (assento) player.sit(assento);
-  else toast('Fique em cima de um sofá ou pufe para sentar.', 'info', 2600);
+  else toast(world.escritorio ? 'Chegue perto de uma cadeira ou sofá para sentar.' : 'Fique em cima de um sofá ou pufe para sentar.', 'info', 2600);
+}
+
+// Cadeira de posto de trabalho: se o posto está livre, fica sendo seu — o que você compartilhar
+// estando nesta sala aparece nos 3 monitores dele, e quem passar (até de fora, pelo vidro) vê.
+function sentarNoLugar(lugar) {
+  player.sentarEm(lugar);
+  if (!lugar.posto || self()?.posto === lugar.posto) return;
+  socket.emit('posto', { id: lugar.posto }, (r) => {
+    if (r?.ok) toast(`${rotuloDoPosto(lugar.posto)} agora é seu: compartilhe a tela e ela aparece nestes 3 monitores. Mire num monitor e aperte E para controlar.`, 'info', 6000);
+    else if (r?.dono) toast(`Este posto é de ${r.dono}. Pode sentar, mas suas telas não vão para estes monitores.`, 'info', 4500);
+    else if (r?.erro) toast(r.erro, 'error');
+  });
+}
+
+function donoDoPosto(id) {
+  for (const u of state.users.values()) if (u.posto === id) return u;
+  return null;
 }
 
 function updateSitHint() {
-  const podeSentar = !player.sitting && !!assentoAtual() && !state.focus && !state.panel;
+  const podeSentar = !player.sitting && !!(lugarPerto() || assentoAtual()) && !state.focus && !state.panel;
   const dica = $('#sit-hint');
   const mostrar = podeSentar || player.sitting;
   if (dica.hidden === !mostrar) { /* já está certo */ } else dica.hidden = !mostrar;
@@ -2751,8 +2787,9 @@ function pickScreen() {
   const cam = world.camera;
   raycaster.setFromCamera(screenCenter, cam);
   raycaster.far = 140;
+  const alcance = (s, d) => s.w >= 3 || d < 14;
   const hit = raycaster.intersectObjects(world.screens.map((s) => s.surface), false)[0];
-  if (hit && screenInfo(hit.object.userData.screen)) return hit.object.userData.screen;
+  if (hit && alcance(hit.object.userData.screen, hit.distance) && screenInfo(hit.object.userData.screen)) return hit.object.userData.screen;
   cam.getWorldDirection(_fwd);
   let best = null;
   let bestScore = 1.25;
@@ -2760,7 +2797,7 @@ function pickScreen() {
     if (!screenInfo(s)) continue;
     s.surface.getWorldPosition(_to).sub(cam.position);
     const dist = _to.length();
-    if (dist > 140) continue;
+    if (dist > 140 || (s.w < 3 && dist > 5)) continue;
     const angle = _fwd.angleTo(_to);
     const radius = Math.atan(Math.max(s.w, s.h) / 2 / dist);
     const score = angle / (radius + 0.08);
