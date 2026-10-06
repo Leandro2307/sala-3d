@@ -4,7 +4,9 @@
 // - obedece aos botões voltar e avançar da barra;
 // - link que abriria aba nova (target=_blank, Ctrl+clique) vira aba nova do navegador da sala;
 // - repassa teclas e mouse, para o teclado e o mouse do posto se mexerem junto. Em campo de
-//   senha vai só "uma tecla" (sem dizer qual).
+//   senha vai só "uma tecla" (sem dizer qual);
+// - Alt+← / Alt+→ passa para a tela do lado (o monitor vizinho do posto), em vez de voltar página;
+// - conta se a página está tocando vídeo ou som (aba assim não é descarregada quando escondida).
 (() => {
   if (window.__sala3dQuadro || window.top === window || window.parent !== window.top) return;
   window.__sala3dQuadro = true;
@@ -42,6 +44,12 @@
   }, true);
 
   const tecla = (desceu) => (e) => {
+    if (desceu && e.altKey && (e.code === 'ArrowLeft' || e.code === 'ArrowRight')) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      avisar({ t: 'trocarTela', lado: e.code === 'ArrowRight' ? 1 : -1 });
+      return;
+    }
     const senha = e.target?.type === 'password';
     avisar({ t: 'tecla', code: senha ? null : e.code, desceu });
   };
@@ -65,4 +73,12 @@
   addEventListener('mousedown', () => avisar({ t: 'clique', desceu: true }), true);
   addEventListener('mouseup', () => avisar({ t: 'clique', desceu: false }), true);
   addEventListener('wheel', (e) => avisar({ t: 'roda', dy: e.deltaY }), { capture: true, passive: true });
+
+  let tocando = false;
+  setInterval(() => {
+    const agora = [...document.querySelectorAll('video, audio')].some((m) => !m.paused && !m.muted && m.volume > 0);
+    if (agora === tocando) return;
+    tocando = agora;
+    avisar({ t: 'midia', tocando });
+  }, 1500);
 })();

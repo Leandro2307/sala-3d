@@ -508,7 +508,9 @@ export class Player {
       cam.position.lerp(this.override.position, k);
       this.lookPoint.lerp(this.override.target, k);
       cam.lookAt(this.lookPoint);
-      this.avatar.setVisible(true);
+      // sentado (no posto) ou com a câmera colada no boneco, ele só taparia a tela: some
+      // (personagem grande, como o Optimus, ficava na frente dos monitores)
+      this.avatar.setVisible(!this.sitting && cam.position.distanceTo(this.avatar.group.position) > 2.2);
       return;
     }
 

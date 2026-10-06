@@ -445,6 +445,26 @@ body.touch #hud, body.touch #bar, body.touch #touch { -webkit-user-select: none;
   pointer-events: auto;
 }
 
+/* ‹ › nas bordas: passa para a tela do lado */
+.pg-lado {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 44px;
+  height: 96px;
+  border-radius: 22px;
+  border: 1px solid var(--line);
+  background: var(--glass-strong);
+  color: var(--text);
+  font-size: 34px;
+  line-height: 1;
+  pointer-events: auto;
+  transition: background-color 160ms;
+}
+.pg-lado:hover { background: rgba(62, 68, 84, 0.95); }
+.pg-lado.esq { left: max(10px, env(safe-area-inset-left)); }
+.pg-lado.dir { right: max(10px, env(safe-area-inset-right)); }
+
 /* ------------------------------------------------------------ navegador nas telas (navegador.js)
    vive no CSS3D: 1280 px de largura, a escala vem do tamanho da tela no mundo */
 #css3d .nv {

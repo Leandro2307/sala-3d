@@ -84,11 +84,12 @@ const navegadores = new Navegadores(world, {
   endereco: (texto) => paraIframe(enderecoDigitado(texto)),
   temPonte: () => extensaoNaVersao(1, 7),
   sala: () => state.room || 'principal',
-  aoEntrada: (m) => perifericosEntrada(m),
+  aoEntrada: (m) => entradaDoSite(m),
   aoDesligar: (tela) => {
     if (state.focus?.kind === 'pagina' && state.focus.tela === tela) sairDoFoco();
     refreshScreens();
   },
+  aoTrocarTela: (lado) => irParaTelaDoLado(lado),
 });
 // sol, lua, chuva e tempestade (clima.js): o dono da sala pode fixar, senão muda sozinho
 const clima = new Clima(world);
@@ -3508,6 +3509,28 @@ function sentarNoLugar(lugar) {
 // no mouse pad com o seu mouse — aqui na sala ou dentro de um site do navegador da tela (a
 // extensão repassa: navegador.js). Ver perifericos.js.
 const perifericosAtivos = () => (sentadoNoPosto ? world.escritorio?.perifericos : null);
+
+// O que o site da tela repassa (extensão): teclas e mouse para o posto, e Esc duas vezes seguidas
+// volta a andar — com o teclado dentro do site, o Esc não chega ao jogo (um Esc só é do site:
+// fechar janelinha, sair de tela cheia...)
+let escDoSite = 0;
+function entradaDoSite(m) {
+  if (m.t === 'tecla' && m.code === 'Escape' && m.desceu && state.focus?.kind === 'pagina') {
+    const agora = performance.now();
+    if (agora - escDoSite < 700) {
+      escDoSite = 0;
+      sairDoFoco();
+      return;
+    }
+    escDoSite = agora;
+  }
+  perifericosEntrada(m);
+}
+// clicou fora do monitor (na borda escura): o teclado volta para o jogo, e aí o Esc funciona
+$('#css3d').addEventListener('pointerdown', (e) => {
+  if (state.focus?.kind !== 'pagina' || e.target.closest('.nv')) return;
+  if (document.activeElement?.tagName === 'IFRAME') document.activeElement.blur();
+});
 function perifericosEntrada(m) {
   const p = perifericosAtivos();
   if (!p) return;
@@ -4228,6 +4251,8 @@ function enterFocus(info) {
   if (info.kind === 'pagina') {
     if (!navegadores.usar(info.screen)) return;
     state.focus = { kind: 'pagina', tela: info.screen };
+    $('#pg-esq').hidden = !telaDoLado(info.screen, -1);
+    $('#pg-dir').hidden = !telaDoLado(info.screen, 1);
     // com folga em volta: a barra de cima não tapa o começo do site
     player.override = info.screen.focusPose(world.camera, 1.12);
     document.body.classList.add('pagina-focus');
@@ -4307,6 +4332,8 @@ function exitFocus() {
     player.override = null;
     navegadores.soltar(); // o iframe segurava o teclado: devolve para o jogo
     document.body.classList.remove('pagina-focus');
+    $('#pg-esq').hidden = true;
+    $('#pg-dir').hidden = true;
     $('#pagina-hud').hidden = true;
     $('#crosshair').hidden = false;
   } else {
@@ -4329,6 +4356,53 @@ function sairDoFoco() {
 $('#focus-close').addEventListener('click', sairDoFoco);
 $('#jh-sair').addEventListener('click', sairDoFoco);
 $('#tv-focus-exit').addEventListener('click', sairDoFoco);
+// ------------------------------------------------------------------ a tela do lado
+// Usando uma tela (o navegador no monitor do posto, por exemplo): ‹ › nas bordas ou Alt+← / Alt+→
+// (até de dentro do site, com a extensão) passa para a tela vizinha — a câmera desliza até ela.
+const _ladoA = new THREE.Vector3();
+const _ladoB = new THREE.Vector3();
+const _ladoQ = new THREE.Quaternion();
+const _ladoDir = new THREE.Vector3();
+function telaDoLado(tela, lado) {
+  tela.surface.getWorldPosition(_ladoA);
+  _ladoDir.set(lado, 0, 0).applyQuaternion(tela.surface.getWorldQuaternion(_ladoQ));
+  let melhor = null;
+  let nota = Infinity;
+  for (const s of world.slots) {
+    if (!s || s === tela || !s.group.visible || !screenInfo(s)) continue;
+    s.surface.getWorldPosition(_ladoB).sub(_ladoA);
+    const paraLa = _ladoB.dot(_ladoDir);
+    if (paraLa < Math.min(tela.w, s.w) * 0.3) continue; // tem que estar mesmo daquele lado
+    const dist = _ladoB.length();
+    if (dist > Math.max(6, tela.w * 2.5)) continue;
+    // a da mesma altura primeiro (nas paredes com duas fileiras de telas)
+    const n = dist + Math.abs(_ladoB.y) * 2;
+    if (n < nota) {
+      nota = n;
+      melhor = s;
+    }
+  }
+  return melhor;
+}
+
+function irParaTelaDoLado(lado) {
+  const atual = state.focus?.kind === 'pagina' ? state.focus.tela : null;
+  const prox = atual && telaDoLado(atual, lado);
+  const info = prox && screenInfo(prox);
+  if (!info) return;
+  exitFocus(); // a câmera sai de onde está e desliza até a próxima (sem voltar ao boneco)
+  if (info.kind === 'livre') menuDaTela(prox);
+  else enterFocus(info);
+}
+$('#pg-esq').addEventListener('click', (e) => {
+  e.currentTarget.blur();
+  irParaTelaDoLado(-1);
+});
+$('#pg-dir').addEventListener('click', (e) => {
+  e.currentTarget.blur();
+  irParaTelaDoLado(1);
+});
+
 // navegador em foco: a barra dele (abas, endereço) está na própria tela; aqui só o Sair
 $('#pagina-hud').addEventListener('click', (e) => {
   if (e.target.closest('[data-pg="sair"]')) sairDoFoco();
@@ -4611,7 +4685,13 @@ window.addEventListener('keydown', (e) => {
   }
   if (typing() || e.repeat || guia.aberto || escolha.aberto || !$('#tela-mais').hidden) return;
   // usando o navegador da tela: as letras são do site, não atalhos do jogo (só o Esc sai)
-  if (state.focus?.kind === 'pagina') return;
+  if (state.focus?.kind === 'pagina') {
+    if (e.altKey && (e.code === 'ArrowLeft' || e.code === 'ArrowRight')) {
+      e.preventDefault();
+      irParaTelaDoLado(e.code === 'ArrowRight' ? 1 : -1);
+    }
+    return;
+  }
   // H: esconde (e mostra de novo) tudo o que fica por cima do 3D — para ver a sala limpa
   if (e.code === 'KeyH') {
     alternarHud();
@@ -4813,10 +4893,29 @@ function slowUpdate() {
   if (state.panel === 'telao' && state.casting) updateCastProgress();
 }
 
+// Teto de quadros do 3D enquanto um navegador de tela está em uso. O site é desenhado pelo próprio
+// Chrome, por cima de tudo (fora do 3D): com ele em foco cobrindo quase a tela inteira, o 3D atrás
+// em 60 quadros só tirava placa de vídeo e processador do site (3 navegadores derrubavam a sala
+// para 23 qps). Em foco, depois que a câmera chega na tela, o 3D cai para 12 quadros; sentado no
+// posto com navegador aberto, para 30 (menos na qualidade Alta: PC forte segura os 60). 0 = sem teto.
+function tetoDeQuadros() {
+  if (state.focus?.kind === 'pagina') {
+    const alvo = player.override?.position;
+    return alvo && world.camera.position.distanceToSquared(alvo) < 0.0004 ? 12 : 0;
+  }
+  if (sentadoNoPosto && navegadores.abertos > 0 && !mesa.aberta && !state.focus && qualidade.efetivo !== 'alta') return 30;
+  return 0;
+}
+
 function frame() {
   const now = performance.now();
+  const teto = tetoDeQuadros();
+  if (teto && now - lastFrame < 1000 / teto - 2) {
+    requestAnimationFrame(frame);
+    return;
+  }
   const dtMs = now - lastFrame;
-  const dt = Math.min(dtMs / 1000, 0.05);
+  const dt = Math.min(dtMs / 1000, teto ? 0.1 : 0.05);
   lastFrame = now;
   elapsed += dt;
   const t = elapsed;
@@ -4863,7 +4962,8 @@ function frame() {
 
   // a mesa e a tela em foco cobrem tudo: sem desenhar o 3D sobra placa de vídeo para as telas
   const desenhando = !mesa.aberta && state.focus?.kind !== 'share';
-  qualidade.quadro(dtMs, desenhando && !world.compilando); // compilando: quadro vazio não conta
+  // compilando: quadro vazio não conta; com teto (navegador em uso) a lentidão é de propósito
+  qualidade.quadro(dtMs, desenhando && !world.compilando && !teto);
   if (desenhando) world.render();
   requestAnimationFrame(frame);
 }

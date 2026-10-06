@@ -116,8 +116,11 @@
 
     <!-- navegador da tela em foco (ver navegador.js): abas e endereço ficam na própria tela -->
     <div id="pagina-hud" hidden>
-      <button type="button" class="chip-btn" data-pg="sair"><kbd>Esc</kbd> Voltar a andar</button>
+      <button type="button" class="chip-btn" data-pg="sair" title="Digitando dentro do site: Esc duas vezes"><kbd>Esc</kbd> Voltar a andar</button>
     </div>
+    <!-- a tela do lado (o monitor vizinho do posto): também Alt+← / Alt+→ -->
+    <button type="button" class="pg-lado esq" id="pg-esq" hidden title="Tela da esquerda (Alt+←)" aria-label="Tela da esquerda">‹</button>
+    <button type="button" class="pg-lado dir" id="pg-dir" hidden title="Tela da direita (Alt+→)" aria-label="Tela da direita">›</button>
 
     <div id="jogo-hud" hidden>
       <div class="jh-head">

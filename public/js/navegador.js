@@ -13,13 +13,18 @@
 // aba normal. Sites como YouTube e Google proíbem abrir dentro de outra página; a extensão Sala
 // 3D (1.7+) tira essa trava só nas telas da sala e conta o endereço e o título de cada aba.
 //
-// Os iframes só existem perto da tela (abrem ao chegar, fecham ao ir embora).
+// Para rodar em PC leve, só fica aberto o que importa: o navegador de um monitor de posto abre
+// de perto (quem está sentado ali); o de tela de parede, só com a pessoa na mesma sala. Fora da
+// vista ele para de ser desenhado (continua carregado), e aba escondida sem tocar nada há 2 min
+// é descarregada (recarrega ao voltar nela, como o "economia de memória" do Chrome).
 import * as THREE from 'three';
 import { CSS3DObject } from 'three/addons/renderers/CSS3DRenderer.js';
 
 const LARGURA_PX = 1280; // a "janela": 1280 px de largura, como um notebook
-const ABRIR = 32; // metros: perto assim, as abas carregam
-const FECHAR = 48; // longe assim, fecham (com folga, para não ficar abrindo e fechando na porta)
+const PERTO_POSTO = 8; // metros: monitor de posto abre perto assim
+const PERTO_PAREDE = 18; // tela de parede: na mesma sala e até esta distância
+const FOLGA = 1.4; // fecha só bem mais longe do que abre (sem abre-e-fecha na porta)
+const DESCARTAR_MS = 120_000; // aba escondida, sem tocar vídeo/som, por 2 min: descarrega
 const MAX_ABAS = 8;
 // sem "allow-top-navigation": o site lá dentro não consegue tirar a pessoa da sala
 const SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox '
@@ -127,11 +132,17 @@ class Navegador {
     this.buraco.userData.screen = tela;
     tela.group.add(this.buraco);
     this.posicionar();
+    // em que sala a tela fica (um passo na frente dela): de parede, só abre com a pessoa lá
+    this.centro = tela.surface.getWorldPosition(new THREE.Vector3());
+    const frente = new THREE.Vector3(0, 0, 1).applyQuaternion(tela.surface.getWorldQuaternion(new THREE.Quaternion()));
+    const ponto = this.centro.clone().addScaledVector(frente, 1);
+    this.sala = dono.world.salaEm?.(ponto.x, ponto.z) ?? null;
+    this.naVista = true;
     this.desenhar();
   }
 
   novaAba(url = null) {
-    return { id: ++seq, url: url || null, titulo: '', iframe: null, ponte: false, pilha: url ? [url] : [], pos: url ? 0 : -1 };
+    return { id: ++seq, url: url || null, titulo: '', iframe: null, ponte: false, tocando: false, escondidaDesde: 0, pilha: url ? [url] : [], pos: url ? 0 : -1 };
   }
 
   posicionar() {
@@ -145,10 +156,27 @@ class Navegador {
   abrir() {
     if (this.aberto) return;
     this.aberto = true;
+    this.naVista = true;
     this.posicionar();
     this.css.visible = true;
     this.buraco.visible = true;
     this.mostrar(this.ativa);
+  }
+
+  // fora da vista: o Chrome para de desenhar (as abas continuam carregadas, vídeo continua tocando)
+  vista(v) {
+    if (!this.aberto || v === this.naVista) return;
+    this.naVista = v;
+    this.css.visible = v;
+    this.buraco.visible = v;
+  }
+
+  // aba escondida há muito tempo e quieta: descarrega (volta a carregar quando for para a frente)
+  descartarParadas(agora) {
+    for (const a of this.abas) {
+      if (a === this.ativa || !a.iframe || a.tocando || !a.escondidaDesde) continue;
+      if (agora - a.escondidaDesde > DESCARTAR_MS) this.tirarQuadro(a);
+    }
   }
 
   fechar() {
@@ -192,13 +220,21 @@ class Navegador {
     aba.iframe?.remove();
     aba.iframe = null;
     aba.ponte = false;
+    aba.tocando = false;
   }
 
   // deixa a aba na frente (as outras continuam carregadas por trás, como no Chrome)
   mostrar(aba) {
     this.ativa = aba;
     if (!this.aberto) return this.desenhar();
-    for (const a of this.abas) if (a.iframe) a.iframe.hidden = a !== aba;
+    const agora = performance.now();
+    for (const a of this.abas) {
+      if (!a.iframe) continue;
+      const esconder = a !== aba;
+      if (esconder && !a.iframe.hidden) a.escondidaDesde = agora;
+      a.iframe.hidden = esconder;
+    }
+    aba.escondidaDesde = 0;
     this.corpo.querySelector('.nv-inicio')?.remove();
     if (aba.url) this.quadro(aba).hidden = false;
     else this.corpo.appendChild(this.paginaInicial());
@@ -287,6 +323,8 @@ class Navegador {
       this.mudou();
     } else if (m.t === 'aba' && typeof m.url === 'string' && /^https?:/.test(m.url)) {
       this.abrirAba(m.url);
+    } else if (m.t === 'midia') {
+      aba.tocando = !!m.tocando;
     }
   }
 
@@ -385,17 +423,27 @@ export class Navegadores {
   // endereco: texto digitado -> url (ou null); temPonte: a extensão 1.7+ está ligada aqui;
   // sala: () => nome da sala (as abas pessoais ficam guardadas por sala); aoEntrada: tecla e mouse
   // de dentro dos sites (teclado e mouse do posto)
-  constructor(world, { endereco, temPonte, sala, aoEntrada, aoDesligar }) {
+  // aoTrocarTela(lado): Alt+← / Alt+→ dentro do site (a extensão repassa)
+  constructor(world, { endereco, temPonte, sala, aoEntrada, aoDesligar, aoTrocarTela }) {
     this.world = world;
     this.endereco = endereco;
     this.temPonte = temPonte;
     this.sala = sala;
     this.aoEntrada = aoEntrada;
     this.aoDesligar = aoDesligar;
+    this.aoTrocarTela = aoTrocarTela;
     this.itens = new Map(); // tela -> Navegador
     this.emUso = null; // o navegador em foco
-    this._pos = new THREE.Vector3();
+    this._frustum = new THREE.Frustum();
+    this._m = new THREE.Matrix4();
     window.addEventListener('message', (e) => this.mensagem(e));
+  }
+
+  // quantos estão abertos e na vista agora (o 3D economiza quadros enquanto houver: main.js)
+  get abertos() {
+    let n = 0;
+    for (const nav of this.itens.values()) if (nav.aberto && nav.naVista) n++;
+    return n;
   }
 
   // ---------------------------------------------------------------- abas guardadas (pessoais)
@@ -458,18 +506,32 @@ export class Navegadores {
     for (const [tela, p] of quer) if (!this.itens.has(tela)) this.itens.set(tela, new Navegador(this, tela, p));
   }
 
-  // a cada pouco: abre os que ficaram perto, fecha os que ficaram longe
+  // a cada pouco: abre o que ficou perto (na mesma sala), fecha o que ficou longe, para de
+  // desenhar o que saiu da vista e descarrega as abas paradas
   atualizar() {
-    const cam = this.world.camera.position;
+    const cam = this.world.camera;
+    cam.updateMatrixWorld();
+    this._frustum.setFromProjectionMatrix(this._m.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse));
+    const salaDaCamera = this.world.salaEm?.(cam.position.x, cam.position.z) ?? null;
+    const agora = performance.now();
     for (const nav of this.itens.values()) {
       if (!nav.tela.group.visible) {
         nav.fechar();
         continue;
       }
-      nav.tela.surface.getWorldPosition(this._pos);
-      const d = this._pos.distanceTo(cam);
-      if (!nav.aberto && d < ABRIR) nav.abrir();
-      else if (nav.aberto && d > FECHAR && this.emUso !== nav) nav.fechar();
+      if (this.emUso === nav) {
+        nav.abrir();
+        nav.vista(true);
+        continue;
+      }
+      const d = nav.centro.distanceTo(cam.position);
+      const perto = nav.tela.posto ? PERTO_POSTO : PERTO_PAREDE;
+      const mesmaSala = !!nav.tela.posto || !nav.sala || !salaDaCamera || nav.sala === salaDaCamera;
+      if (!nav.aberto && d < perto && mesmaSala) nav.abrir();
+      else if (nav.aberto && (d > perto * FOLGA || !mesmaSala)) nav.fechar();
+      if (!nav.aberto) continue;
+      nav.vista(this._frustum.intersectsObject(nav.buraco) || this._frustum.containsPoint(nav.centro));
+      nav.descartarParadas(agora);
     }
   }
 
@@ -506,7 +568,8 @@ export class Navegadores {
     for (const nav of this.itens.values()) {
       const aba = nav.abas.find((a) => a.iframe?.contentWindow === e.source);
       if (!aba) continue;
-      if (m.t === 'pagina' || m.t === 'aba') nav.recebeu(aba, m);
+      if (m.t === 'pagina' || m.t === 'aba' || m.t === 'midia') nav.recebeu(aba, m);
+      else if (m.t === 'trocarTela') this.aoTrocarTela?.(m.lado > 0 ? 1 : -1);
       else this.aoEntrada?.(m);
       return;
     }
