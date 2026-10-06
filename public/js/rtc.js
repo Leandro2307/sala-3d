@@ -161,6 +161,22 @@ export class RTC {
     return stream;
   }
 
+  // Aba entregue pela extensão (chrome.tabCapture, Alt+Shift+S): sem a faixa "Compartilhando..."
+  // que o Chrome põe no topo quando a aba vem do seletor. O id só vale nesta aba da sala.
+  async captureAba(streamId) {
+    const preset = SHARE_PRESETS[this.shareMode] || SHARE_PRESETS.detail;
+    const fonte = { chromeMediaSource: 'tab', chromeMediaSourceId: streamId };
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { mandatory: fonte },
+      video: { mandatory: { ...fonte, maxWidth: preset.width, maxHeight: preset.height, maxFrameRate: preset.fps } },
+    });
+    const video = stream.getVideoTracks()[0];
+    if (video) video.contentHint = preset.hint;
+    const audio = stream.getAudioTracks()[0];
+    if (audio) audio.contentHint = 'music';
+    return stream;
+  }
+
   // Põe uma tela no ar para todo mundo (chamar depois do servidor reservar a tela).
   // Arquivo transmitido: o stream vem do próprio <video> (captureStream) e vai como 'motion'.
   addScreen(key, stream, { file = false, height = 0 } = {}) {

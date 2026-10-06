@@ -2646,3 +2646,7 @@ body.touch #topo-centro { top: calc(64px + env(safe-area-inset-top)); }
   .lobby-card { margin: 0 auto; }
   .ao-vivo { margin: 0 auto; max-height: none; }
 }
+
+/* dica do compartilhar sem a faixa do Chrome */
+.sp-dica { margin: 8px 2px 0; color: var(--muted); font-size: 11.5px; line-height: 1.45; }
+.sp-dica kbd { padding: 0 4px; border-radius: 4px; background: rgba(255, 255, 255, 0.1); font-size: 10.5px; }

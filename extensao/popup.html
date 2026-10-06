@@ -12,9 +12,18 @@
   li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid rgba(255, 255, 255, 0.08); word-break: break-all; }
   li button { width: auto; height: 26px; padding: 0 10px; }
   .site { font-weight: 600; color: #6ee7c8; }
+  .bloco { margin-bottom: 14px; padding-bottom: 14px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+  kbd { padding: 1px 5px; border-radius: 4px; background: rgba(255, 255, 255, 0.1); font: 600 11px system-ui, sans-serif; }
+  #comp-msg { margin: 8px 0 0; }
 </style>
 </head>
 <body>
+  <div class="bloco" id="comp" hidden>
+    <h1>Mostrar esta aba na sala</h1>
+    <p>Sem a faixa “Compartilhando…” do Chrome no topo da sala. Atalho: <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> na aba.</p>
+    <button id="comp-btn">Compartilhar esta aba na Sala 3D</button>
+    <p id="comp-msg" hidden></p>
+  </div>
   <h1>Sala 3D — controle das abas</h1>
   <p id="txt">Abra a aba da Sala 3D e clique aqui de novo.</p>
   <button id="btn" hidden></button>

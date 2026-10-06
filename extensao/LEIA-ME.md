@@ -11,6 +11,19 @@ Só precisa dela **quem compartilha**. Quem só controla não instala nada.
 4. Abra a Sala 3D, clique no ícone de quebra-cabeça do Chrome → **Sala 3D — controle das abas**
    → **Liberar este site**. Só libere o endereço da sua sala.
 
+## Compartilhar uma aba sem a faixa do Chrome
+
+Pelo botão de compartilhar da sala, o Chrome põe no topo da Sala 3D a faixa
+**“Compartilhando ... com esta guia”** (uma por aba), e o site não consegue esconder.
+Pela extensão não tem faixa:
+
+1. Com a sala aberta (e o site liberado), vá para a aba que quer mostrar.
+2. Aperte **Alt+Shift+S** — ou clique no ícone da extensão → **Compartilhar esta aba na Sala 3D**.
+3. A aba entra numa tela livre, com som. Para parar, use o X da tela na sala.
+
+O atalho pode ser trocado em `chrome://extensions/shortcuts`. Atualizou a extensão? Clique em
+**Recarregar** nela em `chrome://extensions` e recarregue a página da sala.
+
 ## Janelas e tela inteira (opcional, só Windows)
 
 Sozinha, a extensão só controla **abas**. Para deixarem mexer numa **janela** qualquer (um jogo,

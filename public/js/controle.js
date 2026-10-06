@@ -53,6 +53,8 @@ export class Controle {
         this.pedidos.delete(m.id);
       } else if (m.sala3dExt === 'desligou') {
         this.onDesligou?.(m.aba, m.motivo, !!m.janela);
+      } else if (m.sala3dExt === 'capturar-aba' && typeof m.streamId === 'string') {
+        this.onCapturarAba?.({ streamId: m.streamId, aba: Number(m.aba), site: m.site || null, titulo: m.titulo || '' });
       } else if (m.sala3dExt === 'aba-mudou') {
         this.onAbaMudou?.(m.aba, m.site || null, m.titulo || '');
       }

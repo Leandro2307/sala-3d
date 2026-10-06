@@ -42,6 +42,8 @@
     if (m?.tipo === 'desligou' && ehSala()) window.postMessage({ sala3dExt: 'desligou', aba: m.aba, janela: !!m.janela, motivo: m.motivo }, location.origin);
     // a aba compartilhada abriu outra página: a sala mostra o site na barra de navegação
     if (m?.tipo === 'aba-mudou' && ehSala()) window.postMessage({ sala3dExt: 'aba-mudou', aba: m.aba, site: m.site, titulo: m.titulo }, location.origin);
+    // Alt+Shift+S (ou o ícone) numa aba: a sala abre a captura dela, sem a barra do Chrome
+    if (m?.tipo === 'capturar-aba' && ehSala()) window.postMessage({ sala3dExt: 'capturar-aba', streamId: m.streamId, aba: m.aba, site: m.site, titulo: m.titulo }, location.origin);
   });
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => ehSala() && avisar());

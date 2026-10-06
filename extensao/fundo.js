@@ -244,7 +244,18 @@ async function janela(alvo, ev, sala) {
 async function tratar(m, sender) {
   if (m.tipo === 'meu-id') return { aba: sender.tab?.id };
   // não abre o ajudante aqui: ele só sobe quando alguém liga o controle de uma janela
-  if (m.tipo === 'status') return { liberado: await liberado(sender.url) };
+  if (m.tipo === 'status') {
+    const ok = await liberado(sender.url);
+    // a sala liberada mais recente é para onde vão as abas do Alt+Shift+S
+    if (ok && sender.tab) await chrome.storage.session.set({ salaAba: sender.tab.id });
+    return { liberado: ok, salaAba: true };
+  }
+  // só o popup da própria extensão pede isso (o clique no ícone é o que libera a captura)
+  if (m.tipo === 'compartilhar-aba') {
+    if (sender.tab || sender.id !== chrome.runtime.id) return { erro: 'pedido-invalido' };
+    const r = await compartilharAba(Number(m.aba));
+    return r.ok ? r : { erro: mensagemDeErro(r.erro) };
+  }
   if (!sender.tab || !(await liberado(sender.url))) return { erro: 'site-nao-liberado' };
   if (m.tipo === 'abas') {
     await registrarAbas(sender.tab.id, Array.isArray(m.abas) ? m.abas.map(Number) : []);
@@ -284,6 +295,52 @@ async function tratar(m, sender) {
     return { ok: true };
   }
   return { erro: 'pedido-invalido' };
+}
+
+// ------------------------------------------------------------------ compartilhar aba sem a barra
+// O seletor do navegador (getDisplayMedia) põe a faixa "Compartilhando ... com esta guia" no topo
+// da Sala 3D, uma por aba, e o site não consegue esconder. Pelo chrome.tabCapture não tem faixa:
+// a pessoa aperta Alt+Shift+S (ou clica no ícone) na aba que quer mostrar, a extensão gera um id
+// de captura daquela aba que só a aba da sala pode usar, e a sala abre o vídeo com getUserMedia.
+// O Chrome só deixa capturar a aba em que a extensão foi chamada — por isso o atalho/ícone.
+async function salaAberta() {
+  const { salaAba } = await chrome.storage.session.get('salaAba');
+  if (salaAba == null) return null;
+  const t = await chrome.tabs.get(salaAba).catch(() => null);
+  return t && (await liberado(t.url)) ? t : null;
+}
+
+async function compartilharAba(alvo) {
+  const sala = await salaAberta();
+  if (!sala) return { erro: 'sem-sala' };
+  if (!Number.isInteger(alvo) || alvo === sala.id) return { erro: 'aba-da-sala' };
+  const t = await chrome.tabs.get(alvo).catch(() => null);
+  if (!t || !/^https?:|^file:/.test(t.url || t.pendingUrl || '')) return { erro: 'aba-interna' };
+  let streamId;
+  try {
+    streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: alvo, consumerTabId: sala.id });
+  } catch (err) {
+    return { erro: String(err?.message || err) };
+  }
+  await chrome.tabs.sendMessage(sala.id, { tipo: 'capturar-aba', streamId, aba: alvo, titulo: t.title || '', site: siteDe(t.url || '') });
+  return { ok: true, sala: sala.title };
+}
+
+chrome.commands.onCommand.addListener(async (cmd, tab) => {
+  if (cmd !== 'compartilhar-aba' || !tab) return;
+  const r = await compartilharAba(tab.id);
+  // sem popup aberto: o retorno aparece no ícone por uns segundos
+  chrome.action.setBadgeBackgroundColor({ color: r.ok ? '#16a34a' : '#dc2626' });
+  chrome.action.setBadgeText({ text: r.ok ? 'ok' : '!', tabId: tab.id });
+  chrome.action.setTitle({ title: r.ok ? 'Aba compartilhada na Sala 3D' : mensagemDeErro(r.erro), tabId: tab.id });
+  setTimeout(() => chrome.action.setBadgeText({ text: '', tabId: tab.id }).catch(() => {}), 4000);
+});
+
+function mensagemDeErro(erro) {
+  if (erro === 'sem-sala') return 'Abra a Sala 3D (e libere o site no ícone da extensão) antes de compartilhar.';
+  if (erro === 'aba-da-sala') return 'Esta é a aba da própria sala: vá para a aba que quer mostrar.';
+  if (erro === 'aba-interna') return 'O Chrome não deixa compartilhar esta página.';
+  return `Não deu para compartilhar: ${erro}`;
 }
 
 chrome.runtime.onMessage.addListener((m, sender, responder) => {

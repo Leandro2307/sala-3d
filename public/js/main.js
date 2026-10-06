@@ -1221,11 +1221,50 @@ async function novaTela() {
   } else {
     toast(`Você está compartilhando no ${onde === 'Telão' ? 'telão' : onde} (com som)`);
   }
+  // aba pelo seletor: o Chrome põe a faixa no topo. Uma vez por sessão, ensina o atalho sem faixa
+  if (stream.getVideoTracks()[0]?.getSettings?.().displaySurface === 'browser' && !dicaFaixaDada) {
+    dicaFaixaDada = true;
+    setTimeout(() => toast(dicaSemFaixa().replace(/<[^>]+>/g, ''), 'info', 9000), 1500);
+  }
+}
+let dicaFaixaDada = false;
+
+// Aba mandada pela extensão (Alt+Shift+S ou o ícone dela, numa aba qualquer): entra numa tela
+// livre como as outras, mas sem a faixa "Compartilhando ... com esta guia" do Chrome no topo.
+async function capturarAbaDaExtensao({ streamId, aba, site, titulo }) {
+  if (!state.joined) return toast('Entre na sala antes de compartilhar uma aba.', 'warn');
+  for (const sh of self().shares.values()) {
+    if (sh.aba === aba) return toast('Essa aba já está compartilhada.', 'info', 3000);
+  }
+  if (!cabeMaisUma()) return toast('Todas as telas e o telão estão ocupados. Pare uma delas para compartilhar outra.', 'warn', 5000);
+  if (shareBusy) return;
+  shareBusy = true;
+  let stream;
+  let key;
+  try {
+    stream = await rtc.captureAba(streamId);
+    key = await publishShare(stream, { aba });
+  } catch (err) {
+    return toast(`Não deu para compartilhar a aba: ${err.message}`, 'error', 6000);
+  } finally {
+    shareBusy = false;
+  }
+  if (!key) return;
+  const sh = self().shares.get(key);
+  Object.assign(sh, { site, titulo });
+  // pela tabCapture o som da aba deixa de sair no seu alto-falante: toca aqui para você ouvir
+  if (stream.getAudioTracks().length) {
+    sh.escuta = new Audio();
+    sh.escuta.srcObject = new MediaStream(stream.getAudioTracks());
+    sh.escuta.play().catch(() => {});
+  }
+  renderPeople();
+  toast(`${titulo ? `“${titulo.slice(0, 40)}”` : 'A aba'} está no ${ondeEsta(sh) === 'Telão' ? 'telão' : ondeEsta(sh)} (com som). Para parar, use o X da tela.`, 'success', 6000);
 }
 
 // Reserva uma tela no servidor e manda o stream (captura ou arquivo) para todo mundo.
 // Devolve a chave da tela, ou null se não deu.
-async function publishShare(stream, { file = false, height = 0 } = {}) {
+async function publishShare(stream, { file = false, height = 0, aba: abaConhecida = null } = {}) {
   // no escritório, numa tela da sala onde a pessoa está
   const sala = world.salaEm(player.pos.x, player.pos.z);
   const res = await new Promise((resolve) => socket.emit('share-start', { streamId: stream.id, sala }, resolve));
@@ -1237,7 +1276,8 @@ async function publishShare(stream, { file = false, height = 0 } = {}) {
   const video = makeVideo(true);
   video.srcObject = stream;
   video.play().catch(() => {});
-  const aba = file ? null : controle.abaDe(stream, (nova) => marcaDaAba(res.key, nova));
+  // aba que veio pela extensão (Alt+Shift+S): já se sabe qual é, sem a marca da página
+  const aba = file ? null : abaConhecida ?? controle.abaDe(stream, (nova) => marcaDaAba(res.key, nova));
   // não é aba (janela ou tela inteira): quem clica é o ajudante nativo da extensão
   const alvo = file || aba != null ? null : controle.alvoDe(stream);
   self().shares.set(res.key, { key: res.key, slot: res.slot ?? null, streamId: stream.id, video, file, aba, alvo, controle: false, site: null, titulo: null });
@@ -1320,6 +1360,10 @@ function stopShare(key, notify) {
   clearTimeout(turbos.get(key));
   turbos.delete(key);
   rtc.stopScreen(key);
+  if (sh.escuta) {
+    sh.escuta.pause();
+    sh.escuta.srcObject = null;
+  }
   controle.soltar(sh.aba);
   if (sh.alvo && sh.controle) controle.soltarJanela();
   if (sh.file) stopCastVideo();
@@ -1384,7 +1428,16 @@ function renderSharePop() {
       </div>`;
     }).join('')
     + `<button type="button" class="sp-add" data-act="add"${cabe ? '' : ' disabled'}>${icon('share', 16)}${!cabe ? 'Telas e telão ocupados' : vaiProTelao ? 'Compartilhar outra direto no telão' : 'Compartilhar outra aba ou janela'}</button>`
-    + (telas.length > 1 ? '<button type="button" class="sp-stop-all" data-act="stop-all">Parar todas</button>' : '');
+    + (telas.length > 1 ? '<button type="button" class="sp-stop-all" data-act="stop-all">Parar todas</button>' : '')
+    + `<p class="sp-dica">${dicaSemFaixa()}</p>`;
+}
+
+// a faixa "Compartilhando ... com esta guia" do Chrome só some quando a aba vem pela extensão
+const extTemCaptura = () => controle.ext.ok && String(controle.ext.versao || '0').split('.').map(Number).reduce((a, n, i) => a + n * [1e6, 1e3, 1][i], 0) >= 1003000;
+function dicaSemFaixa() {
+  if (extTemCaptura()) return 'Sem a faixa do Chrome no topo: vá na aba que quer mostrar e aperte <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>.';
+  if (controle.ext.ok) return 'Atualize a extensão Sala 3D (versão 1.3) para compartilhar abas sem a faixa do Chrome no topo.';
+  return 'Com a extensão Sala 3D (em Ajustes) dá para compartilhar abas sem a faixa do Chrome no topo.';
 }
 
 $('#btn-share').addEventListener('click', () => {
@@ -1437,6 +1490,7 @@ const controle = new Controle({
     renderExtensao();
   },
 });
+controle.onCapturarAba = capturarAbaDaExtensao;
 
 // Guia de instalação da extensão (ver guia-extensao.js). Abre sozinho quando alguém tenta liberar
 // o controle sem ela, e fica em Ajustes → Extensão de controle.

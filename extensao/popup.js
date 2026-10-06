@@ -47,3 +47,19 @@ async function desenhar() {
 }
 
 desenhar();
+
+// compartilhar a aba da frente na Sala 3D (sem a barra do Chrome): abrir o popup é o que deixa
+// a extensão capturar esta aba
+(async () => {
+  const [aba] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!/^(https?|file):/.test(aba?.url || '')) return;
+  $('#comp').hidden = false;
+  $('#comp-btn').onclick = async () => {
+    $('#comp-btn').disabled = true;
+    const r = await chrome.runtime.sendMessage({ tipo: 'compartilhar-aba', aba: aba.id }).catch((e) => ({ erro: String(e?.message || e) }));
+    $('#comp-msg').hidden = false;
+    $('#comp-msg').textContent = r?.ok ? 'Pronto: a aba já aparece na sala.' : r?.erro || 'Não deu para compartilhar.';
+    $('#comp-btn').disabled = false;
+    if (r?.ok) setTimeout(() => window.close(), 1200);
+  };
+})();
