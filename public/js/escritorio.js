@@ -6,7 +6,13 @@
 // O prédio fica onde no modo Lazer está o cinema, com a porta para o mesmo lado (leste), então
 // lá fora continuam o parque, a pista e as mesas de jogos.
 //
-//   z=2   ┌─────────┬─────────┬─────────┬──────────┐
+// Com mais de 6 departamentos entra uma terceira fileira (fundos), com o seu próprio corredor:
+//
+//   z=-30 ┌─────────┬─────────┬─────────┬──────────┐
+//         │ 9ª sala │ 8ª sala │ 7ª sala │          │
+//   z=-6  ├──  ─────┴──  ─────┴──  ─────┤          │
+//         │        corredor dos fundos         │          │
+//   z=2   ├─────────┬─────────┬─────────┤          │
 //         │ 5ª sala │ 3ª sala │ 1ª sala │          │
 //   z=26  ├──  ─────┴──  ─────┴──  ─────┤ recepção │
 //         │        corredor                    porta  → lá fora (x=60)
@@ -30,7 +36,7 @@ export const DEPARTAMENTOS = {
 };
 export const MONITORES_POR_POSTO = 3;
 export const IDS_DEPARTAMENTOS = Object.keys(DEPARTAMENTOS);
-export const MAX_SALAS = 6;
+export const MAX_SALAS = 9;
 
 export const PREDIO = {
   maxX: 60,
@@ -38,14 +44,26 @@ export const PREDIO = {
   z1: 58,
   altura: 6.5,
   corredor: [26, 34], // z do corredor; a porta de fora fica no mesmo trecho, em x = 60
+  corredorFundos: [-6, 2], // z do corredor da fileira dos fundos (só com mais de 6 salas)
+  z0Fundos: -30, // onde o prédio começa quando tem a fileira dos fundos
   recepcao: 40, // de x = 40 até a porta é recepção
   largura: 28, // largura (x) de cada sala
 };
 
-// vagas na ordem em que as salas entram: a mais perto da recepção primeiro, norte e depois sul
-const VAGAS = [12, 12, -16, -16, -44, -44].map((x0, i) => ({ x0, lado: i % 2 ? 'sul' : 'norte' }));
+// vagas na ordem em que as salas entram: a mais perto da recepção primeiro, norte e depois sul;
+// da 7ª em diante, a fileira dos fundos
+const VAGAS = [
+  ...[12, 12, -16, -16, -44, -44].map((x0, i) => ({ x0, lado: i % 2 ? 'sul' : 'norte' })),
+  ...[12, -16, -44].map((x0) => ({ x0, lado: 'fundos' })),
+];
 
-const faixaZ = (lado) => (lado === 'norte' ? [PREDIO.z0, PREDIO.corredor[0]] : [PREDIO.corredor[1], PREDIO.z1]);
+const faixaZ = (lado) => ({
+  norte: [PREDIO.z0, PREDIO.corredor[0]],
+  sul: [PREDIO.corredor[1], PREDIO.z1],
+  fundos: [PREDIO.z0Fundos, PREDIO.corredorFundos[0]],
+}[lado]);
+// z da parede da sala que dá para o corredor (onde fica a porta). Norte e fundos olham para +z.
+export const zDaPorta = (lado) => ({ norte: PREDIO.corredor[0], sul: PREDIO.corredor[1], fundos: PREDIO.corredorFundos[0] }[lado]);
 
 // departamentos válidos, sem repetir, na ordem escolhida
 export function limparDepartamentos(lista) {
@@ -75,17 +93,18 @@ export function planta(deptos) {
       tela += MONITORES_POR_POSTO;
     }
   }
-  const colunas = Math.max(1, Math.ceil(lista.length / 2));
-  const lounges = VAGAS.slice(lista.length, colunas * 2).map(({ x0, lado }) => {
+  const fundos = lista.length > 6;
+  const colunas = fundos ? 3 : Math.max(1, Math.ceil(lista.length / 2));
+  const lounges = VAGAS.slice(lista.length, fundos ? VAGAS.length : colunas * 2).map(({ x0, lado }) => {
     const [z0, z1] = faixaZ(lado);
     return { id: 'lounge', nome: 'Lounge', lado, x0, x1: x0 + PREDIO.largura, z0, z1 };
   });
-  return { salas, lounges, postos, minX: VAGAS[(colunas - 1) * 2].x0, telasParede, totalTelas: tela };
+  return { salas, lounges, postos, minX: VAGAS[(colunas - 1) * 2].x0, z0: fundos ? PREDIO.z0Fundos : PREDIO.z0, fundos, telasParede, totalTelas: tela };
 }
 
 // em que sala está o ponto (id do departamento, 'lounge', 'corredor', 'recepcao' ou null = fora)
 export function salaEm(p, x, z) {
-  if (x < p.minX || x > PREDIO.maxX || z < PREDIO.z0 || z > PREDIO.z1) return null;
+  if (x < p.minX || x > PREDIO.maxX || z < p.z0 || z > PREDIO.z1) return null;
   if (x >= PREDIO.recepcao) return 'recepcao';
   for (const s of [...p.salas, ...p.lounges]) if (x >= s.x0 && x <= s.x1 && z >= s.z0 && z <= s.z1) return s.id;
   return 'corredor';
@@ -97,7 +116,7 @@ export function portaDa(p, id) {
   const s = p.salas.find((x) => x.id === id);
   if (!s) return null;
   const x = (s.x0 + s.x1) / 2;
-  return s.lado === 'norte' ? { pos: [x, 0, PREDIO.corredor[0] - 2.5], yaw: 0 } : { pos: [x, 0, PREDIO.corredor[1] + 2.5], yaw: Math.PI };
+  return s.lado === 'sul' ? { pos: [x, 0, zDaPorta(s.lado) + 2.5], yaw: Math.PI } : { pos: [x, 0, zDaPorta(s.lado) - 2.5], yaw: 0 };
 }
 
 // as telas de parede de uma sala: [primeira, última + 1). Fora de sala: todas as de parede.
