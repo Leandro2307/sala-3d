@@ -4874,7 +4874,10 @@ function slowUpdate() {
   updateVolumes();
   if (settings.mostrarFps) {
     const res = qualidade.escala < 0.999 ? ` ${Math.round(qualidade.escala * 100)}%` : '';
-    $('#fps').textContent = `${Math.round(qualidade.fps)} FPS · ${NIVEIS[qualidade.efetivo].nome}${res}`;
+    // navegador em foco: o 3D atrás anda devagar de propósito (o site continua liso)
+    $('#fps').textContent = tetoDeQuadros()
+      ? `3D em economia · navegador em uso · ${NIVEIS[qualidade.efetivo].nome}`
+      : `${Math.round(qualidade.fps)} FPS · ${NIVEIS[qualidade.efetivo].nome}${res}`;
   }
   for (const li of $$('#people-list .person')) {
     const u = state.users.get(li.dataset.id);
@@ -4896,15 +4899,13 @@ function slowUpdate() {
 // Teto de quadros do 3D enquanto um navegador de tela está em uso. O site é desenhado pelo próprio
 // Chrome, por cima de tudo (fora do 3D): com ele em foco cobrindo quase a tela inteira, o 3D atrás
 // em 60 quadros só tirava placa de vídeo e processador do site (3 navegadores derrubavam a sala
-// para 23 qps). Em foco, depois que a câmera chega na tela, o 3D cai para 12 quadros; sentado no
-// posto com navegador aberto, para 30 (menos na qualidade Alta: PC forte segura os 60). 0 = sem teto.
+// para 23 qps). Em foco, depois que a câmera chega na tela, o 3D cai para 12 quadros — atrás do
+// site não dá para notar. Fora do foco (sentado no posto, andando) não tem teto: 30 quadros
+// olhando em volta parecia travado. 0 = sem teto.
 function tetoDeQuadros() {
-  if (state.focus?.kind === 'pagina') {
-    const alvo = player.override?.position;
-    return alvo && world.camera.position.distanceToSquared(alvo) < 0.0004 ? 12 : 0;
-  }
-  if (sentadoNoPosto && navegadores.abertos > 0 && !mesa.aberta && !state.focus && qualidade.efetivo !== 'alta') return 30;
-  return 0;
+  if (state.focus?.kind !== 'pagina') return 0;
+  const alvo = player.override?.position;
+  return alvo && world.camera.position.distanceToSquared(alvo) < 0.0004 ? 12 : 0;
 }
 
 function frame() {

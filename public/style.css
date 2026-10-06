@@ -468,6 +468,9 @@ body.touch #hud, body.touch #bar, body.touch #touch { -webkit-user-select: none;
 /* ------------------------------------------------------------ navegador nas telas (navegador.js)
    vive no CSS3D: 1280 px de largura, a escala vem do tamanho da tela no mundo */
 #css3d .nv {
+  /* o Chrome desenha o site uma vez e só move/escala a imagem quando a câmera mexe, em vez de
+     redesenhar o site inteiro a cada quadro */
+  will-change: transform;
   display: flex;
   flex-direction: column;
   overflow: hidden;

@@ -439,12 +439,6 @@ export class Navegadores {
     window.addEventListener('message', (e) => this.mensagem(e));
   }
 
-  // quantos estão abertos e na vista agora (o 3D economiza quadros enquanto houver: main.js)
-  get abertos() {
-    let n = 0;
-    for (const nav of this.itens.values()) if (nav.aberto && nav.naVista) n++;
-    return n;
-  }
 
   // ---------------------------------------------------------------- abas guardadas (pessoais)
   guardados() {
@@ -524,6 +518,12 @@ export class Navegadores {
         nav.vista(true);
         continue;
       }
+      // com um navegador em foco, os outros (os monitores do lado) param de ser desenhados — é o
+      // que pesava: 3 sites desenhados de uma vez. Continuam carregados, e o vídeo segue tocando.
+      if (this.emUso) {
+        nav.vista(false);
+        continue;
+      }
       const d = nav.centro.distanceTo(cam.position);
       const perto = nav.tela.posto ? PERTO_POSTO : PERTO_PAREDE;
       const mesmaSala = !!nav.tela.posto || !nav.sala || !salaDaCamera || nav.sala === salaDaCamera;
@@ -550,6 +550,7 @@ export class Navegadores {
     if (!nav) return null;
     nav.abrir();
     this.emUso = nav;
+    this.atualizar(); // os do lado já param de ser desenhados
     return nav;
   }
 
@@ -557,6 +558,7 @@ export class Navegadores {
     if (document.activeElement && this.emUso?.el.contains(document.activeElement)) document.activeElement.blur();
     if (document.activeElement?.tagName === 'IFRAME') document.activeElement.blur();
     this.emUso = null;
+    this.atualizar(); // os do lado voltam
   }
 
   get enderecoAtual() { return this.emUso?.ativa?.url || ''; }
