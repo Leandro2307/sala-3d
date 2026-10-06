@@ -14,6 +14,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { PREDIO, zDaPorta } from './escritorio.js';
+import { criarPerifericos } from './perifericos.js';
 
 const FONTE = "'Plus Jakarta Sans', system-ui, sans-serif";
 const H = PREDIO.altura;
@@ -267,16 +268,19 @@ function marco(world, raiz, s, telas, telaoes, postos, assentos) {
       const [x, z] = mundo(lx, lz);
       assentos.push({ x, z, y, yaw: ry + giro, posto });
     },
-    // posto de trabalho n: a cadeira (já vira assento) e os 3 monitores dele
-    posto(n, cadeira, monitores) {
+    // posto de trabalho n: a cadeira (já vira assento), os 3 monitores e onde ficam o teclado e o
+    // mouse (topo: altura do tampo da mesa daquela sala)
+    posto(n, cadeira, monitores, topo = 1.03) {
       const id = `${s.id}-${n}`;
       this.assento(cadeira.x, cadeira.z, cadeira.y, cadeira.ry ?? 0, id);
+      const [tx, tz] = mundo(cadeira.x, cadeira.z - 1.02);
       postos.push({
         id,
         monitores: monitores.map((mo) => {
           const [x, z] = mundo(mo.x, mo.z);
           return { pos: [x, mo.y, z], rotY: mo.ry + giro, w: mo.w, h: mo.h };
         }),
+        mesa: { pos: [tx, topo, tz], rotY: giro }, // teclado aqui, virado para a cadeira (+z local)
       });
     },
   };
@@ -336,7 +340,7 @@ function salaTI(m) {
         const mons = tresMonitores(lx + dx, lz - 0.32, 1.58, 1.0);
         monitores.push(...mons);
         cadeiras.push([lx + dx, lz + 1.3]);
-        m.posto(n++, { x: lx + dx, z: lz + 1.3, y: 0.66 }, mons);
+        m.posto(n++, { x: lx + dx, z: lz + 1.3, y: 0.66 }, mons, 1.035);
       }
       m.bloco([lx - 5.5, 0, lz - 0.65], [lx + 5.5, 1.05, lz + 0.65], { data: { type: 'mesa' } });
     }
@@ -414,7 +418,7 @@ function salaComercial(m) {
         const mons = tresMonitores(lx + dx, lz - 0.3, 1.56, 0.95);
         monitores.push(...mons);
         cadeiras.push([lx + dx, lz + 1.3]);
-        m.posto(n++, { x: lx + dx, z: lz + 1.3, y: 0.62 }, mons);
+        m.posto(n++, { x: lx + dx, z: lz + 1.3, y: 0.62 }, mons, 1.04);
       }
       m.bloco([lx - 4.5, 0, lz - 0.65], [lx + 4.5, 1.05, lz + 0.65], { data: { type: 'mesa' } });
     }
@@ -527,7 +531,7 @@ function salaTelemarketing(m) {
       cadeiras.push([lx, lz + 1.25]);
       const mons = tresMonitores(lx, lz - 0.3, 1.47, 0.75);
       monitores.push(...mons);
-      m.posto(n++, { x: lx, z: lz + 1.25, y: 0.62 }, mons);
+      m.posto(n++, { x: lx, z: lz + 1.25, y: 0.62 }, mons, 1.01);
       // uma caixa por baia (tampo + divisórias): era uma só de parede a parede, e o vão entre
       // as baias travava com uma parede invisível
       m.bloco([lx - 1.66, 0, lz - 0.68], [lx + 1.62, 1.6, lz + 0.56], { data: { type: 'mesa' } });
@@ -637,7 +641,7 @@ function salaEquipe(m, { piso, parede, faixa, luz, telas, bancadas, madeira = 0x
       const mons = tresMonitores(lx + dx, lz - 0.3, 1.56, 0.95);
       monitores.push(...mons);
       cadeiras.push([lx + dx, lz + 1.3]);
-      m.posto(n++, { x: lx + dx, z: lz + 1.3, y: 0.62 }, mons);
+      m.posto(n++, { x: lx + dx, z: lz + 1.3, y: 0.62 }, mons, 1.04);
     }
     m.bloco([lx - 4.5, 0, lz - 0.65], [lx + 4.5, 1.05, lz + 0.65], { data: { type: 'mesa' } });
   }
@@ -1552,6 +1556,9 @@ export function construirEscritorio(world, p, { empresa = '' } = {}) {
   for (const s of p.salas) salas[s.id] = SALAS[s.id](marco(world, raiz, s, telas, telaoes, postos, assentos));
   for (const l of p.lounges) lounge(marco(world, raiz, l, telas, telaoes, postos, assentos));
   telas.push(...telasRecepcao);
+  // teclado e mouse em cada posto (o do seu posto se mexe junto com você: perifericos.js)
+  const perifericos = criarPerifericos(raiz, postos);
+  let antes = 0;
 
   return {
     telas,
@@ -1563,6 +1570,7 @@ export function construirEscritorio(world, p, { empresa = '' } = {}) {
     // a fachada é de vidro: olhando para ela, o lado de fora aparece
     porta: new THREE.Box3(new THREE.Vector3(maxX - 1, 0, z0), new THREE.Vector3(maxX + 1, HR, z1)),
     placar: (dados) => salas.comercial?.placar(dados),
+    perifericos,
     setLogo: mostrarLogo,
     tocarSino: () => salas.comercial?.tocarSino(),
     // painel da sala de Gestão: [{ nome, status, texto }]
@@ -1579,6 +1587,8 @@ export function construirEscritorio(world, p, { empresa = '' } = {}) {
     update(t) {
       agua.offset.set(t * 0.012, t * 0.007);
       for (const s of Object.values(salas)) s.update?.(t);
+      perifericos.update(Math.min(0.1, Math.max(0, t - antes)));
+      antes = t;
     },
   };
 }

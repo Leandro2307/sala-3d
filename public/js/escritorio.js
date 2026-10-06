@@ -152,12 +152,14 @@ export function rotuloDoPosto(id) {
   return `${DEPARTAMENTOS[depto]?.nome ?? depto} · Posto ${Number(n) + 1}`;
 }
 
-// Chave de uma tela de parede que não muda quando o dono troca os departamentos (o número da
-// tela muda): "ti:4" é a 4ª tela do TI; no Lazer (p = null), "cinema:2". Os monitores dos postos
-// não têm (null). É por ela que fica guardada a página fixa de cada tela.
-export const CHAVE_DE_TELA = /^[a-z]{2,20}:\d{1,2}$/;
+// Chave de uma tela que não muda quando o dono troca os departamentos (o número da tela muda):
+// "ti:4" é a 4ª tela de parede do TI; no Lazer (p = null), "cinema:2"; "ti-0.2" é o monitor 2
+// do posto 1 do TI. É por ela que ficam guardados a página fixa de cada tela de parede (só elas
+// podem ter) e o navegador que cada pessoa abriu numa tela.
 export function chaveDaTela(p, i) {
   if (!p) return `cinema:${i + 1}`;
+  const po = postoDaTela(p, i);
+  if (po) return `${po.id}.${i - po.primeiraTela + 1}`;
   const s = comTelas(p).find((x) => i >= x.primeiraTela && i < x.primeiraTela + x.telas);
   return s ? `${s.id}:${i - s.primeiraTela + 1}` : null;
 }

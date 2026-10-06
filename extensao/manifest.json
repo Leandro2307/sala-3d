@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Sala 3D — controle das abas",
-  "version": "1.6.0",
-  "description": "Compartilha abas na Sala 3D sem a barra do Chrome (Alt+Shift+S) e deixa os amigos clicarem e digitarem nas abas, janelas e telas que você compartilha (só nas que você liberar).",
+  "version": "1.7.0",
+  "description": "Compartilha abas na Sala 3D sem a barra do Chrome (Alt+Shift+S), deixa os amigos clicarem e digitarem nas abas, janelas e telas que você compartilha (só nas que você liberar) e abre qualquer site no navegador das telas da sala.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxuteIw0TKPtjRM8QyfebzBvVEhnoacsVq1YDson+3GfQQCFevsv7+QuyOAcVPg2wT5fLd0Ek8CIbnNQKmWsP7m1ocN1u3bSB3UNgckqK39dYcbZ0mp3ysJx/Nb0cI+1IELcA7ZwAwPc39m+4qcPUIqmf+n8bIiiCCvzxbl93keus5en911CVGAdgenqSv0o33tb2m1Xsb1m+4YtpkHGcMNVQ8GWJ917X/G3n/wYnUXorNqHMUBGjr3PGPOIrx36hADYZC5A/kVzmmjDqUEY5Ot07v65IqN3rBO7j2mjzDSuXyfT0mXURNeZbii3qPK3vOWBBLvcBccFiM5lvyaFmHwIDAQAB",
   "permissions": [
     "debugger",
@@ -11,7 +11,9 @@
     "tabs",
     "scripting",
     "storage",
-    "nativeMessaging"
+    "nativeMessaging",
+    "declarativeNetRequest",
+    "webNavigation"
   ],
   "host_permissions": [
     "<all_urls>"

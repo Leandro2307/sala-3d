@@ -212,6 +212,47 @@ function monitorApagado(accent) {
   return _apagados.get(accent);
 }
 
+// O (+) das telas livres: clicar nele compartilha ali ou abre o navegador (ver main.js)
+function drawPlus(ctx, cx, cy, r, accent = '#6ee7c8') {
+  ctx.save();
+  ctx.fillStyle = 'rgba(110, 231, 200, 0.14)';
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = r * 0.1;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.strokeStyle = '#f3fffb';
+  ctx.lineWidth = r * 0.16;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(cx - r * 0.48, cy);
+  ctx.lineTo(cx + r * 0.48, cy);
+  ctx.moveTo(cx, cy - r * 0.48);
+  ctx.lineTo(cx, cy + r * 0.48);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// Monitor livre do SEU posto: o mesmo cartaz de desligado, com o (+) no meio
+const _mais = new Map();
+function monitorMais(accent) {
+  if (!_mais.has(accent)) {
+    const tex = canvasTexture(256, 144, (ctx, w, h) => {
+      const g = ctx.createLinearGradient(0, 0, w, h);
+      g.addColorStop(0, '#111827');
+      g.addColorStop(1, '#05070d');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, w, h);
+      drawPlus(ctx, w / 2, h * 0.5, h * 0.2, accent);
+    });
+    const m = new THREE.MeshBasicMaterial({ map: tex, toneMapped: false });
+    m.userData.compartilhado = true;
+    _mais.set(accent, m);
+  }
+  return _mais.get(accent);
+}
+
 // logo da empresa (World.setLogo): aparece no lugar do ícone nas telas livres
 let logoDasTelas = null;
 
@@ -253,10 +294,20 @@ class ScreenDisplay {
     this.surface.userData.screen = this;
     this.group.add(this.surface);
 
-    this.placeholderTex = leve || painel ? null : canvasTexture(1024, Math.round((1024 * h) / w), (ctx, cw, ch, t = title, s = subtitle) => {
+    // mais: tela livre que aceita o (+) (compartilhar ali ou abrir o navegador)
+    this.placeholderTex = leve || painel ? null : canvasTexture(1024, Math.round((1024 * h) / w), (ctx, cw, ch, t = title, s = subtitle, mais = false) => {
       screenBackground(ctx, cw, ch);
       if (icon === 'play') drawPlayIcon(ctx, cw / 2, ch * 0.4, ch * 0.24, '#ff4d5e');
-      else if (logoDasTelas) {
+      else if (mais) {
+        if (logoDasTelas) {
+          const img = logoDasTelas;
+          const k = Math.min((cw * 0.3) / img.width, (ch * 0.16) / img.height);
+          ctx.globalAlpha = 0.92;
+          ctx.drawImage(img, cw / 2 - (img.width * k) / 2, ch * 0.16 - (img.height * k) / 2, img.width * k, img.height * k);
+          ctx.globalAlpha = 1;
+        }
+        drawPlus(ctx, cw / 2, logoDasTelas ? ch * 0.43 : ch * 0.39, ch * 0.13, accent);
+      } else if (logoDasTelas) {
         // logo da empresa, cabendo numa caixa no meio de cima
         const img = logoDasTelas;
         const k = Math.min((cw * 0.5) / img.width, (ch * 0.42) / img.height);
@@ -373,11 +424,18 @@ class ScreenDisplay {
     this.placeholderTex.userData.redraw(...(this._ph || []));
   }
 
-  setPlaceholder(title, subtitle) {
-    if (!this.placeholderTex || this._phKey === title + subtitle) return;
-    this._ph = [title, subtitle];
-    this._phKey = title + subtitle;
-    this.placeholderTex.userData.redraw(title, subtitle);
+  setPlaceholder(title, subtitle, mais = false) {
+    if (!this.placeholderTex || this._phKey === title + subtitle + mais) return;
+    this._ph = [title, subtitle, mais];
+    this._phKey = title + subtitle + mais;
+    this.placeholderTex.userData.redraw(title, subtitle, mais);
+  }
+
+  // monitor de posto: o (+) no cartaz de desligado (só nos do seu posto)
+  setMais(on) {
+    if (!this.leve || this.mais === on) return;
+    this.mais = on;
+    this.placeholder.material = on ? monitorMais(this.accent) : monitorApagado(this.accent);
   }
 
   setLabel(text, dotColor = null) {

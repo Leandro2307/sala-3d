@@ -1194,8 +1194,11 @@ function attachSockets(io) {
       const sid = cleanText(streamId, 80);
       if (!sid) return reply({ ok: false, error: 'Compartilhamento inválido.' });
       const layout = layoutTelas(room.config);
-      // a pessoa escolheu a tela de parede (fora do posto, no escritório): se ainda está livre, é ela
-      const escolhida = Number.isInteger(tela) && tela >= 0 && tela < layout.parede && !room.slots[tela] ? tela : -1;
+      // a pessoa escolheu a tela (de parede, ou um monitor do próprio posto pelo +): se ainda está
+      // livre, é ela
+      const meuPosto = user.posto ? layout.faixaPosto(user.posto) : null;
+      const podeEssa = Number.isInteger(tela) && tela >= 0 && (tela < layout.parede || (!!meuPosto && tela >= meuPosto[0] && tela < meuPosto[1]));
+      const escolhida = podeEssa && !room.slots[tela] ? tela : -1;
       if (Number.isInteger(tela) && escolhida === -1) return reply({ ok: false, error: 'Essa tela acabou de ser ocupada. Escolha outra.' });
       // na sala do próprio posto: nos monitores dele; senão numa tela de parede da sala
       const noPosto = escolhida === -1 && user.posto && sala === salaDoPosto(user.posto) ? telaLivre(room, layout.faixaPosto(user.posto)) : -1;

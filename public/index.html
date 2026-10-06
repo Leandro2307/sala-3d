@@ -114,14 +114,10 @@
       <button type="button" id="tv-focus-exit" class="chip-btn"><kbd>Esc</kbd> Sair do foco</button>
     </div>
 
-    <!-- página fixa em foco: mexendo direto no site da tela (ver paginas.js) -->
-    <form id="pagina-hud" hidden autocomplete="off">
-      <button type="button" class="chip-btn" data-pg="inicio" title="Voltar à página desta tela">Início</button>
-      <button type="button" class="chip-btn" data-pg="recarregar" title="Recarregar">Recarregar</button>
-      <input name="endereco" spellcheck="false" aria-label="Endereço" placeholder="Abrir outro endereço aqui (só para você)">
-      <button type="button" class="chip-btn" data-pg="chrome" title="Abrir este endereço numa aba do Chrome">Abrir no Chrome</button>
-      <button type="button" class="chip-btn" data-pg="sair"><kbd>Esc</kbd> Sair</button>
-    </form>
+    <!-- navegador da tela em foco (ver navegador.js): abas e endereço ficam na própria tela -->
+    <div id="pagina-hud" hidden>
+      <button type="button" class="chip-btn" data-pg="sair"><kbd>Esc</kbd> Voltar a andar</button>
+    </div>
 
     <div id="jogo-hud" hidden>
       <div class="jh-head">
@@ -211,6 +207,7 @@
           <span><kbd>T</kbd> chat</span>
           <span><kbd>M</kbd> microfone</span>
           <span><kbd>K</kbd> câmera</span>
+          <span><kbd>H</kbd> esconder a interface</span>
           <span><kbd>C</kbd> sentar</span>
           <span><kbd>P</kbd> trocar personagem</span>
           <span data-jogo="corrida"><kbd>G</kbd> virar carro</span>
@@ -579,7 +576,7 @@
           <span>Páginas nas telas <small class="opt">(um site aberto direto na tela, sem compartilhar)</small></span>
           <div class="paginas-linhas" id="paginas-linhas"></div>
           <button type="button" class="chip-btn" id="pagina-add">+ Página numa tela</button>
-          <small class="hint">Cada pessoa vê o site no próprio navegador e mexe nele chegando perto e apertando <kbd>E</kbd>. Site que pede login precisa estar logado no navegador de cada um. Alguns sites (Google, WhatsApp…) não deixam abrir dentro de outra página: para esses, compartilhe a aba.</small>
+          <small class="hint">Cada pessoa vê o site no próprio navegador e mexe nele chegando perto e apertando <kbd>E</kbd>. Site que pede login precisa estar logado no navegador de cada um. YouTube, Google e outros que não deixam abrir dentro de outra página precisam da extensão Sala 3D (1.7) no Chrome de quem vê.</small>
         </div>
         <div class="field">
           <span class="field-linha">Jogos e diversão <span><button type="button" class="chip-btn" data-todos="1">Todos</button> <button type="button" class="chip-btn" data-todos="0">Nenhum</button></span></span>
@@ -910,6 +907,20 @@
         <button type="button" class="ghost-btn small" data-et="cancelar">Cancelar</button>
         <button type="button" class="secondary small" data-et="auto">Qualquer tela livre</button>
       </div>
+    </div>
+  </div>
+
+  <!-- o (+) de uma tela livre: compartilhar ali ou abrir o navegador -->
+  <div class="escolher-tela" id="tela-mais" hidden>
+    <div class="et-card" role="dialog" aria-label="O que pôr nesta tela">
+      <h3 id="tm-titulo">Nesta tela</h3>
+      <p class="et-sub" id="tm-sub">Escolha o que aparece aqui.</p>
+      <div class="tm-opcoes">
+        <button type="button" data-tm="navegador"><i data-icon="globe" data-size="22"></i><span><b>Navegador</b><small>Abas e endereço como no Chrome. Só você vê, e fica guardado aqui.</small></span></button>
+        <button type="button" data-tm="compartilhar"><i data-icon="share" data-size="22"></i><span><b>Compartilhar aba ou janela</b><small>Todo mundo vê. O Chrome pergunta o quê.</small></span></button>
+        <button type="button" data-tm="extensao"><i data-icon="extensao" data-size="22"></i><span><b>Aba do Chrome sem a faixa</b><small>Vá na aba que quer mostrar e aperte <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>: ela vem para esta tela.</small></span></button>
+      </div>
+      <div class="et-acoes"><button type="button" class="ghost-btn small" data-tm="cancelar">Cancelar <kbd>Esc</kbd></button></div>
     </div>
   </div>
 

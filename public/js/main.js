@@ -21,7 +21,7 @@ import { Controle } from './controle.js';
 import { Mesa } from './mesa.js';
 import { Qualidade, NIVEIS, nivelInicial } from './qualidade.js';
 import { GuiaExtensao } from './guia-extensao.js';
-import { Paginas } from './paginas.js';
+import { Navegadores, siteDe } from './navegador.js';
 import { DEPARTAMENTOS, IDS_DEPARTAMENTOS, MAX_SALAS, rotuloDoPosto, portaDa, comTelas } from './escritorio.js';
 import { Dados, MESA_DADOS } from './dados.js';
 import { icon, hydrateIcons } from './icons.js';
@@ -79,7 +79,17 @@ if (!NIVEIS[settings.qualidade]) settings.qualidade = 'auto';
 const nivelDePartida = settings.qualidade !== 'auto' ? settings.qualidade
   : NIVEIS[settings.nivelAuto] ? settings.nivelAuto : nivelInicial();
 const world = new World($('#gl'), $('#css3d'), { antialias: NIVEIS[nivelDePartida].antialias, qualidade: NIVEIS[nivelDePartida] });
-const paginas = new Paginas(world); // sites abertos direto nas telas (páginas fixas do dono)
+// navegador dentro das telas: páginas fixas do dono e o navegador que cada um abre no (+)
+const navegadores = new Navegadores(world, {
+  endereco: (texto) => paraIframe(enderecoDigitado(texto)),
+  temPonte: () => extensaoNaVersao(1, 7),
+  sala: () => state.room || 'principal',
+  aoEntrada: (m) => perifericosEntrada(m),
+  aoDesligar: (tela) => {
+    if (state.focus?.kind === 'pagina' && state.focus.tela === tela) sairDoFoco();
+    refreshScreens();
+  },
+});
 // sol, lua, chuva e tempestade (clima.js): o dono da sala pode fixar, senão muda sozinho
 const clima = new Clima(world);
 const qualidade = new Qualidade(world, {
@@ -1437,7 +1447,8 @@ setInterval(medirFoco, 1000);
 // ------------------------------------------------------------------ compartilhar tela
 // Dá para compartilhar várias abas/janelas ao mesmo tempo: cada clique em "Compartilhar outra"
 // abre o seletor do navegador de novo e a escolhida vai para a próxima tela livre.
-async function novaTela() {
+// telaEscolhida: veio do (+) de uma tela (aí não pergunta onde)
+async function novaTela(telaEscolhida) {
   if (shareBusy) return;
   if (!navigator.mediaDevices?.getDisplayMedia) {
     toast('Seu navegador não permite compartilhar a tela aqui. Use Chrome/Edge no computador (https ou localhost).', 'error', 6000);
@@ -1448,7 +1459,7 @@ async function novaTela() {
     return;
   }
   // escritório, fora do próprio posto: a pessoa escolhe em qual tela da sala vai aparecer
-  const tela = await escolherTela();
+  const tela = telaEscolhida ?? await escolherTela();
   if (tela === null) return;
   let stream;
   let key;
@@ -1541,7 +1552,10 @@ async function capturarAbaDaExtensao({ streamId, aba, site, titulo }) {
   let key;
   try {
     stream = await rtc.captureAba(streamId);
-    const tela = await escolherTela();
+    // marcou a tela no (+) e veio do Alt+Shift+S: vai para ela
+    const marcada = alvoDaExtensao && Date.now() < alvoDaExtensao.ate ? alvoDaExtensao.i : undefined;
+    alvoDaExtensao = null;
+    const tela = marcada ?? await escolherTela();
     if (tela === null) {
       for (const t of stream.getTracks()) t.stop();
       return;
@@ -1736,6 +1750,9 @@ function renderSharePop() {
 }
 
 // a faixa "Compartilhando ... com esta guia" do Chrome só some quando a aba vem pela extensão
+// a extensão está aqui, liberada para esta sala, e é pelo menos a versão a.b
+const extensaoNaVersao = (a, b) => controle.ext.ok && controle.ext.liberado
+  && String(controle.ext.versao || '0').split('.').map(Number).reduce((s, n, i) => s + n * [1e6, 1e3, 1][i], 0) >= a * 1e6 + b * 1e3;
 const extTemCaptura = () => controle.ext.ok && String(controle.ext.versao || '0').split('.').map(Number).reduce((a, n, i) => a + n * [1e6, 1e3, 1][i], 0) >= 1003000;
 function dicaSemFaixa() {
   if (extTemCaptura()) return 'Sem a faixa do Chrome no topo: vá na aba que quer mostrar e aperte <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>.';
@@ -3024,18 +3041,62 @@ function routeStreams(u) {
   refreshScreens();
 }
 
+// ------------------------------------------------------------------ o (+) das telas livres
+// Mirar numa tela livre e clicar (ou E): escolhe ali mesmo o que ela mostra — o navegador, uma
+// aba/janela compartilhada, ou a próxima aba do Alt+Shift+S. Sem ir até o botão de compartilhar.
+let telaDoMais = null;
+let alvoDaExtensao = null; // { i, ate }: a próxima aba do Alt+Shift+S vai para a tela i
+function menuDaTela(slot) {
+  if (document.pointerLockElement) document.exitPointerLock();
+  telaDoMais = slot;
+  $('#tm-titulo').textContent = world.rotuloTela(slot.index);
+  $('#tm-sub').textContent = slot.posto ? 'Monitor do seu posto: escolha o que aparece aqui.' : 'Escolha o que aparece nesta tela.';
+  $('#tela-mais [data-tm="extensao"]').hidden = !extTemCaptura();
+  $('#tela-mais').hidden = false;
+  $('#hover-hint').hidden = true;
+}
+function fecharMenuDaTela(voltar = false) {
+  $('#tela-mais').hidden = true;
+  telaDoMais = null;
+  if (voltar) voltarAOlhar();
+}
+$('#tela-mais').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-tm]');
+  if (!b) {
+    if (e.target.id === 'tela-mais') fecharMenuDaTela(true); // clicou fora do cartão
+    return;
+  }
+  const slot = telaDoMais;
+  fecharMenuDaTela();
+  if (!slot || b.dataset.tm === 'cancelar') return voltarAOlhar();
+  if (b.dataset.tm === 'navegador') {
+    navegadores.ligar(world.chaveTela(slot.index));
+    refreshScreens();
+    enterFocus({ kind: 'pagina', screen: slot });
+  } else if (b.dataset.tm === 'compartilhar') {
+    novaTela(slot.index);
+  } else if (b.dataset.tm === 'extensao') {
+    alvoDaExtensao = { i: slot.index, ate: Date.now() + 120_000 };
+    toast(`Agora vá na aba que quer mostrar e aperte Alt+Shift+S: ela aparece em ${world.rotuloTela(slot.index)}.`, 'info', 8000);
+  }
+});
+
+// H: some com tudo por cima do 3D (barra, botões, chat...). As barras de sair dos focos ficam.
+function alternarHud() {
+  const sem = document.body.classList.toggle('sem-hud');
+  if (sem) toast('Interface escondida. Aperte H para mostrar de novo.', 'info', 2500);
+}
+
 // a página fixa que o dono pôs na tela i (ou null)
 function paginaDaTela(i) {
   const chave = world.chaveTela(i);
   return (chave && state.sala?.paginas?.[chave]) || null;
 }
-const siteDaPagina = (url) => {
-  try {
-    return new URL(url).hostname.replace(/^www\./, '');
-  } catch {
-    return url;
-  }
-};
+const siteDaPagina = siteDe;
+
+// O (+) aparece nas telas de parede livres e nos monitores livres do SEU posto (os dos postos
+// dos outros são deles).
+const aceitaMais = (slot) => !slot.posto || slot.posto === self()?.posto;
 
 function refreshScreens() {
   const telas = telasNoAr();
@@ -3043,7 +3104,7 @@ function refreshScreens() {
   // Fixou a tela de alguém no telão com um vídeo tocando: o vídeo vai para a tela dessa
   // pessoa (trocam de lugar). Antes o vídeo simplesmente sumia.
   const slotMidia = pinned && tv?.state.id && pinned.share.slot != null ? world.slots[pinned.share.slot] : null;
-  const comPagina = []; // telas livres com página fixa: { tela, url }
+  const comNavegador = []; // telas livres com navegador: { tela, chave, inicio, pessoal }
   world.slots.forEach((slot, i) => {
     const dono = telas.find((t) => t.share.slot === i);
     slot.owner = dono?.share.key ?? null;
@@ -3057,15 +3118,21 @@ function refreshScreens() {
     slot.setMidia(false);
     if (!dono) {
       slot.clearVideo();
-      // página fixa: o site aparece de perto; de longe fica o cartaz (ou o painel da sala)
-      const url = paginaDaTela(i);
-      if (url) {
-        comPagina.push({ tela: slot, url });
-        slot.setPlaceholder(world.rotuloTela(i), `${siteDaPagina(url)} — chegue perto para abrir`);
+      // navegador (página fixa do dono ou o que você abriu no +): o site aparece de perto; de
+      // longe fica o cartaz (ou o painel da sala)
+      const chave = world.chaveTela(i);
+      const inicio = paginaDaTela(i);
+      const pessoal = aceitaMais(slot) ? navegadores.pessoal(chave) : null;
+      if (inicio || pessoal) {
+        comNavegador.push({ tela: slot, chave, inicio, pessoal });
+        slot.setPlaceholder(world.rotuloTela(i), inicio ? `${siteDaPagina(inicio)} — chegue perto para abrir` : 'Seu navegador — chegue perto', false);
+        slot.setMais(false);
         slot.setLabel(null);
         return;
       }
-      slot.setPlaceholder(world.rotuloTela(i), 'Livre — clique em “Compartilhar tela”');
+      const mais = aceitaMais(slot);
+      slot.setMais(mais);
+      slot.setPlaceholder(world.rotuloTela(i), mais ? 'Clique no + para compartilhar ou abrir o navegador' : 'Livre — clique em “Compartilhar tela”', mais);
       // posto com dono: o monitor do meio mostra de quem é
       const dp = slot.posto && slot.meio ? donoDoPosto(slot.posto) : null;
       slot.setLabel(dp ? (dp.isSelf ? 'Seu posto' : `Posto de ${dp.name}`) : null, dp?.color);
@@ -3083,8 +3150,8 @@ function refreshScreens() {
   });
 
   world.midiaNoSlot(slotMidia);
-  paginas.sincronizar(comPagina);
-  if (state.focus?.kind === 'pagina' && !paginas.tem(state.focus.tela)) exitFocus();
+  navegadores.sincronizar(comNavegador);
+  if (state.focus?.kind === 'pagina' && !navegadores.tem(state.focus.tela)) exitFocus();
 
   // o telão do cinema e o da pista mostram sempre a mesma coisa
   for (const ms of world.telaoes) {
@@ -3423,8 +3490,12 @@ function toggleSit() {
 
 // Cadeira de posto de trabalho: se o posto está livre, fica sendo seu — o que você compartilhar
 // estando nesta sala aparece nos 3 monitores dele, e quem passar (até de fora, pelo vidro) vê.
+let sentadoNoPosto = null; // id do posto em que estou sentado (sem a dica "C Levantar" na frente)
 function sentarNoLugar(lugar) {
   player.sentarEm(lugar);
+  sentadoNoPosto = lugar.posto || null;
+  world.escritorio?.perifericos?.ativar(sentadoNoPosto);
+  updateSitHint();
   if (!lugar.posto || self()?.posto === lugar.posto) return;
   socket.emit('posto', { id: lugar.posto }, (r) => {
     if (r?.ok) toast(`${rotuloDoPosto(lugar.posto)} agora é seu: compartilhe a tela e ela aparece nestes 3 monitores. Mire num monitor e aperte E para controlar.`, 'info', 6000);
@@ -3432,6 +3503,24 @@ function sentarNoLugar(lugar) {
     else if (r?.erro) toast(r.erro, 'error');
   });
 }
+
+// Teclado e mouse do posto em que você está sentado: afundam a tecla que você aperta e andam
+// no mouse pad com o seu mouse — aqui na sala ou dentro de um site do navegador da tela (a
+// extensão repassa: navegador.js). Ver perifericos.js.
+const perifericosAtivos = () => (sentadoNoPosto ? world.escritorio?.perifericos : null);
+function perifericosEntrada(m) {
+  const p = perifericosAtivos();
+  if (!p) return;
+  if (m.t === 'tecla') p.tecla(m.code ?? null, !!m.desceu);
+  else if (m.t === 'mouse') p.mouse(Number(m.dx) || 0, Number(m.dy) || 0);
+  else if (m.t === 'clique') p.clique(!!m.desceu);
+}
+window.addEventListener('keydown', (e) => perifericosAtivos()?.tecla(e.target?.type === 'password' ? null : e.code, true), true);
+window.addEventListener('keyup', (e) => perifericosAtivos()?.tecla(e.code, false), true);
+window.addEventListener('blur', () => perifericosAtivos()?.soltarTudo());
+document.addEventListener('mousemove', (e) => perifericosAtivos()?.mouse(e.movementX || 0, e.movementY || 0));
+document.addEventListener('mousedown', () => perifericosAtivos()?.clique(true));
+document.addEventListener('mouseup', () => perifericosAtivos()?.clique(false));
 
 function donoDoPosto(id) {
   for (const u of state.users.values()) if (u.posto === id) return u;
@@ -3441,7 +3530,8 @@ function donoDoPosto(id) {
 function updateSitHint() {
   const podeSentar = !player.sitting && !!(lugarPerto() || assentoAtual()) && !state.focus && !state.panel;
   const dica = $('#sit-hint');
-  const mostrar = podeSentar || player.sitting;
+  // no posto a dica de levantar ficava bem na frente dos monitores: lá ela some (C continua valendo)
+  const mostrar = podeSentar || (player.sitting && !sentadoNoPosto);
   if (dica.hidden === !mostrar) { /* já está certo */ } else dica.hidden = !mostrar;
   if (mostrar) dica.querySelector('span').textContent = player.sitting ? 'Levantar' : 'Sentar';
   if (touchPad) {
@@ -3456,6 +3546,10 @@ player.on('veiculo', (on) => {
 });
 
 player.on('sit', (sentado) => {
+  if (!sentado) {
+    sentadoNoPosto = null;
+    world.escritorio?.perifericos?.ativar(null);
+  }
   updateSitHint();
   if (sentado) sfx.message();
 });
@@ -4047,7 +4141,9 @@ function screenInfo(screen) {
   if (screen.midia) return { kind: 'tv', screen, label: `Focar no vídeo (${tv?.label ?? 'vídeo'})` };
   const t = acharTela(screen.owner);
   if (t && shareVideo(t.share)) return { kind: 'share', key: t.share.key, label: t.user.isSelf ? 'Ver sua tela' : `Ver a tela de ${t.user.name}` };
-  if (paginas.tem(screen)) return { kind: 'pagina', screen, label: `Usar ${paginas.rotulo(screen)}` };
+  if (navegadores.tem(screen)) return { kind: 'pagina', screen, label: navegadores.rotulo(screen) };
+  // tela livre: o (+) — compartilhar ali ou abrir o navegador
+  if (!t && !screen.owner && world.slots.includes(screen) && aceitaMais(screen)) return { kind: 'livre', screen, label: 'Compartilhar ou abrir o navegador aqui' };
   return null;
 }
 
@@ -4125,13 +4221,16 @@ function enterFocus(info) {
     return;
   }
   // página fixa: a câmera para de frente e o mouse e o teclado vão direto para o site
+  if (info.kind === 'livre') {
+    menuDaTela(info.screen);
+    return;
+  }
   if (info.kind === 'pagina') {
-    if (!paginas.usar(info.screen)) return;
+    if (!navegadores.usar(info.screen)) return;
     state.focus = { kind: 'pagina', tela: info.screen };
     // com folga em volta: a barra de cima não tapa o começo do site
     player.override = info.screen.focusPose(world.camera, 1.12);
     document.body.classList.add('pagina-focus');
-    $('#pagina-hud').elements.endereco.value = paginas.enderecoAtual;
     $('#pagina-hud').hidden = false;
     $('#crosshair').hidden = true;
     $('#hover-hint').hidden = true;
@@ -4206,7 +4305,7 @@ function exitFocus() {
     $('#crosshair').hidden = false;
   } else if (state.focus.kind === 'pagina') {
     player.override = null;
-    paginas.soltar(); // o iframe segurava o teclado: devolve para o jogo
+    navegadores.soltar(); // o iframe segurava o teclado: devolve para o jogo
     document.body.classList.remove('pagina-focus');
     $('#pagina-hud').hidden = true;
     $('#crosshair').hidden = false;
@@ -4230,27 +4329,10 @@ function sairDoFoco() {
 $('#focus-close').addEventListener('click', sairDoFoco);
 $('#jh-sair').addEventListener('click', sairDoFoco);
 $('#tv-focus-exit').addEventListener('click', sairDoFoco);
-// barra da página em foco: início, recarregar, outro endereço (só para você), abrir no Chrome
+// navegador em foco: a barra dele (abas, endereço) está na própria tela; aqui só o Sair
 $('#pagina-hud').addEventListener('click', (e) => {
-  const b = e.target.closest('[data-pg]');
-  if (!b) return;
-  b.blur();
-  const acao = b.dataset.pg;
-  if (acao === 'sair') return sairDoFoco();
-  if (acao === 'inicio') paginas.inicio();
-  if (acao === 'recarregar') paginas.recarregar();
-  if (acao === 'chrome') window.open(paginas.enderecoAtual, '_blank', 'noopener');
-  $('#pagina-hud').elements.endereco.value = paginas.enderecoAtual;
+  if (e.target.closest('[data-pg="sair"]')) sairDoFoco();
 });
-$('#pagina-hud').addEventListener('submit', (e) => {
-  e.preventDefault();
-  const campo = e.currentTarget.elements.endereco;
-  const url = paraIframe(enderecoDigitado(campo.value));
-  if (url) paginas.irPara(url);
-  campo.value = paginas.enderecoAtual;
-  campo.blur();
-});
-$('#pagina-hud').elements.endereco.addEventListener('focus', (e) => e.target.select());
 $('#focus-full').addEventListener('click', () => {
   if (document.fullscreenElement) document.exitFullscreen();
   else $('#focus').requestFullscreen().catch(() => {});
@@ -4517,6 +4599,7 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'Escape') {
     // Esc sai de vez (mesmo controlando a tela) e devolve o mouse para a visão do boneco
     if (typing()) document.activeElement.blur();
+    else if (!$('#tela-mais').hidden) fecharMenuDaTela(true);
     else if (guia.aberto) guia.fechar();
     else if (escolha.aberto) escolha.fechar();
     else if (mesa.aberta) fecharMesa(true);
@@ -4526,7 +4609,14 @@ window.addEventListener('keydown', (e) => {
     else run.abandon(); // preso no parkour? Esc sai da corrida
     return;
   }
-  if (typing() || e.repeat || guia.aberto || escolha.aberto) return;
+  if (typing() || e.repeat || guia.aberto || escolha.aberto || !$('#tela-mais').hidden) return;
+  // usando o navegador da tela: as letras são do site, não atalhos do jogo (só o Esc sai)
+  if (state.focus?.kind === 'pagina') return;
+  // H: esconde (e mostra de novo) tudo o que fica por cima do 3D — para ver a sala limpa
+  if (e.code === 'KeyH') {
+    alternarHud();
+    return;
+  }
   // comandando um tabuleiro: as teclas de andar/voar/socar ficam com o jogo
   if ((state.focus?.kind === 'jogo' || state.focus?.kind === 'dados') && !['KeyE', 'KeyM', 'KeyT', 'Enter'].includes(e.code)) return;
   switch (e.code) {
@@ -4699,7 +4789,7 @@ function sendState(dt) {
 }
 
 function slowUpdate() {
-  paginas.atualizar();
+  navegadores.atualizar();
   $('#clima-chip').textContent = clima.rotulo();
   updateVolumes();
   if (settings.mostrarFps) {

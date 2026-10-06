@@ -24,6 +24,20 @@ Pela extensão não tem faixa:
 O atalho pode ser trocado em `chrome://extensions/shortcuts`. Atualizou a extensão? Clique em
 **Recarregar** nela em `chrome://extensions` e recarregue a página da sala.
 
+## Navegador nas telas da sala (versão 1.7)
+
+Mirando numa tela livre (ou num monitor do seu posto) e clicando no **+**, dá para abrir um
+**navegador** ali mesmo: abas, barra de endereço, voltar e avançar, como no Chrome. Só você vê,
+e as abas ficam guardadas naquela tela. Com a tela na mira, **E** usa o navegador; **Esc** volta
+a andar. As páginas fixas que o dono da sala põe nas telas usam o mesmo navegador.
+
+Sozinha, a sala só consegue abrir sites que deixam aparecer dentro de outra página. A extensão
+1.7 tira essa trava **só dentro das telas da Sala 3D** (nas abas do site liberado): YouTube,
+Google e os outros abrem normalmente. Ela também conta o endereço e o título de cada aba, faz o
+voltar/avançar funcionar dentro do site, abre os links de "aba nova" como aba do navegador da
+sala e faz o teclado e o mouse do seu posto se mexerem enquanto você digita no site (em campo de
+senha ela não diz qual tecla foi).
+
 ## Janelas e tela inteira (opcional, só Windows)
 
 Sozinha, a extensão só controla **abas**. Para deixarem mexer numa **janela** qualquer (um jogo,
@@ -79,3 +93,6 @@ controle na hora.
 - Só as telas em que você ligou "permitir controle" aceitam cliques dos outros.
 - A sala só pede controle da aba que você compartilhou. Um site liberado, porém, teria
   como pedir outras abas: por isso libere só o endereço da sua sala.
+- A trava "não abrir dentro de outra página" (X-Frame-Options / CSP) só é tirada nos sites
+  abertos dentro das telas da aba da Sala 3D. As outras abas do Chrome não mudam. O site aberto
+  na tela não consegue mudar a página da sala (o quadro dele não tem permissão para isso).

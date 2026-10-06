@@ -185,7 +185,7 @@ export class Player {
     this.pos.set(lugar.x, lugar.y, lugar.z);
     this.vel.set(0, 0, 0);
     this.yaw = lugar.yaw;
-    this.pitch = lugar.posto ? -0.12 : 0;
+    this.pitch = lugar.posto ? -0.3 : 0; // no posto, olhando um pouco para baixo: monitores, teclado e mouse
     this.sitYaw = Math.atan2(-Math.sin(lugar.yaw), -Math.cos(lugar.yaw));
     this.bodyYaw = this.sitYaw;
     this.jumpBuffer = 0;

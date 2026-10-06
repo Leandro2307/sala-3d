@@ -334,7 +334,8 @@ async function tratar(m, sender) {
     const ok = await liberado(sender.url);
     // a sala liberada mais recente é para onde vão as abas do Alt+Shift+S
     if (ok && sender.tab) await chrome.storage.session.set({ salaAba: sender.tab.id });
-    return { liberado: ok, salaAba: true };
+    if (sender.tab) quadrosDaSala(sender.tab.id, ok);
+    return { liberado: ok, salaAba: true, quadros: ok };
   }
   // só o popup da própria extensão pede isso (o clique no ícone é o que libera a captura)
   if (m.tipo === 'compartilhar-aba') {
@@ -386,6 +387,51 @@ async function tratar(m, sender) {
   }
   return { erro: 'pedido-invalido' };
 }
+
+// ------------------------------------------------------------------ navegador dentro das telas
+// O navegador das telas da sala (public/js/navegador.js) abre os sites em iframes. Muitos sites
+// (YouTube, Google, WhatsApp...) mandam X-Frame-Options ou CSP frame-ancestors, e o Chrome se
+// recusa a mostrá-los dentro de outra página. Nas abas da Sala 3D — só nelas, e só se o site da
+// sala foi liberado no ícone — a extensão tira esses dois cabeçalhos dos quadros internos, e o
+// site abre na tela do jogo como numa aba normal. As outras abas do Chrome não mudam em nada.
+// O iframe da sala vem com sandbox sem "allow-top-navigation": o site lá dentro não consegue
+// tirar a pessoa da sala.
+const REGRA_QUADROS = 1;
+let filaQuadros = Promise.resolve();
+function quadrosDaSala(aba, ligar) {
+  filaQuadros = filaQuadros.then(async () => {
+    if (!chrome.declarativeNetRequest) return; // permissão nova ainda não aplicada
+    const { abasSala = [] } = await chrome.storage.session.get('abasSala');
+    if (abasSala.includes(aba) === ligar) return;
+    const abas = ligar ? [...abasSala, aba] : abasSala.filter((a) => a !== aba);
+    await chrome.storage.session.set({ abasSala: abas });
+    await chrome.declarativeNetRequest.updateSessionRules({
+      removeRuleIds: [REGRA_QUADROS],
+      addRules: abas.length ? [{
+        id: REGRA_QUADROS,
+        priority: 1,
+        action: {
+          type: 'modifyHeaders',
+          responseHeaders: [
+            { header: 'x-frame-options', operation: 'remove' },
+            { header: 'content-security-policy', operation: 'remove' },
+          ],
+        },
+        condition: { resourceTypes: ['sub_frame'], tabIds: abas },
+      }] : [],
+    });
+  }).catch((err) => console.warn('[quadros]', err));
+}
+
+// Cada site que abre numa tela (quadro direto da aba da sala) ganha o quadro.js: conta o
+// endereço e o título para a barra do navegador, obedece voltar/avançar, abre os links de aba
+// nova como aba do navegador da sala e repassa teclas e mouse (teclado e mouse do posto).
+chrome.webNavigation?.onDOMContentLoaded.addListener(async ({ tabId, frameId, parentFrameId }) => {
+  if (frameId === 0 || parentFrameId !== 0) return;
+  const { abasSala = [] } = await chrome.storage.session.get('abasSala');
+  if (!abasSala.includes(tabId)) return;
+  chrome.scripting.executeScript({ target: { tabId, frameIds: [frameId] }, files: ['quadro.js'] }).catch(() => {});
+});
 
 // ------------------------------------------------------------------ compartilhar aba sem a barra
 // O seletor do navegador (getDisplayMedia) põe a faixa "Compartilhando ... com esta guia" no topo
@@ -445,6 +491,7 @@ chrome.debugger.onDetach.addListener(({ tabId }, motivo) => {
   if (info) chrome.tabs.sendMessage(info.sala, { tipo: 'desligou', aba: tabId, motivo }).catch(() => {});
 });
 chrome.tabs.onRemoved.addListener(async (aba) => {
+  quadrosDaSala(aba, false);
   anexadas.delete(aba);
   ultimoToque.delete(aba);
   filas.delete(aba);
