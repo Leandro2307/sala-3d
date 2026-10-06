@@ -91,6 +91,44 @@ function agendarSoltura(aba) {
   }, SOLTAR_MS));
 }
 
+// Rolagem suave. Despachado de uma vez, cada clique da roda (100 px) fazia a página pular 100 px
+// num quadro só e ficar parada até o próximo: dentro da sala parecia travando (medido num vídeo:
+// 8 a 13 quadros diferentes por segundo, contra 30 a 60 rolando a aba direto no Chrome, que
+// anima esses pulos). Aqui também: o giro entra num "falta rolar" que sai em pedaços, um a cada
+// quadro, começando rápido e desacelerando (~160 ms por clique). Giro novo no meio só soma.
+const rolagens = new Map(); // aba -> { x, y, dx, dy, mod, rodando }
+const QUADRO_MS = 16;
+const pedaco = (v) => (Math.abs(v) <= 4 ? v : v * 0.22 + Math.sign(v) * 2);
+
+function rolar(aba, x, y, dx, dy, mod) {
+  let r = rolagens.get(aba);
+  if (!r) rolagens.set(aba, (r = { dx: 0, dy: 0, rodando: false }));
+  Object.assign(r, { x, y, mod });
+  r.dx += dx;
+  r.dy += dy;
+  if (!r.rodando) animarRolagem(aba, r);
+}
+
+async function animarRolagem(aba, r) {
+  r.rodando = true;
+  try {
+    while (anexadas.has(aba) && (Math.abs(r.dx) >= 0.5 || Math.abs(r.dy) >= 0.5)) {
+      const inicio = Date.now();
+      const px = pedaco(r.dx);
+      const py = pedaco(r.dy);
+      r.dx -= px;
+      r.dy -= py;
+      await cdp(aba, 'Input.dispatchMouseEvent', { type: 'mouseWheel', x: r.x, y: r.y, deltaX: px, deltaY: py, modifiers: r.mod });
+      const falta = QUADRO_MS - (Date.now() - inicio);
+      if (falta > 0) await new Promise((ok) => setTimeout(ok, falta));
+    }
+  } catch { /* aba fechou ou o controle foi solto */ } finally {
+    r.dx = 0;
+    r.dy = 0;
+    r.rodando = false;
+  }
+}
+
 async function soltar(aba) {
   if (!anexadas.has(aba)) return;
   anexadas.delete(aba);
@@ -112,7 +150,11 @@ async function despachar(aba, ev) {
     const x = num(ev.x, 0, 1) * info.vp.w;
     const y = num(ev.y, 0, 1) * info.vp.h;
     if (ev.t === 'wheel') {
-      return cdp(aba, 'Input.dispatchMouseEvent', { type: 'mouseWheel', x, y, deltaX: num(ev.dx, -3000, 3000), deltaY: num(ev.dy, -3000, 3000), modifiers });
+      const dx = num(ev.dx, -3000, 3000);
+      const dy = num(ev.dy, -3000, 3000);
+      // Ctrl + roda é zoom: esse vai de uma vez
+      if (modifiers & 2) return cdp(aba, 'Input.dispatchMouseEvent', { type: 'mouseWheel', x, y, deltaX: dx, deltaY: dy, modifiers });
+      return rolar(aba, x, y, dx, dy, modifiers);
     }
     const type = { down: 'mousePressed', up: 'mouseReleased', move: 'mouseMoved' }[ev.a];
     if (!type) return;
@@ -407,6 +449,7 @@ chrome.tabs.onRemoved.addListener(async (aba) => {
   ultimoToque.delete(aba);
   filas.delete(aba);
   movimentoMaisNovo.delete(aba);
+  rolagens.delete(aba);
   // fechou a aba compartilhada ou a da sala: esquece as duas pontas
   const mapa = await compartilhadas();
   let mudou = false;

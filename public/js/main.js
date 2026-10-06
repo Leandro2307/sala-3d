@@ -1256,9 +1256,9 @@ async function ligarCam(deviceId) {
 
 // câmera desconectada (ou tomada por outro programa): desliga aqui também
 function vigiarCam() {
-  const track = rtc.camTrack;
+  const track = rtc.camFonte; // a câmera de verdade (o que sai é o rosto recortado dela)
   track?.addEventListener('ended', () => {
-    if (!state.camOn || rtc.camTrack !== track) return;
+    if (!state.camOn || rtc.camFonte !== track) return;
     toggleCam();
     toast('A câmera foi desconectada.', 'warn', 5000);
   });

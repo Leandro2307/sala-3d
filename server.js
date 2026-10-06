@@ -206,6 +206,8 @@ app.use('/vendor/three', express.static(THREE_DIR)); // endereço sem versão (s
 // players de HLS (.m3u8) e DASH (.mpd): só são baixados quando alguém cola um link desses
 app.use('/vendor/hls', express.static(path.join(__dirname, 'node_modules', 'hls.js', 'dist')));
 app.use('/vendor/dash', express.static(path.join(__dirname, 'node_modules', 'dashjs', 'dist', 'modern', 'esm')));
+// detector de rosto da webcam (public/js/rosto.js): só baixa quando alguém liga a câmera
+app.use('/vendor/mediapipe', express.static(path.join(__dirname, 'node_modules', '@mediapipe', 'tasks-vision'), { maxAge: '1d' }));
 // A extensão de controle para baixar (guia de instalação da sala). O .zip é montado aqui mesmo a
 // partir da pasta extensao/, uma vez só. Os arquivos ficam na raiz do .zip: o "Extrair tudo" do
 // Windows já cria a pasta "sala3d-extensao" com o manifest.json dentro — com uma pasta a mais lá

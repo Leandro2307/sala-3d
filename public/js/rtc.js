@@ -1,5 +1,6 @@
 // WebRTC em malha (cada pessoa conecta direto com cada outra): microfone + tela + som da tela.
 // Usa o padrão "perfect negotiation" para renegociar sem conflitos quando alguém liga/desliga a tela.
+import { podeRecortar, recortarRosto } from './rosto.js';
 
 // Presets de qualidade: todos a 60 quadros por segundo. Se a internet ou o PC apertarem, o
 // navegador baixa a resolução e segura os 60 quadros ("maintain-framerate"). A captura já sai no
@@ -14,8 +15,10 @@ export const SHARE_PRESETS = {
 // os nomes antigos (texto nítido, vídeo, jogo) viram a Máxima
 export const presetDe = (modo) => (SHARE_PRESETS[modo] ? modo : 'max');
 
-// Webcam: só ocupa o rosto do boneco, então 640x480 a 30 quadros sobra.
+// Webcam: só ocupa o rosto do boneco. Com o recorte do rosto (rosto.js) a câmera abre em 720p
+// para o rosto aproximado continuar nítido, e o que sai é um quadrado de 360 px.
 const CAM = { width: 640, height: 480, fps: 30, maxBitrate: 600_000 };
+const CAM_RECORTE = { width: 1280, height: 720 };
 
 // Quanto cada pessoa que assiste precisa de cada tela (ela mesma avisa, ver enviarInteresse):
 // max = olhando de perto ou em foco; baixo = vê de longe; mini = vê bem pequena; off = não vê.
@@ -163,37 +166,52 @@ export class RTC {
   // Vai no rosto do boneco (Avatar.setCam): imagem pequena, 30 quadros e pouca banda. O stream é
   // sempre o mesmo (camStream): desligar e ligar de novo só troca a trilha, sem renegociar, e
   // quem recebe continua achando a câmera pelo mesmo id. Quem está longe avisa (interesse 'cam')
-  // e para de receber.
+  // e para de receber. camFonte é a câmera de verdade; camTrack, o que sai (o rosto recortado).
   async startCam(deviceId = null) {
+    const recortar = podeRecortar();
+    const tam = recortar ? CAM_RECORTE : CAM;
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {
         deviceId: deviceId ? { exact: deviceId } : undefined,
         facingMode: deviceId ? undefined : 'user',
-        width: { ideal: CAM.width },
-        height: { ideal: CAM.height },
+        width: { ideal: tam.width },
+        height: { ideal: tam.height },
         frameRate: { ideal: CAM.fps, max: CAM.fps },
       },
     });
-    const track = stream.getVideoTracks()[0];
-    track.contentHint = 'motion';
-    this.camStream = this.camStream || new MediaStream();
-    const old = this.camTrack;
-    if (old) {
-      this.camStream.removeTrack(old);
-      old.stop();
+    const fonte = stream.getVideoTracks()[0];
+    fonte.contentHint = 'motion';
+    let track = fonte;
+    if (recortar) {
+      try {
+        track = recortarRosto(fonte);
+      } catch (err) {
+        console.warn('[rtc] recorte do rosto', err);
+      }
     }
+    this.camStream = this.camStream || new MediaStream();
+    this.pararCam();
     this.camStream.addTrack(track);
     this.camTrack = track;
+    this.camFonte = fonte;
     for (const peer of this.peers.values()) this.addCamTo(peer);
     return this.camStream;
   }
 
-  stopCam() {
-    const track = this.camTrack;
-    if (!track) return;
+  pararCam() {
+    const { camTrack: track, camFonte: fonte } = this;
     this.camTrack = null;
-    this.camStream?.removeTrack(track);
-    track.stop();
+    this.camFonte = null;
+    if (track) {
+      this.camStream?.removeTrack(track);
+      track.stop();
+    }
+    if (fonte && fonte !== track) fonte.stop();
+  }
+
+  stopCam() {
+    if (!this.camTrack) return;
+    this.pararCam();
     for (const peer of this.peers.values()) peer.camSender?.replaceTrack(null).catch(() => {});
   }
 
