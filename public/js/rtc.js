@@ -14,6 +14,9 @@ export const SHARE_PRESETS = {
 // os nomes antigos (texto nítido, vídeo, jogo) viram a Máxima
 export const presetDe = (modo) => (SHARE_PRESETS[modo] ? modo : 'max');
 
+// Webcam: só ocupa o rosto do boneco, então 640x480 a 30 quadros sobra.
+const CAM = { width: 640, height: 480, fps: 30, maxBitrate: 600_000 };
+
 // Quanto cada pessoa que assiste precisa de cada tela (ela mesma avisa, ver enviarInteresse):
 // max = olhando de perto ou em foco; baixo = vê de longe; mini = vê bem pequena; off = não vê.
 // Quem não vê não recebe vídeo: o PC de quem compartilha não gasta codificando para ela, e sobra
@@ -154,6 +157,78 @@ export class RTC {
 
   setMicEnabled(on) {
     if (this.micTrack) this.micTrack.enabled = on;
+  }
+
+  // -------------------------------------------------------------- webcam
+  // Vai no rosto do boneco (Avatar.setCam): imagem pequena, 30 quadros e pouca banda. O stream é
+  // sempre o mesmo (camStream): desligar e ligar de novo só troca a trilha, sem renegociar, e
+  // quem recebe continua achando a câmera pelo mesmo id. Quem está longe avisa (interesse 'cam')
+  // e para de receber.
+  async startCam(deviceId = null) {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        deviceId: deviceId ? { exact: deviceId } : undefined,
+        facingMode: deviceId ? undefined : 'user',
+        width: { ideal: CAM.width },
+        height: { ideal: CAM.height },
+        frameRate: { ideal: CAM.fps, max: CAM.fps },
+      },
+    });
+    const track = stream.getVideoTracks()[0];
+    track.contentHint = 'motion';
+    this.camStream = this.camStream || new MediaStream();
+    const old = this.camTrack;
+    if (old) {
+      this.camStream.removeTrack(old);
+      old.stop();
+    }
+    this.camStream.addTrack(track);
+    this.camTrack = track;
+    for (const peer of this.peers.values()) this.addCamTo(peer);
+    return this.camStream;
+  }
+
+  stopCam() {
+    const track = this.camTrack;
+    if (!track) return;
+    this.camTrack = null;
+    this.camStream?.removeTrack(track);
+    track.stop();
+    for (const peer of this.peers.values()) peer.camSender?.replaceTrack(null).catch(() => {});
+  }
+
+  get camId() {
+    return this.camTrack ? this.camStream.id : null;
+  }
+
+  addCamTo(peer) {
+    if (!this.camTrack) return;
+    if (peer.camSender) {
+      peer.camSender.replaceTrack(this.camTrack).catch((err) => console.warn('[rtc] webcam', err));
+      return;
+    }
+    const tr = peer.pc.addTransceiver(this.camTrack, {
+      direction: 'sendonly',
+      streams: [this.camStream],
+      sendEncodings: [{ maxBitrate: CAM.maxBitrate, maxFramerate: CAM.fps, active: peer.interesse.get('cam') !== 'off' }],
+    });
+    peer.camSender = tr.sender;
+  }
+
+  // longe ou sem olhar: a câmera para de ir para essa pessoa (o codificador nem roda para ela)
+  async tuneCam(peer) {
+    const sender = peer.camSender;
+    if (!sender) return;
+    try {
+      const params = sender.getParameters();
+      if (!params.encodings?.length) return;
+      const ativo = peer.interesse.get('cam') !== 'off';
+      if (params.encodings[0].active === ativo) return;
+      params.encodings[0].active = ativo;
+      await sender.setParameters(params);
+    } catch (err) {
+      if (err.name !== 'InvalidStateError') console.warn('[rtc] ajuste da webcam', err);
+    }
   }
 
   // -------------------------------------------------------------- tela
@@ -343,15 +418,19 @@ export class RTC {
 
   // -------------------------------------------------------------- interesse (quem vê o quê)
   // Quem assiste avisa quanto precisa de cada tela minha ({ chave: 'max'|'baixo'|'mini'|'off' }).
+  // A chave 'cam' é a minha webcam (só 'max' ou 'off').
   receberInteresse(peer, mapa) {
     if (!mapa || typeof mapa !== 'object') return;
     let mudou = false;
+    let cam = false;
     for (const [k, v] of Object.entries(mapa)) {
       if (!NIVEIS[v] || peer.interesse.get(k) === v) continue;
       peer.interesse.set(k, v);
-      mudou = true;
+      if (k === 'cam') cam = true;
+      else mudou = true;
     }
     if (mudou) this.tuneScreen(peer);
+    if (cam) this.tuneCam(peer);
   }
 
   // Eu (que assisto) aviso a quem compartilha quanto preciso de cada tela dele.
@@ -372,6 +451,7 @@ export class RTC {
       makingOffer: false,
       ignoreOffer: false,
       micSender: null,
+      camSender: null,
       screenTransceivers: new Map(), // key da tela -> transceivers (vídeo e áudio)
       interesse: new Map(), // key da tela -> quanto essa pessoa precisa dela (ver NIVEIS)
       pending: [],
@@ -410,6 +490,7 @@ export class RTC {
     };
 
     if (this.micTrack) peer.micSender = pc.addTrack(this.micTrack, this.micStream);
+    this.addCamTo(peer);
     this.addScreenTo(peer);
     return peer;
   }
@@ -455,6 +536,7 @@ export class RTC {
   closeAll() {
     for (const id of [...this.peers.keys()]) this.removePeer(id);
     this.stopScreen();
+    this.stopCam();
     this.micTrack?.stop();
   }
 

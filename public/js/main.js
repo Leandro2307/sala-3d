@@ -41,7 +41,7 @@ const PANEL_TITLES = { people: 'Pessoas', chat: 'Chat da sala', telao: 'Telão',
 // ------------------------------------------------------------------ ajustes salvos
 const DEFAULTS = {
   name: '', color: COLORS[0], mic: true, voice: 100, screen: 90, tv: 80, spatial: false,
-  shareMode: 'max', sens: 100, sfx: true, micDevice: '', helpCollapsed: false, photo: null, shirt: 'none', char: 'padrao', arma: ARMA_PADRAO,
+  shareMode: 'max', sens: 100, sfx: true, micDevice: '', camDevice: '', helpCollapsed: false, photo: null, shirt: 'none', char: 'padrao', arma: ARMA_PADRAO,
   // qualidade gráfica: 'auto' ou um nível fixo; nivelAuto: onde o automático parou da última vez
   qualidade: 'auto', nivelAuto: null, mostrarFps: false,
   // presença (ver "empresa") e se o gestor quer os alertas da equipe
@@ -110,6 +110,7 @@ const state = {
   main: 'media',
   micOn: settings.mic,
   micAvailable: false,
+  camOn: false, // webcam no rosto do boneco (começa sempre desligada)
   casting: false, // uma das minhas telas é um arquivo de vídeo, não a captura da tela
   castKey: null, // chave dessa tela (só um arquivo por vez)
   panel: null,
@@ -752,6 +753,7 @@ function emitJoin() {
       name: settings.name,
       color: settings.color,
       mic: state.micOn && state.micAvailable,
+      cam: rtc?.camId ?? null,
       photo: settings.photo,
       shirt: settings.shirt,
       char: settings.char,
@@ -845,7 +847,7 @@ function bindSocket() {
     u.avatar.speaking = !!s;
   });
 
-  socket.on('user-update', ({ id, mic, photo, shirt, char, color, arma, health, ko, status, inativo, gestor, desde }) => {
+  socket.on('user-update', ({ id, mic, cam, photo, shirt, char, color, arma, health, ko, status, inativo, gestor, desde }) => {
     const u = state.users.get(id);
     if (!u) return;
     if (status !== undefined || inativo !== undefined || gestor !== undefined) {
@@ -865,6 +867,10 @@ function bindSocket() {
       u.mic = mic;
       u.avatar.setStatus({ mic });
       renderPeople();
+    }
+    if (cam !== undefined && !u.isSelf) {
+      u.cam = cam;
+      routeStreams(u);
     }
     if (photo !== undefined) {
       u.photo = photo;
@@ -1066,6 +1072,10 @@ function removeUser(id, quiet = false) {
     u.audioEl.srcObject = null;
     u.audioEl.remove();
   }
+  if (u.camVideo) {
+    u.camVideo.srcObject = null;
+    u.camVideo.remove();
+  }
   for (const sh of u.shares.values()) soltarVideo(sh);
   if (state.focus?.kind === 'share' && u.shares.has(state.focus.key)) exitFocus();
   state.users.delete(id);
@@ -1226,15 +1236,95 @@ function updateMicButton() {
   localAvatar.setStatus({ mic: on });
 }
 
+// ------------------------------------------------------------------ webcam
+// Opcional e sempre começa desligada. Ligada, o vídeo vai no rosto do boneco para todo mundo
+// (Avatar.setCam: na calota da foto, ou num disco na frente do rosto dos personagens) e numa
+// bolinha no canto para você se ver — em 1ª pessoa o seu boneco não aparece.
+const camPreview = $('#cam-preview');
+
+async function ligarCam(deviceId) {
+  try {
+    return await rtc.startCam(deviceId || null);
+  } catch (err) {
+    // a câmera escolhida nos ajustes sumiu (desconectou): tenta a padrão
+    if (!deviceId || err.name === 'NotAllowedError') throw err;
+    settings.camDevice = '';
+    saveSettings();
+    return rtc.startCam(null);
+  }
+}
+
+// câmera desconectada (ou tomada por outro programa): desliga aqui também
+function vigiarCam() {
+  const track = rtc.camTrack;
+  track?.addEventListener('ended', () => {
+    if (!state.camOn || rtc.camTrack !== track) return;
+    toggleCam();
+    toast('A câmera foi desconectada.', 'warn', 5000);
+  });
+}
+
+function avisoDaCam(err) {
+  if (err.name === 'NotAllowedError') return 'A câmera está bloqueada. Libere no cadeado ao lado do endereço e clique de novo.';
+  if (err.name === 'NotReadableError' || err.name === 'AbortError') return 'A câmera está ocupada por outro programa (Meet, Zoom, Teams…). Feche lá e tente de novo.';
+  if (err.name === 'NotFoundError' || err.name === 'OverconstrainedError') return 'Não achei nenhuma câmera neste computador.';
+  return `Não deu para ligar a câmera: ${err.message}`;
+}
+
+async function toggleCam() {
+  if (!rtc) return;
+  const btn = $('#btn-cam');
+  if (state.camOn) {
+    state.camOn = false;
+    rtc.stopCam();
+    socket.emit('cam', null);
+    localAvatar.setCam(null);
+    camPreview.srcObject = null;
+    updateCamButton();
+    return;
+  }
+  if (!navigator.mediaDevices?.getUserMedia) return toast('Este navegador não dá acesso à câmera.', 'error');
+  btn.disabled = true;
+  let stream;
+  try {
+    stream = await ligarCam(settings.camDevice);
+  } catch (err) {
+    console.warn('[webcam]', err);
+    toast(avisoDaCam(err), 'warn', 7000);
+    return;
+  } finally {
+    btn.disabled = false;
+  }
+  state.camOn = true;
+  socket.emit('cam', rtc.camId);
+  camPreview.srcObject = stream;
+  camPreview.play().catch(() => {});
+  localAvatar.setCam(camPreview);
+  vigiarCam();
+  updateCamButton();
+  populateDevices(); // com a permissão dada, os nomes das câmeras aparecem nos ajustes
+}
+
+function updateCamButton() {
+  const on = state.camOn;
+  const b = $('#btn-cam');
+  b.classList.toggle('on', on);
+  b.querySelector('i').innerHTML = icon(on ? 'webcam' : 'webcamOff');
+  b.dataset.tip = on ? 'Desligar câmera (K)' : 'Ligar câmera (K)';
+  camPreview.hidden = !on;
+}
+
 async function populateDevices() {
   try {
     const devices = await navigator.mediaDevices.enumerateDevices();
-    const mics = devices.filter((d) => d.kind === 'audioinput');
-    const sel = $('#set-mic-device');
-    sel.innerHTML = '<option value="">Padrão do sistema</option>'
-      + mics.filter((d) => d.deviceId && d.deviceId !== 'default')
-        .map((d) => `<option value="${esc(d.deviceId)}">${esc(d.label || 'Microfone')}</option>`).join('');
-    sel.value = settings.micDevice || '';
+    const preencher = (sel, tipo, nome, atual) => {
+      sel.innerHTML = '<option value="">Padrão do sistema</option>'
+        + devices.filter((d) => d.kind === tipo && d.deviceId && d.deviceId !== 'default')
+          .map((d) => `<option value="${esc(d.deviceId)}">${esc(d.label || nome)}</option>`).join('');
+      sel.value = atual || '';
+    };
+    preencher($('#set-mic-device'), 'audioinput', 'Microfone', settings.micDevice);
+    preencher($('#set-cam-device'), 'videoinput', 'Câmera', settings.camDevice);
   } catch { /* sem permissão */ }
 }
 
@@ -1259,35 +1349,45 @@ function nivelDesejado(sh) {
   return px >= 160 ? 'max' : px >= 50 ? 'baixo' : px > 0 ? 'mini' : 'off';
 }
 
+// Webcam de alguém: só vem se dá para ver o rosto (perto, aba aberta, sem tela em foco cobrindo
+// tudo). Longe, quem tem a câmera nem codifica para mim.
+const CAM_PERTO = 18;
+function nivelDaCam(u) {
+  if (document.hidden || state.focus?.kind === 'share' || mesa.aberta) return 'off';
+  return world.camera.position.distanceTo(u.avatar.group.position) < CAM_PERTO ? 'max' : 'off';
+}
+
 function atualizarInteresse() {
   if (!state.joined || !rtc) return;
   const agora = performance.now();
   const completo = agora - ultimoEnvioCompleto > 8000;
   if (completo) ultimoEnvioCompleto = agora;
   const vistas = new Set();
-  for (const u of state.users.values()) {
-    if (u.isSelf || !u.shares.size) continue;
-    const mapa = {};
-    for (const sh of u.shares.values()) {
-      vistas.add(sh.key);
-      const quer = nivelDesejado(sh);
-      let t = niveisTela.get(sh.key);
-      if (!t) {
-        t = { nivel: quer, candidato: quer, desde: agora };
-        niveisTela.set(sh.key, t);
-      }
-      if (ORDEM_NIVEL[quer] >= ORDEM_NIVEL[t.nivel]) {
-        t.nivel = quer; // subir (ou igual): na hora
-        t.candidato = quer;
-      } else {
-        if (t.candidato !== quer) {
-          t.candidato = quer;
-          t.desde = agora;
-        }
-        if (agora - t.desde >= ESPERA_DESCER[quer]) t.nivel = quer;
-      }
-      mapa[sh.key] = t.nivel;
+  // subir (ou igual) é na hora; descer só depois de um tempo querendo menos
+  const suavizar = (chave, quer) => {
+    vistas.add(chave);
+    let t = niveisTela.get(chave);
+    if (!t) {
+      t = { nivel: quer, candidato: quer, desde: agora };
+      niveisTela.set(chave, t);
     }
+    if (ORDEM_NIVEL[quer] >= ORDEM_NIVEL[t.nivel]) {
+      t.nivel = quer;
+      t.candidato = quer;
+    } else {
+      if (t.candidato !== quer) {
+        t.candidato = quer;
+        t.desde = agora;
+      }
+      if (agora - t.desde >= ESPERA_DESCER[quer]) t.nivel = quer;
+    }
+    return t.nivel;
+  };
+  for (const u of state.users.values()) {
+    if (u.isSelf || (!u.shares.size && !u.cam)) continue;
+    const mapa = {};
+    for (const sh of u.shares.values()) mapa[sh.key] = suavizar(sh.key, nivelDesejado(sh));
+    if (u.cam) mapa.cam = suavizar(`cam:${u.id}`, nivelDaCam(u));
     const antes = interesseEnviado.get(u.id) || {};
     const mudou = Object.keys(mapa).filter((k) => antes[k] !== mapa[k]);
     if (completo || mudou.length) {
@@ -1683,6 +1783,8 @@ $('#share-pop').addEventListener('click', (e) => {
 // Precisa da extensão (pasta extensao/) no Chrome de quem compartilha. Ver controle.js.
 const controle = new Controle({
   emitir: (ev, data, volatil) => (volatil ? socket?.volatile.emit(ev, data) : socket?.emit(ev, data)),
+  // as minhas telas: o evento vai direto para a extensão, sem ida e volta pelo servidor
+  minha: (key) => self()?.shares.get(key) ?? null,
   toast,
   onExtensao: () => {
     renderSharePop();
@@ -2840,6 +2942,19 @@ function routeStreams(u) {
       u.audioEl.srcObject = mic;
       u.audioEl.play().catch(() => {});
     }
+  }
+  // webcam: vai no rosto do boneco
+  const cam = u.cam ? u.streams.get(u.cam) : null;
+  if (vivo(cam) && cam.getVideoTracks().length) {
+    if (!u.camVideo) u.camVideo = makeVideo(true);
+    if (u.camVideo.srcObject !== cam) {
+      u.camVideo.srcObject = cam;
+      u.camVideo.play().catch(() => {});
+    }
+    u.avatar.setCam(u.camVideo);
+  } else {
+    u.avatar.setCam(null);
+    if (u.camVideo) u.camVideo.srcObject = null;
   }
   for (const sh of u.shares.values()) {
     const st = u.streams.get(sh.streamId);
@@ -4104,6 +4219,7 @@ helpBtn.addEventListener('click', () => {
 $$('[data-panel]').forEach((b) => b.addEventListener('click', () => openPanel(b.dataset.panel)));
 $('#panel-close').addEventListener('click', closePanel);
 $('#btn-mic').addEventListener('click', toggleMic);
+$('#btn-cam').addEventListener('click', toggleCam);
 $('#btn-view').addEventListener('click', toggleView);
 $('#btn-react').addEventListener('click', (e) => {
   e.stopPropagation();
@@ -4244,6 +4360,24 @@ $('#set-share-mode').addEventListener('click', (e) => {
   saveSettings();
 });
 
+$('#set-cam-device').addEventListener('change', async (e) => {
+  settings.camDevice = e.target.value;
+  saveSettings();
+  if (!rtc || !state.camOn) return;
+  try {
+    const stream = await ligarCam(settings.camDevice);
+    // trilha nova no mesmo stream: recarrega o vídeo e a textura do rosto junto
+    localAvatar.setCam(null);
+    camPreview.srcObject = stream;
+    camPreview.play().catch(() => {});
+    localAvatar.setCam(camPreview);
+    vigiarCam();
+    toast('Câmera trocada.');
+  } catch (err) {
+    toast(avisoDaCam(err), 'error');
+  }
+});
+
 $('#set-mic-device').addEventListener('change', async (e) => {
   settings.micDevice = e.target.value;
   saveSettings();
@@ -4318,6 +4452,9 @@ window.addEventListener('keydown', (e) => {
       break;
     case 'KeyM':
       toggleMic();
+      break;
+    case 'KeyK':
+      toggleCam();
       break;
     case 'KeyT':
     case 'Enter':

@@ -698,7 +698,7 @@ function premiarJogo(io, room, mesa, j) {
 
 function publicUser(u) {
   return {
-    id: u.id, name: u.name, color: u.color, mic: u.mic,
+    id: u.id, name: u.name, color: u.color, mic: u.mic, cam: u.cam,
     shares: [...u.shares.values()],
     posto: u.posto,
     status: u.status, inativo: u.inativo, gestor: u.gestor, desde: u.statusDesde,
@@ -915,6 +915,7 @@ function attachSockets(io) {
         name: nome,
         color: /^#[0-9a-f]{6}$/i.test(data?.color) ? data.color : '#7c9cff',
         mic: !!data?.mic,
+        cam: cleanText(data?.cam, 80) || null, // id do stream da webcam (vai no rosto do boneco)
         shares: new Map(), // chave -> { key, slot, streamId }
         shareSeq: 0,
         photo: cleanPhoto(data?.photo),
@@ -1152,6 +1153,15 @@ function attachSockets(io) {
       if (!user) return;
       user.mic = !!on;
       io.to(room.id).emit('user-update', { id: user.id, mic: user.mic });
+    });
+
+    // webcam ligada (id do stream, para os outros acharem o vídeo no WebRTC) ou desligada (null)
+    socket.on('cam', (streamId) => {
+      if (!user) return;
+      const cam = cleanText(streamId, 80) || null;
+      if (cam === user.cam) return;
+      user.cam = cam;
+      io.to(room.id).emit('user-update', { id: user.id, cam });
     });
 
     // Cada chamada é mais uma aba/janela (ou um arquivo) numa tela livre. No escritório, numa tela

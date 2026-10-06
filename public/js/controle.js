@@ -12,6 +12,10 @@
 // Do lado de quem controla, cada imagem que aceita controle é uma "superfície": o foco 2D tem
 // uma, a mesa de trabalho tem uma por monitor. Como num PC com vários monitores, o mouse vai
 // para a superfície que está embaixo dele e o teclado fica com a última clicada.
+//
+// Mexendo na PRÓPRIA aba compartilhada, nada passa pelo servidor: o evento vai direto para a
+// extensão deste Chrome, e o mouse sai a cada movimento (assim que a extensão terminou o
+// anterior), sem o intervalo que segura a rede de quem controla de longe.
 
 const MOD = (e) => (e.altKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.metaKey ? 4 : 0) | (e.shiftKey ? 8 : 0);
 const BOTAO = ['left', 'middle', 'right'];
@@ -19,12 +23,14 @@ const BOTAO = ['left', 'middle', 'right'];
 const MOVE_MS = 25;
 const ARRASTO_MS = 16;
 const RODA_MS = 30;
+const RODA_MINHA_MS = 8;
 
 export class Controle {
-  constructor({ emitir, toast, onExtensao }) {
+  constructor({ emitir, toast, onExtensao, minha }) {
     this.emitir = emitir;
     this.toast = toast;
     this.onExtensao = onExtensao;
+    this.minha = minha || (() => null); // chave -> a minha tela com essa chave (ou null)
     this.ext = { ok: false, liberado: false, versao: null };
     this.pedidos = new Map();
     this.seq = 0;
@@ -38,6 +44,7 @@ export class Controle {
     this.ultimoMove = 0;
     this.movePendente = null;
     this.moveTimer = 0;
+    this.moveEmVoo = false; // movimento na minha aba esperando a extensão
     this.roda = null;
     this.rodaTimer = 0;
     this.arrastando = null; // { video, key, b, x, y }
@@ -192,13 +199,19 @@ export class Controle {
   }
 
   mandar(key, ev, volatil = false) {
-    this.emitir('controle', { key, ev }, volatil);
+    const minha = this.minha(key);
+    if (minha) this.receber(minha, { ev });
+    else this.emitir('controle', { key, ev }, volatil);
   }
 
   // Movimento: no máximo um a cada MOVE_MS, mas o último sempre sai (senão o cursor do outro
-  // lado parava um pouco antes de onde o mouse parou).
+  // lado parava um pouco antes de onde o mouse parou). Na minha aba: um por vez, sem relógio.
   mover(key, ev, intervalo) {
     this.movePendente = { key, ev };
+    if (this.minha(key)) {
+      if (!this.moveEmVoo) this.moverNaMinha();
+      return;
+    }
     if (this.moveTimer) return;
     const falta = this.ultimoMove + intervalo - performance.now();
     if (falta <= 0) this.enviarMove();
@@ -215,6 +228,22 @@ export class Controle {
     this.mandar(p.key, p.ev, true);
   }
 
+  // sempre o movimento mais novo; os que chegaram enquanto a extensão trabalhava ficam para trás
+  async moverNaMinha() {
+    this.moveEmVoo = true;
+    try {
+      while (this.movePendente) {
+        const { key, ev } = this.movePendente;
+        this.movePendente = null;
+        const minha = this.minha(key);
+        if (minha) await this.receber(minha, { ev });
+        else this.mandar(key, ev, true);
+      }
+    } finally {
+      this.moveEmVoo = false;
+    }
+  }
+
   // clique e soltura já levam a posição: um movimento atrasado depois deles só atrapalharia
   cancelarMove() {
     clearTimeout(this.moveTimer);
@@ -229,7 +258,8 @@ export class Controle {
     Object.assign(this.roda, { x: p.x, y: p.y, mod });
     this.roda.dx += dx;
     this.roda.dy += dy;
-    if (!this.rodaTimer) this.rodaTimer = setTimeout(() => this.enviarRoda(), RODA_MS);
+    // na minha aba a rolagem sai a cada quadro, como numa aba de verdade
+    if (!this.rodaTimer) this.rodaTimer = setTimeout(() => this.enviarRoda(), this.minha(key) ? RODA_MINHA_MS : RODA_MS);
   }
 
   enviarRoda() {

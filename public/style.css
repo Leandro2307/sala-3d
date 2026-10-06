@@ -990,6 +990,24 @@ body.touch .help-grid[data-input="touch"] { display: grid; }
 }
 #btn-mic.talking .mic-level { opacity: 0.9; }
 
+/* a sua webcam, espelhada como num espelho (no boneco ela vai sem espelhar, como os outros veem) */
+#cam-preview {
+  position: fixed;
+  right: 18px;
+  bottom: calc(92px + env(safe-area-inset-bottom));
+  z-index: 4;
+  width: 128px;
+  height: 128px;
+  border-radius: 50%;
+  border: 3px solid var(--accent);
+  background: #0b0d12;
+  object-fit: cover;
+  transform: scaleX(-1);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+body.touch #cam-preview { right: auto; left: 12px; bottom: auto; top: calc(108px + env(safe-area-inset-top)); width: 76px; height: 76px; }
+
 [data-tip] { position: relative; }
 [data-tip]::before {
   content: attr(data-tip);

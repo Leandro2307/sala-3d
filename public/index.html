@@ -201,6 +201,7 @@
           <span><kbd>R</kbd> voltar ao checkpoint</span>
           <span><kbd>T</kbd> chat</span>
           <span><kbd>M</kbd> microfone</span>
+          <span><kbd>K</kbd> câmera</span>
           <span><kbd>C</kbd> sentar</span>
           <span><kbd>P</kbd> trocar personagem</span>
           <span data-jogo="corrida"><kbd>G</kbd> virar carro</span>
@@ -259,6 +260,9 @@
     </div>
   </div>
 
+  <!-- a sua webcam, para você se ver (os outros veem no rosto do boneco) -->
+  <video id="cam-preview" autoplay muted playsinline hidden aria-hidden="true"></video>
+
   <!-- ============================================================ barra inferior -->
   <nav id="bar" hidden>
     <div class="bar-left">
@@ -269,6 +273,8 @@
 
     <div class="bar-center">
       <button type="button" class="round" id="btn-mic" data-tip="Microfone (M)"><span class="mic-level"></span><i data-icon="mic"></i></button>
+      <!-- webcam opcional: aparece no rosto do boneco -->
+      <button type="button" class="round" id="btn-cam" data-tip="Ligar câmera (K)"><i data-icon="webcamOff"></i></button>
       <div class="pop-wrap">
         <button type="button" class="round" id="btn-share" data-tip="Compartilhar tela"><i data-icon="share"></i><span class="share-count" id="share-count" hidden></span></button>
         <!-- suas telas no ar: dá para compartilhar várias abas/janelas, cada uma numa tela -->
@@ -603,6 +609,10 @@
       <label class="field">
         <span>Microfone</span>
         <select id="set-mic-device"><option value="">Padrão do sistema</option></select>
+      </label>
+      <label class="field">
+        <span>Câmera</span>
+        <select id="set-cam-device"><option value="">Padrão do sistema</option></select>
       </label>
       <label class="slider-row">
         <span>Volume das vozes</span>

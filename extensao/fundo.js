@@ -8,9 +8,15 @@
 const anexadas = new Map(); // aba -> { sala, vp: { w, h }, medido }
 const ultimoToque = new Map(); // aba -> quando chegou o último clique/Enter de quem controla
 
-async function sitesLiberados() {
-  const { sites = [] } = await chrome.storage.local.get('sites');
-  return sites;
+// Fica na memória: ler o storage a cada movimento do mouse atrasava todos eles. O popup grava
+// a lista e o onChanged atualiza aqui.
+let sitesCache = null; // Promise da lista (a rajada que chega antes da primeira leitura espera a mesma)
+chrome.storage.onChanged.addListener((mudou, area) => {
+  if (area === 'local' && mudou.sites) sitesCache = Promise.resolve(mudou.sites.newValue || []);
+});
+function sitesLiberados() {
+  sitesCache ||= chrome.storage.local.get('sites').then((r) => r.sites || [], () => { sitesCache = null; return []; });
+  return sitesCache;
 }
 async function liberado(url) {
   try {
@@ -34,7 +40,7 @@ async function anexar(aba, sala) {
   // a aba compartilhada quase nunca é a que está na frente: finge que ela tem o foco,
   // senão campo de texto não recebe o que é digitado
   await cdp(aba, 'Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => {});
-  const info = { sala, vp: { w: 1280, h: 720 }, medido: 0 };
+  const info = { sala, vp: { w: 1280, h: 720 }, medido: 0, medindo: false };
   anexadas.set(aba, info);
   await medir(aba);
   return info;
@@ -47,6 +53,30 @@ async function medir(aba) {
   const v = m.cssVisualViewport || m.cssLayoutViewport || m.layoutViewport;
   info.vp = { w: v.clientWidth, h: v.clientHeight };
   info.medido = Date.now();
+}
+
+// Movimento e roda não esperam medir a página (era uma ida à aba antes de cada um): a medida
+// se renova por trás, no máximo uma vez por segundo.
+function remedir(aba, info) {
+  if (info.medindo || Date.now() - info.medido < 1000) return;
+  info.medindo = true;
+  medir(aba).catch(() => {}).finally(() => { info.medindo = false; });
+}
+
+// Uma fila por aba: cada evento chega numa mensagem separada e cada um espera coisas diferentes
+// (ligar o depurador, medir a página). Sem a fila, um "soltar" podia passar na frente do
+// "apertar" e o clique se perdia. Movimento que ficou para trás de outro mais novo é pulado:
+// todo clique, soltura e giro leva a própria posição, então só o último movimento importa.
+const filas = new Map(); // aba -> Promise do último evento
+const movimentoMaisNovo = new Map(); // aba -> número do último movimento que entrou na fila
+let numMovimento = 0;
+function enfileirar(aba, ev, tarefa) {
+  const n = ev.t === 'mouse' && ev.a === 'move' ? ++numMovimento : 0;
+  if (n) movimentoMaisNovo.set(aba, n);
+  const rodar = () => (n && movimentoMaisNovo.get(aba) !== n ? null : tarefa());
+  const vez = (filas.get(aba) || Promise.resolve()).then(rodar, rodar);
+  filas.set(aba, vez.catch(() => {}));
+  return vez;
 }
 
 // A faixa "começou a depurar este navegador" fica enquanto a extensão está ligada na aba. Sem
@@ -76,7 +106,9 @@ async function despachar(aba, ev) {
   const modifiers = num(ev.mod, 0, 15) | 0;
   if ((ev.t === 'mouse' && ev.a === 'down') || (ev.t === 'tecla' && ev.a === 'down' && ev.key === 'Enter')) ultimoToque.set(aba, Date.now());
   if (ev.t === 'mouse' || ev.t === 'wheel') {
-    if (ev.a === 'down' || Date.now() - info.medido > 2000) await medir(aba);
+    // o clique mede antes (a faixa amarela do depurador pode ter acabado de mudar a altura)
+    if (ev.a === 'down') await medir(aba);
+    else remedir(aba, info);
     const x = num(ev.x, 0, 1) * info.vp.w;
     const y = num(ev.y, 0, 1) * info.vp.h;
     if (ev.t === 'wheel') {
@@ -302,8 +334,11 @@ async function tratar(m, sender) {
       await navegar(aba, m.ev);
       return { ok: true };
     }
-    await anexar(aba, sender.tab.id);
-    await despachar(aba, m.ev);
+    const sala = sender.tab.id;
+    await enfileirar(aba, m.ev, async () => {
+      await anexar(aba, sala);
+      await despachar(aba, m.ev);
+    });
     agendarSoltura(aba);
     return { ok: true };
   }
@@ -370,6 +405,8 @@ chrome.debugger.onDetach.addListener(({ tabId }, motivo) => {
 chrome.tabs.onRemoved.addListener(async (aba) => {
   anexadas.delete(aba);
   ultimoToque.delete(aba);
+  filas.delete(aba);
+  movimentoMaisNovo.delete(aba);
   // fechou a aba compartilhada ou a da sala: esquece as duas pontas
   const mapa = await compartilhadas();
   let mudou = false;

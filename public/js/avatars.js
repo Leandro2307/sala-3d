@@ -62,6 +62,9 @@ const shared = {
   // Calota na frente da cabeça, onde entra a foto. Larga de propósito: cobre
   // praticamente todo o rosto, em vez de ficar uma bolinha no meio da cabeça.
   rosto: uvDeFrente(new THREE.SphereGeometry(0.2905, 40, 32, Math.PI / 2 - 1.05, 2.1, Math.PI / 2 - 0.92, 1.84)),
+  // webcam na frente do rosto dos personagens glTF (a cabeça redonda usa a calota acima)
+  discoCam: new THREE.CircleGeometry(0.2, 40),
+  aroCam: new THREE.RingGeometry(0.2, 0.225, 40),
   // faixa curva no peito, onde entra a estampa da camiseta
   peito: uvDeFrente(new THREE.CylinderGeometry(0.307, 0.307, 0.34, 28, 1, true, -0.72, 1.44)),
   visorMat: new THREE.MeshStandardMaterial({ color: 0x0d1018, roughness: 0.12, metalness: 0.6 }),
@@ -199,6 +202,28 @@ function fotoRedonda(img, cor) {
   return tex;
 }
 
+// O mesmo esmaecido da foto, para a webcam: vídeo não passa pelo canvas, então a borda vem de um
+// alphaMap (um só para todos os bonecos).
+let _mascaraCam = null;
+function mascaraCam() {
+  if (_mascaraCam) return _mascaraCam;
+  const n = 256;
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = n;
+  const ctx = cv.getContext('2d');
+  const g = ctx.createRadialGradient(n / 2, n / 2, n * 0.40, n / 2, n / 2, n * 0.52);
+  g.addColorStop(0, '#fff');
+  g.addColorStop(1, '#000');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, n, n);
+  _mascaraCam = new THREE.CanvasTexture(cv);
+  return _mascaraCam;
+}
+
+const _osso = new THREE.Vector3();
+const _v = new THREE.Vector3();
+const _mat = new THREE.Matrix4();
+
 export class Avatar {
   constructor({ name, color, isLocal = false }) {
     this.isLocal = isLocal;
@@ -230,6 +255,7 @@ export class Avatar {
     this.visor = visor;
     this.face = null; // foto do rosto, quando a pessoa escolhe uma
     this.photo = null;
+    this.cam = null; // webcam no rosto (setCam): { video, tex, mat, calota, disco, osso }
     this.shirt = 'none';
     this.chest = null; // estampa da camiseta
     this.health = 1; // 0..1 — barra só aparece quando leva porrada
@@ -500,7 +526,7 @@ export class Avatar {
     }
     this.photo = dataUrl || null;
     if (!dataUrl) {
-      this.visor.visible = true;
+      this.visor.visible = !this.cam;
       return;
     }
     const img = new Image();
@@ -511,12 +537,131 @@ export class Avatar {
         shared.rosto,
         new THREE.MeshBasicMaterial({ map: tex, transparent: true, toneMapped: false }),
       );
+      calota.visible = !this.cam; // com a webcam ligada, a foto espera ela desligar
       this.head.add(calota);
       this.face = calota;
       this.visor.visible = false;
     };
-    img.onerror = () => { this.visor.visible = true; };
+    img.onerror = () => { this.visor.visible = !this.cam; };
     img.src = dataUrl;
+  }
+
+  // Webcam no rosto. Na cabeça redonda ela ocupa a calota da foto (a foto volta quando a câmera
+  // desliga). Os personagens glTF não têm essa cabeça: lá ela vira um disco com aro na frente do
+  // rosto, que acompanha o osso da cabeça (andar, sentar, gestos).
+  setCam(video) {
+    if ((this.cam?.video || null) === (video || null)) return;
+    if (this.cam) {
+      const { tex, mat, calota, disco, aro } = this.cam;
+      calota.removeFromParent();
+      disco.removeFromParent();
+      disco.material.dispose();
+      aro.material.dispose();
+      tex.dispose();
+      mat.dispose();
+      this.cam = null;
+    }
+    if (!video) {
+      if (this.face) this.face.visible = true;
+      else this.visor.visible = true;
+      return;
+    }
+    const tex = new THREE.VideoTexture(video);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    // na calota a borda esmaece como a da foto; no disco quem fecha a borda é o aro
+    const mat = new THREE.MeshBasicMaterial({ map: tex, alphaMap: mascaraCam(), transparent: true, toneMapped: false });
+    const calota = new THREE.Mesh(shared.rosto, mat);
+    this.head.add(calota);
+    const disco = new THREE.Mesh(shared.discoCam, new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }));
+    const aro = new THREE.Mesh(shared.aroCam, new THREE.MeshBasicMaterial({ color: this.color, toneMapped: false }));
+    disco.add(aro);
+    disco.visible = false;
+    this.inner.add(disco);
+    this.cam = { video, tex, mat, calota, disco, aro, aspecto: 0, de: null, osso: null, raio: 0.2, desvio: null };
+    if (this.face) this.face.visible = false;
+    this.visor.visible = false;
+  }
+
+  // Recorta o meio da imagem (4:3, 16:9 ou celular em pé) para caber no rosto redondo, e põe o
+  // disco na frente do rosto do personagem.
+  atualizarCam() {
+    const c = this.cam;
+    const v = c.video;
+    if (v.videoWidth && v.videoHeight) {
+      const a = v.videoWidth / v.videoHeight;
+      if (a !== c.aspecto) {
+        c.aspecto = a;
+        if (a >= 1) {
+          c.tex.repeat.set(1 / a, 1);
+          c.tex.offset.set((1 - 1 / a) / 2, 0);
+        } else {
+          c.tex.repeat.set(1, a);
+          c.tex.offset.set(0, (1 - a) / 2);
+        }
+      }
+    }
+    const p = this.personagem;
+    c.disco.visible = !!p && !this.veiculo;
+    if (!c.disco.visible) return;
+    if (c.de !== p) {
+      c.de = p;
+      Object.assign(c, this.medirCabeca(p));
+      c.disco.scale.setScalar(c.raio / 0.2);
+    }
+    // segue o osso da cabeça (andar, sentar, gestos)
+    if (c.osso) {
+      c.osso.updateWorldMatrix(true, false);
+      this.inner.worldToLocal(c.osso.getWorldPosition(_osso)).add(c.desvio);
+      c.disco.position.copy(_osso);
+    } else {
+      c.disco.position.copy(c.desvio);
+    }
+  }
+
+  // Onde fica o rosto de um personagem glTF, no espaço do boneco. Cada modelo é de um jeito
+  // (o robô tem capacete grande, os do KayKit têm cabeção), então mede pelos vértices acima do
+  // osso da cabeça: a largura dá o tamanho do disco e o ponto mais à frente diz onde ele fica —
+  // contando só "metade da altura", o disco sumia dentro do capacete do robô.
+  medirCabeca(p) {
+    let osso = null;
+    p.raiz.traverse((o) => {
+      if (!osso && o.isBone && /head/i.test(o.name) && !/end|top|nub|tip/i.test(o.name)) osso = o;
+    });
+    this.inner.updateWorldMatrix(true, false);
+    p.raiz.updateWorldMatrix(false, true);
+    const paraBoneco = _mat.copy(this.inner.matrixWorld).invert();
+    const pontos = [];
+    p.raiz.traverse((o) => {
+      const pos = o.isMesh && o.geometry?.attributes.position;
+      if (!pos) return;
+      const passo = Math.max(1, Math.floor(pos.count / 3000));
+      for (let i = 0; i < pos.count; i += passo) {
+        o.getVertexPosition(i, _v).applyMatrix4(o.matrixWorld).applyMatrix4(paraBoneco);
+        pontos.push(_v.x, _v.y, _v.z);
+      }
+    });
+    let topo = -Infinity;
+    for (let i = 1; i < pontos.length; i += 3) topo = Math.max(topo, pontos[i]);
+    if (!Number.isFinite(topo)) topo = 1.8;
+    const base = osso ? _osso.setFromMatrixPosition(osso.matrixWorld).applyMatrix4(paraBoneco).clone() : new THREE.Vector3(0, topo - 0.45, 0);
+    const altura = THREE.MathUtils.clamp(topo - base.y, 0.2, 0.9);
+    // só a cabeça: acima do pescoço e perto do eixo dela (fora mão, arma, ombreira)
+    let frente = -Infinity;
+    let esq = Infinity;
+    let dir = -Infinity;
+    for (let i = 0; i < pontos.length; i += 3) {
+      const [x, y, z] = [pontos[i], pontos[i + 1], pontos[i + 2]];
+      if (y < base.y + altura * 0.12 || Math.abs(x - base.x) > altura * 0.7) continue;
+      frente = Math.max(frente, z);
+      esq = Math.min(esq, x);
+      dir = Math.max(dir, x);
+    }
+    const largura = dir > esq ? dir - esq : altura;
+    if (!Number.isFinite(frente)) frente = base.z + altura * 0.5;
+    // chapéu alto não conta: o disco senta no pescoço e cobre a cabeça até onde ela é larga
+    const raio = THREE.MathUtils.clamp(Math.min(altura, largura) * 0.46, 0.12, 0.36);
+    const centro = new THREE.Vector3(base.x, base.y + raio * 1.05, frente + 0.03);
+    return { osso, raio, desvio: osso ? centro.sub(base) : centro };
   }
 
   // Camiseta: pinta o tronco e cola a estampa curva no peito.
@@ -615,6 +760,7 @@ export class Avatar {
     this.color = color;
     this.material.color.set(color);
     this.pinturaMat?.color.set(color);
+    this.cam?.aro.material.color.set(color);
     // a foto tem a borda na cor do jogador: redesenha para acompanhar
     if (this.photo) {
       const url = this.photo;
@@ -716,6 +862,7 @@ export class Avatar {
   }
 
   update(dt, t) {
+    if (this.cam) this.atualizarCam();
     if (this.armaMao) {
       this.armaMao.visible = this.armado && !this.personagem && !this.veiculo;
       this.armaSolta.visible = this.armado && !!this.personagem && !this.veiculo;
@@ -900,6 +1047,7 @@ export class Avatar {
   }
 
   dispose() {
+    this.setCam(null);
     this.group.removeFromParent();
     this.material.dispose();
     this.halo.material.dispose();
