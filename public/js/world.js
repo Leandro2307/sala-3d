@@ -207,10 +207,14 @@ function monitorApagado(accent) {
   return _apagados.get(accent);
 }
 
+// logo da empresa (World.setLogo): aparece no lugar do ícone nas telas livres
+let logoDasTelas = null;
+
 class ScreenDisplay {
   // leve: monitor de posto de trabalho — sem moldura (a mesa já tem), com o cartaz de desligado
   // em comum e sem texto próprio. A etiqueta com o nome só é criada quando aparece pela 1ª vez.
-  constructor({ w, h, title, subtitle, icon = 'monitor', accent = '#6ee7c8', leve = false }) {
+  // painel: textura própria (placar, status...) mostrada enquanto a tela está livre
+  constructor({ w, h, title, subtitle, icon = 'monitor', accent = '#6ee7c8', leve = false, painel = null }) {
     this.w = w;
     this.h = h;
     this.leve = leve;
@@ -244,10 +248,17 @@ class ScreenDisplay {
     this.surface.userData.screen = this;
     this.group.add(this.surface);
 
-    this.placeholderTex = leve ? null : canvasTexture(1024, Math.round((1024 * h) / w), (ctx, cw, ch, t = title, s = subtitle) => {
+    this.placeholderTex = leve || painel ? null : canvasTexture(1024, Math.round((1024 * h) / w), (ctx, cw, ch, t = title, s = subtitle) => {
       screenBackground(ctx, cw, ch);
       if (icon === 'play') drawPlayIcon(ctx, cw / 2, ch * 0.4, ch * 0.24, '#ff4d5e');
-      else drawMonitorIcon(ctx, cw / 2, ch * 0.38, ch * 0.24, 'rgba(255,255,255,0.55)');
+      else if (logoDasTelas) {
+        // logo da empresa, cabendo numa caixa no meio de cima
+        const img = logoDasTelas;
+        const k = Math.min((cw * 0.5) / img.width, (ch * 0.42) / img.height);
+        ctx.globalAlpha = 0.92;
+        ctx.drawImage(img, cw / 2 - (img.width * k) / 2, ch * 0.38 - (img.height * k) / 2, img.width * k, img.height * k);
+        ctx.globalAlpha = 1;
+      } else drawMonitorIcon(ctx, cw / 2, ch * 0.38, ch * 0.24, 'rgba(255,255,255,0.55)');
       ctx.fillStyle = '#f3f5fa';
       ctx.textAlign = 'center';
       ctx.font = `700 ${Math.round(ch * 0.085)}px ${FONT}`;
@@ -258,7 +269,7 @@ class ScreenDisplay {
     });
     this.placeholder = new THREE.Mesh(
       new THREE.PlaneGeometry(w, h),
-      leve ? monitorApagado(accent) : new THREE.MeshBasicMaterial({ map: this.placeholderTex, toneMapped: false }),
+      leve ? monitorApagado(accent) : new THREE.MeshBasicMaterial({ map: painel || this.placeholderTex, toneMapped: false }),
     );
     this.placeholder.position.z = 0.01;
     this.placeholder.userData.screen = this;
@@ -351,8 +362,15 @@ class ScreenDisplay {
     this.atualizarBuraco();
   }
 
+  // redesenha o cartaz de livre (o logo da empresa mudou)
+  redesenharCartaz() {
+    if (!this.placeholderTex) return;
+    this.placeholderTex.userData.redraw(...(this._ph || []));
+  }
+
   setPlaceholder(title, subtitle) {
     if (!this.placeholderTex || this._phKey === title + subtitle) return;
+    this._ph = [title, subtitle];
     this._phKey = title + subtitle;
     this.placeholderTex.userData.redraw(title, subtitle);
   }
@@ -2122,9 +2140,10 @@ export class World {
   montarEscritorio(departamentos, empresa) {
     this.planta = planta(departamentos);
     this.escritorio = this.area('escritorio', () => construirEscritorio(this, this.planta, { empresa }));
+    if (this.logo) this.escritorio.setLogo?.(this.logo);
     // as telas de compartilhar, na ordem das salas (é a mesma ordem das telas no servidor)
     this.slotsEscritorio = this.escritorio.telas.map((t, i) => {
-      const s = new ScreenDisplay({ w: t.w, h: t.h, title: t.rotulo, subtitle: 'Livre — clique em "Compartilhar tela"' });
+      const s = new ScreenDisplay({ w: t.w, h: t.h, title: t.rotulo, subtitle: 'Livre — clique em "Compartilhar tela"', painel: t.painel || null });
       s.index = i;
       s.group.position.set(...t.pos);
       s.group.rotation.y = t.rotY;
@@ -2153,6 +2172,14 @@ export class World {
       tel.group.rotation.y = t.rotY;
       return tel;
     });
+  }
+
+  // logo da empresa (imagem já carregada, ou null): telas livres e a parede da recepção
+  setLogo(img) {
+    logoDasTelas = img;
+    this.logo = img;
+    for (const s of [...this.slotsCinema, ...(this.slotsEscritorio || [])]) s?.redesenharCartaz();
+    this.escritorio?.setLogo?.(img);
   }
 
   // tira o prédio inteiro: objetos (e a memória deles na placa), colisões, telas e telões

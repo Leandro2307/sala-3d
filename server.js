@@ -135,6 +135,52 @@ const app = express();
 // Sem isto o navegador baixa tudo cru: só o three.js são 662 kB, e o cabeçalho
 // JSON dos modelos 3D comprime a mais de 5x.
 app.use(compression());
+// Modo ao vivo (só rodando no seu PC, nunca no Render): quando um arquivo de public/ muda, quem
+// está com a sala aberta no localhost recebe o nome dele por /dev-recarregar e a página se
+// atualiza sozinha (CSS troca na hora; o resto recarrega e volta para a sala). O "boot" muda
+// quando o servidor reinicia (npm run dev = node --watch): aí a página também recarrega.
+if (!(process.env.RENDER || process.env.NODE_ENV === 'production')) {
+  const boot = Date.now().toString(36);
+  const ouvintesDev = new Set();
+  let pendente = null;
+  try {
+    // no Windows o fs.watch avisa até quando um arquivo só é lido: confere se o conteúdo mudou
+    const assinaturas = new Map();
+    fs.watch(path.join(__dirname, 'public'), { recursive: true }, (_ev, nome) => {
+      if (!nome || /(^|[\\/])\.|~$|\.tmp$/.test(nome)) return;
+      let assinatura;
+      try {
+        const st = fs.statSync(path.join(__dirname, 'public', nome));
+        if (!st.isFile()) return;
+        assinatura = `${st.size}:${st.mtimeMs}`;
+      } catch {
+        return;
+      }
+      const antes = assinaturas.get(nome);
+      assinaturas.set(nome, assinatura);
+      if (antes === undefined) {
+        // primeira notícia deste arquivo: só conta se ele mudou há pouco (não é uma leitura)
+        if (Date.now() - Number(assinatura.split(':')[1]) > 3000) return;
+      } else if (antes === assinatura) return;
+      clearTimeout(pendente);
+      pendente = setTimeout(() => {
+        const msg = `data: ${String(nome).replace(/\\/g, '/')}\n\n`;
+        for (const res of ouvintesDev) { res.write(msg); res.flush?.(); }
+      }, 250);
+    });
+  } catch (err) {
+    console.warn('[ao vivo] não deu para vigiar public/', err.message);
+  }
+  app.get('/dev-recarregar', (req, res) => {
+    res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive' });
+    res.flushHeaders?.();
+    res.write(`event: boot\ndata: ${boot}\n\n`);
+    res.flush?.();
+    ouvintesDev.add(res);
+    req.on('close', () => ouvintesDev.delete(res));
+  });
+}
+
 // a página inicial vai montada (ver pagina.js): com a lista de scripts para baixar de uma vez
 app.get(['/', '/index.html'], (_req, res) => {
   res.set('Cache-Control', 'no-cache');
@@ -346,6 +392,7 @@ const configPadrao = () => ({
   aviso: '', // comunicado da empresa: faixa no topo para todo mundo
   privacidade: true, // escritório: voz só dentro da mesma sala de departamento
   listada: true, // aparece na lista de salas ao vivo do saguão
+  logo: '', // logo da empresa (data URL)
 });
 
 // o que vier do cliente (ou do banco) passa por aqui antes de valer
@@ -366,6 +413,8 @@ function limparConfig(raw, base = configPadrao()) {
     aviso: typeof c.aviso === 'string' ? cleanText(c.aviso, 200) : base.aviso ?? '',
     privacidade: typeof c.privacidade === 'boolean' ? c.privacidade : base.privacidade ?? true,
     listada: typeof c.listada === 'boolean' ? c.listada : base.listada ?? true,
+    // logo da empresa (data URL de imagem já reduzida no navegador); '' tira
+    logo: c.logo === '' ? '' : typeof c.logo === 'string' ? cleanLogo(c.logo) ?? base.logo ?? '' : base.logo ?? '',
     placar: c.placar === undefined ? base.placar : {
       titulo: cleanText(placar.titulo, 40) || 'Metas do mês',
       itens: (Array.isArray(placar.itens) ? placar.itens : []).slice(0, 12).map((it) => ({
@@ -657,10 +706,14 @@ function publicUser(u) {
   };
 }
 
+// logo da empresa: o mesmo filtro da foto, com mais espaço (o navegador reduz para 512 px)
+const MAX_LOGO = 160_000;
+const cleanLogo = (value) => cleanPhoto(value, MAX_LOGO);
+
 // Aceita só data URL de imagem, com tamanho limitado.
-function cleanPhoto(value) {
+function cleanPhoto(value, max = MAX_PHOTO) {
   if (typeof value !== 'string') return null;
-  if (value.length > MAX_PHOTO) return null;
+  if (value.length > max) return null;
   const tipos = ['data:image/jpeg;base64,', 'data:image/png;base64,', 'data:image/webp;base64,'];
   const prefixo = tipos.find((t) => value.startsWith(t));
   if (!prefixo) return null;
@@ -725,9 +778,9 @@ function layoutTelas(cfg) {
     return {
       total: p.totalTelas,
       parede: p.telasParede,
-      salaDa: (i) => p.salas.find((s) => i >= s.primeiraTela && i < s.primeiraTela + s.telas)?.id ?? null,
+      salaDa: (i) => ESCRITORIO.comTelas(p).find((s) => i >= s.primeiraTela && i < s.primeiraTela + s.telas)?.id ?? null,
       faixa: (id) => ESCRITORIO.faixaDeTelas(p, id),
-      temSala: (id) => p.salas.some((s) => s.id === id),
+      temSala: (id) => ESCRITORIO.comTelas(p).some((s) => s.id === id),
       postoDa: (i) => ESCRITORIO.postoDaTela(p, i)?.id ?? null,
       faixaPosto: (id) => ESCRITORIO.faixaDoPosto(p, id),
     };
@@ -1104,16 +1157,19 @@ function attachSockets(io) {
     // Cada chamada é mais uma aba/janela (ou um arquivo) numa tela livre. No escritório, numa tela
     // da sala onde a pessoa está (sala = id do departamento), se tiver alguma livre.
     socket.on('share-start', (msg, ack) => {
-      const { streamId, sala } = obj(msg);
+      const { streamId, sala, tela } = obj(msg);
       const reply = typeof ack === 'function' ? ack : () => {};
       if (!user) return;
       const sid = cleanText(streamId, 80);
       if (!sid) return reply({ ok: false, error: 'Compartilhamento inválido.' });
       const layout = layoutTelas(room.config);
+      // a pessoa escolheu a tela de parede (fora do posto, no escritório): se ainda está livre, é ela
+      const escolhida = Number.isInteger(tela) && tela >= 0 && tela < layout.parede && !room.slots[tela] ? tela : -1;
+      if (Number.isInteger(tela) && escolhida === -1) return reply({ ok: false, error: 'Essa tela acabou de ser ocupada. Escolha outra.' });
       // na sala do próprio posto: nos monitores dele; senão numa tela de parede da sala
-      const noPosto = user.posto && sala === salaDoPosto(user.posto) ? telaLivre(room, layout.faixaPosto(user.posto)) : -1;
-      const naSala = noPosto === -1 && typeof sala === 'string' && layout.temSala(sala) ? telaLivre(room, layout.faixa(sala)) : -1;
-      let slot = noPosto !== -1 ? noPosto : naSala !== -1 ? naSala : telaLivre(room, [0, layout.parede]);
+      const noPosto = escolhida === -1 && user.posto && sala === salaDoPosto(user.posto) ? telaLivre(room, layout.faixaPosto(user.posto)) : -1;
+      const naSala = escolhida === -1 && noPosto === -1 && typeof sala === 'string' && layout.temSala(sala) ? telaLivre(room, layout.faixa(sala)) : -1;
+      let slot = escolhida !== -1 ? escolhida : noPosto !== -1 ? noPosto : naSala !== -1 ? naSala : telaLivre(room, [0, layout.parede]);
       if (slot === -1) {
         if (semTela(room)) return reply({ ok: false, error: 'Todas as telas e o telão já estão ocupados.' });
         slot = null; // vai direto para o telão

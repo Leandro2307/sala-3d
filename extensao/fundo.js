@@ -49,6 +49,18 @@ async function medir(aba) {
   info.medido = Date.now();
 }
 
+// A faixa "começou a depurar este navegador" fica enquanto a extensão está ligada na aba. Sem
+// ninguém mexendo por SOLTAR_MS, desliga sozinha (a faixa some); o próximo clique liga de novo.
+const SOLTAR_MS = 15000;
+const timersSoltar = new Map();
+function agendarSoltura(aba) {
+  clearTimeout(timersSoltar.get(aba));
+  timersSoltar.set(aba, setTimeout(() => {
+    timersSoltar.delete(aba);
+    soltar(aba);
+  }, SOLTAR_MS));
+}
+
 async function soltar(aba) {
   if (!anexadas.has(aba)) return;
   anexadas.delete(aba);
@@ -292,6 +304,7 @@ async function tratar(m, sender) {
     }
     await anexar(aba, sender.tab.id);
     await despachar(aba, m.ev);
+    agendarSoltura(aba);
     return { ok: true };
   }
   return { erro: 'pedido-invalido' };

@@ -23,18 +23,21 @@
 
 // telas: as da parede (de todo mundo). postos: mesas individuais com 3 monitores cada — quem
 // senta fica com o posto, e o que compartilha aparece nos monitores dele.
+// painel: a sala tem um painel (placar, status, mural...) que conta como a ÚLTIMA tela dela. Livre,
+// mostra o conteúdo dele; com alguém compartilhando ali (ex.: a aba do ranking), mostra a aba.
 export const DEPARTAMENTOS = {
-  ti: { nome: 'TI', telas: 8, postos: 12, cor: '#38bdf8', descricao: 'Parede de monitoramento e 12 postos com 3 monitores e cadeira gamer' },
-  comercial: { nome: 'Comercial', telas: 4, postos: 8, cor: '#fbbf24', descricao: 'Placar de metas, 8 postos com 3 monitores e sino' },
-  telemarketing: { nome: 'Telemarketing', telas: 4, postos: 8, cor: '#f472b6', descricao: '8 baias com 3 monitores, headset e painel da central' },
+  ti: { nome: 'TI', telas: 9, painel: 'Status', postos: 12, cor: '#38bdf8', descricao: 'Parede de monitoramento e 12 postos com 3 monitores e cadeira gamer' },
+  comercial: { nome: 'Comercial', telas: 5, painel: 'Placar', postos: 8, cor: '#fbbf24', descricao: 'Placar de metas, 8 postos com 3 monitores e sino' },
+  telemarketing: { nome: 'Telemarketing', telas: 5, painel: 'Central', postos: 8, cor: '#f472b6', descricao: '8 baias com 3 monitores, headset e painel da central' },
   reuniao: { nome: 'Reunião', telas: 2, postos: 0, cor: '#a78bfa', descricao: 'Mesa para 10, telão e duas telas' },
-  financeiro: { nome: 'Financeiro', telas: 2, postos: 8, cor: '#34d399', descricao: '8 postos com 3 monitores, painel de indicadores e cofre' },
-  rh: { nome: 'RH', telas: 2, postos: 6, cor: '#fb923c', descricao: '6 postos, cantinho de conversa e mural da equipe' },
-  marketing: { nome: 'Marketing', telas: 4, postos: 8, cor: '#e879f9', descricao: '8 postos em ilhas, parede criativa e quadro de ideias' },
-  gestao: { nome: 'Gestão', telas: 2, postos: 4, cor: '#f87171', descricao: 'Sala dos gestores: painel da equipe ao vivo (quem está trabalhando, em pausa ou inativo) e 4 postos' },
+  financeiro: { nome: 'Financeiro', telas: 3, painel: 'Indicadores', postos: 8, cor: '#34d399', descricao: '8 postos com 3 monitores, painel de indicadores e cofre' },
+  rh: { nome: 'RH', telas: 3, painel: 'Mural', postos: 6, cor: '#fb923c', descricao: '6 postos, cantinho de conversa e mural da equipe' },
+  marketing: { nome: 'Marketing', telas: 5, painel: 'Ideias', postos: 8, cor: '#e879f9', descricao: '8 postos em ilhas, parede criativa e quadro de ideias' },
+  gestao: { nome: 'Gestão', telas: 3, painel: 'Equipe', postos: 4, cor: '#f87171', descricao: 'Sala dos gestores: painel da equipe ao vivo (quem está trabalhando, em pausa ou inativo) e 4 postos' },
   descanso: { nome: 'Descanso', telas: 1, postos: 0, cor: '#a3e635', descricao: 'Copa com sofás e TV — quem entra fica “Em pausa” e os gestores são avisados' },
 };
 export const MONITORES_POR_POSTO = 3;
+export const TELAS_RECEPCAO = 2; // na parede da recepção, uma de cada lado do corredor principal
 export const IDS_DEPARTAMENTOS = Object.keys(DEPARTAMENTOS);
 export const MAX_SALAS = 9;
 
@@ -84,6 +87,9 @@ export function planta(deptos) {
     tela += d.telas;
     return sala;
   });
+  // a recepção também tem telas de parede (depois das salas)
+  const recepcao = { id: 'recepcao', nome: 'Recepção', primeiraTela: tela, telas: TELAS_RECEPCAO };
+  tela += TELAS_RECEPCAO;
   // monitores dos postos: depois de todas as telas de parede, 3 por posto, na ordem das salas
   const telasParede = tela;
   const postos = [];
@@ -99,7 +105,7 @@ export function planta(deptos) {
     const [z0, z1] = faixaZ(lado);
     return { id: 'lounge', nome: 'Lounge', lado, x0, x1: x0 + PREDIO.largura, z0, z1 };
   });
-  return { salas, lounges, postos, minX: VAGAS[(colunas - 1) * 2].x0, z0: fundos ? PREDIO.z0Fundos : PREDIO.z0, fundos, telasParede, totalTelas: tela };
+  return { salas, recepcao, lounges, postos, minX: VAGAS[(colunas - 1) * 2].x0, z0: fundos ? PREDIO.z0Fundos : PREDIO.z0, fundos, telasParede, totalTelas: tela };
 }
 
 // em que sala está o ponto (id do departamento, 'lounge', 'corredor', 'recepcao' ou null = fora)
@@ -119,9 +125,12 @@ export function portaDa(p, id) {
   return s.lado === 'sul' ? { pos: [x, 0, zDaPorta(s.lado) + 2.5], yaw: Math.PI } : { pos: [x, 0, zDaPorta(s.lado) - 2.5], yaw: 0 };
 }
 
+// salas e recepção: tudo o que tem telas de parede
+export const comTelas = (p) => [...p.salas, p.recepcao];
+
 // as telas de parede de uma sala: [primeira, última + 1). Fora de sala: todas as de parede.
 export function faixaDeTelas(p, id) {
-  const s = p.salas.find((x) => x.id === id);
+  const s = comTelas(p).find((x) => x.id === id);
   return s ? [s.primeiraTela, s.primeiraTela + s.telas] : [0, p.telasParede];
 }
 
@@ -147,6 +156,9 @@ export function rotuloDoPosto(id) {
 export function rotuloDaTela(p, i) {
   const po = postoDaTela(p, i);
   if (po) return `${rotuloDoPosto(po.id)} · Monitor ${i - po.primeiraTela + 1}`;
-  const s = p.salas.find((x) => i >= x.primeiraTela && i < x.primeiraTela + x.telas);
-  return s ? `${s.nome} · Tela ${i - s.primeiraTela + 1}` : `Tela ${i + 1}`;
+  const s = comTelas(p).find((x) => i >= x.primeiraTela && i < x.primeiraTela + x.telas);
+  if (!s) return `Tela ${i + 1}`;
+  const n = i - s.primeiraTela;
+  const painel = DEPARTAMENTOS[s.id]?.painel;
+  return painel && n === s.telas - 1 ? `${s.nome} · ${painel}` : `${s.nome} · Tela ${n + 1}`;
 }

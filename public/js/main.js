@@ -21,7 +21,7 @@ import { Controle } from './controle.js';
 import { Mesa } from './mesa.js';
 import { Qualidade, NIVEIS, nivelInicial } from './qualidade.js';
 import { GuiaExtensao } from './guia-extensao.js';
-import { DEPARTAMENTOS, IDS_DEPARTAMENTOS, MAX_SALAS, rotuloDoPosto, portaDa } from './escritorio.js';
+import { DEPARTAMENTOS, IDS_DEPARTAMENTOS, MAX_SALAS, rotuloDoPosto, portaDa, comTelas } from './escritorio.js';
 import { Dados, MESA_DADOS } from './dados.js';
 import { icon, hydrateIcons } from './icons.js';
 import { isTouch, setupTouchControls, toggleFullscreen, isFullscreen, temTelaCheia } from './touch.js';
@@ -246,6 +246,52 @@ $('#in-mic').checked = settings.mic;
 // "Instalar o app" aparece quando o navegador deixa instalar; no iPhone ele só explica o caminho.
 if ('serviceWorker' in navigator && window.isSecureContext) {
   navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
+
+// Modo ao vivo (só no localhost, com "npm run dev"): o servidor avisa quando um arquivo muda.
+// CSS troca na hora; o resto recarrega a página, volta para a sala e para o mesmo lugar.
+if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname) && window.EventSource) {
+  const DEV_POS = 'sala3d-dev-pos';
+  let bootVisto = null;
+  const recarregar = () => {
+    const url = new URL(location.href);
+    if (state.joined) {
+      url.searchParams.set('sala', state.room);
+      url.searchParams.set('entrar', '1');
+      try { sessionStorage.setItem(DEV_POS, JSON.stringify({ p: [player.pos.x, player.pos.y, player.pos.z], yaw: player.yaw })); } catch { /* sem storage */ }
+    }
+    location.href = url;
+  };
+  const dev = new EventSource('/dev-recarregar');
+  dev.addEventListener('boot', (e) => {
+    // o servidor reiniciou (mudou server.js, por exemplo): recarrega também
+    if (bootVisto && bootVisto !== e.data) recarregar();
+    bootVisto = e.data;
+  });
+  dev.onmessage = (e) => {
+    if (/\.css$/.test(e.data)) {
+      for (const l of document.querySelectorAll('link[rel="stylesheet"]')) {
+        if (!l.href.includes('/style.css')) continue;
+        const u = new URL(l.href);
+        u.searchParams.set('t', Date.now());
+        l.href = u;
+      }
+      toast('Visual atualizado ao vivo', 'info', 1800);
+      return;
+    }
+    toast(`Atualizando: ${e.data}`, 'info', 1500);
+    setTimeout(recarregar, 300);
+  };
+  // voltou de uma atualização: depois de entrar, põe a pessoa onde ela estava
+  let volta = null;
+  try { volta = JSON.parse(sessionStorage.getItem(DEV_POS) || 'null'); sessionStorage.removeItem(DEV_POS); } catch { /* sem storage */ }
+  if (volta) {
+    const esperar = setInterval(() => {
+      if (!state.joined) return;
+      clearInterval(esperar);
+      setTimeout(() => player.teleport(volta.p, volta.yaw), 1200);
+    }, 300);
+  }
 }
 const instalado = window.matchMedia('(display-mode: fullscreen), (display-mode: standalone)').matches || navigator.standalone;
 const ehIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -1202,12 +1248,15 @@ async function novaTela() {
     toast('Todas as telas e o telão estão ocupados. Pare uma delas para compartilhar outra.', 'warn', 5000);
     return;
   }
+  // escritório, fora do próprio posto: a pessoa escolhe em qual tela da sala vai aparecer
+  const tela = await escolherTela();
+  if (tela === null) return;
   let stream;
   let key;
   shareBusy = true;
   try {
     stream = await rtc.captureScreen();
-    key = await publishShare(stream);
+    key = await publishShare(stream, { tela });
     if (!key) return;
   } catch (err) {
     if (err.name !== 'NotAllowedError' && err.name !== 'AbortError') toast(`Não foi possível compartilhar: ${err.message}`, 'error');
@@ -1229,6 +1278,56 @@ async function novaTela() {
 }
 let dicaFaixaDada = false;
 
+// Em qual tela compartilhar? Só pergunta no escritório, numa sala com telas de parede (ou na
+// recepção), quando a pessoa NÃO está na sala do próprio posto (aí vai para os monitores dela).
+// Devolve o número da tela, undefined (qualquer livre, o servidor escolhe) ou null (desistiu).
+function escolherTela() {
+  if (!modoEscritorio() || !world.planta) return Promise.resolve(undefined);
+  const lugar = world.salaEm(player.pos.x, player.pos.z);
+  const me = self();
+  if (me?.posto && me.posto.split('-')[0] === lugar) return Promise.resolve(undefined);
+  const sala = comTelas(world.planta).find((s) => s.id === lugar);
+  if (!sala?.telas) return Promise.resolve(undefined);
+  // quem está em cada tela agora
+  const dono = new Map();
+  for (const u of state.users.values()) for (const sh of u.shares.values()) if (sh.slot != null) dono.set(sh.slot, u);
+  const caixa = $('#escolher-tela');
+  $('#et-sala').textContent = sala.nome;
+  const opcoes = [];
+  for (let i = sala.primeiraTela; i < sala.primeiraTela + sala.telas; i++) {
+    const u = dono.get(i);
+    const nome = world.rotuloTela(i).split(' · ').slice(1).join(' · ') || world.rotuloTela(i);
+    opcoes.push(`<button type="button" data-tela="${i}"${u ? ' disabled' : ''}>
+      ${icon('share', 18)}<span><b>${esc(nome)}</b><small>${u ? `Ocupada · ${esc(u.name)}` : 'Livre'}</small></span>
+    </button>`);
+  }
+  $('#et-grade').innerHTML = opcoes.join('');
+  if (document.pointerLockElement) document.exitPointerLock();
+  caixa.hidden = false;
+  return new Promise((resolve) => {
+    const fechar = (v) => {
+      caixa.hidden = true;
+      caixa.removeEventListener('click', clique);
+      document.removeEventListener('keydown', tecla, true);
+      resolve(v);
+    };
+    const clique = (e) => {
+      const b = e.target.closest('[data-tela], [data-et]');
+      if (!b && e.target === caixa) return fechar(null);
+      if (!b || b.disabled) return;
+      if (b.dataset.tela) return fechar(Number(b.dataset.tela));
+      fechar(b.dataset.et === 'auto' ? undefined : null);
+    };
+    const tecla = (e) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      fechar(null);
+    };
+    caixa.addEventListener('click', clique);
+    document.addEventListener('keydown', tecla, true);
+  });
+}
+
 // Aba mandada pela extensão (Alt+Shift+S ou o ícone dela, numa aba qualquer): entra numa tela
 // livre como as outras, mas sem a faixa "Compartilhando ... com esta guia" do Chrome no topo.
 async function capturarAbaDaExtensao({ streamId, aba, site, titulo }) {
@@ -1243,7 +1342,12 @@ async function capturarAbaDaExtensao({ streamId, aba, site, titulo }) {
   let key;
   try {
     stream = await rtc.captureAba(streamId);
-    key = await publishShare(stream, { aba });
+    const tela = await escolherTela();
+    if (tela === null) {
+      for (const t of stream.getTracks()) t.stop();
+      return;
+    }
+    key = await publishShare(stream, { aba, tela });
   } catch (err) {
     return toast(`Não deu para compartilhar a aba: ${err.message}`, 'error', 6000);
   } finally {
@@ -1264,10 +1368,10 @@ async function capturarAbaDaExtensao({ streamId, aba, site, titulo }) {
 
 // Reserva uma tela no servidor e manda o stream (captura ou arquivo) para todo mundo.
 // Devolve a chave da tela, ou null se não deu.
-async function publishShare(stream, { file = false, height = 0, aba: abaConhecida = null } = {}) {
+async function publishShare(stream, { file = false, height = 0, aba: abaConhecida = null, tela } = {}) {
   // no escritório, numa tela da sala onde a pessoa está
   const sala = world.salaEm(player.pos.x, player.pos.z);
-  const res = await new Promise((resolve) => socket.emit('share-start', { streamId: stream.id, sala }, resolve));
+  const res = await new Promise((resolve) => socket.emit('share-start', { streamId: stream.id, sala, tela }, resolve));
   if (!res?.ok) {
     if (!file) for (const t of stream.getTracks()) t.stop();
     toast(res?.error || 'Não foi possível compartilhar.', 'error');
@@ -1737,9 +1841,26 @@ function irParaEntrada() {
 let senhaDono = null; // só na memória: se a conexão cair, entra como dono de novo sozinho
 let formSujo = false; // o dono está mexendo no formulário: o que chega do servidor não apaga
 
+// logo da empresa: carrega a imagem uma vez por logo novo e põe no mundo e no topo da tela
+let logoCarregado = null;
+function aplicarLogo(src) {
+  if (src === logoCarregado) return;
+  logoCarregado = src;
+  $('#room-logo').hidden = !src;
+  if (!src) return world.setLogo(null);
+  const img = new Image();
+  img.onload = () => {
+    if (logoCarregado !== src) return;
+    $('#room-logo').src = src;
+    world.setLogo(img);
+  };
+  img.src = src;
+}
+
 function aplicarSala(cfg) {
   if (!cfg) return;
   state.sala = cfg;
+  aplicarLogo(cfg.logo || '');
   clima.setConfig(cfg);
   if (state.room) salas.visitar(state.room, { empresa: cfg.empresa, temSenha: cfg.temSenha });
   let mudou = false;
@@ -1810,6 +1931,8 @@ function preencherConfig(forcar = false) {
   const cfg = state.sala;
   const f = $('#sala-config').elements;
   f.empresa.value = cfg.empresa || '';
+  logoNovo = undefined;
+  mostrarPreviaLogo(cfg.logo || '');
   f.aviso.value = cfg.aviso || '';
   f.privacidade.checked = cfg.privacidade !== false;
   f.listada.checked = cfg.listada !== false;
@@ -1838,6 +1961,51 @@ function preencherConfig(forcar = false) {
   for (const it of placar.itens) linhaDoPlacar(it);
   mostrarEditorDoPlacar();
 }
+
+// ---------------------------------------------------- logo da empresa (formulário do dono)
+let logoNovo; // undefined = não mexeu; '' = tirar; data URL = novo
+function mostrarPreviaLogo(src) {
+  $('#logo-prev').innerHTML = src ? `<img src="${src}" alt="Logo">` : '<small>Sem logo</small>';
+  $('#logo-clear').hidden = !src;
+}
+// reduz para caber em 512 px (e no banco): WebP mantém o fundo transparente
+function reduzirLogo(img) {
+  for (const lado of [512, 384, 256, 192]) {
+    const k = Math.min(1, lado / Math.max(img.width, img.height));
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(img.width * k));
+    c.height = Math.max(1, Math.round(img.height * k));
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    let url = c.toDataURL('image/webp', 0.9);
+    if (!url.startsWith('data:image/webp')) url = c.toDataURL('image/png');
+    if (url.length < 150_000) return url;
+  }
+  return null;
+}
+$('#logo-pick').addEventListener('click', () => $('#logo-file').click());
+$('#logo-file').addEventListener('change', (e) => {
+  const arq = e.target.files?.[0];
+  e.target.value = '';
+  if (!arq) return;
+  const url = URL.createObjectURL(arq);
+  const img = new Image();
+  img.onload = () => {
+    URL.revokeObjectURL(url);
+    const dados = reduzirLogo(img);
+    if (!dados) return toast('Essa imagem ficou grande demais. Tente um PNG mais simples.', 'error');
+    logoNovo = dados;
+    formSujo = true;
+    mostrarPreviaLogo(dados);
+    toast('Logo pronto. Clique em “Salvar para todos” para aplicar.', 'info', 4000);
+  };
+  img.onerror = () => toast('Não deu para abrir essa imagem.', 'error');
+  img.src = url;
+});
+$('#logo-clear').addEventListener('click', () => {
+  logoNovo = '';
+  formSujo = true;
+  mostrarPreviaLogo('');
+});
 
 // ---------------------------------------------------- placar de metas (Sala Comercial)
 function linhaDoPlacar(it = { nome: '', valor: '', meta: '' }) {
@@ -2290,12 +2458,14 @@ $('#sala-config').addEventListener('submit', (e) => {
     clima: form.elements.clima.value,
     horario: form.elements.horario.value,
     aviso: form.elements.aviso.value.trim(),
+    ...(logoNovo !== undefined ? { logo: logoNovo } : {}),
     privacidade: form.elements.privacidade.checked,
     listada: form.elements.listada.checked,
   };
   socket.emit('sala-config', cfg, (r) => {
     if (!r?.ok) return toast(r?.erro || 'Não deu para salvar.', 'error');
     formSujo = false;
+    logoNovo = undefined;
     toast('Sala atualizada para todo mundo.', 'success');
   });
 });

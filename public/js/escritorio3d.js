@@ -251,6 +251,12 @@ function marco(world, raiz, s, telas, telaoes, postos, assentos) {
       const [x, z] = mundo(lx, lz);
       telas.push({ pos: [x, y, z], rotY: ry + giro, w, h, rotulo: `${s.nome} · Tela ${++k}` });
     },
+    // painel (placar, status, mural...): também é tela de compartilhar — a ÚLTIMA da sala. Livre,
+    // mostra a textura do painel; com alguém compartilhando, mostra o que foi compartilhado.
+    painel(lx, y, lz, ry, w, h, tex, nome) {
+      const [x, z] = mundo(lx, lz);
+      telas.push({ pos: [x, y, z], rotY: ry + giro, w, h, rotulo: `${s.nome} · ${nome}`, painel: tex });
+    },
     telao(lx, y, lz, ry, w, h) {
       const [x, z] = mundo(lx, lz);
       telaoes.push({ pos: [x, y, z], rotY: ry + giro, w, h });
@@ -370,7 +376,7 @@ function salaTI(m) {
 
   // quadro de status (dados de verdade da sala), na parede da direita
   const status = painel('STATUS DOS SISTEMAS', '#38bdf8');
-  plano(g, [6, 3.375], [W - 0.25, 3.3, 6], new THREE.MeshBasicMaterial({ map: status.tex, toneMapped: false }), [0, -Math.PI / 2, 0]);
+  m.painel(W - 0.3, 3.3, 6, -Math.PI / 2, 6, 3.375, status.tex, 'Status');
 
   let piscou = 0;
   return {
@@ -463,8 +469,7 @@ function salaComercial(m) {
     ctx.font = `800 40px ${FONTE}`;
     ctx.fillText(meta ? `Time: ${dinheiro.format(total)} de ${dinheiro.format(meta)} (${Math.round((total / meta) * 100)}%)` : `Time: ${dinheiro.format(total)}`, 56, h - 44);
   });
-  caixa(g, [0.15, 4.9, 8.0], [W - 0.25, 3.3, -1], mat(0x111827));
-  plano(g, [7.6, 4.56], [W - 0.34, 3.3, -1], new THREE.MeshBasicMaterial({ map: placar.tex, toneMapped: false }), [0, -Math.PI / 2, 0]);
+  m.painel(W - 0.3, 3.3, -1, -Math.PI / 2, 7.6, 4.56, placar.tex, 'Placar');
 
   // sino de venda fechada, perto da porta
   const ouro = mat(0xf5c542, { roughness: 0.25, metalness: 0.9, emissive: 0x3a2a00 });
@@ -506,9 +511,8 @@ function salaTelemarketing(m) {
   vestirSala(m, { piso: mat(0x25304a, { roughness: 1 }), parede: 0xece6f3, faixa: 0xf472b6, luz: 0xffe4f2, intensidade: 55 });
   // painel da central no meio da parede do fundo e 4 telas, duas de cada lado
   const central = painel('CENTRAL DE ATENDIMENTO', '#f472b6');
-  caixa(g, [8.3, 4.6, 0.12], [0, 3.3, -D + 0.24], mat(0x111827));
-  plano(g, [8, 4.5], [0, 3.3, -D + 0.31], new THREE.MeshBasicMaterial({ map: central.tex, toneMapped: false }));
   for (const lx of [-10.2, 10.2]) for (const y of [2.1, 4.75]) m.tela(lx, y, -D + 0.25, 0, 4.4, 2.48);
+  m.painel(0, 3.3, -D + 0.25, 0, 8, 4.5, central.tex, 'Central');
 
   // 8 baias (postos): 2 fileiras × 4, com divisórias, 3 monitores e headset
   const tampo = mat(0xf8fafc, { roughness: 0.5 });
@@ -647,10 +651,9 @@ function salaEquipe(m, { piso, parede, faixa, luz, telas, bancadas, madeira = 0x
   for (const [lx, lz] of cadeiras) m.bloco([lx - 0.32, 0, lz - 0.32], [lx + 0.32, 0.6, lz + 0.32], { data: { type: 'sofa' } });
 }
 
-// quadro grande na parede da direita (olhando para dentro da sala)
-function quadroDireita(m, q, w = 7.6, h = 4.28) {
-  caixa(m.g, [0.15, h + 0.3, w + 0.4], [m.W - 0.25, 3.3, -1], mat(0x111827));
-  plano(m.g, [w, h], [m.W - 0.34, 3.3, -1], new THREE.MeshBasicMaterial({ map: q.tex, toneMapped: false }), [0, -Math.PI / 2, 0]);
+// painel grande na parede da direita (olhando para dentro da sala); também é tela de compartilhar
+function quadroDireita(m, q, nome, w = 7.6, h = 4.28) {
+  m.painel(m.W - 0.3, 3.3, -1, -Math.PI / 2, w, h, q.tex, nome);
 }
 
 function salaFinanceiro(m) {
@@ -677,7 +680,7 @@ function salaFinanceiro(m) {
     ctx.lineTo(w - 70, h - 78);
     ctx.stroke();
   });
-  quadroDireita(m, ind);
+  quadroDireita(m, ind, 'Indicadores');
   // cofre perto da porta, na parede da esquerda
   const aco = mat(0x52525b, { roughness: 0.35, metalness: 0.8 });
   caixa(g, [1.2, 1.5, 1.1], [-W + 1, 0.75, D - 3], aco);
@@ -723,7 +726,7 @@ function salaRH(m) {
       ctx.restore();
     });
   });
-  quadroDireita(m, mural, 6.4, 3.6);
+  quadroDireita(m, mural, 'Mural', 6.4, 3.6);
   plantas(g, [[-W + 1.2, -D + 1.2], [W - 1.2, -D + 1.2], [-W + 1.2, D - 1.6]]);
   return {};
 }
@@ -753,7 +756,7 @@ function salaMarketing(m) {
       ctx.fillText(x, cx + 14, cy + 90, 145);
     });
   });
-  quadroDireita(m, ideias);
+  quadroDireita(m, ideias, 'Ideias');
   plantas(g, [[W - 1.2, -D + 1.2], [W - 1.2, D - 1.6]]);
   return {};
 }
@@ -811,7 +814,7 @@ function salaGestao(m) {
       ctx.fillText(p.texto, x + 300, y + lh * 0.5, (w - 80) / col - 320);
     });
   });
-  quadroDireita(m, painelEquipe);
+  quadroDireita(m, painelEquipe, 'Equipe');
   plantas(g, [[-W + 1.2, -D + 1.2], [W - 1.2, -D + 1.2], [W - 1.2, D - 1.6]]);
   return { equipe: (pessoas, rodape) => painelEquipe.redesenhar(pessoas, rodape) };
 }
@@ -1285,33 +1288,11 @@ export function construirEscritorio(world, p, { empresa = '' } = {}) {
   parede(recepcao, zz, recepcao, z1, interna, { y1: HR });
   // do lado do átrio: faixa de madeira na altura do forro dos corredores e quadros grandes
   caixa(raiz, [0.1, 0.7, z1 - z0], [recepcao + T / 2 + 0.05, H + 0.35, (z0 + z1) / 2], madeira, { sombra: false });
-  const arteGrande = quadro(1024, 640, (ctx, w, h) => {
-    const g = ctx.createLinearGradient(0, h, w, 0);
-    g.addColorStop(0, '#1f3b4d');
-    g.addColorStop(0.55, '#2f6f6a');
-    g.addColorStop(1, '#d8b46a');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, w, h);
-    const r = sorteio(21);
-    for (let i = 0; i < 5; i++) {
-      ctx.fillStyle = `rgba(255,255,255,${0.06 + r() * 0.1})`;
-      ctx.beginPath();
-      ctx.moveTo(0, h * (0.5 + i * 0.1));
-      for (let x = 0; x <= w; x += 32) ctx.lineTo(x, h * (0.45 + i * 0.1) + Math.sin(x / 140 + i) * 40);
-      ctx.lineTo(w, h);
-      ctx.lineTo(0, h);
-      ctx.fill();
-    }
-    ctx.fillStyle = 'rgba(255,240,210,0.85)';
-    ctx.beginPath();
-    ctx.arc(w * 0.72, h * 0.3, 70, 0, Math.PI * 2);
-    ctx.fill();
-  });
-  const zsArte = [(c1 + z1) / 2, (PREDIO.z0 + c0) / 2];
-  for (const z of zsArte) {
-    caixa(raiz, [0.12, 3.8, 6.4], [recepcao + T / 2 + 0.06, 3.6, z], madeiraEsc, { sombra: false });
-    plano(raiz, [6.0, 3.4], [recepcao + T / 2 + 0.13, 3.6, z], new THREE.MeshBasicMaterial({ map: arteGrande.tex }), [0, Math.PI / 2, 0]);
-  }
+  // duas telas de compartilhar na parede da recepção, uma de cada lado do corredor principal
+  // (entram na lista de telas depois das salas — é a ordem da planta)
+  const telasRecepcao = [(PREDIO.z0 + c0) / 2, (c1 + z1) / 2].map((z, i) => ({
+    pos: [recepcao + T / 2 + 0.55, 3.6, z], rotY: Math.PI / 2, w: 6.4, h: 3.6, rotulo: `Recepção · Tela ${i + 1}`,
+  }));
 
   // ---------------------------------------------------------------- frente das salas
   // vidro com faixa jateada na cor do setor, porta com batentes de madeira e placa iluminada
@@ -1414,13 +1395,48 @@ export function construirEscritorio(world, p, { empresa = '' } = {}) {
 
   // parede de destaque atrás do balcão: ripas de madeira sobre fundo escuro, com o nome da empresa
   const zp = dc.z - R1 - 1.3;
-  caixa(raiz, [13, 5.6, 0.3], [rx, 2.8, zp], mat(0x1f2329, { roughness: 0.8 }));
-  world.addBox({ min: [rx - 6.5, 0, zp - 0.2], max: [rx + 6.5, 5.6, zp + 0.2] });
+  // (11 m de largura: sobram passagens dos dois lados para o fundo do átrio e o corredor dos fundos)
+  caixa(raiz, [11, 5.6, 0.3], [rx, 2.8, zp], mat(0x1f2329, { roughness: 0.8 }));
+  world.addBox({ min: [rx - 5.5, 0, zp - 0.2], max: [rx + 5.5, 5.6, zp + 0.2] });
   const ripasDestaque = [];
-  for (let x = rx - 6.3; x <= rx + 6.3; x += 0.22) ripasDestaque.push([x, zp + 0.2]);
+  for (let x = rx - 5.3; x <= rx + 5.3; x += 0.22) ripasDestaque.push([x, zp + 0.2]);
   repetir(raiz, [{ geo: new THREE.BoxGeometry(0.1, 5.6, 0.1), mat: madeira, pos: [0, 2.8, 0], sombra: false }], ripasDestaque);
-  caixa(raiz, [13.2, 0.06, 0.5], [rx, 5.62, zp], luzQuente, { sombra: false });
-  plano(raiz, [9.6, 2.4], [rx, 3.4, zp + 0.3], letreiro(empresa || 'Bem-vindo', empresa ? 'bem-vindo' : 'escritório virtual'));
+  caixa(raiz, [11.2, 0.06, 0.5], [rx, 5.62, zp], luzQuente, { sombra: false });
+  const nomeEmpresa = plano(raiz, [9.6, 2.4], [rx, 3.4, zp + 0.3], letreiro(empresa || 'Bem-vindo', empresa ? 'bem-vindo' : 'escritório virtual'));
+  // logo da empresa (o dono põe no painel "Sala da empresa"): numa placa clara acima do nome
+  const logoMat = new THREE.MeshBasicMaterial({ transparent: true, toneMapped: false, depthWrite: false });
+  const logoFundo = caixa(raiz, [1, 1, 0.06], [rx, 4.35, zp + 0.3], mat(0xf5f2ec, { roughness: 0.6 }), { sombra: false, arredondada: 0.02 });
+  const logoPlano = plano(raiz, [1, 1], [rx, 4.35, zp + 0.34], logoMat);
+  logoFundo.visible = false;
+  logoPlano.visible = false;
+  const mostrarLogo = (img) => {
+    logoMat.map?.dispose();
+    logoMat.map = null;
+    if (!img) {
+      logoFundo.visible = logoPlano.visible = false;
+      nomeEmpresa.position.y = 3.4;
+      nomeEmpresa.scale.set(1, 1, 1);
+      return;
+    }
+    const tex = new THREE.Texture(img);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 4;
+    tex.needsUpdate = true;
+    logoMat.map = tex;
+    logoMat.needsUpdate = true;
+    const asp = img.width / img.height || 1;
+    let h = 1.7;
+    let w = h * asp;
+    if (w > 5.6) {
+      w = 5.6;
+      h = w / asp;
+    }
+    logoPlano.scale.set(w, h, 1);
+    logoFundo.scale.set(w + 0.4, h + 0.3, 1);
+    logoFundo.visible = logoPlano.visible = true;
+    nomeEmpresa.position.y = 2.25;
+    nomeEmpresa.scale.set(0.8, 0.8, 1);
+  };
   // jardim vertical na parede do fundo (norte) do átrio, com árvores
   const jvR = verde.clone();
   jvR.needsUpdate = true;
@@ -1429,7 +1445,7 @@ export function construirEscritorio(world, p, { empresa = '' } = {}) {
   caixa(raiz, [maxX - recepcao - 3.6, 0.5, 0.6], [rx, 0.25, z0 + 0.45], madeiraEsc, { sombra: false });
   // e outro na parede sul, atrás do espelho d'água
   plano(raiz, [maxX - recepcao - 4, HR - 2], [rx, HR / 2, z1 - T / 2 - 0.03], mat(0xffffff, { map: jvR, roughness: 1 }), [0, Math.PI, 0]);
-  const arv = [[recepcao + 2.6, zp - 2.4], [maxX - 2.6, zp - 2.4], [recepcao + 2.4, z1 - 3], [maxX - 2.4, z1 - 3]];
+  const arv = [[rx - 3.4, zp - 2.2], [rx + 3.4, zp - 2.2], [recepcao + 2.4, z1 - 3], [maxX - 2.4, z1 - 3]];
   if (p.fundos) arv.push([recepcao + 2.6, z0 + 3], [maxX - 2.6, z0 + 3]);
   arvores(raiz, arv, world);
 
@@ -1493,7 +1509,23 @@ export function construirEscritorio(world, p, { empresa = '' } = {}) {
   }
 
   // totens com as salas de cada corredor, na entrada dele
-  const totens = [[zEntrada - 6.2, 'Corredor principal', p.salas.filter((s) => s.lado !== 'fundos')]];
+  // caminho até o corredor dos fundos: passadeira no mármore, rente à parede, do eixo da entrada
+  // até o portal, e placas em cima dos dois portais
+  if (p.fundos) {
+    const zA = (f0 + f1) / 2 - 1.2;
+    const zB = zEntrada - 4;
+    const cam = passadeira.clone();
+    cam.needsUpdate = true;
+    cam.repeat.set((zB - zA) / 3, 1);
+    plano(raiz, [zB - zA, 2.4], [recepcao + 2.3, 0.032, (zA + zB) / 2], mat(0xffffff, { map: cam, roughness: 1 }), [-Math.PI / 2, 0, Math.PI / 2]);
+  }
+  const portais = [[zEntrada, 'Salas', 'corredor principal']];
+  if (p.fundos) portais.push([(f0 + f1) / 2, 'Mais salas', 'corredor dos fundos']);
+  for (const [z, t, sub] of portais) {
+    const pl = placa(t, '#c9a14a', { sub });
+    plano(raiz, [4.4, 1.1], [recepcao + T / 2 + 0.04, H + 1.4, z], new THREE.MeshBasicMaterial({ map: pl.tex, toneMapped: false }), [0, Math.PI / 2, 0]);
+  }
+  const totens = [[c1 + 3.2, 'Corredor principal', p.salas.filter((s) => s.lado !== 'fundos')]];
   if (p.fundos) totens.push([f0 - 3.2, 'Corredor dos fundos', p.salas.filter((s) => s.lado === 'fundos')]);
   for (const [z, titulo, lista] of totens) {
     if (!lista.length) continue;
@@ -1517,6 +1549,7 @@ export function construirEscritorio(world, p, { empresa = '' } = {}) {
   const salas = {};
   for (const s of p.salas) salas[s.id] = SALAS[s.id](marco(world, raiz, s, telas, telaoes, postos, assentos));
   for (const l of p.lounges) lounge(marco(world, raiz, l, telas, telaoes, postos, assentos));
+  telas.push(...telasRecepcao);
 
   return {
     telas,
@@ -1528,6 +1561,7 @@ export function construirEscritorio(world, p, { empresa = '' } = {}) {
     // a fachada é de vidro: olhando para ela, o lado de fora aparece
     porta: new THREE.Box3(new THREE.Vector3(maxX - 1, 0, z0), new THREE.Vector3(maxX + 1, HR, z1)),
     placar: (dados) => salas.comercial?.placar(dados),
+    setLogo: mostrarLogo,
     tocarSino: () => salas.comercial?.tocarSino(),
     // painel da sala de Gestão: [{ nome, status, texto }]
     equipe: (pessoas, rodape) => salas.gestao?.equipe(pessoas, rodape),

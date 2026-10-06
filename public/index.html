@@ -42,6 +42,7 @@
       <div class="salas-tip" hidden></div>
     </nav>
     <div class="room-chip">
+      <img class="room-logo" id="room-logo" alt="" hidden>
       <span class="live-dot"></span>
       <span id="room-name">principal</span>
       <span class="sep">·</span>
@@ -518,6 +519,18 @@
       </form>
       <form id="sala-config" hidden autocomplete="off">
         <label class="field"><span>Nome da empresa</span><input name="empresa" maxlength="40" placeholder="Aparece no topo da sala"></label>
+        <div class="field">
+          <span>Logo da empresa <small class="opt">(recepção, telas livres e topo da tela)</small></span>
+          <div class="photo-row">
+            <div class="logo-prev" id="logo-prev"><small>Sem logo</small></div>
+            <div class="photo-acts">
+              <button type="button" class="secondary small" id="logo-pick"><i data-icon="camera" data-size="16"></i>Escolher imagem</button>
+              <button type="button" class="ghost-btn small" id="logo-clear" hidden>Tirar o logo</button>
+            </div>
+            <input type="file" id="logo-file" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden>
+          </div>
+          <small class="hint">PNG com fundo transparente fica melhor. Vale depois do “Salvar para todos”.</small>
+        </div>
         <label class="field"><span>Comunicado <small class="opt">(faixa no topo para todo mundo)</small></span><textarea name="aviso" maxlength="200" rows="2" placeholder="Ex.: Reunião geral às 15h na sala de Reunião"></textarea></label>
         <div class="field">
           <span>Ambiente</span>
@@ -860,6 +873,19 @@
       </div>
       <div class="ao-vivo-lista" id="ao-vivo-lista"></div>
     </aside>
+  </div>
+
+  <!-- compartilhar fora do posto, no escritório: em qual tela da sala? (ver escolherTela no main.js) -->
+  <div class="escolher-tela" id="escolher-tela" hidden>
+    <div class="et-card" role="dialog" aria-label="Escolher a tela">
+      <h3>Em qual tela compartilhar?</h3>
+      <p class="et-sub">Telas de <b id="et-sala"></b></p>
+      <div class="et-grade" id="et-grade"></div>
+      <div class="et-acoes">
+        <button type="button" class="ghost-btn small" data-et="cancelar">Cancelar</button>
+        <button type="button" class="secondary small" data-et="auto">Qualquer tela livre</button>
+      </div>
+    </div>
   </div>
 
   <div id="reconnecting" hidden><div class="spinner"></div>Reconectando…</div>

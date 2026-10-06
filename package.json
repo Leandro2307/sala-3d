@@ -6,6 +6,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "dev": "node --watch server.js",
     "https": "node server.js --https",
     "tunnel": "cloudflared.exe tunnel --url http://localhost:3000 --no-autoupdate",
     "publico": "node scripts/publico.js",

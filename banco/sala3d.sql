@@ -5,7 +5,7 @@
 
 CREATE TABLE IF NOT EXISTS sala3d_salas (
   nome        VARCHAR(40)  NOT NULL,
-  config      TEXT         NOT NULL,   -- módulo, jogos, nome da empresa, placar (JSON)
+  config      MEDIUMTEXT   NOT NULL,   -- módulo, jogos, nome e logo da empresa, placar (JSON)
   senha_hash  VARCHAR(200) NULL,       -- senha do dono (scrypt, nunca a senha em si)
   criada_em   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
   mudou_em    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
