@@ -395,7 +395,21 @@ const configPadrao = () => ({
   privacidade: true, // escritório: voz só dentro da mesma sala de departamento
   listada: true, // aparece na lista de salas ao vivo do saguão
   logo: '', // logo da empresa (data URL)
+  paginas: {}, // página fixa por tela: { "ti:4": "https://..." } (ver chaveDaTela em escritorio.js)
 });
+
+// Páginas fixas: só endereço http(s), em chave de tela válida, até 24 telas
+function limparPaginas(raw) {
+  const saida = {};
+  for (const [chave, valor] of Object.entries(obj(raw)).slice(0, 24)) {
+    if (!/^[a-z]{2,20}:\d{1,2}$/.test(chave)) continue;
+    try {
+      const u = new URL(cleanText(valor, 500));
+      if (u.protocol === 'https:' || u.protocol === 'http:') saida[chave] = u.href;
+    } catch { /* não é endereço */ }
+  }
+  return saida;
+}
 
 // o que vier do cliente (ou do banco) passa por aqui antes de valer
 function limparConfig(raw, base = configPadrao()) {
@@ -417,6 +431,7 @@ function limparConfig(raw, base = configPadrao()) {
     listada: typeof c.listada === 'boolean' ? c.listada : base.listada ?? true,
     // logo da empresa (data URL de imagem já reduzida no navegador); '' tira
     logo: c.logo === '' ? '' : typeof c.logo === 'string' ? cleanLogo(c.logo) ?? base.logo ?? '' : base.logo ?? '',
+    paginas: c.paginas === undefined ? base.paginas ?? {} : limparPaginas(c.paginas),
     placar: c.placar === undefined ? base.placar : {
       titulo: cleanText(placar.titulo, 40) || 'Metas do mês',
       itens: (Array.isArray(placar.itens) ? placar.itens : []).slice(0, 12).map((it) => ({
@@ -785,11 +800,12 @@ function layoutTelas(cfg) {
       temSala: (id) => ESCRITORIO.comTelas(p).some((s) => s.id === id),
       postoDa: (i) => ESCRITORIO.postoDaTela(p, i)?.id ?? null,
       faixaPosto: (id) => ESCRITORIO.faixaDoPosto(p, id),
+      chaveDa: (i) => ESCRITORIO.chaveDaTela(p, i),
     };
   }
   return {
     total: SHARE_SLOTS, parede: SHARE_SLOTS, salaDa: () => null, faixa: () => [0, SHARE_SLOTS], temSala: () => false,
-    postoDa: () => null, faixaPosto: () => null,
+    postoDa: () => null, faixaPosto: () => null, chaveDa: (i) => `cinema:${i + 1}`,
   };
 }
 
@@ -836,9 +852,12 @@ function pegarPosto(room, user, id) {
   return mudaram;
 }
 
-// primeira tela livre entre [a, b)
+// primeira tela livre entre [a, b). Tela com página fixa não conta como livre: o compartilhamento
+// só vai para ela se a pessoa escolher aquela tela.
 function telaLivre(room, [a, b]) {
-  for (let i = a; i < b; i++) if (room.slots[i] === null) return i;
+  const paginas = room.config?.paginas;
+  const chaveDa = paginas && Object.keys(paginas).length ? layoutTelas(room.config).chaveDa : null;
+  for (let i = a; i < b; i++) if (room.slots[i] === null && !(chaveDa && paginas[chaveDa(i)])) return i;
   return -1;
 }
 

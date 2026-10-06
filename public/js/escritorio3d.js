@@ -528,8 +528,10 @@ function salaTelemarketing(m) {
       const mons = tresMonitores(lx, lz - 0.3, 1.47, 0.75);
       monitores.push(...mons);
       m.posto(n++, { x: lx, z: lz + 1.25, y: 0.62 }, mons);
+      // uma caixa por baia (tampo + divisórias): era uma só de parede a parede, e o vão entre
+      // as baias travava com uma parede invisível
+      m.bloco([lx - 1.66, 0, lz - 0.68], [lx + 1.62, 1.6, lz + 0.56], { data: { type: 'mesa' } });
     }
-    m.bloco([-11.6, 0, lz - 0.7], [11.6, 1.6, lz + 0.5], { data: { type: 'mesa' } });
   }
   const fone = mat(0x1f2937, { roughness: 0.5 });
   repetir(g, [

@@ -114,6 +114,15 @@
       <button type="button" id="tv-focus-exit" class="chip-btn"><kbd>Esc</kbd> Sair do foco</button>
     </div>
 
+    <!-- página fixa em foco: mexendo direto no site da tela (ver paginas.js) -->
+    <form id="pagina-hud" hidden autocomplete="off">
+      <button type="button" class="chip-btn" data-pg="inicio" title="Voltar à página desta tela">Início</button>
+      <button type="button" class="chip-btn" data-pg="recarregar" title="Recarregar">Recarregar</button>
+      <input name="endereco" spellcheck="false" aria-label="Endereço" placeholder="Abrir outro endereço aqui (só para você)">
+      <button type="button" class="chip-btn" data-pg="chrome" title="Abrir este endereço numa aba do Chrome">Abrir no Chrome</button>
+      <button type="button" class="chip-btn" data-pg="sair"><kbd>Esc</kbd> Sair</button>
+    </form>
+
     <div id="jogo-hud" hidden>
       <div class="jh-head">
         <b id="jh-titulo">Xadrez de bruxo</b>
@@ -565,6 +574,12 @@
           <div class="placar-linhas" id="placar-linhas"></div>
           <button type="button" class="chip-btn" id="placar-add">+ Pessoa no placar</button>
           <small class="hint">Vendido e meta em números (ex.: 15000). Até 12 pessoas — o placar ordena pelo % da meta.</small>
+        </div>
+        <div class="field">
+          <span>Páginas nas telas <small class="opt">(um site aberto direto na tela, sem compartilhar)</small></span>
+          <div class="paginas-linhas" id="paginas-linhas"></div>
+          <button type="button" class="chip-btn" id="pagina-add">+ Página numa tela</button>
+          <small class="hint">Cada pessoa vê o site no próprio navegador e mexe nele chegando perto e apertando <kbd>E</kbd>. Site que pede login precisa estar logado no navegador de cada um. Alguns sites (Google, WhatsApp…) não deixam abrir dentro de outra página: para esses, compartilhe a aba.</small>
         </div>
         <div class="field">
           <span class="field-linha">Jogos e diversão <span><button type="button" class="chip-btn" data-todos="1">Todos</button> <button type="button" class="chip-btn" data-todos="0">Nenhum</button></span></span>

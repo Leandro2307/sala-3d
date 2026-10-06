@@ -10,7 +10,7 @@ import { PISTA, CAMINHO, CURVAS, pontoEm, projetar } from './pista.js';
 import { criarNatureza } from './natureza.js';
 import { RESERVAS_JOGOS } from './tabuleiros.js';
 import { construirEscritorio } from './escritorio3d.js';
-import { planta, salaEm, rotuloDaTela, postoDaTela, DEPARTAMENTOS } from './escritorio.js';
+import { planta, salaEm, rotuloDaTela, postoDaTela, chaveDaTela, DEPARTAMENTOS } from './escritorio.js';
 
 // Área jogável inteira (cercada): a sala do cinema num canto, em volta da origem, e o
 // autódromo ao ar livre a leste. O telão do cinema continua em minZ, perto da plateia.
@@ -2245,6 +2245,11 @@ export class World {
   // nome da tela N ("TI · Tela 2" no escritório, "Tela 3" no cinema)
   rotuloTela(i) {
     return this.planta ? rotuloDaTela(this.planta, i) : `Tela ${i + 1}`;
+  }
+
+  // chave que não muda com os departamentos ("ti:4"), para a página fixa; monitor de posto: null
+  chaveTela(i) {
+    return chaveDaTela(this.modo === 'escritorio' ? this.planta : null, i);
   }
 
   telaoVisivel(t) {

@@ -21,6 +21,7 @@ import { Controle } from './controle.js';
 import { Mesa } from './mesa.js';
 import { Qualidade, NIVEIS, nivelInicial } from './qualidade.js';
 import { GuiaExtensao } from './guia-extensao.js';
+import { Paginas } from './paginas.js';
 import { DEPARTAMENTOS, IDS_DEPARTAMENTOS, MAX_SALAS, rotuloDoPosto, portaDa, comTelas } from './escritorio.js';
 import { Dados, MESA_DADOS } from './dados.js';
 import { icon, hydrateIcons } from './icons.js';
@@ -78,6 +79,7 @@ if (!NIVEIS[settings.qualidade]) settings.qualidade = 'auto';
 const nivelDePartida = settings.qualidade !== 'auto' ? settings.qualidade
   : NIVEIS[settings.nivelAuto] ? settings.nivelAuto : nivelInicial();
 const world = new World($('#gl'), $('#css3d'), { antialias: NIVEIS[nivelDePartida].antialias, qualidade: NIVEIS[nivelDePartida] });
+const paginas = new Paginas(world); // sites abertos direto nas telas (páginas fixas do dono)
 // sol, lua, chuva e tempestade (clima.js): o dono da sala pode fixar, senão muda sozinho
 const clima = new Clima(world);
 const qualidade = new Qualidade(world, {
@@ -1495,7 +1497,7 @@ function escolherTela() {
     const u = dono.get(i);
     const nome = world.rotuloTela(i).split(' · ').slice(1).join(' · ') || world.rotuloTela(i);
     opcoes.push(`<button type="button" data-tela="${i}"${u ? ' disabled' : ''}>
-      ${icon('share', 18)}<span><b>${esc(nome)}</b><small>${u ? `Ocupada · ${esc(u.name)}` : 'Livre'}</small></span>
+      ${icon('share', 18)}<span><b>${esc(nome)}</b><small>${u ? `Ocupada · ${esc(u.name)}` : paginaDaTela(i) ? `Página ${esc(siteDaPagina(paginaDaTela(i)))} (sai enquanto você compartilha)` : 'Livre'}</small></span>
     </button>`);
   }
   $('#et-grade').innerHTML = opcoes.join('');
@@ -2067,10 +2069,10 @@ function aplicarSala(cfg) {
   if (mudou) world.aquecerShaders(); // o número de luzes pode ter mudado
   // o cinema (Lazer) ou o prédio do escritório com os departamentos escolhidos
   if (world.setModo(cfg)) {
-    refreshScreens();
     // a planta mudou com gente dentro: volta para a entrada (senão alguém fica dentro de uma parede)
     if (state.joined) irParaEntrada();
   }
+  refreshScreens(); // outro ambiente, ou só outras páginas fixas nas telas
   world.escritorio?.placar(cfg.placar);
   $('#sino').hidden = !temSino();
   atualizarPaineis();
@@ -2159,7 +2161,56 @@ function preencherConfig(forcar = false) {
   $('#placar-linhas').innerHTML = '';
   for (const it of placar.itens) linhaDoPlacar(it);
   mostrarEditorDoPlacar();
+  $('#paginas-linhas').innerHTML = '';
+  for (const [chave, url] of Object.entries(cfg.paginas || {})) linhaDePagina(chave, url);
 }
+
+// ---------------------------------------------------- páginas fixas nas telas (ver paginas.js)
+// As telas de parede do ambiente que está no ar (o que mudar nos departamentos só aparece aqui
+// depois do "Salvar para todos"). Os monitores dos postos ficam de fora.
+function telasParaPagina() {
+  const lista = [];
+  world.slots.forEach((s, i) => {
+    const chave = world.chaveTela(i);
+    if (chave && !s.posto) lista.push({ chave, nome: world.rotuloTela(i) });
+  });
+  return lista;
+}
+function linhaDePagina(chave = '', url = '') {
+  const lista = $('#paginas-linhas');
+  if (lista.children.length >= 24) return;
+  const telas = telasParaPagina();
+  // tela guardada que não existe no ambiente de agora (departamento tirado): continua na lista
+  if (chave && !telas.some((t) => t.chave === chave)) telas.push({ chave, nome: `${chave} (fora do ambiente atual)` });
+  const div = document.createElement('div');
+  div.className = 'pagina-linha';
+  div.innerHTML = `<select name="ptela" aria-label="Tela">${telas.map((t) => `<option value="${esc(t.chave)}">${esc(t.nome)}</option>`).join('')}</select>
+    <input name="purl" inputmode="url" spellcheck="false" maxlength="500" placeholder="https://…">
+    <button type="button" class="icon-btn" data-remover aria-label="Tirar a página">${icon('x', 14)}</button>`;
+  if (chave) div.querySelector('select').value = chave;
+  div.querySelector('input').value = url;
+  lista.appendChild(div);
+}
+$('#pagina-add').addEventListener('click', () => {
+  linhaDePagina();
+  formSujo = true;
+  $('#paginas-linhas').lastElementChild?.querySelector('input')?.focus();
+});
+$('#paginas-linhas').addEventListener('click', (e) => {
+  if (!e.target.closest('[data-remover]')) return;
+  e.target.closest('.pagina-linha').remove();
+  formSujo = true;
+});
+// a sala é https: página http seria bloqueada pelo navegador (conteúdo misto), então vai de https
+const paraIframe = (url) => (url && location.protocol === 'https:' ? url.replace(/^http:/i, 'https:') : url);
+const lerPaginas = () => {
+  const saida = {};
+  for (const l of $$('#paginas-linhas .pagina-linha')) {
+    const url = paraIframe(enderecoDigitado(l.querySelector('[name="purl"]').value));
+    if (url) saida[l.querySelector('[name="ptela"]').value] = url;
+  }
+  return saida;
+};
 
 // ---------------------------------------------------- logo da empresa (formulário do dono)
 let logoNovo; // undefined = não mexeu; '' = tirar; data URL = novo
@@ -2654,6 +2705,7 @@ $('#sala-config').addEventListener('submit', (e) => {
     departamentos: $$('#sala-deptos input:checked').map((i) => i.value),
     jogos: Object.fromEntries($$('#sala-jogos input').map((i) => [i.value, i.checked])),
     placar: lerPlacar(),
+    paginas: lerPaginas(),
     clima: form.elements.clima.value,
     horario: form.elements.horario.value,
     aviso: form.elements.aviso.value.trim(),
@@ -2972,12 +3024,26 @@ function routeStreams(u) {
   refreshScreens();
 }
 
+// a página fixa que o dono pôs na tela i (ou null)
+function paginaDaTela(i) {
+  const chave = world.chaveTela(i);
+  return (chave && state.sala?.paginas?.[chave]) || null;
+}
+const siteDaPagina = (url) => {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return url;
+  }
+};
+
 function refreshScreens() {
   const telas = telasNoAr();
   const pinned = acharTela(state.main);
   // Fixou a tela de alguém no telão com um vídeo tocando: o vídeo vai para a tela dessa
   // pessoa (trocam de lugar). Antes o vídeo simplesmente sumia.
   const slotMidia = pinned && tv?.state.id && pinned.share.slot != null ? world.slots[pinned.share.slot] : null;
+  const comPagina = []; // telas livres com página fixa: { tela, url }
   world.slots.forEach((slot, i) => {
     const dono = telas.find((t) => t.share.slot === i);
     slot.owner = dono?.share.key ?? null;
@@ -2991,6 +3057,14 @@ function refreshScreens() {
     slot.setMidia(false);
     if (!dono) {
       slot.clearVideo();
+      // página fixa: o site aparece de perto; de longe fica o cartaz (ou o painel da sala)
+      const url = paginaDaTela(i);
+      if (url) {
+        comPagina.push({ tela: slot, url });
+        slot.setPlaceholder(world.rotuloTela(i), `${siteDaPagina(url)} — chegue perto para abrir`);
+        slot.setLabel(null);
+        return;
+      }
       slot.setPlaceholder(world.rotuloTela(i), 'Livre — clique em “Compartilhar tela”');
       // posto com dono: o monitor do meio mostra de quem é
       const dp = slot.posto && slot.meio ? donoDoPosto(slot.posto) : null;
@@ -3009,6 +3083,8 @@ function refreshScreens() {
   });
 
   world.midiaNoSlot(slotMidia);
+  paginas.sincronizar(comPagina);
+  if (state.focus?.kind === 'pagina' && !paginas.tem(state.focus.tela)) exitFocus();
 
   // o telão do cinema e o da pista mostram sempre a mesma coisa
   for (const ms of world.telaoes) {
@@ -3971,6 +4047,7 @@ function screenInfo(screen) {
   if (screen.midia) return { kind: 'tv', screen, label: `Focar no vídeo (${tv?.label ?? 'vídeo'})` };
   const t = acharTela(screen.owner);
   if (t && shareVideo(t.share)) return { kind: 'share', key: t.share.key, label: t.user.isSelf ? 'Ver sua tela' : `Ver a tela de ${t.user.name}` };
+  if (paginas.tem(screen)) return { kind: 'pagina', screen, label: `Usar ${paginas.rotulo(screen)}` };
   return null;
 }
 
@@ -4047,6 +4124,20 @@ function enterFocus(info) {
     syncTouchVisibility();
     return;
   }
+  // página fixa: a câmera para de frente e o mouse e o teclado vão direto para o site
+  if (info.kind === 'pagina') {
+    if (!paginas.usar(info.screen)) return;
+    state.focus = { kind: 'pagina', tela: info.screen };
+    // com folga em volta: a barra de cima não tapa o começo do site
+    player.override = info.screen.focusPose(world.camera, 1.12);
+    document.body.classList.add('pagina-focus');
+    $('#pagina-hud').elements.endereco.value = paginas.enderecoAtual;
+    $('#pagina-hud').hidden = false;
+    $('#crosshair').hidden = true;
+    $('#hover-hint').hidden = true;
+    syncTouchVisibility();
+    return;
+  }
   if (info.kind === 'tv') {
     state.focus = { kind: 'tv' };
     // o telão em foco fica com o player, mesmo que o outro esteja mais perto
@@ -4113,6 +4204,12 @@ function exitFocus() {
     if (document.activeElement?.tagName === 'IFRAME') document.activeElement.blur();
     $('#tv-focus-hud').hidden = true;
     $('#crosshair').hidden = false;
+  } else if (state.focus.kind === 'pagina') {
+    player.override = null;
+    paginas.soltar(); // o iframe segurava o teclado: devolve para o jogo
+    document.body.classList.remove('pagina-focus');
+    $('#pagina-hud').hidden = true;
+    $('#crosshair').hidden = false;
   } else {
     controle.remover($('#focus-video'));
     $('#focus').hidden = true;
@@ -4133,6 +4230,27 @@ function sairDoFoco() {
 $('#focus-close').addEventListener('click', sairDoFoco);
 $('#jh-sair').addEventListener('click', sairDoFoco);
 $('#tv-focus-exit').addEventListener('click', sairDoFoco);
+// barra da página em foco: início, recarregar, outro endereço (só para você), abrir no Chrome
+$('#pagina-hud').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-pg]');
+  if (!b) return;
+  b.blur();
+  const acao = b.dataset.pg;
+  if (acao === 'sair') return sairDoFoco();
+  if (acao === 'inicio') paginas.inicio();
+  if (acao === 'recarregar') paginas.recarregar();
+  if (acao === 'chrome') window.open(paginas.enderecoAtual, '_blank', 'noopener');
+  $('#pagina-hud').elements.endereco.value = paginas.enderecoAtual;
+});
+$('#pagina-hud').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const campo = e.currentTarget.elements.endereco;
+  const url = paraIframe(enderecoDigitado(campo.value));
+  if (url) paginas.irPara(url);
+  campo.value = paginas.enderecoAtual;
+  campo.blur();
+});
+$('#pagina-hud').elements.endereco.addEventListener('focus', (e) => e.target.select());
 $('#focus-full').addEventListener('click', () => {
   if (document.fullscreenElement) document.exitFullscreen();
   else $('#focus').requestFullscreen().catch(() => {});
@@ -4581,6 +4699,7 @@ function sendState(dt) {
 }
 
 function slowUpdate() {
+  paginas.atualizar();
   $('#clima-chip').textContent = clima.rotulo();
   updateVolumes();
   if (settings.mostrarFps) {

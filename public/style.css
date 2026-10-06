@@ -65,6 +65,11 @@ kbd {
 /* cada plataforma cria o player do tamanho que quer: aqui todos ocupam o telão inteiro */
 #css3d iframe, #css3d video { border: 0; display: block; width: 100%; height: 100%; background: #000; }
 body.tv-focus #css3d { z-index: 2; pointer-events: auto; }
+/* página fixa em foco: o clique atravessa o 3D (que continua por cima, com o buraco) e cai no site */
+body.pagina-focus #gl { pointer-events: none; }
+body.pagina-focus #css3d { pointer-events: auto; }
+body.pagina-focus .room-chip, body.pagina-focus #controls-help, body.pagina-focus #fps { display: none; }
+#css3d .pagina-surface, #css3d .pagina-surface iframe { background: #fff; }
 
 #gl {
   position: fixed;
@@ -422,6 +427,31 @@ body.touch #hud, body.touch #bar, body.touch #touch { -webkit-user-select: none;
   pointer-events: auto;
   white-space: nowrap;
 }
+
+/* barra da página fixa em foco (ver paginas.js) */
+#pagina-hud {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100vw - 32px);
+  padding: 6px;
+  border-radius: 999px;
+  background: var(--glass-strong);
+  border: 1px solid var(--line);
+  pointer-events: auto;
+}
+#pagina-hud input {
+  width: min(380px, 34vw);
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 12.5px;
+}
+@media (max-width: 760px) { #pagina-hud input, #pagina-hud [data-pg='chrome'] { display: none; } }
 
 /* xadrez de bruxo / dama: painel de comando */
 #jogo-hud {
@@ -1267,6 +1297,10 @@ body.touch #cam-preview { right: auto; left: 12px; bottom: auto; top: calc(108px
 .placar-linha { display: grid; grid-template-columns: 1.4fr 1fr 1fr auto; gap: 6px; align-items: center; }
 .placar-linha input { width: 100%; min-width: 0; height: 36px; padding: 0 10px; border-radius: 10px; }
 .placar-linha .icon-btn { width: 30px; height: 30px; }
+.paginas-linhas { display: grid; gap: 6px; }
+.pagina-linha { display: grid; grid-template-columns: 1fr 1.4fr auto; gap: 6px; align-items: center; }
+.pagina-linha select, .pagina-linha input { width: 100%; min-width: 0; height: 36px; padding: 0 10px; border-radius: 10px; }
+.pagina-linha .icon-btn { width: 30px; height: 30px; }
 #placar-add { justify-self: start; }
 #bar .round.sino { color: #fbbf24; }
 #bar .round.sino:hover { background: rgba(251, 191, 36, 0.16); }
