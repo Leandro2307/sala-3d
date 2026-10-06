@@ -27,6 +27,16 @@ const kaykit = (id, label, credito) => ({ id, label, url: `/models/${id}.glb`, .
 
 export const PERSONAGENS = {
   padrao: { id: 'padrao', label: 'Boneco', url: null, resumo: 'Com a sua cor, camiseta e foto no rosto' },
+  // gerado inteiro no Blender por scripts/modelar-atos.py — para mexer nele, mude o script
+  atos: {
+    id: 'atos',
+    label: 'Atos',
+    url: '/models/atos.glb',
+    // é uma bola: bem mais baixa que os bonecos, mas quase tão larga quanto alta
+    altura: 1.25,
+    clipes: { idle: 'Idle', walk: 'Walk', run: 'Run', air: 'Jump', sit: 'Sit', punch: 'Punch', wave: 'Wave' },
+    resumo: 'Quica ao andar, pula, senta, acena e soca',
+  },
   robo: {
     id: 'robo',
     label: 'Robô',

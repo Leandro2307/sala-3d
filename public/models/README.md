@@ -35,12 +35,18 @@ outra na troca.
 
 | Personagem | Origem | Licença | Arquivo |
 |---|---|---|---|
+| Atos | Gerado no Blender por `scripts/modelar-atos.py` | do projeto | `atos.glb` (206 KB) |
 | Robô | Tomás Laulhé (Quaternius), ajustes de Don McCurdy | CC0 | `robo.glb` (453 KB) |
 | Cavaleiro, Bárbaro, Mago, Ladino, Encapuzado | KayKit Adventurers, de Kay Lousberg | CC0 | ~400 KB cada |
 | Esqueleto, Esqueleto Guerreiro, Esqueleto Ladino, Esqueleto Mago | KayKit Skeletons, de Kay Lousberg | CC0 | ~400 KB cada |
 | Optimus, Solus Prime | OrangeSauceu, a partir de *Transformers: Earth Wars* | marcado CC BY pelo autor do envio | 706 KB / 1,1 MB |
 
-Os dois últimos trazem a animação de **transformar em veículo** — é o que faz o
+O Atos não vem de pacote: o script modela a bola, monta o esqueleto, anima os 7
+clipes e exporta já com meshopt. Para mudar cor, tamanho ou movimento, edite o
+script, rode a linha do cabeçalho dele e gere a miniatura de novo
+(`node scripts/miniaturas.js atos`).
+
+Optimus e Solus trazem a animação de **transformar em veículo** — é o que faz o
 `G` virar o personagem de verdade, em vez de trocar pelo carro desenhado em
 código. Em compensação não têm ciclo de andar: deslizam ao caminhar.
 
