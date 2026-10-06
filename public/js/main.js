@@ -7,7 +7,7 @@ import { EscolherPersonagem } from './escolher-personagem.js';
 import { SalasLaterais } from './salas.js';
 import { AoVivo, cartaoDoSaguao, COR_STATUS } from './aovivo.js';
 import { Player } from './player.js';
-import { RTC, SHARE_PRESETS } from './rtc.js';
+import { RTC, presetDe } from './rtc.js';
 import { MediaSync, PROVIDERS, preloadYouTube } from './media.js';
 import { ParkourRun, formatTime, CHECKPOINT_COUNT } from './parkour.js';
 import { Combat } from './combat.js';
@@ -41,7 +41,7 @@ const PANEL_TITLES = { people: 'Pessoas', chat: 'Chat da sala', telao: 'Telão',
 // ------------------------------------------------------------------ ajustes salvos
 const DEFAULTS = {
   name: '', color: COLORS[0], mic: true, voice: 100, screen: 90, tv: 80, spatial: false,
-  shareMode: 'detail', sens: 100, sfx: true, micDevice: '', helpCollapsed: false, photo: null, shirt: 'none', char: 'padrao', arma: ARMA_PADRAO,
+  shareMode: 'max', sens: 100, sfx: true, micDevice: '', helpCollapsed: false, photo: null, shirt: 'none', char: 'padrao', arma: ARMA_PADRAO,
   // qualidade gráfica: 'auto' ou um nível fixo; nivelAuto: onde o automático parou da última vez
   qualidade: 'auto', nivelAuto: null, mostrarFps: false,
   // presença (ver "empresa") e se o gestor quer os alertas da equipe
@@ -51,6 +51,7 @@ const stored = (() => {
   try { return JSON.parse(localStorage.getItem('sala3d') || '{}'); } catch { return {}; }
 })();
 const settings = { ...DEFAULTS, ...stored };
+settings.shareMode = presetDe(settings.shareMode); // texto nítido / vídeo / jogo viraram a Máxima
 // o volume do telão se chamava "yt" quando ele só tocava YouTube
 if (stored.tv === undefined && stored.yt !== undefined) settings.tv = stored.yt;
 delete settings.yt;
@@ -251,6 +252,8 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 // Modo ao vivo (só no localhost, com "npm run dev"): o servidor avisa quando um arquivo muda.
 // CSS troca na hora; o resto recarrega a página, volta para a sala e para o mesmo lugar.
 if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname) && window.EventSource) {
+  // para depurar pelo console (só no localhost)
+  window.sala3d = { world: () => world, state: () => state, player: () => player, rtc: () => rtc };
   const DEV_POS = 'sala3d-dev-pos';
   let bootVisto = null;
   const recarregar = () => {
@@ -1235,6 +1238,100 @@ async function populateDevices() {
   } catch { /* sem permissão */ }
 }
 
+// ------------------------------------------------------------------ qualidade das telas
+// Quem assiste diz a quem compartilha quanto precisa de cada tela (rtc.js, NIVEIS): em foco ou
+// grande na vista = máxima (60 quadros); pequena = metade ou um quarto; fora da vista ou com a
+// aba escondida = nada de vídeo (o som continua). Subir é na hora; descer espera um pouco, para
+// não ficar trocando enquanto a pessoa olha em volta.
+const ESPERA_DESCER = { baixo: 1500, mini: 2000, off: 2500 };
+const ORDEM_NIVEL = { off: 0, mini: 1, baixo: 2, max: 3 };
+const niveisTela = new Map(); // key -> { nivel, candidato, desde }
+const interesseEnviado = new Map(); // peerId -> { key: nivel }
+let ultimoEnvioCompleto = 0;
+
+function nivelDesejado(sh) {
+  if (document.hidden) return 'off';
+  if (state.focus?.kind === 'share') return state.focus.key === sh.key ? 'max' : 'off';
+  if (mesa.aberta) return 'max';
+  if (!sh.video) return 'max';
+  // em pixels de verdade do monitor (tela 4K com zoom de 150% tem 1,5 pixel por pixel da página)
+  const px = world.alturaDoVideo(sh.video) * (window.devicePixelRatio || 1);
+  return px >= 160 ? 'max' : px >= 50 ? 'baixo' : px > 0 ? 'mini' : 'off';
+}
+
+function atualizarInteresse() {
+  if (!state.joined || !rtc) return;
+  const agora = performance.now();
+  const completo = agora - ultimoEnvioCompleto > 8000;
+  if (completo) ultimoEnvioCompleto = agora;
+  const vistas = new Set();
+  for (const u of state.users.values()) {
+    if (u.isSelf || !u.shares.size) continue;
+    const mapa = {};
+    for (const sh of u.shares.values()) {
+      vistas.add(sh.key);
+      const quer = nivelDesejado(sh);
+      let t = niveisTela.get(sh.key);
+      if (!t) {
+        t = { nivel: quer, candidato: quer, desde: agora };
+        niveisTela.set(sh.key, t);
+      }
+      if (ORDEM_NIVEL[quer] >= ORDEM_NIVEL[t.nivel]) {
+        t.nivel = quer; // subir (ou igual): na hora
+        t.candidato = quer;
+      } else {
+        if (t.candidato !== quer) {
+          t.candidato = quer;
+          t.desde = agora;
+        }
+        if (agora - t.desde >= ESPERA_DESCER[quer]) t.nivel = quer;
+      }
+      mapa[sh.key] = t.nivel;
+    }
+    const antes = interesseEnviado.get(u.id) || {};
+    const mudou = Object.keys(mapa).filter((k) => antes[k] !== mapa[k]);
+    if (completo || mudou.length) {
+      rtc.enviarInteresse(u.id, completo ? mapa : Object.fromEntries(mudou.map((k) => [k, mapa[k]])));
+      interesseEnviado.set(u.id, mapa);
+    }
+  }
+  for (const k of niveisTela.keys()) if (!vistas.has(k)) niveisTela.delete(k);
+}
+setInterval(atualizarInteresse, 250);
+// voltou para a aba (ou saiu dela): decide na hora
+document.addEventListener('visibilitychange', () => setTimeout(atualizarInteresse, 0));
+
+// "1080p · 60 qps · H264 na placa de vídeo": como cada tela minha está saindo (menu Suas telas)
+const envios = new Map(); // key -> texto
+const LIMITES = { bandwidth: 'internet no limite', cpu: 'PC no limite' };
+async function medirEnvios() {
+  if (!rtc || !compartilhando()) return;
+  for (const key of self().shares.keys()) {
+    const e = await rtc.envioAtual(key);
+    let texto = '';
+    if (e) {
+      texto = `${e.altura}p · ${e.fps} qps${e.codec ? ` · ${e.codec}` : ''}${e.placa ? ' na placa de vídeo' : ''}`;
+      if (LIMITES[e.limite]) texto += ` · ${LIMITES[e.limite]}`;
+    } else if (state.users.size > 1) {
+      texto = 'Ninguém olhando agora: o vídeo pausa sozinho';
+    }
+    envios.set(key, texto);
+    const el = document.querySelector(`[data-envio="${CSS.escape(key)}"]`);
+    if (el) el.textContent = texto;
+  }
+}
+setInterval(() => { if (!$('#share-pop').hidden) medirEnvios(); }, 1000);
+
+// em foco: como a tela está chegando (altura e quadros)
+async function medirFoco() {
+  const el = $('#focus-qualidade');
+  const t = state.focus?.kind === 'share' ? acharTela(state.focus.key) : null;
+  const track = t && !t.user.isSelf ? t.share.video?.srcObject?.getVideoTracks()[0] : null;
+  const r = track && rtc ? await rtc.recebendo(t.user.id, track.id) : null;
+  el.textContent = r ? `${r.altura}p · ${r.fps} qps` : '';
+}
+setInterval(medirFoco, 1000);
+
 // ------------------------------------------------------------------ compartilhar tela
 // Dá para compartilhar várias abas/janelas ao mesmo tempo: cada clique em "Compartilhar outra"
 // abre o seletor do navegador de novo e a escolhida vai para a próxima tela livre.
@@ -1525,7 +1622,7 @@ function renderSharePop() {
     + telas.map((sh) => {
       const noTelao = state.main === sh.key;
       return `<div class="sp-row" data-key="${esc(sh.key)}">
-        <span class="sp-name">${esc(tipoDaTela(sh))}<small>${ondeEsta(sh)}${noTelao && sh.slot != null ? ' · no telão' : ''}</small></span>
+        <span class="sp-name">${esc(tipoDaTela(sh))}<small>${ondeEsta(sh)}${noTelao && sh.slot != null ? ' · no telão' : ''}</small><small class="sp-envio" data-envio="${esc(sh.key)}">${esc(envios.get(sh.key) || '')}</small></span>
         ${sh.file ? '' : `<button type="button" class="sp-btn ctrl${sh.controle ? ' on' : ''}" data-act="ctrl" title="${sh.controle ? 'Parar de deixar controlar' : 'Permitir que mexam nesta tela'}">${icon('cursor', 16)}</button>`}
         <button type="button" class="sp-btn${noTelao ? ' on' : ''}" data-act="pin" title="${noTelao ? 'Tirar do telão' : 'Pôr no telão'}">${icon('pin', 16)}</button>
         <button type="button" class="sp-btn danger" data-act="stop" title="Parar esta tela">${icon('x', 16)}</button>
@@ -4123,14 +4220,12 @@ $('#set-qualidade').addEventListener('click', (e) => {
 
 function renderShareMode() {
   $$('#set-share-mode button').forEach((b) => b.classList.toggle('on', b.dataset.value === settings.shareMode));
-  const preset = SHARE_PRESETS[settings.shareMode] || SHARE_PRESETS.detail;
   const dicas = {
-    detail: 'Para código, planilhas, slides: imagem nítida a 30 quadros — e 60 enquanto alguém controla a tela.',
-    motion: 'Para filme e vídeo: 30 quadros por segundo em 1080p.',
-    game: 'Para jogo pesado: Full HD a 60 quadros por segundo. Se a internet apertar, ele derruba '
-      + 'a resolução em vez dos quadros — é o que evita engasgo quando a placa de vídeo já está ocupada.',
+    leve: '720p a 60 quadros: para internet fraca ou PC simples.',
+    max: 'Full HD (1080p) a 60 quadros, sempre. Se a internet apertar, cai a resolução e não a fluidez.',
+    ultra: '1440p a 60 quadros: para PC forte e internet boa (mais de 25 Mbps de upload).',
   };
-  $('#share-mode-hint').textContent = dicas[settings.shareMode] || 'Vale para o próximo compartilhamento.';
+  $('#share-mode-hint').textContent = `${dicas[settings.shareMode]} Quem assiste de longe recebe uma versão menor e quem não está vendo não recebe: sobra placa de vídeo e internet para quem está olhando.`;
 }
 renderShareMode();
 $('#set-share-mode').addEventListener('click', (e) => {

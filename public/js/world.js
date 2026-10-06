@@ -22,6 +22,11 @@ export const SPAWN = { pos: [0, 0, -2], yaw: 0 };
 
 const FONT = "'Plus Jakarta Sans', system-ui, sans-serif";
 const _tmp = new THREE.Vector3();
+const _tmp2 = new THREE.Vector3();
+const _tmp3 = new THREE.Vector3();
+const _quat = new THREE.Quaternion();
+const CANTOS = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
+const _raio = new THREE.Raycaster();
 const _m4 = new THREE.Matrix4();
 const _frustum = new THREE.Frustum();
 const _esfera = new THREE.Sphere();
@@ -2353,24 +2358,100 @@ export class World {
     });
   }
 
-  // quadros das telas compartilhadas no 3D: perto, no ritmo da qualidade; longe, bem menos
-  atualizarTelas() {
-    const agora = performance.now();
-    const base = 1000 / this.videoFps;
+  // Altura (em pixels da janela) com que uma tela aparece agora: 0 se está fora da vista ou de
+  // costas. Leva em conta a distância e o ângulo (de lado, ela encolhe).
+  alturaAparente(s) {
+    const cam = this.camera;
+    if (!s.group.visible) return 0;
+    // de costas para a câmera não aparece
+    s.surface.getWorldPosition(_tmp);
+    s.surface.getWorldQuaternion(_quat);
+    if (_tmp3.set(0, 0, 1).applyQuaternion(_quat).dot(_tmp2.copy(cam.position).sub(_tmp)) <= 0) return 0;
+    // os 4 cantos no espaço da câmera, recortados no plano da frente dela (o pedaço atrás da
+    // câmera não aparece), projetados na imagem: mede o pedaço que cai dentro dela
+    const cantos = CANTOS.map(([cx, cy]) => new THREE.Vector3((cx * s.w) / 2, (cy * s.h) / 2, 0)
+      .applyMatrix4(s.surface.matrixWorld).applyMatrix4(cam.matrixWorldInverse));
+    const plano = -cam.near * 1.01;
+    const dentro = [];
+    for (let i = 0; i < 4; i++) {
+      const a = cantos[i];
+      const b = cantos[(i + 1) % 4];
+      const aDentro = a.z <= plano;
+      if (aDentro) dentro.push(a);
+      if (aDentro !== (b.z <= plano)) dentro.push(a.clone().lerp(b, (plano - a.z) / (b.z - a.z)));
+    }
+    if (!dentro.length) return 0;
+    let x0 = Infinity;
+    let x1 = -Infinity;
+    let y0 = Infinity;
+    let y1 = -Infinity;
+    for (const v of dentro) {
+      v.applyMatrix4(cam.projectionMatrix);
+      x0 = Math.min(x0, v.x);
+      x1 = Math.max(x1, v.x);
+      y0 = Math.min(y0, v.y);
+      y1 = Math.max(y1, v.y);
+    }
+    const vx = Math.min(1, x1) - Math.max(-1, x0);
+    const vy = Math.min(1, y1) - Math.max(-1, y0);
+    if (vx <= 0 || vy <= 0) return 0;
+    return (vy / 2) * (this.canvas.clientHeight || window.innerHeight);
+  }
+
+  // prepara o frustum da câmera (antes de alturaAparente)
+  prepararVista() {
     const cam = this.camera;
     cam.updateMatrixWorld();
     _m4.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
     _frustum.setFromProjectionMatrix(_m4);
+  }
+
+  // Tem parede (as que barram a câmera; vidro não conta) entre a câmera e a tela? Testa o
+  // centro e quatro pontos perto dos cantos: basta um livre para a tela contar como vista.
+  tapada(s) {
+    const blocos = this.cameraBlockers.filter((m) => {
+      for (let o = m; o; o = o.parent) {
+        if (!o.visible) return false;
+        if (o === this.scene) return true;
+      }
+      return false; // parede de um prédio que já foi desmontado
+    });
+    if (!blocos.length) return false;
+    const cam = this.camera.position;
+    for (const [cx, cy] of [[0, 0], ...CANTOS]) {
+      _tmp.set(cx * s.w * 0.4, cy * s.h * 0.4, 0).applyMatrix4(s.surface.matrixWorld);
+      const d = _tmp.distanceTo(cam);
+      _raio.set(cam, _tmp2.copy(_tmp).sub(cam).normalize());
+      _raio.far = d - 0.3;
+      if (!_raio.intersectObjects(blocos, false).length) return false;
+    }
+    return true;
+  }
+
+  // Maior altura aparente entre as telas do 3D que mostram este <video> (telão incluído).
+  alturaDoVideo(video) {
+    this.prepararVista();
+    let maior = 0;
+    for (const s of this.screens || []) {
+      if (s.video !== video) continue;
+      const px = this.alturaAparente(s);
+      if (px > maior && !this.tapada(s)) maior = px;
+    }
+    return maior;
+  }
+
+  // Quadros das telas compartilhadas no 3D. A que aparece grande (de perto, de frente) sobe a 60
+  // sempre, qualquer que seja a qualidade gráfica; as menores, no ritmo da qualidade; as que
+  // aparecem minúsculas, bem menos. Fora da vista não sobe nada (é o que mais pesa).
+  atualizarTelas() {
+    const agora = performance.now();
+    const base = 1000 / this.videoFps;
+    this.prepararVista();
     for (const s of this.screens || []) {
       if (!s.texture) continue;
-      s.group.getWorldPosition(_tmp);
-      // fora da vista não sobe quadro novo (é o que mais pesa): virou para ela, atualiza na hora
-      if (!_frustum.intersectsSphere(_esfera.set(_tmp, Math.max(s.w, s.h) * 0.75))) continue;
-      const d = _tmp.distanceTo(cam.position);
-      // monitor de mesa é pequeno: de longe é um borrão, não precisa de 60 quadros
-      const intervalo = s.w < 3
-        ? d < 7 ? base : d < 16 ? Math.max(base, 1000 / 20) : 1000 / 8
-        : d < 35 ? base : d < 80 ? Math.max(base, 1000 / 30) : 100;
+      const px = this.alturaAparente(s);
+      if (px <= 0) continue;
+      const intervalo = px >= 240 ? 1000 / 60 : px >= 90 ? base : px >= 40 ? Math.max(base, 1000 / 20) : 1000 / 8;
       s.texture.atualizar(agora, intervalo - 2); // 2 ms de folga: quadro de 16,6 ms não pode cair para 30 fps
     }
   }

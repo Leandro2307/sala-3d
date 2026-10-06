@@ -622,11 +622,11 @@
         computador no Chrome ou Edge — mas você pode ver as telas dos outros, falar e assistir normalmente.
       </p>
       <div class="field" id="share-mode-field">
-        <span>Compartilhar tela otimizada para</span>
+        <span>Qualidade do compartilhar tela <small class="opt">(sempre 60 quadros)</small></span>
         <div class="segmented" id="set-share-mode">
-          <button type="button" data-value="detail">Texto nítido</button>
-          <button type="button" data-value="motion">Vídeo</button>
-          <button type="button" data-value="game">Jogo</button>
+          <button type="button" data-value="leve">Leve · 720p</button>
+          <button type="button" data-value="max">Máxima · 1080p</button>
+          <button type="button" data-value="ultra">Ultra · 1440p</button>
         </div>
         <small class="hint" id="share-mode-hint">Vale para o próximo compartilhamento.</small>
       </div>
@@ -663,7 +663,7 @@
   <div id="focus" hidden>
     <video id="focus-video" playsinline autoplay muted></video>
     <div class="focus-bar">
-      <div class="focus-name"><span class="live-dot"></span><span id="focus-name">Tela</span></div>
+      <div class="focus-name"><span class="live-dot"></span><span id="focus-name">Tela</span><small class="focus-qualidade" id="focus-qualidade"></small></div>
       <!-- navegação da aba controlada (a mesa tem uma igual em cada monitor) -->
       <form class="nav-aba" id="focus-nav" hidden autocomplete="off">
         <button type="button" class="nav-btn" data-nav="voltar" title="Voltar"><i data-icon="esq" data-size="16"></i></button>
