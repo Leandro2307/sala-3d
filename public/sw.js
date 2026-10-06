@@ -13,7 +13,7 @@ self.addEventListener('activate', (e) => {
 });
 
 // nunca passam por aqui: tempo real, senha da sala, configuração e downloads
-const FORA = /^\/(socket\.io|config|sala-acesso|sala3d-extensao\.zip)/;
+const FORA = /^\/(socket\.io|config|ao-vivo|salas-status|sala-acesso|sala3d-extensao\.zip)/;
 // não mudam sem mudar de endereço (ou quase nunca): do cache primeiro
 const FIXOS = /^\/(vendor\/three@|models\/|img\/|icons\/)/;
 

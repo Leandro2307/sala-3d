@@ -5,6 +5,7 @@ import { Avatar } from './avatars.js';
 import { PERSONAGENS } from './modelo.js';
 import { EscolherPersonagem } from './escolher-personagem.js';
 import { SalasLaterais } from './salas.js';
+import { AoVivo, cartaoDoSaguao, COR_STATUS } from './aovivo.js';
 import { Player } from './player.js';
 import { RTC, SHARE_PRESETS } from './rtc.js';
 import { MediaSync, PROVIDERS, preloadYouTube } from './media.js';
@@ -20,7 +21,7 @@ import { Controle } from './controle.js';
 import { Mesa } from './mesa.js';
 import { Qualidade, NIVEIS, nivelInicial } from './qualidade.js';
 import { GuiaExtensao } from './guia-extensao.js';
-import { DEPARTAMENTOS, IDS_DEPARTAMENTOS, rotuloDoPosto } from './escritorio.js';
+import { DEPARTAMENTOS, IDS_DEPARTAMENTOS, MAX_SALAS, rotuloDoPosto, portaDa } from './escritorio.js';
 import { Dados, MESA_DADOS } from './dados.js';
 import { icon, hydrateIcons } from './icons.js';
 import { isTouch, setupTouchControls, toggleFullscreen, isFullscreen, temTelaCheia } from './touch.js';
@@ -43,6 +44,8 @@ const DEFAULTS = {
   shareMode: 'detail', sens: 100, sfx: true, micDevice: '', helpCollapsed: false, photo: null, shirt: 'none', char: 'padrao', arma: ARMA_PADRAO,
   // qualidade gráfica: 'auto' ou um nível fixo; nivelAuto: onde o automático parou da última vez
   qualidade: 'auto', nivelAuto: null, mostrarFps: false,
+  // presença (ver "empresa") e se o gestor quer os alertas da equipe
+  status: 'disponivel', alertasGestor: true,
 };
 const stored = (() => {
   try { return JSON.parse(localStorage.getItem('sala3d') || '{}'); } catch { return {}; }
@@ -531,6 +534,20 @@ const salas = new SalasLaterais({
     window.location.href = url;
   },
 });
+// salas ao vivo (aovivo.js): o cartão do saguão e as salas com gente na coluna lateral
+const aoVivo = new AoVivo();
+aoVivo.ouvir((dados) => salas.aoVivo(dados));
+const redesenharSaguao = cartaoDoSaguao(aoVivo, {
+  lista: $('#ao-vivo-lista'),
+  resumo: $('#ao-vivo-resumo'),
+  selecionada: () => idDaSala(roomInput.value),
+  aoEscolher: (id) => {
+    roomInput.value = id;
+    roomInput.dispatchEvent(new Event('input'));
+    (nameInput.value.trim() ? $('#btn-join') : nameInput).focus();
+  },
+});
+roomInput.addEventListener('input', () => redesenharSaguao());
 if (params.get('entrar') === '1') {
   const url = new URL(window.location.href);
   url.searchParams.delete('entrar');
@@ -690,6 +707,7 @@ function emitJoin() {
       shirt: settings.shirt,
       char: settings.char,
       arma: settings.arma,
+      status: settings.status,
       passe: state.passe,
     }, resolve);
   });
@@ -705,7 +723,9 @@ function applyJoined(data) {
   state.users.set(data.selfId, {
     id: data.selfId, name: settings.name, color: settings.color, mic: state.micOn && state.micAvailable,
     shares: new Map(), isSelf: true, avatar: localAvatar, streams: new Map(),
+    status: settings.status, inativo: false, gestor: false, desde: Date.now(),
   });
+  meuStatusMudou();
   for (const u of data.users) addUser(u);
   state.main = data.main;
   tv.setInitial(data.media);
@@ -776,9 +796,22 @@ function bindSocket() {
     u.avatar.speaking = !!s;
   });
 
-  socket.on('user-update', ({ id, mic, photo, shirt, char, color, arma, health, ko }) => {
+  socket.on('user-update', ({ id, mic, photo, shirt, char, color, arma, health, ko, status, inativo, gestor, desde }) => {
     const u = state.users.get(id);
     if (!u) return;
+    if (status !== undefined || inativo !== undefined || gestor !== undefined) {
+      if (status !== undefined) u.status = status;
+      if (inativo !== undefined) u.inativo = inativo;
+      if (gestor !== undefined) u.gestor = gestor;
+      if (desde !== undefined) u.desde = desde;
+      u.avatar.setPresenca(COR_STATUS[presencaDe(u)]);
+      if (u.isSelf && gestor) {
+        pedirNotificacoes();
+        renderSala();
+      }
+      renderPeople();
+      renderEquipe();
+    }
     if (mic !== undefined) {
       u.mic = mic;
       u.avatar.setStatus({ mic });
@@ -920,6 +953,8 @@ function bindSocket() {
     aplicarSala(cfg);
     if (cfg.por && cfg.por !== settings.name) toast(`${cfg.por} atualizou a sala`, 'info', 3500);
   });
+  socket.on('alerta-gestor', alertaDaEquipe);
+  socket.on('chamado', foiChamado);
   socket.on('sino', ({ nome, cor }) => {
     ultimoSino = Date.now();
     sfx.sino();
@@ -966,6 +1001,7 @@ function addUser(data) {
   if (data.health != null) avatar.setHealth(data.health);
   if (data.ko) avatar.setKo(true);
   avatar.setNetworkState(data.p, data.r, data.a);
+  avatar.setPresenca(COR_STATUS[presencaDe(data)]);
   world.scene.add(avatar.group);
   const shares = new Map((data.shares || []).map((sh) => [sh.key, { ...sh, video: null }]));
   const u = { ...data, shares, isSelf: false, avatar, streams: new Map(), audioEl: null, speaking: false };
@@ -1014,9 +1050,13 @@ function renderPeople() {
   const users = [...state.users.values()].sort((a, b) => (a.isSelf ? -1 : b.isSelf ? 1 : a.name.localeCompare(b.name)));
   $('#people-list').innerHTML = users.map((u) => {
     const telas = [...u.shares.values()].sort(ordemDasTelas);
+    // presença + onde está no escritório ("Ocupado · TI"); compartilhando tem prioridade
+    const pres = presencaDe(u);
+    const local = localDe(u);
     const sub = telas.length
       ? `Compartilhando · ${telas.map(ondeEsta).join(', ')}`
-      : u.isSelf ? 'Você' : statusText(u);
+      : !u.isSelf && statusText(u) !== 'Na sala' ? statusText(u)
+        : `${NOMES_PRESENCA[pres]}${pres !== 'disponivel' && u.desde ? ` há ${haQuanto(u.desde)}` : ''}${local ? ` · ${local}` : ''}`;
     // uma linha por tela: ver, pôr no telão e (as suas) parar
     const linhas = telas.map((sh) => {
       const noTelao = state.main === sh.key;
@@ -1028,12 +1068,13 @@ function renderPeople() {
       </li>`;
     }).join('');
     return `<li class="person${u.speaking ? ' speaking' : ''}" data-id="${esc(u.id)}">
-      <span class="avatar-dot" style="--c:${esc(u.color)}">${esc((u.name[0] || '?').toUpperCase())}</span>
+      <span class="avatar-dot" style="--c:${esc(u.color)}">${esc((u.name[0] || '?').toUpperCase())}<i class="pres-dot" style="--s:${COR_STATUS[pres]}" title="${NOMES_PRESENCA[pres]}"></i></span>
       <div class="person-info">
-        <div class="person-name">${esc(u.name)}${u.isSelf ? ' <small>(você)</small>' : ''}<span class="moedas" title="Moedas">${icon('moeda', 12)} ${u.moedas ?? 0}</span></div>
+        <div class="person-name">${esc(u.name)}${u.isSelf ? ' <small>(você)</small>' : ''}${u.gestor ? ' <span class="tag-gestor">Gestor</span>' : ''}<span class="moedas" title="Moedas">${icon('moeda', 12)} ${u.moedas ?? 0}</span></div>
         <div class="person-sub${telas.length ? ' sharing' : ''}">${esc(sub)}</div>
       </div>
       <div class="person-actions">
+        ${!u.isSelf ? `<button type="button" class="icon-btn" data-act="chamar" title="Chamar (avisa que você quer falar)">${icon('sino', 17)}</button>` : ''}
         ${!u.isSelf ? `<button type="button" class="icon-btn" data-act="goto" title="Ir até">${icon('goto', 18)}</button>` : ''}
         ${u.mic ? '' : `<span class="muted-ic" title="Microfone desligado">${icon('micOff', 18)}</span>`}
       </div>
@@ -1053,13 +1094,17 @@ $('#people-list').addEventListener('click', (e) => {
   if (btn.dataset.act === 'view') enterFocus({ kind: 'share', key });
   if (btn.dataset.act === 'pin') togglePin(key);
   if (btn.dataset.act === 'stop') stopShare(key, true);
-  if (btn.dataset.act === 'goto') {
-    const p = u.avatar.group.position;
-    run.cancel();
-    hideParkourHud();
-    player.teleport([p.x + 1.4, p.y, p.z + 1.4], null);
-  }
+  if (btn.dataset.act === 'goto') irAte(u);
+  if (btn.dataset.act === 'chamar') chamar(u);
 });
+
+function irAte(u) {
+  const p = u.avatar.group.position;
+  run.cancel();
+  hideParkourHud();
+  if (player.veiculo) toggleVeiculo();
+  player.teleport([p.x + 1.4, p.y, p.z + 1.4], null);
+}
 
 function togglePin(key) {
   if (key) socket.emit('main', state.main === key ? 'media' : key);
@@ -1671,6 +1716,8 @@ function aplicarSala(cfg) {
   if (state.panel && $(`#bar [data-panel="${state.panel}"]`)?.hidden) closePanel();
   poderesMudaram(); // arma (camiseta 22) na ajuda e no toque
   updateRoomInfo();
+  mostrarAviso();
+  ondeAntes = undefined; // o chip de onde estou redesenha (planta ou privacidade podem ter mudado)
   renderSala();
 }
 
@@ -1683,8 +1730,16 @@ function renderSala() {
   const desligados = JOGOS_DA_SALA.filter(([j]) => !jogoLigado(j)).length;
   $('#sala-resumo').innerHTML = `<div class="sala-chip">${icon('predio', 18)}<span>
     <b>${esc(cfg.empresa || 'Sem nome de empresa')}</b>
-    <small>Ambiente: ${esc(amb.nome)} · ${desligados ? `${desligados} ${desligados === 1 ? 'jogo desligado' : 'jogos desligados'}` : 'todos os jogos ligados'}${cfg.temSenha ? ' · com senha' : ''}</small>
-  </span></div>${state.donoDaSala ? '<p class="hint">Você é o dono desta sala.</p>' : ''}`;
+    <small>Ambiente: ${esc(amb.nome)} · ${desligados ? `${desligados} ${desligados === 1 ? 'jogo desligado' : 'jogos desligados'}` : 'todos os jogos ligados'}${cfg.temSenha ? ' · com senha' : ''}${modoEscritorio() && cfg.privacidade !== false ? ' · salas à prova de som' : ''}</small>
+  </span></div>${state.donoDaSala ? '<p class="hint">Você é o dono desta sala.</p>' : souGestor() ? '<p class="hint">Você é gestor desta sala.</p>' : ''}`;
+  $('#sala-gestor').hidden = !cfg.temGestor || souGestor() || state.donoDaSala;
+  $('#gestor-status').textContent = cfg.temGestor
+    ? 'Ligada: quem entra com ela vira gestor e recebe os alertas.'
+    : 'Sem senha: só você (o dono) recebe os alertas da equipe.';
+  $('#gestor-salvar').textContent = cfg.temGestor ? 'Trocar' : 'Criar';
+  $('#gestor-tirar').hidden = !cfg.temGestor;
+  renderIrPara();
+  renderEquipe();
   $('#sala-criar').hidden = cfg.temDono || state.donoDaSala;
   $('#sala-entrar').hidden = !cfg.temDono || state.donoDaSala;
   $('#sala-config').hidden = !state.donoDaSala;
@@ -1699,7 +1754,11 @@ function renderSala() {
 function preencherConfig(forcar = false) {
   if (formSujo && !forcar) return;
   const cfg = state.sala;
-  $('#sala-config').elements.empresa.value = cfg.empresa || '';
+  const f = $('#sala-config').elements;
+  f.empresa.value = cfg.empresa || '';
+  f.aviso.value = cfg.aviso || '';
+  f.privacidade.checked = cfg.privacidade !== false;
+  f.listada.checked = cfg.listada !== false;
   const opcoes = (lista, atual) => Object.entries(lista).map(([id, o]) => `<option value="${id}"${id === atual ? ' selected' : ''}>${o.nome}</option>`).join('');
   $('#sala-config').elements.clima.innerHTML = opcoes(CLIMAS, cfg.clima || 'auto');
   $('#sala-config').elements.horario.innerHTML = opcoes(HORARIOS, cfg.horario || 'ciclo');
@@ -1747,7 +1806,15 @@ const mostrarEditorDoPlacar = () => {
   $('#sala-deptos').hidden = !escritorio;
   $('#deptos-hint').hidden = !escritorio;
   $('#placar-editor').hidden = !(escritorio && $('#sala-deptos input[value="comercial"]')?.checked);
+  $('#campo-privacidade').hidden = !escritorio;
 };
+// o prédio tem vagas para MAX_SALAS departamentos
+$('#sala-deptos').addEventListener('change', (e) => {
+  if (e.target.checked && $('#sala-deptos input:checked').length > MAX_SALAS) {
+    e.target.checked = false;
+    toast(`O prédio tem lugar para ${MAX_SALAS} departamentos. Desmarque um para pôr este.`, 'warn', 5000);
+  }
+});
 $('#sala-modulos').addEventListener('change', mostrarEditorDoPlacar);
 $('#sala-deptos').addEventListener('change', mostrarEditorDoPlacar);
 $('#placar-add').addEventListener('click', () => {
@@ -1801,7 +1868,15 @@ function atualizarPaineis() {
       ?? world.planta?.salas.find((s) => t.share.slot >= s.primeiraTela && t.share.slot < s.primeiraTela + s.telas)?.id;
     if (sala) telasPorSala[sala] = (telasPorSala[sala] || 0) + 1;
   }
+  // painel da sala de Gestão: todo mundo, os parados primeiro
+  const ordem = (u) => (PARADOS.includes(presencaDe(u)) ? 0 : 1);
+  const equipe = [...state.users.values()].sort((a, b) => ordem(a) - ordem(b) || a.name.localeCompare(b.name)).map((u) => {
+    const pres = presencaDe(u);
+    return { nome: u.name, status: pres, texto: `${NOMES_PRESENCA[pres]}${pres !== 'disponivel' && u.desde ? ` há ${haQuanto(u.desde)}` : ''} · ${localDe(u)}` };
+  });
+  const parados = equipe.filter((p) => PARADOS.includes(p.status)).length;
   const d = new Date();
+  world.escritorio.equipe?.(equipe, `${equipe.length - parados} trabalhando · ${parados} ${parados === 1 ? 'parado' : 'parados'} · ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`);
   world.escritorio.status({
     empresa: state.sala?.empresa || '',
     pessoas: state.users.size,
@@ -1812,9 +1887,296 @@ function atualizarPaineis() {
 }
 setInterval(atualizarPaineis, 5000);
 
+// ---------------------------------------------------- empresa: presença, gestores, comunicado, ir para
+// Presença: cada um escolhe o status (Disponível, Ocupado...). Sem mexer em nada por 10 minutos
+// vira "Inativo" sozinho, e entrar na sala Descanso põe "Em pausa" até sair de lá. Os gestores
+// (senha de gestor, ou o dono) veem a equipe e recebem um alerta quando alguém para de trabalhar.
+const NOMES_PRESENCA = { disponivel: 'Disponível', ocupado: 'Ocupado', reuniao: 'Em reunião', pausa: 'Em pausa', almoco: 'No almoço', ausente: 'Ausente', inativo: 'Inativo' };
+const ESCOLHAS_STATUS = ['disponivel', 'ocupado', 'reuniao', 'pausa', 'almoco', 'ausente'];
+const PARADOS = ['pausa', 'almoco', 'ausente', 'inativo'];
+const INATIVO_MS = 10 * 60 * 1000;
+if (!ESCOLHAS_STATUS.includes(settings.status)) settings.status = 'disponivel';
+function presencaDe(u) {
+  if (u?.inativo) return 'inativo';
+  return ESCOLHAS_STATUS.includes(u?.status) ? u.status : 'disponivel';
+}
+function haQuanto(t) {
+  const min = Math.floor((Date.now() - t) / 60000);
+  if (min < 1) return 'menos de 1 min';
+  if (min < 60) return `${min} min`;
+  return `${Math.floor(min / 60)} h ${String(min % 60).padStart(2, '0')}`;
+}
+function nomeDoLugar(id) {
+  if (id == null) return 'Lá fora';
+  return { recepcao: 'Recepção', corredor: 'Corredor', lounge: 'Lounge' }[id] || DEPARTAMENTOS[id]?.nome || '';
+}
+const posDe = (u) => (u.isSelf ? player.pos : u.avatar.group.position);
+// onde a pessoa está no escritório ("TI", "Recepção"); fora do escritório, nada
+function localDe(u) {
+  if (!modoEscritorio() || !world.planta) return '';
+  const p = posDe(u);
+  return nomeDoLugar(world.salaEm(p.x, p.z));
+}
+// salas à prova de som: quem está num departamento só ouve (e é ouvido por) quem está na mesma sala
+function mesmoAmbiente(u) {
+  if (!modoEscritorio() || state.sala?.privacidade === false || !world.planta) return true;
+  const a = world.salaEm(player.pos.x, player.pos.z);
+  const p = u.avatar.group.position;
+  const b = world.salaEm(p.x, p.z);
+  return a === b || (!DEPARTAMENTOS[a] && !DEPARTAMENTOS[b]);
+}
+
+// ----- o meu status
+const selStatus = $('#meu-status');
+selStatus.innerHTML = ESCOLHAS_STATUS.map((id) => `<option value="${id}">${NOMES_PRESENCA[id]}</option>`).join('');
+let pausaAuto = false; // "Em pausa" posto pelo Descanso (volta sozinho ao sair de lá)
+function meuStatusMudou() {
+  const me = self();
+  const pres = presencaDe(me || { status: settings.status });
+  selStatus.value = me?.status && !me.inativo ? me.status : settings.status;
+  $('#meu-status-dot').style.setProperty('--s', COR_STATUS[pres]);
+  $('#meu-status-sub').textContent = pres === 'inativo'
+    ? 'Inativo: mexa em qualquer coisa para voltar'
+    : pausaAuto ? 'Em pausa enquanto estiver no Descanso' : PARADOS.includes(pres) ? 'Os gestores foram avisados' : 'Os outros veem ao lado do seu nome';
+  renderPeople();
+}
+function mudarStatus(status, { auto = false } = {}) {
+  if (!auto) {
+    settings.status = status;
+    saveSettings();
+  }
+  const me = self();
+  if (me) {
+    me.status = status;
+    me.desde = Date.now();
+  }
+  socket?.emit('status', { status });
+  meuStatusMudou();
+}
+selStatus.addEventListener('change', () => {
+  pausaAuto = false;
+  mudarStatus(selStatus.value);
+  selStatus.blur();
+});
+function marcarInativo(v) {
+  const me = self();
+  if (!me || me.inativo === v) return;
+  me.inativo = v;
+  me.desde = Date.now();
+  socket?.emit('status', { inativo: v });
+  meuStatusMudou();
+  if (!v) toast('Que bom que voltou! Seu status saiu de "Inativo".', 'info', 3500);
+}
+// qualquer mexida conta como atividade (falar e compartilhar tela também)
+let ultimaAcao = Date.now();
+const mexeu = () => {
+  ultimaAcao = Date.now();
+  if (self()?.inativo) marcarInativo(false);
+};
+for (const ev of ['keydown', 'pointerdown', 'pointermove', 'wheel', 'touchstart']) window.addEventListener(ev, mexeu, { passive: true, capture: true });
+setInterval(() => {
+  if (!state.joined) return;
+  if (state.speaking || self()?.shares.size) ultimaAcao = Date.now();
+  if (Date.now() - ultimaAcao > INATIVO_MS) marcarInativo(true);
+}, 15000);
+
+// onde estou (chip no topo) e a pausa automática do Descanso
+let ondeAntes = undefined;
+setInterval(() => {
+  if (!state.joined) return;
+  const esc0 = modoEscritorio() && !!world.planta;
+  $$('.onde').forEach((el) => { el.hidden = !esc0; });
+  const lugar = esc0 ? world.salaEm(player.pos.x, player.pos.z) : null;
+  if (esc0 && lugar !== ondeAntes) {
+    ondeAntes = lugar;
+    const fechada = !!DEPARTAMENTOS[lugar] && state.sala?.privacidade !== false;
+    $('#onde-chip').innerHTML = `${fechada ? icon('lock', 12) : ''}${esc(nomeDoLugar(lugar))}`;
+    $('#onde-chip').title = fechada ? 'Sala à prova de som: só quem está aqui ouve a conversa' : 'Onde você está no escritório';
+    renderPeople();
+  }
+  if (esc0 && lugar === 'descanso' && !pausaAuto && settings.status === 'disponivel') {
+    pausaAuto = true;
+    mudarStatus('pausa', { auto: true });
+    toast('Você entrou no Descanso: seu status ficou "Em pausa" até sair daqui.', 'info', 5000);
+  } else if (pausaAuto && lugar !== 'descanso') {
+    pausaAuto = false;
+    mudarStatus(settings.status, { auto: true });
+  }
+}, 1000);
+
+// ----- gestores
+let senhaGestor = null; // só na memória, como a de dono
+const alertas = []; // últimos avisos da equipe (para o painel do gestor)
+const souGestor = () => !!self()?.gestor;
+function avisoDoNavegador(titulo, corpo) {
+  // aba escondida: notificação do sistema (se a pessoa deixou)
+  if (!document.hidden || !('Notification' in window) || Notification.permission !== 'granted') return;
+  try { new Notification(titulo, { body: corpo, icon: '/icons/icon-192.png', tag: 'sala3d-equipe' }); } catch { /* sem suporte */ }
+}
+function pedirNotificacoes() {
+  if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission().catch(() => {});
+}
+function alertaDaEquipe({ tipo, texto, cor }) {
+  const d = new Date();
+  alertas.unshift({ texto, tipo, hora: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` });
+  alertas.length = Math.min(alertas.length, 12);
+  renderEquipe();
+  if (!settings.alertasGestor) return;
+  // entrar e sair já aparecem para todo mundo; parar e voltar são só dos gestores
+  if (tipo === 'parado' || tipo === 'voltou') {
+    toast(texto, tipo === 'parado' ? 'warn' : 'success', 6500, cor);
+    sfx.message();
+  }
+  avisoDoNavegador(state.sala?.empresa || 'Equipe', texto);
+}
+function renderEquipe() {
+  const box = $('#sala-equipe');
+  if (!box) return;
+  box.hidden = !souGestor();
+  if (box.hidden) return;
+  const outros = [...state.users.values()].filter((u) => !u.isSelf);
+  const parados = outros.filter((u) => PARADOS.includes(presencaDe(u)));
+  $('#equipe-resumo').textContent = outros.length
+    ? `${outros.length - parados.length} trabalhando · ${parados.length} ${parados.length === 1 ? 'parado' : 'parados'}`
+    : '';
+  const ordem = (u) => (PARADOS.includes(presencaDe(u)) ? 0 : 1);
+  const linhas = outros.sort((a, b) => ordem(a) - ordem(b) || a.name.localeCompare(b.name)).map((u) => {
+    const pres = presencaDe(u);
+    const local = localDe(u);
+    return `<li class="${PARADOS.includes(pres) ? 'parado' : ''}" data-id="${esc(u.id)}">
+      <i class="pres-dot solto" style="--s:${COR_STATUS[pres]}"></i>
+      <span><b>${esc(u.name)}</b><small>${NOMES_PRESENCA[pres]}${pres !== 'disponivel' && u.desde ? ` há ${haQuanto(u.desde)}` : ''}${local ? ` · ${esc(local)}` : ''}</small></span>
+      <button type="button" class="icon-btn" data-act="chamar" title="Chamar">${icon('sino', 15)}</button>
+      <button type="button" class="icon-btn" data-act="goto" title="Ir até">${icon('goto', 16)}</button>
+    </li>`;
+  }).join('');
+  const log = alertas.map((a) => `<li class="log ${a.tipo}"><time>${a.hora}</time>${esc(a.texto)}</li>`).join('');
+  $('#equipe-lista').innerHTML = (linhas || '<li class="empty">Só você na sala agora.</li>') + (log ? `<li class="log-titulo">Últimos avisos</li>${log}` : '');
+}
+$('#equipe-lista').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-act]');
+  const u = b && state.users.get(b.closest('[data-id]')?.dataset.id);
+  if (!u) return;
+  if (b.dataset.act === 'goto') irAte(u);
+  if (b.dataset.act === 'chamar') chamar(u);
+});
+$('#alertas-gestor').checked = settings.alertasGestor !== false;
+$('#alertas-gestor').addEventListener('change', (e) => {
+  settings.alertasGestor = e.target.checked;
+  saveSettings();
+  if (e.target.checked) pedirNotificacoes();
+});
+setInterval(() => { if (state.panel === 'sala') renderEquipe(); }, 20000);
+$('#sala-gestor').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const form = e.currentTarget;
+  const senha = form.elements.senha.value;
+  pedirNotificacoes();
+  socket.emit('sala-gestor', { senha }, (r) => {
+    if (!r?.ok) return toast(r?.erro || 'Senha de gestor errada.', 'error');
+    senhaGestor = senha;
+    form.reset();
+    toast('Você entrou como gestor: vai ver a equipe aqui e receber os alertas.', 'success', 6000);
+  });
+});
+function reentrarComoGestor() {
+  if (!senhaGestor) return;
+  socket.emit('sala-gestor', { senha: senhaGestor }, (r) => { if (!r?.ok) senhaGestor = null; });
+}
+// senha de gestor (o dono cria, troca ou tira; vale na hora)
+function mudarSenhaDeGestor(senha) {
+  const campo = $('#sala-config').elements.gestorSenha;
+  socket.emit('sala-gestor-senha', { senha }, (r) => {
+    if (!r?.ok) return toast(r?.erro || 'Não deu para mudar a senha de gestor.', 'error');
+    campo.value = '';
+    toast(senha ? 'Senha de gestor pronta. Passe para os gestores: eles entram com ela no painel "Sala da empresa".' : 'Senha de gestor tirada.', 'success', 7000);
+  });
+}
+$('#gestor-salvar').addEventListener('click', () => {
+  const v = $('#sala-config').elements.gestorSenha.value;
+  if (v.length < 4) return toast('A senha de gestor precisa ter pelo menos 4 caracteres.', 'warn');
+  mudarSenhaDeGestor(v);
+});
+$('#gestor-tirar').addEventListener('click', () => mudarSenhaDeGestor(''));
+
+// ----- chamar alguém ("toque no ombro")
+let ultimoChamar = 0;
+function chamar(u) {
+  if (Date.now() - ultimoChamar < 4000) return toast('Espere uns segundos para chamar de novo.', 'info', 2500);
+  ultimoChamar = Date.now();
+  socket.emit('chamar', u.id);
+  toast(`Você chamou ${u.name}.`, 'info', 3000, u.color);
+}
+let chamadoDe = null;
+let timerChamado = null;
+function foiChamado({ id, nome, cor }) {
+  chamadoDe = id;
+  $('#chamado-nome').textContent = nome;
+  $('#chamado-dot').style.setProperty('--c', cor);
+  $('#chamado-dot').textContent = (nome[0] || '?').toUpperCase();
+  $('#chamado').hidden = false;
+  sfx.join();
+  avisoDoNavegador('Chamado', `${nome} está te chamando`);
+  clearTimeout(timerChamado);
+  timerChamado = setTimeout(() => { $('#chamado').hidden = true; }, 25000);
+}
+$('#chamado-ir').addEventListener('click', (e) => {
+  e.currentTarget.blur();
+  const u = state.users.get(chamadoDe);
+  $('#chamado').hidden = true;
+  if (u) irAte(u);
+  else toast('Essa pessoa já saiu.', 'info');
+});
+$('#chamado-fechar').addEventListener('click', () => { $('#chamado').hidden = true; });
+
+// ----- comunicado da empresa (faixa no topo; quem fecha não vê de novo o mesmo texto)
+let avisoFechado = '';
+try { avisoFechado = sessionStorage.getItem('sala3d-aviso') || ''; } catch { /* sem storage */ }
+function mostrarAviso() {
+  const aviso = state.sala?.aviso || '';
+  $('#aviso-texto').textContent = aviso;
+  $('#aviso-empresa').hidden = !aviso || aviso === avisoFechado;
+}
+$('#aviso-fechar').addEventListener('click', () => {
+  avisoFechado = state.sala?.aviso || '';
+  try { sessionStorage.setItem('sala3d-aviso', avisoFechado); } catch { /* sem storage */ }
+  mostrarAviso();
+});
+
+// ----- ir para (atalho para cada sala do escritório, com quantas pessoas há nela)
+function renderIrPara() {
+  const box = $('#sala-irpara');
+  box.hidden = !modoEscritorio() || !world.planta;
+  if (box.hidden) return;
+  const conta = {};
+  for (const u of state.users.values()) {
+    const p = posDe(u);
+    const id = world.salaEm(p.x, p.z);
+    conta[id] = (conta[id] || 0) + 1;
+  }
+  const lugares = [{ id: 'recepcao', nome: 'Recepção', cor: '#6ee7c8' }, ...world.planta.salas.map((s) => ({ id: s.id, nome: s.nome, cor: s.cor }))];
+  $('#irpara-lista').innerHTML = lugares.map((l) => {
+    const n = conta[l.id] || 0;
+    return `<button type="button" data-ir="${l.id}"><i style="--c:${l.cor}"></i><span><b>${esc(l.nome)}</b><small>${n ? `${n} ${n === 1 ? 'pessoa' : 'pessoas'}` : 'vazia'}</small></span></button>`;
+  }).join('');
+}
+$('#irpara-lista').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-ir]');
+  const alvo = b && world.planta && portaDa(world.planta, b.dataset.ir);
+  if (!alvo) return;
+  b.blur();
+  run.cancel();
+  hideParkourHud();
+  if (player.veiculo) toggleVeiculo();
+  player.teleport([alvo.pos[0] + (Math.random() - 0.5) * 1.5, 0, alvo.pos[2]], alvo.yaw);
+  if (isTouch) closePanel();
+});
+setInterval(() => { if (state.panel === 'sala') renderIrPara(); }, 3000);
+
 // a conexão caiu e voltou: o servidor esqueceu quem era dono, então prova de novo com a senha
 function reentrarComoDono() {
   state.donoDaSala = false;
+  reentrarComoGestor();
   if (!senhaDono) return renderSala();
   socket.emit('sala-entrar', { senha: senhaDono }, (r) => {
     state.donoDaSala = !!r?.ok;
@@ -1827,6 +2189,7 @@ $('#sala-criar').addEventListener('submit', (e) => {
   e.preventDefault();
   const form = e.currentTarget;
   const senha = form.elements.senha.value;
+  pedirNotificacoes();
   socket.emit('sala-dono', { senha }, (r) => {
     if (!r?.ok) return toast(r?.erro || 'Não deu para criar a senha.', 'error');
     senhaDono = senha;
@@ -1842,6 +2205,7 @@ $('#sala-entrar').addEventListener('submit', (e) => {
   e.preventDefault();
   const form = e.currentTarget;
   const senha = form.elements.senha.value;
+  pedirNotificacoes();
   socket.emit('sala-entrar', { senha }, (r) => {
     if (!r?.ok) return toast(r?.erro || 'Senha errada.', 'error');
     senhaDono = senha;
@@ -1871,6 +2235,9 @@ $('#sala-config').addEventListener('submit', (e) => {
     placar: lerPlacar(),
     clima: form.elements.clima.value,
     horario: form.elements.horario.value,
+    aviso: form.elements.aviso.value.trim(),
+    privacidade: form.elements.privacidade.checked,
+    listada: form.elements.listada.checked,
   };
   socket.emit('sala-config', cfg, (r) => {
     if (!r?.ok) return toast(r?.erro || 'Não deu para salvar.', 'error');
@@ -2246,6 +2613,8 @@ function updateVolumes() {
     if (u.isSelf) continue;
     if (u.audioEl) {
       let v = settings.voice / 100;
+      // escritório com salas à prova de som: de um departamento para fora (ou para outro), ninguém ouve
+      if (!mesmoAmbiente(u)) v = 0;
       if (settings.spatial && me) {
         const d = u.avatar.group.position.distanceTo(localAvatar.group.position);
         v *= THREE.MathUtils.clamp(1 - (d - 6) / 34, 0.1, 1);
@@ -3356,6 +3725,10 @@ function openPanel(name) {
     renderCast();
   }
   if (name === 'people') renderPeople();
+  if (name === 'sala') {
+    renderIrPara();
+    renderEquipe();
+  }
   if (name === 'settings') populateDevices();
   syncTouchVisibility();
 }

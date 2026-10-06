@@ -679,7 +679,7 @@ video.controlavel { cursor: default; }
 .moedas-chip b { font-variant-numeric: tabular-nums; }
 .moedas-chip.pulo { animation: moeda-pulo 0.6s var(--ease); }
 @keyframes moeda-pulo { 40% { transform: scale(1.35); } }
-.person-name .moedas { color: #fbbf24; font-weight: 700; margin-left: 6px; font-size: 12px; }
+.person-name .moedas { display: inline-flex; align-items: center; gap: 3px; vertical-align: middle; color: #fbbf24; font-weight: 700; margin-left: 6px; font-size: 12px; }
 
 /* mesa de dados */
 #dados-hud {
@@ -2458,3 +2458,191 @@ body.touch .salas-nova { left: 8px; right: 8px; width: auto; bottom: 60px; }
 }
 #crosshair.luneta-on { display: none; }
 body.com-luneta #controls-help, body.com-luneta #salas, body.com-luneta .room-chip { visibility: hidden; }
+
+/* ------------------------------------------------------------ empresa: presença, gestores, comunicado */
+.field textarea {
+  width: 100%;
+  min-height: 64px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line-strong);
+  background: rgba(0, 0, 0, 0.28);
+  color: inherit;
+  font: inherit;
+  resize: vertical;
+  outline: none;
+}
+.field textarea:focus { border-color: rgba(110, 231, 200, 0.6); box-shadow: 0 0 0 3px rgba(110, 231, 200, 0.15); }
+
+/* bolinha de presença no canto do avatar (lista de pessoas) */
+.pres-dot {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--s, #22c55e);
+  border: 3px solid #12151d;
+}
+.pres-dot.solto { position: static; flex: none; border: 0; width: 10px; height: 10px; }
+.tag-gestor {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgba(248, 113, 113, 0.16);
+  color: #fca5a5;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* seletor do meu status, no topo do painel Pessoas */
+.presenca {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.presenca > span:nth-child(2) { display: grid; gap: 1px; min-width: 0; flex: 1; }
+.presenca small { color: var(--muted); font-size: 11.5px; }
+.presenca select { width: auto; height: 36px; flex: none; }
+.presenca-dot { flex: none; width: 12px; height: 12px; border-radius: 50%; background: var(--s, #22c55e); box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.05); }
+
+/* onde estou (no chip da sala) */
+.onde-chip { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
+
+/* comunicado e chamado, no topo do meio */
+#topo-centro {
+  position: absolute;
+  top: 66px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  width: min(520px, calc(100vw - 32px));
+  pointer-events: none;
+}
+.aviso-empresa, .chamado {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 100%;
+  padding: 8px 8px 8px 12px;
+  border-radius: 14px;
+  background: var(--glass-strong);
+  border: 1px solid var(--line-strong);
+  backdrop-filter: blur(14px);
+  pointer-events: auto;
+  animation: rise 360ms var(--ease) both;
+}
+.aviso-empresa[hidden], .chamado[hidden] { display: none; }
+.aviso-ic { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 8px; background: rgba(110, 231, 200, 0.14); color: var(--accent); }
+.aviso-txt { display: grid; gap: 1px; min-width: 0; font-size: 13px; font-weight: 600; line-height: 1.35; }
+.aviso-txt small { color: var(--accent); font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+.chamado { border-color: rgba(110, 231, 200, 0.45); }
+.chamado .avatar-dot { width: 32px; height: 32px; flex: none; }
+.chamado-txt { display: grid; gap: 1px; min-width: 0; font-size: 13px; }
+.chamado-txt small { color: var(--muted); }
+body.touch #topo-centro { top: calc(64px + env(safe-area-inset-top)); }
+
+/* painel da sala: ir para, equipe */
+.sala-sub { margin-bottom: 16px; }
+.sala-sub h3 { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 0 0 8px; font-size: 13px; }
+.sala-sub h3 small { color: var(--muted); font-weight: 500; font-size: 12px; }
+.irpara { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.irpara button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+.irpara button:hover { background: rgba(255, 255, 255, 0.08); }
+.irpara i { flex: none; width: 10px; height: 10px; border-radius: 3px; background: var(--c); }
+.irpara span { display: grid; min-width: 0; }
+.irpara b { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.irpara small { color: var(--muted); font-size: 11px; }
+.equipe { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 4px; }
+.equipe li { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 10px; }
+.equipe li.parado { background: rgba(251, 191, 36, 0.08); }
+.equipe li > span { display: grid; min-width: 0; flex: 1; font-size: 13px; }
+.equipe li small { color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.equipe li.empty { color: var(--muted); font-size: 12.5px; }
+.equipe .icon-btn { width: 30px; height: 30px; }
+.equipe .log-titulo { margin-top: 6px; padding-bottom: 0; color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+.equipe .log { padding: 2px 8px; font-size: 12px; color: #c4cad6; gap: 6px; }
+.equipe .log time { color: var(--muted); font-variant-numeric: tabular-nums; }
+.equipe .log.parado { color: #fcd34d; }
+
+/* ------------------------------------------------------------ saguão: salas ao vivo */
+#lobby { gap: 32px; }
+.ao-vivo {
+  align-self: center;
+  margin-left: auto;
+  width: min(360px, 100%);
+  max-height: min(640px, calc(100vh - 64px));
+  display: flex;
+  flex-direction: column;
+  border-radius: 18px;
+  background: var(--glass-strong);
+  border: 1px solid var(--line);
+  backdrop-filter: blur(16px);
+  overflow: hidden;
+  animation: rise 700ms 120ms var(--ease) both;
+}
+.ao-vivo-topo { display: flex; align-items: center; gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--line); font-size: 14px; }
+.ao-vivo-topo small { margin-left: auto; color: var(--muted); font-size: 12px; }
+.ao-vivo-lista { overflow-y: auto; padding: 8px; display: grid; gap: 4px; align-content: start; }
+.ao-vivo-vazio { margin: 8px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.av-sala {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 140ms;
+}
+.av-sala:hover { background: rgba(255, 255, 255, 0.05); }
+.av-sala.on { border-color: rgba(110, 231, 200, 0.5); background: rgba(110, 231, 200, 0.07); }
+.av-sala .sala-ic { width: 40px; height: 40px; border-radius: 12px; font-size: 13px; }
+.av-info { display: grid; gap: 3px; min-width: 0; flex: 1; }
+.av-nome { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.av-nome b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14px; }
+.av-qtd { flex: none; padding: 1px 8px; border-radius: 999px; background: #23a55a; color: #fff; font-size: 11.5px; font-weight: 800; }
+.av-info > small { color: var(--muted); font-size: 12px; }
+.av-nomes { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px; }
+.av-nomes li {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 140px;
+  padding: 2px 8px 2px 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.av-nomes li i { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--c); box-shadow: 0 0 0 2px var(--s); }
+.av-nomes li.mais { padding-left: 8px; color: var(--muted); }
+@media (max-width: 860px) {
+  #lobby { flex-direction: column; align-items: stretch; }
+  .lobby-card { margin: 0 auto; }
+  .ao-vivo { margin: 0 auto; max-height: none; }
+}

@@ -342,6 +342,14 @@ export class Avatar {
     ctx.beginPath();
     ctx.arc(x0 + 38, 64, 11, 0, Math.PI * 2);
     ctx.fill();
+    // anel com a cor da presença (disponível, ocupado, em pausa...)
+    if (this.presenca) {
+      ctx.strokeStyle = this.presenca;
+      ctx.lineWidth = 6;
+      ctx.beginPath();
+      ctx.arc(x0 + 38, 64, 18, 0, Math.PI * 2);
+      ctx.stroke();
+    }
     ctx.fillStyle = '#fff';
     ctx.textBaseline = 'middle';
     ctx.fillText(label, x0 + 60, 66, 330);
@@ -613,6 +621,12 @@ export class Avatar {
       this.photo = null;
       this.setPhoto(url);
     }
+    this.drawTag();
+  }
+
+  setPresenca(cor) {
+    if (cor === this.presenca) return;
+    this.presenca = cor;
     this.drawTag();
   }
 

@@ -228,6 +228,61 @@ app.get('/config', (_req, res) => res.json({
 
 // ---------------------------------------------------------------- estado das salas
 const rooms = new Map();
+
+// presença (status) de cada pessoa; PARADO = não está trabalhando (os gestores são avisados)
+const STATUS = ['disponivel', 'ocupado', 'reuniao', 'pausa', 'almoco', 'ausente'];
+const PARADO = ['pausa', 'almoco', 'ausente'];
+const NOMES_STATUS = { disponivel: 'Disponível', ocupado: 'Ocupado', reuniao: 'Em reunião', pausa: 'Em pausa', almoco: 'No almoço', ausente: 'Ausente' };
+
+// ---------------------------------------------------------------- salas ao vivo (saguão)
+// No jeito do Discord: o saguão e a coluna de salas mostram, em tempo real, todas as salas com
+// gente agora e quem está em cada uma. Vai por Server-Sent Events (/ao-vivo): uma conexão que o
+// servidor mantém aberta e onde empurra a lista nova sempre que alguém entra, sai ou muda a sala.
+// Sala que o dono tirou da lista não aparece; sala com senha mostra só quantas pessoas, sem nomes.
+const ouvintesLobby = new Set();
+// o compression() segura o que é escrito até juntar bastante: flush() manda na hora
+const mandar = (res, txt) => { res.write(txt); res.flush?.(); };
+function salasAoVivo() {
+  const lista = [];
+  for (const room of rooms.values()) {
+    if (!room.config || !room.users.size || room.config.listada === false) continue;
+    const fechada = !!room.entradaHash;
+    lista.push({
+      id: room.id,
+      empresa: room.config.empresa || '',
+      modulo: room.config.departamentos?.length && room.config.modulo === 'escritorio' ? 'escritorio' : 'lazer',
+      pessoas: room.users.size,
+      temSenha: fechada,
+      nomes: fechada ? [] : [...room.users.values()].slice(0, 12).map((u) => ({ nome: u.name, cor: u.color, status: u.inativo ? 'inativo' : u.status })),
+    });
+  }
+  lista.sort((a, b) => b.pessoas - a.pessoas || a.id.localeCompare(b.id));
+  return { salas: lista, pessoas: lista.reduce((s, x) => s + x.pessoas, 0) };
+}
+let timerLobby = null;
+function lobbyMudou() {
+  if (timerLobby || !ouvintesLobby.size) return;
+  timerLobby = setTimeout(() => {
+    timerLobby = null;
+    const dados = `data: ${JSON.stringify(salasAoVivo())}\n\n`;
+    for (const res of ouvintesLobby) mandar(res, dados);
+  }, 400);
+}
+app.get('/ao-vivo', (req, res) => {
+  if (ouvintesLobby.size >= 2000) return res.status(503).end();
+  res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+  res.flushHeaders?.();
+  mandar(res, `retry: 4000\ndata: ${JSON.stringify(salasAoVivo())}\n\n`);
+  ouvintesLobby.add(res);
+  // comentário a cada 25 s: proxies (Render, Caddy) não derrubam a conexão parada
+  const vivo = setInterval(() => mandar(res, ': ping\n\n'), 25000);
+  req.on('close', () => {
+    clearInterval(vivo);
+    ouvintesLobby.delete(res);
+  });
+});
+
+
 // Os placares vivem fora da sala de propósito: a sala é apagada 30 min depois de
 // esvaziar, e junto iam embora os recordes. Assim eles duram enquanto o processo viver.
 // (No plano grátis do Render o serviço reinicia quando fica ocioso, e aí zeram.)
@@ -288,6 +343,9 @@ const configPadrao = () => ({
   placar: { titulo: 'Metas do mês', itens: [] },
   clima: 'auto',
   horario: 'ciclo',
+  aviso: '', // comunicado da empresa: faixa no topo para todo mundo
+  privacidade: true, // escritório: voz só dentro da mesma sala de departamento
+  listada: true, // aparece na lista de salas ao vivo do saguão
 });
 
 // o que vier do cliente (ou do banco) passa por aqui antes de valer
@@ -305,6 +363,9 @@ function limparConfig(raw, base = configPadrao()) {
     empresa: typeof c.empresa === 'string' ? cleanText(c.empresa, 40) : base.empresa,
     clima: CLIMAS_SALA.includes(c.clima) ? c.clima : base.clima || 'auto',
     horario: HORARIOS_SALA.includes(c.horario) ? c.horario : base.horario || 'ciclo',
+    aviso: typeof c.aviso === 'string' ? cleanText(c.aviso, 200) : base.aviso ?? '',
+    privacidade: typeof c.privacidade === 'boolean' ? c.privacidade : base.privacidade ?? true,
+    listada: typeof c.listada === 'boolean' ? c.listada : base.listada ?? true,
     placar: c.placar === undefined ? base.placar : {
       titulo: cleanText(placar.titulo, 40) || 'Metas do mês',
       itens: (Array.isArray(placar.itens) ? placar.itens : []).slice(0, 12).map((it) => ({
@@ -322,20 +383,22 @@ function carregarSala(room) {
     room.config = limparConfig(s?.config || {});
     room.senhaHash = s?.senhaHash || null;
     room.entradaHash = s?.config?.entradaHash || null; // vem junto da config, mas não vai para ninguém
+    room.gestorHash = s?.config?.gestorHash || null; // senha de gestor (alertas da equipe), idem
     ajustarTelas(room); // cada departamento do escritório tem as suas telas
   }).catch((err) => {
     console.warn('[banco] lendo sala', room.id, err.code || err.message);
     room.config = configPadrao();
     room.senhaHash = null;
     room.entradaHash = null;
+    room.gestorHash = null;
     room.carregando = null; // tenta ler de novo na próxima entrada
   });
   return room.carregando;
 }
 
-const salaPublica = (room) => ({ ...room.config, temDono: !!room.senhaHash, temSenha: !!room.entradaHash });
+const salaPublica = (room) => ({ ...room.config, temDono: !!room.senhaHash, temSenha: !!room.entradaHash, temGestor: !!room.gestorHash });
 // a senha de entrada viaja dentro do JSON da config (sem mudar a tabela); a pública não a leva
-const guardarSala = (room) => banco.salvarSala(room.id, { ...room.config, entradaHash: room.entradaHash || undefined }, room.senhaHash);
+const guardarSala = (room) => banco.salvarSala(room.id, { ...room.config, entradaHash: room.entradaHash || undefined, gestorHash: room.gestorHash || undefined }, room.senhaHash);
 const idDaSala = (raw) => cleanText(raw, 40).toLowerCase().replace(/[^a-z0-9-_]/g, '') || 'principal';
 
 // Senha de entrada (opcional). Quem acerta recebe um "passe" — o HMAC da sala com a senha atual —
@@ -589,6 +652,7 @@ function publicUser(u) {
     id: u.id, name: u.name, color: u.color, mic: u.mic,
     shares: [...u.shares.values()],
     posto: u.posto,
+    status: u.status, inativo: u.inativo, gestor: u.gestor, desde: u.statusDesde,
     p: u.p, r: u.r, a: u.a, photo: u.photo, shirt: u.shirt, char: u.char, arma: u.arma, health: u.health, ko: u.ko, moedas: u.moedas,
   };
 }
@@ -766,6 +830,12 @@ function encaixarSemTela(room) {
 }
 
 function attachSockets(io) {
+  // alerta para os gestores que estão na sala (menos a própria pessoa)
+  function avisarGestores(room, user, tipo, texto) {
+    for (const u of room.users.values()) {
+      if (u.gestor && u.id !== user.id) io.to(u.id).emit('alerta-gestor', { tipo, texto, id: user.id, nome: user.name, cor: user.color });
+    }
+  }
   io.on('connection', (socket) => {
     let room = null;
     let user = null;
@@ -802,6 +872,11 @@ function attachSockets(io) {
         ko: false,
         ultimoDado: 0,
         posto: null, // posto de trabalho do escritório ("ti-3"), se sentou num
+        status: STATUS.includes(data?.status) ? data.status : 'disponivel', // presença escolhida
+        inativo: false, // sem mexer em nada há um tempo (o navegador avisa)
+        statusDesde: Date.now(),
+        gestor: false, // provou a senha de gestor (ou de dono): recebe os alertas da equipe
+        ultimoChamado: 0,
         p: [0, 0, -4], r: Math.PI, a: 0,
       };
       user.moedas = saldoDe(user.name);
@@ -824,6 +899,8 @@ function attachSockets(io) {
         passe: room.entradaHash ? passeDa(room) : null,
       });
       socket.to(roomId).emit('user-joined', publicUser(user));
+      avisarGestores(room, user, 'entrou', `${user.name} entrou no sistema`);
+      lobbyMudou();
     });
 
     // ---------------------------------------------------------- dono da sala
@@ -847,6 +924,7 @@ function attachSockets(io) {
         return r({ ok: false, erro: 'Não deu para guardar a senha agora. Tente de novo.' });
       }
       dono = true;
+      virarGestor();
       r({ ok: true });
       io.to(room.id).emit('sala', salaPublica(room));
     });
@@ -858,7 +936,73 @@ function attachSockets(io) {
       const { senha } = obj(msg);
       if (!senhaValida(senha) || !confereSenha(senha, room.senhaHash)) return r({ ok: false, erro: 'Senha errada.' });
       dono = true;
+      virarGestor();
       r({ ok: true });
+    });
+
+    // Gestores: quem tem a senha de gestor (ou é o dono) recebe os alertas da equipe — quem ficou
+    // ausente, inativo, em pausa, voltou, entrou ou saiu do sistema.
+    function virarGestor() {
+      if (!user || user.gestor) return;
+      user.gestor = true;
+      io.to(room.id).emit('user-update', { id: user.id, gestor: true });
+    }
+    socket.on('sala-gestor', (msg, ack) => {
+      const r = resposta(ack);
+      if (!room?.gestorHash) return r({ ok: false, erro: 'O dono ainda não criou a senha de gestor.' });
+      if (!podeTentar(ipDe())) return r({ ok: false, erro: 'Muitas tentativas. Espere alguns minutos.' });
+      const { senha } = obj(msg);
+      if (typeof senha !== 'string' || senha.length > 100 || !confereSenha(senha, room.gestorHash)) return r({ ok: false, erro: 'Senha de gestor errada.' });
+      virarGestor();
+      r({ ok: true });
+    });
+    socket.on('sala-gestor-senha', async (msg, ack) => {
+      const r = resposta(ack);
+      if (!room || !dono) return r({ ok: false, erro: 'Só o dono da sala muda isso.' });
+      const { senha } = obj(msg);
+      if (senha && (typeof senha !== 'string' || senha.length < 4 || senha.length > 100)) {
+        return r({ ok: false, erro: 'A senha de gestor precisa ter pelo menos 4 caracteres.' });
+      }
+      const antes = room.gestorHash;
+      room.gestorHash = senha ? hashSenha(senha) : null;
+      try {
+        await guardarSala(room);
+      } catch (err) {
+        room.gestorHash = antes;
+        console.warn('[banco] senha de gestor', err.code || err.message);
+        return r({ ok: false, erro: 'Não deu para guardar agora. Tente de novo.' });
+      }
+      r({ ok: true });
+      io.to(room.id).emit('sala', { ...salaPublica(room), por: user.name });
+      lobbyMudou();
+    });
+
+    // presença: status escolhido (disponível, ocupado...) e se está inativo (sem mexer em nada)
+    socket.on('status', (msg) => {
+      if (!user) return;
+      const m = obj(msg);
+      const status = STATUS.includes(m.status) ? m.status : user.status;
+      const inativo = typeof m.inativo === 'boolean' ? m.inativo : user.inativo;
+      if (status === user.status && inativo === user.inativo) return;
+      const parado = (u) => u.inativo || PARADO.includes(u.status);
+      const antes = parado(user);
+      user.status = status;
+      user.inativo = inativo;
+      user.statusDesde = Date.now();
+      io.to(room.id).emit('user-update', { id: user.id, status, inativo, desde: user.statusDesde });
+      const agora = parado(user);
+      lobbyMudou();
+      if (agora) avisarGestores(room, user, 'parado', `${user.name} ${inativo ? 'está inativo (sem mexer há 10 min)' : `ficou "${NOMES_STATUS[status]}"`}`);
+      else if (antes) avisarGestores(room, user, 'voltou', `${user.name} voltou a trabalhar`);
+    });
+
+    // chamar alguém (o "toque no ombro"): o outro recebe um aviso com "Ir até"
+    socket.on('chamar', (para) => {
+      if (!user || !room.users.has(para) || para === user.id) return;
+      const agora = Date.now();
+      if (agora - user.ultimoChamado < 4000) return;
+      user.ultimoChamado = agora;
+      io.to(para).emit('chamado', { id: user.id, nome: user.name, cor: user.color });
     });
 
     socket.on('sala-config', async (msg, ack) => {
@@ -875,6 +1019,7 @@ function attachSockets(io) {
       }
       r({ ok: true });
       io.to(room.id).emit('sala', { ...salaPublica(room), por: user.name });
+      lobbyMudou();
       // outro modo ou outros departamentos, outras telas: quem mudou de tela fica sabendo
       const postos = new Map([...room.users.values()].map((u) => [u.id, u.posto]));
       const mudaram = ajustarTelas(room, layoutTelas(antes));
@@ -933,6 +1078,7 @@ function attachSockets(io) {
       // quem já está dentro continua podendo voltar (recarregar, reconectar) sem digitar nada
       io.to(room.id).emit('passe', room.entradaHash ? passeDa(room) : null);
       io.to(room.id).emit('sala', { ...salaPublica(room), por: user.name });
+      lobbyMudou();
     });
 
     socket.on('state', (s) => {
@@ -1416,6 +1562,8 @@ function attachSockets(io) {
       const hadSlot = freeShares(room, user).length > 0;
       room.users.delete(user.id);
       io.to(room.id).emit('user-left', { id: user.id });
+      avisarGestores(room, user, 'saiu', `${user.name} saiu do sistema`);
+      lobbyMudou();
       for (const mesa of levantarDeTudo(room, user.id)) io.to(room.id).emit('jogo', { mesa, ...jogoPublico(room.jogos[mesa]) });
       if (hadSlot) {
         const t = encaixarSemTela(room);

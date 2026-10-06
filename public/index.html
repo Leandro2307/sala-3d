@@ -48,9 +48,26 @@
       <span id="room-count">1 pessoa</span>
       <span class="sep">·</span>
       <span class="clima-chip" id="clima-chip" title="Clima e hora na sala"></span>
+      <span class="sep onde" hidden>·</span>
+      <span class="onde-chip onde" id="onde-chip" hidden title="Onde você está no escritório"></span>
       <span class="sep">·</span>
       <span class="moedas-chip" id="moedas-chip" title="Suas moedas"><i data-icon="moeda" data-size="15"></i><b id="moedas-n">0</b></span>
       <button id="copy-invite" class="chip-btn" type="button"><i data-icon="link" data-size="15"></i>Copiar convite</button>
+    </div>
+
+    <!-- topo, no meio: comunicado da empresa e "fulano está te chamando" (ver "empresa" no main.js) -->
+    <div id="topo-centro">
+      <div class="aviso-empresa" id="aviso-empresa" hidden>
+        <span class="aviso-ic"><i data-icon="predio" data-size="16"></i></span>
+        <span class="aviso-txt"><small>Comunicado</small><span id="aviso-texto"></span></span>
+        <button type="button" class="icon-btn" id="aviso-fechar" aria-label="Fechar o comunicado"><i data-icon="x" data-size="14"></i></button>
+      </div>
+      <div class="chamado" id="chamado" hidden>
+        <span class="avatar-dot" id="chamado-dot"></span>
+        <span class="chamado-txt"><b id="chamado-nome"></b><small>está te chamando</small></span>
+        <button type="button" class="primary small" id="chamado-ir"><i data-icon="goto" data-size="16"></i>Ir até</button>
+        <button type="button" class="icon-btn" id="chamado-fechar" aria-label="Agora não"><i data-icon="x" data-size="14"></i></button>
+      </div>
     </div>
 
     <div id="fps" hidden></div>
@@ -306,6 +323,12 @@
         </div>
         <button type="button" class="secondary small" id="copy-invite-2"><i data-icon="copy" data-size="16"></i>Copiar</button>
       </div>
+      <!-- presença: todo mundo vê; "Em pausa", "No almoço" e "Ausente" avisam os gestores -->
+      <label class="presenca">
+        <span class="presenca-dot" id="meu-status-dot"></span>
+        <span><b>Seu status</b><small id="meu-status-sub">Os outros veem ao lado do seu nome</small></span>
+        <select id="meu-status" aria-label="Seu status"></select>
+      </label>
       <ul class="people" id="people-list"></ul>
     </section>
 
@@ -465,6 +488,25 @@
     <!-- sala da empresa: o dono escolhe ambiente, jogos e nome (ver "sala da empresa" no main.js) -->
     <section data-section="sala">
       <div class="sala-resumo" id="sala-resumo"></div>
+      <!-- escritório: atalho para cada sala, com quantas pessoas há em cada uma (todo mundo vê) -->
+      <div class="sala-sub" id="sala-irpara" hidden>
+        <h3>Ir para</h3>
+        <div class="irpara" id="irpara-lista"></div>
+      </div>
+      <!-- gestores: quem não está trabalhando agora (pausa, almoço, ausente, inativo) -->
+      <div class="sala-sub" id="sala-equipe" hidden>
+        <h3>Equipe agora <small id="equipe-resumo"></small></h3>
+        <ul class="equipe" id="equipe-lista"></ul>
+        <label class="toggle-row compact">
+          <span><b>Alertas da equipe</b><small>Aviso quando alguém pausa, fica inativo, volta, entra ou sai</small></span>
+          <input type="checkbox" id="alertas-gestor" class="switch" checked>
+        </label>
+      </div>
+      <form class="sala-acesso" id="sala-gestor" hidden autocomplete="off">
+        <p class="hint">É gestor? Entre com a senha de gestor para ver a equipe e receber os alertas de quem pausou, ficou inativo ou saiu.</p>
+        <label class="field"><span>Senha de gestor</span><input type="password" name="senha" maxlength="100" autocomplete="current-password" required></label>
+        <button type="submit" class="secondary block">Entrar como gestor</button>
+      </form>
       <form class="sala-acesso" id="sala-criar" hidden autocomplete="off">
         <p class="hint">Esta sala ainda não tem dono. Quem criar a senha passa a escolher o ambiente, os jogos e o nome da empresa — para todo mundo que entrar.</p>
         <label class="field"><span>Crie a senha de dono</span><input type="password" name="senha" minlength="6" maxlength="100" autocomplete="new-password" placeholder="Pelo menos 6 caracteres" required></label>
@@ -476,12 +518,21 @@
       </form>
       <form id="sala-config" hidden autocomplete="off">
         <label class="field"><span>Nome da empresa</span><input name="empresa" maxlength="40" placeholder="Aparece no topo da sala"></label>
+        <label class="field"><span>Comunicado <small class="opt">(faixa no topo para todo mundo)</small></span><textarea name="aviso" maxlength="200" rows="2" placeholder="Ex.: Reunião geral às 15h na sala de Reunião"></textarea></label>
         <div class="field">
           <span>Ambiente</span>
           <div class="modulos" id="sala-modulos"></div>
           <small class="hint" id="deptos-hint" hidden>Marque os departamentos da empresa: cada um vira uma sala com a cara do setor, e elas se encaixam dos dois lados de um corredor, com a recepção na entrada.</small>
           <div class="deptos" id="sala-deptos" hidden></div>
+          <label class="toggle-row compact" id="campo-privacidade" hidden>
+            <span><b>Salas à prova de som</b><small>Dentro de um departamento, só quem está na mesma sala ouve a conversa</small></span>
+            <input type="checkbox" name="privacidade" class="switch">
+          </label>
         </div>
+        <label class="toggle-row compact">
+          <span><b>Aparecer nas salas ao vivo</b><small>Mostra a sala e quem está nela na tela de entrada (com senha, só a quantidade)</small></span>
+          <input type="checkbox" name="listada" class="switch">
+        </label>
         <div class="field">
           <span>Clima e hora <small class="opt">(todo mundo vê igual)</small></span>
           <div class="clima-linha">
@@ -512,6 +563,18 @@
             <button type="button" class="secondary small" id="entrada-salvar">Pôr senha</button>
           </div>
           <button type="button" class="ghost-btn small" id="entrada-tirar" hidden>Tirar a senha e abrir a sala</button>
+        </div>
+        <!-- senha de gestor: também vale na hora -->
+        <div class="sala-bloco">
+          <div class="sala-bloco-topo">
+            <span class="sala-bloco-ic"><i data-icon="users" data-size="16"></i></span>
+            <span><b>Senha de gestor</b><small id="gestor-status">Sem senha: só você recebe os alertas da equipe.</small></span>
+          </div>
+          <div class="senha-linha">
+            <input type="password" name="gestorSenha" maxlength="100" autocomplete="new-password" placeholder="Senha dos gestores (4+ caracteres)">
+            <button type="button" class="secondary small" id="gestor-salvar">Criar</button>
+          </div>
+          <button type="button" class="ghost-btn small" id="gestor-tirar" hidden>Tirar a senha de gestor</button>
         </div>
         <details class="sala-bloco sala-senha">
           <summary><span class="sala-bloco-ic"><i data-icon="settings" data-size="16"></i></span><b>Trocar a senha de dono</b><i data-icon="chevron" data-size="16" class="sala-seta"></i></summary>
@@ -787,6 +850,16 @@
       <p class="lobby-note" id="lobby-note">Para mandar o som da tela, marque <b>“Compartilhar áudio”</b> quando o navegador perguntar.</p>
       <p class="lobby-note" id="lobby-note-touch" hidden>No celular você anda com o <b>analógico</b>, olha <b>arrastando o dedo</b> e fala pelo microfone. Só o <b>compartilhar tela</b> exige um computador.</p>
     </form>
+
+    <!-- salas com gente agora, em tempo real (ver /ao-vivo no server.js e aovivo.js) -->
+    <aside class="ao-vivo" id="ao-vivo" aria-label="Salas ao vivo">
+      <div class="ao-vivo-topo">
+        <span class="live-dot"></span>
+        <b>Ao vivo agora</b>
+        <small id="ao-vivo-resumo">Conectando…</small>
+      </div>
+      <div class="ao-vivo-lista" id="ao-vivo-lista"></div>
+    </aside>
   </div>
 
   <div id="reconnecting" hidden><div class="spinner"></div>Reconectando…</div>

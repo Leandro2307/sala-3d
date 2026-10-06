@@ -612,8 +612,218 @@ function salaReuniao(m) {
   return {};
 }
 
+// ------------------------------------------------------------------ salas de equipe
+// Financeiro, RH, Marketing e Gestão têm a mesma base: telas na parede do fundo e bancadas com
+// 2 postos cada (3 monitores por posto). O que muda é a cor, o piso e o que vai nas paredes.
+function salaEquipe(m, { piso, parede, faixa, luz, telas, bancadas, madeira = 0xd6d3d1, cadeira = 0x1f2937 }) {
+  const { g } = m;
+  vestirSala(m, { piso, parede, faixa, luz, intensidade: 55 });
+  const xs = telas === 4 ? [-8.1, -2.7, 2.7, 8.1] : [-5, 5];
+  for (const lx of xs) m.tela(lx, 3.1, -m.D + 0.25, 0, 4.6, 2.59);
+  const tampo = mat(madeira, { roughness: 0.5 });
+  const pe = mat(0xf3f4f6, { roughness: 0.6 });
+  const monitores = [];
+  const cadeiras = [];
+  let n = 0;
+  for (const [lx, lz] of bancadas) {
+    for (const dx of [-2.2, 2.2]) {
+      const mons = tresMonitores(lx + dx, lz - 0.3, 1.56, 0.95);
+      monitores.push(...mons);
+      cadeiras.push([lx + dx, lz + 1.3]);
+      m.posto(n++, { x: lx + dx, z: lz + 1.3, y: 0.62 }, mons);
+    }
+    m.bloco([lx - 4.5, 0, lz - 0.65], [lx + 4.5, 1.05, lz + 0.65], { data: { type: 'mesa' } });
+  }
+  repetir(g, [
+    { geo: new RoundedBoxGeometry(9, 0.08, 1.3, 2, 0.03), mat: tampo, pos: [0, 1.0, 0] },
+    { geo: new THREE.BoxGeometry(8.9, 0.95, 0.06), mat: pe, pos: [0, 0.5, -0.6] },
+    { geo: new THREE.BoxGeometry(0.06, 0.95, 1.26), mat: pe, pos: [-4.45, 0.5, 0] },
+    { geo: new THREE.BoxGeometry(0.06, 0.95, 1.26), mat: pe, pos: [4.45, 0.5, 0] },
+    { geo: new THREE.BoxGeometry(9, 0.04, 0.04), mat: brilho(faixa), pos: [0, 0.97, 0.66], sombra: false },
+  ], bancadas);
+  molduras(g, monitores, mat(0x111827, { roughness: 0.4 }));
+  repetir(g, partesCadeira({ tecido: mat(cadeira, { roughness: 0.7 }), metal: mat(0xa1a1aa, { roughness: 0.3, metalness: 0.7 }), encosto: 0.9 }), cadeiras);
+  for (const [lx, lz] of cadeiras) m.bloco([lx - 0.32, 0, lz - 0.32], [lx + 0.32, 0.6, lz + 0.32], { data: { type: 'sofa' } });
+}
+
+// quadro grande na parede da direita (olhando para dentro da sala)
+function quadroDireita(m, q, w = 7.6, h = 4.28) {
+  caixa(m.g, [0.15, h + 0.3, w + 0.4], [m.W - 0.25, 3.3, -1], mat(0x111827));
+  plano(m.g, [w, h], [m.W - 0.34, 3.3, -1], new THREE.MeshBasicMaterial({ map: q.tex, toneMapped: false }), [0, -Math.PI / 2, 0]);
+}
+
+function salaFinanceiro(m) {
+  const { g, W, D } = m;
+  salaEquipe(m, { piso: mat(0x1f2a2a, { roughness: 1 }), parede: 0xe6ece8, faixa: 0x34d399, luz: 0xeafff5, telas: 2, bancadas: [[-6.5, -1.5], [6.5, -1.5], [-6.5, 4.5], [6.5, 4.5]], madeira: 0x9ca3af, cadeira: 0x064e3b });
+  // painel de indicadores (gráfico de barras ilustrativo do mês)
+  const ind = quadro(1280, 720, (ctx, w, h) => {
+    ctx.fillStyle = '#0b1512';
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = '#34d399';
+    ctx.fillRect(0, 0, w, 12);
+    ctx.fillStyle = '#ecfdf5';
+    ctx.font = `800 60px ${FONTE}`;
+    ctx.fillText('Indicadores do mês', 56, 100);
+    const barras = [0.42, 0.55, 0.48, 0.66, 0.72, 0.61, 0.8, 0.86, 0.78, 0.92];
+    const bw = (w - 160) / barras.length;
+    barras.forEach((v, i) => {
+      ctx.fillStyle = i === barras.length - 1 ? '#34d399' : 'rgba(52,211,153,0.45)';
+      ctx.fillRect(80 + i * bw + 10, h - 80 - v * (h - 220), bw - 20, v * (h - 220));
+    });
+    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+    ctx.beginPath();
+    ctx.moveTo(70, h - 78);
+    ctx.lineTo(w - 70, h - 78);
+    ctx.stroke();
+  });
+  quadroDireita(m, ind);
+  // cofre perto da porta, na parede da esquerda
+  const aco = mat(0x52525b, { roughness: 0.35, metalness: 0.8 });
+  caixa(g, [1.2, 1.5, 1.1], [-W + 1, 0.75, D - 3], aco);
+  const roda = new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.04, 8, 20), mat(0xd4d4d8, { metalness: 0.9, roughness: 0.2 }));
+  roda.position.set(-W + 1.62, 0.85, D - 3);
+  roda.rotation.y = Math.PI / 2;
+  g.add(roda);
+  m.bloco([-W + 0.3, 0, D - 3.6], [-W + 1.7, 1.5, D - 2.4]);
+  plantas(g, [[-W + 1.2, -D + 1.2], [W - 1.2, -D + 1.2], [W - 1.2, D - 1.6]]);
+  return {};
+}
+
+function salaRH(m) {
+  const { g, W, D } = m;
+  salaEquipe(m, { piso: mat(0x3b2f2a, { roughness: 1 }), parede: 0xf3e8dc, faixa: 0xfb923c, luz: 0xfff1e2, telas: 2, bancadas: [[-6.5, -2], [6.5, -2], [-6.5, 4.5]], madeira: 0xc8a27a, cadeira: 0x7c2d12 });
+  // cantinho de conversa (1:1, entrevistas): dois sofás frente a frente com mesinha
+  sofa(g, 0xea8a4a, [[6.5, 3.4, Math.PI], [6.5, 8.2, 0]]);
+  caixa(g, [1.6, 0.42, 1], [6.5, 0.21, 5.8], mat(0x3b2618, { roughness: 0.4 }));
+  m.bloco([4.9, 0, 2.85], [8.1, 0.8, 3.95], { data: { type: 'sofa' } });
+  m.bloco([4.9, 0, 7.65], [8.1, 0.8, 8.75], { data: { type: 'sofa' } });
+  lugaresDoSofa(6.5, 3.4, Math.PI, (lx, lz) => m.assento(lx, lz, 0.8, Math.PI));
+  lugaresDoSofa(6.5, 8.2, 0, (lx, lz) => m.assento(lx, lz, 0.8, 0));
+  // mural da equipe
+  const mural = quadro(1280, 720, (ctx, w, h) => {
+    ctx.fillStyle = '#c69c6d';
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = '#fff7ed';
+    ctx.font = `800 64px ${FONTE}`;
+    ctx.fillText('Mural da equipe', 56, 100);
+    const notas = ['Boas-vindas aos novos!', 'Aniversariantes do mês', 'Benefícios: fale com o RH', 'Feedback é presente', 'Pesquisa de clima aberta', 'Treinamentos da semana'];
+    const cores = ['#fde68a', '#bbf7d0', '#bfdbfe', '#fbcfe8', '#fed7aa', '#ddd6fe'];
+    notas.forEach((t, i) => {
+      const x = 56 + (i % 3) * 400;
+      const y = 160 + Math.floor(i / 3) * 260;
+      ctx.save();
+      ctx.translate(x + 170, y + 110);
+      ctx.rotate(((i * 37) % 7 - 3) * 0.012);
+      ctx.fillStyle = cores[i];
+      ctx.fillRect(-170, -110, 340, 220);
+      ctx.fillStyle = '#1f2937';
+      ctx.font = `700 34px ${FONTE}`;
+      ctx.fillText(t, -150, -40, 300);
+      ctx.restore();
+    });
+  });
+  quadroDireita(m, mural, 6.4, 3.6);
+  plantas(g, [[-W + 1.2, -D + 1.2], [W - 1.2, -D + 1.2], [-W + 1.2, D - 1.6]]);
+  return {};
+}
+
+function salaMarketing(m) {
+  const { g, W, D } = m;
+  salaEquipe(m, { piso: mat(0x2a2236, { roughness: 1 }), parede: 0xf5f0fa, faixa: 0xe879f9, luz: 0xfdf0ff, telas: 4, bancadas: [[-6.5, -1.5], [6.5, -1.5], [-6.5, 4.5], [6.5, 4.5]], madeira: 0xf5f5f4, cadeira: 0x86198f });
+  // parede criativa: faixas coloridas na parede da esquerda
+  const cores = [0xe879f9, 0x38bdf8, 0xfbbf24, 0x34d399, 0xf87171];
+  cores.forEach((c, i) => caixa(g, [0.05, 0.5, D * 2 - 1], [-W + 0.2, 1.2 + i * 0.75, 0], mat(c, { roughness: 0.9 }), { sombra: false }));
+  // quadro de ideias com post-its
+  const ideias = quadro(1280, 720, (ctx, w, h) => {
+    ctx.fillStyle = '#f8fafc';
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = '#86198f';
+    ctx.font = `800 60px ${FONTE}`;
+    ctx.fillText('Quadro de ideias', 56, 96);
+    const pc = ['#fde047', '#f9a8d4', '#93c5fd', '#86efac', '#fdba74'];
+    const t = ['Campanha', 'Reels', 'Lançamento', 'Parcerias', 'Blog', 'E-mail', 'Evento', 'Promo', 'Persona', 'Funil', 'Anúncios', 'Pesquisa'];
+    t.forEach((x, i) => {
+      const cx = 70 + (i % 6) * 200;
+      const cy = 150 + Math.floor(i / 6) * 260 + (i % 2) * 30;
+      ctx.fillStyle = pc[i % pc.length];
+      ctx.fillRect(cx, cy, 170, 170);
+      ctx.fillStyle = '#111827';
+      ctx.font = `700 30px ${FONTE}`;
+      ctx.fillText(x, cx + 14, cy + 90, 145);
+    });
+  });
+  quadroDireita(m, ideias);
+  plantas(g, [[W - 1.2, -D + 1.2], [W - 1.2, D - 1.6]]);
+  return {};
+}
+
+// Gestão: painel da equipe ao vivo — quem está trabalhando, em pausa, inativo — e 4 postos
+const COR_STATUS = { disponivel: '#22c55e', ocupado: '#ef4444', reuniao: '#a78bfa', pausa: '#fbbf24', almoco: '#fb923c', ausente: '#94a3b8', inativo: '#64748b' };
+function salaGestao(m) {
+  const { g, W, D } = m;
+  salaEquipe(m, { piso: mat(0x2b1f22, { roughness: 1 }), parede: 0xe7e2df, faixa: 0xf87171, luz: 0xfff3ef, telas: 2, bancadas: [[-6.5, -1], [6.5, -1]], madeira: 0x5b3a26, cadeira: 0x111827 });
+  // mesa redonda para alinhamentos, no fundo da sala perto da porta
+  const tampo = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.4, 0.08, 32), mat(0x3b2618, { roughness: 0.35 }));
+  tampo.position.set(-5.5, 1.0, 6.5);
+  tampo.castShadow = true;
+  g.add(tampo);
+  caixa(g, [0.3, 0.95, 0.3], [-5.5, 0.48, 6.5], mat(0x1f2937));
+  m.bloco([-6.9, 0, 5.1], [-4.1, 1.05, 7.9], { data: { type: 'mesa' } });
+  const cadeiras = [];
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+    const x = -5.5 + Math.cos(a) * 2.1;
+    const z = 6.5 + Math.sin(a) * 2.1;
+    const ry = Math.atan2(x + 5.5, z - 6.5);
+    cadeiras.push([x, z, ry]);
+    m.bloco([x - 0.32, 0, z - 0.32], [x + 0.32, 0.6, z + 0.32], { data: { type: 'sofa' } });
+    m.assento(x, z, 0.6, ry);
+  }
+  repetir(g, partesCadeira({ tecido: mat(0x7f1d1d, { roughness: 0.8 }), metal: mat(0x374151, { roughness: 0.35, metalness: 0.6 }) }), cadeiras);
+  const painelEquipe = quadro(1280, 768, (ctx, w, h, pessoas = [], rodape = '') => {
+    ctx.fillStyle = '#140d0f';
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = '#f87171';
+    ctx.fillRect(0, 0, w, 12);
+    ctx.fillStyle = '#fef2f2';
+    ctx.font = `800 58px ${FONTE}`;
+    ctx.fillText('Painel da equipe', 56, 96);
+    ctx.fillStyle = '#a8a29e';
+    ctx.font = `600 30px ${FONTE}`;
+    ctx.fillText(rodape, 56, 140);
+    if (!pessoas.length) return;
+    const col = pessoas.length > 8 ? 2 : 1;
+    const linhas = Math.ceil(pessoas.length / col);
+    const lh = Math.min(70, (h - 200) / linhas);
+    pessoas.slice(0, 20).forEach((p, i) => {
+      const x = 56 + Math.floor(i / linhas) * ((w - 80) / col);
+      const y = 190 + (i % linhas) * lh;
+      ctx.fillStyle = COR_STATUS[p.status] || '#22c55e';
+      ctx.beginPath();
+      ctx.arc(x + 14, y + lh * 0.35, Math.min(14, lh * 0.22), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#f5f5f4';
+      ctx.font = `700 ${Math.round(lh * 0.42)}px ${FONTE}`;
+      ctx.fillText(p.nome, x + 42, y + lh * 0.5, 260);
+      ctx.fillStyle = '#a8a29e';
+      ctx.font = `600 ${Math.round(lh * 0.34)}px ${FONTE}`;
+      ctx.fillText(p.texto, x + 300, y + lh * 0.5, (w - 80) / col - 320);
+    });
+  });
+  quadroDireita(m, painelEquipe);
+  plantas(g, [[-W + 1.2, -D + 1.2], [W - 1.2, -D + 1.2], [W - 1.2, D - 1.6]]);
+  return { equipe: (pessoas, rodape) => painelEquipe.redesenhar(pessoas, rodape) };
+}
+
 // ------------------------------------------------------------------ lounge (vaga sem departamento)
-function lounge(m) {
+// O Descanso é o mesmo lounge, com placa própria e uma TV em cima do balcão do café.
+function salaDescanso(m) {
+  lounge(m, 'Descanso');
+  m.tela(-3, 3.25, -m.D + 0.25, 0, 4.4, 2.48);
+  return {};
+}
+
+function lounge(m, sub = 'Lounge') {
   const { g, W, D } = m;
   plano(g, [W * 2, D * 2], [0, 0.02, 0], mat(0x8a7560, { roughness: 0.7 }), [-Math.PI / 2, 0, 0]);
   const tapete = new THREE.Mesh(new THREE.CircleGeometry(1, 40), mat(0x2f3b52, { roughness: 1 }));
@@ -632,7 +842,7 @@ function lounge(m) {
   caixa(g, [8, 1.05, 0.9], [0, 0.52, -D + 0.75], mat(0xe5e7eb, { roughness: 0.5 }));
   caixa(g, [0.6, 0.7, 0.5], [-2, 1.4, -D + 0.75], mat(0x111827, { roughness: 0.3, metalness: 0.5 }));
   m.bloco([-4, 0, -D + 0.3], [4, 1.05, -D + 1.2]);
-  const cafe = placa('Café', '#a16207', { sub: 'Lounge' });
+  const cafe = placa('Café', '#a16207', { sub });
   plano(g, [4, 1], [2.5, 2.6, -D + 0.2], new THREE.MeshBasicMaterial({ map: cafe.tex, toneMapped: false }));
   plantas(g, [[-W + 1.2, -D + 1.2], [W - 1.2, -D + 1.2], [-W + 1.2, D - 1.6], [W - 1.2, D - 1.6]]);
   const l = new THREE.PointLight(0xffe8c7, 45, 28, 1.4);
@@ -641,7 +851,10 @@ function lounge(m) {
   return {};
 }
 
-const SALAS = { ti: salaTI, comercial: salaComercial, telemarketing: salaTelemarketing, reuniao: salaReuniao };
+const SALAS = {
+  ti: salaTI, comercial: salaComercial, telemarketing: salaTelemarketing, reuniao: salaReuniao,
+  financeiro: salaFinanceiro, rh: salaRH, marketing: salaMarketing, gestao: salaGestao, descanso: salaDescanso,
+};
 
 // ------------------------------------------------------------------ prédio
 export function construirEscritorio(world, p, { empresa = '' } = {}) {
@@ -754,6 +967,8 @@ export function construirEscritorio(world, p, { empresa = '' } = {}) {
     porta: new THREE.Box3(new THREE.Vector3(maxX - 1, 0, c0), new THREE.Vector3(maxX + 1, 3.6, c1)),
     placar: (dados) => salas.comercial?.placar(dados),
     tocarSino: () => salas.comercial?.tocarSino(),
+    // painel da sala de Gestão: [{ nome, status, texto }]
+    equipe: (pessoas, rodape) => salas.gestao?.equipe(pessoas, rodape),
     status(info) {
       salas.ti?.status({ ...info, pessoas: info.porSala?.ti ?? 0, telas: info.telasPorSala?.ti ?? 0 });
       salas.telemarketing?.central.redesenhar([

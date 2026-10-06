@@ -1,7 +1,9 @@
 // Lista lateral de salas, no jeito do Discord: uma coluna de ícones com as salas que a pessoa já
 // visitou (guardadas neste navegador), quantas pessoas há em cada uma agora e, passando o mouse,
 // quem está lá. Um clique troca de sala; o "+" entra numa sala nova pelo nome.
-// Os números vêm do /salas-status do server.js, consultado de tempos em tempos.
+// Os números vêm do /ao-vivo (aovivo.js, em tempo real) e do /salas-status (as salas com senha de
+// que a pessoa tem o passe, e as visitadas que estão vazias), consultado de tempos em tempos.
+// Embaixo das visitadas, depois de um separador, entram as outras salas com gente agora.
 import { icon } from './icons.js';
 
 const CHAVE = 'sala3d-visitadas';
@@ -21,13 +23,13 @@ function gravar(lista) {
 }
 
 // cor fixa por nome de sala (a mesma em todo navegador)
-function corDa(id) {
+export function corDa(id) {
   let h = 0;
   for (const c of id) h = (h * 31 + c.charCodeAt(0)) % 360;
   return `hsl(${h} 55% 42%)`;
 }
 // "time-de-vendas" -> "TV", "principal" -> "PR"
-function sigla(nome) {
+export function sigla(nome) {
   const partes = nome.replace(/[^a-z0-9À-ÿ ]/gi, ' ').trim().split(/[\s_-]+/).filter(Boolean);
   if (partes.length >= 2) return (partes[0][0] + partes[1][0]).toUpperCase();
   return (partes[0] || nome || '?').slice(0, 2).toUpperCase();
@@ -48,6 +50,7 @@ export class SalasLaterais {
     this.form = raiz.querySelector('.salas-nova');
     this.tip = raiz.querySelector('.salas-tip');
     this.dicas = new Map(); // id -> html da dica
+    this.vivas = []; // salas com gente agora que a pessoa ainda não visitou
 
     // dica fora da coluna (que rola e cortaria o balão): uma só, posicionada ao lado do ícone
     this.elLista.addEventListener('pointerover', (e) => {
@@ -135,10 +138,28 @@ export class SalasLaterais {
     this.render();
   }
 
+  // lista nova do /ao-vivo: atualiza os números das visitadas e mostra as outras salas com gente
+  aoVivo({ salas = [] } = {}) {
+    const visitadas = new Set(this.lista.map((s) => s.id));
+    for (const v of salas) {
+      if (!visitadas.has(v.id)) continue;
+      const antes = this.status.get(v.id);
+      // sala com senha: o /ao-vivo não manda nomes; ficam os do /salas-status (quem tem o passe)
+      const nomes = v.temSenha && antes?.nomes?.length ? antes.nomes : v.nomes;
+      this.status.set(v.id, { ...antes, ...v, nomes });
+    }
+    // visitada que sumiu da lista ao vivo: esvaziou (ou o dono tirou da lista) — o /salas-status confirma
+    if (this.vivasAntes) for (const id of this.vivasAntes) if (visitadas.has(id) && !salas.some((v) => v.id === id)) this.atualizar();
+    this.vivasAntes = salas.map((v) => v.id);
+    this.vivas = salas.filter((v) => !visitadas.has(v.id)).slice(0, 15);
+    for (const v of this.vivas) this.status.set(v.id, v);
+    this.render();
+  }
+
   render() {
     const atual = this.atual();
     this.dicas.clear();
-    this.elLista.innerHTML = this.lista.map((s) => {
+    const item = (s) => {
       const st = this.status.get(s.id) || {};
       const n = st.pessoas || 0;
       const empresa = st.empresa ?? s.empresa;
@@ -156,7 +177,9 @@ export class SalasLaterais {
         </span>
         <span class="sala-rotulo"><b>#${esc(s.id)}</b><small>${agora}</small></span>
       </button>`;
-    }).join('');
+    };
+    this.elLista.innerHTML = this.lista.map(item).join('')
+      + (this.vivas.length ? `<span class="salas-sep" title="Outras salas com gente agora"></span>${this.vivas.map((v) => item({ id: v.id, empresa: v.empresa, temSenha: v.temSenha })).join('')}` : '');
     // a dica aberta acompanha os números novos
     if (this.dicaDe && !this.tip.hidden) this.tip.innerHTML = this.dicas.get(this.dicaDe) || '';
   }
