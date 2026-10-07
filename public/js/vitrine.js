@@ -95,8 +95,7 @@ export class Vitrine {
     this.avatar = av;
     this.scene.add(av.group);
     av.inner.rotation.y = this.angulo;
-    // modelo com transformação (Optimus) começa na pose de veículo: deixa assumir a de robô
-    this.passo(def?.poses ? 3 : 0.4);
+    this.passo(0.4);
     this.enquadrar();
     return true;
   }

@@ -12,12 +12,9 @@ import { PERSONAGENS } from './personagens.js';
 // então o carregador precisa do decodificador para abri-los.
 const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
 
-const _qPasso = new THREE.Quaternion();
 const _quadril = new THREE.Vector3();
 // do osso do quadril até o assento, sentado (o osso fica no meio da bacia)
 const FOLGA_QUADRIL = 0.14;
-const _eixoPasso = new THREE.Vector3();
-const EIXOS = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] };
 const cache = new Map(); // url -> Promise<gltf>
 const medidas = new WeakMap(); // def -> { escala, giroY, posicao, altura } (ver ajustar)
 const _v = new THREE.Vector3();
@@ -206,7 +203,7 @@ export class Personagem {
 
     this.mixer = new THREE.AnimationMixer(this.raiz);
     this.mapa = mapearClipes(this.clips, def.clipes);
-    // alguns modelos não têm ciclo de andar: o clipe serve como POSE, toca uma
+    // clipe que é o movimento de chegar numa pose (o "Sitting" do robô): toca uma
     // vez e segura o último quadro em vez de ficar repetindo o movimento inteiro
     const poses = new Set(def.poses || []);
     this.acoes = {};
@@ -218,23 +215,6 @@ export class Personagem {
       acao.clampWhenFinished = ehPose;
       this.acoes[estado] = acao;
     }
-    // Modelos sem ciclo de andar (os Transformers) ganham um passo feito à mão:
-    // o esqueleto tem coxa, joelho e braço com nome claro, então dá para girar
-    // esses ossos por cima da pose que o mixer segura.
-    this.ossos = null;
-    if (def.andarProcedural) {
-      const achar = (re) => {
-        let achado = null;
-        this.raiz.traverse((o) => { if (!achado && o.isBone && re.test(o.name)) achado = o; });
-        return achado;
-      };
-      const o = {
-        coxaE: achar(/l_thigh/i), coxaD: achar(/r_thigh/i),
-        joelhoE: achar(/l_knee/i), joelhoD: achar(/r_knee/i),
-        bracoE: achar(/l_upperarm/i), bracoD: achar(/r_upperarm/i),
-      };
-      if (o.coxaE && o.coxaD) this.ossos = o;
-    }
     // Sentado, cada modelo tem o quadril numa altura (o robô senta como no chão, os do KayKit
     // como numa cadeira). O jogo põe o boneco com os pés na altura do assento: sem descer o
     // modelo até o quadril encostar nele, ele fica sentado no ar.
@@ -243,9 +223,6 @@ export class Personagem {
     this.descida = 0;
     // Optimus e Solus "sentam" com a pose de pé: esses não descem
     this.sentaDeVerdade = !!this.mapa.sit && /sit|sent/i.test(this.mapa.sit.name);
-    this.eixoPasso = def.eixoPasso || 'x';
-    this.fasePasso = Math.random() * 6;
-    this.pesoPasso = 0;
 
     this.travado = null; // animação de transformação segurando a pose
     this.modoVeiculo = false;
@@ -340,50 +317,10 @@ export class Personagem {
     return true;
   }
 
-  // Passo feito à mão, somado por cima do que o mixer escreveu. Como o mixer
-  // reescreve a rotação do osso todo frame, basta somar depois dele.
-  aplicarPasso(dt, anim) {
-    if (!this.ossos || this.modoVeiculo) return;
-    const andando = anim === 1 || anim === 2;
-    if (andando) this.fasePasso += dt * (anim === 2 ? 11 : 7);
-    this.pesoPasso += ((andando ? 1 : 0) - this.pesoPasso) * Math.min(1, dt * 9);
-    const o = this.ossos;
-
-    // Parado, a pose atual vira a base do passo. Isso é obrigatório: a animação
-    // de transformação fica PAUSADA segurando o último quadro, então o mixer
-    // para de escrever no osso — e girar o osso "por cima" acumularia um pouco a
-    // cada frame até o boneco dobrar ao meio.
-    if (this.pesoPasso < 0.02) {
-      for (const osso of Object.values(o)) {
-        if (!osso) continue;
-        osso.userData.baseQ = (osso.userData.baseQ || new THREE.Quaternion()).copy(osso.quaternion);
-      }
-      return;
-    }
-
-    const s = Math.sin(this.fasePasso) * this.pesoPasso * (this.forcaPasso ?? 1);
-    _eixoPasso.set(...(EIXOS[this.eixoPasso] || EIXOS.x));
-    const girar = (osso, ang) => {
-      if (!osso || !osso.userData.baseQ) return;
-      _qPasso.setFromAxisAngle(_eixoPasso, ang);
-      osso.quaternion.copy(osso.userData.baseQ).multiply(_qPasso);
-    };
-    // 0,4 rad na coxa foi o maior valor que ainda lê como passada; acima disso
-    // a perna abre demais e o robô parece desengonçado
-    girar(o.coxaE, s * 0.4);
-    girar(o.coxaD, -s * 0.4);
-    // o joelho só dobra na perna que volta, como numa passada de verdade
-    girar(o.joelhoE, -Math.max(0, -s) * 0.45);
-    girar(o.joelhoD, -Math.max(0, s) * 0.45);
-    girar(o.bracoE, -s * 0.2);
-    girar(o.bracoD, s * 0.2);
-  }
-
   update(dt, anim, velocidade = 1) {
     // travado numa pose de transformação: nada de trocar de estado
     if (this.travado) {
       this.mixer.update(dt);
-      this.aplicarPasso(dt, anim);
       return;
     }
     if (!this.gesto) this.setEstado(POR_ANIM[anim] || 'idle');
@@ -394,7 +331,6 @@ export class Personagem {
       this.atual.setEffectiveTimeScale(1);
     }
     this.mixer.update(dt);
-    this.aplicarPasso(dt, anim);
     this.encaixarNoAssento(dt);
   }
 

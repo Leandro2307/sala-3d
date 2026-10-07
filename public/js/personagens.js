@@ -82,28 +82,18 @@ export const PERSONAGENS = {
 
   // Estes dois trazem a animação de transformar em veículo — é o que faz a
   // transformação acontecer de verdade, em vez de trocar pelo carro desenhado
-  // em código. Em compensação não têm ciclo de andar: deslizam ao caminhar.
+  // em código. Andar, correr e pular (e o parado do Optimus) não vinham no arquivo:
+  // Walk, Run, Jump e Idle são gerados por scripts/animar-transformers.js.
   optimus: {
     id: 'optimus',
     label: 'Optimus',
     url: '/models/optimus.glb',
+    versao: 2, // 2: ganhou Idle, Walk, Run e Jump
     // a pose de repouso deste arquivo é bem mais baixa que o robô de pé: ele
     // estica 2,1x ao assumir a pose, então o alvo tem que ser proporcionalmente menor
     altura: 1.34,
-    clipes: {
-      idle: 'transform_to_robot',
-      walk: 'transform_to_robot',
-      run: 'transform_to_robot',
-      air: 'transform_to_robot',
-      sit: 'transform_to_robot',
-      punch: 'fire_gun01',
-    },
-    poses: ['transform_to_robot'],
+    clipes: { idle: 'Idle', walk: 'Walk', run: 'Run', air: 'Jump', sit: 'Idle', punch: 'fire_gun01' },
     transforma: { paraVeiculo: 'transform_to_vehicle', paraRobo: 'transform_to_robot' },
-    andarProcedural: true,
-    // eixo medido no próprio rig: é o que faz a perna ir para a frente e para
-    // trás, e não abrir para o lado. Cada modelo tem o seu.
-    eixoPasso: 'y',
     resumo: 'Vira caminhão de verdade no G',
     credito: 'OrangeSauceu (Transformers: Earth Wars)',
     aviso: 'transforma em caminhão de verdade',
@@ -112,12 +102,13 @@ export const PERSONAGENS = {
     id: 'solus',
     label: 'Solus Prime',
     url: '/models/solus.glb',
+    versao: 2, // 2: ganhou Walk, Run e Jump
     altura: 2.3,
     clipes: {
       idle: 'idle',
-      walk: 'idle',
-      run: 'idle',
-      air: 'idle',
+      walk: 'Walk',
+      run: 'Run',
+      air: 'Jump',
       sit: 'idle',
       punch: 'Main_Hammer_Attack',
       wave: 'Forge_Solus_Prime_Equip',
@@ -126,8 +117,6 @@ export const PERSONAGENS = {
     // nem transformando ele passa de 1,21 h do centro: com os 2,7 h de quem transforma, a
     // esfera de recorte passaria de 6 m
     raioVista: 1.5,
-    andarProcedural: true,
-    eixoPasso: 'z',
     resumo: 'Transforma no G',
     credito: 'OrangeSauceu (Transformers: Earth Wars)',
   },

@@ -40,7 +40,7 @@ outra na troca.
 | Robô | Tomás Laulhé (Quaternius), ajustes de Don McCurdy | CC0 | `robo.glb` (453 KB) |
 | Cavaleiro, Bárbaro, Mago, Ladino, Encapuzado | KayKit Adventurers, de Kay Lousberg | CC0 | ~400 KB cada |
 | Esqueleto, Esqueleto Guerreiro, Esqueleto Ladino, Esqueleto Mago | KayKit Skeletons, de Kay Lousberg | CC0 | ~400 KB cada |
-| Optimus, Solus Prime | OrangeSauceu, a partir de *Transformers: Earth Wars* | marcado CC BY pelo autor do envio | 706 KB / 1,1 MB |
+| Optimus, Solus Prime | OrangeSauceu, a partir de *Transformers: Earth Wars* | marcado CC BY pelo autor do envio | 779 KB / 1,2 MB |
 
 O Atos não vem de pacote: o script modela a bola, monta o esqueleto, anima os 7
 clipes e exporta já com meshopt. Ele é a logo virada bola: visto de frente, a
@@ -57,7 +57,13 @@ novo no endereço quem já abriu a sala continua vendo o modelo antigo.
 
 Optimus e Solus trazem a animação de **transformar em veículo** — é o que faz o
 `G` virar o personagem de verdade, em vez de trocar pelo carro desenhado em
-código. Em compensação não têm ciclo de andar: deslizam ao caminhar.
+código. Em compensação vieram sem ciclo de andar. `Walk`, `Run` e `Jump` (e o
+`Idle` do Optimus, que só tinha a transformação) são gerados por
+`scripts/animar-transformers.js` e gravados dentro dos próprios `.glb`: pernas por
+IK com o pé plantado no chão, pé rolando do calcanhar para a ponta, quadril e
+peito girando ao contrário, braços balançando. Para mexer no passo, mude os
+números no começo do script, rode a linha do cabeçalho dele e suba `versao` no
+cadastro.
 
 > Atenção sobre os Transformers: as tags do arquivo original indicam que são
 > assets do jogo *Transformers: Earth Wars*. Optimus Prime é da Hasbro, e quem
