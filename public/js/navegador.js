@@ -14,8 +14,8 @@
 // 3D (1.7+) tira essa trava só nas telas da sala e conta o endereço e o título de cada aba.
 //
 // Para rodar em PC leve, só fica aberto o que importa: o navegador de um monitor de posto abre
-// de perto (quem está sentado ali); o de tela de parede, só com a pessoa na mesma sala. De costas
-// para ele, ou com a sala dele escondida pelo 3D, ele para de ser desenhado (continua carregado), e
+// de perto (quem está sentado ali); o de tela de parede, só com a pessoa na mesma sala. Com parte
+// dele atrás da câmera, ou com a sala dele escondida pelo 3D, ele para de ser desenhado (continua carregado), e
 // aba escondida sem tocar nada há 2 min é descarregada (recarrega ao voltar nela, como o
 // "economia de memória" do Chrome), inclusive no navegador em uso.
 //
@@ -151,7 +151,8 @@ class Navegador {
     this.posicionar();
     // em que sala a tela fica (um passo na frente dela): de parede, só abre com a pessoa lá
     this.centro = tela.surface.getWorldPosition(new THREE.Vector3());
-    this.raio = Math.hypot(tela.w, tela.h) / 2; // a tela cabe numa bola deste raio em volta do centro
+    // as 4 quinas da tela (Navegadores.atualizar: desenhada só com todas na frente da câmera)
+    this.quinas = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([x, y]) => tela.surface.localToWorld(new THREE.Vector3((x * tela.w) / 2, (y * tela.h) / 2, 0)));
     const frente = new THREE.Vector3(0, 0, 1).applyQuaternion(tela.surface.getWorldQuaternion(new THREE.Quaternion()));
     const ponto = this.centro.clone().addScaledVector(frente, 1);
     this.sala = dono.world.salaEm?.(ponto.x, ponto.z) ?? null;
@@ -226,7 +227,9 @@ class Navegador {
     if (aba.iframe || !aba.url) return aba.iframe;
     const f = document.createElement('iframe');
     f.setAttribute('sandbox', SANDBOX);
-    f.allow = 'autoplay; fullscreen; encrypted-media; picture-in-picture; clipboard-read; clipboard-write; microphone; camera';
+    // os do fim são de login: passkey, "Fazer login com o Google" (FedCM) e acesso aos cookies
+    f.allow = 'autoplay; fullscreen; encrypted-media; picture-in-picture; clipboard-read; clipboard-write; microphone; camera; '
+      + 'publickey-credentials-get *; publickey-credentials-create *; identity-credentials-get *; otp-credentials *; storage-access *';
     f.referrerPolicy = 'strict-origin-when-cross-origin';
     f.src = aba.url;
     aba.iframe = f;
@@ -531,13 +534,18 @@ export class Navegadores {
     cam.getWorldDirection(this._frente);
     const salaDaCamera = this.world.salaEm?.(cam.position.x, cam.position.z) ?? null;
     const agora = performance.now();
-    // Desenhado com a sala dele no ar (sala escondida pelo 3D: segue carregado) e sem estar de costas
-    // para ele — a tela inteira atrás da câmera. Fora da vista, de lado, continua desenhado: esconder
-    // é display: none, e ao mostrar de novo o Chrome montava e desenhava o site inteiro, um tranco a
-    // cada olhada para o lado. Com um navegador em foco, os do lado também (aparece um pedaço deles).
+    // Desenhado com a sala dele no ar (sala escondida pelo 3D: segue carregado) e com as 4 quinas na
+    // frente da câmera. Fora da vista, de lado, continua desenhado: esconder é display: none, e ao
+    // mostrar de novo o Chrome montava e desenhava o site inteiro, um tranco a cada olhada para o
+    // lado. Com um navegador em foco, os do lado também (aparece um pedaço deles). Mas com uma quina
+    // atrás da câmera o Chrome desenha o CSS 3D errado e ele pisca: com o monitor da esquerda do
+    // posto em foco, o da direita fica metade atrás dela. A folga (esconde mais perto do que mostra)
+    // evita o pisca-pisca bem no limite.
     const ver = (nav) => {
-      const deCostas = this._ate.copy(nav.centro).sub(cam.position).dot(this._frente) < -nav.raio;
-      nav.vista(nav.tela.group.parent?.visible !== false && !deCostas);
+      let menor = Infinity; // a quina menos na frente da câmera (negativa: atrás dela)
+      for (const q of nav.quinas) menor = Math.min(menor, this._ate.copy(q).sub(cam.position).dot(this._frente));
+      const naFrente = menor > cam.near * (nav.naVista ? 1 : 2);
+      nav.vista(nav.tela.group.parent?.visible !== false && naFrente);
       nav.descartarParadas(agora);
     };
     const paraAbrir = []; // { nav, d }: fechados que ficaram perto

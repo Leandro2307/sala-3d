@@ -38,6 +38,16 @@ voltar/avançar funcionar dentro do site, abre os links de "aba nova" como aba d
 sala e faz o teclado e o mouse do seu posto se mexerem enquanto você digita no site (em campo de
 senha ela não diz qual tecla foi).
 
+**Login nas telas (versão 1.9).** Dentro de outra página o Chrome não grava o cookie de sessão
+da maioria dos sites (SameSite), e o login não "pegava": o site voltava deslogado. A 1.9 grava
+esses cookies de novo de um jeito que vale dentro das telas, aproveita o login que você já tem
+nas abas normais do Chrome e libera cookies de terceiros com a sala como página principal. Às
+vezes a página recarrega sozinha uma vez logo depois de entrar: é o cookie chegando. Depois de
+atualizar, clique em **Recarregar** na extensão (ela pede permissões novas) e recarregue a sala.
+Alguns sites (o login do Google, por exemplo) podem recusar entrar dentro de outra página: entre
+pelo botão **Abrir esta aba no Chrome**, volte para a tela e clique em **Recarregar** na barra
+do navegador da sala: ela abre logada.
+
 ## Janelas e tela inteira (opcional, só Windows)
 
 Sozinha, a extensão só controla **abas**. Para deixarem mexer numa **janela** qualquer (um jogo,
@@ -96,3 +106,6 @@ controle na hora.
 - A trava "não abrir dentro de outra página" (X-Frame-Options / CSP) só é tirada nos sites
   abertos dentro das telas da aba da Sala 3D. As outras abas do Chrome não mudam. O site aberto
   na tela não consegue mudar a página da sala (o quadro dele não tem permissão para isso).
+- Os cookies dos sites que você abre nas telas passam a ser SameSite=None no Chrome todo (é o
+  mesmo cookie das abas normais). Isso tira desses sites uma proteção contra pedidos vindos de
+  outros sites; os outros sites do Chrome não mudam.

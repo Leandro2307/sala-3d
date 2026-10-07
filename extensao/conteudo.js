@@ -16,11 +16,14 @@
 
   // A ponte só vale na Sala 3D (a página tem <meta name="sala3d">).
   const ehSala = () => !!document.querySelector('meta[name="sala3d"]');
+  let vivo = 0;
   // diz ao site que a extensão está aqui, e se este site já foi liberado no ícone dela
   const avisar = () => chrome.runtime.sendMessage({ tipo: 'status' }, (r) => {
     if (chrome.runtime.lastError) return;
     // nativo: o ajudante para janelas/telas (nativo/instalar.bat) está instalado
     window.postMessage({ sala3dExt: 'oi', versao: VERSAO, liberado: !!r?.liberado, nativo: !!r?.nativo }, location.origin);
+    // sala liberada: o fundo fica acordado, ouvindo os cookies dos sites das telas (login)
+    if (r?.liberado && !vivo) vivo = setInterval(() => chrome.runtime.sendMessage({ tipo: 'vivo' }, () => void chrome.runtime.lastError), 20_000);
   });
 
   const PEDIDOS = ['entrada', 'soltar', 'aba-info', 'janela', 'janela-retomar', 'janela-soltar', 'abas'];

@@ -329,12 +329,14 @@ async function janela(alvo, ev, sala) {
 
 async function tratar(m, sender) {
   if (m.tipo === 'meu-id') return { aba: sender.tab?.id };
+  if (m.tipo === 'vivo') return { ok: true }; // a sala aberta mantém o fundo acordado
   // não abre o ajudante aqui: ele só sobe quando alguém liga o controle de uma janela
   if (m.tipo === 'status') {
     const ok = await liberado(sender.url);
     // a sala liberada mais recente é para onde vão as abas do Alt+Shift+S
     if (ok && sender.tab) await chrome.storage.session.set({ salaAba: sender.tab.id });
     if (sender.tab) quadrosDaSala(sender.tab.id, ok);
+    if (ok) cookiesNaSala(sender.url);
     return { liberado: ok, salaAba: true, quadros: ok };
   }
   // só o popup da própria extensão pede isso (o clique no ícone é o que libera a captura)
@@ -420,14 +422,173 @@ function quadrosDaSala(aba, ligar) {
         condition: { resourceTypes: ['sub_frame'], tabIds: abas },
       }] : [],
     });
+    ouvirCookies(aba, ligar);
   }).catch((err) => console.warn('[quadros]', err));
 }
+
+// ------------------------------------------------------------------ login dentro das telas
+// O site numa tela é um quadro de outro site (a sala), e aí o Chrome não grava nem manda cookie
+// SameSite=Lax/Strict — o padrão de quase todo cookie de sessão. O login até dava certo no
+// servidor, mas o cookie da sessão era jogado fora e o site voltava deslogado. A extensão:
+// - lê o Set-Cookie das respostas dos sites nas telas da sala (só nas abas da sala) e grava o
+//   cookie de novo como SameSite=None, que vale dentro de quadro;
+// - faz o mesmo com os cookies que o site já tinha (logado antes numa aba normal do Chrome);
+// - libera cookies de terceiros com a sala como página principal (Chrome que bloqueia);
+// - recarrega o quadro uma vez quando o cookie chegou tarde (o login que redireciona: a página
+//   seguinte foi pedida antes de a extensão gravar).
+// Os cookies regravados valem no Chrome todo (é o mesmo cookie), só que sem a trava SameSite.
+const ouvintes = new Map(); // aba da sala -> ouvinte do webRequest
+const pendentes = new Map(); // "aba:quadro" -> Promise<bool>: gravou cookie que a página não levou
+const recarregados = new Map(); // "aba:quadro" -> quando recarregou (no máximo 1 a cada 15 s)
+
+function ouvirCookies(aba, ligar) {
+  if (!chrome.webRequest || !chrome.cookies) return; // permissão nova ainda não aplicada
+  const velho = ouvintes.get(aba);
+  if (velho) chrome.webRequest.onHeadersReceived.removeListener(velho);
+  ouvintes.delete(aba);
+  if (!ligar) return;
+  const ouvinte = (d) => {
+    if (d.frameId === 0) return; // a própria sala
+    const linhas = (d.responseHeaders || [])
+      .filter((h) => h.name.toLowerCase() === 'set-cookie')
+      .flatMap((h) => String(h.value || '').split('\n'));
+    if (!linhas.length) return;
+    const gravou = Promise.all(linhas.map((l) => regravarCookie(d.url, l))).then((r) => r.some(Boolean));
+    // redirecionou (o login com formulário): a página seguinte já foi pedida sem o cookie
+    if (d.type === 'sub_frame' && d.statusCode >= 300 && d.statusCode < 400) pendentes.set(`${d.tabId}:${d.frameId}`, gravou);
+  };
+  chrome.webRequest.onHeadersReceived.addListener(ouvinte, { urls: ['https://*/*'], tabId: aba, types: ['sub_frame', 'xmlhttprequest'] }, ['responseHeaders', 'extraHeaders']);
+  ouvintes.set(aba, ouvinte);
+}
+// o service worker dormiu e acordou: volta a ouvir as abas da sala
+chrome.storage.session.get('abasSala').then(({ abasSala = [] }) => abasSala.forEach((a) => ouvirCookies(a, true)));
+
+// Set-Cookie que o Chrome recusou dentro do quadro -> o mesmo cookie com SameSite=None
+async function regravarCookie(url, linha) {
+  const [par, ...resto] = linha.split(';');
+  const i = par.indexOf('=');
+  if (i < 0) return false;
+  const nome = par.slice(0, i).trim();
+  const valor = par.slice(i + 1).trim();
+  const at = {};
+  for (const a of resto) {
+    const j = a.indexOf('=');
+    at[(j < 0 ? a : a.slice(0, j)).trim().toLowerCase()] = j < 0 ? '' : a.slice(j + 1).trim();
+  }
+  if ('partitioned' in at) return false; // cookie feito para quadro (CHIPS): já vale
+  if (at.samesite?.toLowerCase() === 'none' && 'secure' in at) return false; // já vale em quadro
+  const u = new URL(url);
+  const caminho = at.path?.startsWith('/') ? at.path : u.pathname.slice(0, Math.max(1, u.pathname.lastIndexOf('/')));
+  const alvo = `https://${u.host}${caminho}`;
+  let expira;
+  if (at['max-age'] !== undefined && /^-?\d+$/.test(at['max-age'])) expira = Date.now() / 1000 + Number(at['max-age']);
+  else if (at.expires) expira = Date.parse(at.expires) / 1000 || undefined;
+  try {
+    if (expira !== undefined && expira <= Date.now() / 1000) {
+      await chrome.cookies.remove({ url: alvo, name: nome }); // o site apagou (sair da conta)
+      return true;
+    }
+    await chrome.cookies.set({
+      url: alvo,
+      name: nome,
+      value: valor,
+      path: caminho,
+      ...(at.domain ? { domain: at.domain } : {}),
+      secure: true,
+      httpOnly: 'httponly' in at,
+      sameSite: 'no_restriction',
+      ...(expira ? { expirationDate: expira } : {}),
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// um cookie que já existe, de novo com SameSite=None (devolve se regravou)
+const jaValeEmQuadro = (c) => !!c.partitionKey || (c.sameSite === 'no_restriction' && c.secure);
+async function liberarCookie(c) {
+  if (jaValeEmQuadro(c)) return false;
+  try {
+    await chrome.cookies.set({
+      url: `https://${c.domain.replace(/^\./, '')}${c.path}`,
+      name: c.name,
+      value: c.value,
+      path: c.path,
+      ...(c.hostOnly ? {} : { domain: c.domain }),
+      secure: true,
+      httpOnly: c.httpOnly,
+      sameSite: 'no_restriction',
+      ...(c.session ? {} : { expirationDate: c.expirationDate }),
+      storeId: c.storeId,
+    });
+    return true;
+  } catch {
+    return false; // cookie que o Chrome não deixa regravar
+  }
+}
+
+// os cookies que o site já tem (de uma aba normal do Chrome) passam a valer no quadro também
+async function liberarCookiesDe(url) {
+  if (!chrome.cookies || !/^https:/.test(url)) return false;
+  const todos = await chrome.cookies.getAll({ url }).catch(() => []);
+  const r = await Promise.all(todos.map(liberarCookie));
+  return r.some(Boolean);
+}
+
+// Login que abre numa janelinha (Google, Microsoft...) ou numa aba normal: o cookie é gravado lá
+// fora, como Lax. Se for de um site aberto numa tela, já vira SameSite=None.
+const sitesNasTelas = new Set(); // endereços (host) abertos nas telas da sala
+function cookieMudou({ removed, cookie }) {
+  if (removed || jaValeEmQuadro(cookie)) return;
+  const d = cookie.domain.replace(/^\./, '');
+  for (const h of sitesNasTelas) {
+    if (h === d || h.endsWith(`.${d}`)) return void liberarCookie(cookie);
+  }
+}
+function siteNaTela(url) {
+  if (!chrome.cookies) return;
+  if (!sitesNasTelas.size) chrome.cookies.onChanged.addListener(cookieMudou); // só com site aberto
+  sitesNasTelas.add(new URL(url).hostname);
+}
+
+// Chrome com cookies de terceiros bloqueados: liberados só com a sala como página principal
+function cookiesNaSala(url) {
+  try {
+    const u = new URL(url);
+    chrome.contentSettings?.cookies.set({ primaryPattern: 'https://*/*', secondaryPattern: `${u.protocol}//${u.host}/*`, setting: 'allow' })
+      .catch((err) => console.warn('[cookies]', err));
+  } catch { /* endereço estranho */ }
+}
+
+// o site de uma tela vai abrir: os cookies dele já valendo (o pedido em si quase sempre sai antes
+// disso, por isso o recarregar uma vez lá embaixo)
+chrome.webNavigation?.onBeforeNavigate.addListener(async ({ tabId, frameId, parentFrameId, url }) => {
+  if (frameId === 0 || parentFrameId !== 0 || !/^https:/.test(url)) return;
+  const { abasSala = [] } = await chrome.storage.session.get('abasSala');
+  if (!abasSala.includes(tabId)) return;
+  siteNaTela(url);
+  const chave = `${tabId}:${frameId}`;
+  const antes = pendentes.get(chave);
+  const agora = liberarCookiesDe(url);
+  pendentes.set(chave, antes ? Promise.all([antes, agora]).then((r) => r.some(Boolean)) : agora);
+});
 
 // Cada site que abre numa tela (quadro direto da aba da sala) ganha o quadro.js: conta o
 // endereço e o título para a barra do navegador, obedece voltar/avançar, abre os links de aba
 // nova como aba do navegador da sala e repassa teclas e mouse (teclado e mouse do posto).
 chrome.webNavigation?.onDOMContentLoaded.addListener(async ({ tabId, frameId, parentFrameId }) => {
-  if (frameId === 0 || parentFrameId !== 0) return;
+  if (frameId === 0) return;
+  const chave = `${tabId}:${frameId}`;
+  const pendente = pendentes.get(chave);
+  pendentes.delete(chave);
+  if (pendente && (await pendente) && !(performance.now() - (recarregados.get(chave) ?? -Infinity) < 15_000)) {
+    // a página veio sem o cookie que acabou de ser gravado: carrega de novo, agora com ele
+    recarregados.set(chave, performance.now());
+    chrome.scripting.executeScript({ target: { tabId, frameIds: [frameId] }, func: () => location.reload() }).catch(() => {});
+    return;
+  }
+  if (parentFrameId !== 0) return;
   const { abasSala = [] } = await chrome.storage.session.get('abasSala');
   if (!abasSala.includes(tabId)) return;
   chrome.scripting.executeScript({ target: { tabId, frameIds: [frameId] }, files: ['quadro.js'] }).catch(() => {});
