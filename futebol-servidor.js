@@ -18,7 +18,7 @@ const arred = (n) => Math.round(n * 100) / 100;
 
 function novaPartida() {
   return {
-    jogadores: new Map(), // id -> { time, nome, cor, lugar }
+    jogadores: new Map(), // id -> { time, nome, cor, char, lugar }
     placar: [0, 0],
     fase: 'espera', // espera | saida | jogo | gol | fim
     ate: 0, // quando a fase atual termina (saida, gol, fim)
@@ -47,7 +47,7 @@ function publico(pt) {
     prorrogacao: pt.prorrogacao,
     placar: pt.placar,
     marcou: pt.marcou,
-    jogadores: [...pt.jogadores].map(([id, j]) => ({ id, time: j.time, nome: j.nome, cor: j.cor, lugar: j.lugar })),
+    jogadores: [...pt.jogadores].map(([id, j]) => ({ id, time: j.time, nome: j.nome, cor: j.cor, char: j.char, lugar: j.lugar })),
   };
 }
 
@@ -156,13 +156,15 @@ function ligarFutebol(io, rooms, jogoLigado) {
       if (!room || !user || !F || !jogoLigado(room, 'futebol')) return ack?.({ erro: 'desligado' });
       room.futebol ||= novaPartida();
       const pt = room.futebol;
-      if (!pt.jogadores.has(user.id)) {
+      const ja = pt.jogadores.get(user.id);
+      if (ja) ja.char = user.char; // trocou de personagem e entrou de novo: o carro acompanha
+      if (!ja) {
         // o time com menos gente (empate: o que a pessoa pediu, ou o azul)
         const n = [0, 0];
         for (const j of pt.jogadores.values()) n[j.time]++;
         const pediu = msg?.time === 0 || msg?.time === 1 ? msg.time : null;
         const time = n[0] === n[1] ? (pediu ?? 0) : n[0] < n[1] ? 0 : 1;
-        pt.jogadores.set(user.id, { time, nome: user.name, cor: user.color, lugar: n[time] });
+        pt.jogadores.set(user.id, { time, nome: user.name, cor: user.color, char: user.char, lugar: n[time] });
       }
       if (pt.fase === 'espera') comecar(room);
       else avisar(room);

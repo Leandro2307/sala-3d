@@ -10,6 +10,7 @@
 // cima. O grupo do estádio é girado e posto no mundo; tudo da partida mora dentro dele.
 import * as THREE from 'three';
 import { CAMPO, BOLA, ALMOFADAS, andarBola, colidirCampo, lugarDaSaida } from './futebol-fisica.js';
+import { criarPersonagem, PERSONAGENS } from './modelo.js';
 
 export const ESTADIO = { cx: 18, cz: 125, giro: Math.PI / 2 };
 const W = CAMPO.largura / 2;
@@ -325,7 +326,87 @@ function desenharPlacar(ctx, w, h, e) {
 const relogio = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
 // ------------------------------------------------------------------ malhas
-function malhaCarro(cor) {
+// Carro do jogador. Quem joga com personagem que se transforma (Optimus, Solus Prime) entra com o
+// veículo dele: o carro desenhado aqui aparece só até o modelo carregar (ver vestirVeiculo).
+// Em cima de qualquer um vai a luz do time, por baixo.
+function malhaCarro(cor, charId = null) {
+  const g = new THREE.Group();
+  const corpo = desenharCarro(cor);
+  g.add(corpo);
+  g.userData.corpo = corpo;
+  const luz = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 4.4).rotateX(-Math.PI / 2),
+    new THREE.MeshBasicMaterial({ color: cor, transparent: true, opacity: 0.45, toneMapped: false, depthWrite: false }));
+  luz.position.y = 0.06;
+  g.add(luz);
+  // o fogo do turbo, atrás
+  const fogo = new THREE.Mesh(new THREE.ConeGeometry(0.35, 1.6, 10).rotateX(-Math.PI / 2).translate(0, 0.6, -2.45),
+    new THREE.MeshBasicMaterial({ color: 0xffb347, transparent: true, opacity: 0.85, toneMapped: false }));
+  fogo.visible = false;
+  g.add(fogo);
+  g.userData.fogo = fogo;
+  if (PERSONAGENS[charId]?.transforma) vestirVeiculo(g, PERSONAGENS[charId]);
+  return g;
+}
+
+// O personagem já na pose de veículo (o clipe de transformar até o fim, segurando o último
+// quadro), do comprimento do carro, rodas no chão e virado para +z como o carro.
+const COMPRIMENTO_VEICULO = 3.9;
+async function vestirVeiculo(g, def) {
+  let p;
+  try {
+    p = await criarPersonagem(def);
+  } catch {
+    return; // não veio: fica o carro desenhado
+  }
+  if (!p) return;
+  if (g.userData.descartado || !p.temTransformacao || !p.transformar(true)) {
+    p.dispose();
+    return;
+  }
+  p.mixer.update(0.25); // termina de misturar com a pose de antes
+  p.mixer.update(30); // e vai até o fim do clipe (segura o último quadro)
+  const m = p.grupo;
+  m.updateMatrixWorld(true);
+  const caixa = new THREE.Box3();
+  const v = new THREE.Vector3();
+  m.traverse((o) => {
+    const pos = o.isMesh && o.geometry.attributes.position;
+    if (!pos) return;
+    for (let i = 0; i < pos.count; i += 3) caixa.expandByPoint(o.getVertexPosition(i, v).applyMatrix4(o.matrixWorld));
+  });
+  if (caixa.isEmpty()) {
+    p.dispose();
+    return;
+  }
+  const tam = caixa.getSize(new THREE.Vector3());
+  const centro = caixa.getCenter(new THREE.Vector3());
+  const escala = COMPRIMENTO_VEICULO / Math.max(tam.z, tam.x, 0.01);
+  const encaixe = new THREE.Group();
+  m.position.set(-centro.x, -caixa.min.y, -centro.z);
+  encaixe.add(m);
+  encaixe.scale.setScalar(escala);
+  // a esfera de recorte do personagem foi feita para o tamanho dele de pé: o veículo cabe nela
+  g.add(encaixe);
+  g.userData.corpo.visible = false;
+  g.userData.personagem = p;
+  g.userData.fogo.position.z = 2.45 - (tam.z * escala) / 2 - 0.4; // o fogo sai da traseira dele
+}
+
+// tira o carro do campo: o personagem devolve o esqueleto; geometria e material dele são do
+// arquivo em cache (dos outros bonecos também) e não podem ser apagados
+function descartarCarro(g) {
+  if (!g) return;
+  g.userData.descartado = true;
+  g.removeFromParent();
+  const p = g.userData.personagem;
+  if (p) {
+    p.grupo.parent?.removeFromParent();
+    p.dispose();
+  }
+  g.traverse((m) => { m.geometry?.dispose(); m.material?.map?.dispose(); m.material?.dispose(); });
+}
+
+function desenharCarro(cor) {
   const g = new THREE.Group();
   const pintura = new THREE.MeshStandardMaterial({ color: cor, roughness: 0.35, metalness: 0.4 });
   const escuro = new THREE.MeshStandardMaterial({ color: 0x1f2430, roughness: 0.6 });
@@ -353,12 +434,6 @@ function malhaCarro(cor) {
     r.castShadow = true;
     g.add(r);
   }
-  // o fogo do turbo, atrás
-  const fogo = new THREE.Mesh(new THREE.ConeGeometry(0.35, 1.6, 10).rotateX(-Math.PI / 2).translate(0, 0.6, -2.45),
-    new THREE.MeshBasicMaterial({ color: 0xffb347, transparent: true, opacity: 0.85, toneMapped: false }));
-  fogo.visible = false;
-  g.add(fogo);
-  g.userData.fogo = fogo;
   return g;
 }
 
@@ -553,7 +628,7 @@ export class Futebol {
     const jog = this.estado?.jogadores.find((j) => j.id === id);
     if (!o) {
       if (!jog) return;
-      const malha = malhaCarro(TIMES[jog.time].cor);
+      const malha = malhaCarro(TIMES[jog.time].cor, jog.char);
       malha.add(placaDeNome(jog.nome, TIMES[jog.time].claro));
       this.g.add(malha);
       o = { malha, alvoP: new THREE.Vector3(c[0], c[1], c[2]), alvoQ: new THREE.Quaternion(c[3], c[4], c[5], c[6]).normalize() };
@@ -570,8 +645,7 @@ export class Futebol {
   tirarOutro(id) {
     const o = this.outros.get(id);
     if (!o) return;
-    o.malha.removeFromParent();
-    o.malha.traverse((m) => { m.geometry?.dispose(); m.material?.map?.dispose(); m.material?.dispose(); });
+    descartarCarro(o.malha);
     this.outros.delete(id);
   }
 
@@ -595,10 +669,10 @@ export class Futebol {
       if (this.player.veiculo) this.player.setVeiculo(false);
       if (this.player.sitting) this.player.stand?.();
       if (document.pointerLockElement === null) this.world.canvas.requestPointerLock?.()?.catch?.(() => {});
-      this.malhaCarro?.removeFromParent();
+      descartarCarro(this.malhaCarro);
       const eu = r.estado.jogadores.find((j) => j.id === this.eu);
       this.meuTime = eu?.time ?? 0;
-      this.malhaCarro = malhaCarro(TIMES[this.meuTime].cor);
+      this.malhaCarro = malhaCarro(TIMES[this.meuTime].cor, eu?.char);
       this.g.add(this.malhaCarro);
       this.avatarLocal.group.visible = false;
       const mira = document.getElementById('crosshair');
@@ -620,7 +694,7 @@ export class Futebol {
     if (!this.jogando) return;
     this.jogando = false;
     if (avisar) this.socket?.emit('fut-sair');
-    this.malhaCarro?.removeFromParent();
+    descartarCarro(this.malhaCarro);
     this.malhaCarro = null;
     this.hud.hidden = true;
     this.ajuda.hidden = true;
