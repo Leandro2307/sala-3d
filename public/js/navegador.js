@@ -38,10 +38,10 @@ const MAX_ABAS = 8;
 const SO_EM_USO = isTouch;
 // PC de até 4 GB: os 3 do posto + 1; PC forte: sem limite, como sempre foi
 const MAX_ABERTOS = qualidade.POUCA_MEMORIA ? 4 : Infinity;
-// Chrome 128+ (o zoom do CSS entra no iframe): o site fica 4x maior com zoom 4 e encolhe de volta,
-// para o Chrome não redesenhar os sites a cada giro da câmera (ver .nv.zoom4 no style.css). Nos
+// Chrome 128+ (o zoom do CSS entra no iframe): o site fica 2x maior com zoom 2 e encolhe de volta,
+// para o Chrome não redesenhar os sites a cada giro da câmera (ver .nv.zoom2 no style.css). Nos
 // outros navegadores o zoom pode não entrar no site, que ficaria minúsculo.
-const ZOOM4 = Number(navigator.userAgentData?.brands?.find((b) => b.brand === 'Chromium')?.version
+const ZOOM2 = Number(navigator.userAgentData?.brands?.find((b) => b.brand === 'Chromium')?.version
   ?? /Chrom(?:e|ium)\/(\d+)/.exec(navigator.userAgent)?.[1]) >= 128;
 // sem "allow-top-navigation": o site lá dentro não consegue tirar a pessoa da sala
 const SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox '
@@ -117,7 +117,7 @@ class Navegador {
 
     const alto = Math.round((LARGURA_PX * tela.h) / tela.w);
     this.el = document.createElement('div');
-    this.el.className = ZOOM4 ? 'nv zoom4' : 'nv';
+    this.el.className = ZOOM2 ? 'nv zoom2' : 'nv';
     this.el.style.width = `${LARGURA_PX}px`;
     this.el.style.height = `${alto}px`;
     this.el.innerHTML = `<div class="nv-abas"></div>

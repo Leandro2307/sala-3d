@@ -537,9 +537,11 @@ i.nv-fav.letra { display: grid; place-items: center; font: 700 10px/1 system-ui,
 /* Chrome: com a perspectiva, cada giro da câmera muda o tamanho do site na tela, e o Chrome
    redesenha o iframe inteiro e segura o quadro até ele chegar — 3 sites derrubavam a sala de 75
    para 47 qps olhando em volta sentado no posto. Abaixo de 1/4 de escala ele para de acompanhar o
-   tamanho: o iframe fica 4x maior com zoom 4 (o site continua vendo os mesmos 1280 px de largura)
-   e encolhe de volta. Em foco, de perto, passa de 1/4 e desenha na resolução da tela, como antes. */
-#css3d .nv.zoom4 .nv-corpo iframe { inset: auto; left: 0; top: 0; width: 400%; height: 400%; zoom: 4; transform: scale(0.25); transform-origin: 0 0; }
+   tamanho: o iframe fica 2x maior com zoom 2 (o site continua vendo os mesmos 1280 px de largura)
+   e encolhe de volta — de 47 para 72 qps. O site passa a achar que a tela tem o dobro da densidade
+   (como uma tela retina): com zoom 4 era 4x, e um site com canvas ou vídeo desenhava 16x mais pixels
+   (a sala caía para 26 qps até parada). Em foco, de perto, desenha na resolução da tela, como antes. */
+#css3d .nv.zoom2 .nv-corpo iframe { inset: auto; left: 0; top: 0; width: 200%; height: 200%; zoom: 2; transform: scale(0.5); transform-origin: 0 0; }
 .nv-inicio { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 30px; background: #fff; }
 .nv-busca { display: flex; flex-direction: column; align-items: center; gap: 22px; width: min(620px, 80%); }
 .nv-logo { font: 800 44px/1 'Segoe UI', system-ui, sans-serif; letter-spacing: -0.02em; color: #1f2937; }
