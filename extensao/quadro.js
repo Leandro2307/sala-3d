@@ -6,6 +6,8 @@
 // - repassa teclas e mouse, para o teclado e o mouse do posto se mexerem junto. Em campo de
 //   senha vai só "uma tecla" (sem dizer qual);
 // - Alt+← / Alt+→ passa para a tela do lado (o monitor vizinho do posto), em vez de voltar página;
+//   Alt + mouse para o lado também (a sala decide, com o Alt que vai junto no mouse). O Alt sozinho
+//   não leva o foco para o menu do Chrome ao soltar;
 // - conta se a página está tocando vídeo ou som (aba assim não é descarregada quando escondida).
 (() => {
   if (window.__sala3dQuadro || window.top === window || window.parent !== window.top) return;
@@ -50,6 +52,7 @@
       avisar({ t: 'trocarTela', lado: e.code === 'ArrowRight' ? 1 : -1 });
       return;
     }
+    if (e.key === 'Alt') e.preventDefault();
     const senha = e.target?.type === 'password';
     avisar({ t: 'tecla', code: senha ? null : e.code, desceu });
   };
@@ -57,14 +60,16 @@
   addEventListener('keyup', tecla(false), true);
   let dx = 0;
   let dy = 0;
+  let alt = false;
   let marcado = false;
   addEventListener('mousemove', (e) => {
     dx += e.movementX;
     dy += e.movementY;
+    alt = e.altKey && !e.ctrlKey; // Ctrl+Alt é o AltGr
     if (marcado) return;
     marcado = true;
     requestAnimationFrame(() => {
-      avisar({ t: 'mouse', dx, dy });
+      avisar({ t: 'mouse', dx, dy, alt });
       dx = 0;
       dy = 0;
       marcado = false;

@@ -14,8 +14,8 @@
 // 3D (1.7+) tira essa trava só nas telas da sala e conta o endereço e o título de cada aba.
 //
 // Para rodar em PC leve, só fica aberto o que importa: o navegador de um monitor de posto abre
-// de perto (quem está sentado ali); o de tela de parede, só com a pessoa na mesma sala. Fora da
-// vista, ou com a sala dele escondida pelo 3D, ele para de ser desenhado (continua carregado), e
+// de perto (quem está sentado ali); o de tela de parede, só com a pessoa na mesma sala. De costas
+// para ele, ou com a sala dele escondida pelo 3D, ele para de ser desenhado (continua carregado), e
 // aba escondida sem tocar nada há 2 min é descarregada (recarrega ao voltar nela, como o
 // "economia de memória" do Chrome), inclusive no navegador em uso.
 //
@@ -151,6 +151,7 @@ class Navegador {
     this.posicionar();
     // em que sala a tela fica (um passo na frente dela): de parede, só abre com a pessoa lá
     this.centro = tela.surface.getWorldPosition(new THREE.Vector3());
+    this.raio = Math.hypot(tela.w, tela.h) / 2; // a tela cabe numa bola deste raio em volta do centro
     const frente = new THREE.Vector3(0, 0, 1).applyQuaternion(tela.surface.getWorldQuaternion(new THREE.Quaternion()));
     const ponto = this.centro.clone().addScaledVector(frente, 1);
     this.sala = dono.world.salaEm?.(ponto.x, ponto.z) ?? null;
@@ -456,8 +457,8 @@ export class Navegadores {
     this.aoTrocarTela = aoTrocarTela;
     this.itens = new Map(); // tela -> Navegador
     this.emUso = null; // o navegador em foco
-    this._frustum = new THREE.Frustum();
-    this._m = new THREE.Matrix4();
+    this._frente = new THREE.Vector3();
+    this._ate = new THREE.Vector3();
     window.addEventListener('message', (e) => this.mensagem(e));
   }
 
@@ -527,13 +528,16 @@ export class Navegadores {
   atualizar() {
     const cam = this.world.camera;
     cam.updateMatrixWorld();
-    this._frustum.setFromProjectionMatrix(this._m.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse));
+    cam.getWorldDirection(this._frente);
     const salaDaCamera = this.world.salaEm?.(cam.position.x, cam.position.z) ?? null;
     const agora = performance.now();
-    // desenhado só na vista e com a sala dele no ar (sala escondida pelo 3D: segue carregado)
+    // Desenhado com a sala dele no ar (sala escondida pelo 3D: segue carregado) e sem estar de costas
+    // para ele — a tela inteira atrás da câmera. Fora da vista, de lado, continua desenhado: esconder
+    // é display: none, e ao mostrar de novo o Chrome montava e desenhava o site inteiro, um tranco a
+    // cada olhada para o lado. Com um navegador em foco, os do lado também (aparece um pedaço deles).
     const ver = (nav) => {
-      nav.vista(nav.tela.group.parent?.visible !== false
-        && (this._frustum.intersectsObject(nav.buraco) || this._frustum.containsPoint(nav.centro)));
+      const deCostas = this._ate.copy(nav.centro).sub(cam.position).dot(this._frente) < -nav.raio;
+      nav.vista(nav.tela.group.parent?.visible !== false && !deCostas);
       nav.descartarParadas(agora);
     };
     const paraAbrir = []; // { nav, d }: fechados que ficaram perto
@@ -548,12 +552,6 @@ export class Navegadores {
         nav.abrir();
         nav.vista(true);
         nav.descartarParadas(agora);
-        continue;
-      }
-      // com um navegador em foco, os outros (os monitores do lado) param de ser desenhados — é o
-      // que pesava: 3 sites desenhados de uma vez. Continuam carregados, e o vídeo segue tocando.
-      if (this.emUso) {
-        nav.vista(false);
         continue;
       }
       const d = nav.centro.distanceTo(cam.position);
@@ -606,7 +604,7 @@ export class Navegadores {
     if (!nav) return null;
     nav.abrir();
     this.emUso = nav;
-    this.atualizar(); // os do lado já param de ser desenhados
+    this.atualizar();
     return nav;
   }
 
@@ -614,7 +612,7 @@ export class Navegadores {
     if (document.activeElement && this.emUso?.el.contains(document.activeElement)) document.activeElement.blur();
     if (document.activeElement?.tagName === 'IFRAME') document.activeElement.blur();
     this.emUso = null;
-    this.atualizar(); // os do lado voltam
+    this.atualizar();
   }
 
   get enderecoAtual() { return this.emUso?.ativa?.url || ''; }

@@ -3698,6 +3698,13 @@ function entradaDoSite(m) {
     }
     escDoSite = agora;
   }
+  // Alt + mouse para o lado, de dentro do site (ver altParaOLado). A extensão 1.8.1+ manda junto
+  // com o mouse se o Alt está apertado; antes dela, vale o Alt que desceu e subiu
+  if (m.t === 'tecla' && m.code === 'AltLeft') segurarAlt(!!m.desceu);
+  else if (m.t === 'mouse') {
+    if (typeof m.alt === 'boolean' && m.alt !== altMouse.segurado) segurarAlt(m.alt);
+    altParaOLado(Number(m.dx) || 0);
+  }
   perifericosEntrada(m);
 }
 // clicou fora do monitor (na borda escura): o teclado volta para o jogo, e aí o Esc funciona
@@ -4604,6 +4611,42 @@ function irParaTelaDoLado(lado) {
   if (info.kind === 'livre') menuDaTela(prox);
   else enterFocus(info);
 }
+// Alt + mouse para o lado (sem clicar) também passa para a tela vizinha: ALT_PASSO px seguidos para
+// o mesmo lado. Continuando, vai para a próxima, depois de a câmera chegar. O Alt e o mouse de dentro
+// do site chegam pela extensão (entradaDoSite). Só o Alt da esquerda: o da direita é o AltGr.
+const ALT_PASSO = 140;
+const altMouse = { segurado: false, dx: 0, ate: 0 };
+function segurarAlt(on) {
+  altMouse.segurado = on;
+  altMouse.dx = 0;
+}
+function altParaOLado(dx) {
+  const a = altMouse;
+  if (!a.segurado || !dx || state.focus?.kind !== 'pagina') return;
+  const agora = performance.now();
+  if (agora < a.ate) return; // a câmera ainda está indo para a tela nova
+  a.dx = (Math.sign(dx) === Math.sign(a.dx) ? a.dx : 0) + dx;
+  if (Math.abs(a.dx) < ALT_PASSO) return;
+  const lado = Math.sign(a.dx);
+  a.dx = 0;
+  a.ate = agora + 450;
+  irParaTelaDoLado(lado);
+}
+// Alt sozinho, no Chrome do Windows, leva o foco para o menu dele ao soltar: usando um site, não
+const altDoSite = (e) => {
+  if (e.code !== 'AltLeft') return;
+  segurarAlt(e.type === 'keydown');
+  if (state.focus?.kind === 'pagina') e.preventDefault();
+};
+window.addEventListener('keydown', altDoSite, true);
+window.addEventListener('keyup', altDoSite, true);
+window.addEventListener('blur', () => segurarAlt(false)); // Alt+Tab: o Alt sobe em outro programa
+document.addEventListener('mousemove', (e) => {
+  const alt = e.altKey && !e.ctrlKey; // Ctrl+Alt é o AltGr
+  if (alt !== altMouse.segurado) segurarAlt(alt);
+  altParaOLado(e.movementX || 0);
+});
+
 $('#pg-esq').addEventListener('click', (e) => {
   e.currentTarget.blur();
   irParaTelaDoLado(-1);
