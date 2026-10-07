@@ -36,7 +36,7 @@ outra na troca.
 | Personagem | Origem | Licença | Arquivo |
 |---|---|---|---|
 | Atos | Gerado no Blender por `scripts/modelar-atos.py` | do projeto | `atos.glb` (273 KB) |
-| Atos clássico | Gerado no Blender por `scripts/modelar-atos-classico.py` | do projeto | `atos-classico.glb` (216 KB) |
+| Atos clássico | Gerado no Blender por `scripts/modelar-atos-classico.py` | do projeto | `atos-classico.glb` (181 KB) |
 | Robô | Tomás Laulhé (Quaternius), ajustes de Don McCurdy | CC0 | `robo.glb` (453 KB) |
 | Cavaleiro, Bárbaro, Mago, Ladino, Encapuzado | KayKit Adventurers, de Kay Lousberg | CC0 | ~400 KB cada |
 | Esqueleto, Esqueleto Guerreiro, Esqueleto Ladino, Esqueleto Mago | KayKit Skeletons, de Kay Lousberg | CC0 | ~400 KB cada |
@@ -49,8 +49,10 @@ fendas saem pelas laterais e se juntam numa costura fina nas costas. A curvinha 
 baixo à direita vira uma escama em relevo na lateral, com o dobro da altura da logo
 (do tamanho exato ela sumia entre a mão e o pé). As medidas da logo, todas arcos de
 círculo, ficam no começo do script. O Atos clássico, a bolinha de olhos de pílula
-que veio antes, continua no catálogo, com o script dele e a mesma curvinha. Como não tem perna, ele
-não dá passo: anda e corre flutuando em ondas, como fantasma, com mãos e pés arrastados atrás. Para mudar cor, tamanho
+que veio antes, continua no catálogo, com o script dele e a mesma curvinha. Ele não tem perna nem
+pé: anda e corre flutuando em ondas, como fantasma, do chão até o alto e de volta. A altura da onda
+é do jogo (`flutua` no cadastro, `flutuar()` no `modelo.js`), para começar e parar de andar sem
+pulo; o clipe só inclina o corpo e arrasta as mãos no mesmo compasso. Para mudar cor, tamanho
 ou movimento, edite o script, rode a linha do cabeçalho dele, gere a miniatura de
 novo (`node scripts/miniaturas.js atos`) e suba `versao` no cadastro: o navegador
 guarda `/models` e `/img` por um dia sem perguntar ao servidor, e sem o número

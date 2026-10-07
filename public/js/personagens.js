@@ -8,6 +8,8 @@
 // (padrão 1,1, e 2,7 em quem transforma). Pequena demais, um braço some na borda da tela.
 // maos (opcional): nomes das peças que ficam penduradas nos ossos das mãos (padrão: nenhuma —
 // o KayKit traz todas as armas do pacote no arquivo, umas por cima das outras).
+// flutua (opcional): { altura, periodo } para quem não tem perna. Andando, sobe do chão até
+// `altura` e volta a cada `periodo` segundos, em vez de dar passo (ver flutuar em modelo.js).
 // versao (opcional): vai no endereço do .glb e da miniatura. /models e /img ficam um dia no cache
 // do navegador sem perguntar ao servidor: suba o número quando trocar o arquivo, senão quem já
 // abriu a sala continua vendo o antigo.
@@ -32,7 +34,7 @@ const KAYKIT = {
 
 const kaykit = (id, label, credito) => ({ id, label, url: `/models/${id}.glb`, ...KAYKIT, credito });
 
-// os dois Atos têm a mesma altura e clipes com os mesmos nomes
+// os dois Atos têm clipes com os mesmos nomes (o clássico, sem pés, muda a altura)
 const ATOS = {
   // é uma bola: bem mais baixa que os bonecos, mas quase tão larga quanto alta
   altura: 1.25,
@@ -55,8 +57,12 @@ export const PERSONAGENS = {
     id: 'atos-classico',
     label: 'Atos clássico',
     url: '/models/atos-classico.glb',
-    versao: 3, // 2: ganhou a curvinha da logo; 3: anda flutuando, como fantasma
+    versao: 4, // 2: ganhou a curvinha da logo; 3: anda flutuando; 4: sem pés, aceno pelo pulso
     ...ATOS,
+    // sem os pés o modelo ficou mais baixo: 1,18 deixa a bola do mesmo tamanho de antes
+    altura: 1.18,
+    // não tem perna: anda em ondas, do chão a 25 cm e de volta (ver flutuar em modelo.js)
+    flutua: { altura: 0.25, periodo: 1.3 },
     resumo: 'Flutua em ondas como fantasma, pula, senta, acena e soca',
   },
   robo: {

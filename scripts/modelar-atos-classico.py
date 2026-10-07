@@ -22,7 +22,7 @@ SAIDA_BLEND = args[1] if len(args) > 1 else None
 
 FPS = 30
 R = 0.5  # raio do corpo
-CZ = 0.56  # centro do corpo (a base afunda um pouco nos pés, que só aparecem na ponta)
+CZ = R * 0.97  # centro do corpo: sem pés, a bola (achatada em 0,97 por assentar) encosta no chão
 
 bpy.ops.wm.read_factory_settings(use_empty=True)
 cena = bpy.context.scene
@@ -198,8 +198,8 @@ def cor_membro(co, n):
 # Curvinha: a mesma do Atos novo (scripts/modelar-atos.py), a ponta que a logo tem embaixo à
 # direita. É uma escama em relevo na lateral esquerda do boneco, no contorno visto de frente: nasce
 # rente à bola, sobe acompanhando o arco de fora da logo e acaba em gancho — a crista chega na ponta
-# e a base recua até o entalhe. Do tamanho exato da logo (10% do raio) ela sumia entre a mão e o
-# pé: aqui sobe o dobro.
+# e a base recua até o entalhe. Do tamanho exato da logo (10% do raio) ela sumia perto da mão: aqui
+# sobe o dobro.
 CURVINHA = (-0.2155, -0.0678, 1.1867)  # arco de fora (centro x, y e raio, no raio da bola = 1)
 # ângulos em volta do centro, vistos de frente (0 = esquerda do boneco): onde o arco sai do contorno,
 # a ponta e o entalhe
@@ -267,25 +267,12 @@ for lado, sx in (('L', 1), ('R', -1)):
     MAO[lado] = centro
     objeto(f'Mao.{lado}', bm, MAT_CORPO, f'Hand.{lado}', cor_membro)
 
-# pés: dois feijões embaixo da bola, a ponta aparecendo na frente e um pouco para fora. Ficam por
-# dentro da ponta da curvinha, para o passo não atravessá-la.
-PE_ALT = 0.075
-PE = {}
-for lado, sx in (('L', 1), ('R', -1)):
-    centro = Vector((sx * 0.17, -0.15, 0))
-    bm = esfera(1.0, 32, 16)
-    for v in bm.verts:
-        x, y, z = v.co
-        if z < 0:
-            z *= 0.7  # sola mais reta
-        v.co = Vector((x * 0.11, y * 0.155, z * PE_ALT))
-    transformar(bm, Matrix.Rotation(sx * 0.16, 4, 'Z'))
-    # a sola achatada fica a PE_ALT * 0,7 abaixo do centro: subindo isso ela encosta em y=0
-    centro.z = PE_ALT * 0.7
-    transformar(bm, Matrix.Translation(centro))
-    bm.normal_update()
-    PE[lado] = centro
-    objeto(f'Pe.{lado}', bm, MAT_CORPO, f'Foot.{lado}', cor_membro)
+# Sem pés: ele não tem perna, anda flutuando (ver flutuar, lá embaixo).
+
+# Pulso de cada mão: a ponta de baixo da gota, no espaço do osso (x = esquerda do boneco, y = cima).
+# A gota tem 0,122 de meia altura e vem inclinada 0,38 rad com a ponta de cima para dentro, então a
+# de baixo fica para fora. O aceno gira a mão em volta daqui.
+PULSO = {lado: Vector((sx * 0.122 * math.sin(0.38), -0.122 * math.cos(0.38), 0)) for lado, sx in (('L', 1), ('R', -1))}
 
 # junta tudo numa malha só (três materiais, um desenho por material)
 pecas = [o for o in bpy.context.collection.objects if o.type == 'MESH']
@@ -326,7 +313,6 @@ osso('Head', (0, 0, CZ), 'Body', 0.3)
 for lado in ('L', 'R'):
     osso(f'Eye.{lado}', olhos[lado], 'Head', 0.08)
     osso(f'Hand.{lado}', MAO[lado], 'Hips', 0.1)
-    osso(f'Foot.{lado}', PE[lado], 'Root', 0.08)
 bpy.ops.object.mode_set(mode='OBJECT')
 
 corpo.parent = arm
@@ -357,7 +343,7 @@ def piscar(t, inicio, dur=7):
 def criar_acao(nome, quadros, pose_em):
     """pose_em(t) devolve {osso: (loc, rot, esc)} — o que faltar fica na pose de descanso.
     Todos os ossos recebem chave em todo quadro: canal que falta num clipe fica parado no
-    último valor que outro clipe escreveu (o pé ficaria no meio do passo ao parar)."""
+    último valor que outro clipe escreveu (a mão ficaria no alto depois do aceno)."""
     acao = bpy.data.actions.new(nome)
     acao.use_fake_user = True
     arm.animation_data_create()
@@ -403,57 +389,44 @@ def idle(t):
     }
 
 
-def flutuar(t, P, sobe, onda_alt, inclina, arrasto, abre_mao, pe_atras):
-    """Andar de fantasma: ele não tem perna, então em vez de dar passo sai do chão e vai em ondas.
-    Sobe e desce uma vez por ciclo e inclina com a onda (de nariz para cima subindo, para baixo
-    descendo, como barco). Mãos e pés vêm arrastados atrás, cada um um pouco atrasado na onda, como
-    a barra de um lençol: é esse atraso que faz parecer solto no ar."""
-    fi = 2 * math.pi * t / P
-    s, c = math.sin(fi), math.cos(fi)
+# Andar e correr: ele não tem perna, então não dá passo, vai flutuando em ondas como fantasma. Quem
+# sobe e desce é o jogo (flutua em personagens.js, flutuar() em modelo.js), no compasso deste clipe:
+# no quadro 0 ele está no chão, no meio no alto e no fim de volta ao chão. Com a altura dentro do
+# clipe, começar ou parar de andar trocava de animação em 0,2 s e ele pulava do chão para o alto de
+# uma vez. Aqui fica o que vai junto com a onda: inclina como barco (nariz para cima subindo, para
+# baixo descendo), estica subindo e achata descendo, e as mãos vêm arrastadas atrás, atrasadas na
+# onda, como a ponta de um lençol. Sem piscar: o clipe é uma onda só, ele piscaria a cada 1,3 s.
+ONDA = 48  # quadros de uma onda; quanto ela dura de verdade quem diz é o jogo
+
+
+def flutuar(t, inclina, balanco, arrasto, abre_mao):
+    fi = 2 * math.pi * t / ONDA
+    s = math.sin(fi)  # > 0 subindo, < 0 descendo
     pose = {
-        # deriva de leve para os lados, um quarto de onda depois do sobe e desce: o corpo desenha
-        # uma volta no ar em vez de só subir e descer
-        'Hips': ((0.018 * math.sin(fi - math.pi / 2), sobe + onda_alt * s, 0),
-                 (inclina - 1.6 * onda_alt * c, 0.05 * s, 0.06 * math.sin(fi - math.pi / 2)), UM),
-        # estica subindo, achata descendo
-        'Body': (ZERO, ZERO, esmagar(-0.9 * onda_alt * c)),
+        'Hips': (ZERO, (inclina - balanco * s, 0, 0), UM),
+        'Body': (ZERO, ZERO, esmagar(-0.05 * s)),
         # a cabeça desfaz metade da inclinação e acena atrasada, para os olhos ficarem no caminho
-        'Head': (ZERO, (-inclina * 0.5 + 0.04 * math.sin(fi - 1.2), -0.03 * s, 0), UM),
-        'Eye.L': (ZERO, ZERO, (1, piscar(t, P // 2), 1)),
-        'Eye.R': (ZERO, ZERO, (1, piscar(t, P // 2), 1)),
+        'Head': (ZERO, (-inclina * 0.5 + 0.04 * math.sin(fi - 1.2), 0, 0), UM),
     }
-    for lado, sx, f in (('L', 1, 0.0), ('R', -1, math.pi)):
-        # mãos (penduradas no quadril, já sobem com ele): abertas, para trás, ondulando atrasadas
-        # e uma fora de fase da outra
-        m = math.sin(fi - 1.1 + f * 0.35)
+    for lado, sx, atraso in (('L', 1, 0.0), ('R', -1, 0.35)):
+        # penduradas no quadril, já sobem com ele: abertas, para trás, ondulando atrasadas e uma
+        # um pouco depois da outra
+        m = math.sin(fi - 1.1 - atraso)
         pose[f'Hand.{lado}'] = ((sx * abre_mao, 0.05 + 0.04 * m, -arrasto),
                                 (-0.3 - 0.25 * m, 0, -sx * (0.15 + 0.12 * m)), UM)
-        # pés (no Root, não sobem sozinhos): recolhidos rente à barriga e um pouco menores, só a
-        # ponta aparecendo, acompanham o corpo com atraso e batem devagar um contra o outro, como a
-        # barra do lençol ondulando. Pendurados para baixo, ele parecia andar na ponta dos pés.
-        p = math.sin(fi - 1.6 + f)
-        pose[f'Foot.{lado}'] = ((sx * 0.015, sobe + RECOLHE_PE + onda_alt * math.sin(fi - 0.7) + 0.02 * p, -pe_atras),
-                                (0.4 + 0.2 * p, 0, 0), (0.85,) * 3)
     return pose
 
 
-# o quanto ele sai do chão andando, e o quanto os pés sobem para dentro da barriga
-FLUTUA = 0.16
-RECOLHE_PE = 0.035
-
-
 def walk(t):
-    return flutuar(t, 36, sobe=FLUTUA, onda_alt=0.035, inclina=0.1, arrasto=0.04, abre_mao=0.03, pe_atras=0.08)
+    return flutuar(t, inclina=0.1, balanco=0.08, arrasto=0.04, abre_mao=0.03)
 
 
 def run(t):
-    # o jogo toca a corrida 1,6x mais rápido: 42 quadros dão uma onda a cada 0,9 s. Mais inclinado,
-    # mais alto, e mãos e pés esticados para trás como quem é levado pelo vento
-    return flutuar(t, 42, sobe=FLUTUA + 0.03, onda_alt=0.045, inclina=0.26, arrasto=0.1, abre_mao=0.05,
-                   pe_atras=0.14)
+    # mais inclinado, com as mãos esticadas para trás como quem é levado pelo vento
+    return flutuar(t, inclina=0.24, balanco=0.1, arrasto=0.1, abre_mao=0.05)
 
 
-# No ar: esticado, mãos para cima, pés encolhidos e olhos arregalados
+# No ar: esticado, mãos para cima e olhos arregalados
 def jump(t):
     P = 40
     o = onda(t, P)
@@ -465,12 +438,11 @@ def jump(t):
     for lado, sx, fase in (('L', 1, 0.0), ('R', -1, 0.7)):
         pose[f'Hand.{lado}'] = ((sx * 0.1, 0.36 + 0.025 * onda(t, P, fase), 0.03),
                                 (0, 0, -sx * (0.55 + 0.06 * onda(t, P, fase))), UM)
-        pose[f'Foot.{lado}'] = ((sx * -0.02, 0.1 + 0.015 * onda(t, P, fase + 1), 0.02), (0.45, 0, 0), UM)
         pose[f'Eye.{lado}'] = (ZERO, ZERO, (1.08, 1.14, 1))
     return pose
 
 
-# Sentado: assenta o peso (amassa um pouco), pés para a frente balançando, mãos apoiadas
+# Sentado: assenta o peso (amassa um pouco) e apoia as mãos
 def sit(t):
     P = 90
     resp = onda(t, P / 2)
@@ -481,14 +453,21 @@ def sit(t):
         'Eye.L': (ZERO, ZERO, (1, piscar(t, 40), 1)),
         'Eye.R': (ZERO, ZERO, (1, piscar(t, 40), 1)),
     }
-    for lado, sx, fase in (('L', 1, 0.0), ('R', -1, math.pi)):
-        pose[f'Foot.{lado}'] = ((sx * 0.02, 0.085 + 0.02 * onda(t, P / 2, fase), 0.27),
-                                (-0.5 + 0.12 * onda(t, P / 2, fase), 0, 0), UM)
+    for lado, sx in (('L', 1), ('R', -1)):
         pose[f'Hand.{lado}'] = ((sx * 0.02, -0.09 + 0.012 * resp, 0.05), (0.2, 0, sx * -0.15), UM)
     return pose
 
 
-# Aceno (toca uma vez): a mão direita sobe ao lado da cabeça e balança três vezes
+def no_pulso(lado, loc, giro):
+    """loc e giro do osso da mão para ela girar `giro` (em volta do eixo da frente) pelo pulso, e não
+    pelo meio da gota: girando pelo meio, a ponta de baixo balançava tanto quanto a de cima e o
+    aceno parecia sair do cotovelo."""
+    b = PULSO[lado]
+    c, s = math.cos(giro), math.sin(giro)
+    return ((loc[0] + b.x - (b.x * c - b.y * s), loc[1] + b.y - (b.x * s + b.y * c), loc[2]), (0, 0, giro))
+
+
+# Aceno (toca uma vez): a mão direita sobe ao lado da cabeça e balança três vezes, pelo pulso
 def wave(t):
     Q = 46
     sobe = suave(0, 8, t) * (1 - suave(36, Q, t))
@@ -498,8 +477,7 @@ def wave(t):
         'Hips': ((0, 0.04 * pulo, 0), (0, 0, 0.09 * sobe), UM),
         'Body': (ZERO, ZERO, esmagar(-0.05 * pulo + 0.02 * sobe)),
         'Head': (ZERO, (-0.04 * sobe, -0.12 * sobe, 0.05 * sobe), UM),
-        'Hand.R': ((0.08 * sobe + 0.04 * balanca * sobe, 0.45 * sobe, 0.08 * sobe),
-                   (0, 0, 0.25 * sobe + 0.5 * balanca * sobe), UM),
+        'Hand.R': (*no_pulso('R', (0.08 * sobe, 0.45 * sobe, 0.08 * sobe), sobe * (0.25 + 0.5 * balanca)), UM),
         'Hand.L': ((0, 0.03 * sobe, 0), (0, 0, 0.1 * sobe), UM),
         'Eye.L': (ZERO, ZERO, (1, piscar(t, 37, 6), 1)),
         'Eye.R': (ZERO, ZERO, (1, piscar(t, 37, 6), 1)),
@@ -523,7 +501,7 @@ def punch(t):
     }
 
 
-ACOES = [('Idle', 90, idle), ('Walk', 20, walk), ('Run', 18, run), ('Jump', 40, jump),
+ACOES = [('Idle', 90, idle), ('Walk', ONDA, walk), ('Run', ONDA, run), ('Jump', 40, jump),
          ('Sit', 90, sit), ('Wave', 46, wave), ('Punch', 22, punch)]
 for nome, q, f in ACOES:
     criar_acao(nome, q, f)
@@ -540,6 +518,12 @@ if SAIDA_BLEND:
     bpy.ops.wm.save_as_mainfile(filepath=SAIDA_BLEND)
     for tr in arm.animation_data.nla_tracks:
         tr.mute = True
+
+# O exportador grava a rotação dos ossos com 8 bits no meshopt: cada quadro saía arredondado para
+# um lado ou para o outro, até 0,5 grau, e o boneco tremia em todo movimento. 16 bits é o máximo do
+# filtro e ocupa o mesmo espaço (4 números de 16 bits por chave de qualquer jeito).
+from io_scene_gltf2.io.exp import meshopt as _meshopt  # noqa: E402
+_meshopt.QUAT_FILTER_BITS = 16
 
 bpy.ops.object.select_all(action='SELECT')
 bpy.ops.export_scene.gltf(

@@ -15,6 +15,9 @@ const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
 const _quadril = new THREE.Vector3();
 // do osso do quadril até o assento, sentado (o osso fica no meio da bacia)
 const FOLGA_QUADRIL = 0.14;
+// quanto quem flutua leva para trocar de um clipe para o outro: mais que os 0,22 s dos outros, para
+// a inclinação da corrida não sumir antes de ele pousar
+const MISTURA_FLUTUA = 0.4;
 const cache = new Map(); // url -> Promise<gltf>
 const medidas = new WeakMap(); // def -> { escala, giroY, posicao, altura } (ver ajustar)
 const _v = new THREE.Vector3();
@@ -254,6 +257,11 @@ export class Personagem {
       }
     });
 
+    // quem não tem perna anda flutuando (def.flutua): ver flutuar()
+    this.fase = 0;
+    this.subida = 0;
+    this.flutuacao = 0;
+
     this.atual = null;
     this.setEstado('idle', 0);
   }
@@ -263,13 +271,36 @@ export class Personagem {
   setEstado(estado, mistura = 0.22) {
     const acao = this.acoes[estado];
     if (!acao || acao === this.atual) return;
-    acao.reset();
-    acao.enabled = true;
-    acao.setEffectiveWeight(1);
-    acao.play();
-    if (this.atual) this.atual.crossFadeTo(acao, mistura, false);
+    if (this.def.flutua) {
+      // quem flutua mistura os clipes à mão (misturarPesos), cada um saindo do peso em que está
+      if (!acao.isScheduled()) {
+        acao.reset();
+        acao.weight = mistura ? 0 : 1;
+        acao.play();
+      }
+      acao.enabled = true;
+    } else {
+      acao.reset();
+      acao.enabled = true;
+      acao.setEffectiveWeight(1);
+      acao.play();
+      if (this.atual) this.atual.crossFadeTo(acao, mistura, false);
+    }
     this.atual = acao;
     this.estadoAtual = estado;
+  }
+
+  // O crossFade do three recomeça os dois pesos do zero: trocar de novo no meio de uma mistura
+  // (uma curva fechada correndo passa 2 ou 3 quadros andando) jogava o corpo de uma inclinação
+  // para a outra num quadro só. Aqui o clipe do estado sobe até 1 e os outros descem até 0 de onde
+  // estão. Mexe em .weight e não em setEffectiveWeight, que cancelaria o fadeOut de um gesto.
+  misturarPesos(dt) {
+    const passo = dt / MISTURA_FLUTUA;
+    for (const acao of new Set(Object.values(this.acoes))) {
+      if (!acao.isScheduled()) continue;
+      if (acao === this.atual) acao.weight = Math.min(1, acao.weight + passo);
+      else if ((acao.weight = Math.max(0, acao.weight - passo)) === 0) acao.stop();
+    }
   }
 
   // Transformação de verdade: alguns modelos trazem o clipe de virar veículo e
@@ -324,14 +355,40 @@ export class Personagem {
       return;
     }
     if (!this.gesto) this.setEstado(POR_ANIM[anim] || 'idle');
-    // andar/correr acompanham a velocidade real, senão os pés patinam no chão
-    if (this.atual && (this.estadoAtual === 'walk' || this.estadoAtual === 'run')) {
+    if (this.def.flutua) {
+      this.misturarPesos(dt);
+      this.flutuar(dt, anim === 1 || anim === 2, velocidade);
+    } else if (this.atual && (this.estadoAtual === 'walk' || this.estadoAtual === 'run')) {
+      // andar/correr acompanham a velocidade real, senão os pés patinam no chão
       this.atual.setEffectiveTimeScale(Math.max(0.4, Math.min(2.2, velocidade)));
     } else if (this.atual) {
       this.atual.setEffectiveTimeScale(1);
     }
     this.mixer.update(dt);
     this.encaixarNoAssento(dt);
+  }
+
+  // Quem não tem perna (def.flutua = { altura, periodo }) não dá passo: andando, vai em ondas, do
+  // chão até `altura` e de volta ao chão a cada `periodo` segundos (correndo, 1,6x mais rápido).
+  // A altura sai daqui e não do clipe: trocar de animação mistura os clipes em 0,2 s, e começar ou
+  // parar de andar fazia o boneco pular do chão para o alto de uma vez. Aqui a primeira onda sai do
+  // chão, e ao parar ele desce devagar até pousar; voltando a andar antes disso, segue da onda em
+  // que estava. Os clipes de andar e correr trazem o resto (inclinar com a onda, mãos arrastadas)
+  // e tocam no compasso desta onda: quadro 0 no chão, meio do clipe no alto.
+  flutuar(dt, andando, ritmo) {
+    const { altura, periodo } = this.def.flutua;
+    // sobe a onda inteira em 0,35 s e pousa em 0,7 s, com começo e fim suaves
+    this.subida = Math.max(0, Math.min(1, this.subida + dt * (andando ? 1 / 0.35 : -1 / 0.7)));
+    if (andando) this.fase = (this.fase + dt * ritmo / periodo) % 1;
+    else if (this.subida === 0) this.fase = 0; // pousou: a próxima onda começa do chão
+    const s = this.subida;
+    this.flutuacao = altura * s * s * (3 - 2 * s) * (1 - Math.cos(2 * Math.PI * this.fase)) / 2;
+    for (const estado of ['walk', 'run']) {
+      const acao = this.acoes[estado];
+      if (!acao || acao === this.acoes.idle) continue;
+      acao.setEffectiveTimeScale(0);
+      acao.time = this.fase * acao.getClip().duration;
+    }
   }
 
   // Desce o modelo até o quadril encostar no assento (e volta ao levantar), com suavidade
@@ -343,7 +400,7 @@ export class Personagem {
       alvo = Math.max(-1, Math.min(0, FOLGA_QUADRIL - _quadril.y)); // _quadril: no espaço do grupo
     }
     this.descida += (alvo - this.descida) * Math.min(1, dt * 10);
-    this.grupo.position.y = this.descida;
+    this.grupo.position.y = this.descida + this.flutuacao;
   }
 
   // Para a animação e solta os esqueletos (a textura de ossos de cada um). Geometria, material
