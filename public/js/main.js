@@ -25,6 +25,7 @@ import { GuiaExtensao } from './guia-extensao.js';
 import { Navegadores, siteDe } from './navegador.js';
 import { DEPARTAMENTOS, IDS_DEPARTAMENTOS, MAX_SALAS, rotuloDoPosto, portaDa, comTelas } from './escritorio.js';
 import { Dados, MESA_DADOS } from './dados.js';
+import { Futebol } from './futebol.js';
 import { icon, hydrateIcons } from './icons.js';
 import { isTouch, setupTouchControls, toggleFullscreen, isFullscreen, temTelaCheia } from './touch.js';
 
@@ -132,6 +133,10 @@ const player = new Player(world, localAvatar);
 localAvatar.aquecer = (obj) => world.aquecerObjeto(obj);
 player.sensitivity = settings.sens / 100;
 player.balancoVisao = settings.balancoVisao;
+// futebol de carro (estádio ao norte do cinema): jogando, ele dirige o carro e a câmera
+const futebol = new Futebol({
+  world, player, avatarLocal: localAvatar, sfx, toast: (...a) => toast(...a), estaLigado: () => jogoLigado('futebol'),
+});
 
 const state = {
   joined: false,
@@ -706,6 +711,7 @@ async function join() {
 
   socket = window.io();
   combat.socket = socket;
+  futebol.ligar(socket);
   rtc = new RTC(socket, {
     iceServers: config.iceServers,
     onTrack: handleTrack,
@@ -820,6 +826,8 @@ function emitJoin() {
 function applyJoined(data) {
   state.selfId = data.selfId;
   rtc.selfId = data.selfId;
+  futebol.eu = data.selfId;
+  futebol.verPartida(); // numa reconexão, quem estava jogando volta a pé (o servidor esqueceu)
   state.room = data.room;
   state.passe = data.passe || null;
   // versão do servidor na primeira entrada: numa reconexão, outra versão = deploy novo (ver 'connect')
@@ -2176,6 +2184,7 @@ const JOGOS_DA_SALA = [
   ['parkour', 'Parkour', 'Circuito até o camarote'],
   ['ringue', 'Ringue', 'Luta e socos'],
   ['corrida', 'Pista de corrida', 'Virar carro e dar voltas'],
+  ['futebol', 'Futebol de carro', 'Bola gigante, gols e turbo para voar'],
   ['xadrez', 'Xadrez de bruxo', ''],
   ['dama', 'Dama gigante', ''],
   ['velha', 'Jogo da velha', ''],
@@ -2183,7 +2192,7 @@ const JOGOS_DA_SALA = [
   ['poderes', 'Poderes', 'Voar e pulo alto'],
   ['armas', 'Arma da camiseta 22', ''],
 ];
-const AREAS_DE_JOGO = ['parkour', 'ringue', 'corrida', 'xadrez', 'dama', 'velha', 'dados'];
+const AREAS_DE_JOGO = ['parkour', 'ringue', 'corrida', 'futebol', 'xadrez', 'dama', 'velha', 'dados'];
 // parkour e ringue ficam dentro do cinema: no escritório não existem
 const SO_NO_CINEMA = ['parkour', 'ringue'];
 const modoEscritorio = () => state.sala?.modulo === 'escritorio' && state.sala.departamentos?.length > 0;
@@ -4990,10 +4999,18 @@ window.addEventListener('keydown', (e) => {
     else if (state.focus) sairDoFoco();
     else if (!$('#react-pop').hidden) $('#react-pop').hidden = true;
     else if (state.panel) closePanel();
+    else if (futebol.jogando) futebol.sair();
     else run.abandon(); // preso no parkour? Esc sai da corrida
     return;
   }
   if (typing() || e.repeat || guia.aberto || escolha.aberto || !$('#tela-mais').hidden) return;
+  // jogando futebol de carro: as letras são do carro (futebol.js); ficam só microfone, câmera,
+  // chat e esconder a tela
+  if (futebol.jogando && !['KeyM', 'KeyK', 'KeyT', 'Enter', 'KeyH'].includes(e.code)) return;
+  if (e.code === 'KeyE' && !state.focus && futebol.pertoDaEntrada()) {
+    futebol.entrar();
+    return;
+  }
   // usando o navegador da tela: as letras são do site, não atalhos do jogo (só o Esc sai)
   if (state.focus?.kind === 'pagina') {
     if (e.altKey && (e.code === 'ArrowLeft' || e.code === 'ArrowRight')) {
@@ -5199,6 +5216,8 @@ function sendState(dt) {
 
 function slowUpdate() {
   navegadores.atualizar();
+  futebol.atualizarDica(!state.focus && !state.panel);
+  if (futebol.jogando && !jogoLigado('futebol')) futebol.sair(); // o dono da sala desligou
   $('#clima-chip').textContent = clima.rotulo();
   updateVolumes();
   lodDosBonecos();
@@ -5446,6 +5465,10 @@ function atualizarAvatares(dt, t, desenhando) {
   for (const u of state.users.values()) {
     if (u.isSelf) continue;
     const a = u.avatar;
+    // jogando futebol de carro: quem aparece é o carro dele no campo (futebol.js), não o boneco
+    const noCampo = futebol.joga(u.id);
+    if (a.group.visible === noCampo) a.group.visible = !noCampo;
+    if (noCampo) continue;
     if (!a.animarCom) {
       a.update(dt, t);
       continue;
@@ -5554,7 +5577,9 @@ function frame(ts = performance.now()) {
   balancarLuneta(t);
 
   if (state.joined) {
-    player.update(dt);
+    if (futebol.jogando) futebol.update(dt); // no campo: o carro do futebol no lugar do boneco
+    else player.update(dt);
+    futebol.animar(dt);
     // com poder ligado o parkour nem começa (pular alto/voar até o camarote não é recorde)
     if (player.voando || player.puloAlto) {
       if (run.state !== 'idle') {

@@ -11,6 +11,7 @@ const { paginaInicial, moduloVersionado, PREFIXO_THREE, THREE_DIR, PREFIXO_SIO, 
 const { execFile } = require('child_process');
 const crypto = require('crypto');
 const banco = require('./banco');
+const { ligarFutebol } = require('./futebol-servidor.js');
 // a planta do escritório é a mesma do navegador (public/js/escritorio.js); carrega em main()
 let ESCRITORIO = null;
 
@@ -389,7 +390,7 @@ const MODULOS = ['lazer', 'escritorio'];
 // clima e hora do dia (public/js/clima.js): auto/ciclo = muda sozinho, igual para todos
 const CLIMAS_SALA = ['auto', 'sol', 'nublado', 'chuva', 'tempestade'];
 const HORARIOS_SALA = ['ciclo', 'manha', 'dia', 'tarde', 'noite'];
-const JOGOS_SALA = ['parkour', 'ringue', 'corrida', 'xadrez', 'dama', 'velha', 'dados', 'poderes', 'armas'];
+const JOGOS_SALA = ['parkour', 'ringue', 'corrida', 'futebol', 'xadrez', 'dama', 'velha', 'dados', 'poderes', 'armas'];
 const configPadrao = () => ({
   modulo: 'lazer',
   departamentos: [],
@@ -931,6 +932,7 @@ function encaixarSemTela(room) {
 }
 
 function attachSockets(io) {
+  const futebolDoSocket = ligarFutebol(io, rooms, jogoLigado); // futebol de carro (futebol-servidor.js)
   // alerta para os gestores que estão na sala (menos a própria pessoa)
   function avisarGestores(room, user, tipo, texto) {
     for (const u of room.users.values()) {
@@ -975,6 +977,8 @@ function attachSockets(io) {
     socket.use((pacote, next) => {
       if (!fundoDemais(pacote)) next();
     });
+
+    futebolDoSocket(socket, () => ({ room, user }));
 
     let entrando = false;
     let dono = false; // esta conexão provou ser o dono da sala (senha)

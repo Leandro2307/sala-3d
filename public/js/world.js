@@ -9,6 +9,7 @@ import { COURSE, RAILS, FUN_PADS } from './parkour.js';
 import { RING } from './arena.js';
 import { PISTA, CAMINHO, CURVAS, pontoEm, projetar } from './pista.js';
 import { criarNatureza } from './natureza.js';
+import { construirEstadio } from './futebol.js';
 import { RESERVAS_JOGOS } from './tabuleiros.js';
 import { construirEscritorio } from './escritorio3d.js';
 import { planta, salaEm, rotuloDaTela, postoDaTela, chaveDaTela, DEPARTAMENTOS, PREDIO, zDaPorta } from './escritorio.js';
@@ -764,6 +765,8 @@ export class World {
     this.area('parkour', () => this.buildCourse());
     this.area('ringue', () => this.buildRing());
     this.area('corrida', () => this.buildTrack());
+    // estádio do futebol de carro, ao norte do cinema (a partida em si é do futebol.js)
+    this.estadio = this.area('futebol', () => construirEstadio(this));
     // praça do xadrez de bruxo e da dama (as peças em si ficam em jogos.js)
     this.reservas.push(...RESERVAS_JOGOS);
     this.placaDirecao(SALA.maxX + 9, SALA.porta.z0 + 2, -Math.PI / 2, '↖  JOGOS E DADOS', '#a78bfa');
