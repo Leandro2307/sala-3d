@@ -378,10 +378,11 @@ body.touch #hud, body.touch #bar, body.touch #touch { -webkit-user-select: none;
 }
 #crosshair.on { transform: scale(1.8); background: var(--accent); }
 
+/* dica do E: logo acima da barra inferior, para não tapar o que está na mira */
 #hover-hint {
   position: absolute;
   left: 50%;
-  top: calc(50% + 26px);
+  bottom: calc(88px + env(safe-area-inset-bottom));
   transform: translateX(-50%);
   display: flex;
   align-items: center;
@@ -2342,6 +2343,8 @@ body.touch #bar {
   padding: calc(8px + env(safe-area-inset-top)) 10px 8px;
   background: linear-gradient(180deg, rgba(8, 9, 13, 0.92), rgba(8, 9, 13, 0));
 }
+/* no celular a barra está em cima e embaixo ficam os controles: a dica do E volta para baixo da mira */
+body.touch #hover-hint { top: calc(50% + 26px); bottom: auto; }
 body.touch .bar-left { display: flex; font-size: 12px; max-width: 86px; }
 body.touch #clock, body.touch .bar-left .sep { display: none; }
 body.touch .bar-center, body.touch .bar-right { gap: 4px; }
