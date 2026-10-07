@@ -35,16 +35,25 @@ outra na troca.
 
 | Personagem | Origem | Licença | Arquivo |
 |---|---|---|---|
-| Atos | Gerado no Blender por `scripts/modelar-atos.py` | do projeto | `atos.glb` (206 KB) |
+| Atos | Gerado no Blender por `scripts/modelar-atos.py` | do projeto | `atos.glb` (273 KB) |
+| Atos clássico | Gerado no Blender por `scripts/modelar-atos-classico.py` | do projeto | `atos-classico.glb` (217 KB) |
 | Robô | Tomás Laulhé (Quaternius), ajustes de Don McCurdy | CC0 | `robo.glb` (453 KB) |
 | Cavaleiro, Bárbaro, Mago, Ladino, Encapuzado | KayKit Adventurers, de Kay Lousberg | CC0 | ~400 KB cada |
 | Esqueleto, Esqueleto Guerreiro, Esqueleto Ladino, Esqueleto Mago | KayKit Skeletons, de Kay Lousberg | CC0 | ~400 KB cada |
 | Optimus, Solus Prime | OrangeSauceu, a partir de *Transformers: Earth Wars* | marcado CC BY pelo autor do envio | 706 KB / 1,1 MB |
 
 O Atos não vem de pacote: o script modela a bola, monta o esqueleto, anima os 7
-clipes e exporta já com meshopt. Para mudar cor, tamanho ou movimento, edite o
-script, rode a linha do cabeçalho dele e gere a miniatura de novo
-(`node scripts/miniaturas.js atos`).
+clipes e exporta já com meshopt. Ele é a logo virada bola: visto de frente, a
+bola mostra a logo exata (pupila, íris, o anel e as duas fendas em espiral), e as
+fendas saem pelas laterais e se juntam numa costura fina nas costas. A curvinha de
+baixo à direita vira uma escama em relevo na lateral, com o dobro da altura da logo
+(do tamanho exato ela sumia entre a mão e o pé). As medidas da logo, todas arcos de
+círculo, ficam no começo do script. O Atos clássico, a bolinha de olhos de pílula
+que veio antes, continua no catálogo, com o script dele e a mesma curvinha. Para mudar cor, tamanho
+ou movimento, edite o script, rode a linha do cabeçalho dele, gere a miniatura de
+novo (`node scripts/miniaturas.js atos`) e suba `versao` no cadastro: o navegador
+guarda `/models` e `/img` por um dia sem perguntar ao servidor, e sem o número
+novo no endereço quem já abriu a sala continua vendo o modelo antigo.
 
 Optimus e Solus trazem a animação de **transformar em veículo** — é o que faz o
 `G` virar o personagem de verdade, em vez de trocar pelo carro desenhado em

@@ -8,6 +8,9 @@
 // (padrão 1,1, e 2,7 em quem transforma). Pequena demais, um braço some na borda da tela.
 // maos (opcional): nomes das peças que ficam penduradas nos ossos das mãos (padrão: nenhuma —
 // o KayKit traz todas as armas do pacote no arquivo, umas por cima das outras).
+// versao (opcional): vai no endereço do .glb e da miniatura. /models e /img ficam um dia no cache
+// do navegador sem perguntar ao servidor: suba o número quando trocar o arquivo, senão quem já
+// abriu a sala continua vendo o antigo.
 
 const KAYKIT = {
   // altura medida na pose de repouso do arquivo; de pé eles esticam um pouco,
@@ -29,6 +32,13 @@ const KAYKIT = {
 
 const kaykit = (id, label, credito) => ({ id, label, url: `/models/${id}.glb`, ...KAYKIT, credito });
 
+// os dois Atos têm a mesma altura e clipes com os mesmos nomes
+const ATOS = {
+  // é uma bola: bem mais baixa que os bonecos, mas quase tão larga quanto alta
+  altura: 1.25,
+  clipes: { idle: 'Idle', walk: 'Walk', run: 'Run', air: 'Jump', sit: 'Sit', punch: 'Punch', wave: 'Wave' },
+};
+
 export const PERSONAGENS = {
   padrao: { id: 'padrao', label: 'Boneco', url: null, resumo: 'Com a sua cor, camiseta e foto no rosto' },
   // gerado inteiro no Blender por scripts/modelar-atos.py — para mexer nele, mude o script
@@ -36,9 +46,17 @@ export const PERSONAGENS = {
     id: 'atos',
     label: 'Atos',
     url: '/models/atos.glb',
-    // é uma bola: bem mais baixa que os bonecos, mas quase tão larga quanto alta
-    altura: 1.25,
-    clipes: { idle: 'Idle', walk: 'Walk', run: 'Run', air: 'Jump', sit: 'Sit', punch: 'Punch', wave: 'Wave' },
+    versao: 2, // 2: a bola virou a logo (olho em espiral)
+    ...ATOS,
+    resumo: 'Olho em espiral: olha em volta, pisca, pula, senta, acena e soca',
+  },
+  // o primeiro Atos, de olhos de pílula: scripts/modelar-atos-classico.py
+  'atos-classico': {
+    id: 'atos-classico',
+    label: 'Atos clássico',
+    url: '/models/atos-classico.glb',
+    versao: 2, // 2: ganhou a curvinha da logo
+    ...ATOS,
     resumo: 'Quica ao andar, pula, senta, acena e soca',
   },
   robo: {
@@ -115,6 +133,10 @@ export const PERSONAGENS = {
   },
 };
 
-for (const p of Object.values(PERSONAGENS)) p.miniatura = `/img/personagens/${p.id}.webp`;
+for (const p of Object.values(PERSONAGENS)) {
+  const v = p.versao ? `?v=${p.versao}` : '';
+  p.miniatura = `/img/personagens/${p.id}.webp${v}`;
+  if (p.url) p.url += v;
+}
 
 export const IDS_PERSONAGENS = Object.keys(PERSONAGENS);
