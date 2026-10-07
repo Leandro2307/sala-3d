@@ -70,6 +70,7 @@ export class Player {
     this.tQueda = 1;
     // altura dos olhos sem pulos: degrau subido sozinho e sentar/levantar viram um ajuste que se desfaz
     this.chaoSentado = null; // o chão embaixo do assento (o assento não é o chão)
+    this.deOnde = null; // onde fica em pé ao levantar da cadeira (ver sentarEm)
     this.degrau = 0;
     this.ajusteOlho = 0;
     this.olhoAntes = null;
@@ -189,6 +190,7 @@ export class Player {
     this.sitting = true;
     this.vel.set(0, 0, 0);
     this.chaoSentado = assento.min.y;
+    this.deOnde = null;
     this.pos.y = assento.max.y;
     this.jumpBuffer = 0;
     this.emit('sit', true);
@@ -199,7 +201,16 @@ export class Player {
   // ele está virado. Na cadeira de um posto a câmera vai para primeira pessoa, para ver os
   // monitores sem a própria cabeça na frente; ao levantar volta como estava.
   sentarEm(lugar) {
-    this.chaoSentado = Math.min(this.pos.y, lugar.y); // estava em pé no chão, perto da cadeira
+    // o chão é o de onde estava em pé, perto da cadeira. Em pé EM CIMA de um assento (a própria
+    // cadeira, depois de levantar nela), vale o chão embaixo dele: senão os olhos subiam 0,62 m e o
+    // posto ficava visto de cima, por cima dos monitores
+    const g = this.grounded ? this.ground : null;
+    const emCimaDoAssento = g?.data?.type === 'sofa' || g?.data?.type === 'puff';
+    this.chaoSentado = Math.min(emCimaDoAssento ? g.min.y : this.pos.y, lugar.y);
+    // ao levantar, volta para cá (de cima do assento: para o chão, atrás dele)
+    this.deOnde = emCimaDoAssento
+      ? new THREE.Vector3(lugar.x + Math.sin(lugar.yaw) * 0.75, this.chaoSentado, lugar.z + Math.cos(lugar.yaw) * 0.75)
+      : this.pos.clone();
     this.pos.set(lugar.x, lugar.y, lugar.z);
     this.vel.set(0, 0, 0);
     this.yaw = lugar.yaw;
@@ -221,10 +232,16 @@ export class Player {
     if (!this.sitting) return false;
     this.sitting = false;
     this.sitYaw = null;
-    // levanta no chão de onde sentou, em vez de cair do assento (se ali não tiver nada no caminho)
+    // levanta onde estava em pé antes de sentar: a cadeira do posto ocupa o chão embaixo dela, e
+    // levantar ali deixava o boneco em pé em cima do assento. Sem esse lugar (ou ocupado), no chão
+    // de onde sentou, em vez de cair do assento (se ali não tiver nada no caminho)
     const chao = this.chaoSentado;
+    const volta = this.deOnde;
     this.chaoSentado = null;
-    if (chao != null && chao < this.pos.y && !this.blockedAt(this.pos.x, chao + EPS, this.pos.z)) this.pos.y = chao + EPS;
+    this.deOnde = null;
+    if (volta && Math.hypot(volta.x - this.pos.x, volta.z - this.pos.z) < 1.6 && !this.blockedAt(volta.x, volta.y + EPS, volta.z)) {
+      this.pos.set(volta.x, volta.y + EPS, volta.z);
+    } else if (chao != null && chao < this.pos.y && !this.blockedAt(this.pos.x, chao + EPS, this.pos.z)) this.pos.y = chao + EPS;
     if (this.modoAntes) {
       this.mode = this.modoAntes;
       this.modoAntes = null;

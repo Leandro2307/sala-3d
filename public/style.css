@@ -533,6 +533,12 @@ i.nv-fav.letra { display: grid; place-items: center; font: 700 10px/1 system-ui,
 #css3d .nv-end:focus { background: #fff; border-color: #1a73e8; }
 .nv-corpo { position: relative; flex: 1; background: #fff; }
 #css3d .nv-corpo iframe { position: absolute; inset: 0; width: 100%; height: 100%; background: #fff; }
+/* Chrome: com a perspectiva, cada giro da câmera muda o tamanho do site na tela, e o Chrome
+   redesenha o iframe inteiro e segura o quadro até ele chegar — 3 sites derrubavam a sala de 75
+   para 47 qps olhando em volta sentado no posto. Abaixo de 1/4 de escala ele para de acompanhar o
+   tamanho: o iframe fica 4x maior com zoom 4 (o site continua vendo os mesmos 1280 px de largura)
+   e encolhe de volta. Em foco, de perto, passa de 1/4 e desenha na resolução da tela, como antes. */
+#css3d .nv.zoom4 .nv-corpo iframe { inset: auto; left: 0; top: 0; width: 400%; height: 400%; zoom: 4; transform: scale(0.25); transform-origin: 0 0; }
 .nv-inicio { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 30px; background: #fff; }
 .nv-busca { display: flex; flex-direction: column; align-items: center; gap: 22px; width: min(620px, 80%); }
 .nv-logo { font: 800 44px/1 'Segoe UI', system-ui, sans-serif; letter-spacing: -0.02em; color: #1f2937; }
