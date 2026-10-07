@@ -15,10 +15,17 @@
 //
 // Para rodar em PC leve, só fica aberto o que importa: o navegador de um monitor de posto abre
 // de perto (quem está sentado ali); o de tela de parede, só com a pessoa na mesma sala. Fora da
-// vista ele para de ser desenhado (continua carregado), e aba escondida sem tocar nada há 2 min
-// é descarregada (recarrega ao voltar nela, como o "economia de memória" do Chrome).
+// vista, ou com a sala dele escondida pelo 3D, ele para de ser desenhado (continua carregado), e
+// aba escondida sem tocar nada há 2 min é descarregada (recarrega ao voltar nela, como o
+// "economia de memória" do Chrome), inclusive no navegador em uso.
+//
+// Cada site aberto pesa na memória do aparelho, então há limite: no PC de pouca memória ficam
+// abertos no máximo 4 (os mais perto primeiro; um aberto nunca fecha para dar lugar a outro); no
+// celular só o site em uso fica carregado, e a aba que sai da frente é descarregada na hora.
 import * as THREE from 'three';
 import { CSS3DObject } from 'three/addons/renderers/CSS3DRenderer.js';
+import { isTouch } from './touch.js';
+import * as qualidade from './qualidade.js';
 
 const LARGURA_PX = 1280; // a "janela": 1280 px de largura, como um notebook
 const PERTO_POSTO = 8; // metros: monitor de posto abre perto assim
@@ -26,6 +33,11 @@ const PERTO_PAREDE = 18; // tela de parede: na mesma sala e até esta distância
 const FOLGA = 1.4; // fecha só bem mais longe do que abre (sem abre-e-fecha na porta)
 const DESCARTAR_MS = 120_000; // aba escondida, sem tocar vídeo/som, por 2 min: descarrega
 const MAX_ABAS = 8;
+// celular: só o site em uso fica carregado (no iPhone ele mora no processo da sala, e o Safari
+// recarrega a aba toda quando a memória aperta)
+const SO_EM_USO = isTouch;
+// PC de até 4 GB: os 3 do posto + 1; PC forte: sem limite, como sempre foi
+const MAX_ABERTOS = qualidade.POUCA_MEMORIA ? 4 : Infinity;
 // sem "allow-top-navigation": o site lá dentro não consegue tirar a pessoa da sala
 const SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox '
   + 'allow-modals allow-downloads allow-presentation allow-pointer-lock allow-storage-access-by-user-activation';
@@ -231,6 +243,11 @@ class Navegador {
     for (const a of this.abas) {
       if (!a.iframe) continue;
       const esconder = a !== aba;
+      // no celular a aba que sai da frente é descarregada na hora (ver SO_EM_USO)
+      if (esconder && SO_EM_USO) {
+        this.tirarQuadro(a);
+        continue;
+      }
       if (esconder && !a.iframe.hidden) a.escondidaDesde = agora;
       a.iframe.hidden = esconder;
     }
@@ -508,14 +525,24 @@ export class Navegadores {
     this._frustum.setFromProjectionMatrix(this._m.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse));
     const salaDaCamera = this.world.salaEm?.(cam.position.x, cam.position.z) ?? null;
     const agora = performance.now();
+    // desenhado só na vista e com a sala dele no ar (sala escondida pelo 3D: segue carregado)
+    const ver = (nav) => {
+      nav.vista(nav.tela.group.parent?.visible !== false
+        && (this._frustum.intersectsObject(nav.buraco) || this._frustum.containsPoint(nav.centro)));
+      nav.descartarParadas(agora);
+    };
+    const paraAbrir = []; // { nav, d }: fechados que ficaram perto
+    const abertosAgora = []; // { nav, d }: os abertos que contam no limite
+    let abertos = 0; // fora o em uso
     for (const nav of this.itens.values()) {
-      if (!nav.tela.group.visible) {
+      if (!nav.tela.group.visible || (SO_EM_USO && this.emUso !== nav)) {
         nav.fechar();
         continue;
       }
       if (this.emUso === nav) {
         nav.abrir();
         nav.vista(true);
+        nav.descartarParadas(agora);
         continue;
       }
       // com um navegador em foco, os outros (os monitores do lado) param de ser desenhados — é o
@@ -527,11 +554,35 @@ export class Navegadores {
       const d = nav.centro.distanceTo(cam.position);
       const perto = nav.tela.posto ? PERTO_POSTO : PERTO_PAREDE;
       const mesmaSala = !!nav.tela.posto || !nav.sala || !salaDaCamera || nav.sala === salaDaCamera;
-      if (!nav.aberto && d < perto && mesmaSala) nav.abrir();
-      else if (nav.aberto && (d > perto * FOLGA || !mesmaSala)) nav.fechar();
-      if (!nav.aberto) continue;
-      nav.vista(this._frustum.intersectsObject(nav.buraco) || this._frustum.containsPoint(nav.centro));
-      nav.descartarParadas(agora);
+      if (!nav.aberto) {
+        if (d < perto && mesmaSala) paraAbrir.push({ nav, d });
+        continue;
+      }
+      if (d > perto * FOLGA || !mesmaSala) {
+        nav.fechar();
+        continue;
+      }
+      abertos++;
+      abertosAgora.push({ nav, d });
+      ver(nav);
+    }
+    // O mais perto primeiro, até o limite do aparelho. Cheio, o aberto mais longe cede a vaga a
+    // quem ficou bem mais perto (a folga evita o abre-e-fecha): senão as páginas de parede que
+    // abriram primeiro seguravam as vagas e o monitor do próprio posto nunca abria.
+    paraAbrir.sort((a, b) => a.d - b.d);
+    for (const c of paraAbrir) {
+      if (abertos >= MAX_ABERTOS) {
+        let longe = null;
+        for (const a of abertosAgora) if (!longe || a.d > longe.d) longe = a;
+        if (!longe || c.d * FOLGA >= longe.d) break;
+        longe.nav.fechar();
+        abertosAgora.splice(abertosAgora.indexOf(longe), 1);
+        abertos--;
+      }
+      c.nav.abrir();
+      abertos++;
+      abertosAgora.push(c);
+      ver(c.nav);
     }
   }
 

@@ -37,29 +37,32 @@ LINHAS.forEach((linha, r) => {
   }
 });
 
+// Uma tecla na célula dela. A célula inteira volta ao fundo antes: a tecla afundada desce 3 px, e
+// assim dá para redesenhar só a que mudou (o resto do teclado continua no canvas).
+function desenharTecla(ctx, k, baixa) {
+  const p = 3;
+  ctx.fillStyle = '#151922';
+  ctx.fillRect(k.x, k.y, k.w, k.h);
+  ctx.fillStyle = baixa ? '#0b0e14' : '#2a303d';
+  ctx.beginPath();
+  ctx.roundRect(k.x + p, k.y + p + (baixa ? 3 : 0), k.w - p * 2, k.h - p * 2 - (baixa ? 1 : 3), 7);
+  ctx.fill();
+  if (!baixa) {
+    // borda de baixo da tecla (dá o volume) — some quando ela afunda
+    ctx.fillStyle = '#1a1f29';
+    ctx.fillRect(k.x + p + 4, k.y + k.h - p - 3, k.w - p * 2 - 8, 3);
+  }
+  if (k.rotulo) {
+    ctx.fillStyle = baixa ? '#6ee7c8' : '#cbd5e1';
+    ctx.font = `600 ${k.rotulo.length > 2 ? 17 : 24}px system-ui, sans-serif`;
+    ctx.fillText(k.rotulo, k.x + k.w / 2, k.y + k.h / 2 + (baixa ? 3 : -1));
+  }
+}
+
 function desenharTeclado(ctx, apertadas = new Set()) {
   ctx.fillStyle = '#151922';
   ctx.fillRect(0, 0, PX.w, PX.h);
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  for (const [code, k] of TECLAS) {
-    const baixa = apertadas.has(code);
-    const p = 3;
-    ctx.fillStyle = baixa ? '#0b0e14' : '#2a303d';
-    ctx.beginPath();
-    ctx.roundRect(k.x + p, k.y + p + (baixa ? 3 : 0), k.w - p * 2, k.h - p * 2 - (baixa ? 1 : 3), 7);
-    ctx.fill();
-    if (!baixa) {
-      // borda de baixo da tecla (dá o volume) — some quando ela afunda
-      ctx.fillStyle = '#1a1f29';
-      ctx.fillRect(k.x + p + 4, k.y + k.h - p - 3, k.w - p * 2 - 8, 3);
-    }
-    if (k.rotulo) {
-      ctx.fillStyle = baixa ? '#6ee7c8' : '#cbd5e1';
-      ctx.font = `600 ${k.rotulo.length > 2 ? 17 : 24}px system-ui, sans-serif`;
-      ctx.fillText(k.rotulo, k.x + k.w / 2, k.y + k.h / 2 + (baixa ? 3 : -1));
-    }
-  }
+  for (const [code, k] of TECLAS) desenharTecla(ctx, k, apertadas.has(code));
 }
 
 function texturaDoTeclado() {
@@ -69,7 +72,10 @@ function texturaDoTeclado() {
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
-  return { cv, ctx: cv.getContext('2d'), tex };
+  const ctx = cv.getContext('2d');
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  return { cv, ctx, tex };
 }
 
 export function criarPerifericos(raiz, postos) {
@@ -78,14 +84,27 @@ export function criarPerifericos(raiz, postos) {
   const estatico = texturaDoTeclado();
   desenharTeclado(estatico.ctx);
   const topo = new THREE.MeshStandardMaterial({ map: estatico.tex, roughness: 0.6 });
-  // caixa: +x, -x, +y (o topo, com as teclas), -y, +z, -z
+  // Caixa: 6 faces de 6 índices, na ordem +x, -x, +y (o topo, com as teclas), -y, +z, -z. O topo
+  // vai para o fim e as outras 5 faces viram um grupo só: 2 desenhos por teclado no lugar de 6.
   const geoTeclado = new THREE.BoxGeometry(TECLADO.w, TECLADO.h, TECLADO.d);
-  const matsTeclado = [corpo, corpo, topo, corpo, corpo, corpo];
+  const faces = geoTeclado.index.array;
+  geoTeclado.setIndex([...faces.slice(0, 12), ...faces.slice(18), ...faces.slice(12, 18)]);
+  geoTeclado.clearGroups();
+  geoTeclado.addGroup(0, 30, 0);
+  geoTeclado.addGroup(30, 6, 1);
+  const matsTeclado = [corpo, topo];
   const geoPad = new THREE.BoxGeometry(PAD.w, 0.004, PAD.d);
   const matPad = new THREE.MeshStandardMaterial({ color: 0x23293a, roughness: 0.95 });
-  const geoMouse = new THREE.SphereGeometry(0.032, 20, 14);
+  // o mouse dos outros postos é miúdo na tela: 12×8 (168 triângulos) basta. O do seu posto, a
+  // 60 cm do olho, continua 20×14 (ver ativar).
+  const geoMouse = new THREE.SphereGeometry(0.032, 12, 8);
   geoMouse.scale(0.95, 0.5, 1.55);
   const matMouse = new THREE.MeshStandardMaterial({ color: 0x2a2f3a, roughness: 0.35, metalness: 0.25 });
+  // O teclado e o mouse do seu posto têm material próprio (igual ao das instâncias): no three, o
+  // mesmo material numa InstancedMesh e numa Mesh comum troca de programa a cada alternância, duas
+  // vezes por quadro enquanto você está sentado.
+  const corpoAtivo = corpo.clone();
+  const matMouseAtivo = matMouse.clone();
 
   const n = lista.length;
   const teclados = new THREE.InstancedMesh(geoTeclado, matsTeclado, n);
@@ -104,8 +123,9 @@ export function criarPerifericos(raiz, postos) {
     pads.setMatrixAt(i, lugar(p, PAD.x, 0.002, 0));
     mouses.setMatrixAt(i, lugar(p, PAD.x, 0.018, 0.02));
   });
+  // Nenhum faz sombra (só recebem): o normalBias do sol (4 cm) é maior que a altura deles, e a
+  // sombra não aparecia em lugar nenhum. Vale também para o teclado e o mouse do seu posto.
   for (const m of [teclados, pads, mouses]) {
-    m.castShadow = m !== pads;
     m.receiveShadow = true;
     m.computeBoundingSphere();
     raiz.add(m);
@@ -113,11 +133,9 @@ export function criarPerifericos(raiz, postos) {
   const zero = new THREE.Matrix4().makeScale(0, 0, 0);
 
   // ---------------------------------------------------------------- o do seu posto
-  let ativo = null; // { i, grupo, teclado, mouse, din, apertadas, alvo, pos, clique, ultimo }
-  const redesenhar = () => {
-    desenharTeclado(ativo.din.ctx, ativo.apertadas);
-    ativo.din.tex.needsUpdate = true;
-  };
+  // { id, i, grupo, mouse, din, matTopo, apertadas, mudou, alvo, pos, clique, soltas }
+  // mudou: as teclas que subiram ou desceram desde o último quadro (o update redesenha só elas)
+  let ativo = null;
 
   return {
     // senta num posto (id) ou levanta (null)
@@ -131,6 +149,7 @@ export function criarPerifericos(raiz, postos) {
         ativo.grupo.removeFromParent();
         ativo.din.tex.dispose();
         ativo.matTopo.dispose();
+        ativo.mouse.geometry.dispose();
         ativo = null;
       }
       const i = lista.findIndex((p) => p.id === id);
@@ -145,18 +164,17 @@ export function criarPerifericos(raiz, postos) {
       grupo.rotation.y = lista[i].mesa.rotY;
       const din = texturaDoTeclado();
       const matTopo = new THREE.MeshStandardMaterial({ map: din.tex, roughness: 0.6 });
-      const teclado = new THREE.Mesh(geoTeclado, [corpo, corpo, matTopo, corpo, corpo, corpo]);
+      const teclado = new THREE.Mesh(geoTeclado, [corpoAtivo, matTopo]);
       teclado.position.y = TECLADO.h / 2;
-      const mouse = new THREE.Mesh(geoMouse, matMouse);
+      const mouse = new THREE.Mesh(new THREE.SphereGeometry(0.032, 20, 14).scale(0.95, 0.5, 1.55), matMouseAtivo);
       mouse.position.set(PAD.x, 0.018, 0.02);
-      for (const m of [teclado, mouse]) {
-        m.castShadow = true;
-        m.receiveShadow = true;
-      }
+      teclado.receiveShadow = true;
+      mouse.receiveShadow = true;
       grupo.add(teclado, mouse);
       raiz.add(grupo);
-      ativo = { id, i, grupo, mouse, din, matTopo, apertadas: new Set(), alvo: new THREE.Vector2(), pos: new THREE.Vector2(), clique: 0, soltas: new Map() };
-      redesenhar();
+      ativo = { id, i, grupo, mouse, din, matTopo, apertadas: new Set(), mudou: new Set(), alvo: new THREE.Vector2(), pos: new THREE.Vector2(), clique: 0, soltas: new Map() };
+      desenharTeclado(din.ctx);
+      din.tex.needsUpdate = true;
     },
 
     // tecla (code do KeyboardEvent). code null: uma letra qualquer (campo de senha não diz qual)
@@ -172,7 +190,7 @@ export function criarPerifericos(raiz, postos) {
       if (desceu === ativo.apertadas.has(c)) return;
       if (desceu) ativo.apertadas.add(c);
       else ativo.apertadas.delete(c);
-      redesenhar();
+      ativo.mudou.add(c);
     },
 
     // mouse: o movimento da tela vira movimento no mouse pad (e volta devagar para o meio)
@@ -188,9 +206,9 @@ export function criarPerifericos(raiz, postos) {
     },
 
     soltarTudo() {
-      if (!ativo || !ativo.apertadas.size) return;
+      if (!ativo) return;
+      for (const c of ativo.apertadas) ativo.mudou.add(c);
       ativo.apertadas.clear();
-      redesenhar();
     },
 
     update(dt) {
@@ -203,8 +221,15 @@ export function criarPerifericos(raiz, postos) {
           if (agora < ate) continue;
           a.soltas.delete(c);
           a.apertadas.delete(c);
-          redesenhar();
+          a.mudou.add(c);
         }
+      }
+      // só as teclas que mudaram, e a textura sobe uma vez por quadro (com mipmaps, para o teclado
+      // não serrilhar visto de longe)
+      if (a.mudou.size) {
+        for (const c of a.mudou) desenharTecla(a.din.ctx, TECLAS.get(c), a.apertadas.has(c));
+        a.mudou.clear();
+        a.din.tex.needsUpdate = true;
       }
       a.alvo.multiplyScalar(Math.exp(-dt * 0.8)); // sem mexer, o mouse volta para o meio do pad
       a.pos.lerp(a.alvo, 1 - Math.exp(-dt * 18));

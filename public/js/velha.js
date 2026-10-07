@@ -63,6 +63,9 @@ function nota(b, vez, prof) {
 export function lanceDoComputador(st, nivel = 1) {
   const ms = legais(st);
   if (!ms.length) return null;
+  // tabuleiro vazio: o minimax dá empate em todas as casas, depois de passar por mais de meio
+  // milhão de posições. Sortear direto dá a mesma distribuição, em qualquer nível.
+  if (ms.length === 9) return ms[Math.floor(Math.random() * 9)];
   const sorteio = (xs) => xs[Math.floor(Math.random() * xs.length)];
   const ganha = (m, vez) => {
     const b = st.b.slice();

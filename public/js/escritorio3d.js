@@ -9,31 +9,55 @@
 // sabe ligar vídeo nelas).
 //
 // Peças repetidas (cadeiras, monitores, baias) são instanciadas, e cada sala tem uma luz no teto
-// — o World só acende as mais perto da câmera.
+// — o World só acende as mais perto da câmera. As peças soltas que sobram são mescladas por
+// material no fim (juntarSoltas): a casca do prédio e cada sala viram poucos desenhos.
+//
+// Cada sala (e cada lounge) é uma célula: um grupo que o World pode esconder quando a câmera não
+// tem como ver dentro dela (as luzes das salas ficam fora dos grupos, na raiz).
 
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { PREDIO, zDaPorta } from './escritorio.js';
 import { criarPerifericos } from './perifericos.js';
+import * as qualidade from './qualidade.js';
 
 const FONTE = "'Plus Jakarta Sans', system-ui, sans-serif";
 const H = PREDIO.altura;
 const T = 0.3; // espessura das paredes
 const PORTA = 4; // largura da porta de cada sala
 const _o = new THREE.Object3D();
-const _m = new THREE.Matrix4();
 const dinheiro = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 });
 
 // ------------------------------------------------------------------ ajudantes
-function quadro(w, h, desenhar) {
+// Levas de fontes que terminaram de carregar. Um painel que chega igual ao último desenho não é
+// redesenhado, mas a fonte que chegou depois dele conta como mudança (ver quadro()).
+let fontes = 0;
+document.fonts?.addEventListener?.('loadingdone', () => { fontes++; });
+
+// Cartazes, painéis e placas (texto, sem repetição) no tamanho do aparelho: no celular e no PC de
+// até 4 GB o canvas tem menos pixels (qualidade.js; sem a constante lá, tamanho cheio). As
+// texturas que se repetem (piso, grade, jardim...) ficam no tamanho cheio.
+const NO_APARELHO = { escala: qualidade.ESCALA_TEXTURA ?? 1 };
+
+// Textura desenhada num canvas. O desenho é sempre em w×h lógicos; o canvas tem w×h × escala.
+// redesenhar(...args) não faz nada se os argumentos são os mesmos do último desenho: os painéis
+// de TI, Central, Gestão e o placar chegam a cada 5 s quase sempre iguais, e cada desenho sobe a
+// textura inteira (com mipmaps) para a placa de vídeo.
+function quadro(w, h, desenhar, { escala = 1 } = {}) {
   const canvas = document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
+  canvas.width = Math.max(1, Math.round(w * escala));
+  canvas.height = Math.max(1, Math.round(h * escala));
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
+  let ultimo = null;
   const redesenhar = (...args) => {
+    const chave = `${fontes}|${JSON.stringify(args)}`;
+    if (chave === ultimo) return;
+    ultimo = chave;
     const ctx = canvas.getContext('2d');
+    ctx.setTransform(canvas.width / w, 0, 0, canvas.height / h, 0, 0);
     ctx.clearRect(0, 0, w, h);
     desenhar(ctx, w, h, ...args);
     tex.needsUpdate = true;
@@ -45,25 +69,77 @@ function quadro(w, h, desenhar) {
 const mat = (cor, extra = {}) => new THREE.MeshStandardMaterial({ color: cor, roughness: 0.8, ...extra });
 const brilho = (cor) => new THREE.MeshBasicMaterial({ color: cor, toneMapped: false });
 
-// Uma peça feita de partes, repetida em vários lugares: uma InstancedMesh por parte.
+// cópia só dos dados: o clone() roda de novo o construtor da forma (o do RoundedBox é caro)
+const copiaGeo = (geo) => new THREE.BufferGeometry().copy(geo);
+
+// Uma geometria só a partir de várias (já no lugar). Indexadas e não indexadas (Icosahedron,
+// Extrude, RoundedBox) não se misturam no mergeGeometries: aí todas viram não indexadas.
+// Devolve null se não deu para juntar.
+function juntarGeos(geos) {
+  if (geos.length === 1) return geos[0];
+  const mistura = geos.some((g) => g.index) && geos.some((g) => !g.index);
+  return mergeGeometries(mistura ? geos.map((g) => (g.index ? g.toNonIndexed() : g)) : geos);
+}
+
+// Uma peça feita de partes, repetida em vários lugares: uma InstancedMesh por material (as partes
+// do mesmo material e com a mesma sombra viram uma geometria só).
 // partes: [{ geo, mat, pos: [x, y, z], giro?: [rx, ry, rz], sombra? }]; lugares: [[x, z, giroY]]
 function repetir(grupo, partes, lugares) {
   if (!lugares.length) return;
+  const lotes = new Map();
   for (const p of partes) {
-    const malha = new THREE.InstancedMesh(p.geo, p.mat, lugares.length);
+    const chave = `${p.mat.uuid}:${p.sombra !== false}`;
+    if (!lotes.has(chave)) lotes.set(chave, { mat: p.mat, sombra: p.sombra !== false, geos: [] });
     const local = new THREE.Matrix4().makeTranslation(...p.pos);
     if (p.giro) local.multiply(new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(...p.giro)));
+    // cópia: a mesma geometria às vezes serve a várias peças (os painéis hexagonais)
+    lotes.get(chave).geos.push(copiaGeo(p.geo).applyMatrix4(local));
+  }
+  for (const { mat: material, sombra, geos } of lotes.values()) {
+    const malha = new THREE.InstancedMesh(juntarGeos(geos), material, lugares.length);
     lugares.forEach(([x, z, ry = 0], i) => {
       _o.position.set(x, 0, z);
       _o.rotation.set(0, ry, 0);
       _o.updateMatrix();
-      _m.multiplyMatrices(_o.matrix, local);
-      malha.setMatrixAt(i, _m);
+      malha.setMatrixAt(i, _o.matrix);
     });
-    malha.castShadow = p.sombra !== false;
+    malha.castShadow = sombra;
     malha.receiveShadow = true;
     malha.computeBoundingSphere();
     grupo.add(malha);
+  }
+}
+
+// Mescla os filhos soltos de um grupo (Mesh comum, sem filhos, à vista, um material só) que têm o
+// mesmo material e as mesmas flags de sombra: a casca do prédio e o miúdo de cada sala viram poucos
+// desenhos. Ficam soltos: os de `fixas` (paredes que barram a câmera, o letreiro e o logo, que o
+// setLogo mexe), os com userData.anima e os transparentes de lotes diferentes — transparente é
+// ordenado pela distância do centro, e uma malha do prédio inteiro passaria na frente (ou atrás)
+// de tudo; só se juntam os que nasceram como uma peça (userData.lote).
+function juntarSoltas(grupo, fixas) {
+  const lotes = new Map();
+  for (const o of grupo.children) {
+    if (!o.isMesh || o.isInstancedMesh || o.children.length || !o.visible || Array.isArray(o.material)) continue;
+    if (fixas.has(o) || o.userData.anima) continue;
+    const m = o.material;
+    const chave = `${m.uuid}:${o.castShadow}:${o.receiveShadow}${m.transparent ? `:${o.userData.lote ?? o.uuid}` : ''}`;
+    if (!lotes.has(chave)) lotes.set(chave, []);
+    lotes.get(chave).push(o);
+  }
+  for (const lista of lotes.values()) {
+    if (lista.length < 2) continue;
+    // a matriz local de cada peça vai para dentro da geometria (sem o updateMatrix, cairia tudo na origem)
+    const geo = juntarGeos(lista.map((o) => { o.updateMatrix(); return copiaGeo(o.geometry).applyMatrix4(o.matrix); }));
+    if (!geo) continue;
+    const { material, castShadow, receiveShadow } = lista[0];
+    const junta = new THREE.Mesh(geo, material);
+    junta.castShadow = castShadow;
+    junta.receiveShadow = receiveShadow;
+    for (const o of lista) {
+      grupo.remove(o);
+      o.geometry.dispose();
+    }
+    grupo.add(junta);
   }
 }
 
@@ -97,7 +173,9 @@ function partesCadeira({ tecido, metal, encosto = 0.75 }) {
   ];
 }
 
-// cadeira gamer: concha preta com faixas coloridas, abas laterais, almofada de cabeça e braços
+// cadeira gamer: concha preta com faixas coloridas, abas laterais, almofada de cabeça e braços.
+// Na sombra entram só as peças pretas: a das faixas e da almofada caía dentro da do assento e do
+// encosto (e as faixas, todas de um material, viram um desenho a menos na passada de sombra).
 function partesCadeiraGamer(cor) {
   const preto = mat(0x0f1115, { roughness: 0.55 });
   const faixa = mat(cor, { roughness: 0.45 });
@@ -107,12 +185,12 @@ function partesCadeiraGamer(cor) {
     { geo: new THREE.CylinderGeometry(0.36, 0.38, 0.06, 5), mat: metal, pos: [0, 0.05, 0], sombra: false },
     { geo: new THREE.CylinderGeometry(0.05, 0.05, 0.45, 8), mat: metal, pos: [0, 0.3, 0], sombra: false },
     { geo: new RoundedBoxGeometry(0.66, 0.14, 0.62, 2, 0.06), mat: preto, pos: [0, 0.58, 0] },
-    { geo: new RoundedBoxGeometry(0.09, 0.16, 0.6, 2, 0.04), mat: faixa, pos: [-0.31, 0.66, 0] },
-    { geo: new RoundedBoxGeometry(0.09, 0.16, 0.6, 2, 0.04), mat: faixa, pos: [0.31, 0.66, 0] },
+    { geo: new RoundedBoxGeometry(0.09, 0.16, 0.6, 2, 0.04), mat: faixa, pos: [-0.31, 0.66, 0], sombra: false },
+    { geo: new RoundedBoxGeometry(0.09, 0.16, 0.6, 2, 0.04), mat: faixa, pos: [0.31, 0.66, 0], sombra: false },
     { geo: new RoundedBoxGeometry(0.6, 1.15, 0.14, 2, 0.06), mat: preto, pos: [0, 1.22, 0.33], giro: encosto },
-    { geo: new RoundedBoxGeometry(0.1, 1.05, 0.16, 2, 0.04), mat: faixa, pos: [-0.27, 1.2, 0.34], giro: encosto },
-    { geo: new RoundedBoxGeometry(0.1, 1.05, 0.16, 2, 0.04), mat: faixa, pos: [0.27, 1.2, 0.34], giro: encosto },
-    { geo: new RoundedBoxGeometry(0.3, 0.16, 0.12, 2, 0.05), mat: faixa, pos: [0, 1.62, 0.33], giro: encosto },
+    { geo: new RoundedBoxGeometry(0.1, 1.05, 0.16, 2, 0.04), mat: faixa, pos: [-0.27, 1.2, 0.34], giro: encosto, sombra: false },
+    { geo: new RoundedBoxGeometry(0.1, 1.05, 0.16, 2, 0.04), mat: faixa, pos: [0.27, 1.2, 0.34], giro: encosto, sombra: false },
+    { geo: new RoundedBoxGeometry(0.3, 0.16, 0.12, 2, 0.05), mat: faixa, pos: [0, 1.62, 0.33], giro: encosto, sombra: false },
     { geo: new THREE.BoxGeometry(0.07, 0.05, 0.38), mat: preto, pos: [-0.4, 0.86, 0.02] },
     { geo: new THREE.BoxGeometry(0.07, 0.05, 0.38), mat: preto, pos: [0.4, 0.86, 0.02] },
     { geo: new THREE.BoxGeometry(0.05, 0.28, 0.05), mat: metal, pos: [-0.4, 0.72, 0.05], sombra: false },
@@ -164,7 +242,7 @@ function placa(texto, cor, { w = 1024, h = 256, sub = '' } = {}) {
       ctx.font = `600 ${Math.round(H2 * 0.18)}px ${FONTE}`;
       ctx.fillText(sub, H2 * 0.7, H2 * 0.72, W - H2);
     }
-  });
+  }, NO_APARELHO);
 }
 
 // painel com linhas de status (TI e central de telemarketing): [rótulo, valor, cor]
@@ -196,7 +274,7 @@ function painel(titulo, corTopo) {
       ctx.fillText(valor, w - 64, y - 6);
       ctx.textAlign = 'left';
     });
-  });
+  }, NO_APARELHO);
 }
 
 // três monitores lado a lado: o do meio de frente, os dos lados virados para quem senta (o
@@ -213,20 +291,31 @@ function tresMonitores(cx, z, y, w) {
   ];
 }
 
-// moldura, haste e pé de cada monitor (a tela em si é do World, que põe o vídeo nela)
-function molduras(g, monitores, corpo) {
+// moldura, haste e pé de cada monitor (a tela em si é do World, que põe o vídeo nela).
+// apagado: o cartaz de monitor desligado, material do World (compartilhado: nunca dar dispose
+// aqui). Vem instanciado com as molduras, um desenho para a sala toda no lugar de dois por
+// monitor. Fica em z = −0,005: entre a frente da moldura (−0,01) e a superfície preta da tela (0),
+// que cobre ele quando chega vídeo (a tarja do 4:3); na frente continuam o (+), o buraco do player,
+// o navegador e o vídeo.
+function molduras(g, monitores, corpo, apagado = null) {
   const { w, h, y } = monitores[0];
-  repetir(g, [
+  const partes = [
     { geo: new THREE.BoxGeometry(w + 0.06, h + 0.06, 0.04), mat: corpo, pos: [0, y, -0.03] },
     { geo: new THREE.BoxGeometry(0.06, 0.3, 0.05), mat: corpo, pos: [0, y - h / 2 - 0.1, -0.06], sombra: false },
     { geo: new THREE.BoxGeometry(0.34, 0.025, 0.22), mat: corpo, pos: [0, y - h / 2 - 0.25, -0.05], sombra: false },
-  ], monitores.map((m) => [m.x, m.z, m.ry]));
+  ];
+  if (apagado) partes.push({ geo: new THREE.PlaneGeometry(w, h), mat: apagado, pos: [0, y, -0.005], sombra: false });
+  repetir(g, partes, monitores.map((m) => [m.x, m.z, m.ry]));
 }
 
 // ------------------------------------------------------------------ sala genérica
 // Um "marco" é o sistema de coordenadas da sala: g é o grupo (já girado e no lugar), mundo()
 // converte um ponto local para o mundo e bloco() cria a colisão (sempre de eixo) já convertida.
-function marco(world, raiz, s, telas, telaoes, postos, assentos) {
+// celula: o índice da sala na lista de células (vai em cada tela, telão e posto, para o World
+// pôr cada um junto da sala dele). apagado(cor): o cartaz de monitor desligado do World, ou null.
+// As telas, os painéis e os telões das salas são embutidos: rentes à parede, o brilho em volta
+// fica atrás do reboco e a moldura sai só uns centímetros dela.
+function marco(world, raiz, s, telas, telaoes, postos, assentos, celula, apagado) {
   const cx = (s.x0 + s.x1) / 2;
   const cz = (s.z0 + s.z1) / 2;
   const giro = s.lado === 'sul' ? Math.PI : 0; // norte e fundos: porta para +z
@@ -239,9 +328,13 @@ function marco(world, raiz, s, telas, telaoes, postos, assentos) {
   return {
     g,
     s,
+    world,
     W: (s.x1 - s.x0) / 2,
     D: (s.z1 - s.z0) / 2,
     mundo,
+    // cartaz de monitor desligado na cor do setor: só pedido por quem tem postos (cada um é uma
+    // textura no World)
+    get apagado() { return apagado ? apagado(s.cor) : null; },
     bloco(lmin, lmax, extra = {}) {
       const a = mundo(lmin[0], lmin[2]);
       const b = mundo(lmax[0], lmax[2]);
@@ -250,17 +343,17 @@ function marco(world, raiz, s, telas, telaoes, postos, assentos) {
     // tela de compartilhar (na ordem: a 1ª chamada é a 1ª tela da sala no servidor)
     tela(lx, y, lz, ry, w, h) {
       const [x, z] = mundo(lx, lz);
-      telas.push({ pos: [x, y, z], rotY: ry + giro, w, h, rotulo: `${s.nome} · Tela ${++k}` });
+      telas.push({ pos: [x, y, z], rotY: ry + giro, w, h, rotulo: `${s.nome} · Tela ${++k}`, embutida: true, celula });
     },
     // painel (placar, status, mural...): também é tela de compartilhar — a ÚLTIMA da sala. Livre,
     // mostra a textura do painel; com alguém compartilhando, mostra o que foi compartilhado.
     painel(lx, y, lz, ry, w, h, tex, nome) {
       const [x, z] = mundo(lx, lz);
-      telas.push({ pos: [x, y, z], rotY: ry + giro, w, h, rotulo: `${s.nome} · ${nome}`, painel: tex });
+      telas.push({ pos: [x, y, z], rotY: ry + giro, w, h, rotulo: `${s.nome} · ${nome}`, painel: tex, embutida: true, celula });
     },
     telao(lx, y, lz, ry, w, h) {
       const [x, z] = mundo(lx, lz);
-      telaoes.push({ pos: [x, y, z], rotY: ry + giro, w, h });
+      telaoes.push({ pos: [x, y, z], rotY: ry + giro, w, h, embutida: true, celula });
     },
     // Lugar onde dá para sentar (tecla C perto dele). y: altura do assento; ry: para onde quem
     // senta olha (0 = -z local, para o fundo da sala).
@@ -276,6 +369,7 @@ function marco(world, raiz, s, telas, telaoes, postos, assentos) {
       const [tx, tz] = mundo(cadeira.x, cadeira.z - 1.02);
       postos.push({
         id,
+        celula,
         monitores: monitores.map((mo) => {
           const [x, z] = mundo(mo.x, mo.z);
           return { pos: [x, mo.y, z], rotY: mo.ry + giro, w: mo.w, h: mo.h };
@@ -352,7 +446,7 @@ function salaTI(m) {
     { geo: new THREE.BoxGeometry(0.06, 0.95, 1.26), mat: mesa, pos: [5.47, 0.5, 0] },
     { geo: new THREE.BoxGeometry(11, 0.03, 0.03), mat: brilho(0x22d3ee), pos: [0, 0.97, 0.66], sombra: false },
   ], blocos);
-  molduras(g, monitores, mat(0x0b0d12, { roughness: 0.4 }));
+  molduras(g, monitores, mat(0x0b0d12, { roughness: 0.4 }), m.apagado);
   repetir(g, partesCadeiraGamer(0x22d3ee), cadeiras);
   for (const [lx, lz] of cadeiras) m.bloco([lx - 0.33, 0, lz - 0.32], [lx + 0.33, 0.62, lz + 0.32], { data: { type: 'sofa' } });
 
@@ -430,7 +524,7 @@ function salaComercial(m) {
     { geo: new THREE.BoxGeometry(0.06, 0.95, 1.26), mat: branco, pos: [4.45, 0.5, 0] },
     { geo: new THREE.BoxGeometry(9, 0.04, 0.04), mat: brilho(0xfbbf24), pos: [0, 0.97, 0.66], sombra: false },
   ], bancadas);
-  molduras(g, monitores, mat(0x111827, { roughness: 0.4 }));
+  molduras(g, monitores, mat(0x111827, { roughness: 0.4 }), m.apagado);
   repetir(g, partesCadeira({ tecido: mat(0x1c1c1c, { roughness: 0.6 }), metal: mat(0xa1a1aa, { roughness: 0.3, metalness: 0.7 }), encosto: 0.95 }), cadeiras);
   for (const [lx, lz] of cadeiras) m.bloco([lx - 0.32, 0, lz - 0.32], [lx + 0.32, 0.6, lz + 0.32], { data: { type: 'sofa' } });
 
@@ -472,7 +566,7 @@ function salaComercial(m) {
     ctx.fillStyle = '#fbbf24';
     ctx.font = `800 40px ${FONTE}`;
     ctx.fillText(meta ? `Time: ${dinheiro.format(total)} de ${dinheiro.format(meta)} (${Math.round((total / meta) * 100)}%)` : `Time: ${dinheiro.format(total)}`, 56, h - 44);
-  });
+  }, NO_APARELHO);
   m.painel(W - 0.3, 3.3, -1, -Math.PI / 2, 7.6, 4.56, placar.tex, 'Placar');
 
   // sino de venda fechada, perto da porta
@@ -505,6 +599,8 @@ function salaComercial(m) {
       if (balanco <= 0) return;
       balanco = Math.max(0, balanco - dt);
       pendurado.rotation.z = Math.sin(t * 9) * 0.45 * (balanco / 2.4);
+      // a sombra do sol só é refeita quando algo muda: o sino balançando avisa a cada quadro
+      m.world.marcarSombra?.();
     },
   };
 }
@@ -548,7 +644,7 @@ function salaTelemarketing(m) {
     { geo: new THREE.CylinderGeometry(0.06, 0.06, 0.04, 12), mat: fone, pos: [0.96, 1.05, 0.2], giro: [0, 0, Math.PI / 2], sombra: false },
     { geo: new THREE.CylinderGeometry(0.06, 0.06, 0.04, 12), mat: fone, pos: [1.24, 1.05, 0.2], giro: [0, 0, Math.PI / 2], sombra: false },
   ], baias);
-  molduras(g, monitores, mat(0x111827, { roughness: 0.4 }));
+  molduras(g, monitores, mat(0x111827, { roughness: 0.4 }), m.apagado);
   repetir(g, partesCadeira({ tecido: mat(0x312e81, { roughness: 0.85 }), metal: mat(0x52525b, { roughness: 0.35, metalness: 0.6 }) }), cadeiras);
   for (const [lx, lz] of cadeiras) m.bloco([lx - 0.32, 0, lz - 0.32], [lx + 0.32, 0.6, lz + 0.32], { data: { type: 'sofa' } });
 
@@ -652,7 +748,7 @@ function salaEquipe(m, { piso, parede, faixa, luz, telas, bancadas, madeira = 0x
     { geo: new THREE.BoxGeometry(0.06, 0.95, 1.26), mat: pe, pos: [4.45, 0.5, 0] },
     { geo: new THREE.BoxGeometry(9, 0.04, 0.04), mat: brilho(faixa), pos: [0, 0.97, 0.66], sombra: false },
   ], bancadas);
-  molduras(g, monitores, mat(0x111827, { roughness: 0.4 }));
+  molduras(g, monitores, mat(0x111827, { roughness: 0.4 }), m.apagado);
   repetir(g, partesCadeira({ tecido: mat(cadeira, { roughness: 0.7 }), metal: mat(0xa1a1aa, { roughness: 0.3, metalness: 0.7 }), encosto: 0.9 }), cadeiras);
   for (const [lx, lz] of cadeiras) m.bloco([lx - 0.32, 0, lz - 0.32], [lx + 0.32, 0.6, lz + 0.32], { data: { type: 'sofa' } });
 }
@@ -685,7 +781,7 @@ function salaFinanceiro(m) {
     ctx.moveTo(70, h - 78);
     ctx.lineTo(w - 70, h - 78);
     ctx.stroke();
-  });
+  }, NO_APARELHO);
   quadroDireita(m, ind, 'Indicadores');
   // cofre perto da porta, na parede da esquerda
   const aco = mat(0x52525b, { roughness: 0.35, metalness: 0.8 });
@@ -731,7 +827,7 @@ function salaRH(m) {
       ctx.fillText(t, -150, -40, 300);
       ctx.restore();
     });
-  });
+  }, NO_APARELHO);
   quadroDireita(m, mural, 'Mural', 6.4, 3.6);
   plantas(g, [[-W + 1.2, -D + 1.2], [W - 1.2, -D + 1.2], [-W + 1.2, D - 1.6]]);
   return {};
@@ -761,7 +857,7 @@ function salaMarketing(m) {
       ctx.font = `700 30px ${FONTE}`;
       ctx.fillText(x, cx + 14, cy + 90, 145);
     });
-  });
+  }, NO_APARELHO);
   quadroDireita(m, ideias, 'Ideias');
   plantas(g, [[W - 1.2, -D + 1.2], [W - 1.2, D - 1.6]]);
   return {};
@@ -819,7 +915,7 @@ function salaGestao(m) {
       ctx.font = `600 ${Math.round(lh * 0.34)}px ${FONTE}`;
       ctx.fillText(p.texto, x + 300, y + lh * 0.5, (w - 80) / col - 320);
     });
-  });
+  }, NO_APARELHO);
   quadroDireita(m, painelEquipe, 'Equipe');
   plantas(g, [[-W + 1.2, -D + 1.2], [W - 1.2, -D + 1.2], [W - 1.2, D - 1.6]]);
   return { equipe: (pessoas, rodape) => painelEquipe.redesenhar(pessoas, rodape) };
@@ -1004,7 +1100,7 @@ function letreiro(texto, sub, cor = '#6ee7c8') {
     ctx.textBaseline = 'middle';
     ctx.fillStyle = '#ffffff';
     ctx.shadowColor = 'rgba(255,255,255,0.35)';
-    ctx.shadowBlur = 12;
+    ctx.shadowBlur = 12 * ctx.getTransform().a; // o desfoque não segue a escala do canvas
     ctx.font = `800 ${sub ? 112 : 128}px ${FONTE}`;
     ctx.fillText(texto, w / 2, sub ? h * 0.4 : h / 2, w - 40);
     ctx.shadowBlur = 0;
@@ -1013,7 +1109,7 @@ function letreiro(texto, sub, cor = '#6ee7c8') {
       ctx.font = `700 40px ${FONTE}`;
       ctx.fillText(sub.toUpperCase().split('').join(' '), w / 2, h * 0.82, w - 40);
     }
-  });
+  }, NO_APARELHO);
   return new THREE.MeshBasicMaterial({ map: q.tex, transparent: true, toneMapped: false, depthWrite: false });
 }
 
@@ -1045,7 +1141,7 @@ function totem(titulo, salas) {
       ctx.fillText(s.lado === 'sul' ? '↙' : '↖', w - 48, y + 6);
       ctx.textAlign = 'left';
     });
-  });
+  }, NO_APARELHO);
 }
 
 // árvores de interior em vasos redondos: [x, z]
@@ -1062,7 +1158,8 @@ function arvores(grupo, lugares, world) {
 }
 
 // ------------------------------------------------------------------ prédio
-export function construirEscritorio(world, p, { empresa = '' } = {}) {
+// apagado(cor): o cartaz compartilhado de monitor desligado do World (ver molduras), ou null
+export function construirEscritorio(world, p, { empresa = '', apagado = null } = {}) {
   const raiz = new THREE.Group();
   world.scene.add(raiz);
   const minX = p.minX;
@@ -1082,18 +1179,29 @@ export function construirEscritorio(world, p, { empresa = '' } = {}) {
   const madeira = mat(0xa47551, { roughness: 0.55 });
   const madeiraEsc = mat(0x6b4a33, { roughness: 0.5 });
   const latao = mat(0xc9a14a, { roughness: 0.3, metalness: 0.85 });
-  const vidro = new THREE.MeshStandardMaterial({ color: 0xa5d8ff, transparent: true, opacity: 0.16, roughness: 0.05, metalness: 0.1, depthWrite: false, side: THREE.DoubleSide });
-  const fosco = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.32, depthWrite: false, side: THREE.DoubleSide });
+  // Vidro de uma camada só (FrontSide): as caixas de vidro são fechadas, e de qualquer lado aparece
+  // só a face virada para a câmera. 0,29 = 1 − (1 − 0,16)²: a densidade das duas camadas de antes
+  // (frente e fundo da caixa, com o vidro dos dois lados). Continua PBR, com o brilho da Alta.
+  const vidro = new THREE.MeshStandardMaterial({ color: 0xa5d8ff, transparent: true, opacity: 0.29, roughness: 0.05, metalness: 0.1, depthWrite: false });
+  // planos transparentes vistos dos dois lados: numa passada só (o three desenhava 2×, uma por face,
+  // trocando de programa); num plano sem luz o resultado é o mesmo
+  const fosco = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.32, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true });
   const caixilho = mat(0x2b3240, { roughness: 0.4, metalness: 0.5 });
   const janela = mat(0x1e3a5f, { roughness: 0.15, metalness: 0.6, emissive: 0x0b1a2e });
   const luzQuente = brilho(0xfff1d6);
+  // peças que ficam soltas no juntarSoltas do fim (ver lá)
+  const fixas = new Set();
 
-  // parede (alinhada a x ou a z), com colisão e barrando a câmera
+  // parede (alinhada a x ou a z), com colisão e barrando a câmera. As que barram a câmera ficam
+  // soltas (fixas): estão em cameraBlockers, que o raio da câmera, o tiro e o tapada usam.
+  // Vidro não faz nem recebe sombra (recebida, ela custava a busca no mapa por pixel de vidro).
   const parede = (xa, za, xb, zb, material, { y0 = 0, y1 = H, camera = true, colide = true } = {}) => {
     const w = Math.max(T, Math.abs(xb - xa));
     const d = Math.max(T, Math.abs(zb - za));
     const m = caixa(raiz, [w, y1 - y0, d], [(xa + xb) / 2, (y0 + y1) / 2, (za + zb) / 2], material, { sombra: material !== vidro });
+    if (material === vidro) m.receiveShadow = false;
     if (colide) world.addBox({ min: [Math.min(xa, xb) - (w === T ? T / 2 : 0), y0, Math.min(za, zb) - (d === T ? T / 2 : 0)], max: [Math.max(xa, xb) + (w === T ? T / 2 : 0), y1, Math.max(za, zb) + (d === T ? T / 2 : 0)], mesh: m, blocksCamera: camera });
+    if (colide && camera) fixas.add(m);
     return m;
   };
 
@@ -1164,7 +1272,7 @@ export function construirEscritorio(world, p, { empresa = '' } = {}) {
     caixa(raiz, [0.5, 0.4, z1 - c1], [maxX, 0.2, (c1 + z1) / 2], pedra, { sombra: false });
     caixa(raiz, [0.9, 0.45, z1 - z0 + 0.8], [maxX + 0.1, HR + 0.12, (z0 + z1) / 2], grafite, { sombra: false });
     // portas de correr abertas, encostadas dos dois lados do vão
-    for (const z of [c0 - 1.3, c1 + 1.3]) caixa(raiz, [0.06, 3.6, 2.4], [maxX - 0.35, 1.8, z], vidro, { sombra: false });
+    for (const z of [c0 - 1.3, c1 + 1.3]) caixa(raiz, [0.06, 3.6, 2.4], [maxX - 0.35, 1.8, z], vidro, { sombra: false }).receiveShadow = false;
   }
 
   // marquise sobre a entrada, com pilares, luzes embutidas e o nome da empresa em cima
@@ -1177,8 +1285,10 @@ export function construirEscritorio(world, p, { empresa = '' } = {}) {
   repetir(raiz, [{ geo: new THREE.CircleGeometry(0.16, 16), mat: luzQuente, pos: [0, 4.05, 0], giro: [Math.PI / 2, 0, 0], sombra: false }],
     [[maxX + 1.5, zEntrada - 4], [maxX + 1.5, zEntrada], [maxX + 1.5, zEntrada + 4], [maxX + 4.5, zEntrada - 4], [maxX + 4.5, zEntrada], [maxX + 4.5, zEntrada + 4]]);
   plano(raiz, [9, 2.25], [maxX + 6.9, 5.6, zEntrada], letreiro(empresa || 'Escritório', 'escritório'), [0, Math.PI / 2, 0]);
-  // calçada de pedra na frente, floreiras e balizadores de luz
-  plano(raiz, [12, 22], [maxX + 6, 0.025, zEntrada], mat(0xb9b2a6, { map: texMarmore(), roughness: 0.8 }), [-Math.PI / 2, 0, 0]);
+  // calçada de pedra na frente, floreiras e balizadores de luz. O mármore é um canvas só: o piso da
+  // recepção usa uma cópia dele (a mesma imagem na placa), com outra repetição.
+  const marmore = texMarmore();
+  plano(raiz, [12, 22], [maxX + 6, 0.025, zEntrada], mat(0xb9b2a6, { map: marmore, roughness: 0.8 }), [-Math.PI / 2, 0, 0]);
   const floreira = mat(0x57534e, { roughness: 0.8 });
   for (const z of [zEntrada - 9.5, zEntrada + 9.5]) {
     caixa(raiz, [6, 0.7, 1.4], [maxX + 4, 0.35, z], floreira);
@@ -1248,7 +1358,9 @@ export function construirEscritorio(world, p, { empresa = '' } = {}) {
   if (p.fundos) corredor(f0, f1);
 
   // ---------------------------------------------------------------- paredes internas
-  // divisórias entre as colunas de salas (a da recepção, em x = 40, é feita à parte)
+  // divisórias entre as colunas de salas (a da recepção, em x = 40, é feita à parte). São opacas,
+  // como o fundo da fileira norte, e é nisso que o World se apoia para esconder as salas que não
+  // dá para ver (cullSalas): se alguma delas virar vidro, a regra de lá tem de acompanhar.
   const trechos = p.fundos ? [[z0, f0], [f1, c0], [c1, z1]] : [[z0, c0], [c1, z1]];
   const divisas = [...new Set([...p.salas, ...p.lounges].map((s) => s.x1))].filter((x) => x !== recepcao);
   for (const x of divisas) for (const [a, b] of trechos) parede(x, a, x, b, interna);
@@ -1301,7 +1413,10 @@ export function construirEscritorio(world, p, { empresa = '' } = {}) {
   }));
 
   // ---------------------------------------------------------------- frente das salas
-  // vidro com faixa jateada na cor do setor, porta com batentes de madeira e placa iluminada
+  // vidro com faixa jateada na cor do setor, porta com batentes de madeira e placa iluminada.
+  // O vidro, o fosco e a faixa ficam peças separadas (fora do juntarSoltas): transparentes são
+  // desenhados na ordem da distância de cada peça, e mesclar as duas metades da frente punha o
+  // centro na porta, com o rosto de quem está perto do vidro aparecendo na frente da faixa.
   for (const s of p.salas) {
     const zc = zDaPorta(s.lado);
     const meio = (s.x0 + s.x1) / 2;
@@ -1309,7 +1424,7 @@ export function construirEscritorio(world, p, { empresa = '' } = {}) {
     parede(s.x0, zc, meio - PORTA / 2, zc, vidro, { camera: false });
     parede(meio + PORTA / 2, zc, s.x1, zc, vidro, { camera: false });
     parede(meio - PORTA / 2, zc, meio + PORTA / 2, zc, interna, { y0: 3.2, colide: false });
-    const faixa = new THREE.MeshBasicMaterial({ color: s.cor, transparent: true, opacity: 0.55, depthWrite: false, side: THREE.DoubleSide });
+    const faixa = new THREE.MeshBasicMaterial({ color: s.cor, transparent: true, opacity: 0.55, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true });
     for (const [xa, xb] of [[s.x0 + 0.2, meio - PORTA / 2 - 0.2], [meio + PORTA / 2 + 0.2, s.x1 - 0.2]]) {
       plano(raiz, [xb - xa, 0.7], [(xa + xb) / 2, 1.45, zc + ladoCorredor * 0.17], fosco);
       plano(raiz, [xb - xa, 0.05], [(xa + xb) / 2, 1.85, zc + ladoCorredor * 0.17], faixa);
@@ -1325,9 +1440,9 @@ export function construirEscritorio(world, p, { empresa = '' } = {}) {
 
   // ---------------------------------------------------------------- recepção (átrio)
   const rx = (recepcao + maxX) / 2;
-  const marmore = texMarmore();
-  marmore.repeat.set((maxX - recepcao) / 4, (z1 - z0) / 4);
-  plano(raiz, [maxX - recepcao, z1 - z0], [rx, 0.02, (z0 + z1) / 2], mat(0xffffff, { map: marmore, roughness: 0.25, metalness: 0.05 }), [-Math.PI / 2, 0, 0]);
+  const pisoRecepcao = marmore.clone();
+  pisoRecepcao.repeat.set((maxX - recepcao) / 4, (z1 - z0) / 4);
+  plano(raiz, [maxX - recepcao, z1 - z0], [rx, 0.02, (z0 + z1) / 2], mat(0xffffff, { map: pisoRecepcao, roughness: 0.25, metalness: 0.05 }), [-Math.PI / 2, 0, 0]);
   // medalhão de latão no piso, no eixo da entrada
   const medalhao = new THREE.Mesh(new THREE.RingGeometry(2.4, 2.6, 64), latao);
   medalhao.rotation.x = -Math.PI / 2;
@@ -1351,9 +1466,11 @@ export function construirEscritorio(world, p, { empresa = '' } = {}) {
   repetir(raiz, [{ geo: new THREE.BoxGeometry(maxX - recepcao - 5.6, 0.45, 0.22), mat: grafite, pos: [0, HR - 0.25, 0], sombra: false }], vigas);
   for (const x of [recepcao + 3, maxX - 3, rx]) caixa(raiz, [0.22, 0.45, za1 - za0 + 0.4], [x, HR - 0.25, (za0 + za1) / 2], grafite, { sombra: false });
 
-  // quatro colunas redondas emoldurando o eixo da entrada
+  // quatro colunas redondas emoldurando o eixo da entrada (um material para as quatro: viram uma
+  // malha só no fim)
+  const marfim = mat(0xf4f1ea, { roughness: 0.4 });
   for (const [x, z] of [[rx - 4.5, zEntrada - 8.5], [rx + 4.5, zEntrada - 8.5], [rx - 4.5, zEntrada + 8.5], [rx + 4.5, zEntrada + 8.5]]) {
-    const col = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, HR, 24), mat(0xf4f1ea, { roughness: 0.4 }));
+    const col = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, HR, 24), marfim);
     col.position.set(x, HR / 2, z);
     col.castShadow = true;
     raiz.add(col);
@@ -1447,10 +1564,11 @@ export function construirEscritorio(world, p, { empresa = '' } = {}) {
   const jvR = verde.clone();
   jvR.needsUpdate = true;
   jvR.repeat.set((maxX - recepcao - 4) / 4, (HR - 2) / 4);
-  plano(raiz, [maxX - recepcao - 4, HR - 2], [rx, HR / 2, z0 + T / 2 + 0.03], mat(0xffffff, { map: jvR, roughness: 1 }));
+  const jardimRecepcao = mat(0xffffff, { map: jvR, roughness: 1 });
+  plano(raiz, [maxX - recepcao - 4, HR - 2], [rx, HR / 2, z0 + T / 2 + 0.03], jardimRecepcao);
   caixa(raiz, [maxX - recepcao - 3.6, 0.5, 0.6], [rx, 0.25, z0 + 0.45], madeiraEsc, { sombra: false });
-  // e outro na parede sul, atrás do espelho d'água
-  plano(raiz, [maxX - recepcao - 4, HR - 2], [rx, HR / 2, z1 - T / 2 - 0.03], mat(0xffffff, { map: jvR, roughness: 1 }), [0, Math.PI, 0]);
+  // e outro na parede sul, atrás do espelho d'água (o mesmo material: os dois viram uma malha só)
+  plano(raiz, [maxX - recepcao - 4, HR - 2], [rx, HR / 2, z1 - T / 2 - 0.03], jardimRecepcao, [0, Math.PI, 0]);
   const arv = [[rx - 3.4, zp - 2.2], [rx + 3.4, zp - 2.2], [recepcao + 2.4, z1 - 3], [maxX - 2.4, z1 - 3]];
   if (p.fundos) arv.push([recepcao + 2.6, z0 + 3], [maxX - 2.6, z0 + 3]);
   arvores(raiz, arv, world);
@@ -1473,13 +1591,14 @@ export function construirEscritorio(world, p, { empresa = '' } = {}) {
   raiz.add(mesinha);
   caixa(raiz, [0.2, 0.42, 0.2], [rx, 0.21, ze], latao, { sombra: false });
   world.addBox({ min: [rx - 0.9, 0, ze - 0.9], max: [rx + 0.9, 0.5, ze + 0.9] });
-  // pendentes: globos de luz em alturas diferentes
+  // pendentes: globos de luz em alturas diferentes (um material para os cinco)
   const globos = [[rx - 1.6, 6.4, ze - 0.8], [rx + 0.2, 7.2, ze + 0.6], [rx + 1.8, 6.0, ze - 0.2], [rx - 0.6, 7.8, ze + 1.4], [rx + 1.0, 6.8, ze - 1.6]];
+  const luzGlobo = brilho(0xffe7b8);
   for (const [x, y, z] of globos) {
     const fio = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, HR - y, 4), grafite);
     fio.position.set(x, (HR + y) / 2, z);
     raiz.add(fio);
-    const globo = new THREE.Mesh(new THREE.SphereGeometry(0.32, 20, 14), brilho(0xffe7b8));
+    const globo = new THREE.Mesh(new THREE.SphereGeometry(0.32, 20, 14), luzGlobo);
     globo.position.set(x, y, z);
     raiz.add(globo);
   }
@@ -1525,9 +1644,9 @@ export function construirEscritorio(world, p, { empresa = '' } = {}) {
     cam.repeat.set((zB - zA) / 3, 1);
     plano(raiz, [zB - zA, 2.4], [recepcao + 2.3, 0.032, (zA + zB) / 2], mat(0xffffff, { map: cam, roughness: 1 }), [-Math.PI / 2, 0, Math.PI / 2]);
   }
-  const portais = [[zEntrada, 'Salas', 'corredor principal']];
-  if (p.fundos) portais.push([(f0 + f1) / 2, 'Mais salas', 'corredor dos fundos']);
-  for (const [z, t, sub] of portais) {
+  const placasDosPortais = [[zEntrada, 'Salas', 'corredor principal']];
+  if (p.fundos) placasDosPortais.push([(f0 + f1) / 2, 'Mais salas', 'corredor dos fundos']);
+  for (const [z, t, sub] of placasDosPortais) {
     const pl = placa(t, '#c9a14a', { sub });
     plano(raiz, [4.4, 1.1], [recepcao + T / 2 + 0.04, H + 1.4, z], new THREE.MeshBasicMaterial({ map: pl.tex, toneMapped: false }), [0, Math.PI / 2, 0]);
   }
@@ -1549,26 +1668,56 @@ export function construirEscritorio(world, p, { empresa = '' } = {}) {
   }
 
   // ---------------------------------------------------------------- salas
+  // Cada sala e cada lounge é uma célula, com o próprio grupo (os dois lounges têm id 'lounge':
+  // cada um é uma célula)
   const telas = [];
   const telaoes = [];
   const postos = [];
   const salas = {};
-  for (const s of p.salas) salas[s.id] = SALAS[s.id](marco(world, raiz, s, telas, telaoes, postos, assentos));
-  for (const l of p.lounges) lounge(marco(world, raiz, l, telas, telaoes, postos, assentos));
+  const celulas = [];
+  const novaCelula = (s) => {
+    const m = marco(world, raiz, s, telas, telaoes, postos, assentos, celulas.length, apagado);
+    celulas.push({ id: s.id, lado: s.lado, x0: s.x0, x1: s.x1, z0: s.z0, z1: s.z1, grupo: m.g });
+    return m;
+  };
+  for (const s of p.salas) salas[s.id] = SALAS[s.id](novaCelula(s));
+  for (const l of p.lounges) lounge(novaCelula(l));
   telas.push(...telasRecepcao);
+  // A luz do teto de cada sala vai para a raiz (o attach mantém onde ela está). O World esconde a
+  // sala que não dá para ver, e luz dentro de grupo escondido sai das candidatas: a contagem
+  // cairia abaixo do teto de luzes, tudo recompilaria e as luzes piscariam ao cruzar as portas.
+  for (const c of celulas) {
+    const luzes = [];
+    c.grupo.traverse((o) => { if (o.isPointLight) luzes.push(o); });
+    for (const l of luzes) raiz.attach(l);
+  }
+  // as peças soltas viram poucas malhas: o miúdo de cada sala no grupo dela (continua sumindo junto
+  // com a sala) e a casca na raiz, sempre à vista
+  fixas.add(nomeEmpresa).add(logoFundo).add(logoPlano);
+  for (const c of celulas) juntarSoltas(c.grupo, fixas);
+  juntarSoltas(raiz, fixas);
   // teclado e mouse em cada posto (o do seu posto se mexe junto com você: perifericos.js)
   const perifericos = criarPerifericos(raiz, postos);
   let antes = 0;
 
   return {
+    // [{ pos, rotY, w, h, rotulo, painel? }]; as das salas também com embutida e celula
     telas,
-    telaoes,
-    postos, // [{ id: 'ti-0', monitores: [3 × { pos, rotY, w, h }] }], na ordem da planta
+    telaoes, // [{ pos, rotY, w, h, embutida, celula }]
+    postos, // [{ id: 'ti-0', celula, monitores: [3 × { pos, rotY, w, h }], mesa }], na ordem da planta
     assentos, // [{ x, z, y, yaw, posto }]: onde dá para sentar com C
+    // [{ id, lado, x0, x1, z0, z1, grupo }]: salas e lounges, na ordem dos índices `celula` acima
+    celulas,
     entrada: { pos: [55, 0, zEntrada], yaw: Math.PI / 2 }, // olhando para o corredor
-    limites: { minX, maxX, minZ: z0, maxZ: z1 },
+    limites: { minX, maxX, minZ: z0, maxZ: z1, altura: H, alturaRecepcao: HR },
     // a fachada é de vidro: olhando para ela, o lado de fora aparece
     porta: new THREE.Box3(new THREE.Vector3(maxX - 1, 0, z0), new THREE.Vector3(maxX + 1, HR, z1)),
+    // vãos entre a recepção e cada corredor: da recepção (ou de fora do prédio), só por eles se vê
+    // dentro das salas
+    portais: {
+      principal: new THREE.Box3(new THREE.Vector3(recepcao - 0.3, 0, c0), new THREE.Vector3(recepcao + 0.3, H, c1)),
+      fundos: p.fundos ? new THREE.Box3(new THREE.Vector3(recepcao - 0.3, 0, f0), new THREE.Vector3(recepcao + 0.3, H, f1)) : null,
+    },
     placar: (dados) => salas.comercial?.placar(dados),
     perifericos,
     setLogo: mostrarLogo,

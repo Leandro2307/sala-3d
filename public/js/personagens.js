@@ -4,6 +4,10 @@
 //
 // miniatura: imagem pronta em /img/personagens (gerada por scripts/miniaturas.js), para o modal
 // abrir na hora sem baixar nenhum modelo.
+// raioVista (opcional): raio da esfera de recorte de vista e de sombra, em alturas do boneco
+// (padrão 1,1, e 2,7 em quem transforma). Pequena demais, um braço some na borda da tela.
+// maos (opcional): nomes das peças que ficam penduradas nos ossos das mãos (padrão: nenhuma —
+// o KayKit traz todas as armas do pacote no arquivo, umas por cima das outras).
 
 const KAYKIT = {
   // altura medida na pose de repouso do arquivo; de pé eles esticam um pouco,
@@ -101,6 +105,9 @@ export const PERSONAGENS = {
       wave: 'Forge_Solus_Prime_Equip',
     },
     transforma: { paraVeiculo: 'main_to_alt', paraRobo: 'alt_to_main' },
+    // nem transformando ele passa de 1,21 h do centro: com os 2,7 h de quem transforma, a
+    // esfera de recorte passaria de 6 m
+    raioVista: 1.5,
     andarProcedural: true,
     eixoPasso: 'z',
     resumo: 'Transforma no G',

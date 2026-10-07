@@ -9,9 +9,35 @@ import { isTouch } from './touch.js';
 import { CAMINHO, PISTA } from './pista.js';
 
 const LEVE = isTouch; // celular: menos árvores, terreno mais grosso
+// Lado do pedaço do mapa em que as plantas são agrupadas (ver instanciar). No celular, pedaços
+// maiores: uns 45 desenhos a menos, e lá cada desenho pesa mais que os triângulos. No PC fica 320,
+// onde o recorte dos pedaços fora da tela poupa de 120 a 300 mil triângulos.
+const PEDACO = LEVE ? 480 : 320;
 // O sol se põe a noroeste. O relevo abre um vale nessa direção para dar para ver o pôr do sol.
 const SOL = new THREE.Vector3(-0.72, 0.045, 0.69).normalize();
 const SOL_XZ = new THREE.Vector2(SOL.x, SOL.z).normalize();
+
+// ------------------------------------------------------------------ shader só de sol
+// Longe da cerca nenhuma luz pontual nem o holofote chega: além dela, o maior alcance é o do
+// brilho da tela do cinema, ~61 m atrás da sala (onde não nasce árvore), e o dos braseiros dos
+// jogos, ~11 m. Lá o laço das pontuais e da spot só somaria zero em cada pixel: o terreno e as
+// árvores longe e as nuvens usam um shader sem ele. Se puser luz pontual perto da cerca, rever os
+// cortes (80 m no terreno, 60 m nas árvores).
+// O pedaço sai do texto do shader: #undef NUM_POINT_LIGHTS não serve, porque o three troca esses
+// nomes por números no texto e o resultado nem compila. No r186 a ordem é pontual, spot, sol,
+// direcional; se mudar numa versão nova, SEM_PONTUAIS fica null e o material fica como era.
+const TRECHO = THREE.ShaderChunk.lights_fragment_begin;
+const iPonto = TRECHO.indexOf('#if ( NUM_POINT_LIGHTS > 0 ) && defined( RE_Direct )');
+const iSol = TRECHO.indexOf('#if ( NUM_SUN_LIGHTS > 0 ) && defined( RE_Direct )');
+const SEM_PONTUAIS = iPonto >= 0 && iSol > iPonto ? TRECHO.slice(0, iPonto) + TRECHO.slice(iSol) : null;
+function soSol(m) {
+  if (!SEM_PONTUAIS) return m;
+  m.onBeforeCompile = (s) => {
+    s.fragmentShader = s.fragmentShader.replace('#include <lights_fragment_begin>', () => SEM_PONTUAIS);
+  };
+  m.customProgramCacheKey = () => 'soSol';
+  return m;
+}
 
 // ------------------------------------------------------------------ aleatório e ruído
 function semente(seed) {
@@ -189,7 +215,11 @@ function criarCeu(scene, solDir) {
     toneMapped: false,
   });
   const ceu = new THREE.Mesh(new THREE.SphereGeometry(100, 32, 16), mat);
-  ceu.renderOrder = -2;
+  // Último dos opacos: no fundo do depth buffer (z = w), com LessEqual contra o 1,0 do clear, só
+  // pinta onde nada foi desenhado (desenhado primeiro, pintava a tela inteira por baixo de tudo).
+  // Vidro, chuva e estrelas são transparentes e continuam por cima, e o buraco do player (opaco,
+  // NoBlending) grava profundidade e continua transparente.
+  ceu.renderOrder = 1;
   ceu.frustumCulled = false;
   scene.add(ceu);
 
@@ -244,6 +274,7 @@ function criarCeu(scene, solDir) {
   return {
     mat,
     estrelasMat,
+    estrelas,
     seguir(cam, t) {
       ceu.position.copy(cam.position);
       estrelas.position.copy(cam.position);
@@ -335,10 +366,29 @@ function criarTerreno(scene, area) {
   const grao = texturaGrao(128, 0.92, 0.16, 5);
   grao.repeat.set(tamanho / 6, tamanho / 6);
   const mat = new THREE.MeshLambertMaterial({ vertexColors: true, map: grao, flatShading: true });
-  const terreno = new THREE.Mesh(geo, mat);
-  terreno.receiveShadow = true;
-  scene.add(terreno);
-  return terreno;
+  const matLonge = soSol(mat.clone());
+  // Duas malhas: os triângulos até 80 m da cerca (pelo centro), onde luz pontual ainda chega, e o
+  // resto com o shader só de sol. Os mesmos atributos nas duas (sobem uma vez para a placa de
+  // vídeo), cada uma com o seu índice.
+  const indice = geo.index.array;
+  const perto = [];
+  const longe = [];
+  for (let i = 0; i < indice.length; i += 3) {
+    const v1 = indice[i];
+    const v2 = indice[i + 1];
+    const v3 = indice[i + 2];
+    const x = (pos.getX(v1) + pos.getX(v2) + pos.getX(v3)) / 3;
+    const z = (pos.getZ(v1) + pos.getZ(v2) + pos.getZ(v3)) / 3;
+    (foraDaArea(x, z, area) <= 80 ? perto : longe).push(v1, v2, v3);
+  }
+  for (const [triangulos, m] of [[perto, mat], [longe, matLonge]]) {
+    const parte = new THREE.BufferGeometry();
+    for (const nome in geo.attributes) parte.setAttribute(nome, geo.attributes[nome]);
+    parte.setIndex(triangulos);
+    const terreno = new THREE.Mesh(parte, m);
+    terreno.receiveShadow = true;
+    scene.add(terreno);
+  }
 }
 
 // ------------------------------------------------------------------ árvores e afins
@@ -379,7 +429,7 @@ function geoFrondosa() {
 // A ordem dentro de cada pedaço é embaralhada: na qualidade baixa desenha só as primeiras N
 // instâncias (InstancedMesh.count), e assim o que some é um ralear espalhado, não uma faixa.
 const densas = []; // malhas que a qualidade pode ralear
-function instanciar(scene, geo, mat, itens, { pedaco = 320, sombra = true } = {}) {
+function instanciar(scene, geo, mat, itens, { pedaco = PEDACO, sombra = true } = {}) {
   const grupos = new Map();
   for (const it of itens) {
     const k = `${Math.floor(it.x / pedaco)},${Math.floor(it.z / pedaco)}`;
@@ -428,13 +478,18 @@ function instanciar(scene, geo, mat, itens, { pedaco = 320, sombra = true } = {}
 
 // ------------------------------------------------------------------ lago
 function criarLago(scene, renderer, ceuMat, x, z, raio, decorar) {
-  // reflexo do céu: o céu renderizado uma vez num mapa de ambiente que só a água usa
-  // (pôr no scene.environment mudaria a luz do cinema também)
+  // reflexo do céu: o céu renderizado num mapa de ambiente que só a água usa (pôr no
+  // scene.environment mudaria a luz do cinema também). A cena do céu fica guardada: o mapa é
+  // feito na placa de vídeo e some se o contexto do WebGL se perder (ver refazer). Com uma cópia
+  // do material, o reflexo refeito é o mesmo de antes, e não o céu que o clima pintou depois.
   const cenaCeu = new THREE.Scene();
-  cenaCeu.add(new THREE.Mesh(new THREE.SphereGeometry(50, 32, 16), ceuMat));
-  const pmrem = new THREE.PMREMGenerator(renderer);
-  const ambiente = pmrem.fromScene(cenaCeu, 0.02, 0.1, 200).texture;
-  pmrem.dispose();
+  cenaCeu.add(new THREE.Mesh(new THREE.SphereGeometry(50, 32, 16), ceuMat.clone()));
+  const gerarAmbiente = () => {
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const textura = pmrem.fromScene(cenaCeu, 0.02, 0.1, 200).texture;
+    pmrem.dispose();
+    return textura;
+  };
 
   const forma = new THREE.Shape();
   const pontos = 48;
@@ -452,7 +507,7 @@ function criarLago(scene, renderer, ceuMat, x, z, raio, decorar) {
     new THREE.MeshStandardMaterial({
       // reflexo moderado: forte demais, de perto do chão ela espelha o horizonte laranja e
       // fica com cara de areia
-      color: '#1f5a82', roughness: 0.1, metalness: 0.1, envMap: ambiente, envMapIntensity: 0.55,
+      color: '#1f5a82', roughness: 0.1, metalness: 0.1, envMap: gerarAmbiente(), envMapIntensity: 0.55,
       normalMap, normalScale: new THREE.Vector2(0.35, 0.35),
     }),
   );
@@ -474,14 +529,19 @@ function criarLago(scene, renderer, ceuMat, x, z, raio, decorar) {
   decorar.push((t) => {
     normalMap.offset.set(t * 0.012, t * 0.007);
   });
-  return { x, z, raio: raio * 1.2 };
+  return {
+    x, z, raio: raio * 1.2,
+    // contexto do WebGL restaurado: o mapa antigo era do contexto perdido (nada de dispose nele)
+    refazer: () => { agua.material.envMap = gerarAmbiente(); },
+  };
 }
 
 // ------------------------------------------------------------------ nuvens e pássaros
 let nuvensMat = null; // o clima (clima.js) escurece as nuvens na chuva e de noite
 function criarNuvens(scene, centro, decorar) {
   const rnd = semente(31);
-  const mat = new THREE.MeshLambertMaterial({ color: '#f4dfe3', emissive: '#4a3550', emissiveIntensity: 0.55, flatShading: true });
+  // lá no alto nenhuma luz pontual chega: shader só de sol
+  const mat = soSol(new THREE.MeshLambertMaterial({ color: '#f4dfe3', emissive: '#4a3550', emissiveIntensity: 0.55, flatShading: true }));
   const nuvens = [];
   const qtd = LEVE ? 9 : 16;
   for (let n = 0; n < qtd; n++) {
@@ -519,28 +579,37 @@ function criarPassaros(scene, bandos, decorar) {
   bandos.forEach((b, bi) => {
     const rnd = semente(500 + bi);
     for (let i = 0; i < b.qtd; i++) {
-      const corpo = new THREE.Group();
-      const esq = new THREE.Mesh(asaGeo, mat);
-      const dir = new THREE.Mesh(asaGeo, mat);
-      dir.scale.x = -1;
-      corpo.add(esq, dir);
-      corpo.scale.setScalar(1.6);
-      scene.add(corpo);
-      passaros.push({ corpo, esq, dir, b, fase: rnd() * Math.PI * 2, raio: b.raio + (rnd() - 0.5) * 18, alt: b.y + (rnd() - 0.5) * 10, atraso: i * 0.05 });
+      passaros.push({ b, fase: rnd() * Math.PI * 2, raio: b.raio + (rnd() - 0.5) * 18, alt: b.y + (rnd() - 0.5) * 10, atraso: i * 0.05 });
     }
   });
-  decorar.push((t) => {
-    for (const p of passaros) {
-      const a = t * p.b.vel + p.fase * 0.15 - p.atraso;
-      const x = p.b.x + Math.cos(a) * p.raio;
-      const z = p.b.z + Math.sin(a) * p.raio;
-      p.corpo.position.set(x, p.alt + Math.sin(t * 0.7 + p.fase) * 3, z);
-      p.corpo.rotation.y = -a; // tangente do círculo
-      const bate = Math.sin(t * 9 + p.fase) * 0.6;
-      p.esq.rotation.z = bate;
-      p.dir.rotation.z = -bate;
-    }
-  });
+  // As duas asas de todos os pássaros num desenho só. A direita é a esquerda com escala x −1 (o
+  // material é de dois lados, então a face invertida não some). Sem recorte pela esfera: ela é
+  // calculada uma vez e ficaria parada onde o bando estava.
+  const asas = new THREE.InstancedMesh(asaGeo, mat, passaros.length * 2);
+  asas.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  asas.frustumCulled = false;
+  scene.add(asas);
+  const corpo = new THREE.Matrix4();
+  const asa = new THREE.Matrix4();
+  const p = new THREE.Vector3();
+  const q = new THREE.Quaternion();
+  const tamanho = new THREE.Vector3(1.6, 1.6, 1.6);
+  const espelho = new THREE.Vector3(-1, 1, 1);
+  const eixoY = new THREE.Vector3(0, 1, 0);
+  const voar = (t) => {
+    passaros.forEach((ps, i) => {
+      const a = t * ps.b.vel + ps.fase * 0.15 - ps.atraso;
+      p.set(ps.b.x + Math.cos(a) * ps.raio, ps.alt + Math.sin(t * 0.7 + ps.fase) * 3, ps.b.z + Math.sin(a) * ps.raio);
+      q.setFromAxisAngle(eixoY, -a); // tangente do círculo
+      corpo.compose(p, q, tamanho);
+      const bate = Math.sin(t * 9 + ps.fase) * 0.6;
+      asas.setMatrixAt(i * 2, asa.makeRotationZ(bate).premultiply(corpo));
+      asas.setMatrixAt(i * 2 + 1, asa.makeRotationZ(-bate).scale(espelho).premultiply(corpo));
+    });
+    asas.instanceMatrix.needsUpdate = true;
+  };
+  voar(0); // nada de asas empilhadas na origem antes do primeiro quadro
+  decorar.push(voar);
 }
 
 // ------------------------------------------------------------------ cerca da área jogável
@@ -691,8 +760,16 @@ export function criarNatureza(scene, renderer, { area, sala, reservas = [], estr
   // dois lados: os cones e troncos não têm tampa embaixo, e quem olha de baixo veria através
   const matPlanta = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, side: THREE.DoubleSide });
   for (const a of [...pinheiros, ...frondosas]) a.fixa = dentro(a.x, a.z);
-  instanciar(grupo, geoPinheiro(), matPlanta, pinheiros);
-  instanciar(grupo, geoFrondosa(), matPlanta, frondosas);
+  // No PC, as árvores a mais de 60 m da cerca usam o shader só de sol. No celular ficam num
+  // material só: lá o pixel é pouco, e o desenho a mais pesaria mais que o que ele poupa.
+  const matPlantaLonge = LEVE ? null : soSol(matPlanta.clone());
+  const plantar = (geo, lista) => {
+    const longe = (a) => !!matPlantaLonge && foraDaArea(a.x, a.z, area) > 60;
+    instanciar(grupo, geo, matPlanta, lista.filter((a) => !longe(a)));
+    if (matPlantaLonge) instanciar(grupo, geo, matPlantaLonge, lista.filter(longe));
+  };
+  plantar(geoPinheiro(), pinheiros);
+  plantar(geoFrondosa(), frondosas);
   instanciar(grupo, pintar(new THREE.IcosahedronGeometry(1.1, 0).scale(1.3, 0.8, 1.3), '#4e7f39'), matPlanta, arbustos, { sombra: false });
   instanciar(grupo, pintar(new THREE.DodecahedronGeometry(1, 0), '#8a837c'), matPlanta, pedras, { sombra: false });
   instanciar(grupo, new THREE.IcosahedronGeometry(0.22, 0), new THREE.MeshLambertMaterial({ color: '#ffffff', flatShading: true }), flores, { sombra: false });
@@ -714,9 +791,11 @@ export function criarNatureza(scene, renderer, { area, sala, reservas = [], estr
   let anterior = null;
   return {
     lago,
-    // o clima (clima.js) muda as cores do céu, as estrelas e as nuvens
-    ceu: { mat: ceu.mat, estrelasMat: ceu.estrelasMat, get nuvensMat() { return nuvensMat; } },
+    // o clima (clima.js) muda as cores do céu, as estrelas e as nuvens, e esconde as estrelas de dia
+    ceu: { mat: ceu.mat, estrelasMat: ceu.estrelasMat, estrelas: ceu.estrelas, get nuvensMat() { return nuvensMat; } },
     seguirCamera: (cam, t) => ceu.seguir(cam, t),
+    // contexto do WebGL restaurado (o World chama): o reflexo do lago se foi com o contexto perdido
+    refazerAmbiente: () => lago?.refazer(),
     // qualidade: fração de árvores/arbustos/pedras desenhadas, e se as árvores fazem sombra
     ajustar({ densidade = 1, sombras = true }) {
       for (const m of densas) {
@@ -727,6 +806,8 @@ export function criarNatureza(scene, renderer, { area, sala, reservas = [], estr
     update(t) {
       const dt = anterior == null ? 0 : Math.min(0.1, t - anterior);
       anterior = t;
+      // lado de fora escondido (dentro do cinema ou do prédio): água, nuvens e pássaros param
+      if (!grupo.visible) return;
       for (const fn of decorar) fn(t, dt);
     },
   };

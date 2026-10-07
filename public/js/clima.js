@@ -60,6 +60,21 @@ const PALETAS = {
   cinzaDia: [hex('#5d6672'), hex('#7a838f'), hex('#a3abb5'), hex('#59606b'), hex('#c3c8cf')],
   cinzaNoite: [hex('#07080b'), hex('#0d0f14'), hex('#151820'), hex('#08090c'), hex('#1a1d24')],
 };
+// as outras cores do update, criadas uma vez (e não a cada quadro)
+const COR = {
+  clarao: hex('#c8d2ff'),
+  branco: hex('#ffffff'),
+  nuvem: hex('#f4dfe3'),
+  nuvemNoite: hex('#2a3044'),
+  nuvemChuva: hex('#59606b'),
+  brilhoNuvem: hex('#4a3550'),
+  brilhoNuvemDia: hex('#8a96a8'),
+  brilhoNuvemNoite: hex('#0b0e18'),
+  solBaixo: hex('#ffb070'),
+  solAlto: hex('#fff3e6'),
+  chao: hex('#252036'),
+  chaoDia: hex('#3a3a30'),
+};
 const _c = [new THREE.Color(), new THREE.Color(), new THREE.Color(), new THREE.Color(), new THREE.Color()];
 const _g = [new THREE.Color(), new THREE.Color(), new THREE.Color(), new THREE.Color(), new THREE.Color()];
 const smooth = (a, b, x) => {
@@ -171,10 +186,29 @@ function desenharRaio(raio, x, z) {
 }
 
 // ------------------------------------------------------------------ som
+// ronco do trovão: estalo no começo, ronco depois, com "rolagens"
+function gerarTrovao(ac, dur) {
+  const n = Math.floor(ac.sampleRate * dur);
+  const buf = ac.createBuffer(1, n, ac.sampleRate);
+  const d = buf.getChannelData(0);
+  let b = 0;
+  for (let i = 0; i < n; i++) {
+    b = 0.985 * b + 0.015 * (Math.random() * 2 - 1);
+    const env = Math.min(1, i / (ac.sampleRate * 0.02)) * Math.exp(-i / (ac.sampleRate * dur * 0.35)) * (0.7 + 0.3 * Math.sin(i / 2200));
+    d[i] = b * 6 * env;
+  }
+  return buf;
+}
+
+// sem requestIdleCallback (Safari), um pouco depois
+const quandoOcioso = (fn) => (window.requestIdleCallback ? requestIdleCallback(fn, { timeout: 2000 }) : setTimeout(fn, 50));
+
 class SomDoTempo {
   constructor() {
     this.ac = null;
     this.chuva = null;
+    this.trovoes = []; // ver prepararTrovoes
+    this.preparando = false;
   }
 
   iniciar() {
@@ -214,26 +248,34 @@ class SomDoTempo {
     this.chuva.filtro.frequency.setTargetAtTime(dentro ? 650 : 3200, t, 0.4);
   }
 
+  // Cada trovão são ~170 mil amostras calculadas uma a uma: gerado na hora, travava a tela no meio
+  // da tempestade. Quando ela chega, dois ficam prontos em tempo ocioso, um de cada vez.
+  prepararTrovoes() {
+    if (!this.ac || this.preparando) return;
+    this.preparando = true;
+    const proximo = () => {
+      if (this.trovoes.length >= 2) return;
+      quandoOcioso(() => {
+        this.trovoes.push(gerarTrovao(this.ac, 3.5));
+        proximo();
+      });
+    };
+    proximo();
+  }
+
   trovao(forca, dentro) {
     if (!this.ac) return;
     const ac = this.ac;
     const t0 = ac.currentTime;
-    const dur = 2.5 + Math.random() * 1.5;
-    const n = Math.floor(ac.sampleRate * dur);
-    const buf = ac.createBuffer(1, n, ac.sampleRate);
-    const d = buf.getChannelData(0);
-    let b = 0;
-    for (let i = 0; i < n; i++) {
-      b = 0.985 * b + 0.015 * (Math.random() * 2 - 1);
-      // estalo no começo, ronco depois, com "rolagens"
-      const env = Math.min(1, i / (ac.sampleRate * 0.02)) * Math.exp(-i / (ac.sampleRate * dur * 0.35)) * (0.7 + 0.3 * Math.sin(i / 2200));
-      d[i] = b * 6 * env;
-    }
     const src = ac.createBufferSource();
-    src.buffer = buf;
+    // um dos prontos, com outra velocidade e outro filtro para nenhum soar igual; se ainda não
+    // tem, gera na hora
+    const pronto = this.trovoes.length > 0;
+    src.buffer = pronto ? this.trovoes[Math.floor(Math.random() * this.trovoes.length)] : gerarTrovao(ac, 2.5 + Math.random() * 1.5);
+    if (pronto) src.playbackRate.value = 0.85 + Math.random() * 0.3;
     const filtro = ac.createBiquadFilter();
     filtro.type = 'lowpass';
-    filtro.frequency.value = dentro ? 220 : 520;
+    filtro.frequency.value = (dentro ? 220 : 520) * (pronto ? 0.85 + Math.random() * 0.3 : 1);
     const g = ac.createGain();
     g.gain.value = 0.5 * forca * (dentro ? 0.45 : 1);
     src.connect(filtro).connect(g).connect(ac.destination);
@@ -255,7 +297,9 @@ export class Clima {
     this.raioVida = 0;
     this.chuva = criarChuva(LEVE ? 2500 : 6000);
     this.raio = criarRaio();
-    world.scene.add(this.chuva, this.raio);
+    // no grupo do lado de fora: somem com ele quando não há como ver lá fora (o shader da chuva e a
+    // linha do raio já são em coordenadas de mundo)
+    world.fora.add(this.chuva, this.raio);
     this.som = new SomDoTempo();
     this.dirLuz = new THREE.Vector3();
     this.hora = horaDoJogo('ciclo');
@@ -314,7 +358,7 @@ export class Clima {
       _c[i].lerp(_g[i], encoberto * 0.85);
     }
     // relâmpago
-    if (this.clarao > 0) for (let i = 0; i < 4; i++) _c[i].lerp(hex('#c8d2ff'), this.clarao * 0.7);
+    if (this.clarao > 0) for (let i = 0; i < 4; i++) _c[i].lerp(COR.clarao, this.clarao * 0.7);
     const ceu = w.natureza?.ceu;
     if (ceu) {
       const u = ceu.mat.uniforms;
@@ -328,11 +372,14 @@ export class Clima {
       const limpo = 1 - encoberto;
       if (deNoite) u.disco.value.setRGB(0.95, 0.98, 1.1).multiplyScalar(limpo);
       else u.disco.value.setRGB(1.6, 1.38 + dia * 0.2, 1.06 + dia * 0.4).multiplyScalar(limpo * luzDoSol);
-      ceu.estrelasMat.uniforms.visivel.value = noite * (1 - encoberto * 0.95);
+      // de dia (ou com o céu fechado) as estrelas nem são desenhadas
+      const brilho = noite * (1 - encoberto * 0.95);
+      ceu.estrelasMat.uniforms.visivel.value = brilho;
+      ceu.estrelas.visible = brilho > 0.005;
       const nm = ceu.nuvensMat;
       if (nm) {
-        nm.color.copy(hex('#f4dfe3')).lerp(hex('#ffffff'), dia).lerp(hex('#2a3044'), noite).lerp(hex('#59606b'), encoberto * (1 - noite) * 0.8);
-        nm.emissive.copy(hex('#4a3550')).lerp(hex('#8a96a8'), dia).lerp(hex('#0b0e18'), noite);
+        nm.color.copy(COR.nuvem).lerp(COR.branco, dia).lerp(COR.nuvemNoite, noite).lerp(COR.nuvemChuva, encoberto * (1 - noite) * 0.8);
+        nm.emissive.copy(COR.brilhoNuvem).lerp(COR.brilhoNuvemDia, dia).lerp(COR.brilhoNuvemNoite, noite);
         nm.emissiveIntensity = 0.55 - encoberto * 0.25 + this.clarao * 0.8;
       }
     }
@@ -350,15 +397,15 @@ export class Clima {
         sun.color.setRGB(0.62, 0.72, 1);
         sun.intensity = 0.38 * smooth(0.02, -0.12, sol.y) * (1 - encoberto * 0.8);
       } else {
-        sun.color.copy(hex('#ffb070')).lerp(hex('#fff3e6'), dia);
+        sun.color.copy(COR.solBaixo).lerp(COR.solAlto, dia);
         sun.intensity = 1.6 * luzDoSol * (1 - encoberto * 0.72);
       }
       sun.intensity += this.clarao * 1.8;
     }
     const hemi = w.hemi;
     if (hemi) {
-      hemi.color.copy(_c[1]).lerp(hex('#ffffff'), 0.45);
-      hemi.groundColor.copy(hex('#252036')).lerp(hex('#3a3a30'), dia * (1 - encoberto));
+      hemi.color.copy(_c[1]).lerp(COR.branco, 0.45);
+      hemi.groundColor.copy(COR.chao).lerp(COR.chaoDia, dia * (1 - encoberto));
       let forca = THREE.MathUtils.lerp(1.45, 0.45, noite) * (1 - encoberto * 0.25) + this.clarao * 2.5;
       // dentro do cinema/escritório a sala tem a luz dela: a noite lá fora não apaga o salão
       if (dentro) forca = Math.max(forca, 1.25);
@@ -387,6 +434,7 @@ export class Clima {
     this.som.chover(this.chuvaNivel, dentro);
 
     // ---- raios (só na tempestade); cada um em lugar e hora diferentes para cada pessoa
+    if (this.raios > 0.05) this.som.prepararTrovoes();
     this.clarao = Math.max(0, this.clarao - dt * 3.2);
     if (this.raioVida > 0) {
       this.raioVida -= dt;

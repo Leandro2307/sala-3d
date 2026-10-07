@@ -4,7 +4,9 @@
 // Aqui fica só a parte 3D: tabuleiro, peças, animações e estilhaços. As regras ficam em
 // xadrez.js/dama.js e a partida (rede, comandos, HUD) em jogos.js.
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { sfx } from './sfx.js';
+import { isTouch } from './touch.js';
 
 const BORDA = 1.3;
 const Y = 0.16; // altura do tabuleiro (em cima da praça)
@@ -23,6 +25,7 @@ export const RESERVAS_JOGOS = [{ x: 106, z: -12, r: 38 }, { x: 166, z: -12, r: 2
 const ease = (t) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
 const _v = new THREE.Vector3();
 const _up = new THREE.Vector3(0, 1, 0);
+const _m = new THREE.Matrix4();
 
 function* tween(dur, fn) {
   let t = 0;
@@ -38,11 +41,17 @@ function* esperar(s) {
 }
 
 function texturaTabuleiro(tipo, n, Q, LADO) {
-  const px = 1280;
+  // Desenhado num quadro de T px e reduzido conforme o aparelho. No celular, 1024 px ainda deixam o
+  // tabuleiro nítido no zoom normal; o da velha (casas lisas e um #) fica com a metade disso. Cada
+  // tabuleiro de 1280 px custava ~15 MB entre o canvas, a textura e os mipmaps.
+  const T = 1280;
+  const velha = tipo === 'velha';
+  const px = isTouch ? (velha ? 512 : 1024) : (velha ? 1024 : 1280);
   const cv = document.createElement('canvas');
   cv.width = cv.height = px;
   const ctx = cv.getContext('2d');
-  const k = px / LADO;
+  ctx.scale(px / T, px / T);
+  const k = T / LADO;
   const b = BORDA * k;
   const q = Q * k;
   const [claro, escuro, moldura, letra] = {
@@ -51,7 +60,7 @@ function texturaTabuleiro(tipo, n, Q, LADO) {
     velha: ['#1d2340', '#1d2340', '#0e1122', '#a5b4fc'],
   }[tipo];
   ctx.fillStyle = moldura;
-  ctx.fillRect(0, 0, px, px);
+  ctx.fillRect(0, 0, T, T);
   for (let l = 0; l < n; l++) {
     for (let c = 0; c < n; c++) {
       const x = b + c * q;
@@ -83,13 +92,13 @@ function texturaTabuleiro(tipo, n, Q, LADO) {
   ctx.strokeStyle = letra;
   ctx.lineWidth = 4;
   ctx.strokeRect(b - 3, b - 3, q * n + 6, q * n + 6);
-  if (tipo === 'velha') {
+  if (velha) {
     // o "#" do jogo da velha, em neon
     ctx.strokeStyle = '#c4b5fd';
     ctx.lineWidth = 16;
     ctx.lineCap = 'round';
     ctx.shadowColor = '#a78bfa';
-    ctx.shadowBlur = 28;
+    ctx.shadowBlur = 28 * (px / T); // o desfoque da sombra não segue a escala do contexto
     for (const i of [1, 2]) {
       ctx.beginPath();
       ctx.moveTo(b + i * q, b + 18);
@@ -106,7 +115,7 @@ function texturaTabuleiro(tipo, n, Q, LADO) {
   ctx.textBaseline = 'middle';
   for (let i = 0; i < n; i++) {
     const L = 'abcdefgh'[i];
-    ctx.fillText(L, b + i * q + q / 2, px - b / 2);
+    ctx.fillText(L, b + i * q + q / 2, T - b / 2);
     ctx.save();
     ctx.translate(b + i * q + q / 2, b / 2);
     ctx.rotate(Math.PI);
@@ -114,7 +123,7 @@ function texturaTabuleiro(tipo, n, Q, LADO) {
     ctx.restore();
     ctx.fillText(String(i + 1), b / 2, b + (n - 1 - i) * q + q / 2);
     ctx.save();
-    ctx.translate(px - b / 2, b + (n - 1 - i) * q + q / 2);
+    ctx.translate(T - b / 2, b + (n - 1 - i) * q + q / 2);
     ctx.rotate(Math.PI);
     ctx.fillText(String(i + 1), 0, 0);
     ctx.restore();
@@ -125,11 +134,17 @@ function texturaTabuleiro(tipo, n, Q, LADO) {
   return tex;
 }
 
+// placas e letreiros desenhados em escala: no celular o canvas tem a metade
+const ESCALA_PLACA = isTouch ? 0.5 : 1;
+
 function placaTexto(texto, cor) {
+  // desenhado em 1024 x 192, encolhido no celular
+  const e = ESCALA_PLACA;
   const cv = document.createElement('canvas');
-  cv.width = 1024;
-  cv.height = 192;
+  cv.width = 1024 * e;
+  cv.height = 192 * e;
   const ctx = cv.getContext('2d');
+  ctx.setTransform(e, 0, 0, e, 0, 0);
   ctx.fillStyle = '#0f1118';
   ctx.fillRect(0, 0, 1024, 192);
   ctx.fillStyle = cor;
@@ -164,12 +179,20 @@ const PERFIS = {
 };
 const ALTURA = { p: 2.14, r: 2.45, b: 2.98, q: 3.47, k: 3.75, n: 3.05, w: 0.42, W: 0.84 };
 
+// Junta as partes de uma peça numa geometria só. O mergeGeometries exige todas com índice ou todas
+// sem, e a cabeça do cavalo (ExtrudeGeometry) não tem.
+function juntar(partes) {
+  const semIndice = partes.some((p) => !p.index);
+  return mergeGeometries(semIndice ? partes.map((p) => (p.index ? p.toNonIndexed() : p)) : partes);
+}
+
 let geoCache = null;
 function geometrias() {
   if (geoCache) return geoCache;
   const g = {};
+  const torno = {};
   for (const [t, pts] of Object.entries(PERFIS)) {
-    g[t] = new THREE.LatheGeometry(pts.map(([r, y]) => new THREE.Vector2(Math.max(0, r), y)), 28);
+    torno[t] = new THREE.LatheGeometry(pts.map(([r, y]) => new THREE.Vector2(Math.max(0, r), y)), 28);
   }
   // cabeça do cavalo: um perfil de lado, extrudado
   const s = new THREE.Shape();
@@ -186,11 +209,27 @@ function geometrias() {
   s.lineTo(-0.5, 0.58);
   const cab = new THREE.ExtrudeGeometry(s, { depth: 0.56, bevelEnabled: true, bevelThickness: 0.1, bevelSize: 0.08, bevelSegments: 3, curveSegments: 10 });
   cab.translate(0, 0, -0.28);
-  g.cabeca = cab;
-  g.ameia = new THREE.BoxGeometry(0.26, 0.26, 0.2);
-  g.cruzV = new THREE.BoxGeometry(0.12, 0.6, 0.12);
-  g.cruzH = new THREE.BoxGeometry(0.4, 0.12, 0.12);
-  g.perola = new THREE.SphereGeometry(0.09, 10, 8);
+  // as 6 ameias da torre, cada uma virada para fora, e as 8 pérolas da coroa da dama
+  const ameias = Array.from({ length: 6 }, (_, i) => {
+    const a = (i / 6) * Math.PI * 2;
+    return new THREE.BoxGeometry(0.26, 0.26, 0.2).rotateY(-a).translate(Math.cos(a) * 0.52, 2.56, Math.sin(a) * 0.52);
+  });
+  const perolas = Array.from({ length: 8 }, (_, i) => {
+    const a = (i / 8) * Math.PI * 2;
+    return new THREE.SphereGeometry(0.09, 10, 8).translate(Math.cos(a) * 0.6, 2.86, Math.sin(a) * 0.6);
+  });
+  const cruz = [new THREE.BoxGeometry(0.12, 0.6, 0.12).translate(0, 3.42, 0), new THREE.BoxGeometry(0.4, 0.12, 0.12).translate(0, 3.48, 0)];
+  // cada peça do xadrez numa geometria só: um desenho por peça (eram até 9), e outro na sombra
+  g.peca = {
+    p: torno.p,
+    b: torno.b,
+    r: juntar([torno.r, ...ameias]),
+    q: juntar([torno.q, ...perolas]),
+    k: juntar([torno.k, ...cruz]),
+    // os cavalos branco (N) e preto (n) olham para lados opostos
+    N: juntar([torno.n, cab.clone().rotateY(Math.PI / 2)]),
+    n: juntar([torno.n, cab.clone().rotateY(-Math.PI / 2)]),
+  };
   // dama (jogo de damas): disco com borda arredondada e um friso
   g.disco = new THREE.LatheGeometry([[0, 0], [0.9, 0], [0.97, 0.06], [0.97, 0.36], [0.9, 0.42], [0.62, 0.42], [0.56, 0.36], [0, 0.36]].map(([r, y]) => new THREE.Vector2(r, y)), 36);
   g.coroa = new THREE.TorusGeometry(0.5, 0.08, 8, 28);
@@ -212,27 +251,12 @@ const MATERIAIS = {
 };
 
 function pecaXadrez(p) {
-  const g = geometrias();
   const t = p.toLowerCase();
-  const branca = p !== t;
-  const mat = branca ? MATERIAIS.w : MATERIAIS.b;
   const corpo = new THREE.Group();
-  const add = (geo, x = 0, y = 0, z = 0) => {
-    const m = new THREE.Mesh(geo, mat);
-    m.position.set(x, y, z);
-    m.castShadow = true;
-    m.receiveShadow = true;
-    corpo.add(m);
-    return m;
-  };
-  add(g[t]);
-  if (t === 'n') add(g.cabeca).rotation.y = branca ? Math.PI / 2 : -Math.PI / 2;
-  if (t === 'r') for (let i = 0; i < 6; i++) add(g.ameia, Math.cos((i / 6) * Math.PI * 2) * 0.52, 2.56, Math.sin((i / 6) * Math.PI * 2) * 0.52).rotation.y = -(i / 6) * Math.PI * 2;
-  if (t === 'q') for (let i = 0; i < 8; i++) add(g.perola, Math.cos((i / 8) * Math.PI * 2) * 0.6, 2.86, Math.sin((i / 8) * Math.PI * 2) * 0.6);
-  if (t === 'k') {
-    add(g.cruzV, 0, 3.42);
-    add(g.cruzH, 0, 3.48);
-  }
+  const m = new THREE.Mesh(geometrias().peca[t === 'n' ? p : t], p !== t ? MATERIAIS.w : MATERIAIS.b);
+  m.castShadow = true;
+  m.receiveShadow = true;
+  corpo.add(m);
   corpo.scale.setScalar(1.12);
   return corpo;
 }
@@ -324,34 +348,45 @@ export class Mesa {
     const tex = placaTexto(this.def.nome.toUpperCase(), cor);
     const ferroPlaca = new THREE.MeshStandardMaterial({ color: 0x1b1f2a });
     const face = new THREE.MeshBasicMaterial({ map: tex, toneMapped: false });
+    // A caixa da placa em dois grupos, 2 desenhos em vez de 6: laterais, topo e base (os 24
+    // primeiros índices) de ferro, frente e verso com o nome.
+    const caixa = new THREE.BoxGeometry(9, 1.7, 0.16);
+    caixa.clearGroups();
+    caixa.addGroup(0, 24, 0);
+    caixa.addGroup(24, 12, 1);
+    const pes = [];
     for (const lado of [1, -1]) {
       // pórtico na beira da praça: a placa fica no alto, para não tampar o tabuleiro
       const z = lado * (LADO / 2 + 4);
-      const placa = new THREE.Mesh(new THREE.BoxGeometry(9, 1.7, 0.16), [ferroPlaca, ferroPlaca, ferroPlaca, ferroPlaca, face, face]);
+      const placa = new THREE.Mesh(caixa, [ferroPlaca, face]);
       placa.position.set(0, 6.2, z);
       this.grupo.add(placa);
-      for (const sx of [-1, 1]) {
-        const pe = new THREE.Mesh(new THREE.BoxGeometry(0.35, 7, 0.35), ferroPlaca);
-        pe.position.set(sx * 4.7, 3.5, z);
-        pe.castShadow = true;
-        this.grupo.add(pe);
-      }
+      for (const sx of [-1, 1]) pes.push(new THREE.BoxGeometry(0.35, 7, 0.35).translate(sx * 4.7, 3.5, z));
     }
-    // braseiros nos cantos: luz quente, como nas masmorras de Hogwarts
+    // os 4 pés numa malha só
+    const pe = new THREE.Mesh(mergeGeometries(pes), ferroPlaca);
+    pe.castShadow = true;
+    this.grupo.add(pe);
+    // braseiros nos cantos: luz quente, como nas masmorras de Hogwarts. Hastes e taças numa malha
+    // só; as 4 chamas numa InstancedMesh, que o update faz tremular.
     const fogo = new THREE.MeshBasicMaterial({ color: 0xffb347, toneMapped: false });
     const ferro = new THREE.MeshStandardMaterial({ color: 0x2a2a30, metalness: 0.6, roughness: 0.5 });
     const h = LADO / 2 + 2.6;
-    this.chamas = [];
-    for (const [sx, sz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
-      const haste = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.18, 3, 8), ferro);
-      haste.position.set(sx * h, 1.5, sz * h);
-      const taca = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.25, 0.5, 12), ferro);
-      taca.position.set(sx * h, 3.1, sz * h);
-      const chama = new THREE.Mesh(new THREE.ConeGeometry(0.4, 1.0, 10), fogo);
-      chama.position.set(sx * h, 3.75, sz * h);
-      this.chamas.push(chama);
-      this.grupo.add(haste, taca, chama);
-    }
+    const suportes = [];
+    this.chamas = new THREE.InstancedMesh(new THREE.ConeGeometry(0.4, 1.0, 10), fogo, 4);
+    this.chamas.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.posChamas = [[1, 1], [1, -1], [-1, 1], [-1, -1]].map(([sx, sz], k) => {
+      suportes.push(
+        new THREE.CylinderGeometry(0.12, 0.18, 3, 8).translate(sx * h, 1.5, sz * h),
+        new THREE.CylinderGeometry(0.55, 0.25, 0.5, 12).translate(sx * h, 3.1, sz * h),
+      );
+      const p = new THREE.Vector3(sx * h, 3.75, sz * h);
+      this.chamas.setMatrixAt(k, _m.makeTranslation(p));
+      return p;
+    });
+    // a esfera de recorte sai com as chamas na escala 1, a maior a que elas chegam
+    this.chamas.computeBoundingSphere();
+    this.grupo.add(new THREE.Mesh(mergeGeometries(suportes), ferro), this.chamas);
     const luz = new THREE.PointLight(0xffc27a, 120, 40, 1.4);
     luz.position.set(0, 9, 0);
     this.grupo.add(luz);
@@ -438,6 +473,7 @@ export class Mesa {
   // Põe as peças do jeito que estão no tabuleiro, sem animação (entrar na sala, partida nova).
   reconstruir(b, ultimo = null) {
     this.fila = [];
+    this.atual?.return(); // a animação largada no meio ainda fecha o que abriu (a luz do brilho)
     this.atual = null;
     this.linha = null;
     for (const m of this.pecas) if (m) this.grupo.remove(m);
@@ -448,6 +484,15 @@ export class Mesa {
       return m;
     });
     this.marcarUltimo(ultimo);
+    this.marcarSombra();
+  }
+
+  // Peça que anda, aparece ou some muda a sombra do sol: pede um mapa novo ao World, se a mesa
+  // aparece (jogo ligado, lado de fora à vista) e está na área da sombra. Quando ela volta a
+  // aparecer, o próprio World refaz a sombra. Sem a API nova do World, a sombra já é de todo quadro.
+  marcarSombra() {
+    const w = this.world;
+    if (this.grupo.visible && w.fora.visible && (w.pertoDoSol?.(this.grupo.position) ?? true)) w.marcarSombra?.();
   }
 
   marcarUltimo(casas) {
@@ -596,8 +641,9 @@ export class Mesa {
     }
 
     if (v.promo) {
-      // promoção: a peça brilha e vira outra
-      const nova = v.promo;
+      // promoção: a peça brilha e vira outra, da mesma cor (o lance traz a letra minúscula)
+      const p = peca.userData.p;
+      const nova = p === p.toUpperCase() ? v.promo.toUpperCase() : v.promo;
       yield* this.brilho(peca);
       this.grupo.remove(peca);
       const outra = this.novaPeca(nova);
@@ -611,12 +657,19 @@ export class Mesa {
     const luz = new THREE.PointLight(0x9fe8ff, 0, 10, 1.5);
     luz.position.set(0, 2.5, 0);
     peca.add(luz);
-    yield* tween(0.7, (t) => {
-      luz.intensity = Math.sin(Math.PI * t) * 260;
-      peca.rotation.y = ease(t) * Math.PI * 2;
-    });
-    peca.rotation.y = 0;
-    peca.remove(luz);
+    // o World refaz a lista das luzes acesas na entrada e na saída: luz nova sem aviso seria a
+    // maxLuzes + 1, e todo shader recompilaria
+    this.world.luzesMudaram?.();
+    try {
+      yield* tween(0.7, (t) => {
+        luz.intensity = Math.sin(Math.PI * t) * 260;
+        peca.rotation.y = ease(t) * Math.PI * 2;
+      });
+    } finally {
+      peca.rotation.y = 0;
+      peca.remove(luz);
+      this.world.luzesMudaram?.();
+    }
   }
 
   *lanceDama(v) {
@@ -688,8 +741,12 @@ export class Mesa {
 
   update(dt, t, camPos) {
     this.camPos.copy(camPos);
-    for (const [k, c] of this.chamas.entries()) c.scale.set(1, 0.85 + Math.sin(t * 9 + k * 2) * 0.15, 1);
-    if (this.linha && !this.ocupada) {
+    this.posChamas.forEach((p, k) => this.chamas.setMatrixAt(k, _m.makeScale(1, 0.85 + Math.sin(t * 9 + k * 2) * 0.15, 1).setPosition(p)));
+    this.chamas.instanceMatrix.needsUpdate = true;
+    // peça andando, a linha da velha pulando ou cacos voando, inclusive no quadro em que param
+    const pulando = this.linha && !this.ocupada;
+    if (this.ocupada || this.cacos.length || pulando) this.marcarSombra();
+    if (pulando) {
       for (const i of this.linha) {
         const p = this.pecas[i];
         if (p) p.position.y = Y + Math.abs(Math.sin(t * 4)) * 1.2;

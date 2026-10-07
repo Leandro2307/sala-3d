@@ -123,6 +123,15 @@ const ACUM = (() => {
 
 export const COMPRIMENTO = ACUM[ACUM.length - 1];
 
+// Caixa da linha central, com meia largura e folga: quem está fora dela não está na pista, e a
+// pé não precisa projetar (são 700 segmentos por quadro, à toa no cinema e no escritório).
+const CAIXA = (() => {
+  const folga = PISTA.largura / 2 + 2;
+  const xs = CAMINHO.map((p) => PISTA.cx + p.x);
+  const zs = CAMINHO.map((p) => PISTA.cz + p.y);
+  return { x0: Math.min(...xs) - folga, x1: Math.max(...xs) + folga, z0: Math.min(...zs) - folga, z1: Math.max(...zs) + folga };
+})();
+
 const _p = new THREE.Vector2();
 const _ab = new THREE.Vector2();
 const _ap = new THREE.Vector2();
@@ -226,6 +235,19 @@ export class Corrida {
 
   // chamado a cada frame com a posição do jogador
   update(dt, x, z, emVeiculo) {
+    // a pé e longe do traçado: o mesmo que fora da pista, sem projetar
+    if (!emVeiculo && (x < CAIXA.x0 || x > CAIXA.x1 || z < CAIXA.z0 || z > CAIXA.z1)) {
+      if (this.naPista) {
+        this.naPista = false;
+        this.cb.onPista?.(false);
+      }
+      if (this.ativa) {
+        this.ativa = false;
+        this.cb.onCancelar?.();
+      }
+      this.saidaT = null;
+      return;
+    }
     // daqui para baixo, t é a fração da VOLTA (0 na linha de largada), não do traçado
     const proj = projetar(x, z, this.naPista ? noTracado(this.ultimoT) : null);
     const t = naVolta(proj.t);

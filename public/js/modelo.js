@@ -19,6 +19,10 @@ const FOLGA_QUADRIL = 0.14;
 const _eixoPasso = new THREE.Vector3();
 const EIXOS = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] };
 const cache = new Map(); // url -> Promise<gltf>
+const medidas = new WeakMap(); // def -> { escala, giroY, posicao, altura } (ver ajustar)
+const _v = new THREE.Vector3();
+const _x = new THREE.Matrix4();
+const _p = new THREE.Matrix4();
 
 // O catálogo fica em personagens.js (só dados: o servidor usa também).
 export { PERSONAGENS };
@@ -57,10 +61,15 @@ export function mapearClipes(clips, explicito = null) {
 // anim do jogador: 0 parado, 1 andando, 2 correndo, 3 no ar, 4 sentado
 const POR_ANIM = ['idle', 'walk', 'run', 'air', 'sit'];
 
-export function carregarModelo(url) {
+// def: o cadastro de quem pediu, para podar as armas (ver podarMaos). O arquivo é baixado e
+// podado uma vez só, antes de qualquer clone, com o def do primeiro pedido.
+export function carregarModelo(url, def = null) {
   if (!cache.has(url)) {
     cache.set(url, new Promise((resolve, reject) => {
-      loader.load(url, resolve, undefined, (err) => {
+      loader.load(url, (gltf) => {
+        podarMaos(gltf.scene, def?.maos);
+        resolve(gltf);
+      }, undefined, (err) => {
         cache.delete(url); // deixa tentar de novo depois
         reject(err);
       });
@@ -69,18 +78,55 @@ export function carregarModelo(url) {
   return cache.get(url);
 }
 
+// O KayKit traz todas as armas do pacote no arquivo, penduradas nos ossos das mãos (handslot.l
+// e .r, que o GLTFLoader chama de handslotl e handslotr) e umas por cima das outras: o pacote
+// espera que o jogo escolha uma. O jogo usa as animações desarmadas, então elas saem do modelo
+// carregado — eram 4 a 7 desenhos a mais por pessoa, e outros tantos na sombra. maos: nomes das
+// peças que ficam. O osso fica: é junta da skin.
+function podarMaos(cena, maos = []) {
+  const fora = [];
+  cena.traverse((o) => {
+    if (!o.isBone || !/^handslot/i.test(o.name)) return;
+    for (const peca of o.children) if (!peca.isBone && !maos.includes(peca.name)) fora.push(peca);
+  });
+  for (const peca of fora) peca.removeFromParent();
+}
+
+// peça que ficou na mão (def.maos)
+function naMao(o) {
+  for (let p = o.parent; p; p = p.parent) if (p.isBone && /^handslot/i.test(p.name)) return true;
+  return false;
+}
+
 // Mede o tamanho real do modelo. Os arquivos vêm em escalas completamente
 // diferentes (a raposa tem 79 unidades de altura, o humano 1,5), então medir é
 // obrigatório. Dois cuidados que, sem eles, dão modelo gigante ou minúsculo:
-// atualizar as matrizes antes de medir, e usar a versão "precisa", que percorre
-// os vértices em vez de confiar na caixa pré-calculada da malha com esqueleto.
+// atualizar as matrizes antes de medir, e percorrer os vértices já na pose do
+// esqueleto em vez de confiar na caixa pré-calculada da malha com esqueleto.
+// O que fica na mão não conta: um cajado mudaria a altura, e um escudo, o centro.
 function medir(obj) {
   obj.updateMatrixWorld(true);
-  return new THREE.Box3().setFromObject(obj, true);
+  const caixa = new THREE.Box3();
+  obj.traverse((o) => {
+    const pos = o.isMesh && o.geometry.attributes.position;
+    if (!pos || naMao(o)) return;
+    for (let i = 0; i < pos.count; i++) caixa.expandByPoint(o.getVertexPosition(i, _v).applyMatrix4(o.matrixWorld));
+  });
+  return caixa;
 }
 
 // Põe o modelo de pé na origem, com a altura certa e virado para +Z (frente do jogo).
+// A pose de repouso é a mesma em todo clone do arquivo, e medir percorre todos os vértices na
+// CPU: mede uma vez por cadastro, e os seguintes (40 cavaleiros chegando juntos) só copiam.
 function ajustar(raiz, def) {
+  const feita = medidas.get(def);
+  if (feita) {
+    raiz.scale.setScalar(feita.escala);
+    raiz.rotation.y = feita.giroY;
+    raiz.position.copy(feita.posicao);
+    raiz.updateMatrixWorld(true);
+    return feita;
+  }
   const caixa = medir(raiz);
   const tam = caixa.getSize(new THREE.Vector3());
   const alvo = def.altura || 1.8;
@@ -95,7 +141,35 @@ function ajustar(raiz, def) {
   raiz.position.z -= centro.z;
   raiz.position.y -= caixa2.min.y;
   raiz.updateMatrixWorld(true);
-  return escala;
+  const medida = { escala, giroY: raiz.rotation.y, posicao: raiz.position.clone(), altura: caixa2.getSize(tam).y };
+  medidas.set(def, medida);
+  return medida;
+}
+
+// Um esqueleto por personagem. O gltfpack embute a desquantização de cada malha nas matrizes de
+// bind da skin dela: o KayKit chega com 6 a 9 skins dos mesmos 41 ossos, que só diferem por uma
+// matriz fixa X por malha, e o SkeletonUtils.clone ainda dá um esqueleto a cada primitiva (Atos
+// 3, robô 4). X vai para o bindMatrix e todas usam o esqueleto da primeira: 1 atualização e 1
+// textura de ossos por quadro. No shader o ponto é o mesmo:
+// osso·IBMbase·(X·bind)·v = osso·IBMmalha·bind·v.
+// X tem de fechar em TODOS os ossos; se algum não fecha, a malha fica com o esqueleto dela.
+function unirEsqueletos(raiz) {
+  let base = null;
+  raiz.traverse((o) => {
+    if (!o.isSkinnedMesh) return;
+    const sk = o.skeleton;
+    if (!base) { base = sk; return; }
+    if (sk === base) return;
+    const n = base.bones.length;
+    if (sk.bones.length !== n || sk.bones.some((b, i) => b !== base.bones[i])) return;
+    _x.copy(base.boneInverses[0]).invert().multiply(sk.boneInverses[0]);
+    for (let i = 0; i < n; i++) {
+      const p = _p.multiplyMatrices(base.boneInverses[i], _x).elements;
+      const r = sk.boneInverses[i].elements;
+      for (let j = 0; j < 16; j++) if (Math.abs(p[j] - r[j]) > 1e-4 * Math.max(1, Math.abs(r[j]))) return;
+    }
+    o.bind(base, new THREE.Matrix4().multiplyMatrices(_x, o.bindMatrix));
+  });
 }
 
 export class Personagem {
@@ -104,18 +178,30 @@ export class Personagem {
     // clona preservando o esqueleto: o clone comum do three quebra o skinning,
     // e os vários jogadores da sala compartilham o mesmo arquivo carregado
     this.raiz = cloneComEsqueleto(gltf.scene);
+    // antes de ajustar(): o updateMatrixWorld de medir() refaz a bindMatrixInverse
+    unirEsqueletos(this.raiz);
     this.clips = gltf.animations || [];
     this.temAnimacao = this.clips.length > 0;
 
     this.grupo = new THREE.Group();
     this.grupo.add(this.raiz);
-    this.escala = ajustar(this.raiz, def);
+    const medida = ajustar(this.raiz, def);
+    this.escala = medida.escala;
 
+    // Esfera do boneco inteiro, no espaço de cada malha com esqueleto. Com ela o three descarta
+    // o personagem fora da câmera e fora da caixa da sombra, e não sobe os ossos de quem ficou
+    // de fora. Sem esfera dada, o three a calcularia uma vez só, na pose do instante, e o braço
+    // do soco sumiria na borda. Medido em todos os clipes do jogo: o vértice mais longe fica a
+    // 0,87 h (Atos no soco) e a 2,31 h nos que transformam (Optimus virando carreta). Malha
+    // rígida presa em osso usa a esfera da própria geometria.
+    const h = medida.altura;
+    const esfera = new THREE.Sphere(new THREE.Vector3(0, h * 0.5, 0), h * (def.raioVista ?? (def.transforma ? 2.7 : 1.1)));
+    this.grupo.updateMatrixWorld(true); // ainda fora da cena: matrixWorld = espaço do grupo
+    const inv = new THREE.Matrix4();
     this.raiz.traverse((o) => {
-      if (o.isMesh || o.isSkinnedMesh) {
-        o.castShadow = true;
-        o.frustumCulled = false; // esqueleto animado estoura a caixa original
-      }
+      if (!o.isMesh) return;
+      o.castShadow = true;
+      if (o.isSkinnedMesh) o.boundingSphere = esfera.clone().applyMatrix4(inv.copy(o.matrixWorld).invert());
     });
 
     this.mixer = new THREE.AnimationMixer(this.raiz);
@@ -324,25 +410,22 @@ export class Personagem {
     this.grupo.position.y = this.descida;
   }
 
+  // Para a animação e solta os esqueletos (a textura de ossos de cada um). Geometria, material
+  // e textura ficam: são do gltf em cache e dos outros bonecos com o mesmo modelo (a vitrine já
+  // conta com isso). Apagá-los faria cada troca de personagem reenviar e recompilar o modelo, na
+  // hora, em todas as máquinas da sala. O mixer não passa por uncacheRoot: ele morre junto com
+  // este objeto, e um update ou gesto que chegasse depois lançaria erro dentro do three.
   dispose() {
     this.mixer.stopAllAction();
-    this.raiz.traverse((o) => {
-      if (o.isMesh || o.isSkinnedMesh) {
-        o.geometry?.dispose?.();
-        const mats = Array.isArray(o.material) ? o.material : [o.material];
-        for (const m of mats) {
-          if (!m) continue;
-          for (const k of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'emissiveMap', 'aoMap']) m[k]?.dispose?.();
-          m.dispose?.();
-        }
-      }
-    });
+    const esqueletos = new Set();
+    this.raiz.traverse((o) => { if (o.isSkinnedMesh) esqueletos.add(o.skeleton); });
+    for (const s of esqueletos) s.dispose();
   }
 }
 
 // Carrega e devolve um Personagem pronto, ou null se o arquivo não vier.
 export async function criarPersonagem(def) {
   if (!def?.url) return null;
-  const gltf = await carregarModelo(def.url);
+  const gltf = await carregarModelo(def.url, def);
   return new Personagem(gltf, def);
 }

@@ -4,13 +4,15 @@ import * as THREE from 'three';
 import { isTouch } from './touch.js';
 import { CSS3DRenderer, CSS3DObject } from 'three/addons/renderers/CSS3DRenderer.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { mergeGeometries, mergeGroups } from 'three/addons/utils/BufferGeometryUtils.js';
 import { COURSE, RAILS, FUN_PADS } from './parkour.js';
 import { RING } from './arena.js';
 import { PISTA, CAMINHO, CURVAS, pontoEm, projetar } from './pista.js';
 import { criarNatureza } from './natureza.js';
 import { RESERVAS_JOGOS } from './tabuleiros.js';
 import { construirEscritorio } from './escritorio3d.js';
-import { planta, salaEm, rotuloDaTela, postoDaTela, chaveDaTela, DEPARTAMENTOS } from './escritorio.js';
+import { planta, salaEm, rotuloDaTela, postoDaTela, chaveDaTela, DEPARTAMENTOS, PREDIO, zDaPorta } from './escritorio.js';
+import * as moduloQualidade from './qualidade.js';
 
 // Área jogável inteira (cercada): a sala do cinema num canto, em volta da origem, e o
 // autódromo ao ar livre a leste. O telão do cinema continua em minZ, perto da plateia.
@@ -30,6 +32,25 @@ const _raio = new THREE.Raycaster();
 const _m4 = new THREE.Matrix4();
 const _frustum = new THREE.Frustum();
 const _esfera = new THREE.Sphere();
+const _dirSol = new THREE.Vector3();
+const _escala = new THREE.Vector3();
+const _eixoY = new THREE.Vector3(0, 1, 0);
+const _mSombra = new THREE.Matrix4();
+// monta a matriz de cada peça antes de fundir (ver fundir): nunca a matrixWorld, que dentro de
+// area() ainda não foi calculada
+const _aux = new THREE.Object3D();
+// alturaAparente sem alocar: os 4 cantos, os 2 pontos de corte e a lista do que fica na frente
+const _cantos = CANTOS.map(() => new THREE.Vector3());
+const _cortes = [new THREE.Vector3(), new THREE.Vector3()];
+const _naFrente = [];
+// o centro e quatro pontos perto dos cantos de uma tela (tapada)
+const PONTOS_TELA = [[0, 0], ...CANTOS];
+const porDistancia = (a, b) => a.d - b.d;
+// (x, z) do ponto dentro do retângulo, com folga (negativa: retângulo encolhido)
+const dentroDe = (p, x0, x1, z0, z1, folga) => p.x >= x0 - folga && p.x <= x1 + folga && p.z >= z0 - folga && p.z <= z1 + folga;
+// Cartazes e etiquetas das telas em canvas no tamanho do aparelho (qualidade.js): menos pixels no
+// celular e no PC de pouca memória. Sem a constante lá (versão antiga), tamanho cheio.
+const ESCALA_TEXTURA = moduloQualidade.ESCALA_TEXTURA ?? 1;
 // devolve a vez ao navegador (para ele pintar, responder a cliques) e continua logo depois. O
 // setTimeout(0) seria freado para 1 s com a aba em segundo plano; isto não.
 const ceder = () => (globalThis.scheduler?.yield ? globalThis.scheduler.yield()
@@ -46,15 +67,18 @@ const SLOT_LAYOUT = [
 ].map((s) => ({ ...s, w: 16, h: 9 }));
 
 // ------------------------------------------------------------------ utilitários de textura
-function canvasTexture(w, h, draw) {
+// esc: fração do tamanho de verdade do canvas (ESCALA_TEXTURA). O desenho continua nas medidas
+// lógicas w×h: a escala vai na transformação do contexto.
+function canvasTexture(w, h, draw, esc = 1) {
   const canvas = document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
+  canvas.width = Math.max(1, Math.round(w * esc));
+  canvas.height = Math.max(1, Math.round(h * esc));
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
   tex.userData.redraw = (...args) => {
     const ctx = canvas.getContext('2d');
+    ctx.setTransform(canvas.width / w, 0, 0, canvas.height / h, 0, 0);
     ctx.clearRect(0, 0, w, h);
     draw(ctx, w, h, ...args);
     tex.needsUpdate = true;
@@ -62,6 +86,61 @@ function canvasTexture(w, h, draw) {
   tex.userData.redraw();
   return tex;
 }
+
+// ------------------------------------------------------------------ utilitários de geometria
+// Junta peças paradas que dividem o material numa malha só: um desenho (e um na sombra) no lugar
+// de um por peça. As geometrias chegam já posicionadas no mundo e saem da memória depois.
+function fundir(geos, material, { sombra = false, recebe = false } = {}) {
+  const malha = new THREE.Mesh(mergeGeometries(geos), material);
+  for (const g of geos) g.dispose();
+  malha.castShadow = sombra;
+  malha.receiveShadow = recebe;
+  return malha;
+}
+
+// Caixa sem as faces da lista (as que levam outro material) e sem grupos: dá para fundir com outras
+// caixas do mesmo material. Faces da BoxGeometry: 0 +x, 1 -x, 2 +y, 3 -y, 4 +z, 5 -z.
+function caixaSem(w, h, d, sem) {
+  const geo = new THREE.BoxGeometry(w, h, d);
+  const indice = geo.index.array;
+  const fica = [];
+  for (const g of geo.groups) {
+    if (sem.includes(g.materialIndex)) continue;
+    for (let i = g.start; i < g.start + g.count; i++) fica.push(indice[i]);
+  }
+  geo.setIndex(fica);
+  geo.clearGroups();
+  return geo;
+}
+
+// ------------------------------------------------------------------ luz simples (nível Leve)
+// Na Leve, a luz direta (sol e pontuais) dos materiais padrão vira Lambert: some o especular GGX, a
+// conta mais cara do pixel numa placa integrada. A energia do especular entra no difuso, para metal
+// não ficar preto. O MeshPhysical (o Atos) fica de fora. O remendo só entra se o trecho do three for
+// o que conhecemos; numa versão que mudou a assinatura, desliga sozinho.
+let luzSimplesLigada = false; // World.setQualidade
+const PARS_FISICO = THREE.ShaderChunk.lights_physical_pars_fragment;
+const LUZ_SIMPLES_OK = /void RE_Direct_Physical\(\s*const in IncidentLight directLight,\s*const in vec3 geometryPosition,\s*const in vec3 geometryNormal,\s*const in vec3 geometryViewDir,\s*const in vec3 geometryClearcoatNormal,\s*const in PhysicalMaterial material,\s*inout ReflectedLight reflectedLight\s*\)/.test(PARS_FISICO)
+  && PARS_FISICO.includes('vec3 diffuseContribution;') && PARS_FISICO.includes('vec3 specularColorBlended;');
+if (!LUZ_SIMPLES_OK) console.warn('Sala 3D: luz simples desligada, o shader de luz do three mudou');
+// Só RE_Direct é trocado: os nomes NUM_POINT_LIGHTS e cia. o three substitui por números no texto do
+// shader, e redefini-los quebraria a conta de luzes.
+const RE_DIRECT_SIMPLES = `
+#undef RE_Direct
+#define RE_Direct RE_Direct_Simples
+void RE_Direct_Simples( const in IncidentLight directLight, const in vec3 geometryPosition, const in vec3 geometryNormal, const in vec3 geometryViewDir, const in vec3 geometryClearcoatNormal, const in PhysicalMaterial material, inout ReflectedLight reflectedLight ) {
+	vec3 irradiance = saturate( dot( geometryNormal, directLight.direction ) ) * directLight.color;
+	reflectedLight.directDiffuse += irradiance * BRDF_Lambert( material.diffuseContribution + material.specularColorBlended );
+}`;
+const comLuzSimples = (m) => luzSimplesLigada && LUZ_SIMPLES_OK && !m.isMeshPhysicalMaterial;
+THREE.MeshStandardMaterial.prototype.onBeforeCompile = function (shader) {
+  if (!comLuzSimples(this)) return;
+  shader.fragmentShader = shader.fragmentShader.replace('#include <lights_physical_pars_fragment>', `#include <lights_physical_pars_fragment>${RE_DIRECT_SIMPLES}`);
+};
+// a chave do programa continua a padrão; com a luz simples ligada, ganha um prefixo (outro programa)
+THREE.MeshStandardMaterial.prototype.customProgramCacheKey = function () {
+  return (comLuzSimples(this) ? 'luz-simples,' : '') + this.onBeforeCompile.toString();
+};
 
 function roundRect(ctx, x, y, w, h, r) {
   ctx.beginPath();
@@ -260,21 +339,27 @@ class ScreenDisplay {
   // leve: monitor de posto de trabalho — sem moldura (a mesa já tem), com o cartaz de desligado
   // em comum e sem texto próprio. A etiqueta com o nome só é criada quando aparece pela 1ª vez.
   // painel: textura própria (placar, status...) mostrada enquanto a tela está livre
-  constructor({ w, h, title, subtitle, icon = 'monitor', accent = '#6ee7c8', leve = false, painel = null }) {
+  // sombra: a moldura faz sombra (a da tela embutida na parede, rente ao reboco, não precisa)
+  // cartazNaMoldura: o cartaz de desligado do monitor vem instanciado na moldura (escritorio3d.js,
+  // um desenho por sala); o próprio só aparece com o (+)
+  constructor({ w, h, title, subtitle, icon = 'monitor', accent = '#6ee7c8', leve = false, painel = null, sombra = true, cartazNaMoldura = false }) {
     this.w = w;
     this.h = h;
     this.leve = leve;
+    this.cartazNaMoldura = leve && cartazNaMoldura;
     this.group = new THREE.Group();
     this.accent = accent;
 
+    this.frame = null;
     if (!leve) {
       const frame = new THREE.Mesh(
         new RoundedBoxGeometry(w + 0.7, h + 0.7, 0.5, 4, 0.22),
         new THREE.MeshStandardMaterial({ color: 0x0c0e13, roughness: 0.55, metalness: 0.3 }),
       );
       frame.position.z = -0.27;
-      frame.castShadow = true;
+      frame.castShadow = sombra;
       this.group.add(frame);
+      this.frame = frame;
     }
 
     // linha de LED em volta da tela
@@ -287,11 +372,16 @@ class ScreenDisplay {
     this.glow = glow;
     this.group.add(glow);
 
+    // Fundo preto da tela: só aparece com vídeo (as tarjas de um vídeo 4:3). Sem vídeo, o cartaz
+    // opaco do mesmo tamanho, 1 cm na frente, cobre tudo e ela seria um desenho à toa. Escondida
+    // continua servindo: o Raycaster ignora o visible, e a matriz dela segue em dia (mira, foco,
+    // altura aparente, navegador).
     this.surface = new THREE.Mesh(
       new THREE.PlaneGeometry(w, h),
       new THREE.MeshBasicMaterial({ color: 0x000000, toneMapped: false }),
     );
     this.surface.userData.screen = this;
+    this.surface.visible = false;
     this.group.add(this.surface);
 
     // mais: tela livre que aceita o (+) (compartilhar ali ou abrir o navegador)
@@ -322,13 +412,14 @@ class ScreenDisplay {
       ctx.fillStyle = 'rgba(226,232,240,0.6)';
       ctx.font = `500 ${Math.round(ch * 0.05)}px ${FONT}`;
       ctx.fillText(s, cw / 2, ch * 0.76);
-    });
+    }, ESCALA_TEXTURA);
     this.placeholder = new THREE.Mesh(
       new THREE.PlaneGeometry(w, h),
       leve ? monitorApagado(accent) : new THREE.MeshBasicMaterial({ map: painel || this.placeholderTex, toneMapped: false }),
     );
     this.placeholder.position.z = 0.01;
     this.placeholder.userData.screen = this;
+    this.placeholder.visible = !this.cartazNaMoldura;
     this.group.add(this.placeholder);
 
     this.videoMesh = new THREE.Mesh(
@@ -388,7 +479,7 @@ class ScreenDisplay {
       ctx.fillStyle = '#fff';
       ctx.textBaseline = 'middle';
       ctx.fillText(t, dot ? 98 : 36, 84, cw - 150);
-    });
+    }, ESCALA_TEXTURA);
     this.label = new THREE.Mesh(
       new THREE.PlaneGeometry(lw, lh),
       new THREE.MeshBasicMaterial({ map: this.labelTex, transparent: true, toneMapped: false, depthWrite: false }),
@@ -436,6 +527,8 @@ class ScreenDisplay {
     if (!this.leve || this.mais === on) return;
     this.mais = on;
     this.placeholder.material = on ? monitorMais(this.accent) : monitorApagado(this.accent);
+    // sem o (+), o cartaz de desligado é o instanciado da moldura
+    if (!this.video && !this.midia) this.placeholder.visible = on || !this.cartazNaMoldura;
   }
 
   setLabel(text, dotColor = null) {
@@ -463,6 +556,7 @@ class ScreenDisplay {
     video.addEventListener('loadedmetadata', this._fit);
     this.fitAspect();
     this.videoMesh.visible = true;
+    this.surface.visible = true; // as tarjas pretas atrás de um vídeo de outro formato
     this.placeholder.visible = false;
     this.glow.material.opacity = 0.32;
   }
@@ -486,7 +580,8 @@ class ScreenDisplay {
     this.video = null;
     this.videoMesh.material.map = null;
     this.videoMesh.visible = false;
-    this.placeholder.visible = true;
+    this.surface.visible = false;
+    this.placeholder.visible = !this.cartazNaMoldura || !!this.mais;
     this.glow.material.opacity = 0.18;
   }
 
@@ -543,6 +638,33 @@ export class World {
   constructor(canvas, cssContainer, { antialias = true, qualidade = null } = {}) {
     this.canvas = canvas;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias, alpha: true, powerPreference: 'high-performance' });
+    // Contexto do WebGL perdido (o sistema tomou a placa de vídeo; comum no iPhone e no Android): o
+    // three já ouve antes e impede que o contexto se perca de vez. Enquanto isso nada é desenhado
+    // (perdido); na volta tudo sobe de novo para a placa, as texturas de canvas a partir do próprio
+    // canvas — por isso canvas de cartaz nunca é encolhido. aoPerder/aoVoltar: avisos do main.js.
+    this.perdido = false;
+    this.aoPerder = null;
+    this.aoVoltar = null;
+    canvas.addEventListener('webglcontextlost', () => {
+      this.perdido = true;
+      this.consultaGpu = null;
+      this.extGpu = undefined;
+      this.aoPerder?.();
+    });
+    canvas.addEventListener('webglcontextrestored', () => {
+      this.perdido = false;
+      this.natureza?.refazerAmbiente?.();
+      this.luzesMudaram();
+      this.sombraSuja = true;
+      this.aquecerShaders();
+      this.aoVoltar?.();
+    });
+    // Medição do último quadro desenhado (o chip do ?perf=1): desenhos e triângulos (com a passada
+    // de sombra, quando ela foi refeita), se a sombra foi refeita e o tempo de GPU (com medirGpu).
+    this.ultimoQuadro = { draws: 0, triangulos: 0, sombraRefeita: false, gpuMs: 0 };
+    this.medirGpu = false;
+    this.consultaGpu = null;
+    this.extGpu = undefined;
     // Resolução = densidade de pixels da tela, limitada pela qualidade (pixelMax), vezes a escala
     // dinâmica (escala: a qualidade automática baixa um pouco quando o quadro passa do tempo).
     // Telas de celular têm DPR 3: renderizar nisso tudo derruba o fps sem ganho visível.
@@ -552,6 +674,7 @@ export class World {
     this.videoFps = 60;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.pixelMax));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.alturaTela = window.innerHeight; // alturaAparente lê daqui, não do layout
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
@@ -582,11 +705,44 @@ export class World {
     this.fora = new THREE.Group();
     this.scene.add(this.fora);
     this.areas = new Map(); // ver area()
+    // salas do escritório que a câmera pode ver (ver cullSalas): [{ ...célula, caixa }] e um bit por sala
+    this.salas3d = null;
+    this.maskSalas = -1;
+    // caixas do que barra a câmera, para o tapada (ver prepararInteresse)
+    this.caixasBloqueio = [];
+    this.nCaixas = 0;
+    this.caixasProntas = false;
+    this._luzes = null; // luzes pontuais da cena (ver atualizarLuzes)
+    this.luzesVivas = [];
+    this.quadrosLuzes = 0;
+    this.sombraOpcional = []; // torcida e pneus: fazem sombra só no nível em que as árvores fazem
+    this.holofoteNivel = true; // o cone do ringue (ver aplicarLuzRingue)
+    this.luzSimples = false;
     this.compilando = false;
+    // até a sombra e o resto das malhas subirem depois de compilar (a medição de quadros não conta)
+    this.aquecendo = false;
+    // personagem chegando (aquecerObjeto): enquanto compila e logo depois — o 1º desenho de um
+    // programa novo ainda paga o driver — a medição também não conta. Sem isso, uma sala cheia
+    // entrando de uma vez derrubava o nível do automático à toa (ver chegandoModelo)
+    this.modelosNaFila = 0;
+    this.chegandoAte = 0;
+    // muda a cada aquecimento: aquecerObjeto sabe quais materiais já estão compilados para a cena atual
+    this.versaoShader = 0;
+    // material único dos desenhos de aquecimento (só sobem malhas; ver subirMalhas)
+    this.matAquecer = new THREE.MeshBasicMaterial();
+    // câmera que não enxerga nada da cena: as luzes entram na conta mesmo assim (ver acertarLuzes)
+    this.camLonge = new THREE.PerspectiveCamera(60, 1, 1, 2);
+    this.camLonge.position.set(0, -1e6, 0);
+    this.camLonge.updateMatrixWorld();
+    this.filaAquecer = Promise.resolve(); // personagens chegando: um aquecimento de cada vez
+    this.tempo = 0; // o t do último update()
+    this.animado = false; // o laço já animou o cenário neste quadro (ver render)
+    this.cssAntes = false;
     // resolve quando os shaders da abertura estiverem compilados (ver aquecerShaders)
     this.pronto = new Promise((r) => { this.avisarPronto = r; });
 
     this.buildLights();
+    this.criarSombrasRedondas();
     // O cinema (casca, plateia e parede de telas) é do modo Lazer. No modo escritório ele some e o
     // prédio do escritório aparece no mesmo terreno (ver setModo).
     this.area('cinema', () => this.buildRoom());
@@ -617,6 +773,13 @@ export class World {
     this.aquecerShaders();
 
     window.addEventListener('resize', () => this.resize());
+    // densidade de pixels que muda sem mudar o tamanho da janela (arrastada para outro monitor, zoom):
+    // a resolução acompanha. A consulta vale para um valor só: refeita a cada mudança.
+    const vigiarDpr = () => matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`).addEventListener?.('change', () => {
+      this.aplicarResolucao();
+      vigiarDpr();
+    }, { once: true });
+    vigiarDpr();
   }
 
   // O lado de fora só é desenhado quando alguém olha pela porta ou sai, e é aí que o
@@ -628,33 +791,78 @@ export class World {
   // não é desenhado (render() espera): desenhar antes obrigaria o Chrome a compilar tudo na
   // hora, travando a página — eram 0,3 s na abertura e 0,7 s ao montar o escritório, e várias
   // vezes isso num celular. A primeira vez resolve this.pronto.
-  aquecerShaders() {
+  // malhas: false quando só os programas mudaram (troca de nível): malhas e texturas já estão na
+  // placa, e o 3D fica parado só durante o compileAsync, que compila em paralelo.
+  aquecerShaders({ malhas = true } = {}) {
+    // troca de nível no meio de um aquecimento completo (a economia ligando na abertura) cancela a
+    // subida de malhas dele: herda essa subida, senão ninguém a refazia
+    if (malhas) this.malhasPendentes = true;
+    else if (this.malhasPendentes) malhas = true;
     const vez = (this.aquecimentos = (this.aquecimentos || 0) + 1);
+    this.versaoShader++;
     this.compilando = true;
-    const fim = () => {
-      if (vez !== this.aquecimentos) return; // outro aquecimento começou depois deste
+    this.aquecendo = true;
+    this.luzesMudaram();
+    const desistir = () => vez !== this.aquecimentos; // outro aquecimento começou depois deste
+    // libera o desenho (o resto continua subindo enquanto a pessoa já vê e anda)
+    const liberar = () => {
+      if (desistir()) return;
       this.compilando = false;
       this.avisarPronto?.();
     };
-    setTimeout(fim, 6000); // compilação que não responde não pode deixar a tela parada
+    const fim = () => {
+      liberar();
+      if (desistir()) return;
+      this.aquecendo = false;
+      this.sombraSuja = true;
+    };
+    // compilação ou subida que não responde não pode deixar a tela parada
+    setTimeout(liberar, 6000);
+    setTimeout(fim, 20000);
     this.fora.visible = true;
     // o shader é compilado para um número de luzes: tem que ser o mesmo de todo quadro
     this.atualizarLuzes();
-    const desistir = () => vez !== this.aquecimentos;
     // Depois dos shaders, o que também pesa no primeiro quadro: texturas (cartazes, placas, telas
     // em canvas de 1024 px) e malhas indo para a placa de vídeo. Desenhar o mapa inteiro de uma
     // vez para adiantar isso parava a página por 1,1 s; agora vai em lotes, devolvendo a vez ao
     // navegador entre um e outro. Por último, com sombra ligada, um quadro que compila os
     // shaders de sombra (árvores e torcida têm o seu), que o compileAsync não faz.
-    const compilar = this.renderer.compileAsync
+    let corrente = this.renderer.compileAsync
       ? this.renderer.compileAsync(this.scene, this.camera)
       : Promise.resolve().then(() => this.renderer.compile(this.scene, this.camera));
-    return compilar
-      .then(() => this.subirTexturas(this.scene, desistir))
-      .then(() => this.subirMalhas(desistir, fim))
+    if (malhas) {
+      corrente = corrente
+        .then(() => this.subirTexturas(this.scene, desistir))
+        .then(() => this.subirMalhas(desistir, liberar))
+        .then(() => { if (!desistir()) this.malhasPendentes = false; });
+    } else corrente = corrente.then(liberar);
+    return corrente
       .then(() => { if (!desistir()) this.aquecerSombras(); })
       .catch(() => {})
       .then(fim);
+  }
+
+  // Liga o lado de fora e todas as salas do escritório, roda fn (síncrona) e devolve tudo como
+  // estava: o aquecimento sobe o que ainda não está à vista. Áreas desligadas pelo dono continuam
+  // desligadas.
+  comTudoVisivel(fn) {
+    const fora = this.fora.visible;
+    const salas = this.salas3d || [];
+    const antes = salas.map((s) => s.caixa.visible);
+    this.fora.visible = true;
+    for (const s of salas) {
+      if (s.grupo) s.grupo.visible = true;
+      s.caixa.visible = true;
+    }
+    try {
+      return fn();
+    } finally {
+      this.fora.visible = fora;
+      salas.forEach((s, i) => {
+        if (s.grupo) s.grupo.visible = antes[i];
+        s.caixa.visible = antes[i];
+      });
+    }
   }
 
   // câmera bem alta, olhando para baixo, que enxerga o mapa inteiro (para os quadros de aquecer)
@@ -665,61 +873,84 @@ export class World {
     return cam;
   }
 
-  // Manda as malhas para a placa de vídeo, um objeto por vez num quadro invisível de 4x4 px (a
-  // câmera só enxerga a camada 31, e cada objeto entra nela na sua vez), devolvendo a vez ao
-  // navegador a cada ~12 ms. Por objeto, e não em lotes fixos: na placa Intel, o primeiro desenho
-  // de cada material custa 30-120 ms (o driver ainda monta o shader), e um lote de 40 chegava a
-  // 1 s parado. Sombra fica de fora aqui.
+  // Manda as malhas para a placa de vídeo em quadros invisíveis de 4x4 px (a câmera só enxerga a
+  // camada 31, e cada lote entra nela na sua vez), devolvendo a vez ao navegador a cada ~12 ms.
+  // Todo desenho daqui usa um material só (matAquecer): o objetivo é subir buffers e matrizes de
+  // instância, e com o material de verdade o alvo de 4x4 compilava variantes lineares e sem tone
+  // mapping que a tela nunca usa (eram os 30-120 ms por material da placa Intel). O primeiro
+  // objeto de cada tipo vai sozinho (é ele que paga a variante do material único); os outros, em
+  // lotes. Sombra fica de fora aqui.
   // O que está na frente da câmera sobe primeiro, com a tela esperando (fatias de ~12 ms); aí
   // aoVisiveis() libera o desenho e o resto do mapa sobe sem pressa, uma fatia de ~6 ms por
   // quadro, enquanto a pessoa já vê e anda.
   async subirMalhas(desistir, aoVisiveis = () => {}) {
     const objs = [];
-    const foraAntes = this.fora.visible;
-    this.fora.visible = true;
-    this.scene.traverseVisible((o) => { if (o.isMesh || o.isLine || o.isPoints || o.isSprite) objs.push(o); });
-    this.fora.visible = foraAntes;
-    this.camera.updateMatrixWorld();
-    _m4.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
-    _frustum.setFromProjectionMatrix(_m4);
+    this.comTudoVisivel(() => this.scene.traverseVisible((o) => { if (o.isMesh || o.isLine || o.isPoints || o.isSprite) objs.push(o); }));
+    this.prepararVista();
     const naVista = (o) => !o.frustumCulled || (o.isSprite ? _frustum.intersectsSprite(o) : _frustum.intersectsObject(o));
     const frente = [];
     const resto = [];
     for (const o of objs) (naVista(o) ? frente : resto).push(o);
 
+    const tipos = new Set();
+    const emLotes = (lista) => {
+      const lotes = [];
+      let lote = [];
+      for (const o of lista) {
+        const tipo = `${o.isInstancedMesh}|${o.isSkinnedMesh}|${!!o.instanceColor}|${o.isSprite}|${o.isLine}|${o.isPoints}`;
+        if (!tipos.has(tipo)) {
+          tipos.add(tipo);
+          lotes.push([o]);
+          continue;
+        }
+        lote.push(o);
+        if (lote.length === 150) {
+          lotes.push(lote);
+          lote = [];
+        }
+      }
+      if (lote.length) lotes.push(lote);
+      return lotes;
+    };
+
     const cam = this.cameraDeCima();
     cam.layers.set(31);
     const alvo = new THREE.WebGLRenderTarget(4, 4);
-    const subir = (o) => {
-      const fora = this.fora.visible;
+    const subir = (lote) => this.comTudoVisivel(() => {
       const auto = this.renderer.shadowMap.autoUpdate;
-      this.fora.visible = true;
       this.renderer.shadowMap.autoUpdate = false;
-      o.layers.enable(31);
-      this.renderer.setRenderTarget(alvo);
-      this.renderer.render(this.scene, cam);
-      this.renderer.setRenderTarget(null);
-      o.layers.disable(31);
-      this.renderer.shadowMap.autoUpdate = auto;
-      this.fora.visible = fora;
-    };
+      this.scene.overrideMaterial = this.matAquecer;
+      for (const o of lote) o.layers.enable(31);
+      try {
+        this.renderer.setRenderTarget(alvo);
+        this.renderer.render(this.scene, cam);
+      } finally {
+        this.renderer.setRenderTarget(null);
+        for (const o of lote) o.layers.disable(31);
+        this.scene.overrideMaterial = null;
+        this.renderer.shadowMap.autoUpdate = auto;
+      }
+    });
     const proximoQuadro = () => new Promise((r) => requestAnimationFrame(() => r()));
     try {
       let desde = performance.now();
-      for (const o of frente) {
+      for (const lote of emLotes(frente)) {
         if (desistir()) return;
-        subir(o);
+        subir(lote);
         if (performance.now() - desde > 12) {
+          this.acertarLuzes(alvo);
           await ceder();
           desde = performance.now();
         }
       }
+      this.acertarLuzes(alvo);
       aoVisiveis();
       desde = performance.now();
-      for (const o of resto) {
+      for (const lote of emLotes(resto)) {
         if (desistir()) return;
-        subir(o);
+        subir(lote);
         if (performance.now() - desde > 6) {
+          this.acertarLuzes(alvo);
           await proximoQuadro();
           desde = performance.now();
         }
@@ -729,30 +960,92 @@ export class World {
     }
   }
 
+  // O passe de sombra do three usa a contagem de luzes do desenho anterior da mesma cena (as luzes
+  // do quadro só são montadas depois dele), e os quadros 4x4 da camada 31 não enxergam luz nenhuma:
+  // logo depois de um deles, o mapa de sombra compilaria programas de profundidade para zero luzes,
+  // na hora, no meio de um quadro de verdade. Um desenho sem sombra, com uma câmera que não enxerga
+  // nada (as luzes entram na conta mesmo assim) e as luzes escolhidas como num quadro, deixa a
+  // contagem igual à do quadro.
+  acertarLuzes(alvo) {
+    this.atualizarLuzes();
+    const auto = this.renderer.shadowMap.autoUpdate;
+    this.renderer.shadowMap.autoUpdate = false;
+    this.scene.overrideMaterial = this.matAquecer;
+    try {
+      this.renderer.setRenderTarget(alvo);
+      this.renderer.render(this.scene, this.camLonge);
+    } finally {
+      this.renderer.setRenderTarget(null);
+      this.scene.overrideMaterial = null;
+      this.renderer.shadowMap.autoUpdate = auto;
+    }
+  }
+
+  // Compila os programas de profundidade (sombra), que o compileAsync não faz: um mapa de sombra
+  // feito de verdade, com a caixa do sol onde ficam árvores e torcida, que têm o seu. O desenho
+  // comum vai para a câmera que não enxerga nada: só o passe de sombra importa, e ele usa os
+  // materiais de profundidade de cada objeto. (O mapa de sombra do three filtra pelas camadas da
+  // câmera principal: a dela é a 0, a de todo mundo.)
   aquecerSombras() {
-    if (!this.renderer.shadowMap.enabled) return;
-    // tudo já está na placa de vídeo (subirMalhas): este quadro só custa os desenhos e compila
-    // os shaders de sombra. (O mapa de sombra do three filtra pelas camadas da câmera principal.)
-    const cam = this.cameraDeCima();
+    if (!this.renderer.shadowMap.enabled || !this.sun.castShadow) return;
     const alvo = new THREE.WebGLRenderTarget(4, 4);
-    const vis = this.fora.visible;
     const solAntes = this.sun.target.position.clone();
-    this.fora.visible = true;
-    this.focarSol(200, 120); // onde ficam árvores e torcida, que têm shader de sombra próprio
-    this.renderer.setRenderTarget(alvo);
-    this.renderer.render(this.scene, cam);
-    this.renderer.setRenderTarget(null);
-    this.focarSol(solAntes.x, solAntes.z);
-    this.fora.visible = vis;
+    const naSala = this.solNaSala;
+    this.acertarLuzes(alvo);
+    this.comTudoVisivel(() => {
+      this.focarSol(200, 120, PREDIO.altura);
+      this.atualizarLuzes(); // o mesmo número de luzes, escolhidas com tudo à vista
+      try {
+        // o flag por luz: sem ele o three nem desenharia a sombra (ver atualizarSombra)
+        this.sun.shadow.needsUpdate = true;
+        this.scene.overrideMaterial = this.matAquecer;
+        this.renderer.setRenderTarget(alvo);
+        this.renderer.render(this.scene, this.camLonge);
+      } finally {
+        this.renderer.setRenderTarget(null);
+        this.scene.overrideMaterial = null;
+        // de volta para onde estava (no centro da sala, se estava numa)
+        this.focarSol(solAntes.x, solAntes.z, naSala ? 0 : PREDIO.altura);
+      }
+    });
+    // com tudo à vista, o desenho acima pode ter contado luzes de grupos que o quadro esconde
+    // (mesas lá fora): a contagem volta à do quadro antes do próximo passe de sombra
+    this.acertarLuzes(alvo);
     alvo.dispose();
+    this.sombraSuja = true; // o mapa ficou centrado em 200,120
   }
 
   // Compila os shaders de um objeto que vai entrar na cena (um personagem que acabou de
   // carregar), em segundo plano, com as luzes da cena — sem travar o quadro em que ele aparece.
+  // Um por vez (fila): numa sala cheia chegam dezenas de modelos juntos, e cada compilação passa
+  // pela cena inteira. Nunca falha: sem pré-compilação, compila no primeiro quadro, como antes.
+  aquecerObjeto(obj) {
+    this.modelosNaFila++;
+    this.filaAquecer = this.filaAquecer.then(() => this.compilarObjeto(obj)).catch(() => {}).finally(() => {
+      this.modelosNaFila--;
+      this.chegandoAte = performance.now() + 1500;
+    });
+    return this.filaAquecer;
+  }
+
+  // a medição do automático ignora estes quadros (ver modelosNaFila)
+  chegandoModelo() {
+    return this.modelosNaFila > 0 || performance.now() < this.chegandoAte;
+  }
+
   // O objeto entra na cena só durante a compilação: compilado de fora (compileAsync com
   // targetScene) o shader saía com outra configuração e o Chrome compilava de novo na hora.
-  async aquecerObjeto(obj) {
+  // Clones do mesmo personagem dividem o material: só o primeiro de cada modelo compila (marca
+  // por material com a versão dos shaders); os outros só sobem as texturas.
+  async compilarObjeto(obj) {
     if (!this.renderer.compileAsync) return;
+    const versao = this.versaoShader;
+    const materiais = new Set();
+    obj.traverse((o) => { for (const m of [].concat(o.material || [])) materiais.add(m); });
+    if ([...materiais].every((m) => m.userData.aquecidoEm === versao)) {
+      await this.subirTexturas(obj);
+      return;
+    }
     const pai = obj.parent;
     const y = obj.position.y;
     obj.position.y = -50000; // longe da câmera enquanto compila: ninguém vê o modelo no meio do mapa
@@ -760,8 +1053,7 @@ export class World {
     try {
       await this.renderer.compileAsync(this.scene, this.camera);
       await this.subirTexturas(obj);
-    } catch {
-      // sem pré-compilação: compila no primeiro quadro, como antes
+      for (const m of materiais) m.userData.aquecidoEm = versao;
     } finally {
       obj.position.y = y;
       if (pai) pai.add(obj);
@@ -770,17 +1062,18 @@ export class World {
   }
 
   // manda as texturas (visíveis) de um objeto para a placa de vídeo, devolvendo a vez ao
-  // navegador a cada ~12 ms; desistir(): parar no meio (veio outro pedido)
+  // navegador a cada ~12 ms; desistir(): parar no meio (veio outro pedido). Na cena, inclui o que
+  // está escondido agora (lado de fora, outras salas).
   async subirTexturas(raiz, desistir = () => false) {
     const texturas = new Set();
-    raiz.traverseVisible((o) => {
+    this.comTudoVisivel(() => raiz.traverseVisible((o) => {
       for (const m of [].concat(o.material || [])) {
         for (const k of ['map', 'emissiveMap', 'alphaMap', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap']) {
           const t = m[k];
           if (t?.isTexture && !t.isVideoTexture) texturas.add(t);
         }
       }
-    });
+    }));
     let desde = performance.now();
     for (const t of texturas) {
       if (desistir()) return;
@@ -809,6 +1102,16 @@ export class World {
     sun.shadow.normalBias = 0.04;
     sun.shadow.radius = 3;
     this.sun = sun;
+    // Sombra sob demanda (ver atualizarSombra): o mapa só é refeito quando algo pede. É o flag desta
+    // luz, e não o do renderizador: os quadros 4x4 do aquecimento desligam o do renderizador e assim
+    // nunca gastam um pedido pendente.
+    sun.shadow.autoUpdate = false;
+    this.sombraSuja = true; // algo parado mudou (a própria sombra, a caixa do sol, o que está à vista)
+    this.sombraRemota = false; // alguém de longe se mexeu (na Média, refeito a cada 2 quadros)
+    this.ultimaSombra = -Infinity;
+    this.quadroSombra = 0;
+    this.dirSombra = new THREE.Vector3(); // direção do sol no último mapa
+    this.solNaSala = false; // caixa do sol presa a uma sala do escritório (ver focarSol)
     this.sunOffset = sun.position.clone().sub(sun.target.position);
     this.scene.add(sun, sun.target);
 
@@ -826,13 +1129,70 @@ export class World {
   // O galpão ficou grande demais para uma sombra só: em vez de esticar o mapa de
   // sombra sobre tudo (e borrar tudo), o sol acompanha o jogador. A área coberta
   // continua pequena e nítida, e vai junto com quem está olhando.
-  focarSol(x, z) {
+  // Numa sala do escritório (y: abaixo do forro), a caixa encolhe e fica presa no meio da sala: a
+  // meia-diagonal da sala (18,4 m) mais a altura da parede cabem em ±20/±22 a qualquer hora do sol,
+  // e a sombra fica 2,3× mais nítida. Cruzar a porta só muda a nitidez.
+  focarSol(x, z, y = 0) {
     if (!this.sun) return;
+    let sala = null;
+    if (this.planta && y < PREDIO.altura) {
+      for (const s of this.planta.salas) if (x >= s.x0 && x <= s.x1 && z >= s.z0 && z <= s.z1) sala = s;
+      for (const s of this.planta.lounges) if (x >= s.x0 && x <= s.x1 && z >= s.z0 && z <= s.z1) sala = s;
+    }
+    if (!!sala !== this.solNaSala) {
+      this.solNaSala = !!sala;
+      const sc = this.sun.shadow.camera;
+      const [mx, mz] = sala ? [20, 22] : [46, 52];
+      sc.left = -mx;
+      sc.right = mx;
+      sc.top = mz;
+      sc.bottom = -mz;
+      sc.updateProjectionMatrix(); // só a matriz: não recompila nada
+      this.sombraSuja = true;
+    }
     const alvo = this.sun.target.position;
-    if (Math.abs(alvo.x - x) < 6 && Math.abs(alvo.z - z) < 6) return;
+    if (sala) {
+      // dentro da sala, o centro exato dela (sem a folga de 6 m de fora)
+      x = (sala.x0 + sala.x1) / 2;
+      z = (sala.z0 + sala.z1) / 2;
+      if (alvo.x === x && alvo.z === z) return;
+    } else if (Math.abs(alvo.x - x) < 6 && Math.abs(alvo.z - z) < 6) return;
     alvo.set(x, 0, z);
     this.sun.position.copy(alvo).add(this.sunOffset);
     this.sun.target.updateMatrixWorld();
+    this.sombraSuja = true;
+  }
+
+  // Pede o mapa de sombra de novo. remota: alguém (outra pessoa, a torcida) se mexeu dentro da caixa
+  // do sol — no nível com sombra leve, vale a cada 2 quadros.
+  marcarSombra(remota = false) {
+    if (remota) this.sombraRemota = true;
+    else this.sombraSuja = true;
+  }
+
+  // dentro da caixa do sol, com folga para a inclinação dele (na sala do escritório a caixa é ±20 m)
+  pertoDoSol(p, folga = this.solNaSala ? 26 : 75) {
+    const a = this.sun.target.position;
+    return Math.abs(p.x - a.x) < folga && Math.abs(p.z - a.z) < folga;
+  }
+
+  // Antes de cada quadro: decide se o mapa de sombra é refeito. Sem teto de tempo: com o próprio
+  // boneco andando é todo quadro, a 60 ou 144 Hz, como antes. Parado, ~4 vezes por segundo (pega o
+  // que ninguém marca: respiração, um modelo parado), mais quando o sol anda ~0,2°.
+  atualizarSombra() {
+    this.ultimoQuadro.sombraRefeita = false;
+    if (!this.renderer.shadowMap.enabled || !this.sun.castShadow) return;
+    _dirSol.copy(this.sunOffset).normalize();
+    if (_dirSol.dot(this.dirSombra) < 0.999994 || !this.sun.shadow.map) this.sombraSuja = true;
+    const remota = this.sombraRemota && (!this.sombraLeve || (++this.quadroSombra & 1) === 0);
+    const agora = performance.now();
+    if (!this.sombraSuja && !remota && agora - this.ultimaSombra <= 250) return;
+    this.sun.shadow.needsUpdate = true;
+    this.ultimaSombra = agora;
+    this.dirSombra.copy(_dirSol);
+    this.sombraSuja = false;
+    this.sombraRemota = false;
+    this.ultimoQuadro.sombraRefeita = true;
   }
 
   addBox({ min, max, data = {}, mesh = null, blocksCamera = false }) {
@@ -879,11 +1239,14 @@ export class World {
     const frontMat = new THREE.MeshStandardMaterial({ color: 0x0d0f15, roughness: 0.95 });
     const fachadaMat = new THREE.MeshStandardMaterial({ color: 0x232838, roughness: 0.8, metalness: 0.2 });
     const esp = 0.6;
-    // faces da BoxGeometry: 0 +x, 1 -x, 2 +y, 3 -y, 4 +z, 5 -z
+    // faces da BoxGeometry: 0 +x, 1 -x, 2 +y, 3 -y, 4 +z, 5 -z. A face de dentro leva o material
+    // da sala e as outras cinco a fachada, juntas num grupo só: 2 desenhos por parede, não 6. Cada
+    // parede continua uma caixa à parte (barra a câmera; o raio funciona com grupos).
     const parede = (min, max, faceDentro, matDentro) => {
-      const mats = new Array(6).fill(fachadaMat);
-      mats[faceDentro] = matDentro;
-      const m = new THREE.Mesh(new THREE.BoxGeometry(max[0] - min[0], max[1] - min[1], max[2] - min[2]), mats);
+      const geo = new THREE.BoxGeometry(max[0] - min[0], max[1] - min[1], max[2] - min[2]);
+      for (const g of geo.groups) g.materialIndex = g.materialIndex === faceDentro ? 1 : 0;
+      mergeGroups(geo);
+      const m = new THREE.Mesh(geo, [fachadaMat, matDentro]);
       m.position.set((min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2);
       m.receiveShadow = true;
       this.scene.add(m);
@@ -1026,10 +1389,14 @@ export class World {
 
     const sofaMat = new THREE.MeshStandardMaterial({ color: 0x2c3448, roughness: 0.75 });
     const cushionMat = new THREE.MeshStandardMaterial({ color: 0x3d4864, roughness: 0.8 });
+    // as peças de todos os sofás, por material, viram uma malha cada: é aqui que o povo nasce, e
+    // eram 45 desenhos (mais 45 na sombra)
+    const pecas = new Map([[sofaMat, []], [cushionMat, []]]);
     const rows = [-25, -18, -11];
     rows.forEach((z, ri) => {
-      for (const x of [-10, 0, 10]) this.addSofa(x, z, ri === 1 ? cushionMat : sofaMat, ri === 1 ? sofaMat : cushionMat);
+      for (const x of [-10, 0, 10]) this.addSofa(x, z, ri === 1 ? cushionMat : sofaMat, ri === 1 ? sofaMat : cushionMat, pecas);
     });
+    for (const [mat, geos] of pecas) this.scene.add(fundir(geos, mat, { sombra: true, recebe: true }));
 
     // pufes lisinhos na frente
     const puffColors = [0x6ee7c8, 0xf472b6, 0x60a5fa, 0xfbbf24];
@@ -1051,9 +1418,8 @@ export class World {
     });
   }
 
-  addSofa(x, z, mat, cushion) {
-    const group = new THREE.Group();
-    group.position.set(x, 0, z);
+  // pecas: Map material → geometrias já no lugar (buildAudience funde tudo no fim)
+  addSofa(x, z, mat, cushion, pecas) {
     const parts = [
       { size: [7, 0.8, 2.2], pos: [0, 0.4, 0], mat },
       { size: [6.2, 0.25, 1.9], pos: [0, 0.88, -0.05], mat: cushion },
@@ -1061,14 +1427,7 @@ export class World {
       { size: [0.55, 0.7, 2.2], pos: [-3.25, 1.05, 0], mat },
       { size: [0.55, 0.7, 2.2], pos: [3.25, 1.05, 0], mat },
     ];
-    for (const p of parts) {
-      const m = new THREE.Mesh(new RoundedBoxGeometry(...p.size, 3, 0.18), p.mat);
-      m.position.set(...p.pos);
-      m.castShadow = true;
-      m.receiveShadow = true;
-      group.add(m);
-    }
-    this.scene.add(group);
+    for (const p of parts) pecas.get(p.mat).push(new RoundedBoxGeometry(...p.size, 3, 0.18).translate(x + p.pos[0], p.pos[1], z + p.pos[2]));
     this.addBox({ min: [x - 3.5, 0, z - 1.1], max: [x + 3.5, 1.0, z + 1.1], data: { type: 'sofa' } });
     this.addBox({ min: [x - 3.5, 0, z + 0.55], max: [x + 3.5, 2.1, z + 1.15], data: { type: 'sofa' } });
     this.addBox({ min: [x - 3.5, 0, z - 1.1], max: [x - 2.97, 1.4, z + 1.1], data: { type: 'sofa' } });
@@ -1215,17 +1574,14 @@ export class World {
       ctx.fillText('PORRADARIA', w / 2, h / 2);
     });
 
-    const lona = new THREE.Mesh(
-      new THREE.BoxGeometry(size, matThickness, size),
-      [
-        new THREE.MeshStandardMaterial({ color: C.skirt, roughness: 0.8 }),
-        new THREE.MeshStandardMaterial({ color: C.skirt, roughness: 0.8 }),
-        new THREE.MeshStandardMaterial({ map: lonaTex, roughness: 0.72 }),
-        new THREE.MeshStandardMaterial({ color: C.skirt, roughness: 0.8 }),
-        new THREE.MeshStandardMaterial({ color: C.skirt, roughness: 0.8 }),
-        new THREE.MeshStandardMaterial({ color: C.skirt, roughness: 0.8 }),
-      ],
-    );
+    // um material de saia só (lona e degraus) e a face de cima com a pintura: 2 desenhos, não 6.
+    // A pintura tem brilho próprio, que só acende sem o holofote (ver aplicarLuzRingue).
+    const saia = new THREE.MeshStandardMaterial({ color: C.skirt, roughness: 0.8 });
+    this.lonaTopo = new THREE.MeshStandardMaterial({ map: lonaTex, emissiveMap: lonaTex, emissive: 0x000000, roughness: 0.72 });
+    const lonaGeo = new THREE.BoxGeometry(size, matThickness, size);
+    for (const g of lonaGeo.groups) g.materialIndex = g.materialIndex === 2 ? 1 : 0; // 2: face +y
+    mergeGroups(lonaGeo);
+    const lona = new THREE.Mesh(lonaGeo, [saia, this.lonaTopo]);
     lona.position.set(cx, matTop - matThickness / 2, cz);
     lona.castShadow = true;
     lona.receiveShadow = true;
@@ -1250,8 +1606,9 @@ export class World {
       this.cameraBlockers.push(poste);
     }
 
-    // cordas (sem colisão de propósito)
+    // cordas (sem colisão de propósito), todas numa malha só
     const cordaMat = new THREE.MeshStandardMaterial({ color: C.rope, roughness: 0.5, emissive: C.rope, emissiveIntensity: 0.3 });
+    const cordas = [];
     for (const altura of RING.ropes) {
       for (let i = 0; i < 4; i++) {
         const [ax, az] = cantos[i];
@@ -1259,13 +1616,13 @@ export class World {
         const x1 = cx + ax * half, z1 = cz + az * half;
         const x2 = cx + bx * half, z2 = cz + bz * half;
         const comprimento = Math.hypot(x2 - x1, z2 - z1);
-        const corda = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, comprimento, 8), cordaMat);
-        corda.rotation.z = Math.PI / 2;
-        corda.rotation.y = -Math.atan2(z2 - z1, x2 - x1);
-        corda.position.set((x1 + x2) / 2, matTop + altura, (z1 + z2) / 2);
-        grupo.add(corda);
+        _aux.position.set((x1 + x2) / 2, matTop + altura, (z1 + z2) / 2);
+        _aux.rotation.set(0, -Math.atan2(z2 - z1, x2 - x1), Math.PI / 2);
+        _aux.updateMatrix();
+        cordas.push(new THREE.CylinderGeometry(0.05, 0.05, comprimento, 8).applyMatrix4(_aux.matrix));
       }
     }
+    grupo.add(fundir(cordas, cordaMat));
 
     // escadinha para subir no ringue
     for (let i = 0; i < 2; i++) {
@@ -1273,10 +1630,7 @@ export class World {
       const w = 3.4;
       const d = 0.9;
       const z = cz - half - 0.45 - (1 - i) * d;
-      const degrau = new THREE.Mesh(
-        new RoundedBoxGeometry(w, degrauTop, d, 2, 0.08),
-        new THREE.MeshStandardMaterial({ color: C.skirt, roughness: 0.8 }),
-      );
+      const degrau = new THREE.Mesh(new RoundedBoxGeometry(w, degrauTop, d, 2, 0.08), saia);
       degrau.position.set(cx, degrauTop / 2, z);
       degrau.castShadow = true;
       degrau.receiveShadow = true;
@@ -1284,13 +1638,28 @@ export class World {
       this.addBox({ min: [cx - w / 2, 0, z - d / 2], max: [cx + w / 2, degrauTop, z + d / 2], data: { type: 'ring' }, mesh: degrau });
     }
 
-    // luz quente em cima do ringue
+    // luz quente em cima do ringue (o cone só na Alta: ver aplicarLuzRingue)
     const luz = new THREE.SpotLight(0xffd9a0, 420, 26, Math.PI / 4.5, 0.5, 1.4);
     luz.position.set(cx, matTop + 11, cz);
     luz.target.position.set(cx, matTop, cz);
     this.scene.add(luz, luz.target);
+    this.luzRingue = luz;
 
     this.ringGroup = grupo;
+  }
+
+  // O holofote do ringue (SpotLight) fica fora da conta das luzes pontuais e custa em todo pixel:
+  // aceso só no nível que pede (holofote) e com o ringue ligado. Apagado, a pintura da lona ganha
+  // brilho próprio (só um uniform, sem recompilar). Nunca por distância: ligar ou desligar muda o
+  // número de spots do shader e recompila tudo. Devolve se mudou (aí quem chama recompila).
+  aplicarLuzRingue() {
+    const luz = this.luzRingue;
+    if (!luz) return false;
+    const acesa = this.holofoteNivel && !luz.userData.areaDesligada;
+    const mudou = luz.visible !== acesa;
+    luz.visible = acesa;
+    this.lonaTopo.emissive.setHex(0xffd9a0).multiplyScalar(acesa ? 0 : 1.6);
+    return mudou;
   }
 
   // -------------------------------------------------------------- pista de corrida
@@ -1465,11 +1834,14 @@ export class World {
     // 3) guard-rail
     this.guardRail(grupo, borda + 6.5);
 
-    // 3) postes de luz: cabeça acesa (de graça) e algumas luzes de verdade
+    // 3) postes de luz: cabeça acesa (de graça) e algumas luzes de verdade. Postes e luminárias
+    //    fundidos (uma malha de cada); as luzes ficam soltas
     const posteGeo = new THREE.CylinderGeometry(0.22, 0.3, 11, 10);
     const posteMat = new THREE.MeshStandardMaterial({ color: 0x2b3245, roughness: 0.6 });
     const luminariaGeo = new RoundedBoxGeometry(2.6, 0.4, 1.1, 2, 0.12);
     const luminariaMat = new THREE.MeshBasicMaterial({ color: 0xfff1c9, toneMapped: false });
+    const postes = [];
+    const luminarias = [];
     const POSTES = 28;
     for (let i = 0; i < POSTES; i++) {
       const p = pontoEm(i / POSTES);
@@ -1478,14 +1850,11 @@ export class World {
       const px = p.x + lx * (meia + 9) * lado;
       const pz = p.z + lz * (meia + 9) * lado;
       if (this.pertoDeVia(px, pz, 2)) continue; // não planta poste no meio da entrada
-      const poste = new THREE.Mesh(posteGeo, posteMat);
-      poste.position.set(px, 5.5, pz);
-      poste.castShadow = true;
-      grupo.add(poste);
-      const lum = new THREE.Mesh(luminariaGeo, luminariaMat);
-      lum.position.set(px, 11, pz);
-      lum.lookAt(p.x, 10, p.z);
-      grupo.add(lum);
+      postes.push(posteGeo.clone().translate(px, 5.5, pz));
+      _aux.position.set(px, 11, pz);
+      _aux.lookAt(p.x, 10, p.z);
+      _aux.updateMatrix();
+      luminarias.push(luminariaGeo.clone().applyMatrix4(_aux.matrix));
       // só alguns pontos de luz reais: cada um custa caro no desenho
       if (i % 2 === 0) {
         const luz = new THREE.PointLight(0xe8eeff, 170, 58, 1.7);
@@ -1493,10 +1862,14 @@ export class World {
         this.scene.add(luz); // fora do grupo da pista de propósito: ver cullFora
       }
     }
+    grupo.add(fundir(postes, posteMat, { sombra: true }), fundir(luminarias, luminariaMat));
+    posteGeo.dispose();
+    luminariaGeo.dispose();
 
-    // 4) pilhas de pneu nas curvas (instanciadas: eram 210 malhas, agora são 2)
+    // 4) pilhas de pneu nas curvas (instanciadas: eram 210 malhas, agora são 2). 144 triângulos
+    //    por pneu: de perto é igual ao de 256
     const coresPilha = [0xf43f5e, 0xfbbf24, 0x60a5fa, 0x6ee7c8];
-    const pneuGeo = new THREE.TorusGeometry(0.62, 0.26, 8, 16);
+    const pneuGeo = new THREE.TorusGeometry(0.62, 0.26, 6, 12);
     const pneus = [];
     CURVAS.forEach((curva, ci) => {
       for (let k = -3; k <= 3; k++) {
@@ -1522,9 +1895,11 @@ export class World {
       malha.castShadow = true;
       malha.computeBoundingSphere();
       grupo.add(malha);
+      this.sombraOpcional.push(malha);
     }
 
-    // 5) placa com o nome de cada curva
+    // 5) placa com o nome de cada curva (os pés, fundidos numa malha)
+    const pes = [];
     CURVAS.forEach((curva, ci) => {
       const cor = coresPilha[ci % coresPilha.length];
       const p = pontoEm(curva.t);
@@ -1546,10 +1921,9 @@ export class World {
       placa.position.set(px, 3.6, pz);
       placa.lookAt(p.x, 3.2, p.z);
       grupo.add(placa);
-      const pe = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.22, 3.6, 8), posteMat);
-      pe.position.set(px, 1.8, pz);
-      grupo.add(pe);
+      pes.push(new THREE.CylinderGeometry(0.16, 0.22, 3.6, 8).translate(px, 1.8, pz));
     });
+    grupo.add(fundir(pes, posteMat));
 
     // 6) telão da pista e patrocínio
     this.buildTelaoPista(grupo, meia, arq);
@@ -1635,24 +2009,20 @@ export class World {
     const zFrente = Math.round(p.z + lz * (meia + 20));
     const zFundo = zFrente - DEGRAUS * prof;
 
+    // degraus numa malha só, e os assentos numa por cor (os colisores continuam caixas à parte)
     const concreto = new THREE.MeshStandardMaterial({ color: 0x2a3142, roughness: 0.85 });
-    const coresAssento = [0x2563eb, 0x0ea5e9];
+    const coresAssento = [0x2563eb, 0x0ea5e9].map((color) => new THREE.MeshStandardMaterial({ color, roughness: 0.6 }));
+    const degraus = [];
+    const assentos = [[], []];
     for (let d = 0; d < DEGRAUS; d++) {
       const topo = alt * (d + 1);
       const z0 = zFrente - (d + 1) * prof;
-      const degrau = new THREE.Mesh(new THREE.BoxGeometry(L, topo, prof), concreto);
-      degrau.position.set(x, topo / 2, z0 + prof / 2);
-      degrau.castShadow = true;
-      degrau.receiveShadow = true;
-      grupo.add(degrau);
-      const assento = new THREE.Mesh(
-        new THREE.BoxGeometry(L - 0.4, 0.45, 0.3),
-        new THREE.MeshStandardMaterial({ color: coresAssento[d % 2], roughness: 0.6 }),
-      );
-      assento.position.set(x, topo + 0.22, z0 + 0.3);
-      grupo.add(assento);
-      this.addBox({ min: [x - L / 2, 0, z0], max: [x + L / 2, topo, z0 + prof], data: { type: 'sofa' }, mesh: degrau });
+      degraus.push(new THREE.BoxGeometry(L, topo, prof).translate(x, topo / 2, z0 + prof / 2));
+      assentos[d % 2].push(new THREE.BoxGeometry(L - 0.4, 0.45, 0.3).translate(x, topo + 0.22, z0 + 0.3));
+      this.addBox({ min: [x - L / 2, 0, z0], max: [x + L / 2, topo, z0 + prof], data: { type: 'sofa' } });
     }
+    grupo.add(fundir(degraus, concreto, { sombra: true, recebe: true }));
+    assentos.forEach((geos, i) => grupo.add(fundir(geos, coresAssento[i])));
     // calçada na frente
     const calcada = new THREE.Mesh(new THREE.PlaneGeometry(L + 8, 7), new THREE.MeshStandardMaterial({ color: 0x4a4f5a, roughness: 0.9 }));
     calcada.rotation.x = -Math.PI / 2;
@@ -1660,7 +2030,8 @@ export class World {
     calcada.receiveShadow = true;
     grupo.add(calcada);
 
-    // cobertura em balanço, com pilares no fundo
+    // cobertura em balanço, com pilares no fundo (soltos de propósito: barram a câmera, e uma caixa
+    // só para os cinco cobriria os vãos entre eles)
     const topoArq = alt * DEGRAUS;
     const coberturaY = topoArq + 5.5;
     const aco = new THREE.MeshStandardMaterial({ color: 0x3b4252, roughness: 0.45, metalness: 0.6 });
@@ -1681,11 +2052,8 @@ export class World {
     grupo.add(cobertura);
     // luminárias embaixo da cobertura: sem elas a parte de baixo é só sombra
     const luminaria = new THREE.MeshBasicMaterial({ color: 0xfff4dc, toneMapped: false });
-    for (const dz of [0.25, 0.55, 0.85]) {
-      const barra = new THREE.Mesh(new THREE.BoxGeometry(L - 6, 0.12, 0.35), luminaria);
-      barra.position.set(x, coberturaY - 0.35 - dz * 0.6, zFundo + DEGRAUS * prof * dz + 1);
-      grupo.add(barra);
-    }
+    grupo.add(fundir([0.25, 0.55, 0.85].map((dz) => new THREE.BoxGeometry(L - 6, 0.12, 0.35)
+      .translate(x, coberturaY - 0.35 - dz * 0.6, zFundo + DEGRAUS * prof * dz + 1)), luminaria));
     // faixa com o nome, na borda da cobertura
     const nomeTex = canvasTexture(1024, 96, (ctx, w, h) => {
       ctx.fillStyle = '#0d1018';
@@ -1702,21 +2070,24 @@ export class World {
     faixa.position.set(x, coberturaY - 0.6, zFrente + 4.6);
     grupo.add(faixa);
 
-    // bandeiras em cima da cobertura
+    // bandeiras em cima da cobertura (os mastros numa malha só; os panos, soltos, tremulam)
     const bandeiras = [];
+    const mastros = [];
     const panoGeo = new THREE.PlaneGeometry(2.6, 1.6, 8, 1).translate(1.3, 0, 0);
     [0xf43f5e, 0xfbbf24, 0x22c55e, 0x60a5fa, 0xa78bfa, 0xf97316].forEach((cor, i) => {
       const px = x - L / 2 + 6 + (i * (L - 12)) / 5;
-      const mastro = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 4, 6), aco);
-      mastro.position.set(px, coberturaY + 2.2, zFrente + 2);
-      grupo.add(mastro);
+      mastros.push(new THREE.CylinderGeometry(0.06, 0.06, 4, 6).translate(px, coberturaY + 2.2, zFrente + 2));
       const pano = new THREE.Mesh(panoGeo.clone(), new THREE.MeshStandardMaterial({ color: cor, roughness: 0.7, side: THREE.DoubleSide }));
       pano.position.set(px, coberturaY + 3.4, zFrente + 2);
       grupo.add(pano);
       bandeiras.push({ pano, base: pano.geometry.attributes.position.array.slice(), fase: i });
     });
+    grupo.add(fundir(mastros, aco));
     this.decorAnimated.push((t) => {
+      // escondidas (pista desligada, câmera dentro do cinema ou do prédio): nada a mexer
+      if (!grupo.visible || !this.fora.visible) return;
       for (const b of bandeiras) {
+        if (b.pano.position.distanceToSquared(this.camera.position) > 150 * 150) continue; // longe, nem se nota
         const arr = b.pano.geometry.attributes.position.array;
         for (let i = 0; i < arr.length; i += 3) {
           const u = b.base[i] / 2.6; // 0 no mastro, 1 na ponta
@@ -1763,15 +2134,20 @@ export class World {
     for (const malha of [corpos, cabecas]) {
       malha.castShadow = true;
       malha.computeBoundingSphere();
-      malha.frustumCulled = false; // a "ola" levanta todo mundo: a esfera calculada parada ficaria pequena
+      // a "ola" levanta todo mundo no máximo uns 0,13 m além da esfera calculada parada: com a
+      // folga, o recorte pela vista não come ninguém na borda da tela
+      malha.boundingSphere.radius += 1.5;
       grupo.add(malha);
+      this.sombraOpcional.push(malha);
     }
     let quadro = 0;
     this.decorAnimated.push((t) => {
       // só mexe na torcida quando alguém pode estar vendo e a cada dois quadros
-      if (++quadro % 2) return;
+      if (++quadro % 2 || !this.fora.visible || !grupo.visible) return;
       if (this.camera.position.distanceTo(_tmp.set(x, 5, zFrente)) > 260) return;
       atualizarTorcida(t);
+      // a sombra da torcida se mexe junto, se ela faz sombra neste nível e cai na caixa do sol
+      if (corpos.castShadow && this.pertoDoSol(_tmp.set(x, 3, zFrente), L / 2 + 40)) this.marcarSombra(true);
     });
 
     this.reservas.push({ x, z: zFrente - (DEGRAUS * prof) / 2, r: L / 2 + 10 });
@@ -1794,6 +2170,7 @@ export class World {
     this.pistaScreen = this.criarTelao({
       w, h, title: 'Telão da pista', subtitle: 'Cole um link no painel Telão: ele toca aqui e no cinema', accent: '#ff5d73',
     });
+    this.fora.add(this.pistaScreen.group); // some junto com o lado de fora
     this.pistaScreen.group.position.set(tx, base + h / 2, tz);
     this.pistaScreen.group.rotation.y = rotY;
 
@@ -1847,11 +2224,13 @@ export class World {
     }));
     const pe = new THREE.MeshStandardMaterial({ color: 0x2b3245, roughness: 0.6 });
     const verso = new THREE.MeshStandardMaterial({ color: 0x1b1f2a, roughness: 0.8 });
-    const faces = texturas.map((map) => {
-      const frente = new THREE.MeshBasicMaterial({ map, toneMapped: false });
-      // faces da BoxGeometry: 0 +x, 1 -x, 2 +y, 3 -y, 4 +z (frente, virada para a pista), 5 -z
-      return [verso, verso, verso, verso, frente, verso];
-    });
+    const frentes = texturas.map((map) => new THREE.MeshBasicMaterial({ map, toneMapped: false }));
+    // Tudo fundido (eram 8 desenhos por placa): a caixa sem a face da frente (a 4, +z, virada para
+    // a pista) de todas as placas numa malha, a marca de cada patrocinador num plano no lugar exato
+    // daquela face (um plano um pouco à frente brigaria com a caixa de longe), e os postes.
+    const versos = [];
+    const porMarca = frentes.map(() => []);
+    const postes = [];
     let n = 0;
     for (let t = 0.06; t < 0.97; t += 0.075) {
       const p = pontoEm(t);
@@ -1864,19 +2243,18 @@ export class World {
           && !this.reservas.some((r) => Math.hypot(x - r.x, z - r.z) < r.r)
           && !(x < SALA.maxX + 10 && z < SALA.maxZ + 10);
         if (!livre) continue;
-        const placa = new THREE.Mesh(new THREE.BoxGeometry(14, 2.6, 0.12), faces[n % faces.length]);
-        placa.position.set(x, 2.6, z);
-        placa.lookAt(p.x, 2.6, p.z);
-        grupo.add(placa);
-        for (const s of [-1, 1]) {
-          const poste = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 2.6, 6), pe);
-          poste.position.copy(placa.position).add(_tmp.set(lz * s * 6 * lado, -1.3, -lx * s * 6 * lado));
-          grupo.add(poste);
-        }
+        _aux.position.set(x, 2.6, z);
+        _aux.lookAt(p.x, 2.6, p.z);
+        _aux.updateMatrix();
+        versos.push(caixaSem(14, 2.6, 0.12, [4]).applyMatrix4(_aux.matrix));
+        porMarca[n % frentes.length].push(new THREE.PlaneGeometry(14, 2.6).translate(0, 0, 0.06).applyMatrix4(_aux.matrix));
+        for (const s of [-1, 1]) postes.push(new THREE.CylinderGeometry(0.12, 0.12, 2.6, 6).translate(x + lz * s * 6 * lado, 2.6 - 1.3, z - lx * s * 6 * lado));
         n++;
         break; // uma placa por ponto da pista
       }
     }
+    grupo.add(fundir(versos, verso), fundir(postes, pe));
+    porMarca.forEach((geos, i) => { if (geos.length) grupo.add(fundir(geos, frentes[i])); });
   }
 
   // Estrada de pedra da porta do cinema até a pista: passa pela ponta da arquibancada e entra
@@ -1913,6 +2291,11 @@ export class World {
     const uv = [];
     const idx = [];
     let v = 0;
+    // lampiões: hastes numa malha e globos noutra
+    const hasteGeo = new THREE.CylinderGeometry(0.07, 0.09, 2.6, 6);
+    const globoGeo = new THREE.SphereGeometry(0.26, 12, 8);
+    const hastes = [];
+    const globos = [];
     pts.forEach((p, i) => {
       const a = pts[Math.max(0, i - 1)];
       const b = pts[Math.min(pts.length - 1, i + 1)];
@@ -1933,13 +2316,16 @@ export class World {
         const lx = p.x + nx * (largura / 2 + 1) * lado;
         const lz = p.z + nz * (largura / 2 + 1) * lado;
         if (projetar(lx, lz).dist < meia + 9) return; // perto do asfalto: sem lampião
-        const haste = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 2.6, 6), new THREE.MeshStandardMaterial({ color: 0x2b2f3a }));
-        haste.position.set(lx, 1.3, lz);
-        const globo = new THREE.Mesh(new THREE.SphereGeometry(0.26, 12, 8), new THREE.MeshBasicMaterial({ color: 0xffe2a8, toneMapped: false }));
-        globo.position.set(lx, 2.75, lz);
-        this.fora.add(haste, globo);
+        hastes.push(hasteGeo.clone().translate(lx, 1.3, lz));
+        globos.push(globoGeo.clone().translate(lx, 2.75, lz));
       }
     });
+    this.fora.add(
+      fundir(hastes, new THREE.MeshStandardMaterial({ color: 0x2b2f3a })),
+      fundir(globos, new THREE.MeshBasicMaterial({ color: 0xffe2a8, toneMapped: false })),
+    );
+    hasteGeo.dispose();
+    globoGeo.dispose();
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
@@ -1987,12 +2373,20 @@ export class World {
     });
     const verso = new THREE.MeshStandardMaterial({ color: 0x1b1f2a, roughness: 0.8 });
     const frente = new THREE.MeshBasicMaterial({ map: tex, toneMapped: false });
-    const placa = new THREE.Mesh(new THREE.BoxGeometry(6, 1.5, 0.12), [verso, verso, verso, verso, frente, frente]);
-    placa.position.set(x, 3, z);
-    placa.rotation.y = rotY;
+    // a caixa sem as duas faces grandes, e o texto num plano na frente e noutro atrás (girado),
+    // no lugar exato delas: 2 desenhos no lugar dos 6 grupos de material de antes
+    const placa = new THREE.Mesh(caixaSem(6, 1.5, 0.12, [4, 5]), verso);
+    const textos = fundir([
+      new THREE.PlaneGeometry(6, 1.5).translate(0, 0, 0.06),
+      new THREE.PlaneGeometry(6, 1.5).rotateY(Math.PI).translate(0, 0, -0.06),
+    ], frente);
+    for (const m of [placa, textos]) {
+      m.position.set(x, 3, z);
+      m.rotation.y = rotY;
+    }
     const poste = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 3, 6), new THREE.MeshStandardMaterial({ color: 0x2b3245 }));
     poste.position.set(x, 1.5, z);
-    this.fora.add(placa, poste);
+    this.fora.add(placa, textos, poste);
   }
 
   buildCourse() {
@@ -2007,22 +2401,30 @@ export class World {
       return matCache.get(key);
     };
 
+    // plataformas comuns (paradas e sem tipo): uma malha por material no fim, também na sombra
+    const fixas = new Map();
     const build = (def) => {
       const [w, d] = def.size;
       const h = def.h ?? 0.6;
       const [x, top, z] = def.pos;
       const type = def.type ?? 'platform';
       const emissive = type === 'pad' || type === 'finish' || type === 'teleport' ? 0.5 : type === 'balcony' ? 0.02 : 0.14;
-      const mesh = new THREE.Mesh(
-        new RoundedBoxGeometry(w, h, d, 3, Math.min(0.14, h / 3, w / 4, d / 4)),
-        material(def.color, emissive),
-      );
+      const geo = new RoundedBoxGeometry(w, h, d, 3, Math.min(0.14, h / 3, w / 4, d / 4));
+      const data = { ...def, type };
+      if (!def.move && !def.type) {
+        const mat = material(def.color, emissive);
+        if (!fixas.has(mat)) fixas.set(mat, []);
+        fixas.get(mat).push(geo.translate(x, top - h / 2, z));
+        const collider = this.addBox({ min: [x - w / 2, top - h, z - d / 2], max: [x + w / 2, top, z + d / 2], data });
+        collider.half = new THREE.Vector3(w / 2, h / 2, d / 2);
+        return collider;
+      }
+      const mesh = new THREE.Mesh(geo, material(def.color, emissive));
       mesh.position.set(x, top - h / 2, z);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       this.scene.add(mesh);
 
-      const data = { ...def, type };
       const collider = this.addBox({
         min: [x - w / 2, top - h, z - d / 2],
         max: [x + w / 2, top, z + d / 2],
@@ -2054,6 +2456,7 @@ export class World {
 
     COURSE.forEach(build);
     FUN_PADS.forEach(build);
+    for (const [mat, geos] of fixas) this.scene.add(fundir(geos, mat, { sombra: true, recebe: true }));
     for (const r of RAILS) {
       const [w, d] = r.size;
       const [x, top, z] = r.pos;
@@ -2099,7 +2502,10 @@ export class World {
     arrow.rotation.x = -Math.PI / 2;
     arrow.position.y = h / 2 + 0.02;
     mesh.add(arrow);
-    this.decorAnimated.push((t) => { arrow.material.opacity = 0.55 + 0.45 * Math.sin(t * 5); });
+    this.decorAnimated.push((t) => {
+      if (mesh.userData.areaDesligada) return; // parkour desligado (e no escritório)
+      arrow.material.opacity = 0.55 + 0.45 * Math.sin(t * 5);
+    });
   }
 
   decorateMarker(mesh, def, h) {
@@ -2112,6 +2518,7 @@ export class World {
     ring.position.y = h / 2 + 0.06;
     mesh.add(ring);
     this.decorAnimated.push((t) => {
+      if (mesh.userData.areaDesligada) return; // parkour desligado (e no escritório)
       const s = 1 + 0.06 * Math.sin(t * 3 + mesh.position.x);
       ring.scale.set(s, s, 1);
     });
@@ -2138,6 +2545,7 @@ export class World {
       trophy.position.set(0, h / 2 + 2.6, 0);
       mesh.add(trophy);
       this.decorAnimated.push((t) => {
+        if (mesh.userData.areaDesligada) return;
         trophy.rotation.y = t * 1.2;
         trophy.position.y = h / 2 + 3.6 + Math.sin(t * 2) * 0.15;
       });
@@ -2154,7 +2562,10 @@ export class World {
   }
 
   // -------------------------------------------------------------- loop
+  // Física do cenário, todo quadro, desenhado ou não: as plataformas móveis (quem está em cima anda
+  // junto) e o escritório (sino, teclado e mouse do posto).
   update(time) {
+    this.tempo = time;
     // tempo absoluto: todo mundo vê as plataformas móveis na mesma posição
     const t = Date.now() / 1000;
     for (const c of this.movers) {
@@ -2168,10 +2579,18 @@ export class World {
       c.delta.subVectors(c.mesh.position, prev);
       c.min.copy(c.mesh.position).sub(c.half);
       c.max.copy(c.mesh.position).add(c.half);
+      // a sombra dela anda junto
+      if (c.mesh.visible && !c.mesh.userData.areaDesligada && this.pertoDoSol(c.mesh.position, 90)) this.sombraSuja = true;
     }
+    this.escritorio?.update(time);
+  }
+
+  // Enfeites animados e natureza (nuvens, água, pássaros, torcida, bandeiras): só quando o quadro
+  // vai ser desenhado. Quem não chamar, render() chama.
+  animar(time) {
+    this.animado = true;
     for (const fn of this.decorAnimated) fn(time);
     this.natureza?.update(time);
-    this.escritorio?.update(time);
   }
 
   // -------------------------------------------------------------- modo da sala
@@ -2184,6 +2603,9 @@ export class World {
     if (chave === this.chaveModo) return false;
     this.chaveModo = chave;
     this.modo = escritorio ? 'escritorio' : 'lazer';
+    // o teto de luzes é por modo (o escritório tem uma luz em cada sala): o aquecimento do fim já
+    // compila com ele
+    this.maxLuzes = this.luzesDoModo();
     this.desmontarEscritorio();
     this.ligarArea('cinema', !escritorio);
     this.ligarArea('plateia', !escritorio);
@@ -2196,45 +2618,74 @@ export class World {
     this.slots = escritorio ? this.slotsEscritorio : this.slotsCinema;
     this.screens = [...this.telaoes, ...this.slots];
     if (!this.telaoVisivel(this.tvHost)) this.setMidiaHost(this.telaoMaisPerto());
+    this.sombraSuja = true;
     this.aquecerShaders(); // salas novas: compila agora, não na primeira olhada
     return true;
   }
 
   montarEscritorio(departamentos, empresa) {
     this.planta = planta(departamentos);
-    this.escritorio = this.area('escritorio', () => construirEscritorio(this, this.planta, { empresa }));
+    // cartaz de monitor desligado: o prédio instancia um por sala na moldura, com o material
+    // compartilhado daqui (as cores que ele pediu: ali o cartaz próprio de cada monitor sobra)
+    const instanciados = new Set();
+    const apagado = (cor) => {
+      instanciados.add(cor);
+      return monitorApagado(cor);
+    };
+    this.escritorio = this.area('escritorio', () => construirEscritorio(this, this.planta, { empresa, apagado }));
     if (this.logo) this.escritorio.setLogo?.(this.logo);
-    // as telas de compartilhar, na ordem das salas (é a mesma ordem das telas no servidor)
+    // Uma caixa (grupo) por sala com as telas dela: o cullSalas esconde a sala inteira (os móveis, no
+    // grupo da célula, e as telas, na caixa) quando a câmera não tem como vê-la. As caixas ficam na
+    // origem, sem transformação: a posição de cada tela continua sendo a do mundo. Esconde-se pela
+    // caixa, nunca pelo s.group.visible (navegador, telaoVisivel e a tela do lado leem esse). Prédio
+    // sem células: as telas ficam na cena, como sempre.
+    this.salas3d = (this.escritorio.celulas || []).map((c) => {
+      const caixa = new THREE.Group();
+      this.scene.add(caixa);
+      return { ...c, caixa };
+    });
+    this.bitsLado = { norte: 0, sul: 0, fundos: 0 };
+    this.salas3d.forEach((c, i) => { this.bitsLado[c.lado] |= 1 << i; });
+    this.maskSalas = -1;
+    const caixaDa = (celula) => this.salas3d[celula]?.caixa || this.scene;
+    // as telas de compartilhar, na ordem das salas (é a mesma ordem das telas no servidor). As
+    // embutidas na parede não fazem sombra, e o brilho delas, atrás do reboco, nunca aparecia
     this.slotsEscritorio = this.escritorio.telas.map((t, i) => {
-      const s = new ScreenDisplay({ w: t.w, h: t.h, title: t.rotulo, subtitle: 'Livre — clique em "Compartilhar tela"', painel: t.painel || null });
+      const s = new ScreenDisplay({ w: t.w, h: t.h, title: t.rotulo, subtitle: 'Livre — clique em "Compartilhar tela"', painel: t.painel || null, sombra: !t.embutida });
+      if (t.embutida) s.glow.visible = false;
       s.index = i;
       s.group.position.set(...t.pos);
       s.group.rotation.y = t.rotY;
       s.aoMudar = () => { if (s.isHost) this.tvCss.visible = s.mostraMidia; };
-      this.scene.add(s.group);
+      caixaDa(t.celula).add(s.group);
       return s;
     });
     // os 3 monitores de cada posto, depois das telas de parede (mesma numeração do servidor)
-    const monitores = new Map(this.escritorio.postos.map((po) => [po.id, po.monitores]));
+    const postos = new Map(this.escritorio.postos.map((po) => [po.id, po]));
     for (const po of this.planta.postos) {
-      (monitores.get(po.id) || []).forEach((m, j) => {
-        const s = new ScreenDisplay({ w: m.w, h: m.h, leve: true, accent: DEPARTAMENTOS[po.sala].cor });
+      const p3 = postos.get(po.id);
+      const accent = DEPARTAMENTOS[po.sala].cor;
+      (p3?.monitores || []).forEach((m, j) => {
+        const s = new ScreenDisplay({ w: m.w, h: m.h, leve: true, accent, cartazNaMoldura: instanciados.has(accent) });
         s.index = po.primeiraTela + j;
         s.posto = po.id;
         s.meio = j === 1;
         s.group.position.set(...m.pos);
         s.group.rotation.y = m.rotY;
         s.aoMudar = () => { if (s.isHost) this.tvCss.visible = s.mostraMidia; };
-        this.scene.add(s.group);
+        caixaDa(p3.celula).add(s.group);
         this.slotsEscritorio[s.index] = s;
       });
     }
     this.telaoesEscritorio = this.escritorio.telaoes.map((t) => {
-      const tel = this.criarTelao({ w: t.w, h: t.h, title: 'Telão', subtitle: 'Cole um link (YouTube, Twitch, Kick…) ou fixe a tela de alguém aqui', accent: '#a78bfa' });
+      const tel = this.criarTelao({ w: t.w, h: t.h, title: 'Telão', subtitle: 'Cole um link (YouTube, Twitch, Kick…) ou fixe a tela de alguém aqui', accent: '#a78bfa', sombra: !t.embutida });
+      if (t.embutida) tel.glow.visible = false;
       tel.group.position.set(...t.pos);
       tel.group.rotation.y = t.rotY;
+      caixaDa(t.celula).add(tel.group);
       return tel;
     });
+    this.sombraSuja = true;
   }
 
   // logo da empresa (imagem já carregada, ou null): telas livres e a parede da recepção
@@ -2254,6 +2705,9 @@ export class World {
       o.traverse((x) => {
         x.geometry?.dispose();
         for (const m of [].concat(x.material || [])) {
+          // o cartaz de monitor desligado (e a textura dele) é de todos: apagar aqui só faria
+          // subir de novo na próxima montagem
+          if (m.userData.compartilhado) continue;
           m.map?.dispose();
           m.dispose();
         }
@@ -2262,13 +2716,18 @@ export class World {
     this.areas.delete('escritorio');
     for (const s of [...this.slotsEscritorio, ...this.telaoesEscritorio]) {
       s.dispose();
-      this.scene.remove(s.group);
+      s.group.removeFromParent(); // na cena ou na caixa da sala
     }
+    for (const c of this.salas3d || []) c.caixa.removeFromParent();
+    this.salas3d = null;
+    this.maskSalas = -1;
     this.telaoes = this.telaoes.filter((t) => !this.telaoesEscritorio.includes(t));
     this.slotsEscritorio = [];
     this.telaoesEscritorio = [];
     this.escritorio = null;
     this.planta = null;
+    this.luzesMudaram();
+    this.sombraSuja = true;
   }
 
   // onde a pessoa nasce e para onde volta (R)
@@ -2329,6 +2788,7 @@ export class World {
     a.colisoes.push(...this.colliders.slice(nColisoes));
     a.bloqueios.push(...this.cameraBlockers.slice(nBloqueios));
     this.areas.set(nome, a);
+    this.luzesMudaram(); // o que nasceu pode ter trazido luz
     return r;
   }
 
@@ -2349,22 +2809,39 @@ export class World {
       this.colliders = this.colliders.filter((c) => !sai.has(c));
       this.cameraBlockers = this.cameraBlockers.filter((m) => !sai.has(m));
     }
+    // o laço acima acende até o holofote do ringue; ele segue o nível (quem chama recompila)
+    this.aplicarLuzRingue();
+    this.sombraSuja = true;
     return true;
   }
 
   // -------------------------------------------------------------- qualidade
-  // luzes: quantas luzes pontuais ficam acesas; sombra: tamanho do mapa (0 = sem sombra);
-  // pixelMax: teto da densidade de pixels; densidade: fração da vegetação de longe;
-  // sombraArvores: árvores fazem sombra; videoFps: teto de quadros das telas no 3D.
-  setQualidade({ luzes, sombra, pixelMax, densidade, sombraArvores, videoFps }, { aquecer = true } = {}) {
-    // número de luzes e sombra ligada fazem parte do shader: mudou, pré-compila tudo de novo
-    const recompila = luzes !== this.maxLuzes || (sombra > 0) !== this.renderer.shadowMap.enabled;
-    this.maxLuzes = luzes;
+  // luzes: quantas luzes pontuais ficam acesas (luzesEscritorio: o teto no modo escritório);
+  // sombra: tamanho do mapa (0 = sem sombra: aí a sombra redonda sob as pessoas); pixelMax: teto da
+  // densidade de pixels; densidade: fração da vegetação de longe; sombraArvores: árvores, torcida e
+  // pneus fazem sombra; videoFps: teto de quadros das telas no 3D; holofote: o cone do ringue;
+  // luzSimples: luz direta em Lambert (ver o começo do arquivo). Nível sem os campos novos: como era.
+  setQualidade({ luzes, luzesEscritorio = luzes, sombra, pixelMax, densidade, sombraArvores, videoFps, holofote = true, luzSimples = false }, { aquecer = true } = {}) {
+    this.luzesPorModo = { lazer: luzes, escritorio: Math.min(luzes, luzesEscritorio) };
+    const maxLuzes = this.luzesDoModo();
+    // número de luzes, sombra ligada, holofote e luz simples fazem parte do shader: mudou, pré-compila
+    // de novo (só os programas: malhas e texturas já estão na placa)
+    let recompila = maxLuzes !== this.maxLuzes || (sombra > 0) !== this.renderer.shadowMap.enabled;
+    this.maxLuzes = maxLuzes;
     const ligar = sombra > 0;
+    let trocaShader = false;
     if (ligar !== this.renderer.shadowMap.enabled) {
       this.renderer.shadowMap.enabled = ligar;
       this.sun.castShadow = ligar;
-      // ligar/desligar sombra muda o shader de todos os materiais
+      trocaShader = true;
+    }
+    if (luzSimples !== this.luzSimples) {
+      this.luzSimples = luzSimples;
+      luzSimplesLigada = luzSimples;
+      if (LUZ_SIMPLES_OK) trocaShader = recompila = true;
+    }
+    // ligar/desligar sombra (ou a luz simples) muda o shader de todos os materiais
+    if (trocaShader) {
       this.scene.traverse((o) => {
         for (const m of [].concat(o.material || [])) m.needsUpdate = true;
       });
@@ -2374,11 +2851,24 @@ export class World {
       this.sun.shadow.map?.dispose();
       this.sun.shadow.map = null; // o three cria de novo no tamanho novo
     }
+    // trocar o tamanho zera o mapa e religar começa sem ele: refaz já, senão a cena fica escura.
+    // Abaixo de 2048 (Média), gente de longe refaz a sombra a cada 2 quadros.
+    this.sombraLeve = ligar && sombra < 2048;
+    this.marcarSombra();
+    this.sombrasRedondas.visible = !ligar;
+    for (const m of this.sombraOpcional) m.castShadow = sombraArvores;
+    this.holofoteNivel = holofote;
+    if (this.aplicarLuzRingue()) recompila = true;
     this.pixelMax = pixelMax;
     this.aplicarResolucao();
     this.natureza?.ajustar({ densidade, sombras: sombraArvores });
     this.videoFps = videoFps;
-    if (recompila && aquecer) this.aquecerShaders();
+    if (recompila && aquecer) this.aquecerShaders({ malhas: false });
+  }
+
+  // teto de luzes pontuais do modo atual (ver setQualidade)
+  luzesDoModo() {
+    return this.luzesPorModo?.[this.modo] ?? 8;
   }
 
   setEscala(e) {
@@ -2396,60 +2886,86 @@ export class World {
   // exatamente maxLuzes, porque mudar a quantidade faz o three recompilar todos os shaders
   // (engasgo de segundos). A última da lista vai apagando conforme a próxima se aproxima, para a
   // troca não piscar. A cor é que escurece (a intensidade é animada por quem criou a luz).
+  // A lista das luzes da cena é guardada: refeita quando alguma entra ou sai (luzesMudaram) e, por
+  // garantia, a cada 120 quadros. Varrer a cena toda a cada quadro era o que custava.
   atualizarLuzes() {
+    if (!this._luzes || ++this.quadrosLuzes >= 120) {
+      this.quadrosLuzes = 0;
+      const luzes = [];
+      this.scene.traverse((o) => { if (o.isPointLight) luzes.push({ luz: o, d: 0 }); });
+      this._luzes = luzes;
+    }
     const cam = this.camera.position;
-    const lista = [];
-    this.scene.traverse((o) => {
-      if (!o.isPointLight) return;
+    const vivas = this.luzesVivas;
+    vivas.length = 0;
+    for (const item of this._luzes) {
+      const o = item.luz;
       // luz de um jogo desligado pelo dono da sala: apagada de vez
       if (o.userData.areaDesligada) {
         o.visible = false;
-        return;
+        continue;
       }
-      // luz dentro de um grupo escondido já está apagada para o three: fica de fora da conta
-      for (let p = o.parent; p; p = p.parent) if (!p.visible) return;
+      // luz dentro de um grupo escondido já está apagada para o three, e a que saiu da cena não
+      // existe mais: as duas ficam de fora da conta
+      let p = o.parent;
+      while (p && p !== this.scene && p.visible) p = p.parent;
+      if (p !== this.scene) continue;
       if (!o.userData.cor) o.userData.cor = o.color.clone();
-      lista.push({ luz: o, d: o.getWorldPosition(_tmp).distanceTo(cam) });
-    });
-    lista.sort((a, b) => a.d - b.d);
-    const n = Math.min(this.maxLuzes, lista.length);
-    const proxima = lista[n]?.d ?? Infinity;
-    lista.forEach(({ luz, d }, i) => {
+      item.d = o.getWorldPosition(_tmp).distanceTo(cam);
+      vivas.push(item);
+    }
+    vivas.sort(porDistancia);
+    const n = Math.min(this.maxLuzes, vivas.length);
+    const proxima = vivas[n]?.d ?? Infinity;
+    for (let i = 0; i < vivas.length; i++) {
+      const { luz, d } = vivas[i];
       luz.visible = i < n;
       const f = i < n ? THREE.MathUtils.clamp((proxima - d) / 12, 0, 1) : 0;
       luz.color.copy(luz.userData.cor).multiplyScalar(f);
-    });
+    }
   }
 
-  // Altura (em pixels da janela) com que uma tela aparece agora: 0 se está fora da vista ou de
-  // costas. Leva em conta a distância e o ângulo (de lado, ela encolhe).
+  // Uma luz pontual entrou ou saiu da cena (área nova, prédio desmontado, o brilho da promoção no
+  // xadrez): a lista de atualizarLuzes é refeita no próximo quadro.
+  luzesMudaram() {
+    this._luzes = null;
+  }
+
+  // Altura (em pixels da janela) com que uma tela aparece agora: 0 se está fora da vista, de
+  // costas ou escondida (sala do escritório que a câmera não vê, lado de fora atrás da parede).
+  // Leva em conta a distância e o ângulo (de lado, ela encolhe). Sem alocar e sem ler o layout:
+  // roda por tela, por quadro.
   alturaAparente(s) {
     const cam = this.camera;
-    if (!s.group.visible) return 0;
+    if (!s.group.visible || s.group.parent?.visible === false) return 0;
     // de costas para a câmera não aparece
     s.surface.getWorldPosition(_tmp);
     s.surface.getWorldQuaternion(_quat);
     if (_tmp3.set(0, 0, 1).applyQuaternion(_quat).dot(_tmp2.copy(cam.position).sub(_tmp)) <= 0) return 0;
     // os 4 cantos no espaço da câmera, recortados no plano da frente dela (o pedaço atrás da
-    // câmera não aparece), projetados na imagem: mede o pedaço que cai dentro dela
-    const cantos = CANTOS.map(([cx, cy]) => new THREE.Vector3((cx * s.w) / 2, (cy * s.h) / 2, 0)
-      .applyMatrix4(s.surface.matrixWorld).applyMatrix4(cam.matrixWorldInverse));
-    const plano = -cam.near * 1.01;
-    const dentro = [];
+    // câmera não aparece), projetados na imagem: mede o pedaço que cai dentro dela. Os cortes
+    // saem antes de projetar.
     for (let i = 0; i < 4; i++) {
-      const a = cantos[i];
-      const b = cantos[(i + 1) % 4];
-      const aDentro = a.z <= plano;
-      if (aDentro) dentro.push(a);
-      if (aDentro !== (b.z <= plano)) dentro.push(a.clone().lerp(b, (plano - a.z) / (b.z - a.z)));
+      _cantos[i].set((CANTOS[i][0] * s.w) / 2, (CANTOS[i][1] * s.h) / 2, 0)
+        .applyMatrix4(s.surface.matrixWorld).applyMatrix4(cam.matrixWorldInverse);
     }
-    if (!dentro.length) return 0;
+    const plano = -cam.near * 1.01;
+    _naFrente.length = 0;
+    let cortes = 0;
+    for (let i = 0; i < 4; i++) {
+      const a = _cantos[i];
+      const b = _cantos[(i + 1) % 4];
+      const aDentro = a.z <= plano;
+      if (aDentro) _naFrente.push(a);
+      if (aDentro !== (b.z <= plano)) _naFrente.push(_cortes[cortes++].copy(a).lerp(b, (plano - a.z) / (b.z - a.z)));
+    }
+    if (!_naFrente.length) return 0;
     let x0 = Infinity;
     let x1 = -Infinity;
     let y0 = Infinity;
     let y1 = -Infinity;
-    for (const v of dentro) {
-      v.applyMatrix4(cam.projectionMatrix);
+    for (let i = 0; i < _naFrente.length; i++) {
+      const v = _naFrente[i].applyMatrix4(cam.projectionMatrix);
       x0 = Math.min(x0, v.x);
       x1 = Math.max(x1, v.x);
       y0 = Math.min(y0, v.y);
@@ -2458,7 +2974,7 @@ export class World {
     const vx = Math.min(1, x1) - Math.max(-1, x0);
     const vy = Math.min(1, y1) - Math.max(-1, y0);
     if (vx <= 0 || vy <= 0) return 0;
-    return (vy / 2) * (this.canvas.clientHeight || window.innerHeight);
+    return (vy / 2) * this.alturaTela;
   }
 
   // prepara o frustum da câmera (antes de alturaAparente)
@@ -2469,31 +2985,107 @@ export class World {
     _frustum.setFromProjectionMatrix(_m4);
   }
 
+  // Uma vez por quadro, com a câmera deste quadro: o frustum (naVista, escondido), o lado de fora e
+  // as salas do escritório. O laço chama antes dos bonecos; render() chama de novo (é barato).
+  prepararQuadro() {
+    this.prepararVista();
+    this.cullFora();
+    this.cullSalas();
+  }
+
+  // a esfera (de mundo) está na vista da câmera deste quadro? (depois de prepararQuadro)
+  naVista(esfera) {
+    return _frustum.intersectsSphere(esfera);
+  }
+
+  // Alguém em p que a câmera não tem como ver: do lado de fora com a câmera dentro do cinema ou do
+  // prédio sem a porta à vista, ou numa sala do escritório escondida (cullSalas). Na soleira de
+  // uma sala (perto da linha da porta) conta como corredor. Depois de prepararQuadro.
+  escondido(p) {
+    const L = this.escritorio?.limites || SALA;
+    if (!this.fora.visible && (p.x < L.minX || p.x > L.maxX || p.z < L.minZ || p.z > L.maxZ)) return true;
+    const salas = this.salas3d;
+    if (!salas?.length || p.y >= PREDIO.altura - 1) return false;
+    for (let i = 0; i < salas.length; i++) {
+      const s = salas[i];
+      if (p.x < s.x0 || p.x > s.x1 || p.z < s.z0 || p.z > s.z1) continue;
+      return ((this.maskSalas >> i) & 1) === 0 && Math.abs(p.z - zDaPorta(s.lado)) >= 1.2;
+    }
+    return false;
+  }
+
+  // Interesse de vídeo, uma vez por rodada (250 ms): a vista e as caixas do que barra a câmera
+  // agora, que valem até o fim desta tarefa (alturaDaTela e tapada da rodada). Sem cache entre
+  // rodadas: paredes e salas mudam.
+  prepararInteresse() {
+    this.prepararVista();
+    this.montarCaixas();
+    this.caixasProntas = true;
+    queueMicrotask(() => { this.caixasProntas = false; });
+  }
+
+  // Caixas (de mundo) de tudo que barra a câmera e está de pé agora: visível até a cena (uma
+  // parede de um prédio desmontado fica de fora). Todo bloqueio é caixa alinhada ou cilindro
+  // (paredes, pilares, postes, camarote), então a caixa é a forma dele.
+  montarCaixas() {
+    const caixas = this.caixasBloqueio;
+    let n = 0;
+    for (const m of this.cameraBlockers) {
+      let o = m;
+      while (o && o !== this.scene && o.visible) o = o.parent;
+      if (o !== this.scene) continue;
+      if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+      m.updateWorldMatrix(false, false);
+      if (!caixas[n]) caixas[n] = new THREE.Box3();
+      caixas[n++].copy(m.geometry.boundingBox).applyMatrix4(m.matrixWorld);
+    }
+    this.nCaixas = n;
+  }
+
   // Tem parede (as que barram a câmera; vidro não conta) entre a câmera e a tela? Testa o
   // centro e quatro pontos perto dos cantos: basta um livre para a tela contar como vista.
+  // Raio contra as caixas de montarCaixas; a caixa que contém a câmera não conta (de dentro, o
+  // raio não bate na face de trás, como no raycast).
   tapada(s) {
-    const blocos = this.cameraBlockers.filter((m) => {
-      for (let o = m; o; o = o.parent) {
-        if (!o.visible) return false;
-        if (o === this.scene) return true;
-      }
-      return false; // parede de um prédio que já foi desmontado
-    });
-    if (!blocos.length) return false;
+    if (!this.caixasProntas) this.montarCaixas();
+    const n = this.nCaixas;
+    if (!n) return false;
     const cam = this.camera.position;
-    for (const [cx, cy] of [[0, 0], ...CANTOS]) {
+    const raio = _raio.ray;
+    for (const [cx, cy] of PONTOS_TELA) {
       _tmp.set(cx * s.w * 0.4, cy * s.h * 0.4, 0).applyMatrix4(s.surface.matrixWorld);
-      const d = _tmp.distanceTo(cam);
-      _raio.set(cam, _tmp2.copy(_tmp).sub(cam).normalize());
-      _raio.far = d - 0.3;
-      if (!_raio.intersectObjects(blocos, false).length) return false;
+      const ate = _tmp.distanceTo(cam) - 0.3;
+      raio.origin.copy(cam);
+      raio.direction.copy(_tmp).sub(cam).normalize();
+      let livre = true;
+      for (let i = 0; i < n; i++) {
+        const b = this.caixasBloqueio[i];
+        if (b.containsPoint(cam)) continue;
+        if (raio.intersectBox(b, _tmp2) && _tmp2.distanceTo(cam) < ate) {
+          livre = false;
+          break;
+        }
+      }
+      if (livre) return false;
     }
     return true;
   }
 
+  // Maior altura aparente (px da janela) das telas que mostram o compartilhamento key, sem contar
+  // a tela fazendo as vezes de telão e as tapadas por parede. 0 se nenhuma aparece. O main põe o
+  // dono (owner) na tela antes de o vídeo chegar: o primeiro pedido já sai certo.
+  alturaDaTela(key) {
+    let maior = 0;
+    for (const s of this.screens || []) {
+      if (s.owner !== key || s.midia) continue;
+      const px = this.alturaAparente(s);
+      if (px > maior && !this.tapada(s)) maior = px;
+    }
+    return maior;
+  }
+
   // Maior altura aparente entre as telas do 3D que mostram este <video> (telão incluído).
   alturaDoVideo(video) {
-    this.prepararVista();
     let maior = 0;
     for (const s of this.screens || []) {
       if (s.video !== video) continue;
@@ -2506,10 +3098,10 @@ export class World {
   // Quadros das telas compartilhadas no 3D. A que aparece grande (de perto, de frente) sobe a 60
   // sempre, qualquer que seja a qualidade gráfica; as menores, no ritmo da qualidade; as que
   // aparecem minúsculas, bem menos. Fora da vista não sobe nada (é o que mais pesa).
+  // Depois de prepararQuadro (a câmera do quadro).
   atualizarTelas() {
     const agora = performance.now();
     const base = 1000 / this.videoFps;
-    this.prepararVista();
     for (const s of this.screens || []) {
       if (!s.texture) continue;
       const px = this.alturaAparente(s);
@@ -2519,36 +3111,117 @@ export class World {
     }
   }
 
-  // Dentro da sala do cinema, só a porta deixa ver o lado de fora.
+  // Dentro da sala do cinema, só a porta deixa ver o lado de fora; dentro do prédio do escritório,
+  // a fachada de vidro (voando acima do telhado, o parque aparece). Usa o frustum do quadro.
   cullFora() {
-    const cam = this.camera;
-    const p = cam.position;
-    const L = this.escritorio?.limites || SALA; // no modo escritório, o prédio do escritório
-    const dentro = p.x > L.minX && p.x < L.maxX && p.z > L.minZ && p.z < L.maxZ;
+    const p = this.camera.position;
+    const E = this.escritorio;
+    const L = E?.limites || SALA; // no modo escritório, o prédio do escritório
+    let dentro = p.x > L.minX && p.x < L.maxX && p.z > L.minZ && p.z < L.maxZ;
+    if (dentro && E) dentro = p.y < (p.x >= PREDIO.recepcao ? (L.alturaRecepcao ?? 10) : (L.altura ?? PREDIO.altura));
     let ver = !dentro;
     if (dentro) {
-      cam.updateMatrixWorld();
-      _m4.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
-      _frustum.setFromProjectionMatrix(_m4);
-      ver = _frustum.intersectsBox(this.escritorio?.porta || this.portaBox);
+      ver = _frustum.intersectsBox(E?.porta || this.portaBox);
+      // numa sala ou num corredor, a fachada só aparece pelo portal daquele corredor
+      const portal = ver && E ? this.portalDaCamera(p) : null;
+      if (portal) ver = _frustum.intersectsBox(portal);
     }
+    if (ver === this.fora.visible) return;
     this.fora.visible = ver;
+    this.sombraSuja = true; // árvores e torcida entram (ou saem) do mapa de sombra
+  }
+
+  // O portal (da recepção para um corredor) por onde a câmera, numa sala ou num corredor do
+  // escritório, veria a recepção e a fachada; null fora deles. Lugares encolhidos 0,5 m: na
+  // soleira de uma porta não conta, e o teste fica só o da fachada, mais folgado.
+  portalDaCamera(p) {
+    const port = this.escritorio.portais;
+    const P = this.planta;
+    if (!port || !P) return null;
+    const R = PREDIO.recepcao;
+    const [c0, c1] = PREDIO.corredor;
+    const [f0, f1] = PREDIO.corredorFundos;
+    if (dentroDe(p, P.minX, R, c0, c1, -0.5)) return port.principal;
+    if (P.fundos && dentroDe(p, P.minX, R, f0, f1, -0.5)) return port.fundos;
+    for (const s of this.salas3d || []) {
+      if (dentroDe(p, s.x0, s.x1, s.z0, s.z1, -0.5)) return s.lado === 'fundos' ? port.fundos : port.principal;
+    }
+    return null;
+  }
+
+  // Salas do escritório que a câmera pode ver. As frentes de vidro de uma fileira ficam no mesmo
+  // plano, e uma reta não cruza esse plano duas vezes: de uma sala do norte ou do sul vê-se ela e as
+  // do outro lado do corredor (nunca as vizinhas, atrás das divisórias); dos fundos, só ela; do
+  // corredor, as fileiras dele; da recepção ou de fora, o que o portal de cada corredor deixar. Da
+  // altura do forro para cima, todas (vê-se por cima das divisórias). Folga de 0,5 m: perto de uma
+  // divisa, junta o que os dois lados veem. Só mexe na cena quando o conjunto muda.
+  cullSalas() {
+    const salas = this.salas3d;
+    if (!salas?.length) return;
+    const c = this.camera.position;
+    const B = this.bitsLado;
+    const todas = (1 << salas.length) - 1;
+    let mask = 0;
+    if (c.y >= PREDIO.altura - 0.2) mask = todas;
+    else {
+      const P = this.planta;
+      const R = PREDIO.recepcao;
+      const [c0, c1] = PREDIO.corredor;
+      const [f0, f1] = PREDIO.corredorFundos;
+      let achou = false;
+      for (let i = 0; i < salas.length; i++) {
+        const s = salas[i];
+        if (!dentroDe(c, s.x0, s.x1, s.z0, s.z1, 0.5)) continue;
+        achou = true;
+        mask |= (1 << i) | (s.lado === 'norte' ? B.sul : s.lado === 'sul' ? B.norte : 0);
+      }
+      if (dentroDe(c, P.minX, R, c0, c1, 0.5)) {
+        achou = true;
+        mask |= B.norte | B.sul;
+      }
+      if (P.fundos && dentroDe(c, P.minX, R, f0, f1, 0.5)) {
+        achou = true;
+        mask |= B.fundos;
+      }
+      // recepção, lado de fora, a porta: só pelos portais
+      if (!achou || c.x > R - 0.5) {
+        const port = this.escritorio.portais;
+        if (!port) mask = todas;
+        else {
+          if (port.principal && _frustum.intersectsBox(port.principal)) mask |= B.norte | B.sul;
+          if (port.fundos && _frustum.intersectsBox(port.fundos)) mask |= B.fundos;
+        }
+      }
+    }
+    if (mask === this.maskSalas) return;
+    this.maskSalas = mask;
+    for (let i = 0; i < salas.length; i++) {
+      const v = ((mask >> i) & 1) === 1;
+      if (salas[i].grupo) salas[i].grupo.visible = v;
+      salas[i].caixa.visible = v;
+    }
+    this.marcarSombra();
   }
 
   resize() {
     const w = window.innerWidth;
     const h = window.innerHeight;
+    this.alturaTela = h;
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+    this.aplicarResolucao(); // o zoom da página muda a densidade de pixels junto
     this.renderer.setSize(w, h);
     this.css.setSize(w, h);
   }
 
   render() {
-    if (this.compilando) return; // ver aquecerShaders: o quadro anterior fica na tela
+    if (this.compilando || this.perdido) return; // ver aquecerShaders: o quadro anterior fica na tela
+    // o laço anima o cenário antes (animar); se não animou, anima agora
+    if (!this.animado) this.animar(this.tempo);
+    this.animado = false;
     this.natureza?.seguirCamera(this.camera, performance.now() / 1000);
     this.atualizarTelao();
-    this.cullFora();
+    this.prepararQuadro();
     this.atualizarLuzes(); // depois do cullFora: ele esconde grupos, e luz escondida não conta
     this.atualizarTelas();
     for (const label of this.fadeLabels) {
@@ -2561,7 +3234,105 @@ export class World {
       label.material.opacity = THREE.MathUtils.clamp((d - 5) / 5, 0, 1);
       label.visible = label.material.opacity > 0.01;
     }
-    this.renderer.render(this.scene, this.camera);
-    this.css.render(this.cssScene, this.camera);
+    this.atualizarSombra();
+    const medindo = this.medirGpu && this.comecarGpu();
+    try {
+      this.renderer.render(this.scene, this.camera);
+    } finally {
+      if (medindo) this.terminarGpu();
+    }
+    // logo depois do desenho principal: os quadros 4x4 do aquecimento usam o mesmo contador
+    const info = this.renderer.info.render;
+    this.ultimoQuadro.draws = info.calls;
+    this.ultimoQuadro.triangulos = info.triangles;
+    // CSS3D (player do telão, navegadores) só com algo à mostra; o quadro a mais esconde o último
+    // que sumiu
+    let cssAtivo = false;
+    for (let i = 0; i < this.cssScene.children.length && !cssAtivo; i++) cssAtivo = this.cssScene.children[i].visible;
+    if (cssAtivo || this.cssAntes) this.css.render(this.cssScene, this.camera);
+    this.cssAntes = cssAtivo;
+  }
+
+  // Tempo de GPU do desenho principal (?perf=1): uma consulta de tempo em voo, lida nos quadros
+  // seguintes, quando a placa terminar. Só existe no Chrome de PC (EXT_disjoint_timer_query_webgl2);
+  // sem ela, gpuMs fica 0. Devolve se começou a medir este quadro.
+  comecarGpu() {
+    const gl = this.renderer.getContext();
+    if (this.extGpu === undefined) this.extGpu = gl.getExtension('EXT_disjoint_timer_query_webgl2');
+    const ext = this.extGpu;
+    if (!ext) return false;
+    if (this.consultaGpu) {
+      if (!gl.getQueryParameter(this.consultaGpu, gl.QUERY_RESULT_AVAILABLE)) return false;
+      // disjunto: a placa mudou de ritmo (ou outro programa entrou no meio) e a medida não vale
+      if (!gl.getParameter(ext.GPU_DISJOINT_EXT)) this.ultimoQuadro.gpuMs = gl.getQueryParameter(this.consultaGpu, gl.QUERY_RESULT) / 1e6;
+      gl.deleteQuery(this.consultaGpu);
+    }
+    this.consultaGpu = gl.createQuery();
+    gl.beginQuery(ext.TIME_ELAPSED_EXT, this.consultaGpu);
+    return true;
+  }
+
+  terminarGpu() {
+    this.renderer.getContext().endQuery(this.extGpu.TIME_ELAPSED_EXT);
+  }
+
+  // -------------------------------------------------------------- sombra redonda
+  // Sem mapa de sombra (celular, Leve): uma mancha macia no chão sob cada pessoa, todas numa malha
+  // instanciada (um desenho só). O laço (main.js) passa cada boneco por sombraDe e fecha a conta.
+  criarSombrasRedondas(max = 96) {
+    // textura própria (a da vitrine é liberada quando ela fecha)
+    const tex = canvasTexture(64, 64, (ctx, w, h) => {
+      const g = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2);
+      g.addColorStop(0, 'rgba(0,0,0,0.42)');
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, w, h);
+    });
+    const malha = new THREE.InstancedMesh(
+      new THREE.PlaneGeometry(1.3, 1.3).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4 }),
+      max,
+    );
+    malha.count = 0;
+    malha.frustumCulled = false;
+    malha.visible = !this.renderer.shadowMap.enabled;
+    this.scene.add(malha);
+    this.sombrasRedondas = malha;
+    this.maxSombrasRedondas = max;
+  }
+
+  // topo do colisor mais alto embaixo de (x, z) que não passa de y (o chão de quem está no ar)
+  chaoEm(x, y, z) {
+    let topo = Math.min(0, y);
+    for (const c of this.colliders) {
+      if (x < c.min.x || x > c.max.x || z < c.min.z || z > c.max.z) continue;
+      if (c.max.y <= y + 0.05 && c.max.y > topo) topo = c.max.y;
+    }
+    return topo;
+  }
+
+  // Põe a sombra do boneco av na posição i e devolve a próxima. Nada para quem não aparece ou está
+  // sentado (anim 4 é o sentado que vem pela rede); no ar, a mancha fica no chão e encolhe com a
+  // altura; o carro, comprida.
+  sombraDe(i, av, noAr) {
+    if (i >= this.maxSombrasRedondas || !av.inner.visible || av.anim === 4 || av.sitting) return i;
+    const p = av.group.position;
+    let chao = p.y;
+    let k = 1;
+    if (noAr) {
+      chao = this.chaoEm(p.x, p.y, p.z);
+      k = Math.max(0.4, 1 - (p.y - chao) / 5);
+    }
+    if (av.veiculo) _escala.set(1.5 * k, 1, 2.4 * k);
+    else _escala.set(k, 1, k);
+    _quat.setFromAxisAngle(_eixoY, av.inner.rotation.y);
+    this.sombrasRedondas.setMatrixAt(i, _mSombra.compose(_tmp.set(p.x, chao + 0.02, p.z), _quat, _escala));
+    return i + 1;
+  }
+
+  // quantas sombras sombraDe pôs neste quadro
+  fecharSombrasRedondas(n) {
+    this.sombrasRedondas.count = n;
+    this.sombrasRedondas.instanceMatrix.needsUpdate = true;
   }
 }

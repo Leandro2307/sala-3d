@@ -23,6 +23,76 @@ const PONTAS = {
 };
 const Reconhecimento = window.SpeechRecognition || window.webkitSpeechRecognition;
 
+// ------------------------------------------------------------------ computador
+// A busca do computador leva até meio segundo no difícil e, na página, parava o quadro: ela roda
+// num Worker (bot-worker.js), fora da thread do 3D. Sem Worker de módulo (Firefox < 114, Safari
+// < 15) ou se ele falhar, pensa aqui mesmo, como antes.
+let bot = null; // o Worker, criado no primeiro pedido; false: não tem como
+let ultimoPedido = 0;
+const pedidos = new Map(); // id -> { mesa, st, prof, ok, falha }
+
+// o lance do computador em texto (o que vai pela rede), ou null se não tem lance
+function pensarAqui(mesa, st, prof) {
+  const R = REGRAS[mesa];
+  const m = R.lanceDoComputador(st, prof);
+  return m ? R.paraTexto(m) : null;
+}
+
+// responde um pedido pensando na própria página
+function responderAqui(p) {
+  try {
+    p.ok(pensarAqui(p.mesa, p.st, p.prof));
+  } catch (e) {
+    p.falha(e);
+  }
+}
+
+// O Worker não carregou ou quebrou: sai de cena, e quem esperava por ele é respondido aqui
+// (senão o computador empacava com a vez).
+function desligarBot() {
+  bot?.terminate();
+  bot = false;
+  const pendentes = [...pedidos.values()];
+  pedidos.clear();
+  pendentes.forEach(responderAqui);
+}
+
+// Promise com o lance (ver pensarAqui)
+function pensar(mesa, st, prof) {
+  if (bot === null) {
+    try {
+      const w = new Worker(new URL('./bot-worker.js', import.meta.url), { type: 'module' });
+      w.onmessage = ({ data: { id, texto, erro } }) => {
+        const p = pedidos.get(id);
+        if (!p) return;
+        pedidos.delete(id);
+        // a regra lançou lá dentro: tenta aqui, e se lançar de novo o erro vai para quem pediu
+        if (erro) responderAqui(p);
+        else p.ok(texto);
+      };
+      w.onerror = () => { if (bot === w) desligarBot(); };
+      bot = w;
+    } catch {
+      bot = false;
+    }
+  }
+  return new Promise((ok, falha) => {
+    const p = { mesa, st, prof, ok, falha };
+    if (!bot) return responderAqui(p);
+    const id = ++ultimoPedido;
+    bot.postMessage({ id, mesa, st, prof });
+    pedidos.set(id, p);
+  });
+}
+
+// sem pedido no caminho e sem computador meu sentado em mesa nenhuma, o Worker vai embora (volta
+// no próximo pedido)
+function dispensarBot(partidas, eu) {
+  if (!bot || pedidos.size || Object.values(partidas).some((p) => p.botDono === eu && p.lugares.includes('bot'))) return;
+  bot.terminate();
+  bot = null;
+}
+
 export class Jogos {
   constructor({ world, player, toast, emitir, selfId, nomeDe }) {
     this.world = world;
@@ -88,6 +158,7 @@ export class Jogos {
       this.atualizarHud();
     }
     this.vezDoComputador(mesa);
+    dispensarBot(this.partidas, this.selfId());
   }
 
   refazer(mesa, lances) {
@@ -162,17 +233,32 @@ export class Jogos {
     const part = this.partidas[mesa];
     if (part.sit.fim || part.botDono !== this.selfId()) return;
     const vez = COR.indexOf(part.st.vez);
+    // pensando até a resposta chegar: nunca pede duas vezes o mesmo lance
     if (part.lugares[vez] !== 'bot' || part.pensando) return;
     part.pensando = true;
+    const { st } = part;
     const n = part.lances.length;
+    // a partida andou sem ele (lance que chegou, jogo novo, tiraram o computador, outro dono)?
+    const mudou = () => part.st !== st || part.lugares[vez] !== 'bot' || part.botDono !== this.selfId();
+    // larga o pedido e olha de novo: na partida nova pode ser a vez dele outra vez
+    const largar = () => {
+      part.pensando = false;
+      this.vezDoComputador(mesa);
+    };
     // espera as peças pararem de andar e "pensa" um pouco, para não parecer instantâneo
     const tentar = () => {
+      if (mudou()) return largar();
       if (this.mesas[mesa].ocupada) return setTimeout(tentar, 250);
       setTimeout(() => {
-        part.pensando = false;
-        if (part.lances.length !== n || part.lugares[vez] !== 'bot') return;
-        const m = REGRAS[mesa].lanceDoComputador(part.st, PROF[mesa][this.nivel]);
-        if (m) this.emitir('jogo-lance', { mesa, n, lance: REGRAS[mesa].paraTexto(m) });
+        if (mudou()) return largar();
+        pensar(mesa, st, PROF[mesa][this.nivel]).catch(() => null).then((texto) => {
+          if (mudou()) largar();
+          else {
+            part.pensando = false;
+            if (texto) this.emitir('jogo-lance', { mesa, n, lance: texto });
+          }
+          dispensarBot(this.partidas, this.selfId());
+        });
       }, 500);
     };
     tentar();

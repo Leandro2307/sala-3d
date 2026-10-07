@@ -1,6 +1,7 @@
 // WebRTC em malha (cada pessoa conecta direto com cada outra): microfone + tela + som da tela.
 // Usa o padrão "perfect negotiation" para renegociar sem conflitos quando alguém liga/desliga a tela.
 import { podeRecortar, recortarRosto } from './rosto.js';
+import { isTouch } from './touch.js';
 
 // Presets de qualidade: todos a 60 quadros por segundo. Se a internet ou o PC apertarem, o
 // navegador baixa a resolução e segura os 60 quadros ("maintain-framerate"). A captura já sai no
@@ -16,20 +17,32 @@ export const SHARE_PRESETS = {
 export const presetDe = (modo) => (SHARE_PRESETS[modo] ? modo : 'max');
 
 // Webcam: só ocupa o rosto do boneco. Com o recorte do rosto (rosto.js) a câmera abre em 720p
-// para o rosto aproximado continuar nítido, e o que sai é um quadrado de 360 px.
-const CAM = { width: 640, height: 480, fps: 30, maxBitrate: 600_000 };
+// para o rosto aproximado continuar nítido, e o que sai é um quadrado de 360 px. O celular não
+// recorta (quem recebe aproxima o meio da imagem): manda a câmera inteira, menor e a 24 quadros.
+const CAM = isTouch
+  ? { width: 480, height: 360, fps: 24, maxBitrate: 400_000 }
+  : { width: 640, height: 480, fps: 30, maxBitrate: 600_000 };
 const CAM_RECORTE = { width: 1280, height: 720 };
 
 // Quanto cada pessoa que assiste precisa de cada tela (ela mesma avisa, ver enviarInteresse):
-// max = olhando de perto ou em foco; baixo = vê de longe; mini = vê bem pequena; off = não vê.
+// max = olhando de perto ou em foco; medio = vê pequena num PC que desenha o vídeo a 60 quadros;
+// baixo = vê de longe; mini = vê bem pequena; off = não vê.
 // Quem não vê não recebe vídeo: o PC de quem compartilha não gasta codificando para ela, e sobra
 // banda para quem está olhando. O som da tela continua indo para todo mundo.
+// piso: abaixo disso a resolução do nível borra. teto: a fração do preset que o nível pode levar
+// (o 540p não leva os 12 Mbps do 1080p só por ser a única tela que a pessoa vê). linhas: a altura
+// que o nível mira, venha a captura em 1080p, 720p ou 768 (a metade fixa de uma captura de 720p
+// saía com 360 linhas e esticava borrada na mesa); sem linhas, a escala fixa.
 export const NIVEIS = {
-  max: { escala: 1, fps: 60, peso: 1 },
-  baixo: { escala: 2, fps: 60, peso: 0.3 },
-  mini: { escala: 4, fps: 30, peso: 0.08 },
-  off: { escala: 4, fps: 1, peso: 0 },
+  max: { escala: 1, fps: 60, peso: 1, piso: 3_000_000, teto: 1 },
+  medio: { escala: 2, linhas: 540, fps: 60, peso: 0.3, piso: 700_000, teto: 0.25 },
+  baixo: { escala: 2, linhas: 540, fps: 30, peso: 0.3, piso: 500_000, teto: 0.15 },
+  mini: { escala: 4, linhas: 270, fps: 15, peso: 0.08, piso: 120_000, teto: 0.03 },
+  off: { escala: 4, fps: 1, peso: 0, piso: 150_000, teto: 0.0125 },
 };
+// quem ainda não disse quanto precisa (tela nova, quem acabou de entrar) começa barato: quem
+// olha sobe no próximo aviso dela (~250 ms)
+const nivelDe = (peer, k) => NIVEIS[peer.interesse.get(k)] || NIVEIS.mini;
 
 // Codec de vídeo das telas: o que este PC codifica na placa de vídeo (não pesa no processador nem
 // no jogo). Entre os acelerados, nesta ordem: H.264 (todo mundo decodifica na placa), AV1, VP9.
@@ -78,33 +91,69 @@ function preferirCodec(transceiver) {
   }
 }
 
+// as linhas do SDP por seção: o cabeçalho e depois uma lista por m= (começando na linha m=)
+function secoesDoSdp(sdp) {
+  const secoes = [[]];
+  for (const l of sdp.split('\r\n')) {
+    if (l.startsWith('m=')) secoes.push([]);
+    secoes[secoes.length - 1].push(l);
+  }
+  return secoes;
+}
+
 // O Chrome começa toda conexão com ~300 kbps e vai subindo aos poucos: nos primeiros segundos a
 // tela sai em 270p–720p mesmo com internet sobrando (medido: em 6 s ainda estava em 720p). Com a
-// banda inicial e o piso no SDP (parâmetros x-google-* do Chrome; os outros navegadores ignoram),
-// ela já sai em 1080p a 60 quadros. Só nas trilhas de vídeo (o áudio não muda).
-const BANDA_INICIAL = 'x-google-start-bitrate=6000;x-google-min-bitrate=1000';
-function comBandaInicial(desc) {
+// banda inicial no SDP (x-google-start-bitrate, do libwebrtc: Chrome e Safari aplicam, o Firefox
+// ignora) ela já sai em 1080p. O estimador de banda é um por conexão e a subida de quem manda é
+// uma só: com mais gente cada conexão começa mais baixo (1-2: 6 Mbps; 4: 3 Mbps; 15 ou mais:
+// 800 kbps). Piso de banda (x-google-min-bitrate) nenhum: na malha ele vale por conexão, e com 20
+// pessoas assistindo eram 20 Mbps de subida forçados, com a voz picotando.
+const bandaInicial = (conexoes) => Math.round(Math.min(6000, Math.max(800, 12000 / Math.max(1, conexoes))));
+
+// A banda inicial (kbps) em todo codec de vídeo de cada seção: vale o da seção que acabar
+// escolhida. O piso que venha de uma aba antiga sai. Só no vídeo (o áudio não muda).
+function comBandaInicial(desc, kbps) {
   if (!desc?.sdp) return desc;
-  const linhas = desc.sdp.split('\r\n');
   const saida = [];
-  let video = false;
-  const comFmtp = new Set();
-  // payloads de vídeo "de verdade" (não rtx/red/fec) que já têm a=fmtp, por seção
-  const secoes = desc.sdp.split(/\r\nm=/);
-  for (const sec of secoes) {
-    if (!/^(m=)?video /.test(sec)) continue;
-    for (const m of sec.matchAll(/a=fmtp:(\d+) /g)) comFmtp.add(m[1]);
-  }
-  for (const l of linhas) {
-    if (l.startsWith('m=')) video = l.startsWith('m=video');
-    if (video && l.startsWith('a=fmtp:') && !/apt=|x-google-start-bitrate/.test(l)) {
-      saida.push(`${l};${BANDA_INICIAL}`);
+  for (const sec of secoesDoSdp(desc.sdp)) {
+    if (!sec[0].startsWith('m=video')) {
+      saida.push(...sec);
       continue;
     }
-    saida.push(l);
-    // codec sem a=fmtp (o VP8, por exemplo): cria a linha
-    const rtp = video && /^a=rtpmap:(\d+) ([\w-]+)\//.exec(l);
-    if (rtp && !comFmtp.has(rtp[1]) && !/^(rtx|red|ulpfec|flexfec-03)$/i.test(rtp[2])) saida.push(`a=fmtp:${rtp[1]} ${BANDA_INICIAL}`);
+    // payloads que já têm a=fmtp nesta seção
+    const comFmtp = new Set(sec.map((l) => /^a=fmtp:(\d+) /.exec(l)?.[1]).filter(Boolean));
+    for (const l of sec) {
+      // rtx (apt=) não: a banda é do codec, não da retransmissão
+      if (l.startsWith('a=fmtp:') && !l.includes('apt=')) {
+        const [cabeca, ...resto] = l.split(' ');
+        const params = resto.join(' ').split(';').map((p) => p.trim())
+          .filter((p) => p && !/^x-google-(start|min)-bitrate=/.test(p));
+        saida.push(`${cabeca} ${[...params, `x-google-start-bitrate=${kbps}`].join(';')}`);
+        continue;
+      }
+      saida.push(l);
+      // codec sem a=fmtp (o VP8, por exemplo): cria a linha
+      const rtp = /^a=rtpmap:(\d+) ([\w-]+)\//.exec(l);
+      if (rtp && !comFmtp.has(rtp[1]) && !/^(rtx|red|ulpfec|flexfec-03)$/i.test(rtp[2])) saida.push(`a=fmtp:${rtp[1]} x-google-start-bitrate=${kbps}`);
+    }
+  }
+  return { type: desc.type, sdp: saida.join('\r\n') };
+}
+
+// DTX na voz: nos trechos sem fala o Opus manda só um ruído de conforto a cada 400 ms em vez de
+// 50 pacotes/s (~36 kbps na rede com as pausas de uma conversa, contra ~60). Quem decide é o
+// codificador de quem manda, e ele lê o usedtx=1 da descrição REMOTA: por isso só se mexe nela.
+// O som das minhas telas fica de fora (semDtx: mids das seções delas), porque filme e música não
+// trocam os trechos baixos por ruído.
+function comDtx(desc, semDtx) {
+  if (!desc?.sdp) return desc;
+  const saida = [];
+  for (const sec of secoesDoSdp(desc.sdp)) {
+    const mid = sec.find((l) => l.startsWith('a=mid:'))?.slice(6);
+    const opus = sec[0].startsWith('m=audio') && !semDtx.has(mid)
+      ? sec.map((l) => /^a=rtpmap:(\d+) opus\/48000/i.exec(l)?.[1]).find(Boolean)
+      : null;
+    for (const l of sec) saida.push(opus && l.startsWith(`a=fmtp:${opus} `) && !l.includes('usedtx=') ? `${l};usedtx=1` : l);
   }
   return { type: desc.type, sdp: saida.join('\r\n') };
 }
@@ -152,18 +201,44 @@ export class RTC {
     this.micStream.addTrack(track);
     this.micTrack = track;
     for (const peer of this.peers.values()) {
-      if (peer.micSender) await peer.micSender.replaceTrack(track);
-      else peer.micSender = peer.pc.addTrack(track, this.micStream);
+      // addTrack (e não addTransceiver): é ele que casa com a seção sendrecv da voz do outro lado
+      if (!peer.micSender) {
+        peer.micSender = peer.pc.addTrack(track, this.micStream);
+        peer.micVai = track;
+      }
+      this.ajustarMic(peer);
     }
     return this.micStream;
   }
 
   setMicEnabled(on) {
-    if (this.micTrack) this.micTrack.enabled = on;
+    if (!this.micTrack) return;
+    this.micTrack.enabled = on;
+    for (const peer of this.peers.values()) this.ajustarMic(peer);
+  }
+
+  // A voz só sai para quem pode ouvir (o main decide: outra sala com privacidade, por exemplo).
+  vozPara(id, ouve) {
+    const peer = this.peers.get(id);
+    if (!peer) return;
+    peer.ouveMic = !!ouve;
+    this.ajustarMic(peer);
+  }
+
+  // Mudo, ou quem não ouve: a trilha sai do envio. Sem trilha nada é codificado nem enviado; com
+  // enabled = false ia silêncio a 50 pacotes/s para cada conexão. A seção da voz continua
+  // negociada, então voltar é só pôr a trilha de novo (sem renegociar).
+  ajustarMic(peer) {
+    if (!peer.micSender) return;
+    const quer = this.micTrack?.enabled && peer.ouveMic ? this.micTrack : null;
+    if (peer.micVai === quer) return;
+    peer.micVai = quer;
+    peer.micSender.replaceTrack(quer).catch((err) => console.warn('[rtc] voz', err));
   }
 
   // -------------------------------------------------------------- webcam
-  // Vai no rosto do boneco (Avatar.setCam): imagem pequena, 30 quadros e pouca banda. O stream é
+  // Vai no rosto do boneco (Avatar.setCam): imagem pequena, 30 quadros (24 no celular) e pouca
+  // banda; no celular sem recorte do rosto (podeRecortar), que pesava na thread do 3D. O stream é
   // sempre o mesmo (camStream): desligar e ligar de novo só troca a trilha, sem renegociar, e
   // quem recebe continua achando a câmera pelo mesmo id. Quem está longe avisa (interesse 'cam')
   // e para de receber. camFonte é a câmera de verdade; camTrack, o que sai (o rosto recortado).
@@ -258,21 +333,25 @@ export class RTC {
   turbo() {}
 
   // O envio de UMA tela para UMA pessoa: do quanto ela precisa (NIVEIS) e da banda do preset,
-  // dividida pelo peso das telas que ela vê (a que olha de perto leva quase tudo).
+  // dividida pelo peso das telas que ela vê (a que olha de perto leva quase tudo), entre o piso e
+  // o teto do nível. Uma tela pequena sozinha não fica com o preset inteiro (soma < 1).
   envioPara(peer, key) {
     const preset = this.preset();
     const scr = this.screens.get(key);
-    const nivel = NIVEIS[peer.interesse.get(key) || 'max'];
+    const nivel = nivelDe(peer, key);
     let soma = 0;
-    for (const k of this.screens.keys()) soma += NIVEIS[peer.interesse.get(k) || 'max'].peso;
-    const parte = soma > 0 ? nivel.peso / soma : 1;
-    // nunca abaixo do que a resolução daquele nível precisa para ficar limpa
-    const piso = nivel === NIVEIS.max ? 3_000_000 : nivel === NIVEIS.baixo ? 700_000 : 150_000;
+    for (const k of this.screens.keys()) soma += nivelDe(peer, k).peso;
+    const parte = nivel.peso / Math.max(1, soma);
+    // altura do que sai no nível máximo: a da captura (no arquivo maior que o preset, já reduzida
+    // pelo extraScale)
+    const extra = scr?.extraScale || 1;
+    const altura = (scr?.stream?.getVideoTracks()[0]?.getSettings?.().height || preset.height * extra) / extra;
+    const escala = nivel.linhas ? Math.max(1, altura / nivel.linhas) : nivel.escala;
     return {
       active: nivel !== NIVEIS.off,
-      maxBitrate: Math.max(piso, Math.round(preset.maxBitrate * parte)),
+      maxBitrate: Math.round(Math.min(preset.maxBitrate * nivel.teto, Math.max(nivel.piso, preset.maxBitrate * parte))),
       maxFramerate: nivel.fps,
-      scaleResolutionDownBy: Math.max(1, nivel.escala * (scr?.extraScale || 1)),
+      scaleResolutionDownBy: Math.max(1, escala * extra),
     };
   }
 
@@ -342,7 +421,9 @@ export class RTC {
         if (track.kind === 'video') {
           init.sendEncodings = [{ ...this.envioPara(peer, key), networkPriority: 'high', priority: 'high' }];
         } else {
-          init.sendEncodings = [{ maxBitrate: 192_000, networkPriority: 'high', priority: 'high' }];
+          // o Opus aqui é mono (sem stereo=1 no SDP) e o Chrome usa o teto como alvo: com 192k
+          // gastava ~220 kbps por conexão, e 96k mono já é transparente para música e filme
+          init.sendEncodings = [{ maxBitrate: 96_000, networkPriority: 'high', priority: 'high' }];
         }
         const tr = peer.pc.addTransceiver(track, init);
         if (track.kind === 'video') preferirCodec(tr);
@@ -435,8 +516,9 @@ export class RTC {
   }
 
   // -------------------------------------------------------------- interesse (quem vê o quê)
-  // Quem assiste avisa quanto precisa de cada tela minha ({ chave: 'max'|'baixo'|'mini'|'off' }).
-  // A chave 'cam' é a minha webcam (só 'max' ou 'off').
+  // Quem assiste avisa quanto precisa de cada tela minha ({ chave: nível de NIVEIS }). Nível que
+  // esta versão não conhece fica de fora: abas de versões diferentes convivem. Tela de que ela
+  // ainda não falou vai como 'mini' (nivelDe). A chave 'cam' é a minha webcam (só 'max' ou 'off').
   receberInteresse(peer, mapa) {
     if (!mapa || typeof mapa !== 'object') return;
     let mudou = false;
@@ -451,9 +533,20 @@ export class RTC {
     if (cam) this.tuneCam(peer);
   }
 
-  // Eu (que assisto) aviso a quem compartilha quanto preciso de cada tela dele.
+  // Eu (que assisto) aviso a quem compartilha quanto preciso de cada tela dele. Vai em dobro: o
+  // 'interesse' no vocabulário de antes (sem 'medio'; o 'baixo' antigo é 540p a 60, o mesmo que o
+  // 'medio' de agora) para a aba aberta antes do deploy, que descarta nível desconhecido e
+  // deixaria a tela presa no último pedido (até 'off', tela preta); e o 'interesse2' completo.
   enviarInteresse(id, mapa) {
-    if (this.peers.has(id)) this.send(id, { interesse: mapa });
+    if (!this.peers.has(id)) return;
+    let compat = mapa;
+    for (const v of Object.values(mapa)) {
+      if (v !== 'medio') continue;
+      compat = {};
+      for (const [k, n] of Object.entries(mapa)) compat[k] = n === 'medio' ? 'baixo' : n;
+      break;
+    }
+    this.send(id, compat === mapa ? { interesse: mapa } : { interesse: compat, interesse2: mapa });
   }
 
   // -------------------------------------------------------------- conexões
@@ -461,14 +554,20 @@ export class RTC {
     let peer = this.peers.get(id);
     if (peer) return peer;
 
-    const pc = new RTCPeerConnection({ iceServers: this.iceServers });
+    // max-bundle: um transporte só desde a 1ª oferta. No 'balanced' o Chrome junta candidatos
+    // (e reserva TURN) para cada seção até a resposta: voz + câmera + tela abriam 4 transportes
+    // por pessoa que entrava.
+    const pc = new RTCPeerConnection({ iceServers: this.iceServers, bundlePolicy: 'max-bundle' });
     peer = {
       id,
       pc,
       polite: this.selfId > id,
       makingOffer: false,
       ignoreOffer: false,
+      banda: null, // banda inicial da conexão, em kbps (ver banda)
       micSender: null,
+      micVai: null, // a trilha que está no micSender agora (null: a voz não vai para essa pessoa)
+      ouveMic: true, // essa pessoa pode ouvir a minha voz (vozPara)
       camSender: null,
       screenTransceivers: new Map(), // key da tela -> transceivers (vídeo e áudio)
       interesse: new Map(), // key da tela -> quanto essa pessoa precisa dela (ver NIVEIS)
@@ -482,7 +581,7 @@ export class RTC {
         const oferta = await pc.createOffer();
         // outra negociação começou enquanto a oferta era montada: o evento volta sozinho depois
         if (pc.signalingState !== 'stable') return;
-        await pc.setLocalDescription(comBandaInicial(oferta));
+        await pc.setLocalDescription(comBandaInicial(oferta, this.banda(peer)));
         this.send(id, { description: pc.localDescription });
       } catch (err) {
         console.warn('[rtc] offer', err);
@@ -507,28 +606,41 @@ export class RTC {
       ev.track.addEventListener('unmute', () => this.onTrack(id, stream, ev.track));
     };
 
-    if (this.micTrack) peer.micSender = pc.addTrack(this.micTrack, this.micStream);
+    if (this.micTrack) {
+      peer.micSender = pc.addTrack(this.micTrack, this.micStream);
+      peer.micVai = this.micTrack;
+      this.ajustarMic(peer); // mudo: entra sem a trilha
+    }
     this.addCamTo(peer);
     this.addScreenTo(peer);
     return peer;
+  }
+
+  // Banda inicial desta conexão (kbps): decidida na 1ª negociação e fixa depois. Um valor novo
+  // numa renegociação (alguém ligou a tela) faria o estimador de banda recomeçar do zero.
+  banda(peer) {
+    return (peer.banda ??= bandaInicial(this.peers.size));
   }
 
   send(to, data) {
     this.socket.emit('signal', { to, data: JSON.parse(JSON.stringify(data)) });
   }
 
-  async handleSignal(from, { description, candidate, interesse }) {
+  async handleSignal(from, { description, candidate, interesse, interesse2 }) {
     const peer = this.getPeer(from);
-    if (interesse) return this.receberInteresse(peer, interesse);
+    if (interesse2 || interesse) return this.receberInteresse(peer, interesse2 || interesse);
     const { pc } = peer;
     try {
       if (description) {
         const collision = description.type === 'offer' && (peer.makingOffer || pc.signalingState !== 'stable');
         peer.ignoreOffer = !peer.polite && collision;
         if (peer.ignoreOffer) return;
-        await pc.setRemoteDescription(comBandaInicial(description));
+        // o som das minhas telas sai sem DTX (ver comDtx)
+        const semDtx = new Set();
+        for (const trs of peer.screenTransceivers.values()) for (const tr of trs) if (tr.mid) semDtx.add(tr.mid);
+        await pc.setRemoteDescription(comDtx(comBandaInicial(description, this.banda(peer)), semDtx));
         if (description.type === 'offer') {
-          await pc.setLocalDescription(comBandaInicial(await pc.createAnswer()));
+          await pc.setLocalDescription(comBandaInicial(await pc.createAnswer(), this.banda(peer)));
           this.send(from, { description: pc.localDescription });
         }
       } else if (candidate) {

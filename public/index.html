@@ -673,6 +673,16 @@
         </div>
         <small class="hint" id="qualidade-hint"></small>
       </div>
+      <!-- economia de bateria (ver "economia" no main.js): teto de 30 quadros e o resto mais leve -->
+      <div class="field">
+        <span>Economia de bateria</span>
+        <div class="segmented" id="set-economia">
+          <button type="button" data-value="auto">Automática</button>
+          <button type="button" data-value="sim">Sempre</button>
+          <button type="button" data-value="nao">Nunca</button>
+        </div>
+        <small class="hint" id="economia-hint">30 quadros, telas mais leves e câmera só de perto. Automática: liga com a bateria em 20% ou menos, fora da tomada.</small>
+      </div>
       <label class="toggle-row">
         <span><b>Mostrar FPS</b><small>Quadros por segundo, no canto da tela</small></span>
         <input type="checkbox" id="set-fps" class="switch">

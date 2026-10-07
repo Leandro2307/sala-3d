@@ -1,7 +1,9 @@
 :root {
   --bg: #0b0d12;
-  --glass: rgba(16, 19, 27, 0.78);
+  --glass: rgba(16, 19, 27, 0.88);
   --glass-strong: rgba(14, 16, 23, 0.92);
+  --vidro: none;
+  --vidro-leve: none;
   --line: rgba(255, 255, 255, 0.08);
   --line-strong: rgba(255, 255, 255, 0.14);
   --text: #eef1f7;
@@ -16,6 +18,11 @@
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
   color-scheme: dark;
 }
+/* vidro fosco no HUD só no PC na Alta (o main.js põe html.vidro): o 3D atrás muda todo quadro e o
+   desfoque é refeito junto, o que pesa na placa integrada e no celular. Fora dela o fundo fica
+   mais opaco e sem desfoque. Painel, avisos e menus (--glass-strong, 0,92) não desfocam nunca:
+   com esse fundo a diferença não aparece */
+html.vidro { --glass: rgba(16, 19, 27, 0.78); --vidro: blur(14px); --vidro-leve: blur(10px); }
 
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
@@ -262,6 +269,8 @@ input[type='range']::-webkit-slider-thumb {
   transition: background-color 160ms, color 160ms;
 }
 .segmented button.on { background: rgba(255, 255, 255, 0.1); color: var(--text); }
+/* economia de bateria (Ajustes): rótulos curtos, as três escolhas cabem numa linha */
+#set-economia { grid-template-columns: repeat(3, 1fr); }
 
 /* ------------------------------------------------------------ lobby */
 #lobby {
@@ -331,13 +340,14 @@ body.touch #hud, body.touch #bar, body.touch #touch { -webkit-user-select: none;
   border-radius: 999px;
   background: var(--glass);
   border: 1px solid var(--line);
-  backdrop-filter: blur(14px);
+  backdrop-filter: var(--vidro);
   font-weight: 600;
   font-size: 13px;
 }
 .room-chip .sep, .bar-left .sep { color: var(--muted); }
 #room-count { color: var(--muted); }
-/* contador de quadros por segundo (Ajustes → Mostrar FPS) */
+/* contador de quadros por segundo (Ajustes → Mostrar FPS). Com ?perf=1 vêm mais duas linhas
+   curtas, separadas por \n: numa linha só elas passariam por cima da interface no celular */
 #fps {
   position: absolute;
   top: 62px;
@@ -350,6 +360,7 @@ body.touch #hud, body.touch #bar, body.touch #touch { -webkit-user-select: none;
   font-family: var(--mono);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
+  white-space: pre-line;
 }
 .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px rgba(110, 231, 200, 0.15); }
 
@@ -379,7 +390,7 @@ body.touch #hud, body.touch #bar, body.touch #touch { -webkit-user-select: none;
   border-radius: 999px;
   background: var(--glass);
   border: 1px solid var(--line);
-  backdrop-filter: blur(10px);
+  backdrop-filter: var(--vidro-leve);
   font-weight: 600;
   font-size: 13px;
   white-space: nowrap;
@@ -403,7 +414,7 @@ body.touch #hud, body.touch #bar, body.touch #touch { -webkit-user-select: none;
   border-radius: 14px;
   background: var(--glass);
   border: 1px solid var(--line);
-  backdrop-filter: blur(14px);
+  backdrop-filter: var(--vidro);
   font-variant-numeric: tabular-nums;
 }
 #parkour-hud.ready .pk-time { color: var(--muted); }
@@ -882,7 +893,7 @@ body.touch .jh-dica, body.touch #jh-sair kbd, body.touch #dh-sair kbd { display:
   border-radius: 14px;
   background: var(--glass);
   border: 1px solid var(--line);
-  backdrop-filter: blur(14px);
+  backdrop-filter: var(--vidro);
   max-width: 300px;
   overflow: hidden;
   pointer-events: auto;
@@ -927,6 +938,9 @@ body.touch .help-grid[data-input="touch"] { display: grid; }
 }
 #touch > * { pointer-events: auto; }
 
+/* analógico e botões sem desfoque: ficam sempre na tela, por cima de um 3D que muda todo quadro,
+   e o celular refazia o desfoque de cada um a cada quadro. O fundo é mais escuro para manter o
+   contraste, e as cores dos botões já vêm compostas sobre ele */
 #stick {
   position: absolute;
   left: calc(22px + env(safe-area-inset-left));
@@ -934,13 +948,12 @@ body.touch .help-grid[data-input="touch"] { display: grid; }
   width: 132px;
   height: 132px;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(18, 22, 32, 0.52), rgba(18, 22, 32, 0.3));
+  background: radial-gradient(circle, rgba(18, 22, 32, 0.62), rgba(18, 22, 32, 0.42));
   border: 1.5px solid var(--line-strong);
-  backdrop-filter: blur(6px);
   touch-action: none;
   transition: border-color 180ms, background 180ms;
 }
-#stick.active { background: radial-gradient(circle, rgba(24, 30, 44, 0.66), rgba(18, 22, 32, 0.4)); }
+#stick.active { background: radial-gradient(circle, rgba(24, 30, 44, 0.76), rgba(18, 22, 32, 0.52)); }
 #stick.running { border-color: rgba(110, 231, 200, 0.55); }
 .stick-ring {
   position: absolute;
@@ -960,6 +973,8 @@ body.touch .help-grid[data-input="touch"] { display: grid; }
   border: 1.5px solid rgba(255, 255, 255, 0.3);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
   transition: transform 90ms linear, background 180ms;
+  /* o touch.js move a bolinha a cada toque: numa camada própria ela só desliza, sem repintar */
+  will-change: transform;
 }
 #stick.active .stick-knob { transition: background 180ms; }
 #stick.running .stick-knob {
@@ -982,10 +997,9 @@ body.touch .help-grid[data-input="touch"] { display: grid; }
   width: 54px;
   height: 54px;
   border-radius: 50%;
-  background: rgba(18, 22, 32, 0.56);
+  background: rgba(18, 22, 32, 0.66);
   border: 1.5px solid var(--line-strong);
   color: var(--text);
-  backdrop-filter: blur(6px);
   touch-action: none;
   -webkit-user-select: none;
   user-select: none;
@@ -995,12 +1009,12 @@ body.touch .help-grid[data-input="touch"] { display: grid; }
 .tb.big {
   width: 76px;
   height: 76px;
-  background: rgba(110, 231, 200, 0.16);
+  background: rgba(40, 72, 72, 0.66);
   border-color: rgba(110, 231, 200, 0.42);
   color: var(--accent);
 }
-.tb.held { transform: scale(0.92); background: rgba(110, 231, 200, 0.3); border-color: rgba(110, 231, 200, 0.6); }
-.tb.on { background: rgba(110, 231, 200, 0.26); border-color: rgba(110, 231, 200, 0.55); color: var(--accent); }
+.tb.held { transform: scale(0.92); background: rgba(56, 109, 102, 0.72); border-color: rgba(110, 231, 200, 0.6); }
+.tb.on { background: rgba(52, 99, 94, 0.7); border-color: rgba(110, 231, 200, 0.55); color: var(--accent); }
 .tb-label { font-size: 9px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
 .tb-label:empty { display: none; }
 .tb.corner {
@@ -1028,7 +1042,6 @@ body.touch .help-grid[data-input="touch"] { display: grid; }
   border-radius: 12px;
   background: var(--glass-strong);
   border: 1px solid var(--line);
-  backdrop-filter: blur(14px);
   font-weight: 500;
   font-size: 13px;
   line-height: 1.4;
@@ -1100,13 +1113,14 @@ body.touch .help-grid[data-input="touch"] { display: grid; }
 }
 .ghost .dot { position: absolute; top: 9px; right: 9px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--bg); }
 
+/* o anel cresce com a voz pelo transform que o main.js escreve direto nele: uma variável no
+   botão refazia o estilo do botão inteiro a cada quadro */
 .mic-level {
   position: absolute;
   inset: -3px;
   border-radius: 50%;
   border: 2px solid var(--accent);
   opacity: 0;
-  transform: scale(var(--lvl, 1));
   transition: opacity 120ms;
   pointer-events: none;
 }
@@ -1164,7 +1178,6 @@ body.touch #cam-preview { right: auto; left: 12px; bottom: auto; top: calc(108px
   border-radius: 999px;
   background: var(--glass-strong);
   border: 1px solid var(--line);
-  backdrop-filter: blur(14px);
   animation: rise 220ms var(--ease) both;
 }
 .popover button {
@@ -1683,7 +1696,6 @@ body.touch #cam-preview { right: auto; left: 12px; bottom: auto; top: calc(108px
   border-radius: 20px;
   background: var(--glass-strong);
   border: 1px solid var(--line);
-  backdrop-filter: blur(18px);
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
   animation: panel-in 320ms var(--ease) both;
   overflow: hidden;
@@ -1968,7 +1980,7 @@ body.touch #cam-preview { right: auto; left: 12px; bottom: auto; top: calc(108px
   border-radius: 999px;
   background: var(--glass);
   border: 1px solid var(--line);
-  backdrop-filter: blur(10px);
+  backdrop-filter: var(--vidro-leve);
   font-weight: 600;
   font-size: 13px;
   white-space: nowrap;
@@ -2156,7 +2168,7 @@ body.touch #cam-preview { right: auto; left: 12px; bottom: auto; top: calc(108px
   border-radius: 14px;
   background: var(--glass);
   border: 1px solid rgba(251, 191, 36, 0.3);
-  backdrop-filter: blur(14px);
+  backdrop-filter: var(--vidro);
   text-align: center;
   pointer-events: none;
 }
@@ -2183,7 +2195,7 @@ body.touch .rh-time { font-size: 20px; }
   border-radius: 14px;
   background: var(--glass);
   border: 1px solid rgba(244, 63, 94, 0.3);
-  backdrop-filter: blur(14px);
+  backdrop-filter: var(--vidro);
   pointer-events: none;
 }
 .fh-bar {
@@ -2219,17 +2231,17 @@ body.touch .rh-time { font-size: 20px; }
 #fight-hud.ko .fh-hint { color: var(--danger); }
 
 .tb.punch {
-  background: rgba(244, 63, 94, 0.2);
+  background: rgba(84, 34, 50, 0.68);
   border-color: rgba(244, 63, 94, 0.5);
   color: #fb7185;
 }
-.tb.punch.held { background: rgba(244, 63, 94, 0.45); }
+.tb.punch.held { background: rgba(148, 46, 68, 0.78); }
 /* pedais do carro: freio vermelho, acelerador verde, os dois com o rótulo embaixo do ícone */
 .tb.pedal { width: 64px; height: 64px; border-radius: 22px; }
 .tb.big.pedal { width: 82px; height: 82px; border-radius: 26px; }
-#tb-freio { background: rgba(244, 63, 94, 0.18); border-color: rgba(244, 63, 94, 0.5); color: #fb7185; }
-#tb-freio.held { background: rgba(244, 63, 94, 0.42); }
-#tb-acelera.held { background: rgba(110, 231, 200, 0.4); }
+#tb-freio { background: rgba(79, 33, 49, 0.67); border-color: rgba(244, 63, 94, 0.5); color: #fb7185; }
+#tb-freio.held { background: rgba(142, 44, 66, 0.77); }
+#tb-acelera.held { background: rgba(66, 132, 120, 0.76); }
 /* poderes e arma (celular): coluna à direita, acima dos botões de ação */
 .touch-poderes {
   position: absolute;
@@ -2240,8 +2252,8 @@ body.touch .rh-time { font-size: 20px; }
   align-items: flex-end;
   gap: 8px;
 }
-.tb.tiro { width: 58px; height: 58px; background: rgba(250, 204, 21, 0.18); border-color: rgba(250, 204, 21, 0.55); color: #facc15; }
-.tb.tiro.held { background: rgba(250, 204, 21, 0.4); }
+.tb.tiro { width: 58px; height: 58px; background: rgba(80, 71, 29, 0.67); border-color: rgba(250, 204, 21, 0.55); color: #facc15; }
+.tb.tiro.held { background: rgba(140, 118, 26, 0.76); }
 #poderes-hud {
   position: absolute;
   left: 50%;
@@ -2344,11 +2356,20 @@ body.touch #controls-help {
   left: 10px;
   max-width: 180px;
 }
+/* o canto de cima à esquerda é da ajuda (e da sua câmera), que cobria o contador inteiro: no
+   celular ele fica à direita, embaixo do botão de tela cheia, e quebra as linhas antes da câmera */
+body.touch #fps {
+  top: calc(112px + env(safe-area-inset-top));
+  left: auto;
+  right: calc(16px + env(safe-area-inset-right));
+  max-width: calc(100% - 120px);
+}
 body.touch #crosshair { opacity: 0.5; }
 body.touch #parkour-hud { top: calc(58px + env(safe-area-inset-top)); }
 body.touch #fight-hud { bottom: auto; top: calc(58px + env(safe-area-inset-top)); width: min(230px, 56vw); }
 
-/* painel quase inteiro: a tela é pequena e os controles somem enquanto ele está aberto */
+/* painel quase inteiro: a tela é pequena e os controles somem enquanto ele está aberto. Sem
+   desfoque, o fundo fica quase opaco: cobrindo a tela toda, o 3D nítido atrás atrapalharia a leitura */
 body.touch #panel {
   top: calc(54px + env(safe-area-inset-top));
   right: 8px;
@@ -2356,6 +2377,7 @@ body.touch #panel {
   bottom: calc(8px + env(safe-area-inset-bottom));
   width: auto;
   max-width: none;
+  background: rgba(14, 16, 23, 0.97);
 }
 
 /* paisagem baixinha: encolhe tudo pra sobrar mundo */
@@ -2680,7 +2702,6 @@ body.com-luneta #controls-help, body.com-luneta #salas, body.com-luneta .room-ch
   border-radius: 14px;
   background: var(--glass-strong);
   border: 1px solid var(--line-strong);
-  backdrop-filter: blur(14px);
   pointer-events: auto;
   animation: rise 360ms var(--ease) both;
 }
@@ -2740,7 +2761,6 @@ body.touch #topo-centro { top: calc(64px + env(safe-area-inset-top)); }
   border-radius: 18px;
   background: var(--glass-strong);
   border: 1px solid var(--line);
-  backdrop-filter: blur(16px);
   overflow: hidden;
   animation: rise 700ms 120ms var(--ease) both;
 }
@@ -2820,8 +2840,9 @@ body.touch #topo-centro { top: calc(64px + env(safe-area-inset-top)); }
   display: grid;
   place-items: center;
   padding: 16px;
-  background: rgba(5, 7, 12, 0.55);
-  backdrop-filter: blur(4px);
+  /* o mesmo véu do modal de personagem: escuro o bastante para dispensar o desfoque, que era
+     refeito a cada quadro sobre a tela inteira */
+  background: rgba(5, 6, 9, 0.72);
 }
 .escolher-tela[hidden] { display: none; }
 .et-card {

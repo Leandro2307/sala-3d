@@ -20,6 +20,7 @@ import { Jogos } from './jogos.js';
 import { Controle } from './controle.js';
 import { Mesa } from './mesa.js';
 import { Qualidade, NIVEIS, nivelInicial } from './qualidade.js';
+import * as moduloQualidade from './qualidade.js';
 import { GuiaExtensao } from './guia-extensao.js';
 import { Navegadores, siteDe } from './navegador.js';
 import { DEPARTAMENTOS, IDS_DEPARTAMENTOS, MAX_SALAS, rotuloDoPosto, portaDa, comTelas } from './escritorio.js';
@@ -43,8 +44,11 @@ const PANEL_TITLES = { people: 'Pessoas', chat: 'Chat da sala', telao: 'Telão',
 const DEFAULTS = {
   name: '', color: COLORS[0], mic: true, voice: 100, screen: 90, tv: 80, spatial: false,
   shareMode: 'max', sens: 100, sfx: true, micDevice: '', camDevice: '', helpCollapsed: false, photo: null, shirt: 'none', char: 'padrao', arma: ARMA_PADRAO,
-  // qualidade gráfica: 'auto' ou um nível fixo; nivelAuto: onde o automático parou da última vez
-  qualidade: 'auto', nivelAuto: null, mostrarFps: false,
+  // qualidade gráfica: 'auto' ou um nível fixo; nivelAuto: onde o automático parou da última vez;
+  // falhasAuto: quantas vezes cada nível caiu logo depois de subir (o automático espera mais para tentar)
+  qualidade: 'auto', nivelAuto: null, falhasAuto: {}, mostrarFps: false,
+  // economia de bateria: 'auto' (bateria fraca fora da tomada), 'sim' ou 'nao'
+  economia: 'auto',
   // presença (ver "empresa") e se o gestor quer os alertas da equipe
   status: 'disponivel', alertasGestor: true,
 };
@@ -78,7 +82,11 @@ let touchPad = null; // controles de toque (só no celular)
 if (!NIVEIS[settings.qualidade]) settings.qualidade = 'auto';
 const nivelDePartida = settings.qualidade !== 'auto' ? settings.qualidade
   : NIVEIS[settings.nivelAuto] ? settings.nivelAuto : nivelInicial();
-const world = new World($('#gl'), $('#css3d'), { antialias: NIVEIS[nivelDePartida].antialias, qualidade: NIVEIS[nivelDePartida] });
+// MSAA pelo nível e pela densidade da tela (qualidade.js); sem essa função lá, vale o do nível
+const querAntialias = (n) => moduloQualidade.querAntialias?.(n) ?? n.antialias;
+const world = new World($('#gl'), $('#css3d'), { antialias: querAntialias(NIVEIS[nivelDePartida]), qualidade: NIVEIS[nivelDePartida] });
+// lido uma vez: com o contexto do WebGL perdido, getContextAttributes() devolve null
+const bordasLisas = !!world.renderer.getContextAttributes()?.antialias;
 // navegador dentro das telas: páginas fixas do dono e o navegador que cada um abre no (+)
 const navegadores = new Navegadores(world, {
   endereco: (texto) => paraIframe(enderecoDigitado(texto)),
@@ -96,12 +104,22 @@ const clima = new Clima(world);
 const qualidade = new Qualidade(world, {
   modo: settings.qualidade,
   nivel: settings.nivelAuto,
+  falhas: settings.falhasAuto || {},
   aoMudar: (q) => {
-    // guarda onde o automático parou: a próxima visita já começa ali (com o antialias certo)
-    if (q.modo === 'auto' && settings.nivelAuto !== q.nivel) {
+    let mudou = false;
+    // guarda onde o automático parou: a próxima visita já começa ali (com o antialias certo). Com a
+    // tela ou o sistema segurando os quadros, ou em economia de bateria, o nível não diz nada da
+    // placa de vídeo: não grava
+    if (q.modo === 'auto' && !q.presoNoSistema && !q.economia && settings.nivelAuto !== q.nivel) {
       settings.nivelAuto = q.nivel;
-      saveSettings();
+      mudou = true;
     }
+    // nível que caiu logo depois de subir: a próxima visita também espera mais para tentar de novo
+    if (q.falhas && JSON.stringify(q.falhas) !== JSON.stringify(settings.falhasAuto || {})) {
+      settings.falhasAuto = { ...q.falhas };
+      mudou = true;
+    }
+    if (mudou) saveSettings();
     renderQualidade();
   },
 });
@@ -233,19 +251,36 @@ function soltarVideo(sh) {
 }
 
 // ------------------------------------------------------------------ toasts
-function toast(text, kind = 'info', ms = 4200, color = null) {
+// acao: { rotulo, fazer } põe um botão no aviso. Devolve a função que fecha o aviso antes da hora.
+function toast(text, kind = 'info', ms = 4200, color = null, acao = null) {
   const box = $('#toasts');
   const el = document.createElement('div');
   el.className = `toast ${kind}`;
   const c = color || (kind === 'warn' ? 'var(--warn)' : kind === 'error' ? 'var(--danger)' : null);
   el.innerHTML = `<span class="tdot"${c ? ` style="--c:${c}"` : ''}></span><span></span>`;
   el.lastChild.textContent = text;
-  box.appendChild(el);
-  while (box.children.length > 4) box.firstElementChild.remove();
-  setTimeout(() => {
+  const fechar = () => {
+    if (el.classList.contains('out')) return;
     el.classList.add('out');
     setTimeout(() => el.remove(), 260);
-  }, ms);
+  };
+  if (acao) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'secondary small';
+    b.style.flex = 'none';
+    b.textContent = acao.rotulo;
+    b.addEventListener('click', () => {
+      fechar();
+      acao.fazer();
+    });
+    el.appendChild(b);
+    el.style.pointerEvents = 'auto'; // o #hud deixa os cliques passarem para o 3D; o aviso com botão não
+  }
+  box.appendChild(el);
+  while (box.children.length > 4) box.firstElementChild.remove();
+  setTimeout(fechar, ms);
+  return fechar;
 }
 
 // ------------------------------------------------------------------ lobby
@@ -586,16 +621,18 @@ $('#lobby-form').addEventListener('submit', (e) => {
 // ------------------------------------------------------------------ salas (lista lateral)
 // Trocar de sala recarrega a página já entrando na outra (?entrar=1): voz, telas e jogos começam
 // do zero, do mesmo jeito que na primeira entrada. Sala com senha sem passe para no saguão.
+// Também serve para voltar à mesma sala (servidor novo no ar, 3D que não voltou sozinho).
+function recarregarNaSala(id = state.room) {
+  const url = new URL(window.location.href);
+  if (id) url.searchParams.set('sala', id);
+  url.searchParams.set('entrar', '1');
+  window.location.href = url;
+}
 const salas = new SalasLaterais({
   raiz: $('#salas'),
   atual: () => state.room,
   passes: lerPasses,
-  aoTrocar: (id) => {
-    const url = new URL(window.location.href);
-    url.searchParams.set('sala', id);
-    url.searchParams.set('entrar', '1');
-    window.location.href = url;
-  },
+  aoTrocar: (id) => recarregarNaSala(id),
 });
 // salas ao vivo (aovivo.js): o cartão do saguão e as salas com gente na coluna lateral
 const aoVivo = new AoVivo();
@@ -609,6 +646,7 @@ const redesenharSaguao = cartaoDoSaguao(aoVivo, {
     roomInput.dispatchEvent(new Event('input'));
     (nameInput.value.trim() ? $('#btn-join') : nameInput).focus();
   },
+  ativo: () => !state.joined, // dentro da sala o saguão fica escondido
 });
 roomInput.addEventListener('input', () => redesenharSaguao());
 if (params.get('entrar') === '1') {
@@ -773,6 +811,7 @@ function emitJoin() {
       arma: settings.arma,
       status: settings.status,
       passe: state.passe,
+      proto: 2, // recebe as posições em lote ('states'); aba antiga continua no 'state' de cada um
     }, resolve);
   });
 }
@@ -782,8 +821,13 @@ function applyJoined(data) {
   rtc.selfId = data.selfId;
   state.room = data.room;
   state.passe = data.passe || null;
+  // versão do servidor na primeira entrada: numa reconexão, outra versão = deploy novo (ver 'connect')
+  state.versao ??= data.versao;
   guardarPasse(data.room, data.passe);
+  // sobra de antes (bots de teste criados no saguão) sai da cena junto
+  for (const u of state.users.values()) if (!u.isSelf) u.avatar.dispose();
   state.users.clear();
+  porNumero.clear();
   state.users.set(data.selfId, {
     id: data.selfId, name: settings.name, color: settings.color, mic: state.micOn && state.micAvailable,
     shares: new Map(), isSelf: true, avatar: localAvatar, streams: new Map(),
@@ -829,6 +873,8 @@ function bindSocket() {
     for (const id of [...state.users.keys()]) if (id !== state.selfId) removeUser(id, true);
     const data = await emitJoin();
     if (data?.erro) return senhaRecusada();
+    // o servidor mudou de versão (deploy novo): recarrega já entrando, com o código que combina com ele
+    if (data?.versao && data.versao !== state.versao) return recarregarNaSala();
     applyJoined(data);
     toast('Reconectado!');
   });
@@ -852,12 +898,26 @@ function bindSocket() {
     salas.atualizar();
   });
 
+  // servidor antigo: uma mensagem por pessoa a cada passo
   socket.on('state', ({ id, p, r, a, s }) => {
     const u = state.users.get(id);
     if (!u || u.isSelf) return;
     u.avatar.setNetworkState(p, r, a);
     u.speaking = !!s;
     u.avatar.speaking = !!s;
+  });
+  // servidor novo: quem se mexeu na sala vem num lote só, [n, x, y, z, r, a, s, n, x, ...] a cada ~30 ms
+  socket.on('states', (a) => {
+    if (!Array.isArray(a)) return;
+    for (let i = 0; i + 6 < a.length; i += 7) {
+      const u = porNumero.get(a[i]);
+      if (!u || u.isSelf) continue;
+      _pRede[0] = a[i + 1];
+      _pRede[1] = a[i + 2];
+      _pRede[2] = a[i + 3];
+      u.avatar.setNetworkState(_pRede, a[i + 4], a[i + 5]);
+      u.speaking = u.avatar.speaking = !!a[i + 6];
+    }
   });
 
   socket.on('user-update', ({ id, mic, cam, photo, shirt, char, color, arma, health, ko, status, inativo, gestor, desde }) => {
@@ -901,7 +961,8 @@ function bindSocket() {
     }
     if (char !== undefined) {
       u.char = char;
-      u.avatar.setPersonagem(PERSONAGENS[char]);
+      // o próprio já trocou ao escolher (aplicarPersonagem): o eco do servidor carregaria de novo
+      if (!u.isSelf) u.avatar.setPersonagem(PERSONAGENS[char]);
     }
     if (health !== undefined) u.avatar.setHealth(health);
     if (ko !== undefined) u.avatar.setKo(ko);
@@ -983,9 +1044,10 @@ function bindSocket() {
       toast(`${u.name} começou a compartilhar (${ondeEsta(sh)})`, 'info', 4500, u.color);
     }
     u.avatar.setStatus({ sharing: u.shares.size > 0 });
-    if (u.isSelf) refreshScreens();
-    else routeStreams(u);
+    // a tela mudou de lugar, entrou ou saiu: as telas do 3D se refazem mesmo sem vídeo novo
+    if (u.isSelf || !routeStreams(u)) refreshScreens();
     renderPeople();
+    setTimeout(atualizarInteresse, 0);
   });
 
   socket.on('main', ({ source, by }) => {
@@ -1057,6 +1119,10 @@ function bindSocket() {
 }
 
 // ------------------------------------------------------------------ pessoas
+// n: número curto que o servidor dá a cada pessoa, usado no lote de posições ('states')
+const porNumero = new Map(); // n -> pessoa
+const _pRede = [0, 0, 0]; // posição de quem vem no lote (setNetworkState copia)
+
 function addUser(data) {
   if (state.users.has(data.id)) return state.users.get(data.id);
   const avatar = new Avatar({ name: data.name, color: data.color });
@@ -1074,13 +1140,19 @@ function addUser(data) {
   const shares = new Map((data.shares || []).map((sh) => [sh.key, { ...sh, video: null }]));
   const u = { ...data, shares, isSelf: false, avatar, streams: new Map(), audioEl: null, speaking: false };
   state.users.set(u.id, u);
+  if (u.n != null) porNumero.set(u.n, u);
+  world.marcarSombra?.(); // mais um boneco na sombra do sol
   return u;
 }
 
 function removeUser(id, quiet = false) {
   const u = state.users.get(id);
   if (!u || u.isSelf) return;
+  if (porNumero.get(u.n) === u) porNumero.delete(u.n);
+  interesseEnviado.delete(id);
+  vozFora.delete(id);
   u.avatar.dispose();
+  world.marcarSombra?.();
   if (u.audioEl) {
     u.audioEl.srcObject = null;
     u.audioEl.remove();
@@ -1092,7 +1164,7 @@ function removeUser(id, quiet = false) {
   for (const sh of u.shares.values()) soltarVideo(sh);
   if (state.focus?.kind === 'share' && u.shares.has(state.focus.key)) exitFocus();
   state.users.delete(id);
-  rtc.removePeer(id);
+  rtc?.removePeer(id); // bots de teste existem até antes de entrar (sem rtc)
   if (!quiet) {
     refreshScreens();
     renderPeople();
@@ -1119,6 +1191,10 @@ function statusText(u) {
 
 function renderPeople() {
   if (!state.joined && !state.selfId) return;
+  // o menu "Suas telas" e a lista só são montados à mostra (abrir cada um já redesenha): mic,
+  // fala e status de cada pessoa não remontam HTML escondido
+  if (!$('#share-pop').hidden) renderSharePop();
+  if (state.panel !== 'people') return;
   const users = [...state.users.values()].sort((a, b) => (a.isSelf ? -1 : b.isSelf ? 1 : a.name.localeCompare(b.name)));
   $('#people-list').innerHTML = users.map((u) => {
     const telas = [...u.shares.values()].sort(ordemDasTelas);
@@ -1153,7 +1229,6 @@ function renderPeople() {
       ${linhas ? `<ul class="person-shares">${linhas}</ul>` : ''}
     </li>`;
   }).join('');
-  renderSharePop();
 }
 
 $('#people-list').addEventListener('click', (e) => {
@@ -1343,35 +1418,95 @@ async function populateDevices() {
 
 // ------------------------------------------------------------------ qualidade das telas
 // Quem assiste diz a quem compartilha quanto precisa de cada tela (rtc.js, NIVEIS): em foco ou
-// grande na vista = máxima (60 quadros); pequena = metade ou um quarto; fora da vista ou com a
-// aba escondida = nada de vídeo (o som continua). Subir é na hora; descer espera um pouco, para
-// não ficar trocando enquanto a pessoa olha em volta.
-const ESPERA_DESCER = { baixo: 1500, mini: 2000, off: 2500 };
-const ORDEM_NIVEL = { off: 0, mini: 1, baixo: 2, max: 3 };
+// grande na vista = máxima (60 quadros); média = 540p a 60 ou a 30; pequena = um quarto; fora da
+// vista ou com a aba escondida = nada de vídeo (o som continua). Subir é na hora; descer espera um
+// pouco, para não ficar trocando enquanto a pessoa olha em volta.
+const ESPERA_DESCER = { medio: 1500, baixo: 1500, mini: 2000, off: 2500 };
+const ORDEM_NIVEL = { off: 0, mini: 1, baixo: 2, medio: 3, max: 4 };
 const niveisTela = new Map(); // key -> { nivel, candidato, desde }
 const interesseEnviado = new Map(); // peerId -> { key: nivel }
 let ultimoEnvioCompleto = 0;
 
 function nivelDesejado(sh) {
-  if (document.hidden) return 'off';
-  if (state.focus?.kind === 'share') return state.focus.key === sh.key ? 'max' : 'off';
-  if (mesa.aberta) return 'max';
-  if (!sh.video) return 'max';
-  // em pixels de verdade do monitor (tela 4K com zoom de 150% tem 1,5 pixel por pixel da página)
-  const px = world.alturaDoVideo(sh.video) * (window.devicePixelRatio || 1);
-  return px >= 160 ? 'max' : px >= 50 ? 'baixo' : px > 0 ? 'mini' : 'off';
+  const nivel = nivelDaTela(sh);
+  // O som da aba compartilhada sai por este mesmo <video>, que só começa a tocar (som junto)
+  // depois do 1º quadro de imagem. Até lá, no mínimo 'mini' (1/4 a 15 qps, barato): o 'off' logo
+  // de cara (tela de costas, em outra sala) deixava o vídeo sem quadro e a sala sem o som.
+  return nivel === 'off' && !(sh.video?.readyState >= 2) ? 'mini' : nivel;
 }
 
-// Webcam de alguém: só vem se dá para ver o rosto (perto, aba aberta, sem tela em foco cobrindo
-// tudo). Longe, quem tem a câmera nem codifica para mim.
-const CAM_PERTO = 18;
+function nivelDaTela(sh) {
+  if (document.hidden) return 'off';
+  if (state.focus?.kind === 'share') return state.focus.key === sh.key ? 'max' : 'off';
+  // na mesa, pelo tamanho de cada monitor (o que está atrás da ampliada não precisa de vídeo)
+  if (mesa.aberta) return mesa.nivelDe ? mesa.nivelDe(sh.key) : 'max';
+  // Em pixels que o 3D desenha de verdade: a altura na página vezes a resolução do canvas. Pela
+  // densidade da tela, o celular de DPR 3 (onde o 3D sai a 0,8-1,25) pedia 1080p para 60 px.
+  const css = world.alturaDaTela?.(sh.key) ?? (sh.video ? world.alturaDoVideo(sh.video) : 0);
+  const px = css * world.renderer.getPixelRatio();
+  // 'medio' (540p60) só onde o 3D sobe a tela a 60 quadros: na Alta, a partir de 90 px
+  const nivel = px >= (isTouch ? 400 : 160) ? 'max'
+    : px >= 50 ? (css >= 90 && world.videoFps >= 60 ? 'medio' : 'baixo')
+      : px > 0 ? 'mini' : 'off';
+  // economia de bateria: fora do foco e da mesa, no máximo 540p30
+  return economiaLigada && nivel === 'max' ? 'baixo' : nivel;
+}
+
+// Webcam de alguém: só vem se dá para ver o rosto — perto, de frente, na vista e sem tela, site ou
+// mesa cobrindo o 3D. Fora disso quem tem a câmera nem codifica para mim.
+const _rosto = new THREE.Sphere(new THREE.Vector3(), 0.9);
 function nivelDaCam(u) {
-  if (document.hidden || state.focus?.kind === 'share' || mesa.aberta) return 'off';
-  return world.camera.position.distanceTo(u.avatar.group.position) < CAM_PERTO ? 'max' : 'off';
+  if (document.hidden || !mundoVisivel() || navegadorEmUso()) return 'off';
+  const a = u.avatar;
+  if (a.oculto || a.veiculo) return 'off';
+  const p = a.group.position;
+  const cam = world.camera.position;
+  const perto = isTouch || economiaLigada ? 10 : 18;
+  if (cam.distanceToSquared(p) > perto * perto) return 'off';
+  // de costas para a câmera (mais de 120° fora do rosto)
+  const dx = cam.x - p.x;
+  const dz = cam.z - p.z;
+  const giro = a.inner.rotation.y;
+  if (Math.sin(giro) * dx + Math.cos(giro) * dz < -0.5 * Math.hypot(dx, dz)) return 'off';
+  _rosto.center.set(p.x, p.y + 1.2, p.z);
+  return (world.naVista?.(_rosto) ?? true) ? 'max' : 'off';
+}
+
+// Celular: no máximo 6 webcams decodificando ao mesmo tempo. Ficam as que se vê, as mais perto
+// primeiro; quem já estava com a câmera leva 1 m de vantagem, para não trocar a cada passo de quem
+// está na divisa. As que sobram voltam para a foto (ou o visor) em vez de congelar.
+const MAX_CAMS_TOQUE = 6;
+const _camsVistas = [];
+const porDistanciaDaCam = (a, b) => a.distanciaCam - b.distanciaCam;
+function limitarCams() {
+  const cam = world.camera.position;
+  _camsVistas.length = 0;
+  for (const u of state.users.values()) {
+    if (u.isSelf || !u.cam || u.nivelCam !== 'max') continue;
+    u.distanciaCam = u.avatar.group.position.distanceTo(cam) - (u.camPausada === false ? 1 : 0);
+    _camsVistas.push(u);
+  }
+  _camsVistas.sort(porDistanciaDaCam);
+  _camsVistas.forEach((u, i) => {
+    const pausa = i >= MAX_CAMS_TOQUE;
+    if (pausa) u.nivelCam = 'off';
+    u.camPausada = pausa;
+    u.avatar.pausarCam?.(pausa); // não faz nada se já está assim
+  });
 }
 
 function atualizarInteresse() {
   if (!state.joined || !rtc) return;
+  // ninguém compartilhando nem com câmera: nada a pedir, e a vista nem precisa ser preparada
+  let alguem = false;
+  for (const u of state.users.values()) if (!u.isSelf && (u.shares.size || u.cam)) alguem = true;
+  if (!alguem) {
+    niveisTela.clear();
+    return;
+  }
+  world.prepararInteresse?.(); // vista e paredes uma vez por rodada (alturaDaTela, naVista)
+  for (const u of state.users.values()) if (!u.isSelf && u.cam) u.nivelCam = nivelDaCam(u);
+  if (isTouch) limitarCams();
   const agora = performance.now();
   const completo = agora - ultimoEnvioCompleto > 8000;
   if (completo) ultimoEnvioCompleto = agora;
@@ -1400,7 +1535,7 @@ function atualizarInteresse() {
     if (u.isSelf || (!u.shares.size && !u.cam)) continue;
     const mapa = {};
     for (const sh of u.shares.values()) mapa[sh.key] = suavizar(sh.key, nivelDesejado(sh));
-    if (u.cam) mapa.cam = suavizar(`cam:${u.id}`, nivelDaCam(u));
+    if (u.cam) mapa.cam = suavizar(`cam:${u.id}`, u.nivelCam);
     const antes = interesseEnviado.get(u.id) || {};
     const mudou = Object.keys(mapa).filter((k) => antes[k] !== mapa[k]);
     if (completo || mudou.length) {
@@ -1410,7 +1545,10 @@ function atualizarInteresse() {
   }
   for (const k of niveisTela.keys()) if (!vistas.has(k)) niveisTela.delete(k);
 }
-setInterval(atualizarInteresse, 250);
+setInterval(() => {
+  atualizarInteresse();
+  atualizarVoz();
+}, 250);
 // voltou para a aba (ou saiu dela): decide na hora
 document.addEventListener('visibilitychange', () => setTimeout(atualizarInteresse, 0));
 
@@ -2407,13 +2545,32 @@ function localDe(u) {
   const p = posDe(u);
   return nomeDoLugar(world.salaEm(p.x, p.z));
 }
-// salas à prova de som: quem está num departamento só ouve (e é ouvido por) quem está na mesma sala
-function mesmoAmbiente(u) {
+// salas à prova de som: quem está num departamento só ouve (e é ouvido por) quem está na mesma sala.
+// p: onde a pessoa está (a posição que chegou pela rede, para decidir antes de o boneco chegar lá)
+function mesmoAmbiente(u, p = u.avatar.group.position) {
   if (!modoEscritorio() || state.sala?.privacidade === false || !world.planta) return true;
   const a = world.salaEm(player.pos.x, player.pos.z);
-  const p = u.avatar.group.position;
   const b = world.salaEm(p.x, p.z);
   return a === b || (!DEPARTAMENTOS[a] && !DEPARTAMENTOS[b]);
+}
+
+// A minha voz só sai para quem pode ouvir (rtc.vozPara): quem está em outra sala à prova de som
+// não recebe nem decodifica nada. Volta na hora em que a pessoa entra; ao sair, só depois de 2,5 s,
+// para não cortar e religar de quem para na porta.
+const vozFora = new Map(); // id -> desde quando a pessoa está fora do meu ambiente
+function atualizarVoz() {
+  if (!state.joined || !rtc?.vozPara) return;
+  const agora = performance.now();
+  for (const u of state.users.values()) {
+    if (u.isSelf) continue;
+    let ouve = mesmoAmbiente(u, u.avatar.target);
+    if (ouve) vozFora.delete(u.id);
+    else {
+      if (!vozFora.has(u.id)) vozFora.set(u.id, agora);
+      ouve = agora - vozFora.get(u.id) < 2500;
+    }
+    rtc.vozPara(u.id, ouve);
+  }
 }
 
 // ----- o meu status
@@ -2801,6 +2958,8 @@ const mesa = new Mesa({
     if (!r.ok) toast('O navegador não deixou entrar em tela cheia. Tente a tecla F11.', 'warn', 5000);
   },
   aoFechar: () => fecharMesa(true),
+  // mediu os monitores de novo (abriu, ampliou, mudou de tamanho): cada tela no tamanho dela já
+  aoOrganizar: () => setTimeout(atualizarInteresse, 0),
 });
 controle.atalho = (e, a) => mesa.atalho(e, a);
 
@@ -2814,6 +2973,7 @@ function abrirMesa() {
   player.keys.clear(); // tecla que estava apertada não fica andando por trás
   mesa.abrir();
   syncTouchVisibility();
+  setTimeout(atualizarInteresse, 0);
 }
 
 // olhar: devolve o mouse para a visão do boneco (Esc e o botão de voltar)
@@ -2993,7 +3153,8 @@ function handleTrack(peerId, stream) {
   routeStreams(u);
 }
 
-// decide qual stream é voz e qual é cada uma das telas da pessoa
+// Decide qual stream é voz e qual é cada uma das telas da pessoa. Devolve se o vídeo de alguma
+// tela mudou: só aí as telas do 3D são refeitas (voz e webcam não mexem nelas).
 function routeStreams(u) {
   const daTela = new Set([...u.shares.values()].map((sh) => sh.streamId));
   const vivo = (st) => st && st.getTracks().some((t) => t.readyState === 'live');
@@ -3026,6 +3187,7 @@ function routeStreams(u) {
     u.avatar.setCam(null);
     if (u.camVideo) u.camVideo.srcObject = null;
   }
+  let telaMudou = false;
   for (const sh of u.shares.values()) {
     const st = u.streams.get(sh.streamId);
     if (vivo(st)) {
@@ -3033,13 +3195,16 @@ function routeStreams(u) {
       if (sh.video.srcObject !== st) {
         sh.video.srcObject = st;
         tocarTela(sh.video);
+        telaMudou = true;
       }
     } else if (sh.video?.srcObject) {
       sh.video.srcObject = null;
+      telaMudou = true;
     }
   }
   updateVolumes();
-  refreshScreens();
+  if (telaMudou) refreshScreens();
+  return telaMudou;
 }
 
 // ------------------------------------------------------------------ o (+) das telas livres
@@ -3200,6 +3365,12 @@ function updateVolumes() {
         v *= THREE.MathUtils.clamp(1 - (d - 6) / 34, 0.1, 1);
       }
       u.audioEl.volume = THREE.MathUtils.clamp(v, 0, 1);
+      // no iPhone o volume é só leitura (fica sempre 1): calar de verdade é pelo muted
+      const mudo = v <= 0;
+      if (u.audioEl.muted !== mudo) {
+        u.audioEl.muted = mudo;
+        if (!mudo && u.audioEl.paused) u.audioEl.play().catch(() => {});
+      }
     }
     for (const sh of u.shares.values()) if (sh.video) sh.video.volume = settings.screen / 100;
   }
@@ -3367,7 +3538,9 @@ function addChat(msg, notify) {
   li.innerHTML = `<div class="meta"><b style="--c:${esc(msg.color)}">${esc(msg.name)}</b><time>${hhmm(msg.t)}</time></div><div class="text"></div>`;
   li.querySelector('.text').textContent = msg.text;
   list.appendChild(li);
-  list.scrollTop = list.scrollHeight;
+  // guarda as 200 últimas; rolar (que mede o layout) só com o chat à mostra: abrir já rola até o fim
+  while (list.children.length > 200) list.firstElementChild.remove();
+  if (state.panel === 'chat') list.scrollTop = list.scrollHeight;
   state.users.get(msg.id)?.avatar.say(msg.text);
   if (notify && state.panel !== 'chat') {
     state.unread++;
@@ -4165,13 +4338,30 @@ function screenInfo(screen) {
   const t = acharTela(screen.owner);
   if (t && shareVideo(t.share)) return { kind: 'share', key: t.share.key, label: t.user.isSelf ? 'Ver sua tela' : `Ver a tela de ${t.user.name}` };
   if (navegadores.tem(screen)) return { kind: 'pagina', screen, label: navegadores.rotulo(screen) };
-  // tela livre: o (+) — compartilhar ali ou abrir o navegador
-  if (!t && !screen.owner && world.slots.includes(screen) && aceitaMais(screen)) return { kind: 'livre', screen, label: 'Compartilhar ou abrir o navegador aqui' };
+  // tela livre: o (+) — compartilhar ali ou abrir o navegador (index: posição dela em world.slots)
+  if (!t && !screen.owner && world.slots[screen.index] === screen && aceitaMais(screen)) return { kind: 'livre', screen, label: 'Compartilhar ou abrir o navegador aqui' };
   return null;
 }
 
 const _fwd = new THREE.Vector3();
 const _to = new THREE.Vector3();
+const _hits = [];
+// superfícies das telas para o raio da mira: refeitas só quando a lista de telas muda
+let _superficies = [];
+let _telasDasSuperficies = null;
+let _quantasTelas = -1;
+function superficiesDasTelas() {
+  const telas = world.screens;
+  if (telas !== _telasDasSuperficies || telas.length !== _quantasTelas) {
+    _telasDasSuperficies = telas;
+    _quantasTelas = telas.length;
+    _superficies = telas.map((s) => s.surface);
+  }
+  return _superficies;
+}
+// tela escondida (cinema no escritório, sala atrás da parede) não ganha a mira: o raio do three
+// não olha visible
+const telaVisivel = (s) => s.group.visible && s.group.parent?.visible !== false;
 
 // escolhe a tela que está na mira (ou a mais próxima da direção do olhar)
 function pickScreen() {
@@ -4179,20 +4369,28 @@ function pickScreen() {
   raycaster.setFromCamera(screenCenter, cam);
   raycaster.far = 140;
   const alcance = (s, d) => s.w >= 3 || d < 14;
-  const hit = raycaster.intersectObjects(world.screens.map((s) => s.surface), false)[0];
+  _hits.length = 0;
+  raycaster.intersectObjects(superficiesDasTelas(), false, _hits);
+  let hit = null;
+  for (const h of _hits) {
+    if (!telaVisivel(h.object.userData.screen)) continue;
+    hit = h;
+    break;
+  }
   if (hit && alcance(hit.object.userData.screen, hit.distance) && screenInfo(hit.object.userData.screen)) return hit.object.userData.screen;
   cam.getWorldDirection(_fwd);
   let best = null;
   let bestScore = 1.25;
   for (const s of world.screens) {
-    if (!screenInfo(s)) continue;
-    s.surface.getWorldPosition(_to).sub(cam.position);
+    if (!telaVisivel(s)) continue;
+    // a distância vem antes: o screenInfo (o que a tela mostra) só é perguntado a quem ganharia
+    _to.subVectors(s.group.position, cam.position);
     const dist = _to.length();
     if (dist > 140 || (s.w < 3 && dist > 5)) continue;
     const angle = _fwd.angleTo(_to);
     const radius = Math.atan(Math.max(s.w, s.h) / 2 / dist);
     const score = angle / (radius + 0.08);
-    if (score < bestScore) {
+    if (score < bestScore && screenInfo(s)) {
       bestScore = score;
       best = s;
     }
@@ -4277,6 +4475,7 @@ function enterFocus(info) {
     $('#tv-focus-hud').hidden = false;
     $('#crosshair').hidden = true;
     $('#hover-hint').hidden = true;
+    setTimeout(atualizarInteresse, 0); // o vídeo cobre o 3D: as telas e webcams de trás param já
     return;
   }
   const t = acharTela(info.key);
@@ -4290,6 +4489,7 @@ function enterFocus(info) {
   updateFocusCtrl();
   $('#focus').hidden = false;
   syncTouchVisibility();
+  setTimeout(atualizarInteresse, 0); // a tela em foco sobe para 1080p sem esperar a rodada
 }
 
 // Painel do jogo recolhido: só título, vez e mensagem — o resto do tabuleiro fica livre para tocar.
@@ -4578,24 +4778,32 @@ const bindToggle = (sel, key, apply) => {
 };
 bindToggle('#set-spatial', 'spatial', updateVolumes);
 bindToggle('#set-sfx', 'sfx', (on) => setSfxEnabled(on));
-bindToggle('#set-fps', 'mostrarFps', (on) => { $('#fps').hidden = !on; });
-$('#fps').hidden = !settings.mostrarFps;
+// ?perf=1: o chip de FPS aparece sempre, com mais duas linhas — desenhos, sombra, memória da placa
+// e tempo de JS e de GPU por quadro (ver atualizarChipFps e sala.perf.gravar)
+const PERF = params.has('perf');
+if (PERF) world.medirGpu = true;
+bindToggle('#set-fps', 'mostrarFps', (on) => { $('#fps').hidden = !(on || PERF); });
+$('#fps').hidden = !(settings.mostrarFps || PERF);
 
 // qualidade gráfica (ver qualidade.js)
 const DICAS_QUALIDADE = {
   alta: 'Tudo no máximo: sombra nítida, mais luzes e a floresta inteira.',
-  media: 'Sombra mais simples, menos luzes e menos mato ao longe.',
-  baixa: 'Para PC fraco e celular: sem sombra, resolução menor e floresta rala.',
+  // no celular a Média fica sem o mapa de sombra: uma mancha redonda sob cada pessoa
+  media: isTouch ? 'Sombra redonda sob as pessoas, menos luzes e menos mato ao longe.' : 'Sombra mais simples, menos luzes e menos mato ao longe.',
+  baixa: 'Para PC fraco e celular: sombra redonda sob as pessoas, resolução menor e floresta rala.',
 };
 function renderQualidade() {
   $$('#set-qualidade button').forEach((b) => b.classList.toggle('on', b.dataset.value === qualidade.modo));
   const n = NIVEIS[qualidade.efetivo];
+  // vidro fosco no HUD (style.css, html.vidro) só no PC na Alta: no resto, o desfoque refeito a
+  // cada quadro sobre o 3D custava mais do que mostrava
+  document.documentElement.classList.toggle('vidro', !isTouch && qualidade.efetivo === 'alta');
   const res = qualidade.escala < 0.999 ? ` · resolução em ${Math.round(qualidade.escala * 100)}%` : '';
   let dica = qualidade.modo === 'auto'
     ? `Agora: ${n.nome}${res}. Ajusta sozinha para ficar em 60 quadros por segundo.`
     : DICAS_QUALIDADE[qualidade.modo];
   // antialias (bordas sem serrilhado) só muda ao recarregar
-  if (n.antialias !== world.renderer.getContextAttributes().antialias) dica += ' As bordas mudam ao recarregar a página.';
+  if (querAntialias(n) !== bordasLisas) dica += ' As bordas mudam ao recarregar a página.';
   $('#qualidade-hint').textContent = dica;
 }
 renderQualidade();
@@ -4607,6 +4815,54 @@ $('#set-qualidade').addEventListener('click', (e) => {
   qualidade.definirModo(b.dataset.value);
   renderQualidade();
 });
+
+// ------------------------------------------------------------------ economia de bateria
+// 'sim' liga sempre; 'auto' liga com a bateria em 20% ou menos fora da tomada e desliga na tomada
+// ou de 30% para cima (a folga não deixa ligar e desligar em volta do limite). Ligada: 3D a 30
+// quadros, automático preso na Leve, telas fora do foco no máximo em 540p30 e webcam só de perto
+// (ver tetoDeQuadros, nivelDesejado, nivelDaCam e Qualidade.setEconomia).
+if (!['auto', 'sim', 'nao'].includes(settings.economia)) settings.economia = 'auto';
+let economiaLigada = false;
+let bateria = null; // BatteryManager: só no Chrome e no Edge (no iPhone o sistema tem o Pouca Energia)
+const textoEconomia = $('#economia-hint')?.textContent || '';
+function ligarEconomia(on, avisar = false) {
+  if (on === economiaLigada) return;
+  economiaLigada = on;
+  qualidade.setEconomia?.(on);
+  renderEconomia();
+  if (on && avisar) {
+    toast('Bateria fraca: a sala entrou em economia (30 quadros e gráficos leves).', 'warn', 9000, null,
+      { rotulo: 'Desligar', fazer: () => escolherEconomia('nao') });
+  }
+}
+function decidirEconomia() {
+  if (settings.economia !== 'auto') return ligarEconomia(settings.economia === 'sim');
+  if (!bateria || bateria.charging || bateria.level >= 0.3) ligarEconomia(false);
+  else if (bateria.level <= 0.2) ligarEconomia(true, true);
+}
+function escolherEconomia(valor) {
+  settings.economia = valor;
+  saveSettings();
+  renderEconomia();
+  decidirEconomia();
+}
+function renderEconomia() {
+  $$('#set-economia button').forEach((b) => b.classList.toggle('on', b.dataset.value === settings.economia));
+  const dica = $('#economia-hint');
+  if (dica) dica.textContent = economiaLigada ? `Ligada agora. ${textoEconomia}` : textoEconomia;
+}
+$('#set-economia')?.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-value]');
+  if (b) escolherEconomia(b.dataset.value);
+});
+renderEconomia();
+decidirEconomia();
+navigator.getBattery?.().then((b) => {
+  bateria = b;
+  b.addEventListener('levelchange', decidirEconomia);
+  b.addEventListener('chargingchange', decidirEconomia);
+  decidirEconomia();
+}).catch(() => {});
 
 function renderShareMode() {
   $$('#set-share-mode button').forEach((b) => b.classList.toggle('on', b.dataset.value === settings.shareMode));
@@ -4817,6 +5073,12 @@ let slowTimer = 0;
 let lastSent = '';
 let lastSentAt = 0;
 let speakHold = 0;
+let tetoAntes = 0; // teto do quadro anterior: o 1º quadro depois de um teto ainda traz o intervalo longo
+let cpuAnterior = 0; // ms de JS do quadro anterior (o automático separa processador de placa de vídeo)
+// celular: no máximo 60 quadros (tela de 120 Hz vai a 60 e a de 144 a 72; a de 90 continua a 90)
+const TETO_TOQUE = isTouch ? 60 : 0;
+const escolherTelaEl = $('#escolher-tela');
+const telaMaisEl = $('#tela-mais');
 
 function lobbyCamera(t) {
   const a = Math.sin(t * 0.12) * 0.45 + 0.3;
@@ -4830,6 +5092,13 @@ function lobbyCamera(t) {
   localAvatar.inner.rotation.y = a - 0.25;
 }
 
+// O botão do microfone só muda de estilo quando precisa: falar e calar trocam a classe, e o anel
+// cresce em degraus de 2,5% só enquanto se fala (calado ele nem aparece). Escrever o volume a
+// cada quadro refazia o estilo da página 60 vezes por segundo.
+const btnMic = $('#btn-mic');
+const anelMic = btnMic.querySelector('.mic-level');
+let falavaAntes = false;
+let degrauAntes = 0;
 function detectSpeaking(dt) {
   let level = 0;
   if (analyser && state.micOn && state.micAvailable) {
@@ -4844,9 +5113,15 @@ function detectSpeaking(dt) {
   localAvatar.speaking = state.speaking;
   const me = self();
   if (me) me.speaking = state.speaking;
-  const b = $('#btn-mic');
-  b.classList.toggle('talking', state.speaking);
-  b.style.setProperty('--lvl', (1 + Math.min(level * 6, 0.25)).toFixed(3));
+  if (state.speaking !== falavaAntes) {
+    falavaAntes = state.speaking;
+    btnMic.classList.toggle('talking', state.speaking);
+  }
+  if (!state.speaking || !anelMic) return;
+  const degrau = Math.round(Math.min(level * 6, 0.25) * 40); // 0 a 10, de 2,5 em 2,5%
+  if (degrau === degrauAntes) return;
+  degrauAntes = degrau;
+  anelMic.style.transform = `scale(${1 + degrau / 40})`;
 }
 
 function sendState(dt) {
@@ -4872,16 +5147,15 @@ function slowUpdate() {
   navegadores.atualizar();
   $('#clima-chip').textContent = clima.rotulo();
   updateVolumes();
-  if (settings.mostrarFps) {
-    const res = qualidade.escala < 0.999 ? ` ${Math.round(qualidade.escala * 100)}%` : '';
-    // navegador em foco: o 3D atrás anda devagar de propósito (o site continua liso)
-    $('#fps').textContent = tetoDeQuadros()
-      ? `3D em economia · navegador em uso · ${NIVEIS[qualidade.efetivo].nome}`
-      : `${Math.round(qualidade.fps)} FPS · ${NIVEIS[qualidade.efetivo].nome}${res}`;
-  }
-  for (const li of $$('#people-list .person')) {
-    const u = state.users.get(li.dataset.id);
-    li.classList.toggle('speaking', !!u?.speaking);
+  lodDosBonecos();
+  vigiarContexto();
+  if (settings.mostrarFps || PERF) atualizarChipFps();
+  // quem está falando, na lista de pessoas: só com o painel aberto
+  if (state.panel === 'people') {
+    for (const li of $$('#people-list .person')) {
+      const u = state.users.get(li.dataset.id);
+      li.classList.toggle('speaking', !!u?.speaking);
+    }
   }
   updateUnblockButton();
 
@@ -4896,31 +5170,332 @@ function slowUpdate() {
   if (state.panel === 'telao' && state.casting) updateCastProgress();
 }
 
-// Teto de quadros do 3D enquanto um navegador de tela está em uso. O site é desenhado pelo próprio
-// Chrome, por cima de tudo (fora do 3D): com ele em foco cobrindo quase a tela inteira, o 3D atrás
-// em 60 quadros só tirava placa de vídeo e processador do site (3 navegadores derrubavam a sala
-// para 23 qps). Em foco, depois que a câmera chega na tela, o 3D cai para 12 quadros — atrás do
-// site não dá para notar. Fora do foco (sentado no posto, andando) não tem teto: 30 quadros
-// olhando em volta parecia travado. 0 = sem teto.
-function tetoDeQuadros() {
-  if (state.focus?.kind !== 'pagina') return 0;
+// a mesa e a tela em foco cobrem tudo: o 3D nem é desenhado (sobra placa de vídeo para as telas)
+const mundoVisivel = () => !mesa.aberta && state.focus?.kind !== 'share';
+
+// Site (navegador da tela) ou vídeo do telão em foco, com a câmera já parada na frente dele. Ele
+// cobre quase a tela inteira e é desenhado pelo navegador, fora do 3D.
+function navegadorEmUso() {
+  const foco = state.focus?.kind;
+  if (foco !== 'pagina' && !(foco === 'tv' && world.telaoTravado?.mostraMidia)) return false;
   const alvo = player.override?.position;
-  return alvo && world.camera.position.distanceToSquared(alvo) < 0.0004 ? 12 : 0;
+  return !!alvo && world.camera.position.distanceToSquared(alvo) < 0.0004;
 }
 
-function frame() {
-  const now = performance.now();
+// Teto de quadros do 3D (0 = sem teto). O que cobre a tela (site, vídeo, mesa, janelas) não é o
+// 3D: com ele atrás a 60 ou 144 quadros, só tirava placa de vídeo e processador do que está na
+// frente (3 navegadores derrubavam a sala para 23 qps).
+// - Mesa ou tela em foco: o 3D nem é desenhado, e o laço segue a 12 (rede, voz, telas).
+// - Site ou telão em foco, depois que a câmera chega: 12. No celular em pé o vídeo do telão deixa
+//   muito 3D à mostra em cima e embaixo: 30.
+// - Personagem, guia, menus de tela, painel no celular ou saguão em tela estreita: 20.
+// - Economia de bateria: 30. Celular: 60 (a 120 Hz era o dobro de calor e bateria).
+// Andando ou sentado no posto, sem teto: 30 quadros olhando em volta parecia travado.
+function tetoDeQuadros() {
+  if (!mundoVisivel()) return 12;
+  if (navegadorEmUso()) {
+    if (state.focus.kind === 'pagina') return 12;
+    const a = innerWidth / innerHeight;
+    return Math.min(a, 16 / 9) / Math.max(a, 16 / 9) > 0.7 ? 12 : 30;
+  }
+  if (escolha.aberto || guia.aberto || !escolherTelaEl.hidden || !telaMaisEl.hidden || (isTouch && state.panel)) return 20;
+  if (!state.joined && (isTouch || innerWidth <= 860)) return 20;
+  if (economiaLigada) return 30;
+  return TETO_TOQUE;
+}
+
+// o porquê do teto, para o chip de FPS (null: os quadros medidos dizem tudo)
+function motivoDoTeto(teto) {
+  if (!mundoVisivel()) return 'tela coberta';
+  if (navegadorEmUso()) return state.focus.kind === 'pagina' ? 'navegador em uso' : 'vídeo em foco';
+  if (teto === 20) return 'janela aberta';
+  if (teto === 30) return 'economia';
+  return null;
+}
+
+// Chip de FPS (Ajustes → Mostrar FPS, ou ?perf=1). Com teto de propósito, mostra o motivo no lugar
+// dos quadros medidos. Com ?perf=1, mais duas linhas com as médias do último segundo.
+const chipFps = $('#fps');
+const janelaPerf = { desde: performance.now(), quadros: 0, sombras: 0, cpu: 0, gpu: 0, nGpu: 0, sombrasPorSeg: 0, cpuMs: 0, gpuMs: 0 };
+function atualizarChipFps() {
+  const nivel = NIVEIS[qualidade.efetivo].nome;
   const teto = tetoDeQuadros();
-  if (teto && now - lastFrame < 1000 / teto - 2) {
+  const motivo = motivoDoTeto(teto);
+  const res = qualidade.escala < 0.999 ? ` ${Math.round(qualidade.escala * 100)}%` : '';
+  let texto = motivo ? `3D a ${teto} qps · ${motivo} · ${nivel}` : `${Math.round(qualidade.fps)} FPS · ${nivel}${res}`;
+  if (PERF) {
+    const info = world.renderer.info;
+    const uq = world.ultimoQuadro;
+    const j = janelaPerf;
+    texto += `\n${uq ? uq.draws : info.render.calls} draws · ${Math.round((uq ? uq.triangulos : info.render.triangles) / 1000)} mil tri · ${j.sombrasPorSeg}/s sombra · ${info.programs?.length ?? 0} prog`
+      + `\n${info.memory.textures} tex · ${info.memory.geometries} geo · JS ${j.cpuMs.toFixed(1)} ms · GPU ${j.gpuMs.toFixed(1)} ms`;
+  }
+  if (chipFps.textContent !== texto) chipFps.textContent = texto;
+}
+
+// Quadro desenhado: entra nas médias do chip (?perf=1) e na gravação (sala.perf.gravar).
+function registrarQuadro(dtMs, cpu) {
+  const uq = world.ultimoQuadro;
+  const draws = uq ? uq.draws : world.renderer.info.render.calls;
+  const sombra = !!uq?.sombraRefeita;
+  const gpu = uq?.gpuMs || 0;
+  if (PERF) {
+    const j = janelaPerf;
+    j.quadros++;
+    j.cpu += cpu;
+    if (sombra) j.sombras++;
+    if (gpu) {
+      j.gpu += gpu;
+      j.nGpu++;
+    }
+    const agora = performance.now();
+    if (agora - j.desde >= 1000) {
+      j.sombrasPorSeg = Math.round((j.sombras * 1000) / (agora - j.desde));
+      j.cpuMs = j.cpu / j.quadros;
+      j.gpuMs = j.nGpu ? j.gpu / j.nGpu : 0;
+      Object.assign(j, { desde: agora, quadros: 0, sombras: 0, cpu: 0, gpu: 0, nGpu: 0 });
+    }
+  }
+  const g = gravacao;
+  if (g) {
+    g.dt.push(dtMs);
+    g.draws.push(draws);
+    g.cpu.push(cpu);
+    if (gpu) g.gpu.push(gpu);
+    if (sombra) g.sombras++;
+  }
+}
+
+// sala.perf.gravar(20): grava os quadros desenhados por 20 s e devolve o resumo — quadros por
+// segundo, percentis do intervalo, desenhos, ms de JS e de GPU, sombras refeitas por segundo e
+// tarefas longas — para comparar o antes e o depois de uma mudança, nas mesmas poses.
+let gravacao = null;
+async function gravarPerf(segundos = 20) {
+  const g = { dt: [], draws: [], cpu: [], gpu: [], sombras: 0 };
+  gravacao = g;
+  world.medirGpu = true;
+  const longas = [];
+  let observador = null;
+  if (window.PerformanceObserver?.supportedEntryTypes?.includes('longtask')) {
+    observador = new PerformanceObserver((lista) => {
+      for (const e of lista.getEntries()) longas.push(e.duration);
+    });
+    observador.observe({ type: 'longtask' });
+  }
+  await new Promise((r) => setTimeout(r, segundos * 1000));
+  observador?.disconnect();
+  if (gravacao === g) {
+    gravacao = null;
+    world.medirGpu = PERF;
+  }
+  const n = g.dt.length;
+  const soma = (a) => a.reduce((s, v) => s + v, 0);
+  const media = (a) => (a.length ? soma(a) / a.length : 0);
+  const maior = (a) => a.reduce((m, v) => Math.max(m, v), 0);
+  const umaCasa = (v) => Math.round(v * 10) / 10;
+  const ordem = [...g.dt].sort((a, b) => a - b);
+  const percentil = (q) => (n ? ordem[Math.min(n - 1, Math.floor(q * n))] : 0);
+  const segs = soma(g.dt) / 1000;
+  return {
+    quadros: n,
+    fps: umaCasa(segs ? n / segs : 0),
+    p50ms: umaCasa(percentil(0.5)),
+    p95ms: umaCasa(percentil(0.95)),
+    p99ms: umaCasa(percentil(0.99)),
+    drawsMedio: Math.round(media(g.draws)),
+    drawsMax: maior(g.draws),
+    cpuMs: umaCasa(media(g.cpu)),
+    gpuMs: umaCasa(media(g.gpu)),
+    sombrasPorSeg: umaCasa(segs ? g.sombras / segs : 0),
+    longas: longas.length,
+    maiorLongaMs: Math.round(maior(longas)),
+    nivel: qualidade.efetivo,
+    escala: qualidade.escala,
+    bonecos: [...state.users.values()].filter((u) => !u.isSelf).length,
+  };
+}
+
+// sala.bots(40) (com ?debug=1 ou ?perf=1): gente de mentira para medir sala cheia. Entram pelo
+// mesmo caminho de quem chega pela rede (LOD, escondido atrás da parede, sombra), sem WebRTC. No
+// escritório a fração "sentados" ocupa assentos espalhados pelas salas; o resto passeia num
+// quadrado de 2 × raio em volta de você. char fixa o personagem (senão, um de cada, em rodízio).
+// sala.bots(0) tira todos.
+let bots = null; // { ids, andando: [{ id, p, origem, rumo }], timer }
+function criarBots(n = 20, { char = null, sentados = 0.4, raio = 30 } = {}) {
+  if (bots) {
+    clearInterval(bots.timer);
+    for (const id of bots.ids) removeUser(id, true);
+    bots = null;
+  }
+  if (n > 0) {
+    const chaves = Object.keys(PERSONAGENS);
+    const assentos = world.escritorio?.assentos || [];
+    const nSentados = Math.min(assentos.length, Math.round(n * sentados));
+    const centro = state.joined ? player.pos : localAvatar.group.position;
+    bots = { ids: [], andando: [], timer: 0 };
+    for (let i = 0; i < n; i++) {
+      const id = `bot-${i}`;
+      let p;
+      let r;
+      let a = 1;
+      if (i < nSentados) {
+        // um a cada tantos assentos: os sentados ficam em todas as salas, e não só na primeira
+        const lugar = assentos[Math.floor((i * assentos.length) / nSentados)];
+        p = [lugar.x, lugar.y, lugar.z];
+        r = Math.atan2(-Math.sin(lugar.yaw), -Math.cos(lugar.yaw)); // virado para a mesa, como o player.sentarEm
+        a = 4;
+      } else {
+        p = [centro.x + (Math.random() * 2 - 1) * raio, 0, centro.z + (Math.random() * 2 - 1) * raio];
+        r = Math.random() * Math.PI * 2;
+        bots.andando.push({ id, p, origem: [p[0], p[2]], rumo: r });
+      }
+      addUser({ id, name: `Bot ${i + 1}`, color: COLORS[i % COLORS.length], mic: true, shares: [], char: char ?? chaves[i % chaves.length], p, r, a, status: 'disponivel' });
+      bots.ids.push(id);
+    }
+    bots.timer = setInterval(andarBots, 66);
+  }
+  if (state.joined) {
+    renderPeople();
+    updateRoomInfo();
+  }
+  return n;
+}
+
+// 15 vezes por segundo, como chega pela rede: 0,2 m por passo (3 m/s) num rumo que varia um pouco,
+// voltando quando passa de 8 m de onde nasceu
+function andarBots() {
+  for (const b of bots.andando) {
+    const u = state.users.get(b.id);
+    if (!u) continue;
+    const dx = b.p[0] - b.origem[0];
+    const dz = b.p[2] - b.origem[1];
+    b.rumo = dx * dx + dz * dz > 64 ? Math.atan2(-dx, -dz) : b.rumo + (Math.random() - 0.5) * 0.6;
+    b.p[0] += Math.sin(b.rumo) * 0.2;
+    b.p[2] += Math.cos(b.rumo) * 0.2;
+    u.avatar.setNetworkState(b.p, b.rumo, 1);
+  }
+}
+
+// ------------------------------------------------------------------ bonecos no laço
+// Cada boneco anda (a posição da rede) todo quadro, mas a animação do corpo, que é o que pesa (nos
+// personagens, o esqueleto inteiro), vai no ritmo do que aparece: inteira na vista até 30 m, 30
+// qps até 60 m e 15 além. Fora da vista, inteira até 30 m (ao virar a câmera ninguém aparece
+// travado) e para quem faz sombra (a sombra comprida do fim da tarde entra na tela); o resto, 12
+// qps até 80 m e 2 além. Com o 3D coberto (mesa, tela em foco), 2 qps. Atrás da parede (outra
+// sala do escritório), o corpo some e a animação espera. A distância é a aparente: a luneta
+// (~6×) aproxima.
+const TAN_FOV = Math.tan(THREE.MathUtils.degToRad(34)); // metade da abertura da câmera normal (68°)
+const zoomDaCamera = () => TAN_FOV / Math.tan(THREE.MathUtils.degToRad(world.camera.fov / 2));
+function atualizarAvatares(dt, t, desenhando) {
+  const cam = world.camera.position;
+  const zoom = zoomDaCamera();
+  for (const u of state.users.values()) {
+    if (u.isSelf) continue;
+    const a = u.avatar;
+    if (!a.animarCom) {
+      a.update(dt, t);
+      continue;
+    }
+    a.mover(dt, t);
+    a.setOculto(world.escondido?.(a.group.position) ?? false);
+    if (a.oculto) {
+      a.animarCom(dt, t, Infinity);
+      continue;
+    }
+    const d = cam.distanceTo(a.group.position) / zoom;
+    const ve = desenhando && (world.naVista?.(a.esferaVista()) ?? true);
+    const passo = !desenhando ? 0.5
+      : ve ? (d < 30 ? 0 : d < 60 ? 1 / 30 : 1 / 15)
+        : d < 30 || a.lod.sombra ? 0 : d < 80 ? 1 / 12 : 0.5;
+    a.animarCom(dt, t, passo);
+    // boneco com sombra que se mexeu perto do sol: o mapa de sombra precisa ser refeito
+    if (a.lod.sombra && a.mexeu() && (world.pertoDoSol?.(a.group.position) ?? true)) world.marcarSombra?.(true);
+  }
+}
+
+// LOD dos bonecos, a 4 Hz, pelo orçamento do nível (NIVEIS[...].bonecos): sombra só dos mais perto
+// dentro do raio, com folga de 2 bonecos e 4 m para quem já tinha (não pisca na divisa), braços e
+// mãos na sombra só na Alta, e nome até uma distância (quem fala ou compartilha sempre mostra).
+const _lod = []; // os remotos, do mais perto ao mais longe (reaproveitado)
+const porDistancia = (a, b) => a.distLod - b.distLod;
+function lodDosBonecos() {
+  const b = NIVEIS[qualidade.efetivo].bonecos ?? { sombras: 6, raioSombra: 28, nomes: 50, bracos: false };
+  const comMapa = world.renderer.shadowMap.enabled;
+  const cam = world.camera.position;
+  const zoom = zoomDaCamera();
+  _lod.length = 0;
+  for (const u of state.users.values()) {
+    if (u.isSelf || !u.avatar.setLod) continue;
+    u.distLod = u.avatar.group.position.distanceTo(cam);
+    _lod.push(u);
+  }
+  _lod.sort(porDistancia);
+  let n = 0; // a ordem entre os que se pode ver: quem está atrás da parede não gasta vaga de sombra
+  for (const u of _lod) {
+    const a = u.avatar;
+    const tinha = a.lod.sombra;
+    const sombra = comMapa && b.sombras > 0 && !a.oculto && n < b.sombras + (tinha ? 2 : 0) && u.distLod < b.raioSombra + (tinha ? 4 : 0);
+    if (!a.oculto) n++;
+    // o nome vai pela distância aparente: pela luneta dá para ver quem é
+    const nome = u.distLod / zoom < b.nomes + (a.lod.nome ? 5 : 0) || u.speaking || u.shares.size > 0;
+    if (a.setLod({ sombra, detalhe: b.bracos, nome })) world.marcarSombra?.();
+  }
+  if (localAvatar.setLod?.({ sombra: true, detalhe: b.bracos, nome: false })) world.marcarSombra?.();
+}
+
+// Sem mapa de sombra (Leve, Média do celular): uma mancha redonda sob cada pessoa, todas num
+// desenho só (World.sombraDe). No ar ela encolhe; sentado ou escondido, some.
+function atualizarSombrasRedondas() {
+  if (!world.sombrasRedondas?.visible) return;
+  let i = world.sombraDe(0, localAvatar, !player.grounded);
+  for (const u of state.users.values()) if (!u.isSelf) i = world.sombraDe(i, u.avatar, u.avatar.anim === 3);
+  world.fecharSombrasRedondas(i);
+}
+
+// ------------------------------------------------------------------ contexto do WebGL
+// O sistema pode tirar a placa de vídeo da aba (driver reiniciado, celular sem memória, aba muito
+// tempo escondida). O World para de desenhar e espera o contexto voltar; o laço segue (rede, voz,
+// telas). Se com 5 s de aba à vista ele não voltou, oferece recarregar a sala.
+let contextoPerdido = null; // { fechar, visivelMs, ultimo, ofereceu }
+world.aoPerder = () => {
+  contextoPerdido?.fechar();
+  contextoPerdido = { fechar: toast('Recuperando o 3D…', 'warn', 600_000), visivelMs: 0, ultimo: performance.now(), ofereceu: false };
+};
+world.aoVoltar = () => {
+  contextoPerdido?.fechar();
+  contextoPerdido = null;
+  qualidade.pausar?.(3000); // recompilar tudo na volta não é lentidão da placa
+};
+// no slowUpdate, que só roda com a aba à vista (escondida, o rAF para)
+function vigiarContexto() {
+  const c = contextoPerdido;
+  if (!c || c.ofereceu) return;
+  const agora = performance.now();
+  c.visivelMs += Math.min(agora - c.ultimo, 500);
+  c.ultimo = agora;
+  if (c.visivelMs < 5000) return;
+  c.ofereceu = true;
+  c.fechar();
+  c.fechar = toast('O 3D não voltou sozinho.', 'warn', 600_000, null, { rotulo: 'Recarregar a sala', fazer: () => recarregarNaSala() });
+}
+
+function frame(ts = performance.now()) {
+  const teto = tetoDeQuadros();
+  // Com teto, o rAF segue no ritmo da tela e o quadro só roda passado o mínimo, com 4 ms de folga
+  // (o carimbo do rAF varia). A 60 o mínimo é 9,2 ms: a 120 Hz roda um sim e um não, a 90 todos.
+  const minimo = !teto ? 0 : teto >= 50 ? 9.2 : 1000 / teto - 4;
+  if (minimo && ts - lastFrame < minimo) {
     requestAnimationFrame(frame);
     return;
   }
-  const dtMs = now - lastFrame;
-  const dt = Math.min(dtMs / 1000, teto ? 0.1 : 0.05);
-  lastFrame = now;
+  const dtMs = Math.max(0, ts - lastFrame);
+  const dt = Math.min(dtMs / 1000, teto && teto < 50 ? 0.1 : 0.05);
+  lastFrame = ts;
+  const t0 = performance.now();
   elapsed += dt;
   const t = elapsed;
-  world.update(t);
+  const desenhando = mundoVisivel();
+  world.update(t); // plataformas móveis e escritório andam mesmo sem desenhar (quem está em cima)
   clima.update(dt, t);
   balancarLuneta(t);
 
@@ -4948,7 +5523,7 @@ function frame() {
     sendState(dt);
     updateHover();
     updateSitHint();
-    world.focarSol(player.pos.x, player.pos.z);
+    world.focarSol(player.pos.x, player.pos.z, player.pos.y); // a altura diz se está dentro de uma sala do escritório
     slowTimer += dt;
     if (slowTimer > 0.25) {
       slowTimer = 0;
@@ -4958,19 +5533,38 @@ function frame() {
     lobbyCamera(t);
   }
 
+  // bonecos, com a câmera deste quadro já no lugar (vista e paredes)
+  world.prepararQuadro?.();
+  // enfeites e natureza só quando aparecem, depois do prepararQuadro: a natureza para com o lado
+  // de fora escondido, e o cullFora deste quadro é que diz se ele aparece
+  if (desenhando) world.animar?.(t);
   localAvatar.update(dt, t);
-  for (const u of state.users.values()) if (!u.isSelf) u.avatar.update(dt, t);
+  if (localAvatar.mexeu?.()) world.marcarSombra?.();
+  atualizarAvatares(dt, t, desenhando);
+  atualizarSombrasRedondas();
 
-  // a mesa e a tela em foco cobrem tudo: sem desenhar o 3D sobra placa de vídeo para as telas
-  const desenhando = !mesa.aberta && state.focus?.kind !== 'share';
-  // compilando: quadro vazio não conta; com teto (navegador em uso) a lentidão é de propósito
-  qualidade.quadro(dtMs, desenhando && !world.compilando && !teto);
-  if (desenhando) world.render();
+  // O automático só mede quadro desenhado de verdade: sem compilação, aquecimento, personagem
+  // chegando ou contexto perdido, e sem teto abaixo de 25 (lento de propósito) — nem o 1º quadro
+  // depois de um.
+  const medir = desenhando && !world.compilando && !world.aquecendo && !world.chegandoModelo?.() && !world.perdido
+    && !(teto && teto < 25) && !(tetoAntes && tetoAntes < 25);
+  // antes do render: trocar a escala redimensiona o canvas (e o apaga)
+  qualidade.quadro(dtMs, medir, { cpu: cpuAnterior, alvo: teto === 30 ? 30 : 0 });
+  tetoAntes = teto;
+  // pulando: a sonda do automático passa alguns quadros sem desenhar (a imagem anterior fica)
+  const desenha = desenhando && !qualidade.pulando;
+  if (desenha) world.render();
+  cpuAnterior = performance.now() - t0;
+  if (desenha && (PERF || gravacao)) registrarQuadro(dtMs, cpuAnterior);
   requestAnimationFrame(frame);
 }
 
-// atalho para depuração no console do navegador
-window.sala = { state, world, player, run, settings, get tv() { return tv; }, get rtc() { return rtc; }, get socket() { return socket; } };
+// atalho para depuração no console do navegador; sala.perf.gravar(20) mede (ver gravarPerf)
+window.sala = {
+  state, world, player, run, settings, get tv() { return tv; }, get rtc() { return rtc; }, get socket() { return socket; },
+  perf: { gravar: gravarPerf },
+};
+if (PERF || params.get('debug') === '1') window.sala.bots = criarBots;
 
 function updateClock() {
   const d = new Date();

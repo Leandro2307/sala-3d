@@ -3,8 +3,9 @@
 // 1. Um <link rel="modulepreload"> para cada módulo que o main.js usa, direta ou indiretamente
 //    (os nossos e os do three.js). Sem isso o navegador só descobre um import depois de baixar
 //    o arquivo que o pede: eram 8 levas seguidas, e o último script chegava aos 3 s.
-// 2. O three.js num endereço com a versão (/vendor/three@0.186.1/...), que pode ficar no cache
-//    do navegador por um ano: quando a versão mudar, o endereço muda junto.
+// 2. O three.js e o cliente do socket.io num endereço com a versão (/vendor/three@0.186.1/...,
+//    /vendor/socket.io@4.8.4/...), que pode ficar no cache do navegador por um ano: quando a
+//    versão mudar, o endereço muda junto.
 //
 // 3. Em produção, os nossos módulos com uma impressão digital do conteúdo no endereço
 //    (/js/world.js?v=3fa9c1…), também em cache por um ano: o servidor reescreve os imports de
@@ -22,6 +23,10 @@ const PUBLICO = path.join(__dirname, 'public');
 const THREE_DIR = path.join(__dirname, 'node_modules', 'three');
 const VERSAO_THREE = JSON.parse(fs.readFileSync(path.join(THREE_DIR, 'package.json'), 'utf8')).version;
 const PREFIXO_THREE = `/vendor/three@${VERSAO_THREE}`;
+const SOCKET_IO = path.join(__dirname, 'node_modules', 'socket.io');
+const VERSAO_SIO = JSON.parse(fs.readFileSync(path.join(SOCKET_IO, 'package.json'), 'utf8')).version;
+const PREFIXO_SIO = `/vendor/socket.io@${VERSAO_SIO}`;
+const SIO_DIR = path.join(SOCKET_IO, 'client-dist'); // o cliente já montado para o navegador
 
 // import/export estáticos: "from '...'" e "import '...'" (nada de import() dinâmico)
 const IMPORTS = /(?:^|[;\n}])\s*(?:import|export)\s*(?:[\w*{}\s,$]+?\s*from\s*)?['"]([^'"]+)['"]/g;
@@ -106,6 +111,7 @@ function moduloVersionado(url) {
 function montar() {
   let html = fs.readFileSync(path.join(PUBLICO, 'index.html'), 'utf8');
   html = html.split('"/vendor/three/').join(`"${PREFIXO_THREE}/`);
+  html = html.replace('src="/socket.io/socket.io.js"', `src="${PREFIXO_SIO}/socket.io.min.js"`);
   const comVersao = (u) => {
     const m = moduloVersionado(u);
     return m ? `${u}?v=${m.hash}` : u;
@@ -123,4 +129,4 @@ function paginaInicial() {
   return montar();
 }
 
-module.exports = { paginaInicial, moduloVersionado, PREFIXO_THREE, THREE_DIR };
+module.exports = { paginaInicial, moduloVersionado, PREFIXO_THREE, THREE_DIR, PREFIXO_SIO, SIO_DIR };

@@ -56,6 +56,9 @@ Todo `git push` na branch `main` faz o Render redeployar sozinho:
 git add -A && git commit -m "o que mudou" && git push
 ```
 
+Quem estiver com a sala aberta durante o deploy não precisa fazer nada: quando o servidor volta,
+a página percebe que ele mudou de versão (o commit) e recarrega sozinha, voltando para a mesma sala.
+
 ## TURN: necessário para amigos em redes diferentes
 
 O vídeo e a voz vão direto de um computador para o outro (WebRTC). Na mesma rede isso sempre

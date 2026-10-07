@@ -3,6 +3,7 @@
 // pelo scripts/miniaturas.js (que tira a foto de cada um para o catálogo).
 import * as THREE from 'three';
 import { Avatar } from './avatars.js';
+import { isTouch } from './touch.js';
 
 const _caixa = new THREE.Box3();
 const _centro = new THREE.Vector3();
@@ -14,7 +15,8 @@ export class Vitrine {
     this.canvas = canvas;
     // fotos: o buffer fica guardado depois do quadro, para o toDataURL das miniaturas
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, preserveDrawingBuffer: fotos });
-    this.renderer.setPixelRatio(fotos ? 1 : Math.min(2, window.devicePixelRatio || 1));
+    // no celular 1,5× já fica nítido no modal pequeno, e é um segundo WebGL disputando a placa
+    this.renderer.setPixelRatio(fotos ? 1 : Math.min(isTouch ? 1.5 : 2, window.devicePixelRatio || 1));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.1;
@@ -78,7 +80,6 @@ export class Vitrine {
   async mostrar(def, { cor = '#7c9cff', camiseta = 'none', foto = null } = {}) {
     const pedido = ++this.pedido;
     const av = new Avatar({ name: '', color: cor, isLocal: true });
-    av.halo.visible = false;
     if (def?.url) {
       const r = await av.setPersonagem(def);
       if (r?.ok === false) throw new Error(r.erro || 'não carregou');
@@ -100,10 +101,10 @@ export class Vitrine {
     return true;
   }
 
+  // o dispose do boneco para o personagem e o tira do palco; as malhas do modelo são do cache (o
+  // jogo usa as mesmas): ficam
   soltar(av) {
-    av.personagem?.mixer.stopAllAction();
-    av.group.removeFromParent();
-    av.dispose(); // as malhas do modelo são do cache (o jogo usa as mesmas): ficam
+    av.dispose();
   }
 
   // câmera de frente, enquadrando o corpo inteiro com uma folga
@@ -175,6 +176,11 @@ export class Vitrine {
     this.ultimo = performance.now();
     const loop = (agora) => {
       if (!this.rodando) return;
+      // no celular 30 quadros bastam para o giro lento, e o jogo atrás continua com a placa
+      if (isTouch && agora - this.ultimo < 1000 / 30 - 4) {
+        requestAnimationFrame(loop);
+        return;
+      }
       const dt = Math.min(0.05, (agora - this.ultimo) / 1000);
       this.ultimo = agora;
       this.passo(dt);

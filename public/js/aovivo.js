@@ -41,13 +41,15 @@ export class AoVivo {
   }
 }
 
-// O cartão do saguão. aoEscolher(id): a pessoa clicou numa sala.
-export function cartaoDoSaguao(aoVivo, { lista, resumo, selecionada, aoEscolher }) {
+// O cartão do saguão. aoEscolher(id): a pessoa clicou numa sala. ativo(): o cartão está à mostra
+// (dentro da sala ele fica escondido, e quem entra e sai das outras salas não o remonta à toa).
+export function cartaoDoSaguao(aoVivo, { lista, resumo, selecionada, aoEscolher, ativo = () => true }) {
   lista.addEventListener('click', (e) => {
     const b = e.target.closest('[data-sala]');
     if (b) aoEscolher(b.dataset.sala);
   });
   const render = (dados, conectado) => {
+    if (!ativo()) return;
     const { salas = [], pessoas = 0 } = dados;
     resumo.textContent = !conectado && !salas.length
       ? 'Reconectando…'

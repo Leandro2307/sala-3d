@@ -5,14 +5,20 @@
 // Trabalha direto nos quadros da trilha (MediaStreamTrackProcessor -> canvas -> gerador), sem
 // <video> nem requestAnimationFrame: continua saindo com a aba da sala escondida, quando a
 // pessoa está em outra aba. Navegador sem isso (Firefox, Safari): vai a câmera inteira.
+//
+// Os quadros vão para um Worker (rosto-trabalho.js), que procura o rosto e desenha o recorte:
+// nada disso disputa a thread com o 3D. Sem Worker, o mesmo trabalho roda aqui (recortarAqui).
+// No celular não há recorte: o detector e o 2º contexto WebGL dele pesavam demais. Vai a câmera
+// inteira, pequena, e quem recebe aproxima o meio da imagem.
+import { isTouch } from './touch.js';
 
 const LADO = 360; // o quadrado que sai (o rosto do boneco é pequeno: 360 px sobra)
-const A_CADA = 4; // procura o rosto a cada 4 quadros (~7 vezes por segundo a 30 qps)
+const A_CADA = 8; // procura o rosto a cada 8 quadros (~4 vezes por segundo a 30 qps)
 const MARGEM = 1.45; // o quadrado tem 1,45x o tamanho do rosto: o rosto enche a cabeça, com cabelo e queixo
 const SEGUIR = 0.12; // quanto o recorte anda até o rosto a cada quadro (suave, sem tremer)
 const ESQUECER_MS = 4000; // sem achar o rosto por esse tempo, volta ao meio da imagem
 
-let detector = null; // Promise<FaceDetector | null>
+let detector = null; // Promise<FaceDetector | null> (só no recorte aqui na página)
 function carregarDetector() {
   detector ||= (async () => {
     try {
@@ -32,14 +38,62 @@ function carregarDetector() {
   return detector;
 }
 
-export const podeRecortar = () => typeof MediaStreamTrackProcessor === 'function'
+export const podeRecortar = () => !isTouch && typeof MediaStreamTrackProcessor === 'function'
   && typeof MediaStreamTrackGenerator === 'function' && typeof OffscreenCanvas === 'function';
 
+// O Worker do recorte: um só, para todas as vezes que a câmera liga. Promise do Worker que avisou
+// 'pronto' ao carregar, ou null (não carregou, erro, 4 s sem resposta). As trilhas só vão para ele
+// depois disso: transferidas para um Worker que falhou ao carregar, ficavam presas lá e a webcam
+// saía preta até recarregar a página.
+let trabalho = null;
+function abrirTrabalho() {
+  trabalho ??= new Promise((resolve) => {
+    let w;
+    try {
+      // Worker clássico (não de módulo): o carregador do MediaPipe usa importScripts
+      w = new Worker(new URL('./rosto-trabalho.js', import.meta.url));
+    } catch (err) {
+      console.warn('[rosto] recorte sem Worker', err);
+      resolve(null);
+      return;
+    }
+    const desistir = setTimeout(() => resolve(null), 4000);
+    w.addEventListener('message', (e) => {
+      if (e.data !== 'pronto') return;
+      clearTimeout(desistir);
+      resolve(w);
+    });
+    w.addEventListener('error', () => {
+      clearTimeout(desistir);
+      resolve(null);
+    });
+  });
+  return trabalho;
+}
+
 // Trilha nova, quadrada, com o rosto no meio. A original continua sendo a fonte dos quadros:
-// quem chama para as duas.
+// quem chama para as duas. Os quadros começam a sair assim que o Worker responde.
 export function recortarRosto(original) {
   const processador = new MediaStreamTrackProcessor({ track: original });
   const gerador = new MediaStreamTrackGenerator({ kind: 'video' });
+  gerador.contentHint = 'motion';
+  abrirTrabalho().then((w) => {
+    if (w) {
+      try {
+        w.postMessage({ r: processador.readable, w: gerador.writable }, [processador.readable, gerador.writable]);
+        return;
+      } catch (err) {
+        console.warn('[rosto] recorte sem Worker', err);
+      }
+    }
+    recortarAqui(processador.readable, gerador.writable);
+  });
+  return gerador;
+}
+
+// O recorte na thread da página: o mesmo do rosto-trabalho.js, para navegador sem Worker ou sem
+// fluxos transferíveis.
+function recortarAqui(quadros, destino) {
   const saida = new OffscreenCanvas(LADO, LADO);
   const ctx = saida.getContext('2d', { alpha: false });
   const mini = new OffscreenCanvas(256, 256); // a busca roda numa cópia pequena (mais rápido)
@@ -104,7 +158,5 @@ export function recortarRosto(original) {
       fila.enqueue(novo);
     },
   });
-  processador.readable.pipeThrough(transformar).pipeTo(gerador.writable).catch(() => { /* câmera desligada */ });
-  gerador.contentHint = 'motion';
-  return gerador;
+  quadros.pipeThrough(transformar).pipeTo(destino).catch(() => { /* câmera desligada */ });
 }

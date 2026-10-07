@@ -112,6 +112,15 @@ export async function criarArma(tipo) {
   return arma;
 }
 
+// Larga uma arma montada por criarArma: o modelo é do cache (os outros bonecos usam o mesmo) e
+// fica; o clarão é só desta cópia e sai da placa de vídeo junto com ela.
+export function soltarArma(arma) {
+  arma.removeFromParent();
+  const { clarao } = arma.userData;
+  for (const m of clarao.children) m.geometry.dispose();
+  clarao.children[0].material.dispose();
+}
+
 // ------------------------------------------------------------------ animação
 // Tempo de cada coisa, em segundos.
 const T_CLARAO = 0.05;
@@ -312,7 +321,7 @@ export class VisaoArma {
     this.tipo = tipo;
     const arma = await criarArma(tipo).catch(() => null);
     if (!arma || this.tipo !== tipo) return;
-    this.arma?.removeFromParent();
+    if (this.arma) soltarArma(this.arma);
     this.arma = arma;
     arma.traverse((o) => { if (o.isMesh) o.castShadow = false; });
     // cano (+X da arma) para o fundo da tela (-Z da câmera)

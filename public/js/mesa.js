@@ -6,9 +6,11 @@
 // monitores. Alt+1…9 troca de monitor pelo teclado e Alt+Enter amplia o monitor da vez.
 //
 // Enquanto a mesa está aberta o 3D não é desenhado (ela cobre tudo): sobra placa de vídeo
-// para decodificar as telas.
+// para decodificar as telas. E cada tela é pedida a quem compartilha no tamanho em que o
+// monitor dela aparece (nivelDe): quatro monitores lado a lado não precisam de 1080p cada.
 
 import { icon } from './icons.js';
+import { isTouch } from './touch.js';
 
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const GAP = 10;
@@ -31,11 +33,13 @@ export class Mesa {
   // telas(): [{ key, nome, onde, cor, minha, controle, semControle, navega, site, titulo, stream }]
   // na ordem dos monitores. semControle: o que a etiqueta diz quando a tela não aceita controle
   // daqui. navega: é uma aba que dá para navegar (voltar, endereço) — ganha a barra de navegação.
-  constructor({ raiz, controle, telas, aoNavegar, aoCompartilhar, aoTelaCheia, aoFechar }) {
+  // aoOrganizar: os monitores mudaram de tamanho ou de vez (hora de pedir de novo cada tela).
+  constructor({ raiz, controle, telas, aoNavegar, aoCompartilhar, aoTelaCheia, aoFechar, aoOrganizar }) {
     this.raiz = raiz;
     this.controle = controle;
     this.telas = telas;
     this.aoFechar = aoFechar;
+    this.aoOrganizar = aoOrganizar;
     this.area = raiz.querySelector('.mesa-area');
     this.tarefas = raiz.querySelector('.mesa-tarefas');
     this.vazia = raiz.querySelector('.mesa-vazia');
@@ -44,6 +48,8 @@ export class Mesa {
     this.ordem = [];
     this.ativa = null;
     this.ampliada = false;
+    this.alturaVideo = 0; // px CSS da imagem de cada monitor (o organizar mede)
+    this.visiveis = 0; // monitores à vista (os outros estão atrás do ampliado)
 
     raiz.querySelector('[data-mesa="sair"]').addEventListener('click', () => this.aoFechar());
     raiz.querySelector('[data-mesa="cheia"]').addEventListener('click', (e) => {
@@ -118,6 +124,8 @@ export class Mesa {
     for (const m of this.monitores.values()) this.descartar(m);
     this.monitores.clear();
     this.ordem = [];
+    this.alturaVideo = 0;
+    this.visiveis = 0;
     this.area.textContent = '';
     this.tarefas.textContent = '';
     this.raiz.hidden = true;
@@ -284,9 +292,26 @@ export class Mesa {
     const W = this.area.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
     const H = this.area.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
     const g = melhorGrade(vis.length, W, H, aspecto);
+    this.alturaVideo = Math.floor(g.w / aspecto);
+    this.visiveis = vis.length;
     const w = Math.floor(g.w);
-    const h = Math.floor(g.w / aspecto) + ETIQUETA;
+    const h = this.alturaVideo + ETIQUETA;
     this.area.style.gridTemplateColumns = `repeat(${g.cols}, ${w}px)`;
     this.area.style.gridAutoRows = `${h}px`;
+    this.aoOrganizar?.();
+  }
+
+  // Quanto pedir de uma tela a quem compartilha (rtc.js, NIVEIS), pelo tamanho em que o monitor
+  // dela aparece agora. Usa o que o organizar mediu (não lê layout).
+  nivelDe(key) {
+    const m = this.monitores.get(key);
+    if (!m) return 'max';
+    if (m.el.hidden) return 'off'; // atrás da ampliada: só o som continua
+    if (this.visiveis === 1 || !this.alturaVideo) return 'max';
+    // em pixels da tela; o 540p nunca estica (560: com folga)
+    const px = this.alturaVideo * Math.min(window.devicePixelRatio || 1, 2);
+    const nivel = px >= 560 ? 'max' : px >= 200 ? (isTouch ? 'baixo' : 'medio') : 'mini';
+    // a tela em que se digita fica nos 60 quadros, mesmo pequena
+    return nivel !== 'max' && this.controle.teclado === m.video ? 'medio' : nivel;
   }
 }

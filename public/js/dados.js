@@ -3,6 +3,7 @@
 // aqui só se anima: os dados voam, quicam, giram e param com a face sorteada para cima.
 import * as THREE from 'three';
 import { sfx } from './sfx.js';
+import { isTouch } from './touch.js';
 
 export const MESA_DADOS = { x: 176, z: -12 };
 const FELTRO = { w: 11, d: 8 };
@@ -10,6 +11,8 @@ const Y = 0.17;
 const T = 1.1; // lado do dado
 const FONT = "'Plus Jakarta Sans', system-ui, sans-serif";
 const $ = (s) => document.querySelector(s);
+// feltro e placa desenhados em escala: no celular o canvas tem a metade
+const ESCALA = isTouch ? 0.5 : 1;
 
 // aposta -> quanto paga por moeda (igual ao servidor)
 const PAGA_SOMA = { 2: 30, 3: 15, 4: 10, 5: 7, 6: 6, 7: 4, 8: 6, 9: 7, 10: 10, 11: 15, 12: 30 };
@@ -56,31 +59,36 @@ function faceTex(v) {
 }
 
 function texturaFeltro() {
+  // desenhado em W x H, encolhido no celular
+  const W = 1024;
+  const H = Math.round(W * FELTRO.d / FELTRO.w);
   const cv = document.createElement('canvas');
-  cv.width = 1024;
-  cv.height = Math.round(1024 * FELTRO.d / FELTRO.w);
+  cv.width = Math.round(W * ESCALA);
+  cv.height = Math.round(H * ESCALA);
   const ctx = cv.getContext('2d');
+  ctx.setTransform(ESCALA, 0, 0, ESCALA, 0, 0);
   ctx.fillStyle = '#0f5a3a';
-  ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.fillRect(0, 0, W, H);
   ctx.strokeStyle = 'rgba(255, 230, 160, 0.55)';
   ctx.lineWidth = 6;
-  ctx.strokeRect(30, 30, cv.width - 60, cv.height - 60);
+  ctx.strokeRect(30, 30, W - 60, H - 60);
   ctx.fillStyle = 'rgba(255, 230, 160, 0.5)';
   ctx.font = `800 64px ${FONT}`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('DADOS', cv.width / 2, cv.height / 2 - 40);
+  ctx.fillText('DADOS', W / 2, H / 2 - 40);
   ctx.font = `600 30px ${FONT}`;
-  ctx.fillText('baixo 1:1  ·  sete 4:1  ·  alto 1:1  ·  dupla 4:1', cv.width / 2, cv.height / 2 + 30);
+  ctx.fillText('baixo 1:1  ·  sete 4:1  ·  alto 1:1  ·  dupla 4:1', W / 2, H / 2 + 30);
   const t = new THREE.CanvasTexture(cv);
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
 
 function placaResultado() {
+  // desenhada em 1024 x 256, encolhida no celular
   const cv = document.createElement('canvas');
-  cv.width = 1024;
-  cv.height = 256;
+  cv.width = 1024 * ESCALA;
+  cv.height = 256 * ESCALA;
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, toneMapped: false }));
@@ -89,6 +97,7 @@ function placaResultado() {
   sprite.visible = false;
   const escrever = (linha1, linha2, cor) => {
     const ctx = cv.getContext('2d');
+    ctx.setTransform(ESCALA, 0, 0, ESCALA, 0, 0); // a cada escrita: scale() somaria com o da anterior
     ctx.clearRect(0, 0, 1024, 256);
     ctx.fillStyle = 'rgba(12, 14, 22, 0.86)';
     ctx.beginPath();
@@ -226,6 +235,10 @@ export class Dados {
       return;
     }
     const a = this.atual;
+    // dados voando: a sombra do sol muda (até o quadro em que param), se a mesa aparece e está na
+    // área da sombra (ver Mesa.marcarSombra, em tabuleiros.js)
+    const w = this.world;
+    if (this.grupo.visible && w.fora.visible && (w.pertoDoSol?.(this.grupo.position) ?? true)) w.marcarSombra?.();
     a.t += dt;
     const t = Math.min(1, a.t / a.dur);
     const k = easeOut(t);

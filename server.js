@@ -7,7 +7,7 @@ const os = require('os');
 const path = require('path');
 const { Server } = require('socket.io');
 const compression = require('compression');
-const { paginaInicial, moduloVersionado, PREFIXO_THREE, THREE_DIR } = require('./pagina.js');
+const { paginaInicial, moduloVersionado, PREFIXO_THREE, THREE_DIR, PREFIXO_SIO, SIO_DIR } = require('./pagina.js');
 const { execFile } = require('child_process');
 const crypto = require('crypto');
 const banco = require('./banco');
@@ -29,6 +29,10 @@ const SHIRTS = ['none', 'lula', 'bolsonaro'];
 let PERSONAGENS = ['padrao']; // ids do catálogo (public/js/personagens.js), lido no main()
 const VOLTA_MIN = 6; // segundos: abaixo disso é atravessar a pista, não dar a volta
 const VOLTA_MAX = 600;
+// Versão deste servidor (no Render, o commit do deploy), que vai no "join". A página que reconecta
+// e encontra outra versão recarrega, em vez de seguir com o código velho falando com o servidor novo.
+// O commit e não a hora da partida: o plano grátis dorme e acorda sem nada ter mudado.
+const VERSAO = process.env.RENDER_GIT_COMMIT?.slice(0, 12) || Date.now().toString(36);
 
 // Navegador compartilhado (neko, ver neko/docker-compose.yml). Só existe se BROWSER_URL estiver
 // definido — o "npm run navegador" faz isso. A senha é a de participante, não a de admin: quem
@@ -203,6 +207,9 @@ app.use(express.static(path.join(__dirname, 'public'), {
 // three.js com a versão no endereço: pode ficar um ano no cache (versão nova = endereço novo)
 app.use(PREFIXO_THREE, express.static(THREE_DIR, { immutable: true, maxAge: '365d' }));
 app.use('/vendor/three', express.static(THREE_DIR)); // endereço sem versão (scripts/miniaturas.js)
+// O cliente do socket.io também, e a página aponta para ele (ver pagina.js). O /socket.io/socket.io.js
+// do próprio socket.io continua no ar para as abas e caches de antes, mas ele pergunta "mudou?" a cada visita.
+app.use(PREFIXO_SIO, express.static(SIO_DIR, { immutable: true, maxAge: '365d' }));
 // players de HLS (.m3u8) e DASH (.mpd): só são baixados quando alguém cola um link desses
 app.use('/vendor/hls', express.static(path.join(__dirname, 'node_modules', 'hls.js', 'dist')));
 app.use('/vendor/dash', express.static(path.join(__dirname, 'node_modules', 'dashjs', 'dist', 'modern', 'esm')));
@@ -538,6 +545,9 @@ function getRoom(id) {
       media: { provider: null, id: null, playing: false, time: 0, updatedAt: Date.now(), by: null },
       chat: [],
       jogos: novosJogos(),
+      seq: 0, // último número dado a quem entrou: o "n" que identifica a pessoa no lote de posições
+      mudou: new Map(), // n -> pessoa que mandou posição desde o último lote
+      legado: 0, // abas de antes do lote, na sala "<id>:legado"
     };
     rooms.set(id, room);
   }
@@ -715,7 +725,7 @@ function premiarJogo(io, room, mesa, j) {
 
 function publicUser(u) {
   return {
-    id: u.id, name: u.name, color: u.color, mic: u.mic, cam: u.cam,
+    id: u.id, n: u.n, name: u.name, color: u.color, mic: u.mic, cam: u.cam,
     shares: [...u.shares.values()],
     posto: u.posto,
     status: u.status, inativo: u.inativo, gestor: u.gestor, desde: u.statusDesde,
@@ -743,6 +753,23 @@ function dist(a, b) {
   if (!a || !b) return Infinity;
   return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
 }
+
+// Número vindo do cliente. Só converte valor simples: o Number() de uma lista aninhada mil vezes
+// desce recursivo (toString/join) até estourar a pilha, e isso dentro de um handler derruba o
+// processo — a sala inteira cai por um pacote de 40 KB.
+const simples = (x) => x === null || typeof x !== 'object';
+const num = (x) => (simples(x) ? Number(x) || 0 : 0);
+// ponto [x, y, z] vindo do cliente: três números finitos, senão null
+const ponto = (v) => (Array.isArray(v) && v.length === 3 && v.every((n) => simples(n) && Number.isFinite(Number(n))) ? v.map(Number) : null);
+// O mesmo vale para todo handler (Number, String, template): pacote com lista ou objeto aninhado
+// fundo demais é descartado na entrada (ver socket.use). Nenhuma mensagem do app passa de uns 5
+// níveis; binário (Buffer) não é percorrido.
+const fundoDemais = (v, n = 0) => {
+  if (simples(v) || ArrayBuffer.isView(v) || v instanceof ArrayBuffer) return false;
+  if (n > 32) return true;
+  for (const k in v) if (fundoDemais(v[k], n + 1)) return true;
+  return false;
+};
 
 function mediaSnapshot(room) {
   return { ...room.media, serverNow: Date.now() };
@@ -910,9 +937,44 @@ function attachSockets(io) {
       if (u.gestor && u.id !== user.id) io.to(u.id).emit('alerta-gestor', { tipo, texto, id: user.id, nome: user.name, cor: user.color });
     }
   }
+
+  // Posições em lote: a cada 30 ms, uma mensagem por sala com quem se mexeu desde a última,
+  // 'states' = [n, x, y, z, r, a, s, n, ...], codificada uma vez só. Antes cada 'state' virava uma
+  // mensagem para cada um dos outros: com 50 pessoas andando eram ~32 mil por segundo, e cada uma
+  // é uma tarefa no navegador de quem recebe. Volátil: numa rede ruim o lote cai em vez de
+  // enfileirar posição velha, e quem está parado repete a sua a cada 1 s (é o que cura um lote
+  // perdido). Uns 30 ms e não 66: as pessoas mandam a 15 Hz, e com 66 cada boneco chegaria em
+  // degraus de 66 e 133 ms. E 30, não 33: no Windows (npm run publico) o relógio anda de 15,6 em
+  // 15,6 ms, e um intervalo de 33 vira 47.
+  setInterval(() => {
+    for (const room of rooms.values()) {
+      if (!room.mudou.size) continue;
+      // sozinho na sala, ou só abas de antes do lote: ninguém para receber
+      if (room.users.size < 2 || room.legado >= room.users.size) {
+        room.mudou.clear();
+        continue;
+      }
+      const lote = [];
+      let quem = null;
+      for (const u of room.mudou.values()) {
+        lote.push(u.n, u.p[0], u.p[1], u.p[2], u.r, u.a, u.s);
+        quem = u;
+      }
+      // um só se mexeu: ele não precisa da própria posição. As abas antigas recebem 'state'.
+      const fora = room.mudou.size === 1 ? [quem.id] : [];
+      if (room.legado) fora.push(`${room.id}:legado`);
+      room.mudou.clear();
+      io.to(room.id).except(fora).volatile.emit('states', lote);
+    }
+  }, 30);
+
   io.on('connection', (socket) => {
     let room = null;
     let user = null;
+    // sem chamar o next o pacote some, sem chegar a nenhum handler (ver fundoDemais)
+    socket.use((pacote, next) => {
+      if (!fundoDemais(pacote)) next();
+    });
 
     let entrando = false;
     let dono = false; // esta conexão provou ser o dono da sala (senha)
@@ -933,6 +995,7 @@ function attachSockets(io) {
       room = sala;
       user = {
         id: socket.id,
+        n: ++room.seq, // curto e nunca repetido na sala: é ele que vai no lote de posições
         name: nome,
         color: /^#[0-9a-f]{6}$/i.test(data?.color) ? data.color : '#7c9cff',
         mic: !!data?.mic,
@@ -952,11 +1015,18 @@ function attachSockets(io) {
         statusDesde: Date.now(),
         gestor: false, // provou a senha de gestor (ou de dono): recebe os alertas da equipe
         ultimoChamado: 0,
-        p: [0, 0, -4], r: Math.PI, a: 0,
+        p: [0, 0, -4], r: Math.PI, a: 0, s: 0,
       };
       user.moedas = saldoDe(user.name);
       room.users.set(socket.id, user);
       socket.join(roomId);
+      // aba aberta antes do lote de posições (join sem proto): não entende o 'states' e continua
+      // recebendo um 'state' por posição. Só existe para a passagem de versão.
+      if (!data?.proto) {
+        user.legado = true;
+        room.legado++;
+        socket.join(`${roomId}:legado`);
+      }
 
       ack?.({
         selfId: socket.id,
@@ -972,6 +1042,7 @@ function attachSockets(io) {
         moedas: user.moedas,
         sala: salaPublica(room),
         passe: room.entradaHash ? passeDa(room) : null,
+        versao: VERSAO,
       });
       socket.to(roomId).emit('user-joined', publicUser(user));
       avisarGestores(room, user, 'entrou', `${user.name} entrou no sistema`);
@@ -1156,12 +1227,18 @@ function attachSockets(io) {
       lobbyMudou();
     });
 
+    // Posição: só guarda e marca quem se mexeu; quem repassa é o lote (ver attachSockets). O soco e o
+    // tiro conferem a distância com o user.p, e quem entra recebe a posição pelo publicUser.
     socket.on('state', (s) => {
-      if (!user || !Array.isArray(s?.p)) return;
-      user.p = s.p.slice(0, 3).map(Number);
-      user.r = Number(s.r) || 0;
-      user.a = Number(s.a) || 0;
-      socket.to(room.id).volatile.emit('state', { id: user.id, p: user.p, r: user.r, a: user.a, s: s.s ? 1 : 0 });
+      const p = ponto(s?.p);
+      if (!user || !p) return;
+      user.p = p;
+      user.r = num(s.r);
+      user.a = num(s.a);
+      user.s = s.s ? 1 : 0;
+      room.mudou.set(user.n, user);
+      // abas de antes do lote: uma mensagem por posição, como era
+      if (room.legado) socket.to(`${room.id}:legado`).volatile.emit('state', { id: user.id, p, r: user.r, a: user.a, s: user.s });
     });
 
     socket.on('signal', (msg) => {
@@ -1395,7 +1472,6 @@ function attachSockets(io) {
       const agora = Date.now();
       if (agora - (user.ultimoTiro || 0) < arma.cadencia * 1000 * 0.85) return;
       user.ultimoTiro = agora;
-      const ponto = (v) => (Array.isArray(v) && v.length === 3 && v.every((n) => Number.isFinite(Number(n))) ? v.map(Number) : null);
       const a = ponto(de);
       const b = ponto(ate);
       const alcance = arma.alcance + 5;
@@ -1651,6 +1727,8 @@ function attachSockets(io) {
       if (!room || !user) return;
       const hadSlot = freeShares(room, user).length > 0;
       room.users.delete(user.id);
+      room.mudou.delete(user.n);
+      if (user.legado) room.legado--;
       io.to(room.id).emit('user-left', { id: user.id });
       avisarGestores(room, user, 'saiu', `${user.name} saiu do sistema`);
       lobbyMudou();
