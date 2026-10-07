@@ -403,38 +403,54 @@ def idle(t):
     }
 
 
-def passada(t, P, passo, ergue, quique, inclina, balanco_mao, mao_sobe, amassa, giro_pe):
+def flutuar(t, P, sobe, onda_alt, inclina, arrasto, abre_mao, pe_atras):
+    """Andar de fantasma: ele não tem perna, então em vez de dar passo sai do chão e vai em ondas.
+    Sobe e desce uma vez por ciclo e inclina com a onda (de nariz para cima subindo, para baixo
+    descendo, como barco). Mãos e pés vêm arrastados atrás, cada um um pouco atrasado na onda, como
+    a barra de um lençol: é esse atraso que faz parecer solto no ar."""
     fi = 2 * math.pi * t / P
-    pose = {}
+    s, c = math.sin(fi), math.cos(fi)
+    pose = {
+        # deriva de leve para os lados, um quarto de onda depois do sobe e desce: o corpo desenha
+        # uma volta no ar em vez de só subir e descer
+        'Hips': ((0.018 * math.sin(fi - math.pi / 2), sobe + onda_alt * s, 0),
+                 (inclina - 1.6 * onda_alt * c, 0.05 * s, 0.06 * math.sin(fi - math.pi / 2)), UM),
+        # estica subindo, achata descendo
+        'Body': (ZERO, ZERO, esmagar(-0.9 * onda_alt * c)),
+        # a cabeça desfaz metade da inclinação e acena atrasada, para os olhos ficarem no caminho
+        'Head': (ZERO, (-inclina * 0.5 + 0.04 * math.sin(fi - 1.2), -0.03 * s, 0), UM),
+        'Eye.L': (ZERO, ZERO, (1, piscar(t, P // 2), 1)),
+        'Eye.R': (ZERO, ZERO, (1, piscar(t, P // 2), 1)),
+    }
     for lado, sx, f in (('L', 1, 0.0), ('R', -1, math.pi)):
-        s, c = math.sin(fi + f), math.cos(fi + f)
-        no_ar = max(0.0, c)  # o pé sobe só enquanto vai para a frente
-        pose[f'Foot.{lado}'] = ((0, ergue * no_ar ** 1.5, passo * s), (-giro_pe * no_ar * s - 0.15 * no_ar, 0, 0), UM)
-        # a mão vai junto com o pé do outro lado
-        pose[f'Hand.{lado}'] = ((sx * 0.01 * abs(s), mao_sobe * (1 - abs(c)) + 0.01, -balanco_mao * s),
-                                (balanco_mao * 3.2 * s, 0, sx * 0.12 * abs(s)), UM)
-    # quica duas vezes por ciclo: no alto quando um pé passa pelo outro, embaixo no apoio
-    alto = abs(math.cos(fi))
-    apoio = (1 - alto) ** 2
-    pose['Hips'] = ((0.012 * math.sin(fi), quique * alto, 0), (inclina, 0.05 * math.sin(fi), 0.06 * math.sin(fi)), UM)
-    pose['Body'] = (ZERO, ZERO, esmagar(amassa * apoio - amassa * 0.45 * alto))
-    pose['Head'] = (ZERO, (-inclina * 0.45, -0.04 * math.sin(fi), -0.035 * math.sin(fi)), UM)
+        # mãos (penduradas no quadril, já sobem com ele): abertas, para trás, ondulando atrasadas
+        # e uma fora de fase da outra
+        m = math.sin(fi - 1.1 + f * 0.35)
+        pose[f'Hand.{lado}'] = ((sx * abre_mao, 0.05 + 0.04 * m, -arrasto),
+                                (-0.3 - 0.25 * m, 0, -sx * (0.15 + 0.12 * m)), UM)
+        # pés (no Root, não sobem sozinhos): recolhidos rente à barriga e um pouco menores, só a
+        # ponta aparecendo, acompanham o corpo com atraso e batem devagar um contra o outro, como a
+        # barra do lençol ondulando. Pendurados para baixo, ele parecia andar na ponta dos pés.
+        p = math.sin(fi - 1.6 + f)
+        pose[f'Foot.{lado}'] = ((sx * 0.015, sobe + RECOLHE_PE + onda_alt * math.sin(fi - 0.7) + 0.02 * p, -pe_atras),
+                                (0.4 + 0.2 * p, 0, 0), (0.85,) * 3)
     return pose
+
+
+# o quanto ele sai do chão andando, e o quanto os pés sobem para dentro da barriga
+FLUTUA = 0.16
+RECOLHE_PE = 0.035
 
 
 def walk(t):
-    return passada(t, 20, passo=0.11, ergue=0.07, quique=0.045, inclina=0.07,
-                   balanco_mao=0.08, mao_sobe=0.02, amassa=0.07, giro_pe=0.35)
+    return flutuar(t, 36, sobe=FLUTUA, onda_alt=0.035, inclina=0.1, arrasto=0.04, abre_mao=0.03, pe_atras=0.08)
 
 
 def run(t):
-    pose = passada(t, 18, passo=0.17, ergue=0.13, quique=0.1, inclina=0.24,
-                   balanco_mao=0.13, mao_sobe=0.06, amassa=0.13, giro_pe=0.55)
-    # correndo, as mãos vão mais perto do corpo e um pouco para trás
-    for lado, sx in (('L', 1), ('R', -1)):
-        loc, rot, esc = pose[f'Hand.{lado}']
-        pose[f'Hand.{lado}'] = ((loc[0] - sx * 0.03, loc[1] + 0.03, loc[2] - 0.04), rot, esc)
-    return pose
+    # o jogo toca a corrida 1,6x mais rápido: 42 quadros dão uma onda a cada 0,9 s. Mais inclinado,
+    # mais alto, e mãos e pés esticados para trás como quem é levado pelo vento
+    return flutuar(t, 42, sobe=FLUTUA + 0.03, onda_alt=0.045, inclina=0.26, arrasto=0.1, abre_mao=0.05,
+                   pe_atras=0.14)
 
 
 # No ar: esticado, mãos para cima, pés encolhidos e olhos arregalados

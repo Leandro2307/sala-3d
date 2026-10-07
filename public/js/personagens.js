@@ -55,9 +55,9 @@ export const PERSONAGENS = {
     id: 'atos-classico',
     label: 'Atos clássico',
     url: '/models/atos-classico.glb',
-    versao: 2, // 2: ganhou a curvinha da logo
+    versao: 3, // 2: ganhou a curvinha da logo; 3: anda flutuando, como fantasma
     ...ATOS,
-    resumo: 'Quica ao andar, pula, senta, acena e soca',
+    resumo: 'Flutua em ondas como fantasma, pula, senta, acena e soca',
   },
   robo: {
     id: 'robo',
