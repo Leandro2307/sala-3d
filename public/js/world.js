@@ -340,9 +340,12 @@ class ScreenDisplay {
   // em comum e sem texto próprio. A etiqueta com o nome só é criada quando aparece pela 1ª vez.
   // painel: textura própria (placar, status...) mostrada enquanto a tela está livre
   // sombra: a moldura faz sombra (a da tela embutida na parede, rente ao reboco, não precisa)
+  // embutida: tela de sala, a 25–30 cm do eixo de uma parede de 30 cm. A moldura de 0,5 m de fundo
+  // atravessava a parede e aparecia (preta, maior que a tela) na sala do lado; a da embutida é rasa
+  // e termina dentro da parede. O brilho, atrás do reboco, nem é mostrado.
   // cartazNaMoldura: o cartaz de desligado do monitor vem instanciado na moldura (escritorio3d.js,
   // um desenho por sala); o próprio só aparece com o (+)
-  constructor({ w, h, title, subtitle, icon = 'monitor', accent = '#6ee7c8', leve = false, painel = null, sombra = true, cartazNaMoldura = false }) {
+  constructor({ w, h, title, subtitle, icon = 'monitor', accent = '#6ee7c8', leve = false, painel = null, sombra = true, embutida = false, cartazNaMoldura = false }) {
     this.w = w;
     this.h = h;
     this.leve = leve;
@@ -352,11 +355,12 @@ class ScreenDisplay {
 
     this.frame = null;
     if (!leve) {
+      const fundo = embutida ? 0.22 : 0.5;
       const frame = new THREE.Mesh(
-        new RoundedBoxGeometry(w + 0.7, h + 0.7, 0.5, 4, 0.22),
+        new RoundedBoxGeometry(w + 0.7, h + 0.7, fundo, 4, Math.min(0.22, fundo / 2)),
         new THREE.MeshStandardMaterial({ color: 0x0c0e13, roughness: 0.55, metalness: 0.3 }),
       );
-      frame.position.z = -0.27;
+      frame.position.z = -0.02 - fundo / 2; // a frente 2 cm atrás da tela
       frame.castShadow = sombra;
       this.group.add(frame);
       this.frame = frame;
@@ -368,7 +372,7 @@ class ScreenDisplay {
       new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: 0.18, toneMapped: false }),
     );
     glow.position.z = -0.53;
-    glow.visible = !leve;
+    glow.visible = !leve && !embutida;
     this.glow = glow;
     this.group.add(glow);
 
@@ -2649,10 +2653,9 @@ export class World {
     this.maskSalas = -1;
     const caixaDa = (celula) => this.salas3d[celula]?.caixa || this.scene;
     // as telas de compartilhar, na ordem das salas (é a mesma ordem das telas no servidor). As
-    // embutidas na parede não fazem sombra, e o brilho delas, atrás do reboco, nunca aparecia
+    // embutidas na parede não fazem sombra, e a moldura delas é rasa (não passa para a sala do lado)
     this.slotsEscritorio = this.escritorio.telas.map((t, i) => {
-      const s = new ScreenDisplay({ w: t.w, h: t.h, title: t.rotulo, subtitle: 'Livre — clique em "Compartilhar tela"', painel: t.painel || null, sombra: !t.embutida });
-      if (t.embutida) s.glow.visible = false;
+      const s = new ScreenDisplay({ w: t.w, h: t.h, title: t.rotulo, subtitle: 'Livre — clique em "Compartilhar tela"', painel: t.painel || null, sombra: !t.embutida, embutida: !!t.embutida });
       s.index = i;
       s.group.position.set(...t.pos);
       s.group.rotation.y = t.rotY;
@@ -2664,7 +2667,7 @@ export class World {
     const postos = new Map(this.escritorio.postos.map((po) => [po.id, po]));
     for (const po of this.planta.postos) {
       const p3 = postos.get(po.id);
-      const accent = DEPARTAMENTOS[po.sala].cor;
+      const accent = DEPARTAMENTOS[po.sala]?.cor ?? this.planta.recepcao.cor; // o do balcão da recepção
       (p3?.monitores || []).forEach((m, j) => {
         const s = new ScreenDisplay({ w: m.w, h: m.h, leve: true, accent, cartazNaMoldura: instanciados.has(accent) });
         s.index = po.primeiraTela + j;
@@ -2678,8 +2681,7 @@ export class World {
       });
     }
     this.telaoesEscritorio = this.escritorio.telaoes.map((t) => {
-      const tel = this.criarTelao({ w: t.w, h: t.h, title: 'Telão', subtitle: 'Cole um link (YouTube, Twitch, Kick…) ou fixe a tela de alguém aqui', accent: '#a78bfa', sombra: !t.embutida });
-      if (t.embutida) tel.glow.visible = false;
+      const tel = this.criarTelao({ w: t.w, h: t.h, title: 'Telão', subtitle: 'Cole um link (YouTube, Twitch, Kick…) ou fixe a tela de alguém aqui', accent: '#a78bfa', sombra: !t.embutida, embutida: !!t.embutida });
       tel.group.position.set(...t.pos);
       tel.group.rotation.y = t.rotY;
       caixaDa(t.celula).add(tel.group);

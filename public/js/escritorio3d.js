@@ -245,6 +245,357 @@ function placa(texto, cor, { w = 1024, h = 256, sub = '' } = {}) {
   }, NO_APARELHO);
 }
 
+// ------------------------------------------------------------------ placa da porta de cada sala
+// A placa tem a cara do setor: o ícone num quadrado na cor da sala, o nome, uma linha do que se
+// faz ali e, à direita, um desenho que é a cara do lugar (trilhas de circuito no TI, o gráfico
+// subindo no Comercial, a mesa vista de cima na Reunião...). Ícones em traço, no estilo Lucide
+// (24×24) como os de icons.js.
+const ICONES_DAS_PLACAS = {
+  chip: ['M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z', 'M10 9h4a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1z', 'M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2'],
+  alta: ['M22 7 13.5 15.5 8.5 10.5 2 17', 'M16 7h6v6'],
+  headset: ['M3 11h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5Zm0 0a9 9 0 1 1 18 0m0 0v5a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3Z', 'M21 16v2a4 4 0 0 1-4 4h-5'],
+  pessoas: ['M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2', 'M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0', 'M22 21v-2a4 4 0 0 0-3-3.87', 'M16 3.13a4 4 0 0 1 0 7.75'],
+  moeda: ['M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0', 'M14.5 9.5c-.5-1-1.4-1.5-2.5-1.5-1.5 0-2.5.8-2.5 2s1 1.7 2.5 2 2.5.8 2.5 2-1 2-2.5 2c-1.1 0-2-.5-2.5-1.5', 'M12 6.5V8M12 16v1.5'],
+  coracao: ['M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z'],
+  megafone: ['m3 11 18-5v12L3 14v-3z', 'M11.6 16.8a3 3 0 1 1-5.8-1.6'],
+  alvo: ['M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0', 'M18 12a6 6 0 1 1-12 0 6 6 0 0 1 12 0', 'M14 12a2 2 0 1 1-4 0 2 2 0 0 1 4 0'],
+  cafe: ['M6 2v2M10 2v2M14 2v2', 'M16 8a1 1 0 0 1 1 1v8a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1h14a4 4 0 1 1 0 8h-1'],
+};
+
+// Desenhos do lado direito das placas, em 1536×400 lógicos. Saem com força total: a camada
+// inteira é esmaecida depois (placaDaSala). r: sorteio com semente (sai igual em todo navegador).
+const MOTIVOS = {
+  circuito(c, w, h, cor, r) {
+    c.strokeStyle = c.fillStyle = cor;
+    c.lineWidth = 5;
+    for (let y = 36; y < h - 20; y += 38) {
+      let x = 760 + r() * 260;
+      const d = (r() < 0.5 ? -1 : 1) * (14 + r() * 22);
+      c.beginPath();
+      c.arc(x, y, 8, 0, Math.PI * 2);
+      c.stroke();
+      c.beginPath();
+      c.moveTo(x + 8, y);
+      x += 80 + r() * 220;
+      c.lineTo(x, y);
+      x += Math.abs(d);
+      c.lineTo(x, y + d);
+      x += 80 + r() * 300;
+      c.lineTo(x, y + d);
+      c.stroke();
+      c.beginPath();
+      c.arc(x + 9, y + d, 9, 0, Math.PI * 2);
+      c.fill();
+    }
+  },
+  grafico(c, w, h, cor) {
+    c.strokeStyle = cor;
+    c.lineWidth = 2;
+    c.globalAlpha = 0.45;
+    for (let y = 60; y < h; y += 70) {
+      c.beginPath();
+      c.moveTo(560, y);
+      c.lineTo(w, y);
+      c.stroke();
+    }
+    const pts = [[600, 340], [720, 296], [830, 318], [950, 232], [1070, 252], [1200, 160], [1320, 178], [1470, 66]];
+    const linha = () => {
+      c.beginPath();
+      pts.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y)));
+    };
+    const area = c.createLinearGradient(0, 60, 0, h);
+    area.addColorStop(0, cor);
+    area.addColorStop(1, 'rgba(0,0,0,0)');
+    linha();
+    c.lineTo(1470, h);
+    c.lineTo(600, h);
+    c.fillStyle = area;
+    c.fill();
+    c.globalAlpha = 1;
+    linha();
+    c.lineWidth = 8;
+    c.stroke();
+    c.fillStyle = cor;
+    for (const [x, y] of pts) {
+      c.beginPath();
+      c.arc(x, y, 11, 0, Math.PI * 2);
+      c.fill();
+    }
+  },
+  ondas(c, w, h, cor) {
+    c.strokeStyle = c.fillStyle = cor;
+    for (let i = 0; i < 8; i++) {
+      c.globalAlpha = 1 - i * 0.1;
+      c.lineWidth = 7 - i * 0.5;
+      c.beginPath();
+      c.arc(1500, h / 2, 50 + i * 72, Math.PI * 0.68, Math.PI * 1.32);
+      c.stroke();
+    }
+    c.globalAlpha = 1;
+    c.beginPath();
+    c.arc(1500, h / 2, 18, 0, Math.PI * 2);
+    c.fill();
+  },
+  // a mesa oval da sala, vista de cima, com as 10 cadeiras em volta
+  mesa(c, w, h, cor) {
+    const cx = 1190;
+    const cy = h / 2;
+    c.strokeStyle = c.fillStyle = cor;
+    c.lineWidth = 6;
+    c.globalAlpha = 0.35;
+    c.beginPath();
+    c.ellipse(cx, cy, 220, 86, 0, 0, Math.PI * 2);
+    c.fill();
+    c.globalAlpha = 1;
+    c.stroke();
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * Math.PI * 2 + Math.PI / 10;
+      c.beginPath();
+      c.arc(cx + Math.cos(a) * 272, cy + Math.sin(a) * 132, 24, 0, Math.PI * 2);
+      c.fill();
+    }
+  },
+  // velas de cotação subindo (cheia: subiu; vazada: desceu)
+  velas(c, w, h, cor, r) {
+    c.strokeStyle = c.fillStyle = cor;
+    c.lineWidth = 4;
+    let y = 330;
+    for (let i = 0; i < 12; i++) {
+      const x = 600 + i * 76;
+      const sobe = r() < 0.72;
+      const corpo = 20 + r() * 36;
+      const y1 = Math.max(60, sobe ? y - corpo : y + corpo * 0.6);
+      c.beginPath();
+      c.moveTo(x, Math.min(y, y1) - 12 - r() * 18);
+      c.lineTo(x, Math.max(y, y1) + 12 + r() * 18);
+      c.stroke();
+      if (sobe) c.fillRect(x - 18, y1, 36, y - y1);
+      else c.strokeRect(x - 16, y, 32, y1 - y);
+      y = y1;
+    }
+  },
+  // a equipe: bustos lado a lado, de tamanhos e cores diferentes
+  equipe(c, w, h, cor, r) {
+    const cores = [cor, '#fdba74', '#f9a8d4', '#fcd34d', '#fb7185'];
+    for (let i = 0; i < 7; i++) {
+      const x = 780 + i * 116 + r() * 20;
+      const k = 0.8 + r() * 0.45;
+      c.fillStyle = cores[i % cores.length];
+      c.beginPath();
+      c.arc(x, h - 150 * k, 34 * k, 0, Math.PI * 2);
+      c.fill();
+      c.beginPath();
+      c.ellipse(x, h + 10, 62 * k, 100 * k, 0, Math.PI, 0);
+      c.fill();
+    }
+  },
+  // confete nas cores da parede criativa da sala
+  confete(c, w, h, cor, r) {
+    const cores = ['#e879f9', '#38bdf8', '#fbbf24', '#34d399', '#f87171'];
+    for (let i = 0; i < 46; i++) {
+      c.save();
+      c.translate(580 + r() * 940, 20 + r() * 360);
+      c.rotate(r() * Math.PI);
+      c.fillStyle = cores[i % cores.length];
+      c.beginPath();
+      if (i % 3 === 0) c.rect(-16, -6, 32, 12);
+      else if (i % 3 === 1) c.arc(0, 0, 9, 0, Math.PI * 2);
+      else {
+        c.moveTo(0, -13);
+        c.lineTo(12, 9);
+        c.lineTo(-12, 9);
+      }
+      c.fill();
+      c.restore();
+    }
+  },
+  // alvo com a flecha cravada no meio
+  alvo(c, w, h, cor) {
+    const cx = 1380;
+    const cy = h / 2;
+    c.strokeStyle = c.fillStyle = cor;
+    c.lineWidth = 6;
+    for (let raio = 50; raio < 340; raio += 62) {
+      c.beginPath();
+      c.arc(cx, cy, raio, 0, Math.PI * 2);
+      c.stroke();
+    }
+    c.beginPath();
+    c.arc(cx, cy, 20, 0, Math.PI * 2);
+    c.fill();
+    // flecha da cauda até o centro, com duas penas em V na cauda
+    const [tx, ty] = [cx - 300, cy + 170];
+    const [ux, uy] = [0.87, -0.49]; // direção da flecha
+    c.lineWidth = 8;
+    c.beginPath();
+    c.moveTo(tx, ty);
+    c.lineTo(cx - 14, cy + 8);
+    c.stroke();
+    c.lineWidth = 6;
+    c.beginPath();
+    for (const k of [12, 42]) {
+      const [px, py] = [tx + ux * k, ty + uy * k];
+      for (const lado of [-1, 1]) {
+        c.moveTo(px, py);
+        c.lineTo(px - ux * 30 - uy * 24 * lado, py - uy * 30 + ux * 24 * lado);
+      }
+    }
+    c.stroke();
+  },
+  // grãos de café espalhados
+  graos(c, w, h, cor, r) {
+    for (let i = 0; i < 16; i++) {
+      c.save();
+      c.translate(600 + r() * 920, 30 + r() * 340);
+      c.rotate(r() * Math.PI);
+      c.fillStyle = '#6f4a2e';
+      c.beginPath();
+      c.ellipse(0, 0, 30, 20, 0, 0, Math.PI * 2);
+      c.fill();
+      c.strokeStyle = '#d9c3a5';
+      c.lineWidth = 4;
+      c.beginPath();
+      c.moveTo(-24, 0);
+      c.bezierCurveTo(-8, -10, 8, 10, 24, 0);
+      c.stroke();
+      c.restore();
+    }
+  },
+};
+
+// sub: a linha de baixo; fundo: degradê da placa; claro: placa clara (letras escuras)
+const CARA_DAS_SALAS = {
+  ti: { sub: 'Tecnologia · Sistemas', fundo: ['#081221', '#0f1d33'], icone: 'chip', motivo: 'circuito' },
+  comercial: { sub: 'Vendas · Metas', fundo: ['#17130b', '#2a200c'], icone: 'alta', motivo: 'grafico' },
+  telemarketing: { sub: 'Central de atendimento', fundo: ['#1c0b1b', '#2c1031'], icone: 'headset', motivo: 'ondas' },
+  reuniao: { sub: 'Sala de reunião', fundo: ['#120f20', '#211a38'], icone: 'pessoas', motivo: 'mesa' },
+  financeiro: { sub: 'Contas · Indicadores', fundo: ['#06140f', '#0c241b'], icone: 'moeda', motivo: 'velas' },
+  rh: { sub: 'Pessoas · Cultura', fundo: ['#fff8ef', '#fde6cc'], claro: true, icone: 'coracao', motivo: 'equipe' },
+  marketing: { sub: 'Marca · Campanhas', fundo: ['#1b0a25', '#300f40'], icone: 'megafone', motivo: 'confete' },
+  gestao: { sub: 'Liderança · Equipe', fundo: ['#170a0d', '#2a1016'], icone: 'alvo', motivo: 'alvo' },
+  descanso: { sub: 'Café · Pausa', fundo: ['#f7f1e6', '#e9dcc4'], claro: true, icone: 'cafe', motivo: 'graos' },
+};
+
+// só o caminho de um retângulo de cantos redondos
+function cantos(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+// a face da placa (3,76 × 0,98 m na porta)
+function placaDaSala(s) {
+  const cara = CARA_DAS_SALAS[s.id] ?? { sub: '', fundo: ['#0f131b', '#161b26'] };
+  const tinta = cara.claro ? '#1c1917' : '#f8fafc';
+  // na placa clara, a cor da sala (clarinha) não se lê: vai uma versão mais escura
+  const destaque = cara.claro ? new THREE.Color(s.cor).offsetHSL(0, 0.1, -0.2).getStyle() : s.cor;
+  return quadro(1536, 400, (ctx, w, h) => {
+    const escala = ctx.getTransform().a; // o desfoque da sombra não segue a escala do canvas
+    const fundo = ctx.createLinearGradient(0, 0, w, h);
+    fundo.addColorStop(0, cara.fundo[0]);
+    fundo.addColorStop(1, cara.fundo[1]);
+    ctx.fillStyle = fundo;
+    ctx.fillRect(0, 0, w, h);
+    // o desenho do setor numa camada à parte, que some para a esquerda (não briga com o nome)
+    if (cara.motivo) {
+      const camada = document.createElement('canvas');
+      camada.width = ctx.canvas.width;
+      camada.height = ctx.canvas.height;
+      const c = camada.getContext('2d');
+      c.setTransform(ctx.getTransform());
+      c.lineCap = 'round';
+      c.lineJoin = 'round';
+      MOTIVOS[cara.motivo](c, w, h, s.cor, sorteio(s.id.length * 977 + s.id.charCodeAt(0)));
+      const some = c.createLinearGradient(560, 0, 1150, 0);
+      some.addColorStop(0, 'rgba(0,0,0,0)');
+      some.addColorStop(1, `rgba(0,0,0,${cara.claro ? 0.5 : 0.38})`);
+      c.globalCompositeOperation = 'destination-in';
+      c.globalAlpha = 1;
+      c.fillStyle = some;
+      c.fillRect(0, 0, w, h);
+      ctx.drawImage(camada, 0, 0, w, h);
+    }
+    // reflexo de vidro em cima e o filete de dentro na cor da sala
+    const reflexo = ctx.createLinearGradient(0, 0, 0, h);
+    reflexo.addColorStop(0, cara.claro ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.08)');
+    reflexo.addColorStop(0.55, 'rgba(255,255,255,0)');
+    ctx.fillStyle = reflexo;
+    ctx.fillRect(0, 0, w, h);
+    cantos(ctx, 14, 14, w - 28, h - 28, 26);
+    ctx.strokeStyle = destaque;
+    ctx.globalAlpha = 0.45;
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    // o ícone, num quadrado na cor da sala (com brilho em volta na placa escura)
+    const lado = 280;
+    const ix = 60;
+    const iy = (h - lado) / 2;
+    ctx.save();
+    ctx.shadowColor = cara.claro ? 'rgba(0,0,0,0.22)' : `${s.cor}99`;
+    ctx.shadowBlur = (cara.claro ? 18 : 36) * escala;
+    cantos(ctx, ix, iy, lado, lado, 64);
+    ctx.fillStyle = s.cor;
+    ctx.fill();
+    ctx.restore();
+    const volume = ctx.createLinearGradient(0, iy, 0, iy + lado);
+    volume.addColorStop(0, 'rgba(255,255,255,0.3)');
+    volume.addColorStop(1, 'rgba(0,0,0,0.18)');
+    ctx.fillStyle = volume;
+    ctx.fill();
+    if (cara.icone) {
+      const tam = 168;
+      ctx.save();
+      ctx.translate(ix + (lado - tam) / 2, iy + (lado - tam) / 2);
+      ctx.scale(tam / 24, tam / 24);
+      ctx.strokeStyle = 'rgba(12,14,20,0.88)';
+      ctx.lineWidth = 2.1;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      for (const d of ICONES_DAS_PLACAS[cara.icone]) ctx.stroke(new Path2D(d));
+      ctx.restore();
+    }
+    // o nome (encolhe para caber: "Telemarketing") e a linha do setor
+    const x = ix + lado + 56;
+    const largura = w - x - 60;
+    let tam = 168;
+    ctx.font = `800 ${tam}px ${FONTE}`;
+    const medida = ctx.measureText(s.nome).width;
+    if (medida > largura) {
+      tam = Math.floor((tam * largura) / medida);
+      ctx.font = `800 ${tam}px ${FONTE}`;
+    }
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = tinta;
+    if (!cara.claro) {
+      ctx.shadowColor = `${s.cor}66`;
+      ctx.shadowBlur = 24 * escala;
+    }
+    ctx.fillText(s.nome, x, 218);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = destaque;
+    ctx.font = `700 46px ${FONTE}`;
+    if ('letterSpacing' in ctx) ctx.letterSpacing = '7px';
+    ctx.fillText(cara.sub.toUpperCase(), x + 4, 306, largura);
+    if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
+  }, NO_APARELHO);
+}
+
+// cor por vértice (uma só na peça inteira): peças de cores diferentes com um material só ainda
+// viram um desenho no juntarSoltas
+function pintar(geo, cor) {
+  const c = new THREE.Color(cor);
+  const n = geo.attributes.position.count;
+  const cores = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) cores.set([c.r, c.g, c.b], i * 3);
+  geo.setAttribute('color', new THREE.BufferAttribute(cores, 3));
+  return geo;
+}
+
 // painel com linhas de status (TI e central de telemarketing): [rótulo, valor, cor]
 function painel(titulo, corTopo) {
   return quadro(1024, 576, (ctx, w, h, linhas = [], rodape = '') => {
@@ -569,23 +920,110 @@ function salaComercial(m) {
   }, NO_APARELHO);
   m.painel(W - 0.3, 3.3, -1, -Math.PI / 2, 7.6, 4.56, placar.tex, 'Placar');
 
-  // sino de venda fechada, perto da porta
-  const ouro = mat(0xf5c542, { roughness: 0.25, metalness: 0.9, emissive: 0x3a2a00 });
-  const perfil = [[0, 0], [0.55, 0.01], [0.52, 0.1], [0.4, 0.32], [0.36, 0.6], [0.32, 0.78], [0.17, 0.9], [0, 0.94]].map(([x, y]) => new THREE.Vector2(x, y));
+  // Sino de venda fechada, perto da porta: pórtico de madeira escura com anéis e remates de latão,
+  // num tablado redondo com um filete de luz âmbar, e a plaquinha "Venda fechada!" em cima da
+  // travessa. O sino é oco, com frisos, badalo e o cordão de sino de navio; balança em volta da
+  // travessa e, ao tocar, brilha e solta ondas douradas. As peças paradas são soltas no g (o
+  // juntarSoltas mescla por material); as que mexem ficam nos grupos pendurado, badalo e ecos.
+  const sx = -W + 2.5;
+  const sz = D - 2.5;
+  const madeiraEsc = mat(0x3b2618, { roughness: 0.45 });
+  const latao = mat(0xd9ad4b, { roughness: 0.3, metalness: 0.8, emissive: 0x2a1d05 });
+  // (o escritório não tem mapa de ambiente: metal demais fica marrom, sem nada para refletir)
+  const ouro = mat(0xf6c443, { roughness: 0.28, metalness: 0.6, emissive: 0x4a3000 });
+  const cordao = mat(0xf1e6cf, { roughness: 0.95 });
+  const peca = (pai, geo, material, [x, y, z], giro = null, sombra = true) => {
+    const o = new THREE.Mesh(geo, material);
+    o.position.set(x, y, z);
+    if (giro) o.rotation.set(...giro);
+    o.castShadow = sombra;
+    o.receiveShadow = true;
+    pai.add(o);
+    return o;
+  };
+  // tablado com aro de latão e o filete de luz em volta
+  peca(g, new THREE.CylinderGeometry(0.95, 1.0, 0.16, 40), madeiraEsc, [sx, 0.08, sz]);
+  peca(g, new THREE.TorusGeometry(0.955, 0.018, 6, 48), latao, [sx, 0.16, sz], [Math.PI / 2, 0, 0], false);
+  const fita = brilho(0xfbbf24);
+  const corDaFita = fita.color.clone();
+  peca(g, new THREE.CylinderGeometry(1.01, 1.01, 0.03, 40, 1, true), fita, [sx, 0.045, sz], null, false);
+  // colunas com anéis e remates de latão, a travessa e a ferragem de onde o sino pende
+  for (const dx of [-0.78, 0.78]) {
+    peca(g, new THREE.CylinderGeometry(0.06, 0.075, 2.62, 16), madeiraEsc, [sx + dx, 1.47, sz]);
+    peca(g, new THREE.CylinderGeometry(0.1, 0.115, 0.14, 16), latao, [sx + dx, 0.23, sz], null, false);
+    peca(g, new THREE.CylinderGeometry(0.085, 0.085, 0.05, 16), latao, [sx + dx, 2.74, sz], null, false);
+    peca(g, new THREE.CylinderGeometry(0.035, 0.06, 0.08, 12), latao, [sx + dx, 2.95, sz], null, false);
+    peca(g, new THREE.SphereGeometry(0.085, 16, 12), latao, [sx + dx, 3.05, sz]);
+  }
+  caixa(g, [1.84, 0.14, 0.16], [sx, 2.85, sz], madeiraEsc, { arredondada: 0.03 });
+  caixa(g, [0.24, 0.07, 0.2], [sx, 2.745, sz], latao, { sombra: false });
+  // plaquinha em cima da travessa, escrita dos dois lados
+  const plaquinha = quadro(620, 150, (ctx, w, h) => {
+    const fundo = ctx.createLinearGradient(0, 0, 0, h);
+    fundo.addColorStop(0, '#2b1b10');
+    fundo.addColorStop(1, '#160d07');
+    ctx.fillStyle = fundo;
+    ctx.fillRect(0, 0, w, h);
+    ctx.strokeStyle = '#d9ad4b';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(12, 12, w - 24, h - 24);
+    const dourado = ctx.createLinearGradient(0, 34, 0, 96);
+    dourado.addColorStop(0, '#fde68a');
+    dourado.addColorStop(1, '#d4a12a');
+    ctx.fillStyle = dourado;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = `800 60px ${FONTE}`;
+    ctx.fillText('VENDA FECHADA!', w / 2, 66, w - 70);
+    ctx.fillStyle = '#c9b48c';
+    ctx.font = `600 25px ${FONTE}`;
+    ctx.fillText('fechou? toque o sino · tecla B', w / 2, 114, w - 70);
+  }, NO_APARELHO);
+  caixa(g, [1.3, 0.36, 0.06], [sx, 3.1, sz], madeiraEsc, { arredondada: 0.02 });
+  const letras = new THREE.MeshBasicMaterial({ map: plaquinha.tex, toneMapped: false });
+  plano(g, [1.24, 0.3], [sx, 3.1, sz + 0.031], letras);
+  plano(g, [1.24, 0.3], [sx, 3.1, sz - 0.031], letras, [0, Math.PI, 0]);
+
+  // o sino: oco (o perfil desce por dentro até a boca e sobe por fora até a coroa), pendurado por
+  // uma argola; o eixo é a travessa (x), então ele balança para a frente e para trás
   const pendurado = new THREE.Group();
-  const sino = new THREE.Mesh(new THREE.LatheGeometry(perfil, 28), ouro);
-  sino.position.y = -0.94;
-  sino.castShadow = true;
-  const badalo = new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 8), ouro);
-  badalo.position.y = -0.86;
-  pendurado.add(sino, badalo);
-  pendurado.position.set(-W + 2.5, 2.7, D - 2.5);
-  const suporte = mat(0x5b3a26, { roughness: 0.5 });
-  caixa(g, [1.6, 0.12, 0.12], [-W + 2.5, 2.76, D - 2.5], suporte);
-  caixa(g, [0.12, 2.8, 0.12], [-W + 1.75, 1.4, D - 2.5], suporte);
-  caixa(g, [0.12, 2.8, 0.12], [-W + 3.25, 1.4, D - 2.5], suporte);
+  pendurado.position.set(sx, 2.71, sz);
   g.add(pendurado);
-  m.bloco([-W + 1.6, 0, D - 2.7], [-W + 3.4, 2.8, D - 2.3]);
+  peca(pendurado, new THREE.TorusGeometry(0.055, 0.018, 8, 20), latao, [0, -0.05, 0], [0, Math.PI / 2, 0], false);
+  const perfil = [
+    [0, 0.7], [0.15, 0.69], [0.25, 0.63], [0.3, 0.5], [0.33, 0.33], [0.38, 0.17], [0.44, 0.06], [0.46, 0], // por dentro
+    [0.52, 0], [0.54, 0.035], [0.535, 0.08], [0.49, 0.14], [0.43, 0.25], [0.4, 0.4], [0.385, 0.55], [0.37, 0.68], [0.33, 0.77], [0.24, 0.835], [0.12, 0.855], [0, 0.86], // por fora
+  ].map(([x, y]) => new THREE.Vector2(x, y));
+  const boca = -0.96; // a boca do sino, abaixo do eixo (0,86 de sino + a argola)
+  peca(pendurado, new THREE.LatheGeometry(perfil, 40), ouro, [0, boca, 0]);
+  // frisos em relevo: dois na cintura e um acima do bojo (nos pontos do perfil)
+  for (const [r, y] of [[0.4, 0.4], [0.385, 0.55], [0.49, 0.14]]) peca(pendurado, new THREE.TorusGeometry(r + 0.004, 0.013, 6, 48), ouro, [0, boca + y, 0], [Math.PI / 2, 0, 0]);
+  // badalo (haste e bola, que bate no bojo) e o cordão com nó e borla, para fora da boca
+  const badalo = new THREE.Group();
+  badalo.position.y = boca + 0.66;
+  pendurado.add(badalo);
+  peca(badalo, new THREE.CylinderGeometry(0.016, 0.016, 0.5, 8), latao, [0, -0.25, 0], null, false);
+  peca(badalo, new THREE.SphereGeometry(0.07, 16, 12), ouro, [0, -0.56, 0]);
+  peca(badalo, new THREE.CylinderGeometry(0.017, 0.017, 0.52, 8), cordao, [0, -0.88, 0]);
+  peca(badalo, new THREE.TorusGeometry(0.026, 0.014, 6, 14), cordao, [0, -0.78, 0], [Math.PI / 2, 0, 0]);
+  peca(badalo, new THREE.SphereGeometry(0.038, 10, 8), cordao, [0, -1.15, 0]);
+  peca(badalo, new THREE.ConeGeometry(0.06, 0.17, 12), cordao, [0, -1.25, 0]);
+  // o que mexe junto e tem o mesmo material vira uma malha (sino e frisos; as partes do cordão)
+  juntarSoltas(pendurado, new Set());
+  juntarSoltas(badalo, new Set());
+  // ondas douradas que saem do sino quando ele toca (escondidas no resto do tempo)
+  const ecos = new THREE.Group();
+  ecos.position.set(sx, 2.71 + boca + 0.3, sz);
+  ecos.visible = false;
+  g.add(ecos);
+  for (let i = 0; i < 3; i++) {
+    const onda = new THREE.Mesh(new THREE.RingGeometry(0.6, 0.66, 48), new THREE.MeshBasicMaterial({
+      color: 0xffd36b, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true, toneMapped: false, blending: THREE.AdditiveBlending,
+    }));
+    onda.rotation.x = -Math.PI / 2;
+    ecos.add(onda);
+  }
+  m.bloco([sx - 1, 0, sz - 1], [sx + 1, 3.15, sz + 1]);
 
   plantas(g, [[-W + 1.2, -D + 1.2], [W - 1.2, -D + 1.2], [W - 1.2, D - 1.6]]);
   let balanco = 0;
@@ -598,7 +1036,21 @@ function salaComercial(m) {
       antes = t;
       if (balanco <= 0) return;
       balanco = Math.max(0, balanco - dt);
-      pendurado.rotation.z = Math.sin(t * 9) * 0.45 * (balanco / 2.4);
+      const passou = 2.4 - balanco; // segundos desde a badalada
+      const k = (balanco / 2.4) * Math.min(1, passou * 5); // força: entra rápido e vai morrendo
+      pendurado.rotation.x = Math.sin(passou * 7) * 0.5 * k;
+      // o badalo vai atrasado em relação ao sino: é ele que bate no bojo
+      badalo.rotation.x = Math.sin(passou * 7 - 1.2) * 0.45 * k;
+      ouro.emissiveIntensity = 1 + 5 * k * k;
+      fita.color.copy(corDaFita).multiplyScalar(1 + 1.6 * k);
+      ecos.visible = balanco > 0;
+      ecos.children.forEach((onda, i) => {
+        const f = passou * 0.85 - i * 0.3;
+        const p = f < 0 ? 0 : f % 1;
+        onda.visible = f >= 0;
+        onda.scale.setScalar(1 + p * 2.4);
+        onda.material.opacity = (1 - p) * 0.7 * Math.min(1, balanco / 0.6);
+      });
       // a sombra do sol só é refeita quando algo muda: o sino balançando avisa a cada quadro
       m.world.marcarSombra?.();
     },
@@ -1417,6 +1869,8 @@ export function construirEscritorio(world, p, { empresa = '', apagado = null } =
   // O vidro, o fosco e a faixa ficam peças separadas (fora do juntarSoltas): transparentes são
   // desenhados na ordem da distância de cada peça, e mesclar as duas metades da frente punha o
   // centro na porta, com o rosto de quem está perto do vidro aparecendo na frente da faixa.
+  // Os contornos das placas, cada um na cor da sua sala, são um material só (cor por vértice).
+  const contornoDaPlaca = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
   for (const s of p.salas) {
     const zc = zDaPorta(s.lado);
     const meio = (s.x0 + s.x1) / 2;
@@ -1432,10 +1886,17 @@ export function construirEscritorio(world, p, { empresa = '', apagado = null } =
     for (let x = s.x0 + 3.5; x < s.x1 - 0.5; x += 3.5) if (Math.abs(x - meio) > PORTA / 2) caixa(raiz, [0.08, H, 0.12], [x, H / 2, zc], caixilho, { sombra: false });
     for (const x of [meio - PORTA / 2, meio + PORTA / 2]) caixa(raiz, [0.22, 3.25, 0.4], [x, 1.62, zc], madeira);
     caixa(raiz, [PORTA + 0.22, 0.22, 0.4], [meio, 3.2, zc], madeira, { sombra: false });
-    const pl = placa(s.nome, s.cor);
-    plano(raiz, [3.6, 0.9], [meio, 4.25, zc + ladoCorredor * 0.18], new THREE.MeshBasicMaterial({ map: pl.tex, toneMapped: false }), [0, ladoCorredor > 0 ? 0 : Math.PI, 0]);
-    // arandelas dos dois lados da placa
-    for (const dx of [-2.4, 2.4]) caixa(raiz, [0.3, 0.5, 0.08], [meio + dx, 4.25, zc + ladoCorredor * 0.2], luzQuente, { sombra: false });
+    // placa: a cara do setor (placaDaSala) numa caixa de grafite, com o contorno aceso na cor da
+    // sala e uma luminária de quadro em cima. Cabe no trecho de parede sobre a porta (4 m).
+    const yp = 4.35;
+    const face = zc + ladoCorredor * (T / 2); // a face da parede, do lado do corredor
+    const fora = (d) => face + ladoCorredor * d;
+    pintar(caixa(raiz, [3.7, 1.1, 0.05], [meio, yp, fora(0.025)], contornoDaPlaca, { sombra: false, arredondada: 0.04 }).geometry, s.cor);
+    caixa(raiz, [3.6, 1.0, 0.1], [meio, yp, fora(0.06)], grafite, { sombra: false, arredondada: 0.04 });
+    plano(raiz, [3.52, 0.917], [meio, yp, fora(0.112)], new THREE.MeshBasicMaterial({ map: placaDaSala(s).tex, toneMapped: false }), [0, ladoCorredor > 0 ? 0 : Math.PI, 0]);
+    for (const dx of [-1.15, 1.15]) caixa(raiz, [0.04, 0.04, 0.34], [meio + dx, yp + 0.8, fora(0.17)], grafite, { sombra: false });
+    caixa(raiz, [2.8, 0.07, 0.11], [meio, yp + 0.8, fora(0.36)], grafite, { sombra: false });
+    caixa(raiz, [2.7, 0.02, 0.07], [meio, yp + 0.76, fora(0.36)], luzQuente, { sombra: false });
   }
 
   // ---------------------------------------------------------------- recepção (átrio)
@@ -1490,7 +1951,9 @@ export function construirEscritorio(world, p, { empresa = '', apagado = null } =
   const forma = new THREE.Shape();
   forma.absarc(0, 0, R1, -Math.PI / 2 - abre, -Math.PI / 2 + abre, false);
   forma.absarc(0, 0, R0, -Math.PI / 2 + abre, -Math.PI / 2 - abre, true);
-  const corpo = new THREE.Mesh(new THREE.ExtrudeGeometry(forma, { depth: 1.08, bevelEnabled: false, curveSegments: 40 }), mat(0xf8f7f4, { roughness: 0.35 }));
+  const corian = mat(0xf8f7f4, { roughness: 0.35 });
+  const luzBalcao = brilho(0x6ee7c8);
+  const corpo = new THREE.Mesh(new THREE.ExtrudeGeometry(forma, { depth: 1.08, bevelEnabled: false, curveSegments: 40 }), corian);
   corpo.rotation.x = -Math.PI / 2;
   corpo.position.set(dc.x, 0, dc.z);
   corpo.castShadow = true;
@@ -1500,7 +1963,7 @@ export function construirEscritorio(world, p, { empresa = '', apagado = null } =
   tampoBalcao.rotation.x = -Math.PI / 2;
   tampoBalcao.position.set(dc.x, 1.08, dc.z);
   raiz.add(tampoBalcao);
-  const filete = new THREE.Mesh(new THREE.TorusGeometry(R1 + 0.01, 0.025, 6, 64, abre * 2), brilho(0x6ee7c8));
+  const filete = new THREE.Mesh(new THREE.TorusGeometry(R1 + 0.01, 0.025, 6, 64, abre * 2), luzBalcao);
   filete.rotation.x = Math.PI / 2;
   const fileteG = new THREE.Group();
   fileteG.add(filete);
@@ -1512,9 +1975,31 @@ export function construirEscritorio(world, p, { empresa = '', apagado = null } =
     const z = dc.z + Math.cos(a) * 3.4;
     world.addBox({ min: [x - 1.1, 0, z - 1.1], max: [x + 1.1, 1.15, z + 1.1] });
   }
-  // monitor e cadeira da recepcionista
-  caixa(raiz, [0.9, 0.55, 0.05], [dc.x, 1.5, dc.z + 2.6], grafite, { sombra: false });
-  repetir(raiz, partesCadeira({ tecido: mat(0x23394a, { roughness: 0.8 }), metal: mat(0x9ca3af, { metalness: 0.6, roughness: 0.3 }) }), [[dc.x, dc.z + 1.4, Math.PI]]);
+  // Posto da recepcionista, por dentro do balcão: mesa reta (cabe no arco de dentro, R0), 3 monitores
+  // virados para a cadeira, teclado e mouse. Quem senta olha para +z (para quem chega). Entra nos
+  // postos e nos assentos lá embaixo, depois dos das salas (é a ordem da planta).
+  const zMon = dc.z + 2.38; // tela do meio
+  const zCad = zMon - 1.6; // a mesma distância das bancadas do Comercial
+  const zMesa = dc.z + 2.08; // de dc.z + 1,6 a 2,56: os cantos de trás ficam dentro do R0
+  repetir(raiz, [
+    { geo: new RoundedBoxGeometry(2.9, 0.08, 0.96, 2, 0.03), mat: madeira, pos: [0, 1.0, 0] },
+    { geo: new THREE.BoxGeometry(2.8, 0.95, 0.06), mat: corian, pos: [0, 0.5, -0.44] },
+    { geo: new THREE.BoxGeometry(0.06, 0.95, 0.92), mat: corian, pos: [-1.4, 0.5, 0] },
+    { geo: new THREE.BoxGeometry(0.06, 0.95, 0.92), mat: corian, pos: [1.4, 0.5, 0] },
+    { geo: new THREE.BoxGeometry(2.9, 0.03, 0.03), mat: luzBalcao, pos: [0, 0.97, 0.49], sombra: false },
+  ], [[dc.x, zMesa, Math.PI]]);
+  world.addBox({ min: [dc.x - 1.45, 0, zMesa - 0.48], max: [dc.x + 1.45, 1.05, zMesa + 0.48], data: { type: 'mesa' } });
+  // tresMonitores olha para +z: girado meia volta em torno da tela do meio
+  const monsRecepcao = tresMonitores(0, 0, 1.56, 0.95).map((mo) => ({ ...mo, x: dc.x - mo.x, z: zMon - mo.z, ry: mo.ry + Math.PI }));
+  molduras(raiz, monsRecepcao, mat(0x111827, { roughness: 0.4 }), apagado ? apagado(p.recepcao.cor) : null);
+  repetir(raiz, partesCadeira({ tecido: mat(0x23394a, { roughness: 0.8 }), metal: mat(0x9ca3af, { metalness: 0.6, roughness: 0.3 }) }), [[dc.x, zCad, Math.PI]]);
+  world.addBox({ min: [dc.x - 0.32, 0, zCad - 0.32], max: [dc.x + 0.32, 0.6, zCad + 0.32], data: { type: 'sofa' } });
+  const idPostoRecepcao = `${p.recepcao.id}-0`;
+  const postoRecepcao = {
+    id: idPostoRecepcao,
+    monitores: monsRecepcao.map((mo) => ({ pos: [mo.x, mo.y, mo.z], rotY: mo.ry, w: mo.w, h: mo.h })),
+    mesa: { pos: [dc.x, 1.04, zCad + 1.02], rotY: Math.PI }, // teclado virado para a cadeira (−z)
+  };
 
   // parede de destaque atrás do balcão: ripas de madeira sobre fundo escuro, com o nome da empresa
   const zp = dc.z - R1 - 1.3;
@@ -1683,6 +2168,9 @@ export function construirEscritorio(world, p, { empresa = '', apagado = null } =
   for (const s of p.salas) salas[s.id] = SALAS[s.id](novaCelula(s));
   for (const l of p.lounges) lounge(novaCelula(l));
   telas.push(...telasRecepcao);
+  // o balcão da recepção: o último posto (sem célula, como as telas da recepção: sempre à vista)
+  postos.push(postoRecepcao);
+  assentos.push({ x: dc.x, z: zCad, y: 0.62, yaw: Math.PI, posto: idPostoRecepcao });
   // A luz do teto de cada sala vai para a raiz (o attach mantém onde ela está). O World esconde a
   // sala que não dá para ver, e luz dentro de grupo escondido sai das candidatas: a contagem
   // cairia abaixo do teto de luzes, tudo recompilaria e as luzes piscariam ao cruzar as portas.
@@ -1704,7 +2192,7 @@ export function construirEscritorio(world, p, { empresa = '', apagado = null } =
     // [{ pos, rotY, w, h, rotulo, painel? }]; as das salas também com embutida e celula
     telas,
     telaoes, // [{ pos, rotY, w, h, embutida, celula }]
-    postos, // [{ id: 'ti-0', celula, monitores: [3 × { pos, rotY, w, h }], mesa }], na ordem da planta
+    postos, // [{ id: 'ti-0', celula, monitores: [3 × { pos, rotY, w, h }], mesa }], na ordem da planta (o 'recepcao-0' sem celula)
     assentos, // [{ x, z, y, yaw, posto }]: onde dá para sentar com C
     // [{ id, lado, x0, x1, z0, z1, grupo }]: salas e lounges, na ordem dos índices `celula` acima
     celulas,

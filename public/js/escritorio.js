@@ -22,7 +22,8 @@
 //        x=-44     -16        12        40         60
 
 // telas: as da parede (de todo mundo). postos: mesas individuais com 3 monitores cada — quem
-// senta fica com o posto, e o que compartilha aparece nos monitores dele.
+// senta fica com o posto, e o que compartilha aparece nos monitores dele. O balcão da recepção
+// também é um posto (o último).
 // painel: a sala tem um painel (placar, status, mural...) que conta como a ÚLTIMA tela dela. Livre,
 // mostra o conteúdo dele; com alguém compartilhando ali (ex.: a aba do ranking), mostra a aba.
 export const DEPARTAMENTOS = {
@@ -88,7 +89,7 @@ export function planta(deptos) {
     return sala;
   });
   // a recepção também tem telas de parede (depois das salas)
-  const recepcao = { id: 'recepcao', nome: 'Recepção', primeiraTela: tela, telas: TELAS_RECEPCAO };
+  const recepcao = { id: 'recepcao', nome: 'Recepção', cor: '#6ee7c8', primeiraTela: tela, telas: TELAS_RECEPCAO };
   tela += TELAS_RECEPCAO;
   // monitores dos postos: depois de todas as telas de parede, 3 por posto, na ordem das salas
   const telasParede = tela;
@@ -99,6 +100,9 @@ export function planta(deptos) {
       tela += MONITORES_POR_POSTO;
     }
   }
+  // e o do balcão da recepção, depois de todos (os números dos postos das salas não mudam)
+  postos.push({ id: `${recepcao.id}-0`, sala: recepcao.id, n: 0, primeiraTela: tela });
+  tela += MONITORES_POR_POSTO;
   const fundos = lista.length > 6;
   const colunas = fundos ? 3 : Math.max(1, Math.ceil(lista.length / 2));
   const lounges = VAGAS.slice(lista.length, fundos ? VAGAS.length : colunas * 2).map(({ x0, lado }) => {
@@ -146,9 +150,10 @@ export function postoDaTela(p, i) {
   return p.postos[Math.floor((i - p.telasParede) / MONITORES_POR_POSTO)] ?? null;
 }
 
-// "TI · Posto 3"
+// "TI · Posto 3" (o da recepção: "Recepção · Balcão")
 export function rotuloDoPosto(id) {
   const [depto, n] = String(id).split('-');
+  if (depto === 'recepcao') return 'Recepção · Balcão';
   return `${DEPARTAMENTOS[depto]?.nome ?? depto} · Posto ${Number(n) + 1}`;
 }
 

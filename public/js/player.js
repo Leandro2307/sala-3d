@@ -18,6 +18,9 @@ const CARRO_FREIO = 26;
 const CARRO_ATRITO = 1.6;
 const CARRO_ESTERCO = 2.1; // radianos por segundo no volante
 const EPS = 1e-4;
+// 1ª pessoa: os olhos ficam sempre nesta altura acima do chão — em pé, sentado (no posto, no sofá)
+// ou de carro. Sentado, antes ia para o assento + 1,28, mais alto que em pé (e acima dos monitores)
+const OLHO = 1.62;
 
 const _v = new THREE.Vector3();
 const _dir = new THREE.Vector3();
@@ -58,6 +61,19 @@ export class Player {
     this.velocidade = 0; // m/s na direção do carro
     this.shake = 0; // tremor da câmera (soco recebido)
     this.shakeSeed = Math.random() * 100;
+    // balanço da visão (1ª pessoa, ver balancoDaVisao)
+    this.balancoVisao = true; // ajuste do jogador: quem enjoa desliga
+    this.mirando = false; // na luneta a mira balança com a respiração (main.js), não com o passo
+    this.balanco = 0; // 0..1: quanto do balanço do passo está valendo
+    this.passo = 0; // fase da passada
+    this.forcaQueda = 0; // afundada da aterrissagem, em metros
+    this.tQueda = 1;
+    // altura dos olhos sem pulos: degrau subido sozinho e sentar/levantar viram um ajuste que se desfaz
+    this.chaoSentado = null; // o chão embaixo do assento (o assento não é o chão)
+    this.degrau = 0;
+    this.ajusteOlho = 0;
+    this.olhoAntes = null;
+    this.sentadoAntes = false;
     this.override = null; // { position, target } para modo foco
     this.events = {};
     this.anim = 0;
@@ -172,6 +188,7 @@ export class Player {
     this.sitYaw = null;
     this.sitting = true;
     this.vel.set(0, 0, 0);
+    this.chaoSentado = assento.min.y;
     this.pos.y = assento.max.y;
     this.jumpBuffer = 0;
     this.emit('sit', true);
@@ -182,10 +199,12 @@ export class Player {
   // ele está virado. Na cadeira de um posto a câmera vai para primeira pessoa, para ver os
   // monitores sem a própria cabeça na frente; ao levantar volta como estava.
   sentarEm(lugar) {
+    this.chaoSentado = Math.min(this.pos.y, lugar.y); // estava em pé no chão, perto da cadeira
     this.pos.set(lugar.x, lugar.y, lugar.z);
     this.vel.set(0, 0, 0);
     this.yaw = lugar.yaw;
-    this.pitch = lugar.posto ? -0.3 : 0; // no posto, olhando um pouco para baixo: monitores, teclado e mouse
+    // no posto, com os olhos na altura dos monitores, só um pouco para baixo: teclado e mouse também
+    this.pitch = lugar.posto ? -0.16 : 0;
     this.sitYaw = Math.atan2(-Math.sin(lugar.yaw), -Math.cos(lugar.yaw));
     this.bodyYaw = this.sitYaw;
     this.jumpBuffer = 0;
@@ -202,6 +221,10 @@ export class Player {
     if (!this.sitting) return false;
     this.sitting = false;
     this.sitYaw = null;
+    // levanta no chão de onde sentou, em vez de cair do assento (se ali não tiver nada no caminho)
+    const chao = this.chaoSentado;
+    this.chaoSentado = null;
+    if (chao != null && chao < this.pos.y && !this.blockedAt(this.pos.x, chao + EPS, this.pos.z)) this.pos.y = chao + EPS;
     if (this.modoAntes) {
       this.mode = this.modoAntes;
       this.modoAntes = null;
@@ -254,6 +277,12 @@ export class Player {
     this.ground = null;
     this.grounded = false;
     this.camDistCurrent = 0.5;
+    // chegou em outro lugar: nada de deslizar da altura antiga nem de balançar o passo de lá
+    this.degrau = 0;
+    this.ajusteOlho = 0;
+    this.olhoAntes = null;
+    this.balanco = 0;
+    this.forcaQueda = 0;
   }
 
   // ------------------------------------------------------------------ física
@@ -276,6 +305,7 @@ export class Player {
       // sobe degraus baixos automaticamente
       const rise = c.max.y - p.y;
       if (rise > 0 && rise <= STEP && (this.grounded || this.coyote > 0) && !this.blockedAt(p.x, c.max.y + EPS, p.z)) {
+        this.degrau += c.max.y + EPS - p.y; // a câmera sobe deslizando (updateCamera)
         p.y = c.max.y + EPS;
         continue;
       }
@@ -360,6 +390,8 @@ export class Player {
 
     this.vel.y = Math.max(this.vel.y - GRAVITY * dt, -45);
 
+    const noAr = !this.grounded;
+    const vy = this.vel.y;
     this.moveAxis('x', this.vel.x * dt);
     this.moveAxis('z', this.vel.z * dt);
     this.moveVertical(this.vel.y * dt);
@@ -367,6 +399,12 @@ export class Player {
     if (this.grounded) this.coyote = 0.11;
 
     const type = this.ground?.data.type;
+    // aterrissou de um pulo ou queda (descer degrau não conta): a câmera afunda e volta.
+    // No trampolim não: ele já joga para cima de novo
+    if (noAr && this.grounded && vy < -6 && type !== 'pad') {
+      this.forcaQueda = Math.min(0.12, (-vy - 6) * 0.006);
+      this.tQueda = 0;
+    }
     if (type === 'pad') {
       this.vel.y = this.ground.data.strength;
       this.grounded = false;
@@ -499,10 +537,53 @@ export class Player {
     return out.set(-Math.sin(this.yaw) * cp, Math.sin(this.pitch), -Math.cos(this.yaw) * cp);
   }
 
+  // Balanço da visão na 1ª pessoa: a cada passo a câmera desce e sobe (duas vezes por passada),
+  // ginga de leve para o lado do pé de apoio e inclina um tiquinho. A média é zero: balança em volta
+  // da altura padrão, sem tirar a câmera dela. Some aos poucos ao parar, no ar, sentado, de carro,
+  // voando e na luneta. Devolve a inclinação (radianos) para girar a câmera depois do lookAt.
+  balancoDaVisao(dt, cam) {
+    const hs = Math.hypot(this.vel.x, this.vel.z);
+    const pisando = this.grounded || this.coyote > 0;
+    const vale = this.balancoVisao && !this.mirando && pisando && !this.sitting && !this.veiculo && !this.voando;
+    this.balanco += ((vale ? Math.min(1, hs / WALK) : 0) - this.balanco) * (1 - Math.exp(-dt * 8));
+    // ~2,4 passos por segundo andando, ~2,9 correndo
+    this.passo = (this.passo + dt * (4.2 + hs * 0.45)) % (Math.PI * 2);
+
+    // aterrissagem: afunda e volta sem passar do ponto (resposta de mola criticamente amortecida)
+    this.tQueda += dt;
+    const w = this.tQueda * 9;
+    cam.position.y -= this.balancoVisao && w < 6 ? this.forcaQueda * w * Math.exp(1 - w) : 0;
+
+    const k = this.balanco;
+    if (k < 0.001) return 0;
+    const correndo = THREE.MathUtils.clamp((hs - WALK) / (RUN - WALK), 0, 1);
+    const s = Math.sin(this.passo);
+    // |sen| tem média 2/π: descontada, o pé no chão fica abaixo da altura padrão e o meio do passo acima
+    cam.position.y += (Math.abs(s) - 2 / Math.PI) * (0.05 + correndo * 0.025) * k;
+    const lado = s * (0.022 + correndo * 0.01) * k; // para a direita da câmera
+    cam.position.x += Math.cos(this.yaw) * lado;
+    cam.position.z -= Math.sin(this.yaw) * lado;
+    return -s * 0.006 * k;
+  }
+
   updateCamera(dt) {
     const cam = this.world.camera;
     // decai rápido: tremor longo embrulha o estômago
     if (this.shake > 0) this.shake = Math.max(0, this.shake - dt * 2.6);
+
+    // altura dos olhos sem pulos: o degrau que o boneco subiu sozinho vira um ajuste que se desfaz
+    // rápido (pulo e queda seguem o corpo na hora, senão a câmera fica "boiando")
+    this.ajusteOlho = THREE.MathUtils.clamp(this.ajusteOlho - this.degrau, -0.8, 0.8);
+    this.degrau = 0;
+    // 1ª pessoa: OLHO acima do chão, também sentado; sentar e levantar deslizam para a altura nova
+    const olho = (this.sitting && this.chaoSentado != null ? this.chaoSentado : this.pos.y) + OLHO;
+    if (this.mode === 'first' && this.sitting !== this.sentadoAntes && this.olhoAntes != null && Math.abs(this.olhoAntes - olho) < 1.5) {
+      this.ajusteOlho = THREE.MathUtils.clamp(this.ajusteOlho + this.olhoAntes - olho, -0.8, 0.8);
+    }
+    this.sentadoAntes = this.sitting;
+    this.olhoAntes = olho;
+    this.ajusteOlho *= Math.exp(-dt * 12);
+
     if (this.override) {
       const k = 1 - Math.exp(-dt * 6);
       cam.position.lerp(this.override.position, k);
@@ -516,15 +597,19 @@ export class Player {
 
     const dir = this.lookDirection(_dir);
     if (this.mode === 'first') {
-      cam.position.set(this.pos.x, this.pos.y + (this.sitting ? 1.28 : 1.62), this.pos.z);
+      cam.position.set(this.pos.x, olho + this.ajusteOlho, this.pos.z);
+      const inclinacao = this.balancoDaVisao(dt, cam);
       this.applyShake(cam);
+      // o alvo anda junto com a câmera: o balanço mexe a visão, não a mira
       this.lookPoint.copy(cam.position).add(dir);
       cam.lookAt(this.lookPoint);
+      if (inclinacao) cam.rotateZ(inclinacao);
       this.avatar.setVisible(false);
       return;
     }
+    this.balanco = 0; // voltando para a 1ª pessoa, o balanço entra aos poucos
 
-    const target = _v.set(this.pos.x, this.pos.y + 1.55, this.pos.z);
+    const target = _v.set(this.pos.x, this.pos.y + 1.55 + this.ajusteOlho, this.pos.z);
     // impede a câmera de atravessar paredes/plataformas
     _ray.set(target, dir.clone().negate());
     _ray.far = this.camDist + 0.4;

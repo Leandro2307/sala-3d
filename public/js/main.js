@@ -43,7 +43,7 @@ const PANEL_TITLES = { people: 'Pessoas', chat: 'Chat da sala', telao: 'Telão',
 // ------------------------------------------------------------------ ajustes salvos
 const DEFAULTS = {
   name: '', color: COLORS[0], mic: true, voice: 100, screen: 90, tv: 80, spatial: false,
-  shareMode: 'max', sens: 100, sfx: true, micDevice: '', camDevice: '', helpCollapsed: false, photo: null, shirt: 'none', char: 'padrao', arma: ARMA_PADRAO,
+  shareMode: 'max', sens: 100, balancoVisao: true, sfx: true, micDevice: '', camDevice: '', helpCollapsed: false, photo: null, shirt: 'none', char: 'padrao', arma: ARMA_PADRAO,
   // qualidade gráfica: 'auto' ou um nível fixo; nivelAuto: onde o automático parou da última vez;
   // falhasAuto: quantas vezes cada nível caiu logo depois de subir (o automático espera mais para tentar)
   qualidade: 'auto', nivelAuto: null, falhasAuto: {}, mostrarFps: false,
@@ -131,6 +131,7 @@ world.scene.add(localAvatar.group);
 const player = new Player(world, localAvatar);
 localAvatar.aquecer = (obj) => world.aquecerObjeto(obj);
 player.sensitivity = settings.sens / 100;
+player.balancoVisao = settings.balancoVisao;
 
 const state = {
   joined: false,
@@ -4030,6 +4031,7 @@ function ligarLuneta(on) {
   if (on && (luneta || !temSniper() || state.focus || player.veiculo || player.sitting || combat.knockedOut || !state.joined)) return;
   if (!on && !luneta) return;
   luneta = on;
+  player.mirando = on; // na luneta o passo não balança a visão (a respiração balança a mira)
   const cam = world.camera;
   if (on) {
     antesDaLuneta = { modo: player.mode, fov: cam.fov, sens: player.sensitivity };
@@ -4362,6 +4364,14 @@ function superficiesDasTelas() {
 // tela escondida (cinema no escritório, sala atrás da parede) não ganha a mira: o raio do three
 // não olha visible
 const telaVisivel = (s) => s.group.visible && s.group.parent?.visible !== false;
+// o (+) da tela livre só vale com o boneco perto dela (no chão, sem contar a altura): de longe a
+// mira serve para ver as telas, não para ocupar uma. As caixas das salas ficam na origem, então a
+// posição do grupo já é a do mundo
+const pertoDaTela = (s) => Math.hypot(s.group.position.x - player.pos.x, s.group.position.z - player.pos.z) <= Math.max(5, s.w * 0.8);
+function infoDaMira(s) {
+  const info = screenInfo(s);
+  return info?.kind === 'livre' && !pertoDaTela(s) ? null : info;
+}
 
 // escolhe a tela que está na mira (ou a mais próxima da direção do olhar)
 function pickScreen() {
@@ -4377,7 +4387,7 @@ function pickScreen() {
     hit = h;
     break;
   }
-  if (hit && alcance(hit.object.userData.screen, hit.distance) && screenInfo(hit.object.userData.screen)) return hit.object.userData.screen;
+  if (hit && alcance(hit.object.userData.screen, hit.distance) && infoDaMira(hit.object.userData.screen)) return hit.object.userData.screen;
   cam.getWorldDirection(_fwd);
   let best = null;
   let bestScore = 1.25;
@@ -4390,7 +4400,7 @@ function pickScreen() {
     const angle = _fwd.angleTo(_to);
     const radius = Math.atan(Math.max(s.w, s.h) / 2 / dist);
     const score = angle / (radius + 0.08);
-    if (score < bestScore && screenInfo(s)) {
+    if (score < bestScore && infoDaMira(s)) {
       bestScore = score;
       best = s;
     }
@@ -4404,7 +4414,7 @@ function updateHover() {
   const naMesaDeDados = !state.focus && !mesa && jogoLigado('dados') && dados.perto(player.pos);
   const info = state.focus ? null
     : mesa ? { kind: 'jogo', mesa, label: jogos.rotulo(mesa) }
-      : naMesaDeDados ? { kind: 'dados', label: 'Apostar nos dados' } : screenInfo(pickScreen());
+      : naMesaDeDados ? { kind: 'dados', label: 'Apostar nos dados' } : infoDaMira(pickScreen());
   const changed = (info?.label ?? null) !== (state.hovered?.label ?? null);
   state.hovered = info;
   if (changed) {
@@ -4778,6 +4788,7 @@ const bindToggle = (sel, key, apply) => {
 };
 bindToggle('#set-spatial', 'spatial', updateVolumes);
 bindToggle('#set-sfx', 'sfx', (on) => setSfxEnabled(on));
+bindToggle('#set-balanco', 'balancoVisao', (on) => { player.balancoVisao = on; });
 // ?perf=1: o chip de FPS aparece sempre, com mais duas linhas — desenhos, sombra, memória da placa
 // e tempo de JS e de GPU por quadro (ver atualizarChipFps e sala.perf.gravar)
 const PERF = params.has('perf');
