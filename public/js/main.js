@@ -26,6 +26,7 @@ import { Navegadores, siteDe } from './navegador.js';
 import { DEPARTAMENTOS, IDS_DEPARTAMENTOS, MAX_SALAS, rotuloDoPosto, portaDa, comTelas } from './escritorio.js';
 import { Dados, MESA_DADOS } from './dados.js';
 import { Futebol } from './futebol.js';
+import { Quadras } from './quadras.js';
 import { icon, hydrateIcons } from './icons.js';
 import { isTouch, setupTouchControls, toggleFullscreen, isFullscreen, temTelaCheia } from './touch.js';
 
@@ -136,6 +137,13 @@ player.balancoVisao = settings.balancoVisao;
 // futebol de carro (estádio ao norte do cinema): jogando, ele dirige o carro e a câmera
 const futebol = new Futebol({
   world, player, avatarLocal: localAvatar, sfx, toast: (...a) => toast(...a), estaLigado: () => jogoLigado('futebol'),
+});
+// vôlei, basquete e boliche (a pé, com o boneco)
+const quadras = new Quadras({
+  world, player, sfx, toast: (...a) => toast(...a), ligado: (j) => jogoLigado(j),
+  livre: () => state.joined && !state.focus && !futebol.jogando && !typing(),
+  posDe: (id) => state.users.get(id)?.avatar.group.position ?? null,
+  yawDe: (id) => state.users.get(id)?.avatar.inner.rotation.y ?? null,
 });
 
 const state = {
@@ -712,6 +720,7 @@ async function join() {
   socket = window.io();
   combat.socket = socket;
   futebol.ligar(socket);
+  quadras.ligar(socket);
   rtc = new RTC(socket, {
     iceServers: config.iceServers,
     onTrack: handleTrack,
@@ -828,6 +837,8 @@ function applyJoined(data) {
   state.selfId = data.selfId;
   rtc.selfId = data.selfId;
   futebol.eu = data.selfId;
+  quadras.eu = data.selfId;
+  quadras.ver();
   futebol.verPartida(); // numa reconexão, quem estava jogando volta a pé (o servidor esqueceu)
   state.room = data.room;
   state.passe = data.passe || null;
@@ -2195,6 +2206,9 @@ const JOGOS_DA_SALA = [
   ['ringue', 'Ringue', 'Luta e socos'],
   ['corrida', 'Pista de corrida', 'Virar carro e dar voltas'],
   ['futebol', 'Futebol de carro', 'Bola gigante, gols e turbo para voar'],
+  ['volei', 'Vôlei', 'Na areia, com os bonecos'],
+  ['basquete', 'Basquete', 'Arremesso com barra de força'],
+  ['boliche', 'Boliche', '2 pistas, até 4 por pista'],
   ['xadrez', 'Xadrez de bruxo', ''],
   ['dama', 'Dama gigante', ''],
   ['velha', 'Jogo da velha', ''],
@@ -2202,7 +2216,7 @@ const JOGOS_DA_SALA = [
   ['poderes', 'Poderes', 'Voar e pulo alto'],
   ['armas', 'Arma da camiseta 22', ''],
 ];
-const AREAS_DE_JOGO = ['parkour', 'ringue', 'corrida', 'futebol', 'xadrez', 'dama', 'velha', 'dados'];
+const AREAS_DE_JOGO = ['parkour', 'ringue', 'corrida', 'futebol', 'volei', 'basquete', 'boliche', 'xadrez', 'dama', 'velha', 'dados'];
 // parkour e ringue ficam dentro do cinema: no escritório não existem
 const SO_NO_CINEMA = ['parkour', 'ringue'];
 const modoEscritorio = () => state.sala?.modulo === 'escritorio' && state.sala.departamentos?.length > 0;
@@ -5131,6 +5145,7 @@ window.addEventListener('keydown', (e) => {
     futebol.entrar();
     return;
   }
+  if (e.code === 'KeyE' && !state.focus && quadras.usarE()) return; // fila do boliche
   // usando o navegador da tela: as letras são do site, não atalhos do jogo (só o Esc sai)
   if (state.focus?.kind === 'pagina') {
     if (e.altKey && (e.code === 'ArrowLeft' || e.code === 'ArrowRight')) {
@@ -5337,6 +5352,7 @@ function sendState(dt) {
 function slowUpdate() {
   navegadores.atualizar();
   futebol.atualizarDica(!state.focus && !state.panel);
+  quadras.atualizarDica(!state.focus && !state.panel && !futebol.jogando);
   if (futebol.jogando && !jogoLigado('futebol')) futebol.sair(); // o dono da sala desligou
   $('#clima-chip').textContent = clima.rotulo();
   updateVolumes();
@@ -5700,6 +5716,7 @@ function frame(ts = performance.now()) {
     if (futebol.jogando) futebol.update(dt); // no campo: o carro do futebol no lugar do boneco
     else player.update(dt);
     futebol.animar(dt);
+    quadras.update(dt, t);
     // com poder ligado o parkour nem começa (pular alto/voar até o camarote não é recorde)
     if (player.voando || player.puloAlto) {
       if (run.state !== 'idle') {

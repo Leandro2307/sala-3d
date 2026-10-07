@@ -131,11 +131,21 @@ function ligarFutebol(io, rooms, jogoLigado) {
     if (pt.tic % 60 === 0) avisar(room);
   }
 
+  // Passos de 1/60 s pelo tempo que passou de verdade: no Windows o setInterval de 16,7 ms dispara
+  // a cada ~31 ms (o relógio anda de 15,6 em 15,6), e um passo por disparo deixava a bola em
+  // câmera lenta aqui — o navegador, que prevê a bola, ia na frente e era puxado de volta.
+  let ultimoTic = performance.now();
+  let sobra = 0;
   setInterval(() => {
+    const agora = performance.now();
+    sobra = Math.min(sobra + (agora - ultimoTic) / 1000, PASSO * 6);
+    ultimoTic = agora;
     if (!F) return;
-    for (const room of rooms.values()) {
-      if (!room.futebol?.jogadores.size) continue;
-      tic(room);
+    for (; sobra >= PASSO; sobra -= PASSO) {
+      for (const room of rooms.values()) {
+        if (!room.futebol?.jogadores.size) continue;
+        tic(room);
+      }
     }
   }, PASSO * 1000);
 
