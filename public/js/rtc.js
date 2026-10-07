@@ -165,6 +165,7 @@ export class RTC {
     this.onTrack = onTrack;
     this.onPeerGone = onPeerGone;
     this.onFalha = onFalha; // (id, temTurn) — conexão de voz/vídeo com alguém não fechou
+    this.onMicCaiu = null; // o sistema encerrou a trilha do microfone (fone trocado, ligação, app em 2º plano)
     this.temTurn = iceServers.some((s) => [].concat(s.urls).some((u) => /^turns?:/.test(u)));
     this.selfId = null;
     this.peers = new Map();
@@ -177,6 +178,7 @@ export class RTC {
     escolherCodec();
 
     socket.on('signal', ({ from, data }) => this.handleSignal(from, data));
+    setInterval(() => this.vigiar(), 1000);
   }
 
   // -------------------------------------------------------------- microfone
@@ -190,6 +192,7 @@ export class RTC {
       },
     });
     const track = stream.getAudioTracks()[0];
+    track.addEventListener('ended', () => { if (this.micTrack === track) this.onMicCaiu?.(); });
     const enabled = this.micTrack ? this.micTrack.enabled : true;
     track.enabled = enabled;
     const old = this.micTrack;
@@ -233,7 +236,77 @@ export class RTC {
     const quer = this.micTrack?.enabled && peer.ouveMic ? this.micTrack : null;
     if (peer.micVai === quer) return;
     peer.micVai = quer;
-    peer.micSender.replaceTrack(quer).catch((err) => console.warn('[rtc] voz', err));
+    peer.micSender.replaceTrack(quer).catch((err) => {
+      console.warn('[rtc] voz', err);
+      // não entrou: o vigia tenta de novo no próximo segundo (antes ficava marcada como enviada)
+      if (peer.micVai === quer) peer.micVai = undefined;
+    });
+  }
+
+  // Quem ouve viu o aro verde e não chegou som: põe a trilha da voz de novo no envio e, se a
+  // conexão caiu, refaz o caminho (ICE).
+  reforcarVoz(peer) {
+    if (this.micTrack && !peer.micSender) peer.micSender = peer.pc.addTrack(this.micTrack, this.micStream);
+    peer.micVai = undefined;
+    this.ajustarMic(peer);
+    if (!['connected', 'completed'].includes(peer.pc.iceConnectionState)) this.restartIce(peer);
+  }
+
+  // eu (que ouço) peço a voz de novo a quem está falando
+  pedirVoz(id) {
+    const peer = this.peers.get(id);
+    if (!peer) return;
+    this.send(id, { voz: 1 });
+    if (!['connected', 'completed'].includes(peer.pc.iceConnectionState)) this.restartIce(peer);
+  }
+
+  // pacotes de voz recebidos até agora na trilha trackId dessa pessoa (null: a trilha não é dela)
+  async vozChegando(id, trackId) {
+    const r = this.peers.get(id)?.pc.getReceivers().find((x) => x.track?.id === trackId);
+    if (!r) return null;
+    let n = null;
+    try {
+      (await r.getStats()).forEach((s) => {
+        if (s.type === 'inbound-rtp' && (s.kind || s.mediaType) === 'audio') n = s.packetsReceived ?? 0;
+      });
+    } catch { /* conexão fechando */ }
+    return n;
+  }
+
+  // no máximo um reinício de ICE a cada 8 s por pessoa
+  restartIce(peer) {
+    const agora = performance.now();
+    if (agora - peer.reinicioIce < 8000) return;
+    peer.reinicioIce = agora;
+    try {
+      peer.pc.restartIce();
+    } catch { /* conexão fechada */ }
+  }
+
+  // A cada segundo: a voz que devia sair e não entrou vai de novo; a oferta que ficou sem resposta
+  // (perdida numa colisão) é desfeita e refeita; a conexão que caiu (Wi-Fi trocado por 4G, celular
+  // que dormiu) refaz o caminho em 3 s, em vez de esperar o "failed", que leva até 30 s.
+  vigiar() {
+    const agora = performance.now();
+    for (const peer of this.peers.values()) {
+      const { pc } = peer;
+      if (pc.connectionState === 'closed') continue;
+      this.ajustarMic(peer);
+      if (pc.signalingState === 'have-local-offer' && !peer.makingOffer && agora - peer.ofertaDesde > 6000) {
+        peer.ofertaDesde = agora;
+        pc.setLocalDescription({ type: 'rollback' })
+          .then(() => { peer.reinicioIce = 0; this.restartIce(peer); }) // força uma oferta nova
+          .catch((err) => console.warn('[rtc] oferta sem resposta', err));
+        continue;
+      }
+      const ice = pc.iceConnectionState;
+      if (ice === 'disconnected' || ice === 'failed') {
+        peer.caiuDesde ||= agora;
+        if (agora - peer.caiuDesde > 3000) this.restartIce(peer);
+      } else {
+        peer.caiuDesde = 0;
+      }
+    }
   }
 
   // -------------------------------------------------------------- webcam
@@ -564,6 +637,10 @@ export class RTC {
       polite: this.selfId > id,
       makingOffer: false,
       ignoreOffer: false,
+      aplicandoResposta: false, // setRemoteDescription(answer) em andamento (ver handleSignal)
+      ofertaDesde: 0, // quando saiu a minha última oferta (o vigia desfaz a que nunca teve resposta)
+      caiuDesde: 0, // desde quando o ICE está desconectado
+      reinicioIce: 0,
       banda: null, // banda inicial da conexão, em kbps (ver banda)
       micSender: null,
       micVai: null, // a trilha que está no micSender agora (null: a voz não vai para essa pessoa)
@@ -582,6 +659,7 @@ export class RTC {
         // outra negociação começou enquanto a oferta era montada: o evento volta sozinho depois
         if (pc.signalingState !== 'stable') return;
         await pc.setLocalDescription(comBandaInicial(oferta, this.banda(peer)));
+        peer.ofertaDesde = performance.now();
         this.send(id, { description: pc.localDescription });
       } catch (err) {
         console.warn('[rtc] offer', err);
@@ -593,7 +671,7 @@ export class RTC {
       if (candidate) this.send(id, { candidate });
     };
     pc.oniceconnectionstatechange = () => {
-      if (pc.iceConnectionState === 'failed') pc.restartIce();
+      if (pc.iceConnectionState === 'failed') this.restartIce(peer);
     };
     // Redes diferentes atrás de CGNAT (comum em fibra e 4G) não fecham conexão direta: sem TURN
     // a tela fica preta e a voz muda. Avisa em vez de deixar a pessoa adivinhando.
@@ -626,19 +704,29 @@ export class RTC {
     this.socket.emit('signal', { to, data: JSON.parse(JSON.stringify(data)) });
   }
 
-  async handleSignal(from, { description, candidate, interesse, interesse2 }) {
+  async handleSignal(from, { description, candidate, interesse, interesse2, voz }) {
     const peer = this.getPeer(from);
     if (interesse2 || interesse) return this.receberInteresse(peer, interesse2 || interesse);
+    if (voz) return this.reforcarVoz(peer);
     const { pc } = peer;
     try {
       if (description) {
-        const collision = description.type === 'offer' && (peer.makingOffer || pc.signalingState !== 'stable');
+        // Oferta que chega enquanto a resposta à minha ainda está sendo aplicada não é colisão.
+        // Antes o lado "impolite" descartava essa oferta e o outro ficava esperando a resposta
+        // para sempre: nada mais negociava (a voz ligada depois nunca chegava).
+        const pronto = !peer.makingOffer && (pc.signalingState === 'stable' || peer.aplicandoResposta);
+        const collision = description.type === 'offer' && !pronto;
         peer.ignoreOffer = !peer.polite && collision;
         if (peer.ignoreOffer) return;
         // o som das minhas telas sai sem DTX (ver comDtx)
         const semDtx = new Set();
         for (const trs of peer.screenTransceivers.values()) for (const tr of trs) if (tr.mid) semDtx.add(tr.mid);
-        await pc.setRemoteDescription(comDtx(comBandaInicial(description, this.banda(peer)), semDtx));
+        peer.aplicandoResposta = description.type === 'answer';
+        try {
+          await pc.setRemoteDescription(comDtx(comBandaInicial(description, this.banda(peer)), semDtx));
+        } finally {
+          peer.aplicandoResposta = false;
+        }
         if (description.type === 'offer') {
           await pc.setLocalDescription(comBandaInicial(await pc.createAnswer(), this.banda(peer)));
           this.send(from, { description: pc.localDescription });

@@ -725,6 +725,7 @@ async function join() {
         : `Não deu para conectar voz e vídeo com ${u.name}: vocês estão em redes que bloqueiam conexão direta. O dono da sala precisa configurar o TURN (veja DEPLOY.md).`, 'error', 12000);
     },
   });
+  rtc.onMicCaiu = religarMic;
   rtc.shareMode = settings.shareMode;
   preloadYouTube();
   $('#browser-block').hidden = !config.browser;
@@ -913,7 +914,7 @@ function bindSocket() {
     if (!u || u.isSelf) return;
     u.avatar.setNetworkState(p, r, a);
     u.speaking = !!s;
-    u.avatar.speaking = !!s;
+    u.avatar.speaking = u.speaking && mesmoAmbiente(u); // aro só em quem dá para ouvir
   });
   // servidor novo: quem se mexeu na sala vem num lote só, [n, x, y, z, r, a, s, n, x, ...] a cada ~30 ms
   socket.on('states', (a) => {
@@ -925,7 +926,9 @@ function bindSocket() {
       _pRede[1] = a[i + 2];
       _pRede[2] = a[i + 3];
       u.avatar.setNetworkState(_pRede, a[i + 4], a[i + 5]);
-      u.speaking = u.avatar.speaking = !!a[i + 6];
+      u.speaking = !!a[i + 6];
+      // aro verde só em quem dá para ouvir (outra sala à prova de som fala e não se ouve)
+      u.avatar.speaking = u.speaking && mesmoAmbiente(u);
     }
   });
 
@@ -1150,6 +1153,11 @@ function addUser(data) {
   const u = { ...data, shares, isSelf: false, avatar, streams: new Map(), audioEl: null, speaking: false };
   state.users.set(u.id, u);
   if (u.n != null) porNumero.set(u.n, u);
+  const semDono = streamsSemDono.get(u.id);
+  if (semDono) {
+    streamsSemDono.delete(u.id);
+    setTimeout(() => { for (const st of semDono.values()) handleTrack(u.id, st); }, 0);
+  }
   world.marcarSombra?.(); // mais um boneco na sombra do sol
   return u;
 }
@@ -1160,6 +1168,8 @@ function removeUser(id, quiet = false) {
   if (porNumero.get(u.n) === u) porNumero.delete(u.n);
   interesseEnviado.delete(id);
   vozFora.delete(id);
+  vozesBarradas.delete(id);
+  streamsSemDono.delete(id);
   u.avatar.dispose();
   world.marcarSombra?.();
   if (u.audioEl) {
@@ -3153,9 +3163,15 @@ castVideo.addEventListener('ended', () => {
 });
 
 // ------------------------------------------------------------------ mídia recebida
+// trilhas que chegaram antes da pessoa estar na lista: entram quando ela entrar (addUser)
+const streamsSemDono = new Map(); // peerId -> Map(stream.id -> stream)
 function handleTrack(peerId, stream) {
   const u = state.users.get(peerId);
-  if (!u) return;
+  if (!u) {
+    if (!streamsSemDono.has(peerId)) streamsSemDono.set(peerId, new Map());
+    streamsSemDono.get(peerId).set(stream.id, stream);
+    return;
+  }
   if (!u.streams.has(stream.id)) {
     u.streams.set(stream.id, stream);
     stream.addEventListener('removetrack', () => routeStreams(u));
@@ -3181,7 +3197,7 @@ function routeStreams(u) {
     }
     if (u.audioEl.srcObject !== mic) {
       u.audioEl.srcObject = mic;
-      u.audioEl.play().catch(() => {});
+      tocarVoz(u);
     }
   }
   // webcam: vai no rosto do boneco
@@ -3379,10 +3395,114 @@ function updateVolumes() {
       const mudo = v <= 0;
       if (u.audioEl.muted !== mudo) {
         u.audioEl.muted = mudo;
-        if (!mudo && u.audioEl.paused) u.audioEl.play().catch(() => {});
+        if (!mudo) tocarVoz(u);
       }
     }
     for (const sh of u.shares.values()) if (sh.video) sh.video.volume = settings.screen / 100;
+  }
+}
+
+// ------------------------------------------------------------------ voz: garantir que toca
+// O aro verde vem pelo servidor; a voz, pelo WebRTC. Quando um dos dois falha, aparecia o aro e
+// não vinha som. Três causas, três remédios:
+// 1) o navegador barrou o play() do <audio> (entrada sem clique, como a recarga depois de um
+//    deploy; celular que pausou o áudio em segundo plano): qualquer toque ou tecla toca de novo,
+//    e se continuar barrado aparece o botão de ativar o som;
+// 2) a pessoa está falando e não chega pacote nenhum: pede a voz de novo a ela (rtc.pedirVoz) e,
+//    se a conexão caiu, refaz o caminho;
+// 3) o <audio> perdeu a trilha (stream trocado): escolhe a voz de novo (routeStreams).
+const vozesBarradas = new Set(); // ids com o play() recusado pelo navegador
+let avisoVozBarrada = null; // fecha o aviso de ativar o som
+
+function tocarVoz(u) {
+  const a = u.audioEl;
+  if (!a?.srcObject || !a.paused) return;
+  a.play().then(() => {
+    vozesBarradas.delete(u.id);
+    if (!vozesBarradas.size) avisoVozBarrada?.();
+  }).catch((err) => {
+    if (err?.name !== 'NotAllowedError' || vozesBarradas.has(u.id)) return;
+    vozesBarradas.add(u.id);
+    if (vozesBarradas.size === 1) {
+      avisoVozBarrada = toast('O navegador pausou o som das vozes.', 'warn', 600_000, null, { rotulo: 'Ativar o som', fazer: liberarVozes });
+    }
+  });
+}
+
+// um toque, clique ou tecla de verdade: o navegador deixa tocar
+function liberarVozes() {
+  if (!state.joined) return;
+  audioContext(); // o analisador do microfone e os efeitos também param quando o contexto suspende
+  for (const u of state.users.values()) if (!u.isSelf) tocarVoz(u);
+}
+for (const ev of ['pointerdown', 'touchend', 'click', 'keydown']) document.addEventListener(ev, liberarVozes, { capture: true, passive: true });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  liberarVozes();
+  if (micCaiu || rtc?.micTrack?.readyState === 'ended') religarMic();
+});
+
+async function vigiarVozes() {
+  if (!state.joined || !rtc) return;
+  for (const u of state.users.values()) {
+    if (u.isSelf) continue;
+    if (u.audioEl && !u.audioEl.muted) tocarVoz(u); // pausado por fora (celular, fone trocado)
+    if (!u.mic || !mesmoAmbiente(u) || settings.voice <= 0 || vozesBarradas.has(u.id)) {
+      u.semVoz = 0;
+      continue;
+    }
+    // só mede enquanto o aro está aceso; a pausa entre frases não zera a conta (só o som chegando)
+    if (!u.speaking) continue;
+    const trilha = u.audioEl?.srcObject?.getAudioTracks()[0];
+    const n = trilha?.readyState === 'live' ? await rtc.vozChegando(u.id, trilha.id) : null;
+    // contador de pacotes que andou desde a última medida = a voz está chegando
+    const chegou = n != null && u.pacotesVoz != null && n > u.pacotesVoz;
+    u.pacotesVoz = n;
+    if (chegou) {
+      u.semVoz = 0;
+      continue;
+    }
+    // 3 s de fala sem nenhum pacote: pede a voz de novo (e repete a cada 5 s enquanto faltar)
+    u.semVoz = (u.semVoz || 0) + 1;
+    if (u.semVoz >= 3 && u.semVoz % 5 === 3) {
+      console.warn(`[voz] ${u.name} está falando e a voz não chega: pedindo de novo`);
+      if (n == null) routeStreams(u);
+      rtc.pedirVoz(u.id);
+    }
+  }
+}
+setInterval(vigiarVozes, 1000);
+
+// O sistema encerrou o meu microfone (fone Bluetooth trocado, ligação no celular, app que ficou
+// em segundo plano): pega de novo, senão eu falava e ninguém ouvia. Com a página escondida o
+// navegador não deixa: espera ela voltar.
+let micCaiu = false;
+let religandoMic = false;
+async function religarMic() {
+  if (!rtc || !state.micAvailable || religandoMic) return;
+  if (document.hidden) {
+    micCaiu = true;
+    return;
+  }
+  micCaiu = false;
+  religandoMic = true;
+  try {
+    try {
+      await rtc.startMic(settings.micDevice || null);
+    } catch {
+      await rtc.startMic(null);
+    }
+    rtc.setMicEnabled(state.micOn);
+    setupAnalyser();
+  } catch (err) {
+    console.warn('[mic] não voltou', err);
+    toast('O microfone parou. Clique no microfone para ligar de novo.', 'warn', 8000);
+    state.micAvailable = false;
+    state.micOn = false;
+    socket?.emit('mic', false);
+    updateMicButton();
+  } finally {
+    religandoMic = false;
   }
 }
 

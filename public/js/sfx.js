@@ -6,7 +6,8 @@ export function setSfxEnabled(on) { enabled = on; }
 
 export function audioContext() {
   if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
-  if (ctx.state === 'suspended') ctx.resume();
+  // 'interrupted': o iPhone para o contexto numa ligação ou com outro app tocando
+  if (ctx.state === 'suspended' || ctx.state === 'interrupted') ctx.resume()?.catch?.(() => {});
   return ctx;
 }
 
