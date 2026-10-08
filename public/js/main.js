@@ -4179,6 +4179,7 @@ function atualizarArmas(dt) {
     chao: player.pos.y,
   });
   atualizarCapsulas(dt);
+  vigiarMunicao();
   if (gatilho && temArma() && defArma(armaAtual()).auto) atirar();
 }
 
@@ -4304,12 +4305,83 @@ function atualizarTiros(dt) {
   }
 }
 
+// ------------------------------------------------------------------ munição
+// Cada arma tem um pente (no máximo 30, ver armas-dados.js). Acabou, recarrega sozinho; R recarrega
+// antes (com a arma na mão e o pente não cheio). Nasceu de novo ou pegou arma no mata-mata: cheio.
+const balas = {}; // arma -> balas no pente
+let recarga = null; // { arma, ate } enquanto recarrega
+const pente = (arma) => defArma(arma).pente || 30;
+const balasDe = (arma) => balas[arma] ?? pente(arma);
+function recarregar() {
+  const arma = armaAtual();
+  if (!temArma() || recarga || balasDe(arma) >= pente(arma) || combat.knockedOut) return false;
+  recarga = { arma, ate: performance.now() + defArma(arma).recarga * 1000 };
+  sfx.engatilhar(0.6);
+  mostrarMunicao();
+  return true;
+}
+function encherPentes() {
+  for (const k of Object.keys(balas)) delete balas[k];
+  recarga = null;
+  mostrarMunicao();
+}
+const elMunicao = document.createElement('div');
+elMunicao.id = 'municao';
+elMunicao.hidden = true;
+document.body.appendChild(elMunicao);
+const estiloMunicao = document.createElement('style');
+estiloMunicao.textContent = `#municao { position: fixed; right: 22px; bottom: 96px; z-index: 25; padding: 8px 14px; border-radius: 12px; background: rgba(15,23,42,.8);
+  color: #f8fafc; font: 800 22px 'Plus Jakarta Sans', system-ui, sans-serif; font-variant-numeric: tabular-nums; pointer-events: none; text-align: right; }
+#municao small { display: block; font-size: 11px; font-weight: 600; color: #94a3b8; letter-spacing: .06em; }
+#municao.vazio { color: #f87171; }
+#municao[hidden] { display: none; }`;
+document.head.appendChild(estiloMunicao);
+let municaoAntes = '';
+function mostrarMunicao() {
+  const arma = armaAtual();
+  const ver = temArma() && state.joined && !player.veiculo;
+  const txt = !ver ? '' : recarga ? `…|${defArma(arma).nome} · recarregando` : `${balasDe(arma)} / ${pente(arma)}|${defArma(arma).nome}${mataMata.ativo ? ' · R recarrega' : ''}`;
+  if (txt === municaoAntes) return;
+  municaoAntes = txt;
+  elMunicao.hidden = !txt;
+  if (!txt) return;
+  const [n, nome] = txt.split('|');
+  elMunicao.innerHTML = `${n}<small>${nome}</small>`;
+  elMunicao.classList.toggle('vazio', !recarga && balasDe(arma) === 0);
+}
+let armaVista = null;
+let koVisto = false;
+function vigiarMunicao() {
+  if (recarga && performance.now() >= recarga.ate) {
+    balas[recarga.arma] = pente(recarga.arma);
+    recarga = null;
+    sfx.engatilhar();
+  }
+  // pegou outra arma (no mata-mata): vem cheia
+  const arma = armaAtual();
+  if (mataMata.ativo && arma !== armaVista) {
+    delete balas[arma];
+    if (recarga && recarga.arma !== arma) recarga = null;
+  }
+  armaVista = arma;
+  // levantou do nocaute: pentes cheios
+  if (koVisto && !combat.knockedOut) encherPentes();
+  koVisto = combat.knockedOut;
+  mostrarMunicao();
+}
+
 function atirar() {
   if (!temArma()) {
     toast('Arma só para quem escolheu a camiseta 22 (ou no mata-mata, pegando uma do chão).', 'info', 2600);
     return;
   }
   if (player.veiculo || player.sitting || state.focus || !state.joined) return;
+  const armaAgora = armaAtual();
+  if (recarga) return;
+  if (balasDe(armaAgora) <= 0) {
+    recarregar(); // pente vazio: recarrega sozinho
+    return;
+  }
   const cam = world.camera;
   cam.getWorldDirection(_camDir);
   // o raio sai da mira, mas da altura do boneco para a frente: em 3ª pessoa a câmera fica
@@ -4329,6 +4401,8 @@ function atirar() {
     },
   });
   if (!r) return; // cadência ou nocauteado
+  balas[armaAgora] = balasDe(armaAgora) - 1;
+  if (balas[armaAgora] <= 0) recarregar();
   // vira o corpo para onde atirou: os outros veem o braço apontando para lá
   player.bodyYaw = Math.atan2(-Math.sin(player.yaw), -Math.cos(player.yaw));
   localAvatar.atirar();
@@ -5216,7 +5290,9 @@ window.addEventListener('keydown', (e) => {
       abrirMesa();
       break;
     case 'KeyR':
-      if (!state.focus) respawn();
+      if (state.focus) break;
+      if (temArma() && recarregar()) break;
+      if (!mataMata.ativo) respawn(); // no mata-mata o R só recarrega
       break;
     case 'KeyV':
       toggleView();
@@ -5776,6 +5852,7 @@ function frame(ts = performance.now()) {
     }
     if (run.state === 'running') setPkTime(run.time);
     combat.update(dt);
+    player.travado = combat.knockedOut; // nocaute: fica parado onde caiu até levantar
     jogos.update(dt, t);
     dados.update(dt);
     atualizarTiros(dt);

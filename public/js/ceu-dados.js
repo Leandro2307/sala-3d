@@ -11,28 +11,70 @@ export const PORTAIS = {
 // Rampas em cunha (como as do CS): a crista vai de a até b, descendo; as duas faces caem até a
 // base, h metros abaixo, a w metros para cada lado. Faces a ~53°: em cima delas não dá para ficar
 // de pé, só deslizar — e no ar, virando o mouse junto com A/D, se ganha velocidade.
-// Plataformas: caixas (centro x/z, topo y, lados lx/lz). As de etapa salvam o ponto de volta.
+// O percurso sai do alto, a 440 m, no sudoeste do mapa, vai para leste e faz uma curva longa e
+// aberta (dá para fazer embalado) até apontar para oeste; desce até o chão no lado oeste do mapa
+// (a chegada). São 18 rampas, sempre em
+// cima do mapa (fora da cerca a serra passa de 500 m). Os pontos de volta são anéis no ar: passar
+// por dentro salva; não precisa parar em nada.
+const GRAUS = Math.PI / 180;
+const CORES = ['#22d3ee', '#a78bfa', '#f472b6', '#34d399', '#fbbf24', '#f87171', '#60a5fa', '#c084fc'];
+function gerarSurf() {
+  const trechos = [
+    { n: 3, L: 70, vao: 12, desce: 0.26, queda: 13, giro: 0 }, // para leste
+    { n: 6, L: 45, vao: 8, desce: 0.25, queda: 8, giro: -15 }, // curva para o norte (aberta: dá para fazer embalado)
+    { n: 6, L: 45, vao: 8, desce: 0.25, queda: 8, giro: -15 }, // e segue virando, para oeste
+    { n: 2, L: 70, vao: 12, desce: 0.26, queda: 13, giro: 0 },
+    { n: 1, L: 60, vao: 12, desce: 0.78, queda: 0, giro: 0 }, // a última encosta no chão
+  ];
+  const rampas = [];
+  let x = 5;
+  let y = 440;
+  let z = -20;
+  let ang = 90 * GRAUS; // direção: (sen, cos) no plano x/z; 90° = leste
+  for (const t of trechos) {
+    for (let i = 0; i < t.n; i++) {
+      ang += t.giro * GRAUS;
+      const dx = Math.sin(ang);
+      const dz = Math.cos(ang);
+      // as rampas ficam em linha: com uma para cada lado, quem desce pela face de dentro chegava
+      // alinhado com a crista da seguinte, abaixo dela, e batia de frente na ponta
+      const off = 0;
+      const a = [x + Math.cos(ang) * off, y, z - Math.sin(ang) * off];
+      const b = [a[0] + dx * t.L, y - t.L * t.desce, a[2] + dz * t.L];
+      rampas.push({ a, b, w: 9, h: 12, dir: [dx, dz], cor: CORES[rampas.length % CORES.length] });
+      x = b[0] - Math.cos(ang) * off + dx * t.vao;
+      z = b[2] + Math.sin(ang) * off + dz * t.vao;
+      y = b[1] - t.queda;
+    }
+  }
+  return rampas;
+}
+const RAMPAS = gerarSurf();
+// anéis de volta: em volta do começo destas rampas, grandes o bastante para pegar quem vem por
+// qualquer uma das faces. A volta (R) põe a pessoa em cima da face, já embalada
+const ANEIS = [3, 6, 9, 12, 15].map((i) => {
+  const r = RAMPAS[i];
+  const [dx, dz] = r.dir;
+  return { i, x: r.a[0], y: r.a[1], z: r.a[2], dir: r.dir, volta: [r.a[0] + dz * 4 + dx * 3, r.a[1] - 2.5, r.a[2] - dx * 4 + dz * 3] };
+});
 export const SURF = {
-  inicio: { x: 0, y: 420, z: 460, yaw: -Math.PI / 2 }, // olhando para +x
-  plataformas: [
-    { id: 'inicio', x: 0, y: 420, z: 460, lx: 12, lz: 12, etapa: 0 },
-    // a parede no fundo segura quem chega embalado da etapa 1 (dali se vira para -z)
-    { id: 'etapa2', x: 254, y: 340, z: 455, lx: 16, lz: 16, etapa: 1, parede: { min: [262, 338, 447], max: [263.5, 345, 463] } },
-    // o fim também tem parede: quem chega voando bate e cai na plataforma
-    { id: 'fim', x: 254, y: 255, z: 200, lx: 18, lz: 18, fim: true, parede: { min: [245, 253, 189.5], max: [263, 270, 191] } },
-  ],
-  rampas: [
-    // etapa 1, para +x
-    { a: [6.5, 417, 460], b: [84, 397, 460], w: 9, h: 12, cor: '#22d3ee' },
-    { a: [96, 394, 466], b: [166, 374, 466], w: 9, h: 12, cor: '#a78bfa' },
-    { a: [178, 364, 458], b: [240, 347, 458], w: 9, h: 12, cor: '#f472b6' },
-    // etapa 2, para -z
-    { a: [254, 337, 446.5], b: [254, 317, 371], w: 9, h: 12, cor: '#34d399' },
-    { a: [260, 314, 359], b: [260, 294, 289], w: 9, h: 12, cor: '#fbbf24' },
-    { a: [256, 280, 277], b: [256, 266, 212], w: 9, h: 12, cor: '#f87171' },
-  ],
-  // abaixo disto, volta para o começo da etapa
-  queda: [320, 245],
+  inicio: { x: -7, y: 442, z: -20, yaw: -Math.PI / 2 }, // olhando para leste
+  largada: { x: -3, y: 442, z: -20, lx: 16, lz: 12 }, // plataforma da largada (a crista começa na beirada)
+  rampas: RAMPAS,
+  aneis: ANEIS,
+  raioAnel: 16,
+  // a chegada: um círculo no chão, no fim da última rampa
+  chegada: { x: -32, z: 383, raio: 18 },
+  // atrás da chegada, uma parede alta: quem chega voando bate nela e cai na chegada
+  parede: { min: [-47.5, 0, 330], max: [-46, 150, 436] },
+  // abaixo disto (por anel: o 0 é a largada), caiu: volta para o último anel
+  queda: [0, ...ANEIS].map((anel, k, lista) => {
+    const de = anel.i ?? 0;
+    const ate = (lista[k + 1]?.i ?? RAMPAS.length) + 1;
+    let min = Infinity;
+    for (let i = de; i < Math.min(ate, RAMPAS.length); i++) min = Math.min(min, RAMPAS[i].b[1] - RAMPAS[i].h);
+    return min - 18;
+  }),
 };
 
 // ------------------------------------------------------------------ mata-mata

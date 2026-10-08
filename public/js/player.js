@@ -59,6 +59,7 @@ export class Player {
     this.veiculo = false; // transformado em carro
     // física de fora (o surf, em ceu.js): (dt, frente, lado, correndo) no lugar do passo normal
     this.fisicaExterna = null;
+    this.travado = false; // nocauteado: fica onde caiu, sem andar nem pular (só olha em volta)
     this.volante = 0; // -1..1, só para animar as rodas
     this.velocidade = 0; // m/s na direção do carro
     this.shake = 0; // tremor da câmera (soco recebido)
@@ -372,6 +373,11 @@ export class Player {
     // no carro, os pedais do celular mandam no acelerador; o analógico fica só de volante
     if (this.veiculo && this.pedal) f = this.pedal;
     const running = k.has('ShiftLeft') || k.has('ShiftRight') || this.runInput || this.runLock;
+    if (this.travado) {
+      f = 0;
+      r = 0;
+      this.jumpBuffer = 0;
+    }
 
     if (this.fisicaExterna) {
       this.fisicaExterna(dt, f, r, running);
@@ -510,7 +516,7 @@ export class Player {
 
     if (this.enabled && !this.sitting) {
       // botão de pulo mantido pressionado: pula de novo ao encostar no chão
-      if (this.jumpHeld && !this.override) this.jumpBuffer = Math.max(this.jumpBuffer, 0.12);
+      if (this.jumpHeld && !this.override && !this.travado) this.jumpBuffer = Math.max(this.jumpBuffer, 0.12);
       // carregado por plataforma móvel (deslocamento deste frame)
       if (this.ground && this.ground.data.move) this.pos.add(this.ground.delta);
       const steps = Math.ceil(dt / (1 / 120));

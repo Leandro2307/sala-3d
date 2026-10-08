@@ -142,33 +142,50 @@ export function construirSurf(world) {
     const f = planosDaRampa(r);
     formas.push(f);
     g.add(malhaDaRampa(r, f));
+    // a parte baixa do percurso passa perto do chão: lá não nasce árvore nem lago
+    const baixo = Math.min(r.a[1], r.b[1]) - r.h < 60;
+    if (baixo) world.reservas.push({ x: (r.a[0] + r.b[0]) / 2, z: (r.a[2] + r.b[2]) / 2, r: 45 });
   }
-  const pedra = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.7 });
-  const borda = new THREE.MeshBasicMaterial({ color: 0x22d3ee, toneMapped: false });
-  for (const p of SURF.plataformas) {
-    const min = new THREE.Vector3(p.x - p.lx / 2, p.y - 2, p.z - p.lz / 2);
-    const max = new THREE.Vector3(p.x + p.lx / 2, p.y, p.z + p.lz / 2);
-    formas.push(planosDaCaixa(min, max));
-    const m = new THREE.Mesh(new THREE.BoxGeometry(p.lx, 2, p.lz), pedra);
-    m.position.set(p.x, p.y - 1, p.z);
-    m.receiveShadow = true;
-    const aro = new THREE.Mesh(new THREE.BoxGeometry(p.lx + 0.2, 0.12, p.lz + 0.2), p.fim ? new THREE.MeshBasicMaterial({ color: 0xfacc15, toneMapped: false }) : borda);
-    aro.position.set(p.x, p.y - 0.05, p.z);
-    g.add(m, aro);
-    if (p.parede) {
-      const pmin = new THREE.Vector3(...p.parede.min);
-      const pmax = new THREE.Vector3(...p.parede.max);
-      formas.push(planosDaCaixa(pmin, pmax));
-      const tam = pmax.clone().sub(pmin);
-      const pm = new THREE.Mesh(new THREE.BoxGeometry(tam.x, tam.y, tam.z), new THREE.MeshStandardMaterial({ color: 0x0e7490, transparent: true, opacity: 0.55 }));
-      pm.position.copy(pmin).add(pmax).multiplyScalar(0.5);
-      g.add(pm);
-    }
-    const placa = placaTexto(p.fim ? 'FIM' : p.etapa === 0 ? 'SURF — LARGADA' : 'ETAPA 2', p.fim ? '#facc15' : '#22d3ee', 6);
-    placa.position.set(p.x, p.y + 4, p.z);
-    g.add(placa);
-  }
-  // placar dos tempos, na largada
+  // a largada
+  const L = SURF.largada;
+  const min = new THREE.Vector3(L.x - L.lx / 2, L.y - 2, L.z - L.lz / 2);
+  const max = new THREE.Vector3(L.x + L.lx / 2, L.y, L.z + L.lz / 2);
+  formas.push(planosDaCaixa(min, max));
+  const largada = new THREE.Mesh(new THREE.BoxGeometry(L.lx, 2, L.lz), new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.7 }));
+  largada.position.set(L.x, L.y - 1, L.z);
+  const aro = new THREE.Mesh(new THREE.BoxGeometry(L.lx + 0.2, 0.12, L.lz + 0.2), new THREE.MeshBasicMaterial({ color: 0x22d3ee, toneMapped: false }));
+  aro.position.set(L.x, L.y - 0.05, L.z);
+  const placaLargada = placaTexto('SURF — LARGADA', '#22d3ee', 6);
+  placaLargada.position.set(L.x, L.y + 4, L.z);
+  g.add(largada, aro, placaLargada);
+  // os anéis de volta (passar por dentro salva)
+  const aneis = SURF.aneis.map((a, k) => {
+    const anel = new THREE.Mesh(new THREE.TorusGeometry(SURF.raioAnel, 0.35, 10, 48), new THREE.MeshBasicMaterial({ color: 0x22d3ee, transparent: true, opacity: 0.75, toneMapped: false }));
+    anel.position.set(a.x, a.y, a.z);
+    anel.rotation.y = Math.atan2(a.dir[0], a.dir[1]); // virado para quem vem
+    const n = placaTexto(`${k + 1} / ${SURF.aneis.length}`, '#22d3ee', 3);
+    n.position.set(a.x, a.y + SURF.raioAnel + 1.6, a.z);
+    g.add(anel, n);
+    return anel;
+  });
+  // a parede atrás da chegada
+  const P = SURF.parede;
+  const pmin = new THREE.Vector3(...P.min);
+  const pmax = new THREE.Vector3(...P.max);
+  formas.push(planosDaCaixa(pmin, pmax));
+  const tamP = pmax.clone().sub(pmin);
+  const parede = new THREE.Mesh(new THREE.BoxGeometry(tamP.x, tamP.y, tamP.z), new THREE.MeshStandardMaterial({ color: 0x0e7490, transparent: true, opacity: 0.35, depthWrite: false }));
+  parede.position.copy(pmin).add(pmax).multiplyScalar(0.5);
+  g.add(parede);
+  // a chegada, no chão
+  const C = SURF.chegada;
+  world.reservas.push({ x: C.x, z: C.z, r: C.raio + 10 });
+  const chegada = new THREE.Mesh(new THREE.CircleGeometry(C.raio, 48).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xfacc15, transparent: true, opacity: 0.35, depthWrite: false, toneMapped: false }));
+  chegada.position.set(C.x, 0.06, C.z);
+  const placaChegada = placaTexto('SURF — CHEGADA', '#facc15', 7);
+  placaChegada.position.set(C.x, 6, C.z);
+  g.add(chegada, placaChegada);
+  // placar dos tempos, na largada e na chegada
   const placar = textura(512, 320, (ctx, w, h, lista) => {
     ctx.fillStyle = '#0b1020';
     ctx.fillRect(0, 0, w, h);
@@ -193,12 +210,15 @@ export function construirSurf(world) {
       ctx.fillText('ninguém terminou ainda', w / 2, h / 2 + 10);
     }
   });
-  const i = SURF.inicio;
-  const quadro = new THREE.Mesh(new THREE.PlaneGeometry(6, 3.75), new THREE.MeshBasicMaterial({ map: placar, toneMapped: false, side: THREE.DoubleSide }));
-  quadro.position.set(i.x - 5.5, i.y + 2.5, i.z);
-  quadro.rotation.y = Math.PI / 2;
-  g.add(quadro);
-  return { grupo: g, formas, placar };
+  const quadro = (x, y, z, ry) => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(6, 3.75), new THREE.MeshBasicMaterial({ map: placar, toneMapped: false, side: THREE.DoubleSide }));
+    m.position.set(x, y, z);
+    m.rotation.y = ry;
+    g.add(m);
+  };
+  quadro(L.x - L.lx / 2 - 0.5, L.y + 2.5, L.z, Math.PI / 2);
+  quadro(C.x - C.raio + 2, 3.5, C.z - 8, Math.PI / 2);
+  return { grupo: g, formas, placar, aneis };
 }
 
 export function construirArena(world) {
@@ -310,7 +330,7 @@ const AR_ACEL = 150; // sv_airaccelerate dos servidores de surf
 const CHAO_ACEL = 10;
 const ATRITO = 6;
 const ANDAR = 7.5;
-const MAX_VEL = 70;
+const MAX_VEL = 60; // 216 km/h: mais que isso passava voando por cima das rampas
 
 export class Surf {
   // opts: world, player, sfx, toast, ligado(), socket(), aoEntrar(), aoSair()
@@ -319,10 +339,8 @@ export class Surf {
     this.formas = opts.world.ceu.surf.formas;
     this.ativo = false;
     this.chao = false;
-    this.ponto = SURF.plataformas[0];
-    this.etapa = 0;
+    this.anel = -1; // o último anel por onde passou (-1: nenhum, volta para a largada)
     this.inicio = null; // quando largou (performance.now)
-    this.terminou = false;
     this.montarHud();
   }
 
@@ -340,43 +358,49 @@ export class Surf {
 
   entrar() {
     if (this.ativo) return;
+    this.ligarFisica();
+    this.anel = -1;
+    this.voltar();
+    this.socket()?.emit('surf-ver', (lista) => this.world.ceu.surf.placar.userData.redesenhar(lista));
+    this.sfx.teleport();
+    this.toast('Surf: em cima da rampa, segure A ou D para o lado dela (sem W) e deslize. No ar, A ou D com o mouse virando para o mesmo lado ganha velocidade. Os anéis salvam o ponto de volta (R) · Esc sai.', 'info', 10000);
+  }
+
+  ligarFisica() {
     this.ativo = true;
     this.aoEntrar?.();
     this.modoAntes = this.player.mode;
     this.player.mode = 'first';
     this.player.fisicaExterna = (dt, f, r) => this.passo(dt, f, r);
-    this.ponto = SURF.plataformas[0];
-    this.etapa = 0;
-    this.inicio = null;
-    this.terminou = false;
-    this.voltar();
     this.hud.hidden = false;
-    this.socket()?.emit('surf-ver', (lista) => this.world.ceu.surf.placar.userData.redesenhar(lista));
-    this.sfx.teleport();
-    this.toast('Surf: em cima da rampa, segure A ou D para o lado dela (sem W) e deslize. No ar, A ou D com o mouse virando para o mesmo lado ganha velocidade. R volta para a etapa · Esc sai.', 'info', 10000);
   }
 
-  sair() {
+  // naChegada: terminou no chão — fica lá, a pé
+  sair(naChegada = false) {
     if (!this.ativo) return;
     this.ativo = false;
     this.player.fisicaExterna = null;
     this.player.mode = this.modoAntes || 'third';
     this.hud.hidden = true;
-    this.player.teleport([PORTAIS.surf.x - 3, 0, PORTAIS.surf.z], Math.PI / 2);
+    if (!naChegada) this.player.teleport([PORTAIS.surf.x - 3, 0, PORTAIS.surf.z], Math.PI / 2);
     this.aoSair?.();
   }
 
-  // de volta para a plataforma da etapa (R, ou caiu)
+  // R, ou caiu: para o último anel (já embalado, na direção da rampa), ou para a largada
   voltar() {
-    const p = this.ponto;
-    const yaw = p.etapa === 1 ? 0 : SURF.inicio.yaw; // etapa 2 desce para -z
-    this.player.teleport([p.x, p.y, p.z], yaw);
-    this.player.vel.set(0, 0, 0);
-    this.chao = true;
-    if (p.etapa === 0) {
+    const pl = this.player;
+    if (this.anel < 0) {
+      const i = SURF.inicio;
+      pl.teleport([i.x, i.y, i.z], i.yaw);
+      pl.vel.set(0, 0, 0);
+      this.chao = true;
       this.inicio = null; // na largada o tempo zera
-      this.terminou = false;
+      return;
     }
+    const a = SURF.aneis[this.anel];
+    pl.teleport(a.volta, Math.atan2(-a.dir[0], -a.dir[1]));
+    pl.vel.set(a.dir[0] * 16, 0, a.dir[1] * 16);
+    this.chao = false;
   }
 
   // um passo da física de surf (no lugar do passo normal do boneco)
@@ -439,6 +463,12 @@ export class Surf {
       }
       if (!bateu) break;
     }
+    // o chão do mapa (a chegada é nele)
+    if (centro.y < SURF_R) {
+      centro.y = SURF_R;
+      if (v.y < 0) v.y = 0;
+      chao = true;
+    }
     p.set(centro.x, centro.y - SURF_R, centro.z);
     this.chao = chao;
     pl.grounded = chao;
@@ -463,38 +493,45 @@ export class Surf {
     if (!this.ligado()) return this.sair();
     const p = this.player.pos;
     // largou: o tempo começa
-    const ini = SURF.plataformas[0];
-    if (!this.inicio && (Math.abs(p.x - ini.x) > ini.lx / 2 || Math.abs(p.z - ini.z) > ini.lz / 2 || p.y < ini.y - 1)) this.inicio = performance.now();
-    // pisou numa plataforma: etapa nova ou fim
-    if (this.chao) {
-      for (const pf of SURF.plataformas) {
-        if (Math.abs(p.x - pf.x) > pf.lx / 2 || Math.abs(p.z - pf.z) > pf.lz / 2 || Math.abs(p.y - pf.y) > 0.3) continue;
-        if (pf.etapa !== undefined && pf.etapa > this.etapa) {
-          this.etapa = pf.etapa;
-          this.ponto = pf;
-          this.sfx.checkpoint();
-          this.toast('Etapa 2! R volta para cá.', 'info', 2200);
-        }
-        if (pf.fim && this.inicio && !this.terminou) {
-          this.terminou = true;
-          const t = (performance.now() - this.inicio) / 1000;
-          this.sfx.finish();
-          this.toast(`Terminou em ${t.toFixed(2)} s! Esc volta para o chão, R recomeça.`, 'info', 6000);
-          this.socket()?.emit('surf-fim', Math.round(t * 100) / 100);
-          this.ponto = SURF.plataformas[0];
-          this.etapa = 0;
-        }
-      }
+    const L = SURF.largada;
+    if (!this.inicio && (Math.abs(p.x - L.x) > L.lx / 2 || Math.abs(p.z - L.z) > L.lz / 2 || p.y < L.y - 1)) this.inicio = performance.now();
+    // passou por dentro de um anel (para a frente): vira o ponto de volta
+    SURF.aneis.forEach((a, k) => {
+      if (k <= this.anel) return;
+      if (Math.hypot(p.x - a.x, p.y + 1 - a.y, p.z - a.z) > SURF.raioAnel) return;
+      this.anel = k;
+      this.world.ceu.surf.aneis[k].material.color.set('#facc15');
+      this.sfx.checkpoint();
+    });
+    // no chão: na chegada, terminou; fora dela, caiu
+    if (this.chao && p.y < 0.5) {
+      const C = SURF.chegada;
+      if (Math.hypot(p.x - C.x, p.z - C.z) < C.raio + 4) return this.terminar();
+      this.voltar();
+      this.sfx.fall();
+      return;
     }
-    // caiu: volta para a plataforma da etapa
-    if (p.y < SURF.queda[this.etapa] && !this.terminou) {
+    // caiu lá de cima: volta para o último anel
+    if (p.y < SURF.queda[this.anel + 1]) {
       this.voltar();
       this.sfx.fall();
     }
-    const t = this.inicio && !this.terminou ? (performance.now() - this.inicio) / 1000 : 0;
+    const t = this.inicio ? (performance.now() - this.inicio) / 1000 : 0;
     const vel = Math.hypot(this.player.vel.x, this.player.vel.z);
-    this.hudTempo.textContent = this.terminou ? 'FIM' : `${t.toFixed(1)} s`;
-    this.hudVel.textContent = `${Math.round(vel * 3.6)} km/h`;
+    this.hudTempo.textContent = `${t.toFixed(1)} s`;
+    this.hudVel.textContent = `${Math.round(vel * 3.6)} km/h · anel ${this.anel + 1}/${SURF.aneis.length}`;
+  }
+
+  terminar() {
+    const t = this.inicio ? (performance.now() - this.inicio) / 1000 : null;
+    this.sfx.finish();
+    if (t) {
+      this.toast(`Chegou no chão em ${t.toFixed(2)} s!`, 'info', 6000);
+      this.socket()?.emit('surf-fim', Math.round(t * 100) / 100);
+    }
+    for (const anel of this.world.ceu.surf.aneis) anel.material.color.set('#22d3ee');
+    this.anel = -1;
+    this.sair(true); // fica na chegada, a pé
   }
 
   montarHud() {
