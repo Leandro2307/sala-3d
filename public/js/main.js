@@ -27,6 +27,7 @@ import { DEPARTAMENTOS, IDS_DEPARTAMENTOS, MAX_SALAS, rotuloDoPosto, portaDa, co
 import { Dados, MESA_DADOS } from './dados.js';
 import { Futebol } from './futebol.js';
 import { Quadras } from './quadras.js';
+import { Surf, MataMata, dicaDoPortal } from './ceu.js';
 import { icon, hydrateIcons } from './icons.js';
 import { isTouch, setupTouchControls, toggleFullscreen, isFullscreen, temTelaCheia } from './touch.js';
 
@@ -144,6 +145,28 @@ const quadras = new Quadras({
   livre: () => state.joined && !state.focus && !futebol.jogando && !typing(),
   posDe: (id) => state.users.get(id)?.avatar.group.position ?? null,
   yawDe: (id) => state.users.get(id)?.avatar.inner.rotation.y ?? null,
+});
+// surf e mata-mata (no céu; portais perto da porta do cinema)
+const surf = new Surf({
+  world, player, sfx, toast: (...a) => toast(...a), ligado: () => jogoLigado('surf'), socket: () => socket,
+  aoEntrar: () => { if (player.veiculo) toggleVeiculo(); if (player.voando) toggleVoar(); if (player.sitting) toggleSit(); },
+});
+const mataMata = new MataMata({
+  world, player, sfx, toast: (...a) => toast(...a), ligado: () => jogoLigado('matamata'), socket: () => socket,
+  knockedOut: () => combat.knockedOut, eu: () => state.selfId,
+  // arma da arena na mão do boneco (null: volta à de sempre, a da camiseta 22)
+  armar: (id, tipo) => {
+    const u = state.users.get(id);
+    if (!u?.avatar) return;
+    if (tipo) {
+      u.armaDeAntes ??= u.avatar.tipoArma; // a escolhida no menu, para devolver na saída
+      u.avatar.setArma(true, tipo);
+    } else if (u.armaDeAntes !== undefined) {
+      u.avatar.setArma(u.avatar.shirt === 'bolsonaro', u.isSelf ? settings.arma : u.armaDeAntes);
+      delete u.armaDeAntes;
+    }
+    if (u.isSelf) poderesMudaram();
+  },
 });
 
 const state = {
@@ -721,6 +744,8 @@ async function join() {
   combat.socket = socket;
   futebol.ligar(socket);
   quadras.ligar(socket);
+  surf.ligar(socket);
+  mataMata.ligar(socket);
   rtc = new RTC(socket, {
     iceServers: config.iceServers,
     onTrack: handleTrack,
@@ -839,6 +864,7 @@ function applyJoined(data) {
   futebol.eu = data.selfId;
   quadras.eu = data.selfId;
   quadras.ver();
+  mataMata.ver();
   futebol.verPartida(); // numa reconexão, quem estava jogando volta a pé (o servidor esqueceu)
   state.room = data.room;
   state.passe = data.passe || null;
@@ -2209,6 +2235,8 @@ const JOGOS_DA_SALA = [
   ['volei', 'Vôlei', 'Na areia, com os bonecos'],
   ['basquete', 'Basquete', 'Arremesso com barra de força'],
   ['boliche', 'Boliche', '2 pistas, até 4 por pista'],
+  ['surf', 'Surf', 'Rampas no céu, como no CS'],
+  ['matamata', 'Mata-mata', 'Arena com armas no chão (X1)'],
   ['xadrez', 'Xadrez de bruxo', ''],
   ['dama', 'Dama gigante', ''],
   ['velha', 'Jogo da velha', ''],
@@ -2216,7 +2244,7 @@ const JOGOS_DA_SALA = [
   ['poderes', 'Poderes', 'Voar e pulo alto'],
   ['armas', 'Arma da camiseta 22', ''],
 ];
-const AREAS_DE_JOGO = ['parkour', 'ringue', 'corrida', 'futebol', 'volei', 'basquete', 'boliche', 'xadrez', 'dama', 'velha', 'dados'];
+const AREAS_DE_JOGO = ['parkour', 'ringue', 'corrida', 'futebol', 'volei', 'basquete', 'boliche', 'surf', 'matamata', 'xadrez', 'dama', 'velha', 'dados'];
 // parkour e ringue ficam dentro do cinema: no escritório não existem
 const SO_NO_CINEMA = ['parkour', 'ringue'];
 const modoEscritorio = () => state.sala?.modulo === 'escritorio' && state.sala.departamentos?.length > 0;
@@ -4093,7 +4121,7 @@ function updateFightHud(health, emRingue) {
   const hud = $('#fight-hud');
   const v = Math.max(0, Math.min(1, health / COMBAT.maxHealth));
   // a porradaria vale no mapa todo: fora do ringue a barra aparece quando você apanha
-  hud.hidden = !(inRing || v < 1 || combat.knockedOut);
+  hud.hidden = !(inRing || mataMata.ativo || v < 1 || combat.knockedOut);
   $('#fh-label').textContent = inRing ? 'Ringue' : 'Vida';
   localAvatar.setHealth(v);
   socket?.emit('health', v);
@@ -4109,7 +4137,9 @@ function updateFightHud(health, emRingue) {
 
 // ------------------------------------------------------------------ arma (camiseta 22)
 // O servidor confere a camiseta de novo: isto aqui é só para não mostrar o que não vale.
-function temArma() { return settings.shirt === 'bolsonaro' && jogoLigado('armas'); }
+function temArma() { return (settings.shirt === 'bolsonaro' && jogoLigado('armas')) || !!mataMata.arma; }
+// a arma que está na mão: a do mata-mata manda enquanto se está nele
+const armaAtual = () => mataMata.arma || settings.arma;
 
 const _tmpTiro = new THREE.Vector3();
 const _camDir = new THREE.Vector3();
@@ -4140,7 +4170,7 @@ window.addEventListener('blur', soltarGatilho);
 
 function atualizarArmas(dt) {
   const fp = player.mode === 'first' && !luneta && temArma() && !player.veiculo && !player.sitting && !state.focus && !combat.knockedOut && !player.override;
-  if (fp && visaoArma.tipo !== settings.arma) visaoArma.setTipo(settings.arma);
+  if (fp && visaoArma.tipo !== armaAtual()) visaoArma.setTipo(armaAtual());
   visaoArma.update(dt, {
     visivel: fp,
     andando: player.grounded ? Math.min(1, Math.hypot(player.vel.x, player.vel.z) / 7) : 0.2,
@@ -4149,7 +4179,7 @@ function atualizarArmas(dt) {
     chao: player.pos.y,
   });
   atualizarCapsulas(dt);
-  if (gatilho && temArma() && defArma(settings.arma).auto) atirar();
+  if (gatilho && temArma() && defArma(armaAtual()).auto) atirar();
 }
 
 // escolha da arma no modal do personagem (só aparece para quem anda armado)
@@ -4176,7 +4206,7 @@ const FOV_LUNETA = 13;
 let luneta = false;
 let antesDaLuneta = null; // { modo, fov, sens }
 let balancoLuneta = { x: 0, y: 0 };
-const temSniper = () => temArma() && settings.arma === 'sniper';
+const temSniper = () => temArma() && armaAtual() === 'sniper';
 function ligarLuneta(on) {
   if (on && (luneta || !temSniper() || state.focus || player.veiculo || player.sitting || combat.knockedOut || !state.joined)) return;
   if (!on && !luneta) return;
@@ -4276,7 +4306,7 @@ function atualizarTiros(dt) {
 
 function atirar() {
   if (!temArma()) {
-    toast('Arma só para quem escolheu a camiseta 22.', 'info', 2600);
+    toast('Arma só para quem escolheu a camiseta 22 (ou no mata-mata, pegando uma do chão).', 'info', 2600);
     return;
   }
   if (player.veiculo || player.sitting || state.focus || !state.joined) return;
@@ -4286,7 +4316,7 @@ function atirar() {
   // atrás, e acertaria quem estivesse entre ela e você
   const frente = Math.max(0, _tmpTiro.copy(player.pos).sub(cam.position).dot(_camDir));
   _origemTiro.copy(cam.position).addScaledVector(_camDir, frente);
-  const def = defArma(settings.arma);
+  const def = defArma(armaAtual());
   const r = combat.atirar({
     origem: _origemTiro,
     dir: _camDir,
@@ -5134,6 +5164,8 @@ window.addEventListener('keydown', (e) => {
     else if (!$('#react-pop').hidden) $('#react-pop').hidden = true;
     else if (state.panel) closePanel();
     else if (futebol.jogando) futebol.sair();
+    else if (surf.ativo) surf.sair();
+    else if (mataMata.ativo) mataMata.sair();
     else run.abandon(); // preso no parkour? Esc sai da corrida
     return;
   }
@@ -5146,6 +5178,19 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   if (e.code === 'KeyE' && !state.focus && quadras.usarE()) return; // fila do boliche
+  if (e.code === 'KeyE' && !state.focus && surf.pertoDoPortal()) {
+    surf.entrar();
+    return;
+  }
+  if (e.code === 'KeyE' && !state.focus && mataMata.pertoDoPortal()) {
+    mataMata.entrar();
+    return;
+  }
+  // no surf, R volta para a etapa (não para a entrada do mapa)
+  if (e.code === 'KeyR' && surf.ativo && !state.focus) {
+    surf.voltar();
+    return;
+  }
   // usando o navegador da tela: as letras são do site, não atalhos do jogo (só o Esc sai)
   if (state.focus?.kind === 'pagina') {
     if (e.altKey && (e.code === 'ArrowLeft' || e.code === 'ArrowRight')) {
@@ -5353,6 +5398,7 @@ function slowUpdate() {
   navegadores.atualizar();
   futebol.atualizarDica(!state.focus && !state.panel);
   quadras.atualizarDica(!state.focus && !state.panel && !futebol.jogando);
+  dicaDoPortal(state.focus || state.panel ? '' : surf.pertoDoPortal() ? 'Ir para o surf' : mataMata.pertoDoPortal() ? 'Entrar no mata-mata' : '');
   if (futebol.jogando && !jogoLigado('futebol')) futebol.sair(); // o dono da sala desligou
   $('#clima-chip').textContent = clima.rotulo();
   updateVolumes();
@@ -5717,6 +5763,8 @@ function frame(ts = performance.now()) {
     else player.update(dt);
     futebol.animar(dt);
     quadras.update(dt, t);
+    surf.update(dt);
+    mataMata.update(dt);
     // com poder ligado o parkour nem começa (pular alto/voar até o camarote não é recorde)
     if (player.voando || player.puloAlto) {
       if (run.state !== 'idle') {

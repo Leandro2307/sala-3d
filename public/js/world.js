@@ -11,6 +11,7 @@ import { PISTA, CAMINHO, CURVAS, pontoEm, projetar } from './pista.js';
 import { criarNatureza } from './natureza.js';
 import { construirEstadio } from './futebol.js';
 import { construirVolei, construirBasquete, construirBoliche } from './quadras.js';
+import { construirPortal, construirSurf, construirArena } from './ceu.js';
 import { RESERVAS_JOGOS } from './tabuleiros.js';
 import { construirEscritorio } from './escritorio3d.js';
 import { planta, salaEm, rotuloDaTela, postoDaTela, chaveDaTela, DEPARTAMENTOS, PREDIO, zDaPorta } from './escritorio.js';
@@ -775,6 +776,11 @@ export class World {
       boliche: this.area('boliche', () => construirBoliche(this)),
     };
     this.placaDirecao(69, 58, -Math.PI / 2, 'VÔLEI · BASQUETE · BOLICHE  →', '#facc15');
+    // surf e mata-mata, no céu; os portais ficam perto da porta (o jogo é do ceu.js)
+    this.ceu = {
+      surf: this.area('surf', () => (construirPortal(this, 'surf'), construirSurf(this))),
+      arena: this.area('matamata', () => (construirPortal(this, 'matamata'), construirArena(this))),
+    };
     // praça do xadrez de bruxo e da dama (as peças em si ficam em jogos.js)
     this.reservas.push(...RESERVAS_JOGOS);
     this.placaDirecao(SALA.maxX + 9, SALA.porta.z0 + 2, -Math.PI / 2, '↖  JOGOS E DADOS', '#a78bfa');

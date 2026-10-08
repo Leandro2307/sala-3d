@@ -57,6 +57,8 @@ export class Player {
     this.touchLook = 1; // multiplicador do arrasto com o dedo
     this.sitting = false; // sentado num sofá/pufe
     this.veiculo = false; // transformado em carro
+    // física de fora (o surf, em ceu.js): (dt, frente, lado, correndo) no lugar do passo normal
+    this.fisicaExterna = null;
     this.volante = 0; // -1..1, só para animar as rodas
     this.velocidade = 0; // m/s na direção do carro
     this.shake = 0; // tremor da câmera (soco recebido)
@@ -371,6 +373,10 @@ export class Player {
     if (this.veiculo && this.pedal) f = this.pedal;
     const running = k.has('ShiftLeft') || k.has('ShiftRight') || this.runInput || this.runLock;
 
+    if (this.fisicaExterna) {
+      this.fisicaExterna(dt, f, r, running);
+      return;
+    }
     if (this.veiculo) {
       this.passoCarro(dt, f, r, running);
       return;
@@ -638,9 +644,12 @@ export class Player {
 
     cam.position.copy(target).addScaledVector(dir, -this.camDistCurrent);
     this.applyShake(cam);
-    cam.position.x = THREE.MathUtils.clamp(cam.position.x, ROOM.minX + 0.4, ROOM.maxX - 0.4);
-    cam.position.z = THREE.MathUtils.clamp(cam.position.z, ROOM.minZ + 0.4, ROOM.maxZ - 0.4);
-    cam.position.y = THREE.MathUtils.clamp(cam.position.y, 0.3, ROOM.height - 0.4);
+    // dentro do mapa a câmera não passa da cerca nem do teto; lá no céu (surf, mata-mata) é livre
+    if (this.pos.y < ROOM.height) {
+      cam.position.x = THREE.MathUtils.clamp(cam.position.x, ROOM.minX + 0.4, ROOM.maxX - 0.4);
+      cam.position.z = THREE.MathUtils.clamp(cam.position.z, ROOM.minZ + 0.4, ROOM.maxZ - 0.4);
+      cam.position.y = THREE.MathUtils.clamp(cam.position.y, 0.3, ROOM.height - 0.4);
+    }
     cam.lookAt(target);
     this.lookPoint.copy(target);
     // esconde o próprio boneco se a câmera encostar nele

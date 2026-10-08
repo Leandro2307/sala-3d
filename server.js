@@ -13,6 +13,7 @@ const crypto = require('crypto');
 const banco = require('./banco');
 const { ligarFutebol } = require('./futebol-servidor.js');
 const { ligarQuadras } = require('./quadras-servidor.js');
+const { ligarCeu } = require('./ceu-servidor.js');
 // a planta do escritório é a mesma do navegador (public/js/escritorio.js); carrega em main()
 let ESCRITORIO = null;
 
@@ -391,7 +392,7 @@ const MODULOS = ['lazer', 'escritorio'];
 // clima e hora do dia (public/js/clima.js): auto/ciclo = muda sozinho, igual para todos
 const CLIMAS_SALA = ['auto', 'sol', 'nublado', 'chuva', 'tempestade'];
 const HORARIOS_SALA = ['ciclo', 'manha', 'dia', 'tarde', 'noite'];
-const JOGOS_SALA = ['parkour', 'ringue', 'corrida', 'futebol', 'volei', 'basquete', 'boliche', 'xadrez', 'dama', 'velha', 'dados', 'poderes', 'armas'];
+const JOGOS_SALA = ['parkour', 'ringue', 'corrida', 'futebol', 'volei', 'basquete', 'boliche', 'surf', 'matamata', 'xadrez', 'dama', 'velha', 'dados', 'poderes', 'armas'];
 const configPadrao = () => ({
   modulo: 'lazer',
   departamentos: [],
@@ -935,6 +936,7 @@ function encaixarSemTela(room) {
 function attachSockets(io) {
   const futebolDoSocket = ligarFutebol(io, rooms, jogoLigado); // futebol de carro (futebol-servidor.js)
   const quadrasDoSocket = ligarQuadras(io, rooms, jogoLigado); // vôlei, basquete e boliche (quadras-servidor.js)
+  const ceu = ligarCeu(io, rooms, jogoLigado, getBoards); // surf e mata-mata (ceu-servidor.js)
   // alerta para os gestores que estão na sala (menos a própria pessoa)
   function avisarGestores(room, user, tipo, texto) {
     for (const u of room.users.values()) {
@@ -982,6 +984,7 @@ function attachSockets(io) {
 
     futebolDoSocket(socket, () => ({ room, user }));
     quadrasDoSocket(socket, () => ({ room, user }));
+    ceu.porSocket(socket, () => ({ room, user }));
 
     let entrando = false;
     let dono = false; // esta conexão provou ser o dono da sala (senha)
@@ -1470,12 +1473,16 @@ function attachSockets(io) {
       io.to(to).emit('hit', { from: user.id, fromName: user.name, dir: d });
     });
 
-    // Tiro: só quem está com a camiseta 22. O servidor confere a camiseta, a cadência, que o
-    // tiro saiu de perto de quem atirou e o alcance; o traçante vai para todo mundo ver.
+    // Tiro: só quem está com a camiseta 22 — ou no mata-mata, com a arma que pegou do chão. O
+    // servidor confere a camiseta (ou a arena), a cadência, que o tiro saiu de perto de quem
+    // atirou e o alcance; o traçante vai para todo mundo ver.
     socket.on('tiro', (msg) => {
       const { to, dir, de, ate, mais, n } = obj(msg);
-      if (!user || user.shirt !== 'bolsonaro' || !jogoLigado(room, 'armas')) return;
-      const arma = armaDe(user);
+      if (!user) return;
+      const naArena = ceu.armaNaArena(room, user);
+      if (!naArena && (user.shirt !== 'bolsonaro' || !jogoLigado(room, 'armas'))) return;
+      const idArma = naArena || user.arma;
+      const arma = naArena ? ARMAS[naArena] : armaDe(user);
       const agora = Date.now();
       if (agora - (user.ultimoTiro || 0) < arma.cadencia * 1000 * 0.85) return;
       user.ultimoTiro = agora;
@@ -1485,13 +1492,13 @@ function attachSockets(io) {
       if (!a || !b || dist(a, user.p) > 6 || dist(a, b) > alcance) return;
       // os outros chumbos da escopeta, só para desenhar
       const extras = (Array.isArray(mais) ? mais : []).slice(0, arma.chumbos - 1).map(ponto).filter((p) => p && dist(a, p) <= alcance);
-      socket.to(room.id).emit('tiro', { id: user.id, de: a, ate: b, mais: extras, arma: user.arma });
+      socket.to(room.id).emit('tiro', { id: user.id, de: a, ate: b, mais: extras, arma: idArma });
       const alvo = room.users.get(to);
       if (!alvo || alvo.id === user.id || dist(user.p, alvo.p) > alcance) return;
       const d = Array.isArray(dir) ? dir.slice(0, 2).map(Number) : [0, 0];
       if (!d.every(Number.isFinite)) return;
       const chumbos = Math.max(1, Math.min(arma.chumbos, Math.floor(Number(n)) || 1));
-      io.to(to).emit('hit', { from: user.id, fromName: user.name, dir: d, arma: user.arma, n: chumbos });
+      io.to(to).emit('hit', { from: user.id, fromName: user.name, dir: d, arma: idArma, n: chumbos });
     });
 
     socket.on('health', (v) => {
@@ -1523,6 +1530,7 @@ function attachSockets(io) {
         placar.sort((a, b) => b.kos - a.kos || a.levou - b.levou);
         placar.length = Math.min(placar.length, 10);
       }
+      ceu.nocaute(room, user, autor); // no mata-mata conta o abate
       io.to(room.id).emit('ko', {
         id: user.id,
         name: user.name,
