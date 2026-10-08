@@ -389,12 +389,15 @@ function mudarSaldo(nome, delta) {
 // departamentos que a empresa tem —, quais jogos aparecem, o nome da empresa e o placar de metas
 // do Comercial. Guardado pelo banco.js.
 const MODULOS = ['lazer', 'escritorio'];
+// o mundo em volta do prédio (public/js/mundo.js): o de sempre ou o da praça central
+const MUNDOS_SALA = ['classico', 'novo'];
 // clima e hora do dia (public/js/clima.js): auto/ciclo = muda sozinho, igual para todos
 const CLIMAS_SALA = ['auto', 'sol', 'nublado', 'chuva', 'tempestade'];
 const HORARIOS_SALA = ['ciclo', 'manha', 'dia', 'tarde', 'noite'];
 const JOGOS_SALA = ['parkour', 'ringue', 'corrida', 'futebol', 'volei', 'basquete', 'boliche', 'surf', 'matamata', 'xadrez', 'dama', 'velha', 'dados', 'poderes', 'armas'];
 const configPadrao = () => ({
   modulo: 'lazer',
+  mundo: 'classico',
   departamentos: [],
   jogos: Object.fromEntries(JOGOS_SALA.map((j) => [j, true])),
   empresa: '',
@@ -431,6 +434,7 @@ function limparConfig(raw, base = configPadrao()) {
   const limpar = ESCRITORIO?.limparDepartamentos ?? (() => []);
   return {
     modulo: antigo ? 'escritorio' : MODULOS.includes(c.modulo) ? c.modulo : base.modulo,
+    mundo: MUNDOS_SALA.includes(c.mundo) ? c.mundo : base.mundo || 'classico',
     departamentos: antigo ? [c.modulo] : c.departamentos === undefined ? base.departamentos : limpar(c.departamentos),
     jogos: Object.fromEntries(JOGOS_SALA.map((j) => [j, typeof jogos[j] === 'boolean' ? jogos[j] : base.jogos[j]])),
     empresa: typeof c.empresa === 'string' ? cleanText(c.empresa, 40) : base.empresa,
@@ -1174,6 +1178,9 @@ function attachSockets(io) {
         return r({ ok: false, erro: 'Não deu para guardar agora. Tente de novo.' });
       }
       r({ ok: true });
+      // outro mundo, outro autódromo: as voltas da pista antiga não valem na nova (todo mundo
+      // recarrega a página e, entrando de novo, recebe o placar já vazio)
+      if (antes.mundo !== room.config.mundo) getBoards(room.id).voltas = [];
       io.to(room.id).emit('sala', { ...salaPublica(room), por: user.name });
       lobbyMudou();
       // outro modo ou outros departamentos, outras telas: quem mudou de tela fica sabendo

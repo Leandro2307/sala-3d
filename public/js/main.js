@@ -5,6 +5,7 @@ import { Avatar } from './avatars.js';
 import { PERSONAGENS } from './modelo.js';
 import { EscolherPersonagem } from './escolher-personagem.js';
 import { SalasLaterais } from './salas.js';
+import { MUNDO, MUNDOS, lembrarMundo } from './mundo.js';
 import { AoVivo, cartaoDoSaguao, COR_STATUS } from './aovivo.js';
 import { Player } from './player.js';
 import { RTC, presetDe } from './rtc.js';
@@ -659,10 +660,14 @@ $('#lobby-form').addEventListener('submit', (e) => {
 // Trocar de sala recarrega a página já entrando na outra (?entrar=1): voz, telas e jogos começam
 // do zero, do mesmo jeito que na primeira entrada. Sala com senha sem passe para no saguão.
 // Também serve para voltar à mesma sala (servidor novo no ar, 3D que não voltou sozinho).
-function recarregarNaSala(id = state.room) {
+function recarregarNaSala(id = state.room, mundo = null) {
   const url = new URL(window.location.href);
   if (id) url.searchParams.set('sala', id);
   url.searchParams.set('entrar', '1');
+  // trocando de sala, o mundo é o que a outra sala usa (mundo.js lembra); só vai no endereço quando
+  // é para montar outro mundo nesta (assim funciona até sem localStorage)
+  if (mundo) url.searchParams.set('mundo', mundo);
+  else if (id !== state.room) url.searchParams.delete('mundo');
   window.location.href = url;
 }
 const salas = new SalasLaterais({
@@ -2257,7 +2262,19 @@ function irParaEntrada() {
   if (player.veiculo) toggleVeiculo();
   player.teleport([e.pos[0] + (Math.random() - 0.5) * 4, 0, e.pos[2] + (Math.random() - 0.5) * 3], e.yaw);
 }
-let senhaDono = null; // só na memória: se a conexão cair, entra como dono de novo sozinho
+// Trocar de mundo recarrega a página (mundoDaSala): quem era dono ou gestor continua sendo do outro
+// lado. As senhas passam só por essa recarga, nesta aba, e são apagadas assim que lidas.
+const CHAVE_RECARGA = 'sala3d-recarga';
+const senhasDaRecarga = (() => {
+  try {
+    const d = JSON.parse(sessionStorage.getItem(CHAVE_RECARGA) || 'null');
+    sessionStorage.removeItem(CHAVE_RECARGA);
+    return d && d.sala === idDaSala(params.get('sala')) ? d : {};
+  } catch {
+    return {};
+  }
+})();
+let senhaDono = senhasDaRecarga.dono || null; // só na memória: se a conexão cair, entra como dono de novo sozinho
 let formSujo = false; // o dono está mexendo no formulário: o que chega do servidor não apaga
 
 // logo da empresa: carrega a imagem uma vez por logo novo e põe no mundo e no topo da tela
@@ -2276,8 +2293,27 @@ function aplicarLogo(src) {
   img.src = src;
 }
 
+// A sala usa outro mundo que o montado nesta página (ver mundo.js): recarrega já entrando nela, com o
+// mundo certo. Acontece na primeira visita a uma sala do mundo novo e quando o dono troca o mundo
+// com gente dentro.
+function mundoDaSala(cfg) {
+  const mundo = MUNDOS[cfg.mundo] ? cfg.mundo : 'classico';
+  if (!state.room) return false;
+  lembrarMundo(state.room, mundo);
+  if (mundo === MUNDO) return false;
+  toast(`Indo para o mundo ${MUNDOS[mundo].nome}…`, 'info', 6000);
+  if (senhaDono || senhaGestor) {
+    try {
+      sessionStorage.setItem(CHAVE_RECARGA, JSON.stringify({ sala: state.room, dono: senhaDono, gestor: senhaGestor }));
+    } catch { /* sem sessionStorage: entra de novo como dono pelo painel */ }
+  }
+  recarregarNaSala(state.room, mundo);
+  return true;
+}
+
 function aplicarSala(cfg) {
   if (!cfg) return;
+  if (mundoDaSala(cfg)) return;
   state.sala = cfg;
   aplicarLogo(cfg.logo || '');
   clima.setConfig(cfg);
@@ -2324,7 +2360,7 @@ function renderSala() {
   const desligados = JOGOS_DA_SALA.filter(([j]) => !jogoLigado(j)).length;
   $('#sala-resumo').innerHTML = `<div class="sala-chip">${icon('predio', 18)}<span>
     <b>${esc(cfg.empresa || 'Sem nome de empresa')}</b>
-    <small>Ambiente: ${esc(amb.nome)} · ${desligados ? `${desligados} ${desligados === 1 ? 'jogo desligado' : 'jogos desligados'}` : 'todos os jogos ligados'}${cfg.temSenha ? ' · com senha' : ''}${modoEscritorio() && cfg.privacidade !== false ? ' · salas à prova de som' : ''}</small>
+    <small>Ambiente: ${esc(amb.nome)} · Mundo: ${esc((MUNDOS[cfg.mundo] || MUNDOS.classico).nome)} · ${desligados ? `${desligados} ${desligados === 1 ? 'jogo desligado' : 'jogos desligados'}` : 'todos os jogos ligados'}${cfg.temSenha ? ' · com senha' : ''}${modoEscritorio() && cfg.privacidade !== false ? ' · salas à prova de som' : ''}</small>
   </span></div>${state.donoDaSala ? '<p class="hint">Você é o dono desta sala.</p>' : souGestor() ? '<p class="hint">Você é gestor desta sala.</p>' : ''}`;
   $('#sala-gestor').hidden = !cfg.temGestor || souGestor() || state.donoDaSala;
   $('#gestor-status').textContent = cfg.temGestor
@@ -2361,6 +2397,10 @@ function preencherConfig(forcar = false) {
   $('#sala-modulos').innerHTML = MODOS.map((a) => `<label class="modulo">
       <input type="radio" name="modulo" value="${a.id}"${cfg.modulo === a.id ? ' checked' : ''}>
       <b>${a.nome}</b><small>${a.desc}</small>
+    </label>`).join('');
+  $('#sala-mundos').innerHTML = Object.entries(MUNDOS).map(([id, m]) => `<label class="modulo">
+      <input type="radio" name="mundo" value="${id}"${(cfg.mundo || 'classico') === id ? ' checked' : ''}>
+      <b>${m.nome}</b><small>${m.desc}</small>
     </label>`).join('');
   // departamentos do escritório: cada um vira uma sala (a ordem é a das vagas, a partir da recepção)
   $('#sala-deptos').innerHTML = IDS_DEPARTAMENTOS.map((id) => {
@@ -2714,7 +2754,7 @@ setInterval(() => {
 }, 1000);
 
 // ----- gestores
-let senhaGestor = null; // só na memória, como a de dono
+let senhaGestor = senhasDaRecarga.gestor || null; // só na memória, como a de dono
 const alertas = []; // últimos avisos da equipe (para o painel do gestor)
 const souGestor = () => !!self()?.gestor;
 function avisoDoNavegador(titulo, corpo) {
@@ -2939,6 +2979,7 @@ $('#sala-config').addEventListener('submit', (e) => {
   const cfg = {
     empresa: form.elements.empresa.value.trim(),
     modulo: form.querySelector('[name="modulo"]:checked')?.value || 'lazer',
+    mundo: form.querySelector('[name="mundo"]:checked')?.value || 'classico',
     departamentos: $$('#sala-deptos input:checked').map((i) => i.value),
     jogos: Object.fromEntries($$('#sala-jogos input').map((i) => [i.value, i.checked])),
     placar: lerPlacar(),

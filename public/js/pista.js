@@ -1,8 +1,9 @@
 // Pista de corrida: um circuito fechado em volta da sala, com largada/chegada,
 // setores para não deixar cortar caminho, e cronometragem de volta.
 import * as THREE from 'three';
+import { NOVO } from './mundo.js';
 
-export const PISTA = {
+const PISTA_CLASSICA = {
   // O autódromo fica numa ala própria, a nordeste do cinema.
   // Encostada na ala do cinema: o circuito é girado para a reta principal correr
   // ao lado da plateia, com o telão à vista de quem está nela.
@@ -22,6 +23,22 @@ export const PISTA = {
   largadaT: 0.03,
 };
 
+// No mundo novo (mundo.js, cidade-dados.js) o autódromo é menor, a leste da praça: ~1 km de volta,
+// com a reta da largada correndo para leste na frente da arquibancada, onde chega a avenida. O
+// desenho já é em metros do mundo (escala 1, sem giro, centro em 230/230 = coordenada do desenho).
+const PISTA_PRACA = {
+  cx: 230,
+  cz: 230,
+  escala: 1,
+  giro: 0,
+  largura: 16,
+  y: 0.14,
+  setores: 12,
+  largadaT: 0.03,
+};
+
+export const PISTA = NOVO ? PISTA_PRACA : PISTA_CLASSICA;
+
 // fração do traçado (0..1) -> fração da volta contada a partir da linha de largada, e de volta
 const naVolta = (t) => (((t - PISTA.largadaT) % 1) + 1) % 1;
 const noTracado = (v) => (v + PISTA.largadaT) % 1;
@@ -29,7 +46,7 @@ const noTracado = (v) => (v + PISTA.largadaT) % 1;
 // Traçado do Autódromo Internacional Ayrton Senna (Goiânia).
 // Os pontos são densos de propósito: com poucos pontos a suavização "inventa"
 // a curva e o traçado chega a passar por cima de si mesmo nos grampos.
-const DESENHO = [
+const DESENHO_GOIANIA = [
   // A largada fica no trecho mais perto do cinema: dá para ver o telão da reta.
   [237.4, 17.9], [265.4, 31.2], [283.1, 55.6], [303.4, 78.6],
   [333.9, 83.3], [360.3, 67.4], [389.2, 58.6], [417.6, 72.1],
@@ -49,7 +66,29 @@ const DESENHO = [
   [217.0, 76.4], [187.8, 70.3], [172.2, 40.5], [204.5, 17.7],
 ];
 
-export const CURVAS = [
+// Mundo novo: reta da largada para leste, curva longa para o norte, retão na beira da cerca, a volta
+// do lago lá em cima, o gancho, os esses no meio e a descida até a arquibancada.
+const DESENHO_PRACA = [
+  [300, 45], [335, 45], [370, 45], [405, 46], [432, 56], [448, 78], [453, 108], [452, 145],
+  [450, 185], [445, 222], [448, 258], [452, 295], [449, 332], [438, 363], [416, 386], [386, 398],
+  [350, 400], [315, 396], [288, 384], [272, 362], [274, 336], [294, 318], [320, 312], [340, 296],
+  [346, 272], [338, 250], [316, 238], [290, 230], [270, 214], [259, 188], [259, 158], [256, 130],
+  [254, 102], [259, 76], [271, 58], [284, 49],
+];
+const DESENHO = NOVO ? DESENHO_PRACA : DESENHO_GOIANIA;
+
+// nomes das curvas do mundo novo: a fração da volta sai do ponto (ver CURVAS, lá embaixo)
+const CURVAS_PRACA = [
+  { nome: 'Curva da Praça', x: 442, z: 64 },
+  { nome: 'Curva do Lago', x: 430, z: 374 },
+  { nome: 'Gancho', x: 276, z: 352 },
+  { nome: 'Esses', x: 330, z: 305 },
+  { nome: 'Curva do Bosque', x: 343, z: 258 },
+  { nome: 'Curva do S', x: 266, z: 206 },
+  { nome: 'Curva da Arquibancada', x: 263, z: 68 },
+];
+
+const CURVAS_GOIANIA = [
   { nome: 'Esses', t: 0.048 }, // logo depois da largada (antes ficava em cima da linha nova)
   { nome: 'Parabólica Ayrton Senna', t: 6 / 64 },
   { nome: 'Curva 1', t: 20 / 64 },
@@ -193,6 +232,10 @@ export function pontoEm(t) {
     angulo: Math.atan2(b.x - a.x, b.y - a.y),
   };
 }
+
+// Curvas com nome (placa e pneus em world.js): no mundo clássico em fração do traçado, no novo
+// a partir de um ponto perto de cada uma
+export const CURVAS = NOVO ? CURVAS_PRACA.map(({ nome, x, z }) => ({ nome, t: projetar(x, z).t })) : CURVAS_GOIANIA;
 
 // Onde o carro nasce: no grid, uns 9 m ANTES da linha, olhando para a frente. Antes nascia
 // logo depois dela, e o tempo só começava a contar depois de uma volta inteira.

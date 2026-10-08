@@ -648,7 +648,12 @@ function criarCerca(scene, area, sala) {
 // opts.reservas: círculos { x, z, r } onde não nasce árvore (arquibancada, telão...)
 // opts.estradas: listas de pontos [[x, z], ...] com largura, para deixar caminho livre
 // opts.colliders: função para registrar colisores (só os troncos dentro da área jogável)
-export function criarNatureza(scene, renderer, { area, sala, reservas = [], estradas = [], addBox, grupo = scene }) {
+// Mundo novo (cidade.js): opts.lago { x, z, r } põe o lago no lugar em vez de procurar o maior que
+// cabe; opts.bosques [{ x0, x1, z0, z1 }] limita a mata de dentro da cerca a esses retângulos (o resto
+// é gramado limpo); opts.fileiras [{ x, z }] são as árvores das avenidas, plantadas uma a uma.
+export function criarNatureza(scene, renderer, {
+  area, sala, reservas = [], estradas = [], addBox, grupo = scene, lago: lagoFixo = null, bosques = null, fileiras = [],
+}) {
   const decorar = [];
   const ceu = criarCeu(grupo, SOL);
   // névoa na cor do horizonte: a serra lá longe se dissolve no céu em vez de cortar seco
@@ -671,9 +676,9 @@ export function criarNatureza(scene, renderer, { area, sala, reservas = [], estr
 
   // lago: o maior que couber na área sem encostar na pista, na sala, na estrada, nas
   // reservas e na cerca (o contorno chega a 1,12x o raio, mais a margem de areia)
-  let melhor = null;
+  let melhor = lagoFixo ? { ...lagoFixo } : null;
   const ate = (d) => (d - 12) / 1.3; // maior raio que ainda deixa d metros de folga
-  for (let x = area.minX + 30; x < area.maxX - 30; x += 8) {
+  for (let x = area.minX + 30; !lagoFixo && x < area.maxX - 30; x += 8) {
     for (let z = area.minZ + 30; z < area.maxZ - 30; z += 8) {
       let r = Math.min(58, (distPista(x, z) - meia - 30) * 0.75);
       const dSala = Math.hypot(Math.max(0, x - sala.maxX), Math.max(0, z - sala.maxZ));
@@ -691,11 +696,13 @@ export function criarNatureza(scene, renderer, { area, sala, reservas = [], estr
 
   // folgaPista: árvore grande fica longe (postes, placas e guard-rail até ~21 m do eixo);
   // pedra e flor podem chegar mais perto, mas nunca na área de escape
+  const noBosque = (x, z) => !bosques || bosques.some((b) => x > b.x0 && x < b.x1 && z > b.z0 && z < b.z1);
   const podeDentro = (x, z, folgaPista = 26) => !naSala(x, z, 14)
     && distPista(x, z) > meia + folgaPista
     && !pertoDeEstrada(x, z, 4)
     && !reservado(x, z, 0)
-    && !noLago(x, z, 3);
+    && !noLago(x, z, 3)
+    && noBosque(x, z);
 
   // ---------------------------------------------------------- árvores
   const rnd = semente(2024);
@@ -713,8 +720,8 @@ export function criarNatureza(scene, renderer, { area, sala, reservas = [], estr
       const mancha = fbm(px * 0.009 + 3, pz * 0.009 - 8, 3);
       const dentroArea = dentro(px, pz);
       if (dentroArea) {
-        // bosques espalhados pela área, com clareiras
-        if (mancha < 0.56 || !podeDentro(px, pz)) continue;
+        // bosques espalhados pela área, com clareiras (no mundo novo, só nos bosques: mais cheios)
+        if (mancha < (bosques ? 0.5 : 0.56) || !podeDentro(px, pz)) continue;
       } else {
         const fora = foraDaArea(px, pz, area);
         if (fora < 3 || mancha < 0.4) continue;
@@ -736,6 +743,12 @@ export function criarNatureza(scene, renderer, { area, sala, reservas = [], estr
         arbustos.push({ x: px + (rnd() - 0.5) * 6, y: y - 0.3, z: pz + (rnd() - 0.5) * 6, rot: rnd() * 6, escala: 0.7 + rnd() * 0.8, luz: 0.8 + rnd() * 0.3 });
       }
     }
+  }
+
+  // árvores das avenidas (mundo novo): frondosas do mesmo tamanho, em fileira
+  for (const f of fileiras) {
+    if (distPista(f.x, f.z) < meia + 20 || reservado(f.x, f.z, 0) || noLago(f.x, f.z, 3)) continue;
+    frondosas.push({ x: f.x, y: -0.2, z: f.z, rot: rnd() * Math.PI * 2, escala: 1.05 + rnd() * 0.12, matiz: 0, sat: 0, luz: 0.9 + rnd() * 0.12 });
   }
 
   // pedras, flores e arbustos soltos pela grama

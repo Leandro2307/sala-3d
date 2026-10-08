@@ -7,20 +7,27 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { sfx } from './sfx.js';
 import { isTouch } from './touch.js';
+import { NOVO } from './mundo.js';
+import { MESAS_NOVO, PRACA_JOGOS } from './cidade-dados.js';
 
 const BORDA = 1.3;
 const Y = 0.16; // altura do tabuleiro (em cima da praça)
 const FONT = "'Plus Jakarta Sans', system-ui, sans-serif";
 
-// Ficam a sudeste da porta do cinema, longe da estrada do autódromo.
+// No mundo clássico ficam a sudeste da porta do cinema, longe da estrada do autódromo; no novo, na
+// praça dos jogos da avenida central (cidade-dados.js).
 // n = casas por lado, q = lado de uma casa em metros
+const ONDE = NOVO ? MESAS_NOVO : { xadrez: { x: 90, z: -12 }, dama: { x: 122, z: -12 }, velha: { x: 152, z: -12 } };
 export const MESAS = {
-  xadrez: { x: 90, z: -12, n: 8, q: 2.6, nome: 'Xadrez de bruxo', lados: ['Brancas', 'Pretas'] },
-  dama: { x: 122, z: -12, n: 8, q: 2.6, nome: 'Dama gigante', lados: ['Claras', 'Escuras'] },
-  velha: { x: 152, z: -12, n: 3, q: 4.2, nome: 'Jogo da velha', lados: ['X', 'O'] },
+  xadrez: { ...ONDE.xadrez, n: 8, q: 2.6, nome: 'Xadrez de bruxo', lados: ['Brancas', 'Pretas'] },
+  dama: { ...ONDE.dama, n: 8, q: 2.6, nome: 'Dama gigante', lados: ['Claras', 'Escuras'] },
+  velha: { ...ONDE.velha, n: 3, q: 4.2, nome: 'Jogo da velha', lados: ['X', 'O'] },
 };
-// para a natureza não plantar árvore em cima (a segunda cobre a velha e a mesa de dados)
-export const RESERVAS_JOGOS = [{ x: 106, z: -12, r: 38 }, { x: 166, z: -12, r: 26 }];
+// para a natureza não plantar árvore em cima (no clássico a segunda cobre a velha e a mesa de dados)
+const J = PRACA_JOGOS;
+export const RESERVAS_JOGOS = NOVO
+  ? [{ x: (J.x0 + J.x1) / 2, z: (J.z0 + J.z1) / 2, r: Math.hypot(J.x1 - J.x0, J.z1 - J.z0) / 2 + 4 }]
+  : [{ x: 106, z: -12, r: 38 }, { x: 166, z: -12, r: 26 }];
 
 const ease = (t) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
 const _v = new THREE.Vector3();

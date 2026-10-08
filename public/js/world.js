@@ -16,6 +16,8 @@ import { RESERVAS_JOGOS } from './tabuleiros.js';
 import { construirEscritorio } from './escritorio3d.js';
 import { planta, salaEm, rotuloDaTela, postoDaTela, chaveDaTela, DEPARTAMENTOS, PREDIO, zDaPorta } from './escritorio.js';
 import * as moduloQualidade from './qualidade.js';
+import { NOVO } from './mundo.js';
+import { construirCidade } from './cidade.js';
 
 // Área jogável inteira (cercada): a sala do cinema num canto, em volta da origem, e o
 // autódromo ao ar livre a leste. O telão do cinema continua em minZ, perto da plateia.
@@ -763,6 +765,9 @@ export class World {
     this.slotsEscritorio = [];
     this.telaoesEscritorio = [];
     this.buildScreens();
+    // Mundo novo (mundo.js): a praça na porta do prédio e as ruas até cada área. Antes do autódromo
+    // (o guard-rail abre passagem onde a avenida chega) e da natureza (não planta em cima das ruas).
+    this.cidade = NOVO ? construirCidade(this) : null;
     // cada jogo é uma área: o dono da sala pode desligar (ver ligarArea)
     this.area('parkour', () => this.buildCourse());
     this.area('ringue', () => this.buildRing());
@@ -775,7 +780,8 @@ export class World {
       basquete: this.area('basquete', () => construirBasquete(this)),
       boliche: this.area('boliche', () => construirBoliche(this)),
     };
-    this.placaDirecao(69, 58, -Math.PI / 2, 'VÔLEI · BASQUETE · BOLICHE  →', '#facc15');
+    // no mundo novo as placas ficam na praça (cidade.js)
+    if (!NOVO) this.placaDirecao(69, 58, -Math.PI / 2, 'VÔLEI · BASQUETE · BOLICHE  →', '#facc15');
     // surf e mata-mata, no céu; os portais ficam perto da porta (o jogo é do ceu.js)
     this.ceu = {
       surf: this.area('surf', () => (construirPortal(this, 'surf'), construirSurf(this))),
@@ -783,9 +789,10 @@ export class World {
     };
     // praça do xadrez de bruxo e da dama (as peças em si ficam em jogos.js)
     this.reservas.push(...RESERVAS_JOGOS);
-    this.placaDirecao(SALA.maxX + 9, SALA.porta.z0 + 2, -Math.PI / 2, '↖  JOGOS E DADOS', '#a78bfa');
+    if (!NOVO) this.placaDirecao(SALA.maxX + 9, SALA.porta.z0 + 2, -Math.PI / 2, '↖  JOGOS E DADOS', '#a78bfa');
     this.natureza = criarNatureza(this.scene, this.renderer, {
       area: ROOM, sala: SALA, reservas: this.reservas, estradas: this.estradas, addBox: (o) => this.addBox(o), grupo: this.fora,
+      ...(this.cidade?.natureza || {}),
     });
     const P = SALA.porta;
     this.portaBox = new THREE.Box3(new THREE.Vector3(SALA.maxX - 1, 0, P.z0), new THREE.Vector3(SALA.maxX + 1, P.altura, P.z1));
@@ -1850,7 +1857,8 @@ export class World {
     // 2) arquibancada e estrada do cinema primeiro: a estrada termina dentro da pista, e
     //    guard-rail, postes e placas precisam saber onde deixar o vão dela
     const arq = this.buildArquibancada(grupo, meia);
-    this.buildEstrada(arq, meia);
+    // no mundo novo quem chega na pista é a avenida da praça (cidade.js)
+    if (!NOVO) this.buildEstrada(arq, meia);
 
     // 3) guard-rail
     this.guardRail(grupo, borda + 6.5);

@@ -1,10 +1,14 @@
 // Surf e mata-mata: os dois ficam no céu, acima do mapa (portais perto da porta do cinema).
 // Só dados e contas sem three.js: o servidor lê o mesmo arquivo para conferir armas e tempos.
+import { NOVO } from './mundo.js';
+import { PORTAIS_NOVO } from './cidade-dados.js';
 
 // ------------------------------------------------------------------ portais (no chão)
+// No mundo novo ficam na praça da aventura, ao lado da chegada do surf (cidade-dados.js). O servidor
+// não usa os portais; o surf e a arena são os mesmos nos dois mundos.
 export const PORTAIS = {
-  surf: { x: 66, z: 68, cor: '#22d3ee', nome: 'SURF' },
-  matamata: { x: 76, z: 68, cor: '#ef4444', nome: 'MATA-MATA' },
+  surf: { ...(NOVO ? PORTAIS_NOVO.surf : { x: 66, z: 68 }), cor: '#22d3ee', nome: 'SURF' },
+  matamata: { ...(NOVO ? PORTAIS_NOVO.matamata : { x: 76, z: 68 }), cor: '#ef4444', nome: 'MATA-MATA' },
 };
 
 // ------------------------------------------------------------------ surf
