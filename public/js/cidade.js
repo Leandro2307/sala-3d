@@ -8,7 +8,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import {
-  PRACA, RUAS, PRACA_JOGOS, PRACA_AVENTURA, MIRANTE, LAGO, PORTICOS, BOSQUES, MESAS_NOVO,
+  PRACA, RUAS, PRACA_JOGOS, PRACA_AVENTURA, MIRANTE, LAGO, PORTICOS, PLACAS, NOMES_DO_MAPA, BOSQUES, MESAS_NOVO,
 } from './cidade-dados.js';
 import { PISTA, CAMINHO, pontoEm } from './pista.js';
 import { ESTADIO } from './futebol.js';
@@ -137,9 +137,9 @@ function texturaPraca() {
     const escuro = '#2f3a44';
     anel(PRACA.r - 1, 1.6, escuro);
     anel(PRACA.r - 3.2, 0.5, escuro);
-    onda(28, 1.6, 18, 1.7, escuro);
-    onda(23.5, 1.6, 18, 1.7, escuro);
-    anel(18.2, 0.45, '#8a6f4e');
+    onda(PRACA.r * 0.75, 1.5, 16, 1.6, escuro);
+    onda(PRACA.r * 0.62, 1.5, 16, 1.6, escuro);
+    anel(PRACA.r * 0.5, 0.45, '#8a6f4e');
     anel(9.2, 1.2, escuro);
     anel(10.6, 0.4, '#8a6f4e');
     // rosa dos ventos em volta da fonte, apontando para as avenidas
@@ -279,7 +279,40 @@ function construirRuas(g, ruas) {
 }
 
 // ------------------------------------------------------------------ a praça
-function construirPraca(g, world, decor, L) {
+// Onde as ruas entram na praça: o ângulo (no plano do chão, x = cos α, z = sin α) e a meia largura
+// da rua. A cerca viva abre ali, e canteiros, bancos e postes ficam fora do caminho.
+function saidasDaPraca(ruas) {
+  const { x: cx, z: cz, r } = PRACA;
+  const saidas = [];
+  for (const rua of ruas) {
+    for (let i = 0; i < rua.pontos.length - 1; i++) {
+      const [ax, az] = rua.pontos[i];
+      const [bx, bz] = rua.pontos[i + 1];
+      const dx = bx - ax;
+      const dz = bz - az;
+      const fx = ax - cx;
+      const fz = az - cz;
+      const a = dx * dx + dz * dz;
+      const b = 2 * (fx * dx + fz * dz);
+      const c = fx * fx + fz * fz - r * r;
+      const delta = b * b - 4 * a * c;
+      if (delta < 0) continue;
+      for (const t of [(-b - Math.sqrt(delta)) / (2 * a), (-b + Math.sqrt(delta)) / (2 * a)]) {
+        if (t < 0 || t > 1) continue;
+        saidas.push({ a: Math.atan2(az + dz * t - cz, ax + dx * t - cx), meia: rua.largura / 2 });
+      }
+    }
+  }
+  return saidas;
+}
+
+// o ângulo α, a esta distância do centro da praça, cai no caminho de uma saída (com folga em m)?
+const naSaida = (saidas, a, raio, folga) => saidas.some((s) => {
+  const d = Math.abs(Math.atan2(Math.sin(a - s.a), Math.cos(a - s.a)));
+  return d < Math.asin(Math.min(1, (s.meia + folga) / raio));
+});
+
+function construirPraca(g, world, decor, L, saidas) {
   const { x, z, r } = PRACA;
   const piso = new THREE.Mesh(new THREE.CircleGeometry(r, 128).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ map: texturaPraca(), roughness: 0.88 }));
   piso.position.set(x, Y_PRACA, z);
@@ -292,17 +325,30 @@ function construirPraca(g, world, decor, L) {
   const borda = [];
   const flores = [];
   const cores = ['#f472b6', '#facc15', '#fb923c', '#a78bfa', '#f87171', '#fde68a'];
+  // canteiros em arco entre uma saída e a seguinte (o caminho da fonte até cada rua fica livre);
+  // arco grande demais vira dois, com uma passagem no meio
+  const R_CANTEIRO = 13.5;
+  const ordem = [...saidas].sort((p, q) => p.a - q.a);
+  const arcos = [];
+  ordem.forEach((s, i) => {
+    const prox = ordem[(i + 1) % ordem.length];
+    const de = s.a + Math.asin(Math.min(1, (s.meia + 2.5) / R_CANTEIRO));
+    let ate = prox.a - Math.asin(Math.min(1, (prox.meia + 2.5) / R_CANTEIRO));
+    while (ate <= de) ate += Math.PI * 2;
+    const vao = 0.35;
+    const partes = ate - de > (Math.PI * 2) / 3 ? 2 : 1;
+    const cada = (ate - de - vao * (partes - 1)) / partes;
+    for (let k = 0; k < partes; k++) arcos.push([de + k * (cada + vao), cada]);
+  });
   // ângulo α no plano do chão: x = cos α, z = sin α (0 = leste, π/2 = norte)
-  for (let k = 0; k < 4; k++) {
-    const a0 = (k / 4) * Math.PI * 2 + 0.32;
-    const comp = Math.PI / 2 - 0.64;
+  for (const [a0, comp] of arcos) {
     // o anel deitado (rotateX -90°) leva o θ do RingGeometry para α = -θ
     const arco = (r0, r1, h) => new THREE.RingGeometry(r0, r1, 24, 1, -(a0 + comp), comp).rotateX(-Math.PI / 2).translate(x, h, z);
     // no CylinderGeometry x = r sen θ e z = r cos θ: α = π/2 - θ
     const parede = (rr) => new THREE.CylinderGeometry(rr, rr, 0.45, 32, 1, true, Math.PI / 2 - a0 - comp, comp).translate(x, 0.225 + Y_PRACA, z);
     borda.push(parede(15), parede(12), arco(14.7, 15.2, 0.46 + Y_PRACA), arco(11.8, 12.3, 0.46 + Y_PRACA));
     terra.push(arco(12.2, 14.8, 0.4 + Y_PRACA));
-    for (let i = 0; i < 70; i++) {
+    for (let i = 0; i < Math.round(comp * 45); i++) {
       const a = a0 + Math.random() * comp;
       const rr = 12.5 + Math.random() * 2;
       flores.push({ x: x + Math.cos(a) * rr, z: z + Math.sin(a) * rr, cor: cores[Math.floor(Math.random() * cores.length)] });
@@ -318,17 +364,17 @@ function construirPraca(g, world, decor, L) {
   const bancos = [];
   for (let k = 0; k < 8; k++) {
     const a = (k / 8) * Math.PI * 2 + Math.PI / 8;
+    if (naSaida(saidas, a, 21, 2)) continue;
     bancos.push({ x: x + Math.cos(a) * 21, z: z + Math.sin(a) * 21, giro: Math.atan2(-Math.cos(a), -Math.sin(a)) });
   }
   construirBancos(L, world, bancos);
 
-  // cerca viva na beirada, aberta nas três saídas (oeste: prédio, leste: autódromo, norte: o resto)
-  const saidas = [0, Math.PI / 2, Math.PI]; // ângulo no plano (x, z): 0 = leste, π/2 = norte
+  // cerca viva na beirada, aberta onde as ruas chegam
   const sebe = [];
-  const passos = 72;
+  const passos = Math.round((Math.PI * 2 * r) / 3.3);
   for (let i = 0; i < passos; i++) {
     const a = (i / passos) * Math.PI * 2;
-    if (saidas.some((s) => Math.abs(Math.atan2(Math.sin(a - s), Math.cos(a - s))) < 0.26)) continue;
+    if (naSaida(saidas, a, r, 3)) continue;
     const ax = x + Math.cos(a) * (r - 0.4);
     const az = z + Math.sin(a) * (r - 0.4);
     const comp = ((Math.PI * 2 * (r - 0.4)) / passos) * 1.08;
@@ -478,7 +524,7 @@ function construirPracinhas(g, world, L) {
 // ------------------------------------------------------------------ postes de luz
 // Postes de praça (haste escura e lanterna que acende à noite), alternando os lados das ruas e em
 // volta da praça. Sem luz de verdade: só a lanterna brilha (muitas luzes pesariam no shader).
-function construirPostes(g, ruas, L) {
+function construirPostes(g, ruas, L, saidas) {
   const hastes = L.ferro;
   const lanternas = [];
   const poste = (x, z) => {
@@ -505,6 +551,7 @@ function construirPostes(g, ruas, L) {
   }
   for (let k = 0; k < 12; k++) {
     const a = (k / 12) * Math.PI * 2 + Math.PI / 12;
+    if (naSaida(saidas, a, PRACA.r - 3, 1)) continue;
     poste(PRACA.x + Math.cos(a) * (PRACA.r - 3), PRACA.z + Math.sin(a) * (PRACA.r - 3));
   }
   g.add(fundir(lanternas, new THREE.MeshBasicMaterial({ color: 0xfff1c9, toneMapped: false })));
@@ -685,12 +732,10 @@ function texturaMapa(aqui) {
     };
     nome('PRÉDIO', 4, 10);
     nome('PRAÇA', PRACA.x, PRACA.z - 2, '#0f172a', 22);
-    nome('AUTÓDROMO', 360, 140, '#6ee7c8', 30);
     nome('ESTÁDIO', ESTADIO.cx, ESTADIO.cz, '#a5f3fc');
     nome('QUADRAS', 22, 196, '#fde68a', 22);
-    nome('JOGOS', 140, 288, '#ddd6fe', 24);
     nome('AVENTURA', PRACA_AVENTURA.x, PRACA_AVENTURA.z + 22, '#fbcfe8', 22);
-    nome('LAGO', LAGO.x, LAGO.z, '#e0f2fe', 26);
+    for (const [t, x, z, cor, tam] of NOMES_DO_MAPA) nome(t, x, z, cor, tam);
     // você está aqui
     const [vx, vy] = px(aqui.x, aqui.z);
     ctx.fillStyle = '#ef4444';
@@ -778,19 +823,15 @@ export function construirCidade(world) {
   const decor = world.decorAnimated;
   const L = novosLotes();
   const ruas = ruasComPista();
+  const saidas = saidasDaPraca(ruas);
   construirRuas(g, ruas);
-  construirPraca(g, world, decor, L);
+  construirPraca(g, world, decor, L, saidas);
   construirPracinhas(g, world, L);
-  construirPostes(g, ruas, L);
+  construirPostes(g, ruas, L, saidas);
   construirPorticos(g, world, L);
   construirMapa(g, world, L);
-  // placas nas três saídas da praça
+  for (const p of PLACAS) placaDeSaida(g, L, p.x, p.z, p.giro, p.linhas);
   const { x, z, r } = PRACA;
-  placaDeSaida(g, L, x + r - 2, z - 9, -Math.PI / 2, [['↑  AUTÓDROMO', '#6ee7c8']]);
-  placaDeSaida(g, L, x + 9, z + r - 2, Math.PI, [
-    ['↑  ESTÁDIO', '#22d3ee'], ['↑  QUADRAS', '#facc15'], ['↑  PRAÇA DOS JOGOS', '#a78bfa'], ['↑  AVENTURA', '#f472b6'], ['↑  LAGO', '#60a5fa'],
-  ]);
-  placaDeSaida(g, L, x - r + 2, z + 9, Math.PI / 2, [['↑  PRÉDIO', '#e2e8f0']]);
   g.add(
     fundir(L.ferro, new THREE.MeshStandardMaterial({ color: 0x262b35, roughness: 0.5, metalness: 0.4 }), { sombra: true }),
     fundir(L.madeira, new THREE.MeshStandardMaterial({ color: 0x9a6a3e, roughness: 0.75 }), { sombra: true, recebe: true }),

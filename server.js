@@ -1178,9 +1178,6 @@ function attachSockets(io) {
         return r({ ok: false, erro: 'Não deu para guardar agora. Tente de novo.' });
       }
       r({ ok: true });
-      // outro mundo, outro autódromo: as voltas da pista antiga não valem na nova (todo mundo
-      // recarrega a página e, entrando de novo, recebe o placar já vazio)
-      if (antes.mundo !== room.config.mundo) getBoards(room.id).voltas = [];
       io.to(room.id).emit('sala', { ...salaPublica(room), por: user.name });
       lobbyMudou();
       // outro modo ou outros departamentos, outras telas: quem mudou de tela fica sabendo
