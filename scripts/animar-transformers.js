@@ -1,6 +1,9 @@
-// Clipes que o Optimus e o Solus não trazem, feitos aqui e gravados dentro do próprio .glb: Walk,
-// Run e Jump (e Idle no Optimus, que só tem a transformação). Os dois vêm do Transformers: Earth
-// Wars sem ciclo de andar, e o passo girado no código por cima da pose (o antigo andarProcedural)
+// Clipes que os Transformers não trazem, feitos aqui e gravados dentro do próprio .glb: Walk, Run e
+// Jump (e Idle no Optimus, que só tem a transformação). Optimus e Solus vêm do Transformers: Earth
+// Wars sem ciclo de andar; Bumblebee, Jazz, Ratchet e Brawn, do Transformers Alliance, com o
+// parado e os golpes virados de lado (lá a luta é vista de lado): neles saem também um Idle de
+// frente e um Punch (direto de direita). Os do Alliance passam antes por scripts/preparar-alliance.js.
+// O passo e o passo girado no código por cima da pose (o antigo andarProcedural)
 // ficava duro: coxa indo e voltando, pé arrastando, o resto do corpo parado. Aqui cada quadro é
 // montado osso a osso:
 //   - pernas por IK: o tornozelo segue um trajeto (no chão durante o apoio, num arco no balanço) e
@@ -10,11 +13,13 @@
 //     ao contrário e o pescoço segura o olhar para a frente;
 //   - os braços descem ao lado do corpo e balançam ao contrário das pernas.
 // A base é a pose de robô de pé do próprio arquivo (último quadro da transformação no Optimus,
-// primeiro do idle no Solus), e todo osso que essa pose mexe entra em todos os clipes: na mistura de
-// um clipe para o outro, osso que ficasse de fora voltaria para a pose de repouso, que é a de veículo.
+// primeiro do idle no Solus e no Bumblebee), e todo osso que essa pose mexe entra em todos os
+// clipes: na mistura de um clipe para o outro, osso que ficasse de fora voltaria para a pose de
+// repouso, que nesses é a de veículo. Em Jazz, Ratchet e Brawn o repouso já é o robô de pé, de
+// frente e de braço esticado: é ele a base.
 //
 //   npm i --prefix ../gt @gltf-transform/core @gltf-transform/extensions meshoptimizer
-//   NODE_PATH=../gt/node_modules node scripts/animar-transformers.js [optimus] [solus] [--medir]
+//   NODE_PATH=../gt/node_modules node scripts/animar-transformers.js [optimus] [solus] [bumblebee] [jazz] [ratchet] [brawn] [--medir]
 //
 // Lê e grava public/models/<id>.glb no lugar; rodar de novo troca os clipes gerados pelos novos.
 // --medir não grava nada: mostra, quadro a quadro, a altura da sola de cada pé em relação ao chão
@@ -28,13 +33,41 @@ const { MeshoptEncoder, MeshoptDecoder } = require('meshoptimizer');
 let THREE; // o three é módulo ES: entra por import() logo no começo
 
 const GRAU = Math.PI / 180;
-const GERADOS = ['Idle', 'Walk', 'Run', 'Jump'];
+const GERADOS = ['Idle', 'Walk', 'Run', 'Jump', 'Punch'];
 
-// base: de onde sai a pose de pé. largura e abertura dos braços mudam de um para o outro: o Optimus
-// tem o peito de cabine de caminhão, e braço colado no corpo entra nele.
+// Os ossos de cada rig, pelo nome. O Earth Wars usa bn_*; o Alliance, o Biped do 3ds Max. No Biped
+// o pescoço carrega as clavículas (girá-lo para segurar o olhar levaria os ombros junto): lá quem
+// segura o olhar é a cabeça.
+const EARTH_WARS = {
+  pelve: '^bn_pelvis01', peito: '^bn_chest01', pescoco: '^bn_neck01',
+  lado: (s) => ({
+    coxa: `^bn_${s}_thigh01`, joelho: `^bn_${s}_knee01`, pe: `^bn_${s}_foot01`, dedo: `^bn_${s}_toe01`,
+    braco: `^bn_${s}_upperarm01`, antebraco: `^bn_${s}_forearm01`, pulso: `^bn_${s}_wrist01`,
+  }),
+};
+const BIPED = {
+  pelve: '^Bip001 Pelvis', peito: '^Bip001 Spine1', pescoco: '^Bip001 Head',
+  lado: (s) => {
+    const L = s.toUpperCase();
+    return {
+      coxa: `^Bip001 ${L} Thigh`, joelho: `^Bip001 ${L} Calf`, pe: `^Bip001 ${L} Foot`, dedo: `^Bip001 ${L} Toe0_`,
+      braco: `^Bip001 ${L} UpperArm`, antebraco: `^Bip001 ${L} Forearm`, pulso: `^Bip001 ${L} Hand`,
+    };
+  },
+};
+
+// base: de onde sai a pose de pé (null: o repouso do arquivo). largura e abertura dos braços mudam
+// de um para o outro: o Optimus tem o peito de cabine de caminhão, e braço colado no corpo entra
+// nele. idleReto: o Idle sai de pé e de frente (poseDePe) em vez de respirar na pose base, que nos
+// do Alliance é a de luta, de lado. descartar: clipes do arquivo que só serviram de base.
+const ALLIANCE = ['Idle', 'Walk', 'Run', 'Jump', 'Punch'];
 const MODELOS = {
   optimus: { base: ['transform_to_robot', 'ultimo'], clipes: ['Idle', 'Walk', 'Run', 'Jump'], abertura: 30 },
   solus: { base: ['idle', 'primeiro'], clipes: ['Walk', 'Run', 'Jump'], abertura: 16 },
+  bumblebee: { ossos: BIPED, base: ['idle01', 'primeiro'], clipes: ALLIANCE, abertura: 16, idleReto: true, descartar: ['idle01'] },
+  jazz: { ossos: BIPED, base: null, clipes: ALLIANCE, abertura: 14, idleReto: true },
+  ratchet: { ossos: BIPED, base: null, clipes: ALLIANCE, abertura: 16, idleReto: true },
+  brawn: { ossos: BIPED, base: null, clipes: ALLIANCE, abertura: 18, idleReto: true },
 };
 
 // Medidas em pernas (L = coxa + canela) e graus, para valer nos dois tamanhos.
@@ -74,11 +107,16 @@ const CORRER = {
   bracoBalanco: 38, bracoFrente: 8, cotovelo: 80, cotoveloExtra: 12,
 };
 
+// De pé, parado e de frente (os do Alliance): quadril pouco abaixo do esticado, pés um pouco por
+// fora dele, e a respiração.
+const PARADO = { altura: 0.985, largura: 0.07, respira: 0.006 };
+
 const CLIPES = {
-  Idle: { duracao: 3, fps: 15, pose: poseParado },
+  Idle: { duracao: 3, fps: 15, pose: (r, p, abertura, cfg) => (cfg.idleReto ? poseDePe(r, p, abertura) : poseParado(r, p)) },
   Walk: { duracao: ANDAR.duracao, fps: 30, pose: (r, p, abertura) => poseAndar(r, p, ANDAR, abertura) },
   Run: { duracao: CORRER.duracao, fps: 30, pose: (r, p, abertura) => poseAndar(r, p, CORRER, abertura) },
   Jump: { duracao: 1.2, fps: 15, pose: poseNoAr },
+  Punch: { duracao: 0.55, fps: 30, pose: poseSoco },
 };
 
 // ---------------------------------------------------------------- matemática
@@ -184,27 +222,27 @@ function pontoDaPele(vt) {
   return soma;
 }
 
-function removerGerados(doc) {
-  const raiz = doc.getRoot();
-  for (const a of raiz.listAnimations()) {
-    if (!GERADOS.includes(a.getName())) continue;
-    for (const c of a.listChannels()) c.dispose();
-    for (const sp of a.listSamplers()) {
-      const dados = [sp.getInput(), sp.getOutput()];
-      sp.dispose();
-      for (const d of dados) if (d && !d.listParents().some((p) => p.propertyType !== 'Root')) d.dispose();
-    }
-    a.dispose();
+function descartarAnimacao(a) {
+  for (const c of a.listChannels()) c.dispose();
+  for (const sp of a.listSamplers()) {
+    const dados = [sp.getInput(), sp.getOutput()];
+    sp.dispose();
+    for (const d of dados) if (d && !d.listParents().some((p) => p.propertyType !== 'Root')) d.dispose();
   }
+  a.dispose();
+}
+
+function removerGerados(doc) {
+  for (const a of doc.getRoot().listAnimations()) if (GERADOS.includes(a.getName())) descartarAnimacao(a);
 }
 
 // ---------------------------------------------------------------- o boneco
 // Monta o espelho na pose base e mede o que os clipes precisam: pernas, pés, chão, quadril.
 function montar(doc, cfg) {
   const { raiz, objs } = espelhar(doc);
-  const [nomeBase, quadro] = cfg.base;
-  const clipeBase = doc.getRoot().listAnimations().find((a) => a.getName() === nomeBase);
-  if (!clipeBase) throw new Error(`sem o clipe ${nomeBase}`);
+  const [nomeBase, quadro] = cfg.base || [];
+  const clipeBase = nomeBase ? doc.getRoot().listAnimations().find((a) => a.getName() === nomeBase) : null;
+  if (nomeBase && !clipeBase) throw new Error(`sem o clipe ${nomeBase}`);
 
   // canais que todo clipe gerado leva (ver o cabeçalho)
   const canais = [];
@@ -215,7 +253,7 @@ function montar(doc, cfg) {
     temCanal.add(k);
     canais.push({ o, caminho });
   };
-  for (const c of clipeBase.listChannels()) {
+  for (const c of clipeBase ? clipeBase.listChannels() : []) {
     const o = objs.get(c.getTargetNode());
     const v = amostra(c.getSampler(), quadro === 'ultimo');
     if (c.getTargetPath() === 'rotation') o.quaternion.fromArray(v);
@@ -231,19 +269,15 @@ function montar(doc, cfg) {
     if (!achado) throw new Error(`sem osso ${re}`);
     return achado;
   };
+  const nomes = cfg.ossos || EARTH_WARS;
   const r = {
     raiz, canais,
-    pelve: achar(/^bn_pelvis01/), peito: achar(/^bn_chest01/), pescoco: achar(/^bn_neck01/),
+    pelve: achar(new RegExp(nomes.pelve)), peito: achar(new RegExp(nomes.peito)), pescoco: achar(new RegExp(nomes.pescoco)),
     lados: {},
   };
   for (const [lado, s] of [['e', 'l'], ['d', 'r']]) {
-    r.lados[lado] = {
-      sinal: lado === 'e' ? 1 : -1, // a esquerda do boneco fica em +x: ele olha para +z
-      coxa: achar(new RegExp(`^bn_${s}_thigh01`)), joelho: achar(new RegExp(`^bn_${s}_knee01`)),
-      pe: achar(new RegExp(`^bn_${s}_foot01`)), dedo: achar(new RegExp(`^bn_${s}_toe01`)),
-      braco: achar(new RegExp(`^bn_${s}_upperarm01`)), antebraco: achar(new RegExp(`^bn_${s}_forearm01`)),
-      pulso: achar(new RegExp(`^bn_${s}_wrist01`)),
-    };
+    r.lados[lado] = { sinal: lado === 'e' ? 1 : -1 }; // a esquerda do boneco fica em +x: ele olha para +z
+    for (const [osso, re] of Object.entries(nomes.lado(s))) r.lados[lado][osso] = achar(new RegExp(re));
   }
   const ossos = [r.pelve, r.peito, r.pescoco];
   for (const l of Object.values(r.lados)) ossos.push(l.coxa, l.joelho, l.pe, l.dedo, l.braco, l.antebraco);
@@ -285,8 +319,15 @@ function montar(doc, cfg) {
     const coxaDir = K.clone().sub(H).normalize();
     const canela = A.clone().sub(K).normalize();
     l.gama0 = Math.acos(THREE.MathUtils.clamp(coxaDir.clone().negate().dot(canela), -1, 1)); // ângulo interno
-    // dobradiça do joelho, medida na própria pose base e guardada no espaço da coxa
-    const dobra = v3().crossVectors(coxaDir, canela).normalize();
+    // dobradiça do joelho, medida na própria pose base e guardada no espaço da coxa. Perna reta (o
+    // repouso dos do Alliance) não diz para onde o joelho dobra: aí vale o eixo de um quadril ao
+    // outro, para a esquerda, que dobra o joelho para a frente
+    let dobra = v3().crossVectors(coxaDir, canela);
+    if (dobra.length() < Math.sin(4 * GRAU)) {
+      const outro = l.sinal > 0 ? r.lados.d : r.lados.e;
+      dobra = H.clone().sub(posMundo(outro.coxa)).multiplyScalar(l.sinal).setY(0);
+    }
+    dobra.normalize();
     l.dobra = dobra.applyQuaternion(quatMundo(l.coxa).invert());
     l.quadril0 = H;
     l.tornozelo0 = A;
@@ -379,7 +420,11 @@ function porBraco(l, abertura, balanco, cotovelo, frente, lado) {
   const dirBraco = pendente.multiplyScalar(Math.cos(abertura)).add(lado.clone().multiplyScalar(l.sinal * Math.sin(abertura))).normalize();
   const atual = posMundo(l.antebraco).sub(posMundo(l.braco)).normalize();
   girar(l.braco, new THREE.Quaternion().setFromUnitVectors(atual, dirBraco));
-  const adiante = semComponente(frente, dirBraco).normalize();
+  // braço apontando para a frente (o soco): o antebraço dobra para cima
+  const adiante = semComponente(frente, dirBraco);
+  const k = adiante.length();
+  if (k < 0.25) adiante.multiplyScalar(k / 0.25).add(semComponente(Y(), dirBraco).normalize().multiplyScalar(1 - k / 0.25));
+  adiante.normalize();
   const dirAnte = dirBraco.clone().multiplyScalar(Math.cos(cotovelo)).add(adiante.multiplyScalar(Math.sin(cotovelo)));
   const atualAnte = posMundo(l.pulso).sub(posMundo(l.antebraco)).normalize();
   girar(l.antebraco, new THREE.Quaternion().setFromUnitVectors(atualAnte, dirAnte));
@@ -488,6 +533,56 @@ function poseParado(r, p) {
   return flexoes;
 }
 
+// De pé e de frente (o Idle dos do Alliance): quadril quadrado com o corpo, pés plantados um pouco
+// por fora dele, joelhos levemente dobrados, braços soltos ao lado do corpo e a respiração. giroPeito
+// e bracos(l) -> [abertura, balanço, cotovelo] servem ao soco, que parte desta pose.
+function poseDePe(r, p, abertura, giroPeito = 0, bracos = null) {
+  const T = Math.PI * 2;
+  const L = r.perna;
+  const g = PARADO;
+  const resp = Math.sin(T * p);
+  const h = (g.altura * L + r.lados.e.alturaTornozelo + r.chao) - r.quadril0.y;
+  mover(r.pelve, v3(0.004 * L * resp, h - g.respira * L * (1 - Math.cos(2 * T * p)), 0));
+  girar(r.pelve, eixoAng(Y(), 1.2 * GRAU * resp + giroPeito * 0.3).multiply(esquadrar(r)));
+  const ombros = posMundo(r.lados.e.braco).sub(posMundo(r.lados.d.braco));
+  const torto = new THREE.Quaternion().setFromUnitVectors(v3(ombros.x, 0, ombros.z).normalize(), X());
+  girar(r.peito, eixoAng(Y(), giroPeito * 0.7 - 1.5 * GRAU * resp)
+    .multiply(eixoAng(X(), -1.2 * GRAU * Math.sin(2 * T * p)))
+    .multiply(torto));
+  // a cabeça desfaz o giro do corpo: o olhar fica para a frente
+  girar(r.pescoco, eixoAng(Y(), -giroPeito + 6 * GRAU * Math.sin(T * p + 0.8)).multiply(eixoAng(X(), 1.5 * GRAU * Math.sin(2 * T * p + 1.3))));
+  const frente = Z().applyAxisAngle(Y(), giroPeito);
+  const lado = X().applyAxisAngle(Y(), giroPeito);
+  for (const l of Object.values(r.lados)) {
+    const [ab, bal, cot] = bracos?.(l)
+      ?? [abertura * GRAU, (4 + 2 * Math.sin(2 * T * p + l.sinal)) * GRAU, (16 + 3 * Math.sin(2 * T * p + 0.6 + l.sinal)) * GRAU];
+    porBraco(l, ab, bal, cot, frente, lado);
+  }
+  const flexoes = {};
+  for (const [nome, l] of Object.entries(r.lados)) {
+    const alvo = pePlantado(r, l, l.quadril0.x + l.sinal * g.largura * L, r.quadril0.z, 0, null);
+    flexoes[nome] = porPe(r, l, alvo, l.frente.clone().add(v3(0, 0.15, 0)).normalize());
+  }
+  return flexoes;
+}
+
+// Soco: direto de direita saindo da guarda. Recua um pouco, estica o braço reto à frente com o peito
+// girando junto e volta para a guarda; a esquerda fica protegendo o rosto. O primeiro e o último
+// quadro são a guarda: o jogo mistura dela para o estado em que a pessoa estava.
+function poseSoco(r, p, abertura) {
+  const recua = p < 0.22 ? Math.sin((Math.PI * p) / 0.22) : 0;
+  const estica = p < 0.22 ? 0 : p < 0.4 ? suave((p - 0.22) / 0.18) : 1 - suave((p - 0.48) / 0.52);
+  const guarda = [abertura * 0.4 * GRAU, 30 * GRAU, 100 * GRAU];
+  return poseDePe(r, 0, abertura, (22 * estica - 6 * recua) * GRAU, (l) => {
+    if (l.sinal > 0) return guarda;
+    return [
+      lerp(guarda[0], 4 * GRAU, estica),
+      lerp(guarda[1] - 12 * GRAU * recua, 84 * GRAU, estica),
+      lerp(guarda[2] + 10 * GRAU * recua, 6 * GRAU, estica),
+    ];
+  });
+}
+
 // No ar: um joelho em cima, a outra perna esticando para baixo, braços abertos se equilibrando.
 function poseNoAr(r, p, abertura) {
   const T = Math.PI * 2;
@@ -520,14 +615,14 @@ function lerCanal(c) {
 }
 
 // fixos: canal parado -> acessor, para os quatro clipes usarem o mesmo (cada acessor pesa no JSON)
-function gravarClipe(doc, r, nome, def, abertura, medir, fixos) {
+function gravarClipe(doc, r, nome, def, cfg, medir, fixos) {
   const n = Math.round(def.duracao * def.fps);
   const tempos = Array.from({ length: n + 1 }, (_, i) => (i * def.duracao) / n);
   const valores = r.canais.map(() => []);
   const relato = [];
   for (let i = 0; i <= n; i++) {
     r.resetar();
-    const flexoes = def.pose(r, (i % n) / n, abertura); // o último quadro é o primeiro: o laço fecha sem tranco
+    const flexoes = def.pose(r, (i % n) / n, cfg.abertura, cfg); // o último quadro é o primeiro: o laço fecha sem tranco
     r.raiz.updateMatrixWorld(true);
     r.canais.forEach((c, k) => {
       const v = lerCanal(c);
@@ -589,8 +684,9 @@ function gravarClipe(doc, r, nome, def, abertura, medir, fixos) {
     removerGerados(doc);
     const r = montar(doc, cfg);
     const fixos = new Map();
-    for (const nome of cfg.clipes) gravarClipe(doc, r, nome, CLIPES[nome], cfg.abertura, medir, fixos);
+    for (const nome of cfg.clipes) gravarClipe(doc, r, nome, CLIPES[nome], cfg, medir, fixos);
     if (medir) continue;
+    for (const a of doc.getRoot().listAnimations()) if ((cfg.descartar || []).includes(a.getName())) descartarAnimacao(a);
     await io.write(arq, doc);
     const depois = fs.statSync(arq).size;
     console.log(id.padEnd(8), Math.round(antes / 1024) + ' KB -> ' + Math.round(depois / 1024) + ' KB', '| clipes:', doc.getRoot().listAnimations().map((a) => a.getName()).join(', '));

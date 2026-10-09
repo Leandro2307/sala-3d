@@ -60,6 +60,9 @@ export class Player {
     // física de fora (o surf, em ceu.js): (dt, frente, lado, correndo) no lugar do passo normal
     this.fisicaExterna = null;
     this.travado = false; // nocauteado: fica onde caiu, sem andar nem pular (só olha em volta)
+    // espectador (mata-mata em times, batalha.js): a posição de outro boneco. A câmera gira em volta
+    // dele, em 3ª pessoa, com o mouse de sempre
+    this.espectar = null;
     this.volante = 0; // -1..1, só para animar as rodas
     this.velocidade = 0; // m/s na direção do carro
     this.shake = 0; // tremor da câmera (soco recebido)
@@ -625,7 +628,8 @@ export class Player {
     }
 
     const dir = this.lookDirection(_dir);
-    if (this.mode === 'first') {
+    const alvo = this.espectar;
+    if (this.mode === 'first' && !alvo) {
       cam.position.set(this.pos.x, olho + this.ajusteOlho, this.pos.z);
       const inclinacao = this.balancoDaVisao(dt, cam);
       this.applyShake(cam);
@@ -638,7 +642,7 @@ export class Player {
     }
     this.balanco = 0; // voltando para a 1ª pessoa, o balanço entra aos poucos
 
-    const target = _v.set(this.pos.x, this.pos.y + 1.55 + this.ajusteOlho, this.pos.z);
+    const target = alvo ? _v.set(alvo.x, alvo.y + 1.8, alvo.z) : _v.set(this.pos.x, this.pos.y + 1.55 + this.ajusteOlho, this.pos.z);
     // impede a câmera de atravessar paredes/plataformas
     _ray.set(target, dir.clone().negate());
     _ray.far = this.camDist + 0.4;
@@ -659,6 +663,6 @@ export class Player {
     cam.lookAt(target);
     this.lookPoint.copy(target);
     // esconde o próprio boneco se a câmera encostar nele
-    this.avatar.setVisible(this.camDistCurrent > 1.1);
+    this.avatar.setVisible(!!alvo || this.camDistCurrent > 1.1);
   }
 }

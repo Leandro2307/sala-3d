@@ -14,6 +14,7 @@ const banco = require('./banco');
 const { ligarFutebol } = require('./futebol-servidor.js');
 const { ligarQuadras } = require('./quadras-servidor.js');
 const { ligarCeu } = require('./ceu-servidor.js');
+const { ligarBatalha } = require('./batalha-servidor.js');
 // a planta do escritório é a mesma do navegador (public/js/escritorio.js); carrega em main()
 let ESCRITORIO = null;
 
@@ -23,7 +24,9 @@ const USE_HTTPS = process.argv.includes('--https') || process.env.HTTPS === '1';
 const SHARE_SLOTS = 4;
 const MAX_CHAT = 60;
 const MAX_PHOTO = 60_000; // data URL da foto do rosto (128x128 jpeg dá ~12 kB)
-const PUNCH_RANGE = 4.5; // metros: folga sobre o alcance real, só para barrar absurdo
+// metros: folga sobre o alcance real (que cresce com o tamanho de quem apanha, como um robô de
+// carro), só para barrar absurdo
+const PUNCH_RANGE = 5.5;
 // armas da camiseta 22 (public/js/armas-dados.js, lido no main()): cadência, alcance e chumbos
 // de cada uma. O servidor aceita 15% de folga na cadência (a rede não entrega no compasso exato).
 let ARMAS = { pistola: { cadencia: 0.3, alcance: 70, chumbos: 1 } };
@@ -394,7 +397,7 @@ const MUNDOS_SALA = ['classico', 'novo'];
 // clima e hora do dia (public/js/clima.js): auto/ciclo = muda sozinho, igual para todos
 const CLIMAS_SALA = ['auto', 'sol', 'nublado', 'chuva', 'tempestade'];
 const HORARIOS_SALA = ['ciclo', 'manha', 'dia', 'tarde', 'noite'];
-const JOGOS_SALA = ['parkour', 'ringue', 'corrida', 'futebol', 'volei', 'basquete', 'boliche', 'surf', 'matamata', 'xadrez', 'dama', 'velha', 'dados', 'poderes', 'armas'];
+const JOGOS_SALA = ['parkour', 'ringue', 'corrida', 'futebol', 'volei', 'basquete', 'boliche', 'surf', 'matamata', 'batalha', 'xadrez', 'dama', 'velha', 'dados', 'poderes', 'armas'];
 const configPadrao = () => ({
   modulo: 'lazer',
   mundo: 'classico',
@@ -941,6 +944,7 @@ function attachSockets(io) {
   const futebolDoSocket = ligarFutebol(io, rooms, jogoLigado); // futebol de carro (futebol-servidor.js)
   const quadrasDoSocket = ligarQuadras(io, rooms, jogoLigado); // vôlei, basquete e boliche (quadras-servidor.js)
   const ceu = ligarCeu(io, rooms, jogoLigado, getBoards); // surf e mata-mata (ceu-servidor.js)
+  const batalha = ligarBatalha(io, rooms, jogoLigado); // mata-mata em times (batalha-servidor.js)
   // alerta para os gestores que estão na sala (menos a própria pessoa)
   function avisarGestores(room, user, tipo, texto) {
     for (const u of room.users.values()) {
@@ -989,6 +993,7 @@ function attachSockets(io) {
     futebolDoSocket(socket, () => ({ room, user }));
     quadrasDoSocket(socket, () => ({ room, user }));
     ceu.porSocket(socket, () => ({ room, user }));
+    batalha.porSocket(socket, () => ({ room, user }));
 
     let entrando = false;
     let dono = false; // esta conexão provou ser o dono da sala (senha)
@@ -1472,18 +1477,19 @@ function attachSockets(io) {
       if (!alvo || alvo.id === user.id) return;
       // confere a distância no servidor: impede socar alguém do outro lado da sala
       if (dist(user.p, alvo.p) > PUNCH_RANGE) return;
+      if (!batalha.podeAcertar(room, user, alvo)) return; // mesmo time, ou espectador
       const d = Array.isArray(dir) ? dir.slice(0, 2).map(Number) : [0, 0];
       if (!d.every(Number.isFinite)) return;
       io.to(to).emit('hit', { from: user.id, fromName: user.name, dir: d });
     });
 
-    // Tiro: só quem está com a camiseta 22 — ou no mata-mata, com a arma que pegou do chão. O
-    // servidor confere a camiseta (ou a arena), a cadência, que o tiro saiu de perto de quem
-    // atirou e o alcance; o traçante vai para todo mundo ver.
+    // Tiro: só quem está com a camiseta 22 — ou no mata-mata (sozinho ou em times), com a arma que
+    // pegou do chão. O servidor confere a camiseta (ou a arena), a cadência, que o tiro saiu de
+    // perto de quem atirou e o alcance; o traçante vai para todo mundo ver.
     socket.on('tiro', (msg) => {
       const { to, dir, de, ate, mais, n } = obj(msg);
-      if (!user) return;
-      const naArena = ceu.armaNaArena(room, user);
+      if (!user || batalha.semTiro(room, user)) return;
+      const naArena = ceu.armaNaArena(room, user) || batalha.armaNaArena(room, user);
       if (!naArena && (user.shirt !== 'bolsonaro' || !jogoLigado(room, 'armas'))) return;
       const idArma = naArena || user.arma;
       const arma = naArena ? ARMAS[naArena] : armaDe(user);
@@ -1499,6 +1505,7 @@ function attachSockets(io) {
       socket.to(room.id).emit('tiro', { id: user.id, de: a, ate: b, mais: extras, arma: idArma });
       const alvo = room.users.get(to);
       if (!alvo || alvo.id === user.id || dist(user.p, alvo.p) > alcance) return;
+      if (!batalha.podeAcertar(room, user, alvo)) return;
       const d = Array.isArray(dir) ? dir.slice(0, 2).map(Number) : [0, 0];
       if (!d.every(Number.isFinite)) return;
       const chumbos = Math.max(1, Math.min(arma.chumbos, Math.floor(Number(n)) || 1));
@@ -1514,7 +1521,7 @@ function attachSockets(io) {
     });
 
     socket.on('ko', (msg) => {
-      const { by } = obj(msg);
+      const { by, arma } = obj(msg);
       if (!user) return;
       user.ko = true;
       user.health = 0;
@@ -1534,10 +1541,15 @@ function attachSockets(io) {
         placar.sort((a, b) => b.kos - a.kos || a.levou - b.levou);
         placar.length = Math.min(placar.length, 10);
       }
-      ceu.nocaute(room, user, autor); // no mata-mata conta o abate
+      ceu.nocaute(room, user, autor, arma); // no mata-mata conta o abate
+      batalha.nocaute(room, user, autor, arma); // em times, também, e quem caiu fica de espectador
       io.to(room.id).emit('ko', {
         id: user.id,
         name: user.name,
+        // nas arenas o placar de abates é delas (sem aviso para a sala inteira); em times quem caiu
+        // na rodada só levanta na próxima
+        arena: !!(room.matamata?.jogadores.has(user.id) || room.batalha?.jogadores.has(user.id)),
+        fica: room.batalha?.jogadores.get(user.id)?.vivo === false,
         by: autor ? autor.name : null,
         byColor: autor ? autor.color : null,
         fights: getBoards(room.id).fights,

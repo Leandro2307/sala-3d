@@ -12,6 +12,7 @@ import { criarNatureza } from './natureza.js';
 import { construirEstadio } from './futebol.js';
 import { construirVolei, construirBasquete, construirBoliche } from './quadras.js';
 import { construirPortal, construirSurf, construirArena } from './ceu.js';
+import { construirArenaTimes } from './batalha.js';
 import { RESERVAS_JOGOS } from './tabuleiros.js';
 import { construirEscritorio } from './escritorio3d.js';
 import { planta, salaEm, rotuloDaTela, postoDaTela, chaveDaTela, DEPARTAMENTOS, PREDIO, zDaPorta } from './escritorio.js';
@@ -786,6 +787,8 @@ export class World {
     this.ceu = {
       surf: this.area('surf', () => (construirPortal(this, 'surf'), construirSurf(this))),
       arena: this.area('matamata', () => (construirPortal(this, 'matamata'), construirArena(this))),
+      // o mata-mata em times tem arena própria (batalha.js), com o portal junto dos outros
+      times: this.area('batalha', () => (construirPortal(this, 'times'), construirArenaTimes(this))),
     };
     // praça do xadrez de bruxo e da dama (as peças em si ficam em jogos.js)
     this.reservas.push(...RESERVAS_JOGOS);

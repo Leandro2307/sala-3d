@@ -3,6 +3,7 @@ let ctx = null;
 let enabled = true;
 
 export function setSfxEnabled(on) { enabled = on; }
+export function sfxLigado() { return enabled; }
 
 export function audioContext() {
   if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -151,4 +152,17 @@ export const sfx = {
     tone({ freq: 420, to: 90, dur: 0.55, type: 'triangle', gain: 0.05, delay: 0.05 });
     ruido({ dur: 0.5, gain: 0.03, type: 'lowpass', freq: 500, toFreq: 120, delay: 0.1 });
   },
+
+  // Sequência de abates (double kill, triple...): um acorde subindo, mais alto e mais longo a cada nível
+  serie: (nivel = 2) => {
+    const base = 330 * 2 ** (Math.min(nivel, 7) / 12);
+    [1, 1.26, 1.5, 2].slice(0, Math.min(4, nivel + 1)).forEach((k, i) => tone({ freq: base * k, dur: 0.22 + nivel * 0.03, type: 'sawtooth', gain: 0.03, delay: i * 0.06 }));
+    tone({ freq: 90, to: 45, dur: 0.4, type: 'sine', gain: 0.12 });
+  },
+  // rodada valendo: buzina curta, duas notas
+  rodada: () => [392, 523].forEach((f, i) => tone({ freq: f, dur: 0.28, type: 'square', gain: 0.03, delay: i * 0.16 })),
+  // contagem (3, 2, 1)
+  bip: () => tone({ freq: 740, dur: 0.09, type: 'square', gain: 0.025 }),
+  // rodada perdida
+  derrota: () => [392, 330, 262].forEach((f, i) => tone({ freq: f, dur: 0.3, type: 'triangle', gain: 0.05, delay: i * 0.14 })),
 };

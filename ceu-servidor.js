@@ -3,11 +3,14 @@
 // Surf: cada um anda com a própria física no navegador; aqui fica só o placar dos tempos.
 // Mata-mata: quem entra nasce com pistola e pega as outras armas do chão. O servidor sabe quem
 // está com qual arma (é ela que vale no tiro, em vez da escolhida no menu), conta os abates e
-// faz as armas do chão voltarem. O tiro e o nocaute continuam passando pelo server.js.
+// faz as armas do chão voltarem. O tiro e o nocaute continuam passando pelo server.js. Cada abate vai
+// para a arena inteira ('mm-abate'), com a sequência (double kill, triple kill...) contada aqui.
+const { contarAbate, zerarSerie, armaDoAbate } = require('./abates');
 
 let D = null; // os dados (módulo ES)
-import('./public/js/ceu-dados.js')
-  .then((m) => { D = m; })
+let ARMAS = {};
+Promise.all([import('./public/js/ceu-dados.js'), import('./public/js/armas-dados.js')])
+  .then(([m, a]) => { D = m; ARMAS = a.ARMAS; })
   .catch((err) => console.warn('  Dados do surf/mata-mata não carregaram:', err.message));
 
 const ondeEsta = (user) => (user?.p ? { x: user.p[0], y: user.p[1], z: user.p[2] } : null);
@@ -41,9 +44,11 @@ function ligarCeu(io, rooms, jogoLigado, getBoards) {
       if (a.fimEm && a.fimEm <= agora) {
         a.fimEm = 0;
         a.vencedor = null;
+        a.primeiro = false;
         for (const j of a.jogadores.values()) {
           j.abates = 0;
           j.mortes = 0;
+          zerarSerie(j);
         }
         mudou = true;
       }
@@ -59,20 +64,33 @@ function ligarCeu(io, rooms, jogoLigado, getBoards) {
       return j.arma;
     },
     // nocaute (chamado pelo 'ko' do server.js): conta o abate e a vítima volta com a pistola
-    nocaute(room, vitima, autor) {
+    nocaute(room, vitima, autor, arma) {
       const a = room?.matamata;
       const v = a?.jogadores.get(vitima.id);
       if (!v) return;
       v.mortes++;
       v.arma = D.ARENA.inicial;
+      zerarSerie(v);
       const k = autor && autor.id !== vitima.id ? a.jogadores.get(autor.id) : null;
-      if (k && !a.fimEm) {
+      const vale = k && !a.fimEm;
+      if (vale) {
         k.abates++;
         if (k.abates >= D.ARENA.abates) {
           a.vencedor = { nome: k.nome, cor: k.cor };
           a.fimEm = Date.now() + 7000;
         }
       }
+      const primeiro = vale && !a.primeiro;
+      if (vale) a.primeiro = true;
+      io.to(room.id).emit('mm-abate', {
+        modo: 'x1',
+        autor: k ? { id: autor.id, nome: k.nome, cor: k.cor } : null,
+        vitima: { id: vitima.id, nome: v.nome, cor: v.cor },
+        arma: armaDoAbate(arma, ARMAS),
+        serie: vale ? contarAbate(k) : 0,
+        primeiro,
+        ace: false,
+      });
       avisar(room);
     },
   };

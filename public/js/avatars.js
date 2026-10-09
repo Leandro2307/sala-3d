@@ -1120,8 +1120,12 @@ export class Avatar {
       this.halo.position.y = 1.1;
       this.inner.rotation.z += (0 - this.inner.rotation.z) * Math.min(1, dt * 9);
     } else if (this.personagem) {
-      this.personagem.update(dt, this.anim, this.anim === 2 ? 1.6 : 1);
+      // nocauteado: parado e caído de lado, como o boneco padrão (em times fica assim até a rodada
+      // acabar; antes o personagem 3D seguia de pé, e não dava para saber quem já tinha caído)
+      this.personagem.update(dt, this.ko ? 0 : this.anim, this.anim === 2 ? 1.6 : 1);
       this.halo.position.y = 1.5;
+      const alvoKo = this.ko ? Math.PI / 2.1 : 0;
+      this.inner.rotation.z += (alvoKo - this.inner.rotation.z) * Math.min(1, dt * 9);
     } else {
       // animação procedural
       const moving = this.anim === 1 || this.anim === 2;

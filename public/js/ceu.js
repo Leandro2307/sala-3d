@@ -19,7 +19,7 @@ const CIMA = new THREE.Vector3(0, 1, 0);
 const _a = new THREE.Vector3();
 const _b = new THREE.Vector3();
 
-function textura(w, h, desenhar) {
+export function textura(w, h, desenhar) {
   const cv = document.createElement('canvas');
   cv.width = w;
   cv.height = h;
@@ -36,7 +36,7 @@ function textura(w, h, desenhar) {
   return tex;
 }
 
-function placaTexto(texto, cor, larg = 6) {
+export function placaTexto(texto, cor, larg = 6) {
   const tex = textura(512, 128, (ctx, w, h) => {
     ctx.fillStyle = 'rgba(15,23,42,0.85)';
     ctx.fillRect(0, 0, w, h);
@@ -131,6 +131,7 @@ export function construirPortal(world, chave) {
     placa.position.set(p.x, 4.4, p.z);
     g.add(anel, meio, chao, placa);
     p.anel = anel;
+    world.reservas.push({ x: p.x, z: p.z, r: 4 }); // nada de árvore nascendo no portal
   }
   return { grupo: g };
 }

@@ -29,6 +29,10 @@ import { Dados, MESA_DADOS } from './dados.js';
 import { Futebol } from './futebol.js';
 import { Quadras } from './quadras.js';
 import { Surf, MataMata, dicaDoPortal } from './ceu.js';
+import { Batalha } from './batalha.js';
+import { TIMES } from './batalha-dados.js';
+import { Anuncios } from './anuncios.js';
+import { acertarAvatar, tamanhoDo } from './hitbox.js';
 import { icon, hydrateIcons } from './icons.js';
 import { isTouch, setupTouchControls, toggleFullscreen, isFullscreen, temTelaCheia } from './touch.js';
 
@@ -167,6 +171,21 @@ const mataMata = new MataMata({
       delete u.armaDeAntes;
     }
     if (u.isSelf) poderesMudaram();
+  },
+});
+// o que aparece por cima nas arenas: abates no canto, double kill, avisos de rodada (anuncios.js)
+const anuncios = new Anuncios();
+// mata-mata em times (arena própria no céu; o portal fica ao lado dos outros dois)
+const batalha = new Batalha({
+  world, player, sfx, toast: (...a) => toast(...a), ligado: () => jogoLigado('batalha'), socket: () => socket,
+  combat: () => combat, meuId: () => state.selfId, anuncios,
+  armar: (id, tipo) => mataMata.armar(id, tipo),
+  avatarDe: (id) => state.users.get(id)?.avatar ?? null,
+  aoEntrar: () => {
+    if (player.veiculo) toggleVeiculo();
+    if (player.voando) toggleVoar();
+    if (player.puloAlto) togglePuloAlto();
+    if (player.sitting) toggleSit();
   },
 });
 
@@ -751,6 +770,12 @@ async function join() {
   quadras.ligar(socket);
   surf.ligar(socket);
   mataMata.ligar(socket);
+  batalha.ligar(socket);
+  // abates nas arenas: só quem está na mesma arena vê a lista e ouve o locutor
+  socket.on('mm-abate', (m) => {
+    const emTimes = m?.modo === 'times';
+    if (emTimes ? batalha.ativo : mataMata.ativo) anuncios.abate(m, state.selfId, emTimes ? (t) => TIMES[t]?.cor : null);
+  });
   rtc = new RTC(socket, {
     iceServers: config.iceServers,
     onTrack: handleTrack,
@@ -870,6 +895,7 @@ function applyJoined(data) {
   quadras.eu = data.selfId;
   quadras.ver();
   mataMata.ver();
+  batalha.ver();
   futebol.verPartida(); // numa reconexão, quem estava jogando volta a pé (o servidor esqueceu)
   state.room = data.room;
   state.passe = data.passe || null;
@@ -1053,16 +1079,19 @@ function bindSocket() {
     combat.takeHit({ dir, from, fromName, arma });
   });
 
-  socket.on('ko', ({ id, name, by, byColor, fights }) => {
+  socket.on('ko', ({ id, name, by, byColor, fights, arena, fica }) => {
     setFightBoard(fights);
     const u = state.users.get(id);
     if (u && !u.isSelf) {
       u.avatar.setKo(true);
       u.avatar.setHealth(0);
-      setTimeout(() => { u.avatar.setKo(false); u.avatar.setHealth(1); }, COMBAT.respawnDelay * 1000);
+      // em times, quem cai na rodada fica no chão até a próxima (batalha.js levanta)
+      if (fica) batalha.manterCaido(id);
+      else setTimeout(() => { u.avatar.setKo(false); u.avatar.setHealth(1); }, COMBAT.respawnDelay * 1000);
     }
     sfx.ko();
-    toast(by ? `${by} nocauteou ${name}!` : `${name} caiu do ringue!`, 'warn', 4200, byColor || null);
+    // nas arenas quem conta é a lista de abates delas (anuncios.js), não um aviso para a sala toda
+    if (!arena) toast(by ? `${by} nocauteou ${name}!` : `${name} caiu do ringue!`, 'warn', 4200, byColor || null);
   });
 
   // uma tela de alguém entrou (slot) ou saiu (slot null). As minhas eu registro na resposta do
@@ -2242,6 +2271,7 @@ const JOGOS_DA_SALA = [
   ['boliche', 'Boliche', '2 pistas, até 4 por pista'],
   ['surf', 'Surf', 'Rampas no céu, como no CS'],
   ['matamata', 'Mata-mata', 'Arena com armas no chão (X1)'],
+  ['batalha', 'Mata-mata em times', 'Autobots × Decepticons, rodadas; quem cai assiste'],
   ['xadrez', 'Xadrez de bruxo', ''],
   ['dama', 'Dama gigante', ''],
   ['velha', 'Jogo da velha', ''],
@@ -2249,7 +2279,7 @@ const JOGOS_DA_SALA = [
   ['poderes', 'Poderes', 'Voar e pulo alto'],
   ['armas', 'Arma da camiseta 22', ''],
 ];
-const AREAS_DE_JOGO = ['parkour', 'ringue', 'corrida', 'futebol', 'volei', 'basquete', 'boliche', 'surf', 'matamata', 'xadrez', 'dama', 'velha', 'dados'];
+const AREAS_DE_JOGO = ['parkour', 'ringue', 'corrida', 'futebol', 'volei', 'basquete', 'boliche', 'surf', 'matamata', 'batalha', 'xadrez', 'dama', 'velha', 'dados'];
 // parkour e ringue ficam dentro do cinema: no escritório não existem
 const SO_NO_CINEMA = ['parkour', 'ringue'];
 const modoEscritorio = () => state.sala?.modulo === 'escritorio' && state.sala.departamentos?.length > 0;
@@ -4141,9 +4171,11 @@ $('#race-go').addEventListener('click', () => { irParaLargada(); closePanel(); }
 const combat = new Combat({
   player,
   socket: null, // preenchido em join(), quando o socket existe
+  // nocauteado não leva golpe (o tiro passa por cima de quem está no chão); em times, colega e
+  // espectador também não. A hitbox de cada um sai do próprio modelo (hitbox.js)
   getOthers: () => [...state.users.values()]
-    .filter((u) => !u.isSelf && u.avatar)
-    .map((u) => ({ id: u.id, position: u.avatar.group.position })),
+    .filter((u) => !u.isSelf && u.avatar && !u.avatar.ko && batalha.podeAcertar(u.id))
+    .map((u) => ({ id: u.id, position: u.avatar.group.position, ...tamanhoDo(u.avatar), acertar: (o, d, max) => acertarAvatar(u.avatar, o, d, max) })),
   onState: (health, inRing) => updateFightHud(health, inRing),
   onHitLanded: () => sfx.punchHit(),
   onDamage: () => {
@@ -4162,7 +4194,7 @@ function updateFightHud(health, emRingue) {
   const hud = $('#fight-hud');
   const v = Math.max(0, Math.min(1, health / COMBAT.maxHealth));
   // a porradaria vale no mapa todo: fora do ringue a barra aparece quando você apanha
-  hud.hidden = !(inRing || mataMata.ativo || v < 1 || combat.knockedOut);
+  hud.hidden = !(inRing || mataMata.ativo || batalha.ativo || v < 1 || combat.knockedOut);
   $('#fh-label').textContent = inRing ? 'Ringue' : 'Vida';
   localAvatar.setHealth(v);
   socket?.emit('health', v);
@@ -4178,9 +4210,9 @@ function updateFightHud(health, emRingue) {
 
 // ------------------------------------------------------------------ arma (camiseta 22)
 // O servidor confere a camiseta de novo: isto aqui é só para não mostrar o que não vale.
-function temArma() { return (settings.shirt === 'bolsonaro' && jogoLigado('armas')) || !!mataMata.arma; }
-// a arma que está na mão: a do mata-mata manda enquanto se está nele
-const armaAtual = () => mataMata.arma || settings.arma;
+function temArma() { return (settings.shirt === 'bolsonaro' && jogoLigado('armas')) || !!mataMata.arma || !!batalha.arma; }
+// a arma que está na mão: a do mata-mata (sozinho ou em times) manda enquanto se está nele
+const armaAtual = () => mataMata.arma || batalha.arma || settings.arma;
 
 const _tmpTiro = new THREE.Vector3();
 const _camDir = new THREE.Vector3();
@@ -4381,7 +4413,7 @@ let municaoAntes = '';
 function mostrarMunicao() {
   const arma = armaAtual();
   const ver = temArma() && state.joined && !player.veiculo;
-  const txt = !ver ? '' : recarga ? `…|${defArma(arma).nome} · recarregando` : `${balasDe(arma)} / ${pente(arma)}|${defArma(arma).nome}${mataMata.ativo ? ' · R recarrega' : ''}`;
+  const txt = !ver ? '' : recarga ? `…|${defArma(arma).nome} · recarregando` : `${balasDe(arma)} / ${pente(arma)}|${defArma(arma).nome}${mataMata.ativo || batalha.ativo ? ' · R recarrega' : ''}`;
   if (txt === municaoAntes) return;
   municaoAntes = txt;
   elMunicao.hidden = !txt;
@@ -4400,7 +4432,7 @@ function vigiarMunicao() {
   }
   // pegou outra arma (no mata-mata): vem cheia
   const arma = armaAtual();
-  if (mataMata.ativo && arma !== armaVista) {
+  if ((mataMata.ativo || batalha.ativo) && arma !== armaVista) {
     delete balas[arma];
     if (recarga && recarga.arma !== arma) recarga = null;
   }
@@ -4416,7 +4448,7 @@ function atirar() {
     toast('Arma só para quem escolheu a camiseta 22 (ou no mata-mata, pegando uma do chão).', 'info', 2600);
     return;
   }
-  if (player.veiculo || player.sitting || state.focus || !state.joined) return;
+  if (player.veiculo || player.sitting || state.focus || !state.joined || batalha.congelado) return;
   const armaAgora = armaAtual();
   if (recarga) return;
   if (balasDe(armaAgora) <= 0) {
@@ -4472,6 +4504,10 @@ function toggleVoar() {
     toast('Os poderes estão desligados nesta sala.', 'info', 2600);
     return;
   }
+  if (!player.voando && batalha.ativo) {
+    toast('No mata-mata em times não dá para voar.', 'info', 2600);
+    return;
+  }
   if (player.veiculo) {
     toast('Saia do carro para voar.', 'info', 2600);
     return;
@@ -4487,6 +4523,10 @@ function toggleVoar() {
 function togglePuloAlto() {
   if (!player.puloAlto && !jogoLigado('poderes')) {
     toast('Os poderes estão desligados nesta sala.', 'info', 2600);
+    return;
+  }
+  if (!player.puloAlto && batalha.ativo) {
+    toast('No mata-mata em times não tem pulo alto.', 'info', 2600);
     return;
   }
   player.puloAlto = !player.puloAlto;
@@ -5281,6 +5321,7 @@ window.addEventListener('keydown', (e) => {
     else if (futebol.jogando) futebol.sair();
     else if (surf.ativo) surf.sair();
     else if (mataMata.ativo) mataMata.sair();
+    else if (batalha.ativo) batalha.sair();
     else run.abandon(); // preso no parkour? Esc sai da corrida
     return;
   }
@@ -5299,6 +5340,19 @@ window.addEventListener('keydown', (e) => {
   }
   if (e.code === 'KeyE' && !state.focus && mataMata.pertoDoPortal()) {
     mataMata.entrar();
+    return;
+  }
+  if (e.code === 'KeyE' && !state.focus && batalha.pertoDoPortal()) {
+    batalha.entrar();
+    return;
+  }
+  // em times: N troca de time; assistindo, as setas trocam de quem se assiste
+  if (batalha.ativo && !state.focus && e.code === 'KeyN') {
+    batalha.trocarTime();
+    return;
+  }
+  if (batalha.espectando && (e.code === 'ArrowLeft' || e.code === 'ArrowRight')) {
+    batalha.trocarAlvo(e.code === 'ArrowRight' ? 1 : -1);
     return;
   }
   // no surf, R volta para a etapa (não para a entrada do mapa)
@@ -5333,7 +5387,7 @@ window.addEventListener('keydown', (e) => {
     case 'KeyR':
       if (state.focus) break;
       if (temArma() && recarregar()) break;
-      if (!mataMata.ativo) respawn(); // no mata-mata o R só recarrega
+      if (!mataMata.ativo && !batalha.ativo) respawn(); // no mata-mata o R só recarrega
       break;
     case 'KeyV':
       toggleView();
@@ -5415,6 +5469,11 @@ function voltarAOlhar() {
 
 document.addEventListener('mousedown', (e) => {
   if (document.pointerLockElement !== world.canvas || e.button !== 0) return;
+  // assistindo (mata-mata em times): o clique troca de quem se assiste
+  if (batalha.espectando) {
+    batalha.trocarAlvo(1);
+    return;
+  }
   // dentro do ringue o botão esquerdo é o soco; fora dele continua focando telas
   if (combat.inRing && !state.focus) punch();
   else if (state.hovered) enterFocus(state.hovered);
@@ -5425,7 +5484,7 @@ document.addEventListener('mousedown', (e) => {
 // em uso normal nada disso fica exposto.
 if (params.get('debug') === '1') {
   window.__sala3d = {
-    state, player, combat, run, corrida, world, settings, punch, goToRing, respawn,
+    state, player, combat, run, corrida, world, settings, punch, goToRing, respawn, mataMata, batalha, anuncios,
     toggleVeiculo, irParaLargada, jogos, irParaMesa, exitFocus, dados,
     tocarTela, telasMudas, liberarSomDasTelas, makeVideo, mesa, controle, abrirMesa, fecharMesa, marcaDaAba,
     publishShare, stopShare, acharTela, telasNoAr, get rtc() { return rtc; }, clima, ligarLuneta,
@@ -5515,7 +5574,9 @@ function slowUpdate() {
   navegadores.atualizar();
   futebol.atualizarDica(!state.focus && !state.panel);
   quadras.atualizarDica(!state.focus && !state.panel && !futebol.jogando);
-  dicaDoPortal(state.focus || state.panel ? '' : surf.pertoDoPortal() ? 'Ir para o surf' : mataMata.pertoDoPortal() ? 'Entrar no mata-mata' : '');
+  dicaDoPortal(state.focus || state.panel ? '' : surf.pertoDoPortal() ? 'Ir para o surf' : mataMata.pertoDoPortal() ? 'Entrar no mata-mata'
+    : batalha.pertoDoPortal() ? 'Entrar no mata-mata em times' : '');
+  if (batalha.ativo && !jogoLigado('batalha')) batalha.sair(); // o dono da sala desligou
   if (futebol.jogando && !jogoLigado('futebol')) futebol.sair(); // o dono da sala desligou
   $('#clima-chip').textContent = clima.rotulo();
   updateVolumes();
@@ -5882,6 +5943,7 @@ function frame(ts = performance.now()) {
     quadras.update(dt, t);
     surf.update(dt);
     mataMata.update(dt);
+    batalha.update(dt);
     // com poder ligado o parkour nem começa (pular alto/voar até o camarote não é recorde)
     if (player.voando || player.puloAlto) {
       if (run.state !== 'idle') {
@@ -5893,7 +5955,8 @@ function frame(ts = performance.now()) {
     }
     if (run.state === 'running') setPkTime(run.time);
     combat.update(dt);
-    player.travado = combat.knockedOut; // nocaute: fica parado onde caiu até levantar
+    // nocaute: fica parado onde caiu até levantar; em times, também na contagem e assistindo
+    player.travado = combat.knockedOut || batalha.congelado;
     jogos.update(dt, t);
     dados.update(dt);
     atualizarTiros(dt);

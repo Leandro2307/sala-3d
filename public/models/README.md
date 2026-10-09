@@ -41,6 +41,8 @@ outra na troca.
 | Cavaleiro, Bárbaro, Mago, Ladino, Encapuzado | KayKit Adventurers, de Kay Lousberg | CC0 | ~400 KB cada |
 | Esqueleto, Esqueleto Guerreiro, Esqueleto Ladino, Esqueleto Mago | KayKit Skeletons, de Kay Lousberg | CC0 | ~400 KB cada |
 | Optimus, Solus Prime | OrangeSauceu, a partir de *Transformers: Earth Wars* | marcado CC BY pelo autor do envio | 779 KB / 1,2 MB |
+| Bumblebee | Pipogame (@joseclaudio162001), a partir de *Transformers Alliance* | marcado CC BY pelo autor do envio | `bumblebee.glb` (1,1 MB) |
+| Jazz, Ratchet, Brawn | orangesauceu, a partir de *Transformers Alliance* | marcado CC BY pelo autor do envio | 1,1 / 1,1 / 1,2 MB |
 
 O Atos não vem de pacote: o script modela a bola, monta o esqueleto, anima os 7
 clipes e exporta já com meshopt. Ele é a logo virada bola: visto de frente, a
@@ -68,11 +70,44 @@ peito girando ao contrário, braços balançando. Para mexer no passo, mude os
 números no começo do script, rode a linha do cabeçalho dele e suba `versao` no
 cadastro.
 
-> Atenção sobre os Transformers: as tags do arquivo original indicam que são
-> assets do jogo *Transformers: Earth Wars*. Optimus Prime é da Hasbro, e quem
-> publicou o modelo não detém esse direito — a marcação "CC BY" dele não vale
-> sobre o personagem. Ficam aqui por escolha do dono do projeto; se a página for
-> divulgada, o risco prático é uma notificação de remoção.
+Bumblebee (Camaro), Jazz (esportivo), Ratchet (ambulância) e Brawn (jipe) vêm do
+*Transformers Alliance*, baixados do Sketchfab
+([Bumblebee](https://sketchfab.com/3d-models/tf-alliance-bumblebee-rotf-0dca36328e2d47fd9fcfd650237ed371),
+[Jazz](https://sketchfab.com/3d-models/f639ce3ae0784f6f82be9ea06377fba0),
+[Ratchet](https://sketchfab.com/3d-models/3937ded1c06241f48e47e7383262e2a3),
+[Brawn](https://sketchfab.com/3d-models/9de7d8f9dd2a4c68963c4391400dce1f)): o
+`.glb` do botão de download vai para `models-brutos/` com o nome que está em
+`MODELOS` no script. Trazem o transformar e golpes, mas não
+andam, e o parado e os golpes ficam **de lado** (lá a luta é vista de lado: o robô
+olha para -x, o carro para +z). São dois passos (`models-brutos/` fica fora do git):
+
+1. `scripts/preparar-alliance.js` tira o prefixo dos clipes, fica só com
+   `transform_v` (vira carro), `transform_r` (volta a robô) e o de comemorar (o
+   aceno); tira o plano de sombra, as armas (o jogo põe a dele) e o símbolo dos
+   Decepticons, que fica por cima do dos Autobots; e **vira os clipes de frente**
+   girando o `_rootJoint`. Na transformação o giro acompanha o clipe: o robô vai
+   virando para a frente enquanto vira carro, e o carro termina como já estava.
+   Texturas em webp de 1024 px e meshopt: de 5–10 MB para ~1 MB.
+2. `scripts/animar-transformers.js bumblebee jazz ratchet brawn` grava `Idle`
+   (de pé e de frente), `Walk`, `Run`, `Jump` e `Punch` (direto de direita, da
+   guarda), com o mesmo IK do Optimus, achando os ossos do Biped do 3ds Max
+   (`Bip001 …`). Em Jazz, Ratchet e Brawn a base é o repouso do arquivo, que já é
+   o robô de pé, de perna reta; no Bumblebee o repouso é o carro, e a base é o
+   primeiro quadro do `idle01` (que o script apaga depois).
+
+Rode sempre os dois, nessa ordem: o segundo sozinho não acha mais o `idle01` do
+Bumblebee. O Bumblebee só traz a ida (`transform_v`): a volta a robô é ela de trás
+para frente (`voltaAoContrario` no cadastro, ver `transformar()` em `modelo.js`).
+Como o repouso dele é o carro, a `altura` do cadastro é a do carro (0,544 deixa o
+robô com 2,6 m) e o `raioVista` passa de 4 h; nos outros três o repouso é o robô, e
+a `altura` é a dele de pé.
+
+> Atenção sobre os Transformers: as tags dos arquivos originais indicam que são
+> assets dos jogos *Transformers: Earth Wars* e *Transformers Alliance*. Os
+> personagens são da Hasbro, e quem publicou os modelos não detém esse direito — a
+> marcação "CC BY" deles não vale sobre os personagens. Ficam aqui por escolha do
+> dono do projeto; se a página for divulgada, o risco prático é uma notificação de
+> remoção.
 
 Os do KayKit vêm com 76 a 95 animações; o jogo usa 7. Foram podados com
 `@gltf-transform` (remover os clipes extras + `meshopt`): de 3,5–4,7 MB para

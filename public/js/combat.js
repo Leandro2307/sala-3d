@@ -16,7 +16,9 @@ export class Combat {
   constructor({ player, socket, getOthers, onState, onHitLanded, onKo, onDamage }) {
     this.player = player;
     this.socket = socket;
-    this.getOthers = getOthers; // () => [{ id, position }]
+    // () => [{ id, position, raio?, altura?, acertar?(origem, dir, max) }]: raio e altura dão o
+    // tamanho do corpo para o soco; acertar diz onde o tiro pega (hitbox.js). Sem ele, três esferas.
+    this.getOthers = getOthers;
     this.onState = onState; // (health, inRing) => void
     this.onHitLanded = onHitLanded; // (targetId) => void  (acertou alguém)
     this.onKo = onKo; // (byName|null) => void  (você foi nocauteado)
@@ -32,6 +34,10 @@ export class Combat {
     this.swing = 0; // 0..1 para a animação do braço
     this.lastKoBy = null;
     this.ultimoAgressor = null; // { id, name, idade } — crédito do ring-out
+    this.ultimaArma = null; // o que bateu por último ('soco' ou o id da arma): vai junto no nocaute
+    // mata-mata em times: quem cai não levanta sozinho (só na rodada seguinte) e a vida não volta
+    this.semVoltar = false;
+    this.semRegen = false;
   }
 
   reset() {
@@ -61,9 +67,10 @@ export class Combat {
       _a.copy(o.position).sub(origin);
       _a.y = 0;
       const dist = _a.length();
-      if (dist > COMBAT.reach || dist < 0.01) continue;
+      // o alcance conta até a beira do corpo: num robô de 2,8 m o centro fica bem para dentro
+      if (dist > COMBAT.reach + Math.max(0, (o.raio ?? 0.45) - 0.45) || dist < 0.01) continue;
       // altura parecida: não dá para socar quem está muito acima/abaixo
-      if (Math.abs(o.position.y - origin.y) > 2.2) continue;
+      if (Math.abs(o.position.y - origin.y) > Math.max(2.2, o.altura ?? 0)) continue;
       _a.divideScalar(dist);
       if (_a.x * fx + _a.z * fz < COMBAT.arc) continue; // está atrás ou muito de lado
       if (dist < maisPerto) {
@@ -84,9 +91,9 @@ export class Combat {
 
   // ------------------------------------------------------------------ atirar
   // Cada chumbo (a escopeta tem vários, as outras um) sai da mira (origem/dir), espalhado pela
-  // abertura da arma, e acerta o primeiro jogador no caminho — cada boneco vira três esferas
-  // empilhadas — se nenhuma parede (bloqueado) estiver antes. Devolve onde cada chumbo parou
-  // (para os traçantes) e o jogador que levou mais chumbos, com quantos.
+  // abertura da arma, e acerta o primeiro jogador no caminho — pela hitbox de cada um (o.acertar,
+  // ver hitbox.js), ou três esferas empilhadas — se nenhuma parede (bloqueado) estiver antes.
+  // Devolve onde cada chumbo parou (para os traçantes) e o jogador que levou mais chumbos, com quantos.
   atirar({ origem, dir, bloqueado, arma = ARMA_PADRAO }) {
     const def = ARMAS[arma] || ARMAS[ARMA_PADRAO];
     if (this.cooldownTiro > 0 || this.knockedOut) return null;
@@ -106,6 +113,11 @@ export class Combat {
       }
       let melhor = null;
       for (const o of this.getOthers()) {
+        if (o.acertar) {
+          const t = o.acertar(origem, _d, melhor ? melhor.t : def.alcance);
+          if (t != null && (!melhor || t < melhor.t)) melhor = { alvo: o, t };
+          continue;
+        }
         for (const altura of [0.45, 0.95, 1.45]) {
           _a.set(o.position.x, o.position.y + altura, o.position.z).sub(origem);
           const t = _a.dot(_d);
@@ -148,6 +160,7 @@ export class Combat {
 
     this.health = Math.max(0, this.health - dano);
     this.sinceHit = 0;
+    this.ultimaArma = def ? def.id : 'soco';
     this.ultimoAgressor = { id: from || null, name: fromName || null, idade: 0 };
     this.onDamage?.();
     this.onState?.(this.health, this.inRing);
@@ -160,7 +173,7 @@ export class Combat {
     this.koNoRingue = this.inRing; // no ringue volta para um canto; no resto do mapa, levanta onde caiu
     this.koTimer = COMBAT.respawnDelay;
     this.lastKoBy = byName || null;
-    this.socket?.emit('ko', { by: byId || null });
+    this.socket?.emit('ko', { by: byId || null, arma: byId ? this.ultimaArma : null });
     this.onKo?.(byName || null);
   }
 
@@ -179,6 +192,7 @@ export class Combat {
     }
 
     if (this.knockedOut) {
+      if (this.semVoltar) return; // em times: espera a próxima rodada (batalha.js levanta)
       this.koTimer -= dt;
       if (this.koTimer <= 0) {
         this.knockedOut = false;
@@ -202,7 +216,7 @@ export class Combat {
       return;
     }
 
-    if (this.health < COMBAT.maxHealth && this.sinceHit > COMBAT.regenDelay) {
+    if (this.health < COMBAT.maxHealth && this.sinceHit > COMBAT.regenDelay && !this.semRegen) {
       const antes = this.health;
       this.health = Math.min(COMBAT.maxHealth, this.health + COMBAT.regenRate * dt);
       if (Math.floor(antes) !== Math.floor(this.health)) this.onState?.(this.health, this.inRing);

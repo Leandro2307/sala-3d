@@ -41,6 +41,24 @@ const ATOS = {
   clipes: { idle: 'Idle', walk: 'Walk', run: 'Run', air: 'Jump', sit: 'Sit', punch: 'Punch', wave: 'Wave' },
 };
 
+// Transformers Alliance: os mesmos clipes em todos (o de comemorar, que vira o aceno, muda de nome
+// no Ratchet)
+const clipesAlliance = (aceno) => ({ idle: 'Idle', walk: 'Walk', run: 'Run', air: 'Jump', sit: 'Idle', punch: 'Punch', wave: aceno });
+// Jazz, Ratchet e Brawn: o repouso do arquivo já é o robô de pé, então a altura é a dele
+const alliance = (id, label, altura, resumo, aceno) => ({
+  id,
+  label,
+  url: `/models/${id}.glb`,
+  altura,
+  clipes: clipesAlliance(aceno),
+  transforma: { paraVeiculo: 'transform_v', paraRobo: 'transform_r' },
+  // com o repouso de robô, nem transformando ele passa de 1,06 h do centro
+  raioVista: 1.15,
+  resumo,
+  credito: 'orangesauceu, do Transformers Alliance — CC BY',
+  aviso: 'transforma em carro de verdade',
+});
+
 export const PERSONAGENS = {
   padrao: { id: 'padrao', label: 'Boneco', url: null, resumo: 'Com a sua cor, camiseta e foto no rosto' },
   // gerado inteiro no Blender por scripts/modelar-atos.py — para mexer nele, mude o script
@@ -126,6 +144,29 @@ export const PERSONAGENS = {
     resumo: 'Transforma no G',
     credito: 'OrangeSauceu (Transformers: Earth Wars)',
   },
+
+  // Os quatro do Transformers Alliance viram carro no G. Chegam do Sketchfab com o transformar, o
+  // comemorar e golpes virados de lado; scripts/preparar-alliance.js os põe de frente e enxuga, e
+  // scripts/animar-transformers.js grava Idle, Walk, Run, Jump e Punch (de frente, pelo esqueleto).
+  bumblebee: {
+    id: 'bumblebee',
+    label: 'Bumblebee',
+    url: '/models/bumblebee.glb',
+    // a pose de repouso deste arquivo é o Camaro (0,58 de altura); de pé, com as portas nas
+    // costas, o robô tem 4,78 vezes isso: 0,544 deixa o robô com 2,6 m
+    altura: 0.544,
+    clipes: clipesAlliance('emo_joyful'),
+    // só traz a ida: a volta a robô é ela de trás para frente (ver transformar em modelo.js)
+    transforma: { paraVeiculo: 'transform_v', voltaAoContrario: true },
+    // a altura acima é a do carro: de pé ele chega a 4,5 h do centro da esfera
+    raioVista: 4.7,
+    resumo: 'Vira Camaro de verdade no G',
+    credito: 'Pipogame (@joseclaudio162001), do Transformers Alliance — CC BY',
+    aviso: 'transforma em carro de verdade',
+  },
+  jazz: alliance('jazz', 'Jazz', 2.4, 'Vira carro esporte no G', 'emo_joyful'),
+  ratchet: alliance('ratchet', 'Ratchet', 2.8, 'Vira ambulância no G', 'emo_joy'),
+  brawn: alliance('brawn', 'Brawn', 2.7, 'Vira jipe no G', 'emo_joyful'),
 };
 
 for (const p of Object.values(PERSONAGENS)) {

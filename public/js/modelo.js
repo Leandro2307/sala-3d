@@ -305,14 +305,18 @@ export class Personagem {
 
   // Transformação de verdade: alguns modelos trazem o clipe de virar veículo e
   // de voltar a robô. Toca uma vez e segura a pose final, em vez de usar o carro
-  // desenhado em código.
+  // desenhado em código. Quem só traz a ida (o Bumblebee: transforma.voltaAoContrario)
+  // volta a robô com ela de trás para frente.
   transformar(paraVeiculo) {
     const t = this.def.transforma;
     if (!t) return false;
-    const nome = paraVeiculo ? t.paraVeiculo : t.paraRobo;
+    const reverso = !paraVeiculo && !!t.voltaAoContrario;
+    const nome = paraVeiculo || reverso ? t.paraVeiculo : t.paraRobo;
     const clip = this.clips.find((c) => c.name === nome);
     if (!clip) return false;
     const acao = this.mixer.clipAction(clip);
+    // de carro, a ida está parada no último quadro com peso 1: a volta sai dali sem misturar
+    const continua = reverso && this.travado === acao;
     if (this.atual) this.atual.fadeOut(0.18);
     if (this.travado && this.travado !== acao) this.travado.fadeOut(0.18);
     if (this.gesto) { this.gesto.stop(); this.gesto = null; }
@@ -320,8 +324,11 @@ export class Personagem {
     acao.setLoop(THREE.LoopOnce);
     acao.clampWhenFinished = true;
     acao.enabled = true;
+    acao.timeScale = reverso ? -1 : 1;
+    if (reverso) acao.time = clip.duration;
     acao.setEffectiveWeight(1);
-    acao.fadeIn(0.18).play();
+    if (!continua) acao.fadeIn(0.18);
+    acao.play();
     this.travado = acao;
     this.modoVeiculo = !!paraVeiculo;
     this.atual = null;

@@ -1,4 +1,5 @@
-// Surf e mata-mata: os dois ficam no céu, acima do mapa (portais perto da porta do cinema).
+// Surf e mata-mata: os dois ficam no céu, acima do mapa (portais perto da porta do cinema, junto com o
+// do mata-mata em times, que tem a arena dele em batalha-dados.js).
 // Só dados e contas sem three.js: o servidor lê o mesmo arquivo para conferir armas e tempos.
 import { NOVO } from './mundo.js';
 import { PORTAIS_NOVO } from './cidade-dados.js';
@@ -9,6 +10,8 @@ import { PORTAIS_NOVO } from './cidade-dados.js';
 export const PORTAIS = {
   surf: { ...(NOVO ? PORTAIS_NOVO.surf : { x: 66, z: 68 }), cor: '#22d3ee', nome: 'SURF' },
   matamata: { ...(NOVO ? PORTAIS_NOVO.matamata : { x: 76, z: 68 }), cor: '#ef4444', nome: 'MATA-MATA' },
+  // o mata-mata em times (batalha.js) tem a arena dele, mas entra por um portal igual a estes
+  times: { ...(NOVO ? PORTAIS_NOVO.times : { x: 86, z: 68 }), cor: '#f59e0b', nome: 'EM TIMES' },
 };
 
 // ------------------------------------------------------------------ surf

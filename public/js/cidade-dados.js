@@ -35,9 +35,10 @@ export const MESAS_NOVO = {
   dados: { x: AV + 32, z: 302 },
 };
 
-// Aventura: os portais do surf e do mata-mata numa pracinha, ao lado de onde o surf termina
+// Aventura: os portais do surf, do mata-mata e do mata-mata em times numa pracinha, ao lado de onde o
+// surf termina
 export const PRACA_AVENTURA = { x: 20, z: 350, r: 16 };
-export const PORTAIS_NOVO = { surf: { x: 25, z: 343 }, matamata: { x: 25, z: 357 } };
+export const PORTAIS_NOVO = { surf: { x: 25, z: 343 }, matamata: { x: 25, z: 357 }, times: { x: 12, z: 350 } };
 
 // O lago no fim da avenida central, com um mirante na ponta da avenida
 export const LAGO = { x: AV, z: 465, r: 40 };
