@@ -16,6 +16,11 @@
 // Mexendo na PRÓPRIA aba compartilhada, nada passa pelo servidor: o evento vai direto para a
 // extensão deste Chrome, e o mouse sai a cada movimento (assim que a extensão terminou o
 // anterior), sem o intervalo que segura a rede de quem controla de longe.
+//
+// Modo jogo (botão "Modo jogo" no foco de uma janela/tela): a tela prende o ponteiro (pointer
+// lock) e o mouse vai como DELTA, não como posição — é assim que jogos tipo Minecraft giram a
+// câmera. As teclas já vão com o "code" físico, e o ajudante nativo as manda como scancode.
+// Esc solta o ponteiro (o jogo recebe um Esc e abre o menu dele); clicar na tela prende de novo.
 
 const MOD = (e) => (e.altKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.metaKey ? 4 : 0) | (e.shiftKey ? 8 : 0);
 const BOTAO = ['left', 'middle', 'right'];
@@ -48,6 +53,19 @@ export class Controle {
     this.roda = null;
     this.rodaTimer = 0;
     this.arrastando = null; // { video, key, b, x, y }
+    this.jogo = null; // { video, key }: modo jogo ligado nessa tela (ver o cabeçalho)
+
+    document.addEventListener('pointerlockchange', () => {
+      const j = this.jogo;
+      if (!j || document.pointerLockElement === j.video) return;
+      // Esc soltou o ponteiro: o jogo lá recebe um Esc (abre o menu dele) e o modo jogo continua
+      // armado — clicar na tela prende o mouse de novo
+      this.soltarTeclas();
+      this.soltarMouse();
+      this.mandar(j.key, { t: 'tecla', a: 'down', key: 'Escape', code: 'Escape', kc: 27, mod: 0 });
+      this.mandar(j.key, { t: 'tecla', a: 'up', key: 'Escape', code: 'Escape', kc: 27, mod: 0 });
+      this.onJogoSoltou?.(j.video);
+    });
 
     window.addEventListener('message', (e) => {
       if (e.source !== window || !e.data?.sala3dExt) return;
@@ -116,6 +134,42 @@ export class Controle {
     if (this.ext.ok && this.ext.liberado) window.postMessage({ sala3d: 'abas', abas }, location.origin);
   }
 
+  // ---------------------------------------------------------------- modo jogo
+  get jogoNo() { return this.jogo?.video || null; }
+
+  // liga o modo jogo numa tela: ponteiro travado nela, mouse vira delta, teclas viram scancode
+  modoJogo(video, ligar) {
+    if (!ligar) return this.desligarJogo();
+    if (!this.superficies.has(video)) return;
+    if (this.jogo?.video === video) return this.travarPonteiro();
+    this.desligarJogo();
+    const key = this.superficies.get(video);
+    this.jogo = { video, key };
+    this.focar(video);
+    this.travarPonteiro();
+    this.mandar(key, { t: 'modo', jogo: true });
+  }
+
+  desligarJogo() {
+    const j = this.jogo;
+    if (!j) return;
+    this.jogo = null;
+    if (document.pointerLockElement === j.video) document.exitPointerLock();
+    this.mandar(j.key, { t: 'modo', jogo: false });
+  }
+
+  travarPonteiro() {
+    const v = this.jogo?.video;
+    if (!v || document.pointerLockElement === v) return;
+    try {
+      // movimento cru (sem a aceleração do Windows de quem controla), onde o navegador deixa
+      const p = v.requestPointerLock({ unadjustedMovement: true });
+      if (p?.catch) p.catch(() => v.requestPointerLock());
+    } catch {
+      try { v.requestPointerLock(); } catch { /* gesto não valeu: o próximo clique tenta de novo */ }
+    }
+  }
+
   soltar(aba) {
     if (aba != null && this.ext.ok) this.pedir('soltar', aba);
   }
@@ -158,6 +212,7 @@ export class Controle {
 
   remover(video) {
     if (!this.superficies.has(video)) return;
+    if (this.jogo?.video === video) this.desligarJogo();
     if (this.teclado === video) this.focar(null);
     if (this.arrastando?.video === video) this.soltarMouse();
     this.superficies.delete(video);
@@ -168,6 +223,7 @@ export class Controle {
   focar(video) {
     const novo = video && this.superficies.has(video) ? video : null;
     if (novo === this.teclado) return;
+    if (this.jogo && this.jogo.video !== novo) this.desligarJogo();
     this.soltarTeclas();
     this.teclado?.classList.remove('controlando');
     this.teclado = novo;
@@ -206,8 +262,15 @@ export class Controle {
 
   // Movimento: no máximo um a cada MOVE_MS, mas o último sempre sai (senão o cursor do outro
   // lado parava um pouco antes de onde o mouse parou). Na minha aba: um por vez, sem relógio.
+  // No modo jogo (delta) os movimentos SOMAM — descartar um moveria a câmera a menos.
   mover(key, ev, intervalo) {
-    this.movePendente = { key, ev };
+    const p = this.movePendente;
+    if (p && p.key === key && p.ev.dx !== undefined && ev.dx !== undefined) {
+      p.ev.dx += ev.dx;
+      p.ev.dy += ev.dy;
+    } else {
+      this.movePendente = { key, ev };
+    }
     if (this.minha(key)) {
       if (!this.moveEmVoo) this.moverNaMinha();
       return;
@@ -304,7 +367,8 @@ export class Controle {
     document.addEventListener('pointerdown', (e) => {
       const v = sob(e);
       if (!v) return;
-      const p = this.ponto(v, e);
+      const emJogo = this.jogo && this.jogo.video === v;
+      const p = emJogo ? { x: 0.5, y: 0.5, dentro: true } : this.ponto(v, e);
       if (!p.dentro) return;
       e.preventDefault();
       // um botão que ficou com o foco levaria o Espaço e o Enter que eram para a tela
@@ -312,6 +376,7 @@ export class Controle {
       this.focar(v);
       this.soltarAlt();
       this.cancelarMove();
+      if (emJogo) this.travarPonteiro(); // voltou de um Esc: o clique que prende o mouse vale lá também
       const key = this.superficies.get(v);
       const b = BOTAO[e.button] || 'left';
       this.arrastando = { video: v, key, b, x: p.x, y: p.y };
@@ -329,6 +394,13 @@ export class Controle {
       const a = this.arrastando;
       const v = a ? a.video : sob(e);
       if (!v) return;
+      // modo jogo com o ponteiro travado: o movimento vai como delta (é o que gira a câmera)
+      if (this.jogo && this.jogo.video === v && document.pointerLockElement === v) {
+        const dx = e.movementX || 0;
+        const dy = e.movementY || 0;
+        if (dx || dy) this.mover(this.superficies.get(v), { t: 'mouse', a: 'move', dx, dy, b: a?.b || 'left', arrastando: !!a, mod: MOD(e) }, a ? ARRASTO_MS : MOVE_MS);
+        return;
+      }
       const p = this.ponto(v, e);
       if (!a && !p.dentro) return;
       if (a) Object.assign(a, { x: p.x, y: p.y });
@@ -338,7 +410,8 @@ export class Controle {
     document.addEventListener('wheel', (e) => {
       const v = sob(e);
       if (!v) return;
-      const p = this.ponto(v, e);
+      const emJogo = this.jogo && this.jogo.video === v && document.pointerLockElement === v;
+      const p = emJogo ? { x: 0.5, y: 0.5, dentro: true } : this.ponto(v, e);
       if (!p.dentro) return;
       e.preventDefault();
       const f = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? 800 : 1;

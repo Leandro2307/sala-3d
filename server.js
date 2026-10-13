@@ -603,8 +603,15 @@ function eventoDeControle(raw) {
   const n = (v, a, b) => Math.min(b, Math.max(a, Number(v) || 0));
   const mod = n(e.mod, 0, 15) | 0;
   if (e.t === 'mouse' && ['down', 'up', 'move'].includes(e.a)) {
-    return { t: 'mouse', a: e.a, x: n(e.x, 0, 1), y: n(e.y, 0, 1), b: ['left', 'right', 'middle'].includes(e.b) ? e.b : 'left', n: n(e.n, 1, 3) | 0, arrastando: !!e.arrastando, mod };
+    const ev = { t: 'mouse', a: e.a, x: e.x === undefined && e.dx !== undefined ? 0.5 : n(e.x, 0, 1), y: e.y === undefined && e.dy !== undefined ? 0.5 : n(e.y, 0, 1), b: ['left', 'right', 'middle'].includes(e.b) ? e.b : 'left', n: n(e.n, 1, 3) | 0, arrastando: !!e.arrastando, mod };
+    // modo jogo: movimento relativo (delta), sem posição — é o que gira a câmera num jogo
+    if (e.a === 'move' && (e.dx !== undefined || e.dy !== undefined)) {
+      ev.dx = n(e.dx, -4000, 4000);
+      ev.dy = n(e.dy, -4000, 4000);
+    }
+    return ev;
   }
+  if (e.t === 'modo') return { t: 'modo', jogo: !!e.jogo }; // liga/desliga o modo jogo no ajudante nativo
   if (e.t === 'wheel') return { t: 'wheel', x: n(e.x, 0, 1), y: n(e.y, 0, 1), dx: n(e.dx, -3000, 3000), dy: n(e.dy, -3000, 3000), mod };
   if (e.t === 'tecla' && (e.a === 'down' || e.a === 'up')) {
     // sem trim: a tecla de espaço é ' '

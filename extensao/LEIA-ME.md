@@ -61,6 +61,16 @@ ou tela compartilhada. A tecla Windows nunca é enviada. **Ctrl+Alt+End** no seu
 controle na hora (só volta quando você liberar de novo). Para tirar: `nativo\desinstalar.bat`.
 Se mover a pasta do projeto, rode o `instalar.bat` de novo.
 
+### Modo jogo (ajudante 1.2)
+
+No controle comum de janela, jogo tipo Minecraft não gira a câmera nem anda com WASD: o jogo lê
+o mouse pelo **movimento relativo** e as teclas pelo **código físico**, não pelo lugar do cursor
+nem pelo texto digitado. Quem controla abre a tela da janela e clica em **Modo jogo** (ou aperta
+**F8**): o mouse vira câmera e as teclas andam com o personagem. **Esc** pausa o jogo e solta o
+mouse (para mexer nos menus); clicar na tela prende o mouse de novo. Atualizou a pasta? Em
+`chrome://extensions` clique em **Recarregar** — o ajudante se recompila sozinho na próxima vez
+que alguém ligar o controle.
+
 ## Usar
 
 1. Compartilhe uma **aba** do Chrome — ou uma janela/tela, se instalou o ajudante acima.

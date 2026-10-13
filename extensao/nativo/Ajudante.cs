@@ -9,6 +9,11 @@
 // - o Chrome só deixa a extensão com o ID registrado no instalador abrir este programa;
 // - a tecla Windows nunca é enviada (Win+R, Win+L etc. ficam de fora);
 // - Ctrl+Alt+End no seu teclado corta o controle na hora (e não pode ser enviado de fora).
+//
+// Modo jogo (ev.t == "modo", liga/desliga pelo botão "Modo jogo" de quem controla): jogos tipo
+// Minecraft leem a câmera pelo movimento RELATIVO do mouse (SetCursorPos não gera isso) e as
+// teclas pelo código físico (scancode) — letra mandada como texto Unicode não anda com o
+// personagem nem fica pressionada. No modo jogo o mouse vai como delta e as teclas como scancode.
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -66,7 +71,7 @@ namespace Sala3d
         [DllImport("user32.dll")] static extern int GetSystemMetrics(int i);
 
         const uint INPUT_MOUSE = 0, INPUT_KEYBOARD = 1;
-        const uint KEYEVENTF_EXTENDEDKEY = 1, KEYEVENTF_KEYUP = 2, KEYEVENTF_UNICODE = 4;
+        const uint MOUSEEVENTF_MOVE = 1, KEYEVENTF_EXTENDEDKEY = 1, KEYEVENTF_KEYUP = 2, KEYEVENTF_UNICODE = 4, KEYEVENTF_SCANCODE = 8;
         const uint MOUSEEVENTF_LEFTDOWN = 2, MOUSEEVENTF_LEFTUP = 4, MOUSEEVENTF_RIGHTDOWN = 8, MOUSEEVENTF_RIGHTUP = 16,
                    MOUSEEVENTF_MIDDLEDOWN = 32, MOUSEEVENTF_MIDDLEUP = 64, MOUSEEVENTF_WHEEL = 0x800, MOUSEEVENTF_HWHEEL = 0x1000;
         const int VK_CONTROL = 0x11, VK_MENU = 0x12, VK_END = 0x23, VK_LWIN = 0x5B, VK_RWIN = 0x5C;
@@ -81,6 +86,9 @@ namespace Sala3d
         static string rotuloAtual;
         static readonly HashSet<ushort> teclasApertadas = new HashSet<ushort>();
         static readonly HashSet<string> botoesApertados = new HashSet<string>();
+        // modo jogo: mouse relativo + teclas por scancode; ctrl/altRemoto seguem o que NÓS apertamos
+        static bool jogo, ctrlRemoto, altRemoto;
+        static readonly HashSet<int> scansApertados = new HashSet<int>();
 
         // ------------------------------------------------------------ protocolo
         static string Ler(Stream e)
@@ -116,7 +124,7 @@ namespace Sala3d
             saida = Console.OpenStandardOutput();
             var entrada = Console.OpenStandardInput();
             new Thread(VigiarAtalho) { IsBackground = true }.Start();
-            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.1.0" } });
+            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.2.0" } });
             var json = new JavaScriptSerializer();
             string txt;
             while ((txt = Ler(entrada)) != null)
@@ -136,6 +144,7 @@ namespace Sala3d
 
         static string S(Dictionary<string, object> m, string k) { object v; return m.TryGetValue(k, out v) && v != null ? Convert.ToString(v) : ""; }
         static double D(Dictionary<string, object> m, string k) { object v; return m.TryGetValue(k, out v) && v != null ? Convert.ToDouble(v) : 0; }
+        static bool B(Dictionary<string, object> m, string k) { object v; return m.TryGetValue(k, out v) && v != null && Convert.ToBoolean(v); }
 
         static void Tratar(Dictionary<string, object> m)
         {
@@ -153,14 +162,15 @@ namespace Sala3d
             }
             // depois do Ctrl+Alt+End, só volta quando quem compartilha liberar de novo na sala
             if (tipo == "retomar") { parado = false; return; }
-            if (tipo == "soltar") { SoltarTudo(); temAlvo = false; rotuloAtual = null; return; }
+            if (tipo == "soltar") { jogo = false; SoltarTudo(); temAlvo = false; rotuloAtual = null; return; }
             if (tipo != "entrada" || !temAlvo || parado) return;
             var ev = m["ev"] as Dictionary<string, object>;
             if (ev == null) return;
             string t = S(ev, "t");
-            if (t == "mouse") Mouse(S(ev, "a"), D(ev, "x"), D(ev, "y"), S(ev, "b"));
-            else if (t == "wheel") Roda(D(ev, "x"), D(ev, "y"), D(ev, "dx"), D(ev, "dy"));
-            else if (t == "tecla") Tecla(S(ev, "a"), S(ev, "key"), (int)D(ev, "kc"), (int)D(ev, "mod"), S(ev, "code"));
+            if (t == "modo") { jogo = B(ev, "jogo"); if (!jogo) SoltarTudo(); return; }
+            if (t == "mouse") { if (jogo) MouseJogo(S(ev, "a"), S(ev, "b"), D(ev, "dx"), D(ev, "dy")); else Mouse(S(ev, "a"), D(ev, "x"), D(ev, "y"), S(ev, "b")); }
+            else if (t == "wheel") { if (jogo) RodaJogo(D(ev, "dx"), D(ev, "dy")); else Roda(D(ev, "x"), D(ev, "y"), D(ev, "dx"), D(ev, "dy")); }
+            else if (t == "tecla") { if (jogo) TeclaJogo(S(ev, "a"), S(ev, "code")); else Tecla(S(ev, "a"), S(ev, "key"), (int)D(ev, "kc"), (int)D(ev, "mod"), S(ev, "code")); }
             else if (t == "texto") Texto(S(ev, "s"));
         }
 
@@ -303,6 +313,90 @@ namespace Sala3d
             if (dx != 0) MouseFlag(MOUSEEVENTF_HWHEEL, unchecked((uint)(int)Math.Round(dx * 1.2)));
         }
 
+        // ------------------------------------------------------------ modo jogo
+        // Movimento relativo: o que os jogos usam para a câmera. SetCursorPos não serve — jogo com
+        // o cursor preso lê o quanto o mouse ANDOU, não onde o cursor está.
+        static void MouseJogo(string a, string b, double dx, double dy)
+        {
+            if (a == "down") Focar();
+            if (a == "move")
+            {
+                int ix = (int)Math.Round(Math.Max(-4000, Math.Min(4000, dx)));
+                int iy = (int)Math.Round(Math.Max(-4000, Math.Min(4000, dy)));
+                if (ix == 0 && iy == 0) return;
+                var i = new INPUT { type = INPUT_MOUSE };
+                i.u.mi = new MOUSEINPUT { dx = ix, dy = iy, dwFlags = MOUSEEVENTF_MOVE };
+                Enviar(i);
+                return;
+            }
+            uint desce = b == "right" ? MOUSEEVENTF_RIGHTDOWN : b == "middle" ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_LEFTDOWN;
+            uint sobe = b == "right" ? MOUSEEVENTF_RIGHTUP : b == "middle" ? MOUSEEVENTF_MIDDLEUP : MOUSEEVENTF_LEFTUP;
+            if (a == "down") { MouseFlag(desce); botoesApertados.Add(b); }
+            else if (a == "up") { MouseFlag(sobe); botoesApertados.Remove(b); }
+        }
+
+        // roda sem tocar no cursor (no jogo ela troca de item/arma)
+        static void RodaJogo(double dx, double dy)
+        {
+            if (dy != 0) MouseFlag(MOUSEEVENTF_WHEEL, unchecked((uint)(int)Math.Round(-dy * 1.2)));
+            if (dx != 0) MouseFlag(MOUSEEVENTF_HWHEEL, unchecked((uint)(int)Math.Round(dx * 1.2)));
+        }
+
+        // code do navegador ("KeyW", "Space") -> scancode do Windows; +0x100 marca as estendidas.
+        // Pelo code e não pela letra: vale a POSIÇÃO da tecla, igual para qualquer teclado.
+        static readonly Dictionary<string, int> SCANS = new Dictionary<string, int>
+        {
+            { "Escape", 0x01 }, { "Digit1", 0x02 }, { "Digit2", 0x03 }, { "Digit3", 0x04 }, { "Digit4", 0x05 },
+            { "Digit5", 0x06 }, { "Digit6", 0x07 }, { "Digit7", 0x08 }, { "Digit8", 0x09 }, { "Digit9", 0x0A },
+            { "Digit0", 0x0B }, { "Minus", 0x0C }, { "Equal", 0x0D }, { "Backspace", 0x0E }, { "Tab", 0x0F },
+            { "KeyQ", 0x10 }, { "KeyW", 0x11 }, { "KeyE", 0x12 }, { "KeyR", 0x13 }, { "KeyT", 0x14 },
+            { "KeyY", 0x15 }, { "KeyU", 0x16 }, { "KeyI", 0x17 }, { "KeyO", 0x18 }, { "KeyP", 0x19 },
+            { "BracketLeft", 0x1A }, { "BracketRight", 0x1B }, { "Enter", 0x1C }, { "ControlLeft", 0x1D },
+            { "KeyA", 0x1E }, { "KeyS", 0x1F }, { "KeyD", 0x20 }, { "KeyF", 0x21 }, { "KeyG", 0x22 },
+            { "KeyH", 0x23 }, { "KeyJ", 0x24 }, { "KeyK", 0x25 }, { "KeyL", 0x26 }, { "Semicolon", 0x27 },
+            { "Quote", 0x28 }, { "Backquote", 0x29 }, { "ShiftLeft", 0x2A }, { "Backslash", 0x2B },
+            { "KeyZ", 0x2C }, { "KeyX", 0x2D }, { "KeyC", 0x2E }, { "KeyV", 0x2F }, { "KeyB", 0x30 },
+            { "KeyN", 0x31 }, { "KeyM", 0x32 }, { "Comma", 0x33 }, { "Period", 0x34 }, { "Slash", 0x35 },
+            { "ShiftRight", 0x36 }, { "NumpadMultiply", 0x37 }, { "AltLeft", 0x38 }, { "Space", 0x39 },
+            { "CapsLock", 0x3A }, { "F1", 0x3B }, { "F2", 0x3C }, { "F3", 0x3D }, { "F4", 0x3E },
+            { "F5", 0x3F }, { "F6", 0x40 }, { "F7", 0x41 }, { "F8", 0x42 }, { "F9", 0x43 }, { "F10", 0x44 },
+            { "NumLock", 0x45 }, { "ScrollLock", 0x46 }, { "Numpad7", 0x47 }, { "Numpad8", 0x48 },
+            { "Numpad9", 0x49 }, { "NumpadSubtract", 0x4A }, { "Numpad4", 0x4B }, { "Numpad5", 0x4C },
+            { "Numpad6", 0x4D }, { "NumpadAdd", 0x4E }, { "Numpad1", 0x4F }, { "Numpad2", 0x50 },
+            { "Numpad3", 0x51 }, { "Numpad0", 0x52 }, { "NumpadDecimal", 0x53 }, { "IntlBackslash", 0x56 },
+            { "F11", 0x57 }, { "F12", 0x58 }, { "IntlRo", 0x73 }, { "Convert", 0x79 }, { "NonConvert", 0x7B },
+            { "IntlYen", 0x7D },
+            { "NumpadEnter", 0x11C }, { "ControlRight", 0x11D }, { "NumpadDivide", 0x135 }, { "AltRight", 0x138 },
+            { "Home", 0x147 }, { "ArrowUp", 0x148 }, { "PageUp", 0x149 }, { "ArrowLeft", 0x14B },
+            { "ArrowRight", 0x14D }, { "End", 0x14F }, { "ArrowDown", 0x150 }, { "PageDown", 0x151 },
+            { "Insert", 0x152 }, { "Delete", 0x153 }, { "ContextMenu", 0x15D },
+        };
+
+        static void TeclaJogo(string a, string code)
+        {
+            if (code == "MetaLeft" || code == "MetaRight") return; // tecla Windows: nunca
+            bool desce = a != "up";
+            if (code == "ControlLeft" || code == "ControlRight") ctrlRemoto = desce;
+            else if (code == "AltLeft" || code == "AltRight") altRemoto = desce;
+            // Ctrl+Alt+End é o atalho de emergência de quem compartilha: de fora, não
+            if (code == "End" && desce && ctrlRemoto && altRemoto) return;
+            int scan;
+            if (!SCANS.TryGetValue(code ?? "", out scan)) return;
+            Scan(scan, !desce);
+            if (desce) scansApertados.Add(scan); else scansApertados.Remove(scan);
+        }
+
+        static void Scan(int scan, bool sobe)
+        {
+            var i = new INPUT { type = INPUT_KEYBOARD };
+            i.u.ki = new KEYBDINPUT
+            {
+                wScan = (ushort)(scan & 0xFF),
+                dwFlags = KEYEVENTF_SCANCODE | (scan > 0xFF ? KEYEVENTF_EXTENDEDKEY : 0) | (sobe ? KEYEVENTF_KEYUP : 0),
+            };
+            Enviar(i);
+        }
+
         static readonly HashSet<int> ESTENDIDAS = new HashSet<int> { 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x2D, 0x2E, 0x6F, 0x90 };
 
         static void Teclado(ushort vk, bool sobe, bool registrar = true)
@@ -350,6 +444,9 @@ namespace Sala3d
         static void SoltarTudo()
         {
             foreach (var vk in new List<ushort>(teclasApertadas)) Teclado(vk, true);
+            foreach (var scan in new List<int>(scansApertados)) Scan(scan, true);
+            scansApertados.Clear();
+            ctrlRemoto = altRemoto = false;
             foreach (var b in new List<string>(botoesApertados))
                 MouseFlag(b == "right" ? MOUSEEVENTF_RIGHTUP : b == "middle" ? MOUSEEVENTF_MIDDLEUP : MOUSEEVENTF_LEFTUP);
             botoesApertados.Clear();

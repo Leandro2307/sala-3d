@@ -2238,6 +2238,16 @@ function updateFocusCtrl() {
   btn.classList.toggle('on', on);
   btn.innerHTML = `${icon(liberar || !on ? 'cursor' : 'eye', 16)}${liberar ? 'Permitir controle' : on ? 'Só assistir' : 'Controlar'}`;
   btn.title = on ? 'Parar de mexer nesta tela (continua vendo)' : '';
+  // Modo jogo: só em janela/tela inteira dos outros (o ajudante nativo é quem manda delta/scancode)
+  const jb = $('#focus-jogo');
+  const janela = !!t && !t.user.isSelf && !isTouch
+    && ['window', 'monitor'].includes(t.share.video?.srcObject?.getVideoTracks?.()[0]?.getSettings?.().displaySurface);
+  if ((!on || !janela) && controle.jogoNo === fv) controle.desligarJogo();
+  jb.hidden = !on || !janela;
+  const emJogo = controle.jogoNo === fv;
+  jb.classList.toggle('on', emJogo);
+  jb.innerHTML = `${icon('gamepad', 16)}${emJogo ? 'Desligar modo jogo' : 'Modo jogo'}`;
+  jb.title = 'Mouse gira a câmera e WASD anda (Minecraft e cia.). F8 liga e desliga.';
 }
 $('#focus-ctrl').addEventListener('click', async () => {
   const btn = $('#focus-ctrl');
@@ -2252,6 +2262,20 @@ $('#focus-ctrl').addEventListener('click', async () => {
   if (state.focus.soAssistir) controle.remover(fv);
   updateFocusCtrl();
 });
+
+// Modo jogo (Minecraft e cia.): mouse vira câmera, WASD anda. Esc pausa o jogo e solta o
+// mouse; clicar na tela prende de novo. Com o ponteiro preso não dá para clicar no botão — por
+// isso o F8 (ver controle.atalho).
+$('#focus-jogo').addEventListener('click', () => {
+  const fv = $('#focus-video');
+  const ligar = controle.jogoNo !== fv;
+  controle.modoJogo(fv, ligar);
+  updateFocusCtrl();
+  if (ligar) toast('Modo jogo ligado: o mouse gira a câmera e o teclado anda com o personagem. Esc pausa o jogo e solta o mouse; clique na tela para voltar. F8 liga e desliga.', 'info', 9000);
+});
+controle.onJogoSoltou = () => {
+  if (controle.jogoNo) toast('Esc soltou o mouse (o jogo recebeu o Esc). Clique na tela para voltar a jogar, ou F8 para desligar o modo jogo.', 'info', 6000);
+};
 
 // ------------------------------------------------------------------ sala da empresa
 // O dono da sala (quem criou a senha) escolhe o ambiente, quais jogos aparecem e o nome da
@@ -3094,7 +3118,14 @@ const mesa = new Mesa({
   // mediu os monitores de novo (abriu, ampliou, mudou de tamanho): cada tela no tamanho dela já
   aoOrganizar: () => setTimeout(atualizarInteresse, 0),
 });
-controle.atalho = (e, a) => mesa.atalho(e, a);
+controle.atalho = (e, a) => {
+  // F8 liga/desliga o modo jogo (com o ponteiro preso não dá para clicar no botão)
+  if (e.code === 'F8' && !$('#focus-jogo').hidden) {
+    if (a === 'down' && !e.repeat) $('#focus-jogo').click();
+    return true;
+  }
+  return mesa.atalho(e, a);
+};
 
 function abrirMesa() {
   if (!state.joined || mesa.aberta) return;
