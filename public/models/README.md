@@ -146,6 +146,24 @@ Os clipes são encontrados pelo nome, sem diferenciar maiúsculas:
 Faltou algum? Ele cai no mais parecido (correr vira andar, no ar vira parado), e
 o jogo não quebra. Se o arquivo não carregar, o boneco padrão volta sozinho.
 
+### Guerreira: rig 100% procedural
+
+`guerreira.glb` veio de um FBX **sem esqueleto e sem animação** (estátua do Mixamo).
+O pipeline é código, não trabalho manual no Blender:
+
+1. `scripts/rigar-guerreira.py` — mede a malha por faixas de altura para achar as
+   juntas, monta o esqueleto (26 ossos, com `Breast_L/R`), faz a pele com pesos
+   automáticos, prende a capa ao quadril por região e pinta os pesos dos seios.
+2. `scripts/animar-guerreira.py` — keyframeia Idle, Walk, Run, Jump, Sit, Punch e
+   Wave (curvas procedurais em `scripts/guerreira_comum.py`) e exporta o GLB.
+3. O balanço dos seios não é keyframado: é física em tempo de execução (classe
+   `MolaOsso` em `public/js/modelo.js`, ligada pelo campo `molas` do cadastro).
+
+Para refazer: `blender -b --factory-startup --python scripts/rigar-guerreira.py -- <fbx> <pasta-saida>`
+e depois `--python scripts/animar-guerreira.py -- <blend> <glb> <pasta-saida>`.
+`scripts/testar-guerreira.js` valida no Chrome invisível (sala no ar): clipe por
+estado, amplitude do joelho correndo e oscilação da mola no pulo.
+
 ## Como transformar um modelo parado em animado
 
 A maioria dos modelos de banco (inclusive os gerados por IA) **não tem rig**.

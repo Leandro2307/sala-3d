@@ -24,3 +24,8 @@ Thumbs.db
 
 # modelos originais para o scripts/podar-modelo.js (baixe de novo quando precisar)
 models-brutos/
+
+# intermediários do rig procedural da guerreira (blend, renders de validação)
+tmp-guerreira/
+
+__pycache__/

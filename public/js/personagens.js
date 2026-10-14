@@ -10,6 +10,9 @@
 // o KayKit traz todas as armas do pacote no arquivo, umas por cima das outras).
 // flutua (opcional): { altura, periodo } para quem não tem perna. Andando, sobe do chão até
 // `altura` e volta a cada `periodo` segundos, em vez de dar passo (ver flutuar em modelo.js).
+// molas (opcional): [{ osso, ponta, rigidez, amortecimento }] — ossos com física de balanço
+// (spring bone): `osso` é um padrão (regex sem distinção de maiúsculas) e `ponta` é o comprimento
+// da alavanca simulada em metros no espaço do osso (ver MolaOsso em modelo.js).
 // versao (opcional): vai no endereço do .glb e da miniatura. /models e /img ficam um dia no cache
 // do navegador sem perguntar ao servidor: suba o número quando trocar o arquivo, senão quem já
 // abriu a sala continua vendo o antigo.
@@ -96,6 +99,18 @@ export const PERSONAGENS = {
   },
   cavaleiro: kaykit('cavaleiro', 'Cavaleiro', 'KayKit Adventurers, de Kay Lousberg — CC0'),
   barbaro: kaykit('barbaro', 'Bárbaro', 'KayKit Adventurers, de Kay Lousberg — CC0'),
+  // rig, animações e ossos de balanço gerados por scripts/rigar-guerreira.py +
+  // scripts/animar-guerreira.py (com scripts/guerreira_comum.py) a partir do FBX bruto
+  guerreira: {
+    id: 'guerreira',
+    label: 'Guerreira',
+    url: '/models/guerreira.glb',
+    altura: 1.72,
+    clipes: { idle: 'Idle', walk: 'Walk', run: 'Run', air: 'Jump', sit: 'Sit', punch: 'Punch', wave: 'Wave' },
+    molas: [{ osso: 'breast', ponta: 0.1 }],
+    resumo: 'Anda, corre, pula, senta, soca e acena — com balanço nos seios',
+    credito: 'Mixamo / Adobe',
+  },
   mago: kaykit('mago', 'Mago', 'KayKit Adventurers, de Kay Lousberg — CC0'),
   ladino: kaykit('ladino', 'Ladino', 'KayKit Adventurers, de Kay Lousberg — CC0'),
   encapuzado: kaykit('encapuzado', 'Encapuzado', 'KayKit Adventurers, de Kay Lousberg — CC0'),

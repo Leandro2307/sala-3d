@@ -172,6 +172,56 @@ function unirEsqueletos(raiz) {
   });
 }
 
+// Mola de osso (def.molas: [{ osso, ponta, rigidez, amortecimento, limite }]): física de
+// balanço secundária. A ponta do osso persegue a posição que a animação dita, com atraso e
+// overshoot de mola — seios, rabos, correntes. Roda depois do mixer, então reage a qualquer
+// clipe (e a pulos e paradas bruscas) sem precisar de quadros extra na animação.
+const _molaCabeca = new THREE.Vector3();
+const _molaAnimada = new THREE.Vector3();
+const _molaDirA = new THREE.Vector3();
+const _molaDirB = new THREE.Vector3();
+const _molaQ = new THREE.Quaternion();
+const _molaQPai = new THREE.Quaternion();
+const _molaIdentidade = new THREE.Quaternion();
+
+class MolaOsso {
+  constructor(osso, cfg) {
+    this.osso = osso;
+    this.ponta = cfg.ponta ?? 0.1; // alavanca simulada, no eixo do osso
+    this.rigidez = cfg.rigidez ?? 110;
+    this.amortecimento = cfg.amortecimento ?? 7;
+    this.limite = cfg.limite ?? 0.5; // radianos: giro máximo longe da pose animada
+    this.sim = null; // posição simulada da ponta, no mundo
+    this.vel = new THREE.Vector3();
+  }
+
+  update(dt) {
+    const osso = this.osso;
+    osso.updateWorldMatrix(true, false);
+    _molaCabeca.setFromMatrixPosition(osso.matrixWorld);
+    _molaAnimada.set(0, this.ponta, 0).applyMatrix4(osso.matrixWorld);
+    // teleporte (troca de sala, spawn): recomeça grudado, senão a ponta vem voando de longe
+    if (!this.sim || this.sim.distanceToSquared(_molaAnimada) > 0.25) {
+      this.sim = (this.sim || new THREE.Vector3()).copy(_molaAnimada);
+      this.vel.set(0, 0, 0);
+      return;
+    }
+    dt = Math.min(dt, 0.05); // aba de fundo devolve dt gigante
+    this.vel.addScaledVector(_molaDirA.subVectors(_molaAnimada, this.sim), this.rigidez * dt);
+    this.vel.multiplyScalar(Math.exp(-this.amortecimento * dt));
+    this.sim.addScaledVector(this.vel, dt);
+
+    // giro que leva a ponta animada até a simulada, limitado, aplicado por cima da pose
+    _molaDirA.subVectors(_molaAnimada, _molaCabeca).normalize();
+    _molaDirB.subVectors(this.sim, _molaCabeca).normalize();
+    _molaQ.setFromUnitVectors(_molaDirA, _molaDirB);
+    const angulo = 2 * Math.acos(Math.min(1, Math.abs(_molaQ.w)));
+    if (angulo > this.limite) _molaQ.slerp(_molaIdentidade, 1 - this.limite / angulo);
+    osso.parent.getWorldQuaternion(_molaQPai);
+    osso.quaternion.copy(_molaQPai).invert().multiply(_molaQ).multiply(_molaQPai).multiply(osso.quaternion);
+  }
+}
+
 export class Personagem {
   constructor(gltf, def) {
     this.def = def;
@@ -224,6 +274,17 @@ export class Personagem {
     this.quadril = null;
     this.raiz.traverse((o) => { if (!this.quadril && o.isBone && /hips?$|pelvis/i.test(o.name)) this.quadril = o; });
     this.descida = 0;
+
+    // molas de balanço (def.molas): a guerreira usa nos seios; ossos que casam com o padrão
+    this.molas = [];
+    if (def.molas) {
+      const cfgs = def.molas.map((m) => ({ ...m, re: new RegExp(m.osso, 'i') }));
+      this.raiz.traverse((o) => {
+        if (!o.isBone) return;
+        const cfg = cfgs.find((c) => c.re.test(o.name));
+        if (cfg) this.molas.push(new MolaOsso(o, cfg));
+      });
+    }
     // Optimus e Solus "sentam" com a pose de pé: esses não descem
     this.sentaDeVerdade = !!this.mapa.sit && /sit|sent/i.test(this.mapa.sit.name);
 
@@ -359,6 +420,7 @@ export class Personagem {
     // travado numa pose de transformação: nada de trocar de estado
     if (this.travado) {
       this.mixer.update(dt);
+      this.atualizarMolas(dt);
       return;
     }
     if (!this.gesto) this.setEstado(POR_ANIM[anim] || 'idle');
@@ -372,7 +434,12 @@ export class Personagem {
       this.atual.setEffectiveTimeScale(1);
     }
     this.mixer.update(dt);
+    this.atualizarMolas(dt);
     this.encaixarNoAssento(dt);
+  }
+
+  atualizarMolas(dt) {
+    for (const m of this.molas) m.update(dt);
   }
 
   // Quem não tem perna (def.flutua = { altura, periodo }) não dá passo: andando, vai em ondas, do
