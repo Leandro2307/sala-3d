@@ -2,7 +2,9 @@
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8">
-  <meta name="sala3d" content="1">
+  <!-- a extensão reconhece a sala por esta marca; o número é o protocolo da ponte (2: a sala
+       responde aos pedidos dela — ver extensao/conteudo.js) -->
+  <meta name="sala3d" content="2">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <meta name="theme-color" content="#0b0d12">
   <meta name="mobile-web-app-capable" content="yes">
@@ -796,6 +798,10 @@
       </header>
       <p class="guia-sub">Com ela, quem está na sala pode clicar e digitar nas abas que você compartilhar. Leva um minuto e é uma vez só, no Chrome ou no Edge do computador.</p>
       <div class="guia-status" id="guia-status"></div>
+      <div class="guia-atualizar" id="guia-atualizar" hidden>
+        <p>Baixe de novo, extraia <b>por cima da pasta de antes</b> (substituindo os arquivos) e, em <code>chrome://extensions</code>, clique em <b>Recarregar</b> na Sala 3D. Não precisa recarregar esta página: ela percebe sozinha.</p>
+        <a class="primary small" href="/sala3d-extensao.zip" download><i data-icon="baixar" data-size="15"></i>Baixar a versão nova</a>
+      </div>
       <div class="guia-video" id="guia-video" aria-label="Vídeo do passo a passo"></div>
       <ol class="guia-passos">
         <li data-passo="baixar">
@@ -825,6 +831,7 @@
         <summary>Controlar janelas e a tela inteira (opcional)</summary>
         <p>Abas funcionam só com a extensão. Para deixarem mexer numa <b>janela</b> ou na <b>tela inteira</b>, é preciso o ajudante do Windows: na pasta extraída, abra <code>nativo</code> e dê dois cliques em <code>instalar.bat</code>. Depois, em <code>chrome://extensions</code>, clique em <b>Recarregar</b> na Sala 3D.</p>
         <p>O ajudante mexe no mouse e no teclado de verdade, só dentro do que você compartilhou. <b>Ctrl+Alt+End</b> corta o controle na hora.</p>
+        <p class="guia-nativo"><span id="guia-nativo"></span> <button type="button" class="chip-btn" data-guia="conferir">Conferir agora</button></p>
       </details>
     </div>
   </div>
@@ -938,10 +945,24 @@
       <div class="tm-opcoes">
         <button type="button" data-tm="navegador"><i data-icon="globe" data-size="22"></i><span><b>Navegador</b><small>Abas e endereço como no Chrome. Só você vê, e fica guardado aqui.</small></span></button>
         <button type="button" data-tm="compartilhar"><i data-icon="share" data-size="22"></i><span><b>Compartilhar aba ou janela</b><small>Todo mundo vê. O Chrome pergunta o quê.</small></span></button>
-        <button type="button" data-tm="extensao"><i data-icon="extensao" data-size="22"></i><span><b>Aba do Chrome sem a faixa</b><small>Vá na aba que quer mostrar e aperte <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>: ela vem para esta tela.</small></span></button>
+        <button type="button" data-tm="extensao"><i data-icon="extensao" data-size="22"></i><span><b>Aba do Chrome sem a faixa</b><small id="tm-atalho">Vá na aba que quer mostrar e aperte <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>: ela vem para esta tela.</small></span></button>
       </div>
       <div class="et-acoes"><button type="button" class="ghost-btn small" data-tm="cancelar">Cancelar <kbd>Esc</kbd></button></div>
     </div>
+  </div>
+
+  <!-- aviso do site numa tela que você controla: alert, confirm, prompt (ver aviso-site.js) -->
+  <div class="escolher-tela" id="aviso-site" hidden>
+    <form class="et-card as-card" role="alertdialog" aria-modal="true" aria-labelledby="as-titulo" aria-describedby="as-msg" autocomplete="off">
+      <h3 id="as-titulo">O site pergunta</h3>
+      <p class="et-sub" id="as-onde"></p>
+      <p class="as-msg" id="as-msg"></p>
+      <input class="as-texto" name="texto" spellcheck="false" aria-label="Resposta" hidden>
+      <div class="et-acoes">
+        <button type="button" class="secondary small" data-as="nao">Cancelar</button>
+        <button type="submit" class="primary small" data-as="sim">OK</button>
+      </div>
+    </form>
   </div>
 
   <div id="reconnecting" hidden><div class="spinner"></div>Reconectando…</div>

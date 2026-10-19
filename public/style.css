@@ -1366,6 +1366,23 @@ body.touch #cam-preview { right: auto; left: 12px; bottom: auto; top: calc(108px
 .guia-extra { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; font-size: 13px; line-height: 1.5; }
 .guia-extra summary { cursor: pointer; font-weight: 700; }
 .guia-extra p { margin: 8px 0 0; color: var(--muted); }
+.guia-nativo { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.guia-nativo b { color: var(--accent); }
+/* extensão mais velha que a do servidor: como atualizar */
+.guia-atualizar {
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+  margin: -4px 0 14px;
+  padding: 12px;
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.guia-atualizar p { margin: 0; color: var(--muted); }
+.guia-atualizar code { padding: 1px 6px; border-radius: 6px; background: rgba(255, 255, 255, 0.08); font-family: var(--mono); font-size: 12px; white-space: nowrap; }
+.guia-atualizar a.primary { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; }
 #ext-row button { flex: none; }
 
 /* ------------------------------------------------------------ sala da empresa (painel) */
@@ -2904,6 +2921,11 @@ body.touch #topo-centro { top: calc(64px + env(safe-area-inset-top)); }
 .et-grade b { font-size: 13px; }
 .et-grade small { color: var(--muted); font-size: 11.5px; }
 .et-acoes { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+/* aviso do site numa tela controlada (aviso-site.js) */
+.as-card { width: min(440px, 100%); }
+.as-msg { margin: 0; max-height: 40vh; overflow-y: auto; font-size: 14px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.as-msg:empty { display: none; }
+.as-texto { margin-top: 12px; }
 
 /* qualidade das telas: como sai (Suas telas) e como chega (foco) */
 .sp-envio { display: block; color: var(--accent); font-size: 10.5px; font-variant-numeric: tabular-nums; }

@@ -226,6 +226,14 @@ app.use('/vendor/mediapipe', express.static(path.join(__dirname, 'node_modules',
 // Windows já cria a pasta "sala3d-extensao" com o manifest.json dentro — com uma pasta a mais lá
 // dentro, o Chrome reclamaria que não acha o manifesto.
 let extensaoZip = null;
+// a versão que vai no .zip: a sala avisa quem está com uma extensão mais velha (ver /config)
+const VERSAO_EXTENSAO = (() => {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(__dirname, 'extensao', 'manifest.json'), 'utf8')).version || null;
+  } catch {
+    return null;
+  }
+})();
 app.get('/sala3d-extensao.zip', (_req, res) => {
   try {
     extensaoZip ??= zipDaPasta(path.join(__dirname, 'extensao'));
@@ -284,6 +292,7 @@ app.post('/salas-status', express.json({ limit: '8kb' }), (req, res) => {
 app.get('/config', (_req, res) => res.json({
   iceServers,
   shareSlots: SHARE_SLOTS,
+  extensao: VERSAO_EXTENSAO,
   browser: BROWSER && { ...BROWSER, sites: BROWSER_SITES.map(({ id, label, url }) => ({ id, label, host: new URL(url).hostname })) },
 }));
 
@@ -614,15 +623,38 @@ function eventoDeControle(raw) {
   if (e.t === 'modo') return { t: 'modo', jogo: !!e.jogo }; // liga/desliga o modo jogo no ajudante nativo
   if (e.t === 'wheel') return { t: 'wheel', x: n(e.x, 0, 1), y: n(e.y, 0, 1), dx: n(e.dx, -3000, 3000), dy: n(e.dy, -3000, 3000), mod };
   if (e.t === 'tecla' && (e.a === 'down' || e.a === 'up')) {
-    // sem trim: a tecla de espaço é ' '
-    return { t: 'tecla', a: e.a, key: String(e.key ?? '').replace(/[\u0000-\u001f]/g, '').slice(0, 24), code: cleanText(e.code, 24), kc: n(e.kc, 0, 255) | 0, mod };
+    // sem trim: a tecla de espaço é ' '. ag: veio do AltGr e dá um caractere (@, €...): do outro
+    // lado vai como texto, e não como Ctrl+Alt+tecla
+    const ev = { t: 'tecla', a: e.a, key: String(e.key ?? '').replace(/[\u0000-\u001f]/g, '').slice(0, 24), code: cleanText(e.code, 24), kc: n(e.kc, 0, 255) | 0, mod };
+    if (e.ag === true) ev.ag = true;
+    return ev;
   }
   if (e.t === 'texto') return { t: 'texto', s: String(e.s ?? '').slice(0, 2000) };
+  // resposta de quem controla a um aviso do site (alert, confirm, prompt, "sair do site?")
+  if (e.t === 'dialogo') return { t: 'dialogo', aceitar: !!e.aceitar, texto: String(e.texto ?? '').slice(0, 2000) };
   // barra de navegação da aba: voltar, avançar, recarregar ou abrir um endereço (só http/https)
   if (e.t === 'nav') {
     if (['voltar', 'avancar', 'recarregar'].includes(e.a)) return { t: 'nav', a: e.a };
     const url = enderecoWeb(e.url);
     return e.a === 'abrir' && url ? { t: 'nav', a: 'abrir', url } : null;
+  }
+  return null;
+}
+
+// O caminho de volta do controle: o que o site da tela controlada responde e só quem controla deve
+// ver — um aviso do site esperando resposta (ou a notícia de que ele fechou), ou o texto do Ctrl+C.
+const TIPOS_DE_AVISO = ['alert', 'confirm', 'prompt', 'beforeunload'];
+function voltaDoControle(raw) {
+  const e = obj(raw);
+  if (e.t === 'copia') {
+    const s = String(e.s ?? '').slice(0, 20_000);
+    return s ? { t: 'copia', s } : null;
+  }
+  if (e.t === 'dialogo') {
+    if (e.fechou) return { t: 'dialogo', fechou: true };
+    if (!TIPOS_DE_AVISO.includes(e.tipo)) return null;
+    const site = /^[a-z0-9.-]{1,100}$/i.test(String(e.site ?? '')) ? String(e.site).toLowerCase() : null;
+    return { t: 'dialogo', tipo: e.tipo, msg: String(e.msg ?? '').slice(0, 500), padrao: String(e.padrao ?? '').slice(0, 200), site };
   }
   return null;
 }
@@ -1378,9 +1410,34 @@ function attachSockets(io) {
       if (!dono?.shares.get(msg.key)?.controle) return;
       const agora = Date.now();
       if (agora - ctrlJanela > 1000) { ctrlJanela = agora; ctrlConta = 0; }
-      if (++ctrlConta > 120) return; // mais de 120 eventos por segundo é abuso
+      // Mais de 120 eventos por segundo é abuso. Movimento e roda caem primeiro (o próximo corrige
+      // o que caiu); clique, soltura e tecla só acima de 240 — antes, uma soltura perdida no meio
+      // de uma rajada de movimentos deixava botão ou Ctrl preso do outro lado.
+      const repete = msg.ev?.t === 'wheel' || (msg.ev?.t === 'mouse' && msg.ev?.a === 'move');
+      if (++ctrlConta > (repete ? 120 : 240)) return;
       const ev = eventoDeControle(msg.ev);
-      if (ev) io.to(dono.id).emit('controle', { key: msg.key, ev, de: user.name, deId: user.id });
+      if (!ev) return;
+      // quem mexeu em cada tela, e quando: só essa pessoa recebe a volta do controle (controle-volta)
+      user.controlou ??= new Map();
+      user.controlou.set(msg.key, agora);
+      if (user.controlou.size > 20) user.controlou.delete(user.controlou.keys().next().value);
+      io.to(dono.id).emit('controle', { key: msg.key, ev, de: user.name, deId: user.id });
+    });
+
+    // A volta do controle (ver voltaDoControle): só o dono da tela manda, e só para quem mexeu
+    // nela nos últimos minutos — ninguém recebe um texto na área de transferência sem ter pedido.
+    let voltaJanela = 0;
+    let voltaConta = 0;
+    socket.on('controle-volta', (msg) => {
+      const m = obj(msg);
+      if (!user || typeof m.key !== 'string' || !user.shares.has(m.key) || typeof m.para !== 'string') return;
+      const para = room.users.get(m.para);
+      const agora = Date.now();
+      if (!para || para === user || !(agora - (para.controlou?.get(m.key) ?? 0) < 10 * 60_000)) return;
+      if (agora - voltaJanela > 1000) { voltaJanela = agora; voltaConta = 0; }
+      if (++voltaConta > 10) return;
+      const ev = voltaDoControle(m.ev);
+      if (ev) io.to(para.id).emit('controle-volta', { key: m.key, ev, de: user.name });
     });
 
     socket.on('main', (source) => {

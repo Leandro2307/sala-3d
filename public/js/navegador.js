@@ -267,11 +267,14 @@ class Navegador {
     this.desenhar();
   }
 
-  abrirAba(url = null) {
+  // fundo: Ctrl+clique ou botão do meio num link — a aba abre por trás, como no Chrome (e só
+  // carrega quando a pessoa for nela)
+  abrirAba(url = null, fundo = false) {
     if (this.abas.length >= MAX_ABAS) this.fecharAba(this.abas.find((a) => a !== this.ativa));
     const aba = this.novaAba(url);
     this.abas.push(aba);
-    this.mostrar(aba);
+    if (fundo && url) this.desenhar();
+    else this.mostrar(aba);
     if (url) this.dono.lembrar(url);
     this.mudou();
     if (!url) setTimeout(() => this.corpo.querySelector('.nv-inicio input')?.focus(), 30);
@@ -348,7 +351,7 @@ class Navegador {
       this.desenhar();
       this.mudou();
     } else if (m.t === 'aba' && typeof m.url === 'string' && /^https?:/.test(m.url)) {
-      this.abrirAba(m.url);
+      this.abrirAba(m.url, !!m.fundo);
     } else if (m.t === 'midia') {
       aba.tocando = !!m.tocando;
     }

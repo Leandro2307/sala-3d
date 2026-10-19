@@ -21,6 +21,10 @@
 // lock) e o mouse vai como DELTA, não como posição — é assim que jogos tipo Minecraft giram a
 // câmera. As teclas já vão com o "code" físico, e o ajudante nativo as manda como scancode.
 // Esc solta o ponteiro (o jogo recebe um Esc e abre o menu dele); clicar na tela prende de novo.
+//
+// A volta (extensão 1.11+): o que o site da aba controlada responde vai para quem mexeu por último
+// nela (this.ultimo) — um aviso do site (alert, confirm...) esperando resposta (ver aviso-site.js)
+// e o texto do Ctrl+C, que cai na área de transferência de quem controla.
 
 const MOD = (e) => (e.altKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.metaKey ? 4 : 0) | (e.shiftKey ? 8 : 0);
 const BOTAO = ['left', 'middle', 'right'];
@@ -29,6 +33,14 @@ const MOVE_MS = 25;
 const ARRASTO_MS = 16;
 const RODA_MS = 30;
 const RODA_MINHA_MS = 8;
+// Duplo e triplo clique: o pointerdown do Chrome vem sempre com detail 0 (só o mousedown traz a
+// contagem), e a aba controlada recebia todo clique como o primeiro — sem duplo clique para
+// selecionar palavra. A conta é feita aqui, como no Windows: mesmo botão, perto e logo em seguida.
+const CLIQUE_MS = 500;
+const CLIQUE_PX = 5;
+
+// "1.10.2" -> um número que dá para comparar com outra versão
+export const versaoNum = (v) => String(v || '0').split('.').map(Number).reduce((s, n, i) => s + (n || 0) * [1e6, 1e3, 1][i], 0);
 
 export class Controle {
   constructor({ emitir, toast, onExtensao, minha }) {
@@ -36,7 +48,9 @@ export class Controle {
     this.toast = toast;
     this.onExtensao = onExtensao;
     this.minha = minha || (() => null); // chave -> a minha tela com essa chave (ou null)
-    this.ext = { ok: false, liberado: false, versao: null };
+    // atalho: o de mostrar uma aba sem a faixa, como está no Chrome ('' = sem atalho; null = extensão
+    // antiga, que não conta). nativo: { ok, versao, erro } do ajudante do Windows (null = nunca abriu)
+    this.ext = { ok: false, liberado: false, versao: null, atalho: null, nativo: null };
     this.pedidos = new Map();
     this.seq = 0;
     this.superficies = new Map(); // <video> -> chave da tela
@@ -52,8 +66,15 @@ export class Controle {
     this.moveEmVoo = false; // movimento na minha aba esperando a extensão
     this.roda = null;
     this.rodaTimer = 0;
-    this.arrastando = null; // { video, key, b, x, y }
+    this.arrastando = null; // { video, key, b, x, y, n }
+    this.ultimoClique = null; // { video, b, x, y, t, n }: para contar duplo e triplo clique
     this.jogo = null; // { video, key }: modo jogo ligado nessa tela (ver o cabeçalho)
+    // quem compartilha: key -> { deId, de, quando } de quem mexeu por último (deId null = eu mesmo)
+    this.ultimo = new Map();
+    // quem controla: key -> quando mandei algo para essa tela, e quando pedi um Ctrl+C nela (a volta
+    // só é aceita assim: ninguém põe texto na sua área de transferência sem você ter pedido)
+    this.envios = new Map();
+    this.copias = new Map();
 
     document.addEventListener('pointerlockchange', () => {
       const j = this.jogo;
@@ -71,7 +92,13 @@ export class Controle {
       if (e.source !== window || !e.data?.sala3dExt) return;
       const m = e.data;
       if (m.sala3dExt === 'oi') {
-        this.ext = { ok: true, liberado: !!m.liberado, nativo: !!m.nativo, versao: m.versao };
+        this.ext = {
+          ok: true,
+          liberado: !!m.liberado,
+          versao: m.versao,
+          atalho: typeof m.atalho === 'string' ? m.atalho : null,
+          nativo: m.nativo && typeof m.nativo === 'object' ? m.nativo : null,
+        };
         this.onExtensao?.(this.ext);
       } else if (m.sala3dExt === 'resposta') {
         this.pedidos.get(m.id)?.(m.r);
@@ -79,9 +106,14 @@ export class Controle {
       } else if (m.sala3dExt === 'desligou') {
         this.onDesligou?.(m.aba, m.motivo, !!m.janela);
       } else if (m.sala3dExt === 'capturar-aba' && typeof m.streamId === 'string') {
-        this.onCapturarAba?.({ streamId: m.streamId, aba: Number(m.aba), site: m.site || null, titulo: m.titulo || '' });
+        // pedido: a extensão 1.11+ espera a resposta (o resultado aparece no ícone dela)
+        this.onCapturarAba?.({ streamId: m.streamId, aba: Number(m.aba), site: m.site || null, titulo: m.titulo || '', pedido: m.pedido ?? null });
+      } else if (m.sala3dExt === 'parar-aba') {
+        this.onPararAba?.({ aba: Number(m.aba), pedido: m.pedido ?? null });
       } else if (m.sala3dExt === 'aba-mudou') {
         this.onAbaMudou?.(m.aba, m.site || null, m.titulo || '');
+      } else if (m.sala3dExt === 'dialogo') {
+        this.onDialogo?.(Number(m.aba), m.dialogo && typeof m.dialogo === 'object' ? m.dialogo : null, m.site || null);
       }
     });
     window.postMessage({ sala3d: 'ping' }, location.origin);
@@ -89,15 +121,30 @@ export class Controle {
   }
 
   // ---------------------------------------------------------------- ponte com a extensão
-  pedir(tipo, aba, ev, alvo) {
+  pedir(tipo, aba, ev, alvo, ms = 4000) {
     return new Promise((resolve) => {
       const id = ++this.seq;
       this.pedidos.set(id, resolve);
       window.postMessage({ sala3d: tipo, aba, ev, alvo, id }, location.origin);
       setTimeout(() => {
         if (this.pedidos.delete(id)) resolve({ erro: 'sem-resposta' });
-      }, 4000);
+      }, ms);
     });
+  }
+
+  // a resposta a um pedido da extensão (o resultado do Alt+Shift+S vai para o ícone dela)
+  responderPedido(pedido, r) {
+    if (pedido != null) window.postMessage({ sala3d: 'resposta-pedido', pedido, r }, location.origin);
+  }
+
+  // a sala precisa que a pessoa escolha algo: a extensão traz esta aba para a frente
+  mostrarSala() {
+    if (this.ext.ok) window.postMessage({ sala3d: 'mostrar-sala' }, location.origin);
+  }
+
+  // o guia confere se o ajudante do Windows está instalado (a resposta chega também pelo "oi")
+  conferirNativo() {
+    return this.pedir('nativo-conferir', null, null, null, 15000);
   }
 
   // Qual aba do Chrome é esse vídeo capturado? (null = janela, tela inteira, ou aba sem a extensão)
@@ -178,9 +225,10 @@ export class Controle {
     if (this.ext.ok) this.pedir('janela-soltar');
   }
 
-  // liberou de novo: destrava o ajudante (depois de um Ctrl+Alt+End ele fica parado)
+  // liberou de novo: destrava o ajudante (depois de um Ctrl+Alt+End ele fica parado). Na primeira
+  // vez depois de instalar ou atualizar, ele se compila: pode levar uns segundos.
   retomarJanela() {
-    return this.pedir('janela-retomar');
+    return this.pedir('janela-retomar', null, null, null, 15000);
   }
 
   // ---------------------------------------------------------------- quem compartilha
@@ -189,13 +237,21 @@ export class Controle {
     if (!sh?.controle || (sh.aba == null && !sh.alvo)) return;
     // aba trocando de página (sem marca por um instante): ignora até a página nova aparecer
     if (sh.semMarca) return;
-    // voltar/endereço só existe em aba; numa janela quem clica é o ajudante nativo
-    if (ev?.t === 'nav' && sh.aba == null) return;
+    // voltar/endereço e os avisos do site só existem em aba; numa janela quem clica é o ajudante
+    if ((ev?.t === 'nav' || ev?.t === 'dialogo') && sh.aba == null) return;
+    // quem mexeu por último nesta tela (o movimento sozinho não conta): é para essa pessoa que vão
+    // os avisos do site e o texto do Ctrl+C
+    if (!(ev?.t === 'mouse' && ev.a === 'move')) this.ultimo.set(sh.key, { deId: deId || null, de: de || null, quando: Date.now() });
     const r = sh.aba != null ? await this.pedir('entrada', sh.aba, ev) : await this.pedir('janela', null, ev, sh.alvo);
     if (r?.erro) {
-      if (r.erro !== 'sem-resposta') console.warn('[controle]', r.erro);
+      if (r.erro === 'alvo-nao-achado') this.onAlvoPerdido?.(sh);
+      // sem-dialogo: o aviso já tinha sido respondido (por quem compartilha, no Chrome dele)
+      else if (!['sem-resposta', 'cortado', 'sem-dialogo'].includes(r.erro)) console.warn('[controle]', r.erro);
       return;
     }
+    // Ctrl+C de quem controla de longe: o texto vai para a área de transferência dela (mexendo na
+    // minha própria aba, o Chrome já copiou para a minha)
+    if (deId && typeof r?.copia === 'string' && r.copia) this.emitir('controle-volta', { key: sh.key, para: deId, ev: { t: 'copia', s: r.copia } });
     // avisa (de vez em quando) que alguém está mexendo
     const agora = Date.now();
     if (deId && (ev.a === 'down' || ev.t === 'tecla') && agora - (this.avisos.get(deId) || 0) > 30000) {
@@ -256,8 +312,22 @@ export class Controle {
 
   mandar(key, ev, volatil = false) {
     const minha = this.minha(key);
-    if (minha) this.receber(minha, { ev });
-    else this.emitir('controle', { key, ev }, volatil);
+    if (minha) return void this.receber(minha, { ev });
+    this.envios.set(key, Date.now());
+    this.emitir('controle', { key, ev }, volatil);
+  }
+
+  // ---------------------------------------------------------------- a volta (quem controla)
+  // pedi um Ctrl+C nessa tela há pouco? (vale uma vez)
+  pediuCopia(key) {
+    const t = this.copias.get(key);
+    this.copias.delete(key);
+    return !!t && Date.now() - t < 8000;
+  }
+
+  // mexi nessa tela nos últimos minutos? (um aviso do site só aparece para quem estava mexendo)
+  mexeuEm(key) {
+    return Date.now() - (this.envios.get(key) || 0) < 10 * 60_000;
   }
 
   // Movimento: no máximo um a cada MOVE_MS, mas o último sempre sai (senão o cursor do outro
@@ -338,12 +408,24 @@ export class Controle {
     if (!a) return;
     this.arrastando = null;
     this.cancelarMove();
-    this.mandar(a.key, { t: 'mouse', a: 'up', x: a.x, y: a.y, b: a.b, n: 1, mod: 0 });
+    this.mandar(a.key, { t: 'mouse', a: 'up', x: a.x, y: a.y, b: a.b, n: a.n || 1, mod: 0 });
+  }
+
+  // 1, 2 ou 3: mesmo botão, mesma tela, perto do clique anterior e a menos de CLIQUE_MS dele
+  contarClique(video, b, e) {
+    const u = this.ultimoClique;
+    const t = performance.now();
+    const seguido = u && u.video === video && u.b === b && t - u.t < CLIQUE_MS && Math.hypot(e.clientX - u.x, e.clientY - u.y) <= CLIQUE_PX;
+    const n = seguido ? (u.n % 3) + 1 : 1;
+    this.ultimoClique = { video, b, x: e.clientX, y: e.clientY, t, n };
+    return n;
   }
 
   mandarTecla(key, ev) {
     if (ev.a === 'down') this.apertadas.set(ev.code, { key, ev });
     else this.apertadas.delete(ev.code);
+    // Ctrl+C / Ctrl+X (pela tecla virtual, que segue o layout do teclado): a volta traz o texto
+    if (ev.a === 'down' && (ev.mod & 6) && !(ev.mod & 1) && (ev.kc === 67 || ev.kc === 88)) this.copias.set(key, Date.now());
     this.mandar(key, ev);
   }
 
@@ -379,8 +461,9 @@ export class Controle {
       if (emJogo) this.travarPonteiro(); // voltou de um Esc: o clique que prende o mouse vale lá também
       const key = this.superficies.get(v);
       const b = BOTAO[e.button] || 'left';
-      this.arrastando = { video: v, key, b, x: p.x, y: p.y };
-      this.mandar(key, { t: 'mouse', a: 'down', x: p.x, y: p.y, b, n: e.detail || 1, mod: MOD(e) });
+      const n = this.contarClique(v, b, e);
+      this.arrastando = { video: v, key, b, x: p.x, y: p.y, n };
+      this.mandar(key, { t: 'mouse', a: 'down', x: p.x, y: p.y, b, n, mod: MOD(e) });
     });
     document.addEventListener('pointerup', (e) => {
       const a = this.arrastando;
@@ -388,7 +471,7 @@ export class Controle {
       const p = this.ponto(a.video, e);
       this.arrastando = null;
       this.cancelarMove();
-      this.mandar(a.key, { t: 'mouse', a: 'up', x: p.x, y: p.y, b: BOTAO[e.button] || a.b, n: e.detail || 1, mod: MOD(e) });
+      this.mandar(a.key, { t: 'mouse', a: 'up', x: p.x, y: p.y, b: BOTAO[e.button] || a.b, n: a.n, mod: MOD(e) });
     });
     document.addEventListener('pointermove', (e) => {
       const a = this.arrastando;
@@ -438,6 +521,8 @@ export class Controle {
       }
       const tag = document.activeElement?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      // dentro de uma janela da sala (o aviso do site, por exemplo) o teclado é dela
+      if (e.target?.closest?.('[role="dialog"], [role="alertdialog"]')) return;
       if (this.atalho?.(e, a)) {
         e.preventDefault();
         e.stopImmediatePropagation();
@@ -470,6 +555,9 @@ export class Controle {
       if (a === 'down' && e.repeat && e.key.length !== 1 && !/^(Backspace|Delete|Arrow)/.test(e.key)) return;
       // o Shift do Shift+Esc não vai junto (do outro lado, Shift+Esc abre o gerenciador do Chrome)
       const ev = { t: 'tecla', a, key: e.key, code: e.code, kc: e.keyCode, mod: e.key === 'Escape' ? MOD(e) & ~8 : MOD(e) };
+      // AltGr (Ctrl+Alt no Windows) que dá um caractere — @, €, ° e, no ABNT2, / e ?: do outro lado vai
+      // como o caractere, e não como o atalho Ctrl+Alt+tecla (que não escreveria nada)
+      if ([...e.key].length === 1 && e.getModifierState?.('AltGraph')) ev.ag = true;
       if (e.code === 'AltLeft' && a === 'down') {
         if (!this.alt) this.alt = { key, ev, usado: false };
         return;

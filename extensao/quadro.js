@@ -1,8 +1,11 @@
 // Roda dentro de cada site aberto numa tela da Sala 3D (o fundo.js injeta só nos quadros diretos
 // das abas da sala). Faz a ponte com o navegador da sala (public/js/navegador.js):
-// - conta em que endereço e com que título a página está (a barra de endereço e a aba mostram);
+// - conta em que endereço e com que título a página está (a barra de endereço e a aba mostram),
+//   na hora em que muda: o título por um observador e a troca de página sem recarregar (YouTube,
+//   Gmail...) pela Navigation API do Chrome — antes era uma conferida a cada 600 ms;
 // - obedece aos botões voltar e avançar da barra;
-// - link que abriria aba nova (target=_blank, Ctrl+clique) vira aba nova do navegador da sala;
+// - link que abriria aba nova vira aba nova do navegador da sala: target=_blank na frente,
+//   Ctrl+clique e botão do meio por trás (como no Chrome);
 // - repassa teclas e mouse, para o teclado e o mouse do posto se mexerem junto. Em campo de
 //   senha vai só "uma tecla" (sem dizer qual);
 // - Alt+← / Alt+→ passa para a tela do lado (o monitor vizinho do posto), em vez de voltar página;
@@ -16,17 +19,27 @@
   const avisar = (m) => pai.postMessage({ sala3dQuadro: m }, '*');
 
   let ultimo = '';
+  let marcado = false;
   const contar = () => {
+    marcado = false;
     const chave = `${location.href}\n${document.title}`;
     if (chave === ultimo) return;
     ultimo = chave;
     avisar({ t: 'pagina', url: location.href, titulo: document.title || '' });
   };
+  // junta as mudanças do mesmo instante (endereço e título costumam mudar juntos) num aviso só
+  const logo = () => {
+    if (marcado) return;
+    marcado = true;
+    setTimeout(contar, 30);
+  };
   contar();
-  addEventListener('load', contar);
-  addEventListener('popstate', contar);
-  addEventListener('hashchange', contar);
-  setInterval(contar, 600); // sites que trocam de página sem recarregar (YouTube, Gmail...)
+  addEventListener('load', logo);
+  addEventListener('popstate', logo);
+  addEventListener('hashchange', logo);
+  window.navigation?.addEventListener('currententrychange', logo);
+  if (document.head) new MutationObserver(logo).observe(document.head, { subtree: true, childList: true, characterData: true });
+  setInterval(contar, 3000); // por garantia (título trocado fora do <head>, por exemplo)
 
   addEventListener('message', (e) => {
     if (e.source !== pai || typeof e.data?.sala3dCmd !== 'string') return;
@@ -34,15 +47,26 @@
     else if (e.data.sala3dCmd === 'avancar') history.forward();
   });
 
-  document.addEventListener('click', (e) => {
-    if (e.defaultPrevented || e.button !== 0) return;
+  const linkDe = (e) => {
     const a = e.target.closest?.('a[href]');
-    if (!a || !/^https?:/.test(a.href)) return;
-    const novaAba = (a.getAttribute('target') || '').toLowerCase() === '_blank' || e.ctrlKey || e.metaKey;
-    if (!novaAba) return;
+    return a && /^https?:/.test(a.href) ? a : null;
+  };
+  const abaNova = (e, url, fundo) => {
     e.preventDefault();
     e.stopImmediatePropagation();
-    avisar({ t: 'aba', url: a.href });
+    avisar({ t: 'aba', url, fundo });
+  };
+  document.addEventListener('click', (e) => {
+    if (e.defaultPrevented || e.button !== 0) return;
+    const a = linkDe(e);
+    if (!a) return;
+    if (e.ctrlKey || e.metaKey) abaNova(e, a.href, true);
+    else if ((a.getAttribute('target') || '').toLowerCase() === '_blank') abaNova(e, a.href, false);
+  }, true);
+  document.addEventListener('auxclick', (e) => {
+    if (e.defaultPrevented || e.button !== 1) return;
+    const a = linkDe(e);
+    if (a) abaNova(e, a.href, true);
   }, true);
 
   const tecla = (desceu) => (e) => {
@@ -61,29 +85,32 @@
   let dx = 0;
   let dy = 0;
   let alt = false;
-  let marcado = false;
+  let mexeu = false;
   addEventListener('mousemove', (e) => {
     dx += e.movementX;
     dy += e.movementY;
     alt = e.altKey && !e.ctrlKey; // Ctrl+Alt é o AltGr
-    if (marcado) return;
-    marcado = true;
+    if (mexeu) return;
+    mexeu = true;
     requestAnimationFrame(() => {
       avisar({ t: 'mouse', dx, dy, alt });
       dx = 0;
       dy = 0;
-      marcado = false;
+      mexeu = false;
     });
   }, true);
   addEventListener('mousedown', () => avisar({ t: 'clique', desceu: true }), true);
   addEventListener('mouseup', () => avisar({ t: 'clique', desceu: false }), true);
-  addEventListener('wheel', (e) => avisar({ t: 'roda', dy: e.deltaY }), { capture: true, passive: true });
 
+  // Vídeo ou som tocando: pelos eventos da mídia, na hora (eles não sobem, mas passam pela janela
+  // na captura). A conferida de vez em quando pega o que muda sem evento.
   let tocando = false;
-  setInterval(() => {
+  const midia = () => {
     const agora = [...document.querySelectorAll('video, audio')].some((m) => !m.paused && !m.muted && m.volume > 0);
     if (agora === tocando) return;
     tocando = agora;
     avisar({ t: 'midia', tocando });
-  }, 1500);
+  };
+  for (const t of ['play', 'playing', 'pause', 'ended', 'emptied', 'volumechange']) addEventListener(t, midia, true);
+  setInterval(midia, 5000);
 })();

@@ -18,7 +18,8 @@ import { sfx, audioContext, setSfxEnabled } from './sfx.js';
 import { Clima, CLIMAS, HORARIOS } from './clima.js';
 import { ARMAS, IDS_ARMAS, ARMA_PADRAO, defArma, VisaoArma, iniciarCapsulas, atualizarCapsulas, preCarregarArma } from './armas.js';
 import { Jogos } from './jogos.js';
-import { Controle } from './controle.js';
+import { Controle, versaoNum } from './controle.js';
+import { AvisoDoSite } from './aviso-site.js';
 import { Mesa } from './mesa.js';
 import { Qualidade, NIVEIS, nivelInicial } from './qualidade.js';
 import * as moduloQualidade from './qualidade.js';
@@ -621,7 +622,7 @@ world.pronto.then(() => aplicarPersonagem());
 $('#btn-personagem').addEventListener('click', () => escolha.abrir(settings.char));
 // P abre o personagem dentro da sala (trocar de boneco, cor, camiseta e arma sem sair)
 window.addEventListener('keydown', (e) => {
-  if (e.code !== 'KeyP' || !state.joined || state.focus || escolha.aberto || e.repeat) return;
+  if (e.code !== 'KeyP' || !state.joined || state.focus || escolha.aberto || avisoSite.aberto || e.repeat) return;
   if (['INPUT', 'TEXTAREA', 'SELECT', 'IFRAME'].includes(document.activeElement?.tagName)) return;
   escolha.abrir(settings.char);
 });
@@ -794,6 +795,9 @@ async function join() {
   preloadYouTube();
   $('#browser-block').hidden = !config.browser;
   renderBrowserSites(config.browser?.sites || []);
+  extensaoNova = config.extensao || null;
+  renderExtensao();
+  guia.atualizar();
   tv = new MediaSync(socket, $('#tv-host'), {
     // o sufixo do id evita dois "Ana" brigando pela mesma sessão dentro do neko
     browser: config.browser && { ...config.browser, name: () => `${settings.name}-${(state.selfId || '').slice(-3)}` },
@@ -825,6 +829,7 @@ async function join() {
   $('#lobby').hidden = true;
   $('#hud').hidden = false;
   $('#bar').hidden = false;
+  avisarExtensaoVelha();
   localAvatar.setName(name);
   irParaEntrada();
   player.enabled = true;
@@ -1108,6 +1113,8 @@ function bindSocket() {
     const u = state.users.get(id);
     if (!u || typeof key !== 'string') return;
     const tinha = u.shares.get(key);
+    // controle desligado ou tela fora do ar: um aviso do site dela não tem mais quem responda
+    if (gone || !podeControlar) avisoSite.esquecer(key);
     if (tinha && !gone) {
       tinha.slot = slot ?? null;
       tinha.controle = !!podeControlar;
@@ -1156,6 +1163,12 @@ function bindSocket() {
     const sh = self()?.shares.get(msg.key);
     if (sh?.controle) turboDaTela(msg.key);
     controle.receber(sh, msg.deId === state.selfId ? { ...msg, deId: null } : msg);
+  });
+  // a volta de uma tela que controlo: o texto do Ctrl+C, ou um aviso do site (ver aviso-site.js)
+  socket.on('controle-volta', ({ key, ev, de } = {}) => {
+    if (typeof key !== 'string' || !ev) return;
+    if (ev.t === 'copia' && typeof ev.s === 'string' && controle.pediuCopia(key)) copiarDaTela(ev.s, de);
+    else if (ev.t === 'dialogo' && (ev.fechou || controle.mexeuEm(key))) avisoSite.receber(key, ev, `Na tela de ${de || 'alguém'}`);
   });
   // o dono pôs, trocou ou tirou a senha: quem está dentro recebe o passe novo
   socket.on('passe', (passe) => {
@@ -1236,6 +1249,7 @@ function addUser(data) {
 function removeUser(id, quiet = false) {
   const u = state.users.get(id);
   if (!u || u.isSelf) return;
+  for (const key of u.shares.keys()) avisoSite.esquecer(key);
   if (porNumero.get(u.n) === u) porNumero.delete(u.n);
   interesseEnviado.delete(id);
   vozFora.delete(id);
@@ -1720,7 +1734,8 @@ let dicaFaixaDada = false;
 // Em qual tela compartilhar? Só pergunta no escritório, numa sala com telas de parede (ou na
 // recepção), quando a pessoa NÃO está na sala do próprio posto (aí vai para os monitores dela).
 // Devolve o número da tela, undefined (qualquer livre, o servidor escolhe) ou null (desistiu).
-function escolherTela() {
+// aoPerguntar: chamado logo antes de mostrar a pergunta (a aba do Alt+Shift+S traz a sala para a frente).
+function escolherTela(aoPerguntar = null) {
   if (!modoEscritorio() || !world.planta) return Promise.resolve(undefined);
   const lugar = world.salaEm(player.pos.x, player.pos.z);
   const me = self();
@@ -1742,6 +1757,7 @@ function escolherTela() {
   }
   $('#et-grade').innerHTML = opcoes.join('');
   if (document.pointerLockElement) document.exitPointerLock();
+  aoPerguntar?.();
   caixa.hidden = false;
   return new Promise((resolve) => {
     const fechar = (v) => {
@@ -1769,13 +1785,19 @@ function escolherTela() {
 
 // Aba mandada pela extensão (Alt+Shift+S ou o ícone dela, numa aba qualquer): entra numa tela
 // livre como as outras, mas sem a faixa "Compartilhando ... com esta guia" do Chrome no topo.
+// Devolve o resultado, que a extensão 1.11+ mostra no ícone dela (a pessoa está na outra aba e não
+// vê os avisos da sala): { ok, onde } ou { erro, msg }.
 async function capturarAbaDaExtensao({ streamId, aba, site, titulo }) {
-  if (!state.joined) return toast('Entre na sala antes de compartilhar uma aba.', 'warn');
+  const falhou = (msg, tipo = 'warn', ms = 5000) => {
+    toast(msg, tipo, ms);
+    return { erro: 'sala', msg };
+  };
+  if (!state.joined) return falhou('Entre na sala antes de compartilhar uma aba.');
   for (const sh of self().shares.values()) {
-    if (sh.aba === aba) return toast('Essa aba já está compartilhada.', 'info', 3000);
+    if (sh.aba === aba) return falhou('Essa aba já está compartilhada.', 'info', 3000);
   }
-  if (!cabeMaisUma()) return toast('Todas as telas e o telão estão ocupados. Pare uma delas para compartilhar outra.', 'warn', 5000);
-  if (shareBusy) return;
+  if (!cabeMaisUma()) return falhou('Todas as telas e o telão estão ocupados. Pare uma delas para compartilhar outra.');
+  if (shareBusy) return { erro: 'sala', msg: 'A sala ainda está pondo outra tela no ar: tente de novo.' };
   shareBusy = true;
   let stream;
   let key;
@@ -1784,18 +1806,19 @@ async function capturarAbaDaExtensao({ streamId, aba, site, titulo }) {
     // marcou a tela no (+) e veio do Alt+Shift+S: vai para ela
     const marcada = alvoDaExtensao && Date.now() < alvoDaExtensao.ate ? alvoDaExtensao.i : undefined;
     alvoDaExtensao = null;
-    const tela = marcada ?? await escolherTela();
+    // a pergunta "em qual tela?" aparece na sala, e a pessoa está na outra aba: a sala vem para a frente
+    const tela = marcada ?? await escolherTela(() => controle.mostrarSala());
     if (tela === null) {
       for (const t of stream.getTracks()) t.stop();
-      return;
+      return { erro: 'sala', msg: 'Você desistiu de compartilhar.' };
     }
     key = await publishShare(stream, { aba, tela });
   } catch (err) {
-    return toast(`Não deu para compartilhar a aba: ${err.message}`, 'error', 6000);
+    return falhou(`Não deu para compartilhar a aba: ${err.message}`, 'error', 6000);
   } finally {
     shareBusy = false;
   }
-  if (!key) return;
+  if (!key) return { erro: 'sala', msg: 'A sala não conseguiu pôr a aba numa tela.' };
   const sh = self().shares.get(key);
   Object.assign(sh, { site, titulo });
   // pela tabCapture o som da aba deixa de sair no seu alto-falante: toca aqui para você ouvir
@@ -1805,7 +1828,10 @@ async function capturarAbaDaExtensao({ streamId, aba, site, titulo }) {
     sh.escuta.play().catch(() => {});
   }
   renderPeople();
-  toast(`${titulo ? `“${titulo.slice(0, 40)}”` : 'A aba'} está no ${ondeEsta(sh) === 'Telão' ? 'telão' : ondeEsta(sh)} (com som). Para parar, use o X da tela.`, 'success', 6000);
+  // a extensão 1.11+ (a que conta o atalho) tira a aba da sala pelo mesmo atalho
+  const parar = controle.ext.atalho ? `o X da tela ou ${controle.ext.atalho} na aba` : 'o X da tela';
+  toast(`${titulo ? `“${titulo.slice(0, 40)}”` : 'A aba'} está no ${ondeEsta(sh) === 'Telão' ? 'telão' : ondeEsta(sh)} (com som). Para parar, use ${parar}.`, 'success', 6000);
+  return { ok: true, onde: ondeEsta(sh) };
 }
 
 // Reserva uma tela no servidor e manda o stream (captura ou arquivo) para todo mundo.
@@ -1978,13 +2004,18 @@ function renderSharePop() {
     + `<p class="sp-dica">${dicaSemFaixa()}</p>`;
 }
 
-// a faixa "Compartilhando ... com esta guia" do Chrome só some quando a aba vem pela extensão
 // a extensão está aqui, liberada para esta sala, e é pelo menos a versão a.b
-const extensaoNaVersao = (a, b) => controle.ext.ok && controle.ext.liberado
-  && String(controle.ext.versao || '0').split('.').map(Number).reduce((s, n, i) => s + n * [1e6, 1e3, 1][i], 0) >= a * 1e6 + b * 1e3;
-const extTemCaptura = () => controle.ext.ok && String(controle.ext.versao || '0').split('.').map(Number).reduce((a, n, i) => a + n * [1e6, 1e3, 1][i], 0) >= 1003000;
+const extensaoNaVersao = (a, b) => controle.ext.ok && controle.ext.liberado && versaoNum(controle.ext.versao) >= versaoNum(`${a}.${b}`);
+// a faixa "Compartilhando ... com esta guia" do Chrome só some quando a aba vem pela extensão (1.3+)
+const extTemCaptura = () => controle.ext.ok && versaoNum(controle.ext.versao) >= versaoNum('1.3');
+// O atalho de mostrar uma aba sem a faixa, como está no Chrome da pessoa: ela pode ter trocado em
+// chrome://extensions/shortcuts, ou outra extensão ficou com ele ('' = sem atalho). A extensão de
+// antes da 1.11 não conta qual é: vale o de fábrica.
+const atalhoDaExt = () => controle.ext.atalho ?? 'Alt+Shift+S';
+const teclasHtml = (a) => a.split('+').map((k) => `<kbd>${esc(k)}</kbd>`).join('+');
+const comoMostrarAba = () => (atalhoDaExt() ? `aperte ${teclasHtml(atalhoDaExt())}` : 'clique no ícone da extensão Sala 3D');
 function dicaSemFaixa() {
-  if (extTemCaptura()) return 'Sem a faixa do Chrome no topo: vá na aba que quer mostrar e aperte <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>.';
+  if (extTemCaptura()) return `Sem a faixa do Chrome no topo: vá na aba que quer mostrar e ${comoMostrarAba()}.`;
   if (controle.ext.ok) return 'Atualize a extensão Sala 3D (versão 1.3) para compartilhar abas sem a faixa do Chrome no topo.';
   return 'Com a extensão Sala 3D (em Ajustes) dá para compartilhar abas sem a faixa do Chrome no topo.';
 }
@@ -2039,25 +2070,97 @@ const controle = new Controle({
     avisarAbas();
     guia.atualizar();
     renderExtensao();
+    avisarExtensaoVelha();
   },
 });
-controle.onCapturarAba = capturarAbaDaExtensao;
+// Alt+Shift+S (ou o ícone da extensão) numa aba: a resposta vai para o ícone dela
+controle.onCapturarAba = async (p) => controle.responderPedido(p.pedido, await capturarAbaDaExtensao(p));
+// o mesmo atalho na aba que já está na sala: tira ela de lá
+controle.onPararAba = ({ aba, pedido }) => {
+  const sh = [...(self()?.shares.values() || [])].find((s) => s.aba === aba);
+  if (sh) {
+    stopShare(sh.key, true);
+    toast(`A aba${sh.titulo ? ` “${sh.titulo.slice(0, 40)}”` : ''} saiu da sala.`, 'info', 3500);
+  }
+  controle.responderPedido(pedido, sh ? { ok: true, parou: true } : { erro: 'sala', msg: 'Essa aba não está na sala.' });
+};
 
 // Guia de instalação da extensão (ver guia-extensao.js). Abre sozinho quando alguém tenta liberar
 // o controle sem ela, e fica em Ajustes → Extensão de controle.
-const guia = new GuiaExtensao({ raiz: $('#guia-ext'), controle });
+// extensaoNova: a versão que este servidor entrega (do /config, ao entrar)
+let extensaoNova = null;
+const guia = new GuiaExtensao({ raiz: $('#guia-ext'), controle, versaoNova: () => extensaoNova });
 const abrirGuiaExtensao = (foco) => guia.abrir(foco);
 
 function renderExtensao() {
   const { ok, liberado, versao } = controle.ext;
-  $('#ext-status').textContent = ok && liberado ? `Instalada e liberada neste site${versao ? ` · versão ${versao}` : ''}`
-    : ok ? 'Instalada, mas falta liberar este site'
-      : 'Para deixarem mexer nas suas abas';
-  $('#ext-guia').textContent = ok && liberado ? 'Ver guia' : ok ? 'Liberar' : 'Instalar';
+  const velha = guia.desatualizada;
+  $('#ext-status').textContent = velha ? `Versão ${versao} instalada · tem a ${extensaoNova}, com novidades`
+    : ok && liberado ? `Instalada e liberada neste site${versao ? ` · versão ${versao}` : ''}`
+      : ok ? 'Instalada, mas falta liberar este site'
+        : 'Para deixarem mexer nas suas abas';
+  $('#ext-guia').textContent = velha ? 'Atualizar' : ok && liberado ? 'Ver guia' : ok ? 'Liberar' : 'Instalar';
 }
 renderExtensao();
 if (isTouch) $('#ext-row').hidden = true; // celular não compartilha tela
 $('#ext-guia').addEventListener('click', () => abrirGuiaExtensao());
+
+// Com uma extensão mais velha que a do servidor, um aviso por visita (só para quem a tem: quem
+// compartilha). Ajustes e o guia continuam mostrando como atualizar.
+let avisouExtensaoVelha = false;
+function avisarExtensaoVelha() {
+  if (avisouExtensaoVelha || !state.joined || !guia.desatualizada) return;
+  avisouExtensaoVelha = true;
+  toast(`Tem uma versão nova da extensão Sala 3D (${extensaoNova}).`, 'info', 10000, null, { rotulo: 'Atualizar', fazer: () => abrirGuiaExtensao() });
+}
+
+// ------------------------------------------------------------------ a volta do controle
+// O que o site da aba controlada responde e só quem controla deve ver: um aviso (alert, confirm,
+// prompt, "sair do site?") esperando resposta, ou o texto que ela copiou (Ctrl+C). Ver controle.js.
+const avisoSite = new AvisoDoSite({ raiz: $('#aviso-site'), controle, responder: (key, ev) => controle.mandar(key, ev) });
+
+// Aviso do site numa aba minha sob controle: vai para quem mexeu nela por último — ou aparece
+// aqui mesmo, se fui eu (mexendo na minha própria aba pela sala).
+controle.onDialogo = (aba, dialogo, site) => {
+  for (const sh of self()?.shares.values() || []) {
+    if (sh.aba !== aba) continue;
+    const quem = controle.ultimo.get(sh.key);
+    if (!quem) continue;
+    const ev = dialogo ? { t: 'dialogo', ...dialogo, site } : { t: 'dialogo', fechou: true };
+    if (quem.deId) socket?.emit('controle-volta', { key: sh.key, para: quem.deId, ev });
+    else avisoSite.receber(sh.key, ev, 'Na sua aba');
+  }
+};
+
+async function copiarDaTela(texto, de) {
+  try {
+    await navigator.clipboard.writeText(texto);
+    toast(`Copiado da tela de ${de || 'alguém'} (${texto.length} ${texto.length === 1 ? 'caractere' : 'caracteres'}).`, 'success', 2500);
+  } catch {
+    toast(`Não deu para copiar o texto da tela de ${de || 'alguém'}: clique na sala e tente de novo.`, 'warn', 5000);
+  }
+}
+
+// a janela compartilhada sumiu para o ajudante do Windows (fechou?): um aviso de vez em quando
+let avisoAlvo = 0;
+controle.onAlvoPerdido = () => {
+  if (Date.now() - avisoAlvo < 30_000) return;
+  avisoAlvo = Date.now();
+  toast('O ajudante do Windows não achou a janela que você compartilhou. Pare e compartilhe ela de novo para voltar a deixar controlar.', 'warn', 9000);
+};
+
+// Na primeira vez depois de instalar ou atualizar, o ajudante do Windows se compila: uns segundos
+// sem resposta. Passando de um instante, um aviso diz que ele está vindo.
+async function esperandoAjudante(pedido) {
+  let fechar = null;
+  const timer = setTimeout(() => { fechar = toast('Abrindo o ajudante do Windows…', 'info', 15000); }, 800);
+  try {
+    return await pedido;
+  } finally {
+    clearTimeout(timer);
+    fechar?.();
+  }
+}
 
 // A extensão está instalada e liberada neste site? Se não, abre o guia (no passo que falta).
 function extensaoPronta() {
@@ -2085,7 +2188,7 @@ async function controleEmTodas() {
   const janelas = faltam.filter((s) => s.aba == null && s.alvo);
   const semAba = faltam.length - abas.length - janelas.length;
   // janela e tela inteira: o ajudante nativo precisa estar instalado (sobe agora)
-  const janelasOk = janelas.length > 0 && !(await controle.retomarJanela())?.erro;
+  const janelasOk = janelas.length > 0 && !(await esperandoAjudante(controle.retomarJanela()))?.erro;
   const liberar = janelasOk ? [...abas, ...janelas] : abas;
   for (const s of liberar) socket.emit('controle-permitir', { key: s.key, on: true });
   if (liberar.length) toast(`Controle liberado em ${liberar.length} ${liberar.length === 1 ? 'tela' : 'telas'}: quem abrir já pode mexer.`, 'success', 5000);
@@ -2113,13 +2216,24 @@ controle.onAbaMudou = (aba, site, titulo) => {
     }, 1000);
   }
 };
-// janela: Ctrl+Alt+End no teclado de quem compartilha. Aba: fechou a barra amarela do Chrome.
+// Aba: fechou a barra amarela do Chrome. Janela: Ctrl+Alt+End no teclado de quem compartilha. As
+// duas: "Cortar o controle agora", no ícone da extensão (motivo 'cortado', um aviso por tela).
+let avisoCorte = 0;
 controle.onDesligou = (aba, motivo, janela) => {
+  let desligou = false;
   for (const sh of self()?.shares.values() || []) {
     if (!sh.controle || (janela ? !sh.alvo : sh.aba !== aba)) continue;
-    socket.emit('controle-permitir', { key: sh.key, on: false });
-    toast(janela ? 'Controle cortado pelo Ctrl+Alt+End.' : 'O controle da aba foi desligado (a barra amarela do Chrome foi fechada).', 'info', 5000);
+    socket?.emit('controle-permitir', { key: sh.key, on: false });
+    desligou = true;
   }
+  // a aba fechou: a tela sai do ar sozinha, sem aviso
+  if (!desligou || motivo === 'target_closed') return;
+  if (motivo === 'cortado') {
+    if (Date.now() - avisoCorte < 3000) return;
+    avisoCorte = Date.now();
+  }
+  toast(motivo === 'cortado' ? 'Você cortou o controle pelo ícone da extensão. Para deixar de novo, use "Permitir controle".'
+    : janela ? 'Controle cortado pelo Ctrl+Alt+End.' : 'O controle da aba foi desligado (a barra amarela do Chrome foi fechada).', 'info', 6000);
 };
 
 async function permitirControle(key) {
@@ -2139,7 +2253,7 @@ async function permitirControle(key) {
   }
   // janela/tela: o ajudante nativo sobe agora (se não estiver instalado, a extensão avisa)
   if (sh.aba == null) {
-    const r = await controle.retomarJanela();
+    const r = await esperandoAjudante(controle.retomarJanela());
     if (r?.erro) {
       toast('Janela e tela inteira precisam do ajudante do Windows — veja no guia. Abas funcionam sem isso.', 'warn', 8000);
       abrirGuiaExtensao('janelas');
@@ -3388,6 +3502,7 @@ function menuDaTela(slot) {
   $('#tm-titulo').textContent = world.rotuloTela(slot.index);
   $('#tm-sub').textContent = slot.posto ? 'Monitor do seu posto: escolha o que aparece aqui.' : 'Escolha o que aparece nesta tela.';
   $('#tela-mais [data-tm="extensao"]').hidden = !extTemCaptura();
+  $('#tm-atalho').innerHTML = `Vá na aba que quer mostrar e ${comoMostrarAba()}: ela vem para esta tela.`;
   $('#tela-mais').hidden = false;
   $('#hover-hint').hidden = true;
 }
@@ -3413,7 +3528,7 @@ $('#tela-mais').addEventListener('click', (e) => {
     novaTela(slot.index);
   } else if (b.dataset.tm === 'extensao') {
     alvoDaExtensao = { i: slot.index, ate: Date.now() + 120_000 };
-    toast(`Agora vá na aba que quer mostrar e aperte Alt+Shift+S: ela aparece em ${world.rotuloTela(slot.index)}.`, 'info', 8000);
+    toast(`Agora vá na aba que quer mostrar e ${comoMostrarAba().replace(/<[^>]+>/g, '')}: ela aparece em ${world.rotuloTela(slot.index)}.`, 'info', 8000);
   }
 });
 
@@ -5340,8 +5455,10 @@ $('#set-mic-device').addEventListener('change', async (e) => {
 window.addEventListener('keydown', (e) => {
   if (!state.joined) return;
   if (e.code === 'Escape') {
-    // Esc sai de vez (mesmo controlando a tela) e devolve o mouse para a visão do boneco
-    if (typing()) document.activeElement.blur();
+    // Esc sai de vez (mesmo controlando a tela) e devolve o mouse para a visão do boneco — com um
+    // aviso do site aberto, ele só responde o aviso (cancela)
+    if (avisoSite.aberto) avisoSite.esc();
+    else if (typing()) document.activeElement.blur();
     else if (!$('#tela-mais').hidden) fecharMenuDaTela(true);
     else if (guia.aberto) guia.fechar();
     else if (escolha.aberto) escolha.fechar();
@@ -5356,7 +5473,7 @@ window.addEventListener('keydown', (e) => {
     else run.abandon(); // preso no parkour? Esc sai da corrida
     return;
   }
-  if (typing() || e.repeat || guia.aberto || escolha.aberto || !$('#tela-mais').hidden) return;
+  if (typing() || e.repeat || guia.aberto || escolha.aberto || avisoSite.aberto || !$('#tela-mais').hidden) return;
   // jogando futebol de carro: as letras são do carro (futebol.js); ficam só microfone, câmera,
   // chat e esconder a tela
   if (futebol.jogando && !['KeyM', 'KeyK', 'KeyT', 'Enter', 'KeyH'].includes(e.code)) return;

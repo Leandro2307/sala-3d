@@ -69,7 +69,7 @@ const CENAS = [
     tela: () => chrome({
       aba: 'Sala 3D',
       url: `${SITE}/?sala=principal`,
-      pagina: paginaSala(`<div class="vg-download oculto" data-alvo="download">${icon('baixar', 12)}<span><b>sala3d-extensao.zip</b><small>18 KB · Concluído</small></span></div>`),
+      pagina: paginaSala(`<div class="vg-download oculto" data-alvo="download">${icon('baixar', 12)}<span><b>sala3d-extensao.zip</b><small>40 KB · Concluído</small></span></div>`),
     }),
     async acoes(c) {
       await c.clicar('baixar');

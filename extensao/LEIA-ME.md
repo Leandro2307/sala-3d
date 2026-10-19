@@ -1,6 +1,7 @@
 # Sala 3D — controle das abas (extensão do Chrome)
 
-Deixa os amigos clicarem, rolarem e digitarem nas abas que você compartilha na Sala 3D.
+Deixa os amigos clicarem, rolarem e digitarem nas abas que você compartilha na Sala 3D, mostra
+abas na sala sem a faixa do Chrome e abre qualquer site no navegador das telas da sala.
 Só precisa dela **quem compartilha**. Quem só controla não instala nada.
 
 ## Instalar (uma vez)
@@ -9,83 +10,62 @@ Só precisa dela **quem compartilha**. Quem só controla não instala nada.
 2. Ligue o **Modo do desenvolvedor** (canto superior direito).
 3. Clique em **Carregar sem compactação** e escolha esta pasta `extensao`.
 4. Abra a Sala 3D, clique no ícone de quebra-cabeça do Chrome → **Sala 3D — controle das abas**
-   → **Liberar este site**. Só libere o endereço da sua sala.
+   → **Liberar este site**. O botão só aparece na página de uma Sala 3D: libere só a sua.
 
-## Compartilhar uma aba sem a faixa do Chrome
+## Atualizar
+
+Quando o servidor tem uma versão mais nova, a sala avisa (e Ajustes → Extensão de controle mostra
+**Atualizar**). Baixe o .zip de novo, extraia **por cima da pasta de antes** (substituindo os
+arquivos) e, em `chrome://extensions`, clique em **Recarregar** na extensão. Sem esse clique o
+Chrome continua rodando a versão antiga.
+
+Desde a 1.11 não precisa recarregar a página da sala depois: a extensão nova se apresenta sozinha
+nas abas abertas. Se a pasta veio de outro lugar, carregue-a de novo pelo **Carregar sem compactação**.
+
+## Mostrar uma aba sem a faixa do Chrome
 
 Pelo botão de compartilhar da sala, o Chrome põe no topo da Sala 3D a faixa
 **“Compartilhando ... com esta guia”** (uma por aba), e o site não consegue esconder.
 Pela extensão não tem faixa:
 
 1. Com a sala aberta (e o site liberado), vá para a aba que quer mostrar.
-2. Aperte **Alt+Shift+S** — ou clique no ícone da extensão → **Compartilhar esta aba na Sala 3D**.
-3. A aba entra numa tela livre, com som. Para parar, use o X da tela na sala.
+2. Aperte **Alt+Shift+S** — ou clique no ícone da extensão → **Mostrar esta aba na Sala 3D**.
+3. A aba entra numa tela livre, com som. No escritório, se a sala precisar que você escolha a
+   tela, ela vem para a frente sozinha.
 
-O atalho pode ser trocado em `chrome://extensions/shortcuts`. Atualizou a extensão? Clique em
-**Recarregar** nela em `chrome://extensions` e recarregue a página da sala.
+O ícone da extensão mostra o resultado (**…** enquanto vai, **ok** ou **!** com o motivo) e,
+enquanto a aba estiver na sala, um **ponto vermelho** — é o lembrete de que ela está sendo
+mostrada, já que pela extensão não aparece a faixa. Para tirar a aba, aperte **Alt+Shift+S** nela
+de novo (ou use o X da tela na sala).
 
-## Navegador nas telas da sala (versão 1.7)
+O atalho pode ser trocado em `chrome://extensions/shortcuts` (o ícone da extensão tem um link
+direto). Se outra extensão já usar Alt+Shift+S, o Chrome deixa este sem atalho: o ícone e a sala
+avisam, e mostram o atalho certo quando você escolher outro.
 
-Mirando numa tela livre (ou num monitor do seu posto) e clicando no **+**, dá para abrir um
-**navegador** ali mesmo: abas, barra de endereço, voltar e avançar, como no Chrome. Só você vê,
-e as abas ficam guardadas naquela tela. Com a tela na mira, **E** usa o navegador; **Esc** volta
-a andar. As páginas fixas que o dono da sala põe nas telas usam o mesmo navegador.
+## Usar o controle
 
-Sozinha, a sala só consegue abrir sites que deixam aparecer dentro de outra página. A extensão
-1.7 tira essa trava **só dentro das telas da Sala 3D** (nas abas do site liberado): YouTube,
-Google e os outros abrem normalmente. Ela também conta o endereço e o título de cada aba, faz o
-voltar/avançar funcionar dentro do site, abre os links de "aba nova" como aba do navegador da
-sala e faz o teclado e o mouse do seu posto se mexerem enquanto você digita no site (em campo de
-senha ela não diz qual tecla foi).
-
-**Login nas telas (versão 1.9).** Dentro de outra página o Chrome não grava o cookie de sessão
-da maioria dos sites (SameSite), e o login não "pegava": o site voltava deslogado. A 1.9 grava
-esses cookies de novo de um jeito que vale dentro das telas, aproveita o login que você já tem
-nas abas normais do Chrome e libera cookies de terceiros com a sala como página principal. Às
-vezes a página recarrega sozinha uma vez logo depois de entrar: é o cookie chegando. Depois de
-atualizar, clique em **Recarregar** na extensão (ela pede permissões novas) e recarregue a sala.
-Alguns sites (o login do Google, por exemplo) podem recusar entrar dentro de outra página: entre
-pelo botão **Abrir esta aba no Chrome**, volte para a tela e clique em **Recarregar** na barra
-do navegador da sala: ela abre logada.
-
-## Janelas e tela inteira (opcional, só Windows)
-
-Sozinha, a extensão só controla **abas**. Para deixarem mexer numa **janela** qualquer (um jogo,
-o Explorer, outro programa) ou na **tela inteira**:
-
-1. Dê dois cliques em `nativo\instalar.bat` (não precisa de administrador).
-2. Em `chrome://extensions`, clique em **Recarregar** na extensão e recarregue a página da sala.
-
-Aí quem controla mexe no **mouse e no teclado de verdade** do seu PC, sempre dentro da janela
-ou tela compartilhada. A tecla Windows nunca é enviada. **Ctrl+Alt+End** no seu teclado corta o
-controle na hora (só volta quando você liberar de novo). Para tirar: `nativo\desinstalar.bat`.
-Se mover a pasta do projeto, rode o `instalar.bat` de novo.
-
-### Modo jogo (ajudante 1.2)
-
-No controle comum de janela, jogo tipo Minecraft não gira a câmera nem anda com WASD: o jogo lê
-o mouse pelo **movimento relativo** e as teclas pelo **código físico**, não pelo lugar do cursor
-nem pelo texto digitado. Quem controla abre a tela da janela e clica em **Modo jogo** (ou aperta
-**F8**): o mouse vira câmera e as teclas andam com o personagem. **Esc** pausa o jogo e solta o
-mouse (para mexer nos menus); clicar na tela prende o mouse de novo. Atualizou a pasta? Em
-`chrome://extensions` clique em **Recarregar** — o ajudante se recompila sozinho na próxima vez
-que alguém ligar o controle.
-
-## Usar
-
-1. Compartilhe uma **aba** do Chrome — ou uma janela/tela, se instalou o ajudante acima.
+1. Compartilhe uma **aba** do Chrome — ou uma janela/tela, se instalou o ajudante (mais abaixo).
 2. No botão de compartilhar → **Suas telas**, clique no ícone de cursor da tela para
    **permitir controle**. Clique de novo para tirar.
 3. Quem quiser mexer tem dois jeitos:
    - **Mesa** (tecla **Tab**): todas as telas da sala lado a lado, como monitores. Nas telas
      liberadas não precisa apertar nada: o mouse mexe na tela que está embaixo dele e o
      teclado vai para a última clicada. **Alt+1…9** troca de monitor, **Alt+Enter** amplia.
-   - **Uma tela só**: abre a sua tela (E ou clique) e aperta **Controlar**.
+   - **Uma tela só**: abre a sua tela (E ou clique) e já sai mexendo.
+
+   Nos dois, **Esc** volta para a sala com o mouse já girando a visão do boneco, e
+   **Shift+Esc** manda um Esc para a tela. **Ctrl+V** cola o texto de quem controla.
 
    As suas **abas** também dá para controlar daqui (bom para testar sozinho). Janela e tela
    inteira, não: o ajudante moveria o seu próprio mouse e ele brigaria com ele mesmo.
 
-Numa aba compartilhada (versão 1.2 da extensão):
+Enquanto alguém controla uma aba, o Chrome mostra uma barra amarela dizendo que a extensão está
+depurando o navegador — é assim que ela consegue clicar na aba. A barra some um minuto depois do
+último movimento de quem controla. **Fechar a barra corta o controle na hora**; o ícone da
+extensão também tem **Cortar o controle agora** (abas e janelas de uma vez). Para deixar de novo,
+ligue "Permitir controle" na sala.
+
+### Numa aba controlada
 
 - **Navegar não corta o controle.** Clicar num link ou trocar de site pausa o controle só
   enquanto a página nova carrega. Em páginas do próprio Chrome (`chrome://…`) ele desliga e
@@ -96,26 +76,92 @@ Numa aba compartilhada (versão 1.2 da extensão):
 - **Barra de navegação** para quem controla, na mesa e no foco: voltar, avançar, recarregar e
   endereço (texto que não é endereço vira pesquisa no Google). A sala vê só o domínio do site
   aberto, nunca o endereço completo.
+- **Duplo e triplo clique** selecionam palavra e parágrafo, como no seu Chrome.
+- **AltGr** escreve o que escreve no seu teclado: @, €, ° — e, no ABNT2, / e ? pelo AltGr+Q/W.
+- **Listas (`<select>`)**: a lista de opções do Chrome é uma janelinha fora da página, que não
+  aparece no vídeo e não recebe o clique de quem controla. Enquanto a aba está sob controle, a
+  extensão faz o Chrome desenhar a lista dentro da página (o `<select>` personalizável): todo
+  mundo vê, e o clique escolhe. Ela volta ao normal quando o controle é solto.
+- **Avisos do site** (alert, confirm, prompt e o "sair do site?") também são janelas do Chrome:
+  a página fica parada esperando. A pergunta aparece para quem mexeu por último na aba, que
+  responde de lá. Você também pode responder no seu Chrome — aí ela some para a outra pessoa.
+- **Ctrl+C** de quem controla: o texto selecionado vai para a área de transferência dela (e
+  para a sua, como sempre foi). Campo de senha nunca.
+- **Clique direito** abre o menu do próprio site, se ele tiver; o menu do Chrome, que ninguém
+  veria (e ficaria aberto na sua tela), não abre.
 
-**Atualizou a pasta?** Em `chrome://extensions`, clique em **Recarregar** na extensão. Sem isso
-o Chrome continua rodando a versão antiga.
+## Janelas e tela inteira (opcional, só Windows)
 
-   Nos dois, **Esc** volta para a sala com o mouse já girando a visão do boneco, e
-   **Shift+Esc** manda um Esc para a tela. Ctrl+V cola texto.
+Sozinha, a extensão só controla **abas**. Para deixarem mexer numa **janela** qualquer (um jogo,
+o Explorer, outro programa) ou na **tela inteira**:
 
-Enquanto alguém controla, o Chrome mostra uma barra amarela dizendo que a extensão está
-depurando o navegador. É assim que ela consegue clicar na aba. Fechar essa barra corta o
-controle na hora.
+1. Dê dois cliques em `nativo\instalar.bat` (não precisa de administrador).
+2. Em `chrome://extensions`, clique em **Recarregar** na extensão.
+
+Aí quem controla mexe no **mouse e no teclado de verdade** do seu PC, sempre dentro da janela
+ou tela compartilhada. A tecla Windows nunca é enviada. **Ctrl+Alt+End** no seu teclado corta o
+controle na hora (só volta quando você liberar de novo). Para tirar: `nativo\desinstalar.bat`.
+Se mover a pasta do projeto, rode o `instalar.bat` de novo.
+
+O guia da sala (Ajustes → Extensão de controle) e o ícone da extensão dizem se o ajudante está
+instalado. Ele se compila na primeira vez que abre e guarda o resultado em
+`%LOCALAPPDATA%\Sala3d`: depois disso abre bem mais rápido, e só compila de novo quando o
+`Ajudante.cs` muda (quando você atualiza a pasta). Se a janela compartilhada fechar, a sala avisa
+em vez de deixar os cliques sumirem.
+
+### Modo jogo
+
+No controle comum de janela, jogo tipo Minecraft não gira a câmera nem anda com WASD: o jogo lê
+o mouse pelo **movimento relativo** e as teclas pelo **código físico**, não pelo lugar do cursor
+nem pelo texto digitado. Quem controla abre a tela da janela e clica em **Modo jogo** (ou aperta
+**F8**): o mouse vira câmera e as teclas andam com o personagem. **Esc** pausa o jogo e solta o
+mouse (para mexer nos menus); clicar na tela prende o mouse de novo.
+
+## Navegador nas telas da sala
+
+Mirando numa tela livre (ou num monitor do seu posto) e clicando no **+**, dá para abrir um
+**navegador** ali mesmo: abas, barra de endereço, voltar e avançar, como no Chrome. Só você vê,
+e as abas ficam guardadas naquela tela. Com a tela na mira, **E** usa o navegador; **Esc** volta
+a andar. As páginas fixas que o dono da sala põe nas telas usam o mesmo navegador.
+
+Sozinha, a sala só consegue abrir sites que deixam aparecer dentro de outra página. A extensão
+tira essa trava **só dentro das telas da Sala 3D** (nas abas do site liberado): YouTube, Google e
+os outros abrem normalmente. Ela também conta o endereço e o título de cada aba na hora em que
+mudam, faz o voltar/avançar funcionar dentro do site, abre os links de "aba nova" como aba do
+navegador da sala (Ctrl+clique e botão do meio abrem por trás, como no Chrome) e faz o teclado e o
+mouse do seu posto se mexerem enquanto você digita no site (em campo de senha ela não diz qual
+tecla foi).
+
+**Login nas telas.** Dentro de outra página o Chrome não grava o cookie de sessão da maioria dos
+sites (SameSite), e o login não "pegava": o site voltava deslogado. A extensão grava esses cookies
+de novo de um jeito que vale dentro das telas, aproveita o login que você já tem nas abas normais
+do Chrome e libera cookies de terceiros com a sala como página principal. Às vezes a página
+recarrega sozinha uma vez logo depois de entrar: é o cookie chegando. Alguns sites (o login do
+Google, por exemplo) podem recusar entrar dentro de outra página: entre pelo botão **Abrir esta
+aba no Chrome**, volte para a tela e clique em **Recarregar** na barra do navegador da sala: ela
+abre logada.
+
+## O ícone da extensão
+
+- **Esta aba**: mostrar na sala ou tirar de lá, com o atalho de verdade e um link para trocá-lo.
+- **Alguém está mexendo**: quais abas e janelas estão sob controle agora, e **Cortar o controle
+  agora**.
+- **Site da Sala 3D**: liberar a sala aberta (só aparece numa Sala 3D) e a lista dos liberados.
+- Embaixo, a versão da extensão e se o ajudante do Windows está instalado.
 
 ## Segurança
 
-- Só os sites liberados no ícone da extensão podem pedir controle.
+- Só os sites liberados no ícone da extensão podem pedir controle, e o botão de liberar só
+  aparece na página de uma Sala 3D.
 - Só as telas em que você ligou "permitir controle" aceitam cliques dos outros.
 - A sala só pede controle da aba que você compartilhou. Um site liberado, porém, teria
   como pedir outras abas: por isso libere só o endereço da sua sala.
+- O texto do Ctrl+C só vai para quem controlava a tela e apertou o Ctrl+C nela; ninguém recebe
+  texto na área de transferência sem ter pedido.
 - A trava "não abrir dentro de outra página" (X-Frame-Options / CSP) só é tirada nos sites
-  abertos dentro das telas da aba da Sala 3D. As outras abas do Chrome não mudam. O site aberto
-  na tela não consegue mudar a página da sala (o quadro dele não tem permissão para isso).
+  abertos dentro das telas da aba da Sala 3D. As outras abas do Chrome não mudam, e se a aba da
+  sala for para outro site, a trava volta nela na hora. O site aberto na tela não consegue mudar
+  a página da sala (o quadro dele não tem permissão para isso).
 - Os cookies dos sites que você abre nas telas passam a ser SameSite=None no Chrome todo (é o
   mesmo cookie das abas normais). Isso tira desses sites uma proteção contra pedidos vindos de
   outros sites; os outros sites do Chrome não mudam.

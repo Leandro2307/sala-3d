@@ -9,16 +9,22 @@ Write-Host ''
 Write-Host '  Sala 3D - ajudante para controlar janelas e telas' -ForegroundColor Cyan
 Write-Host ''
 
-# confere se compila antes de registrar
+$pasta = Join-Path $env:LOCALAPPDATA 'Sala3d'
+New-Item -ItemType Directory -Force -Path $pasta | Out-Null
+
+# Confere se compila antes de registrar, e já deixa o compilado guardado onde o ajudante.ps1
+# procura (o mesmo nome, com a impressão digital do .cs): a primeira abertura pelo Chrome fica rápida.
+$cs = Join-Path $PSScriptRoot 'Ajudante.cs'
 try {
-  Add-Type -Path (Join-Path $PSScriptRoot 'Ajudante.cs') -ReferencedAssemblies 'System.Web.Extensions' | Out-Null
+  $dll = Join-Path $pasta ('ajudante-' + (Get-FileHash -LiteralPath $cs -Algorithm SHA256).Hash.Substring(0, 16) + '.dll')
+  if (-not (Test-Path -LiteralPath $dll)) {
+    Add-Type -Path $cs -ReferencedAssemblies 'System.Web.Extensions' -OutputAssembly $dll -OutputType Library | Out-Null
+  }
 } catch {
   Write-Host "  Nao consegui compilar o ajudante: $($_.Exception.Message)" -ForegroundColor Red
   exit 1
 }
 
-$pasta = Join-Path $env:LOCALAPPDATA 'Sala3d'
-New-Item -ItemType Directory -Force -Path $pasta | Out-Null
 $json = Join-Path $pasta "$nome.json"
 $manifesto = [ordered]@{
   name = $nome
@@ -40,8 +46,7 @@ foreach ($chave in @(
 
 Write-Host '  Pronto! Agora:' -ForegroundColor Green
 Write-Host '   1. Em chrome://extensions, clique em "Recarregar" na extensao Sala 3D.'
-Write-Host '   2. Recarregue a pagina da sala.'
-Write-Host '   3. Compartilhe uma janela ou a tela e ligue "permitir controle" nela.'
+Write-Host '   2. Compartilhe uma janela ou a tela e ligue "permitir controle" nela.'
 Write-Host ''
 Write-Host '  Atalho de emergencia: Ctrl+Alt+End corta o controle na hora.' -ForegroundColor Yellow
 Write-Host '  Se mover esta pasta, rode o instalar.bat de novo.'

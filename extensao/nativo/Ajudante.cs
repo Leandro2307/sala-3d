@@ -124,7 +124,7 @@ namespace Sala3d
             saida = Console.OpenStandardOutput();
             var entrada = Console.OpenStandardInput();
             new Thread(VigiarAtalho) { IsBackground = true }.Start();
-            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.2.0" } });
+            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.3.0" } });
             var json = new JavaScriptSerializer();
             string txt;
             while ((txt = Ler(entrada)) != null)
@@ -160,8 +160,10 @@ namespace Sala3d
                     { "x", r.Left }, { "y", r.Top }, { "w", r.Right - r.Left }, { "h", r.Bottom - r.Top } });
                 return;
             }
-            // depois do Ctrl+Alt+End, só volta quando quem compartilha liberar de novo na sala
+            // depois do Ctrl+Alt+End (ou do "Cortar o controle" no ícone da extensão, que manda o
+            // "parar"), só volta quando quem compartilha liberar de novo na sala
             if (tipo == "retomar") { parado = false; return; }
+            if (tipo == "parar") { lock (travaEntrada) { parado = true; SoltarTudo(); } return; }
             if (tipo == "soltar") { jogo = false; SoltarTudo(); temAlvo = false; rotuloAtual = null; return; }
             if (tipo != "entrada" || !temAlvo || parado) return;
             var ev = m["ev"] as Dictionary<string, object>;
@@ -170,7 +172,7 @@ namespace Sala3d
             if (t == "modo") { jogo = B(ev, "jogo"); if (!jogo) SoltarTudo(); return; }
             if (t == "mouse") { if (jogo) MouseJogo(S(ev, "a"), S(ev, "b"), D(ev, "dx"), D(ev, "dy")); else Mouse(S(ev, "a"), D(ev, "x"), D(ev, "y"), S(ev, "b")); }
             else if (t == "wheel") { if (jogo) RodaJogo(D(ev, "dx"), D(ev, "dy")); else Roda(D(ev, "x"), D(ev, "y"), D(ev, "dx"), D(ev, "dy")); }
-            else if (t == "tecla") { if (jogo) TeclaJogo(S(ev, "a"), S(ev, "code")); else Tecla(S(ev, "a"), S(ev, "key"), (int)D(ev, "kc"), (int)D(ev, "mod"), S(ev, "code")); }
+            else if (t == "tecla") { if (jogo) TeclaJogo(S(ev, "a"), S(ev, "code")); else Tecla(S(ev, "a"), S(ev, "key"), (int)D(ev, "kc"), (int)D(ev, "mod"), B(ev, "ag")); }
             else if (t == "texto") Texto(S(ev, "s"));
         }
 
@@ -418,17 +420,20 @@ namespace Sala3d
             }
         }
 
-        static void Tecla(string a, string key, int kc, int mod, string code)
+        // ag: a tecla veio com o AltGr (Ctrl+Alt no Windows) e dá um caractere — @, €, °...
+        static void Tecla(string a, string key, int kc, int mod, bool ag)
         {
             if (kc == VK_LWIN || kc == VK_RWIN || key == "Meta" || key == "OS") return; // tecla Windows: nunca
             bool ctrl = (mod & 2) != 0, alt = (mod & 1) != 0, meta = (mod & 4) != 0;
             if (meta) return;
             // Ctrl+Alt+End é o atalho de emergência de quem compartilha: de fora, não
             if (kc == VK_END && ctrl && alt) return;
-            // letra/símbolo sem Ctrl/Alt: vai como caractere (respeita acento e teclado de quem digita)
-            if (key.Length == 1 && !ctrl && !alt)
+            // letra/símbolo sem Ctrl/Alt (ou do AltGr): vai como caractere — respeita acento e o
+            // teclado de quem digita. Emoji são dois "char" (par substituto) e vão os dois.
+            bool caractere = key.Length == 1 || (key.Length == 2 && char.IsSurrogatePair(key[0], key[1]));
+            if (caractere && ((!ctrl && !alt) || ag))
             {
-                if (a == "down") Unicode(key[0]);
+                if (a == "down") foreach (char c in key) Unicode(c);
                 return;
             }
             if (kc <= 0 || kc > 254) return;
