@@ -106,7 +106,10 @@ export const PERSONAGENS = {
     label: 'Guerreira',
     url: '/models/guerreira.glb',
     versao: 2, // 2: esqueleto e pesos refeitos (pernas cruzadas da estátua), capa com ossos próprios
-    altura: 1.72,
+    // até o alto do cabelo. Com 1,72 ela ficava do tamanho do robô, mas, magra e de cabeça pequena,
+    // parecia minúscula ao lado dos bonecos atarracados; 2,0 deixa a cabeça um pouco acima da do
+    // boneco padrão (1,8) e o nome (2,3) ainda por cima
+    altura: 2.0,
     clipes: { idle: 'Idle', walk: 'Walk', run: 'Run', air: 'Jump', sit: 'Sit', punch: 'Punch', wave: 'Wave' },
     molas: [{ osso: 'breast', ponta: 0.1, rigidez: 180, amortecimento: 9, limite: 0.35, inercia: 0.45 }],
     resumo: 'Anda, corre, pula, senta, soca e acena — com balanço nos seios',
