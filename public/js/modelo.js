@@ -172,16 +172,19 @@ function unirEsqueletos(raiz) {
   });
 }
 
-// Mola de osso (def.molas: [{ osso, ponta, rigidez, amortecimento, limite }]): física de
-// balanço secundária. A ponta do osso persegue a posição que a animação dita, com atraso e
+// Mola de osso (def.molas: [{ osso, ponta, rigidez, amortecimento, limite, inercia }]): física de
+// balanço secundária. A ponta do osso se desvia da posição que a animação dita, com atraso e
 // overshoot de mola — seios, rabos, correntes. Roda depois do mixer, então reage a qualquer
 // clipe (e a pulos e paradas bruscas) sem precisar de quadros extra na animação.
 const _molaCabeca = new THREE.Vector3();
 const _molaAnimada = new THREE.Vector3();
 const _molaDirA = new THREE.Vector3();
 const _molaDirB = new THREE.Vector3();
+const _molaVelAlvo = new THREE.Vector3();
+const _molaAcel = new THREE.Vector3();
 const _molaQ = new THREE.Quaternion();
 const _molaQPai = new THREE.Quaternion();
+const _molaQPaiInv = new THREE.Quaternion();
 const _molaIdentidade = new THREE.Quaternion();
 
 class MolaOsso {
@@ -191,8 +194,23 @@ class MolaOsso {
     this.rigidez = cfg.rigidez ?? 110;
     this.amortecimento = cfg.amortecimento ?? 7;
     this.limite = cfg.limite ?? 0.5; // radianos: giro máximo longe da pose animada
+    this.inercia = cfg.inercia ?? 1; // quanto da aceleração da pose a ponta sente (0 = nada)
     this.sim = null; // posição simulada da ponta, no mundo
-    this.vel = new THREE.Vector3();
+    this.desvio = new THREE.Vector3(); // ponta simulada menos a animada
+    this.velDesvio = new THREE.Vector3();
+    this.alvoAnt = new THREE.Vector3(); // ponta animada no quadro anterior
+    this.velAlvoAnt = new THREE.Vector3();
+    this.semVelAlvo = true;
+    this.base = new THREE.Quaternion(); // giro do osso antes da mola (o que a animação deu)
+    this.mexeu = false;
+  }
+
+  // O AnimationMixer só reescreve um osso quando o valor da animação muda de um quadro para o
+  // outro: osso com trilha parada (os seios, em quase todo clipe) ficava com o giro da mola do
+  // quadro anterior, e a mola ia somando giro sobre giro. Volta à pose da animação antes do mixer.
+  restaurar() {
+    if (this.mexeu) this.osso.quaternion.copy(this.base);
+    this.mexeu = false;
   }
 
   update(dt) {
@@ -200,16 +218,40 @@ class MolaOsso {
     osso.updateWorldMatrix(true, false);
     _molaCabeca.setFromMatrixPosition(osso.matrixWorld);
     _molaAnimada.set(0, this.ponta, 0).applyMatrix4(osso.matrixWorld);
-    // teleporte (troca de sala, spawn): recomeça grudado, senão a ponta vem voando de longe
-    if (!this.sim || this.sim.distanceToSquared(_molaAnimada) > 0.25) {
+    // teleporte (troca de sala, spawn) ou aba de fundo (dt gigante): recomeça grudado, senão a
+    // ponta vem voando de longe
+    if (!this.sim || !(dt > 0) || dt > 0.1 || this.alvoAnt.distanceToSquared(_molaAnimada) > 0.25) {
       this.sim = (this.sim || new THREE.Vector3()).copy(_molaAnimada);
-      this.vel.set(0, 0, 0);
+      this.desvio.set(0, 0, 0);
+      this.velDesvio.set(0, 0, 0);
+      this.alvoAnt.copy(_molaAnimada);
+      this.semVelAlvo = true;
       return;
     }
-    dt = Math.min(dt, 0.05); // aba de fundo devolve dt gigante
-    this.vel.addScaledVector(_molaDirA.subVectors(_molaAnimada, this.sim), this.rigidez * dt);
-    this.vel.multiplyScalar(Math.exp(-this.amortecimento * dt));
-    this.sim.addScaledVector(this.vel, dt);
+    // A mola simula só o desvio em relação à pose animada, empurrado pela aceleração da pose:
+    // andar reto não estica nada; arrancar, parar, pular e o quique do passo, sim. (Simular a
+    // ponta no mundo não dava: correndo, ela anda 19 cm por quadro, mais que a alavanca, e a
+    // mola ficava presa no limite.)
+    _molaVelAlvo.subVectors(_molaAnimada, this.alvoAnt).divideScalar(dt);
+    if (this.semVelAlvo) this.velAlvoAnt.copy(_molaVelAlvo);
+    _molaAcel.subVectors(_molaVelAlvo, this.velAlvoAnt).divideScalar(dt);
+    this.alvoAnt.copy(_molaAnimada);
+    this.velAlvoAnt.copy(_molaVelAlvo);
+    this.semVelAlvo = false;
+    _molaDirA.copy(this.desvio).multiplyScalar(-this.rigidez)
+      .addScaledVector(this.velDesvio, -this.amortecimento).addScaledVector(_molaAcel, -this.inercia);
+    this.velDesvio.addScaledVector(_molaDirA, dt);
+    this.desvio.addScaledVector(this.velDesvio, dt);
+    // O jogo arranca e para de uma vez (0 a 11,5 m/s num quadro): o desvio fica no máximo do
+    // tamanho da alavanca, e no limite perde a velocidade para fora
+    const alavanca = _molaAnimada.distanceTo(_molaCabeca);
+    const d = this.desvio.length();
+    if (d > alavanca) {
+      this.desvio.multiplyScalar(alavanca / d);
+      const fora = this.velDesvio.dot(this.desvio) / (alavanca * alavanca);
+      if (fora > 0) this.velDesvio.addScaledVector(this.desvio, -fora);
+    }
+    this.sim.copy(_molaAnimada).add(this.desvio);
 
     // giro que leva a ponta animada até a simulada, limitado, aplicado por cima da pose
     _molaDirA.subVectors(_molaAnimada, _molaCabeca).normalize();
@@ -218,7 +260,13 @@ class MolaOsso {
     const angulo = 2 * Math.acos(Math.min(1, Math.abs(_molaQ.w)));
     if (angulo > this.limite) _molaQ.slerp(_molaIdentidade, 1 - this.limite / angulo);
     osso.parent.getWorldQuaternion(_molaQPai);
-    osso.quaternion.copy(_molaQPai).invert().multiply(_molaQ).multiply(_molaQPai).multiply(osso.quaternion);
+    this.base.copy(osso.quaternion);
+    this.mexeu = true;
+    // giro do mundo levado para o espaço do pai e posto antes do giro do osso. (Montar isto em
+    // osso.quaternion com copy() apagava o próprio giro do osso antes de multiplicar por ele: o
+    // osso perdia a orientação e os seios iam parar fora do lugar.)
+    _molaQ.premultiply(_molaQPaiInv.copy(_molaQPai).invert()).multiply(_molaQPai);
+    osso.quaternion.premultiply(_molaQ);
   }
 }
 
@@ -419,6 +467,7 @@ export class Personagem {
   update(dt, anim, velocidade = 1) {
     // travado numa pose de transformação: nada de trocar de estado
     if (this.travado) {
+      this.restaurarMolas();
       this.mixer.update(dt);
       this.atualizarMolas(dt);
       return;
@@ -433,9 +482,14 @@ export class Personagem {
     } else if (this.atual) {
       this.atual.setEffectiveTimeScale(1);
     }
+    this.restaurarMolas();
     this.mixer.update(dt);
     this.atualizarMolas(dt);
     this.encaixarNoAssento(dt);
+  }
+
+  restaurarMolas() {
+    for (const m of this.molas) m.restaurar();
   }
 
   atualizarMolas(dt) {

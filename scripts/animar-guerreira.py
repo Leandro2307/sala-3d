@@ -1,27 +1,54 @@
-# Animações da guerreira: keyframeia as curvas no esqueleto e exporta o GLB.
+# Animações da guerreira: keyframeia as curvas (guerreira_comum.py) no esqueleto, renderiza uma
+# folha de quadros de cada clipe para conferir e exporta o GLB.
+#   blender -b --factory-startup --python scripts/animar-guerreira.py -- <blend> <glb> <pasta-saida> [so-render]
 import bpy, sys, os
-from mathutils import Vector
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from guerreira_comum import (calcular_basis, ANIMACOES, configurar_camera,
-                             renderizar, curva_soco, curva_acenar, curva_pular)
+from guerreira_comum import Rig, ANIMACOES, vertices_mundo, configurar_camera, renderizar, folha
 
 argv = sys.argv[sys.argv.index("--") + 1:]
-blend_path, out_glb, out_dir = argv[0], argv[1], argv[2]
+blend_path, out_glb, out_dir = argv[0], argv[1], os.path.abspath(argv[2])
+so_render = len(argv) > 3 and argv[3] == "so-render"
 
 bpy.ops.wm.open_mainfile(filepath=blend_path)
 arm = next(ob for ob in bpy.data.objects if ob.type == "ARMATURE")
+malha = next(ob for ob in bpy.data.objects if ob.type == "MESH")
 cena = bpy.context.scene
 cena.render.fps = 30
 
+rig = Rig(arm)
+rig.medir_solado(vertices_mundo(malha)[0])
+print("BASE_Z", round(rig.base_z, 4))
+
+# folha de cada clipe: 8 quadros de 3/4 de frente em cima, os mesmos de lado embaixo
+cam = configurar_camera()
+alvo = (0, 0, 0.95)
+for nome, quadros, curva in ANIMACOES:
+    imgs = [[], []]
+    for i in range(8):
+        f = round(i * quadros / 8)
+        rig.aplicar(arm, *curva(f, quadros))
+        for linha, ang in ((0, 0.45), (1, 1.5708)):
+            caminho = os.path.join(out_dir, f"q-{nome.lower()}-{linha}-{i}.png")
+            renderizar(cam, alvo, 3.4, ang, caminho)
+            imgs[linha].append(caminho)
+    folha(imgs[0] + imgs[1], 8, os.path.join(out_dir, f"anim-{nome.lower()}.png"))
+    for c in imgs[0] + imgs[1]:
+        os.remove(c)
+for pb in arm.pose.bones:
+    pb.matrix_basis.identity()
+if so_render:
+    print("RENDER_OK")
+    sys.exit(0)
+
 ad = arm.animation_data or arm.animation_data_create()
+for pb in arm.pose.bones:
+    pb.rotation_mode = "QUATERNION"
 for nome, quadros, curva in ANIMACOES:
     acao = bpy.data.actions.new(nome)
     ad.action = acao
-    for pb in arm.pose.bones:
-        pb.rotation_mode = "QUATERNION"
     for f in range(quadros + 1):
-        basis = calcular_basis(arm, curva(f % quadros, quadros))
+        basis = rig.calcular(*curva(f % quadros, quadros))
         for pb in arm.pose.bones:
             pb.matrix_basis = basis[pb.name]
             pb.keyframe_insert("location", frame=f, group=pb.name)
@@ -41,23 +68,8 @@ for nome, quadros, curva in ANIMACOES:
     ad.action = None
     print("ACAO", nome, quadros, "quadros")
 
-# limpa a pose
 for pb in arm.pose.bones:
     pb.matrix_basis.identity()
-
-# renders de validação: um quadro representativo de cada gesto
-cam = configurar_camera()
-alvo = (0, 0, 0.95)
-for nome, curva, quadro, angulo in [("Punch", curva_soco, 7, 0.5),
-                                    ("Wave", curva_acenar, 20, 0.3),
-                                    ("Jump", curva_pular, 20, 1.2)]:
-    basis = calcular_basis(arm, curva(quadro, 40 if nome != "Punch" else 16))
-    for pb in arm.pose.bones:
-        pb.matrix_basis = basis[pb.name]
-    bpy.context.view_layer.update()
-    renderizar(cam, alvo, 3.2, angulo, os.path.join(out_dir, f"anim-{nome.lower()}.png"))
-    for pb in arm.pose.bones:
-        pb.matrix_basis.identity()
 
 kwargs = dict(filepath=out_glb, export_format="GLB", export_yup=True,
               export_animations=True, export_animation_mode="ACTIONS",

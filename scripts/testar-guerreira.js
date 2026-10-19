@@ -87,8 +87,26 @@ const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
         pontaSeio.set(0, 0.1, 0).applyMatrix4(seio.matrixWorld);
         pulo.push(+ (pontaSeio.y - peito.getWorldPosition(new THREE.Vector3()).y).toFixed(4));
       }
+      // correndo em linha reta a 11,5 m/s: a mola tem de ficar perto da pose animada (antes ela
+      // ficava presa no limite, meio metro atrás, porque amortecia a velocidade absoluta)
+      raiz.position.y = 0;
+      const mola = p.molas.find((m) => m.osso === seio);
+      const cab = new THREE.Vector3(), anim = new THREE.Vector3(), da = new THREE.Vector3(), ds = new THREE.Vector3();
+      const desvios = [];
+      for (let i = 0; i < 120; i++) {
+        raiz.position.z += 11.5 * dt;
+        p.update(dt, 2, 1.6);
+        p.restaurarMolas(); // pose do clipe, sem a mola, para comparar com a ponta simulada
+        raiz.updateMatrixWorld(true);
+        cab.setFromMatrixPosition(seio.matrixWorld);
+        anim.set(0, mola.ponta, 0).applyMatrix4(seio.matrixWorld);
+        da.subVectors(anim, cab).normalize();
+        ds.subVectors(mola.sim, cab).normalize();
+        desvios.push(Math.acos(Math.min(1, da.dot(ds))));
+      }
       const nums = (k) => amostras.map((a) => a[k]);
       const amp = (xs) => Math.max(...xs) - Math.min(...xs);
+      const desvio = desvios.slice(60);
       return {
         mapa: clipes,
         molas: p.molas.length,
@@ -96,6 +114,8 @@ const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
         ampSeioCorrendo: +amp(nums('seio').slice(70)).toFixed(4),
         ampPeitoCorrendo: +amp(nums('peito').slice(70)).toFixed(4),
         folgaSeioPuloMax: +amp(pulo).toFixed(4),
+        // radianos; o limite da mola é 0,5
+        molaCorrendoReto: { medio: +(desvio.reduce((a, b) => a + b, 0) / desvio.length).toFixed(3), max: +Math.max(...desvio).toFixed(3) },
         nan: amostras.some((a) => Object.values(a).some((v) => typeof v === 'number' && Number.isNaN(v))),
       };
     })()`);

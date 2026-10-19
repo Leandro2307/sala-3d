@@ -148,21 +148,32 @@ o jogo não quebra. Se o arquivo não carregar, o boneco padrão volta sozinho.
 
 ### Guerreira: rig 100% procedural
 
-`guerreira.glb` veio de um FBX **sem esqueleto e sem animação** (estátua do Mixamo).
-O pipeline é código, não trabalho manual no Blender:
+`guerreira.glb` veio de um FBX **sem esqueleto e sem animação** (estátua gerada por IA, malha de
+uma ilha só: cabelo, capa e corpo grudados). O pipeline é código, não trabalho manual no Blender:
 
-1. `scripts/rigar-guerreira.py` — mede a malha por faixas de altura para achar as
-   juntas, monta o esqueleto (26 ossos, com `Breast_L/R`), faz a pele com pesos
-   automáticos, prende a capa ao quadril por região e pinta os pesos dos seios.
-2. `scripts/animar-guerreira.py` — keyframeia Idle, Walk, Run, Jump, Sit, Punch e
-   Wave (curvas procedurais em `scripts/guerreira_comum.py`) e exporta o GLB.
-3. O balanço dos seios não é keyframado: é física em tempo de execução (classe
-   `MolaOsso` em `public/js/modelo.js`, ligada pelo campo `molas` do cadastro).
+1. `scripts/rigar-guerreira.py` — separa o cabelo (amarelo ligado ao alto da cabeça) e a capa
+   (abaixo do cinto, tudo o que não cabe nos tubos dos membros; o forro nem é azul), monta o
+   esqueleto (26 ossos, com `Breast_L/R` e `Cape_L/R`) e pinta os pesos ele mesmo: os automáticos
+   do Blender misturavam capa com coxa e o flanco do tronco com o braço. A estátua está num passo
+   de passarela com **as pernas cruzadas** (a direita à frente, cruzando para a esquerda; a
+   esquerda atrás, na ponta do pé), então as juntas ficam medidas à mão em `JUNTAS`. Onde a
+   estátua encosta partes que se movem separadas (braçadeira na capa, cotovelo na cintura,
+   dedos na capa), as faces que ligam as duas são cortadas, as lascas que sobram saem e os
+   furinhos são tapados.
+2. `scripts/animar-guerreira.py` — keyframeia Idle, Walk, Run, Jump, Sit, Punch e Wave (curvas em
+   `scripts/guerreira_comum.py`), grava uma folha de quadros de cada clipe para conferir e exporta
+   o GLB. Toda pose parte de uma pose neutra (pernas retas, pés lado a lado) e não da estátua; as
+   pernas andando, correndo e paradas vão por IK, com o pé no chão. A capa segue 40% do passo da
+   coxa do lado.
+3. O balanço dos seios não é keyframado: é física em tempo de execução (classe `MolaOsso` em
+   `public/js/modelo.js`, ligada pelo campo `molas` do cadastro).
 
 Para refazer: `blender -b --factory-startup --python scripts/rigar-guerreira.py -- <fbx> <pasta-saida>`
-e depois `--python scripts/animar-guerreira.py -- <blend> <glb> <pasta-saida>`.
-`scripts/testar-guerreira.js` valida no Chrome invisível (sala no ar): clipe por
-estado, amplitude do joelho correndo e oscilação da mola no pulo.
+e depois `blender -b <pasta-saida>/guerreira.blend --python scripts/animar-guerreira.py -- <blend> public/models/guerreira.glb <pasta-saida>`
+(com `so-render` no fim, só as folhas, sem exportar). Suba `versao` no cadastro.
+`scripts/testar-guerreira.js` valida no Chrome invisível (sala no ar): clipe por estado,
+amplitude do joelho correndo, a mola no pulo e a mola correndo em linha reta (tem de ficar longe
+do limite).
 
 ## Como transformar um modelo parado em animado
 

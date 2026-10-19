@@ -10,7 +10,7 @@
 // o KayKit traz todas as armas do pacote no arquivo, umas por cima das outras).
 // flutua (opcional): { altura, periodo } para quem não tem perna. Andando, sobe do chão até
 // `altura` e volta a cada `periodo` segundos, em vez de dar passo (ver flutuar em modelo.js).
-// molas (opcional): [{ osso, ponta, rigidez, amortecimento }] — ossos com física de balanço
+// molas (opcional): [{ osso, ponta, rigidez, amortecimento, limite, inercia }] — ossos com física de balanço
 // (spring bone): `osso` é um padrão (regex sem distinção de maiúsculas) e `ponta` é o comprimento
 // da alavanca simulada em metros no espaço do osso (ver MolaOsso em modelo.js).
 // versao (opcional): vai no endereço do .glb e da miniatura. /models e /img ficam um dia no cache
@@ -105,9 +105,10 @@ export const PERSONAGENS = {
     id: 'guerreira',
     label: 'Guerreira',
     url: '/models/guerreira.glb',
+    versao: 2, // 2: esqueleto e pesos refeitos (pernas cruzadas da estátua), capa com ossos próprios
     altura: 1.72,
     clipes: { idle: 'Idle', walk: 'Walk', run: 'Run', air: 'Jump', sit: 'Sit', punch: 'Punch', wave: 'Wave' },
-    molas: [{ osso: 'breast', ponta: 0.1 }],
+    molas: [{ osso: 'breast', ponta: 0.1, rigidez: 180, amortecimento: 9, limite: 0.35, inercia: 0.45 }],
     resumo: 'Anda, corre, pula, senta, soca e acena — com balanço nos seios',
     credito: 'Mixamo / Adobe',
   },
