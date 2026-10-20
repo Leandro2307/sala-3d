@@ -107,8 +107,9 @@ function giraGira() {
     caixas: [{ c: [-1.1, 0, -1.1, 1.1, 3.6, 1.1], cor: 'roxo' }, s.caixa],
     discos: [{ x: 0, z: 0, r: 13, y: 0, esp: 1.2, cor: 'azul' }],
     barras: [
-      { y0: 0.2, y1: 1.0, raio: 13.6, v0: 0.7, ac: 0.016, desde: 0, giro0: 0, cor: 'vermelho' },
-      { y0: 2.05, y1: 2.8, raio: 13.6, v0: -0.55, ac: -0.012, desde: 22, giro0: Math.PI / 2, cor: 'amarelo' },
+      // a de baixo começa a 1,2 rad/s e chega a ~3 no fim; a de cima vai de 0,9 a ~1,9
+      { y0: 0.2, y1: 1.0, raio: 13.6, v0: 1.2, ac: 0.026, desde: 0, giro0: 0, cor: 'vermelho' },
+      { y0: 2.05, y1: 2.8, raio: 13.6, v0: -0.9, ac: -0.018, desde: 16, giro0: Math.PI / 2, cor: 'amarelo' },
     ],
     nascer: { anel: 8, y: 0 }, queda: -6, sacada: s.lugar,
   };

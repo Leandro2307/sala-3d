@@ -149,6 +149,23 @@ export function barraAngulo(b, tf) {
   return b.giro0 + b.v0 * u + 0.5 * b.ac * u * u;
 }
 export const barraVel = (b, tf) => (tf < b.desde ? 0 : b.v0 + b.ac * (tf - b.desde));
+// A barra (inteira, atravessando o centro) pegou o boneco em p (x, z) entre o ângulo `antes` e o
+// `agora`? Rápida, ela anda mais que a grossura dela num quadro: vale também ter passado por ele.
+// meia: meia grossura da barra mais a do boneco
+export function barraPassou(antes, agora, p, meia) {
+  const d = Math.hypot(p.x, p.z);
+  const meiaAng = Math.asin(Math.min(1, meia / Math.max(d, meia)));
+  const phi = Math.atan2(p.z, p.x);
+  // diferença de ângulo até a barra, de -90° a 90° (ela tem as duas pontas)
+  const dif = (a) => {
+    const w = (((phi - a) % Math.PI) + Math.PI) % Math.PI;
+    return w > Math.PI / 2 ? w - Math.PI : w;
+  };
+  const d0 = dif(antes);
+  const d1 = dif(agora);
+  if (Math.abs(d1) <= meiaAng) return true;
+  return Math.sign(d0) !== Math.sign(d1) && Math.abs(d0) + Math.abs(d1) < Math.PI / 2;
+}
 // a barra que começa depois desce do alto nos 2 s antes de girar: quanto ainda falta descer
 export const barraSobe = (b, tf) => Math.min(1, Math.max(0, (b.desde - tf) / 2)) * 7;
 

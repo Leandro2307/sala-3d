@@ -9,7 +9,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import {
   origemDa, nomeDaFase, posMovel, anguloVarredor, cabecaPendulo, portasSolidas, caminhoPisaLeve, sumidaEstado,
-  socadorExt, bolasEm, vidaDaBola, barraAngulo, barraVel, barraSobe, paredesEm, memoriaEm, memoriaRodada, FRUTAS, gosmaY,
+  socadorExt, bolasEm, vidaDaBola, barraAngulo, barraVel, barraSobe, barraPassou, paredesEm, memoriaEm, memoriaRodada, FRUTAS, gosmaY,
 } from './gincana-dados.js';
 import { texturaViva, FONTE } from './hud-jogos.js';
 
@@ -980,9 +980,12 @@ function pecaBarras(f, lista) {
     const r = (b.y1 - b.y0) / 2;
     const ma = malha(new THREE.CylinderGeometry(r, r, b.raio * 2, 14).rotateZ(Math.PI / 2), mat(b.cor));
     f.grupo.add(ma);
-    return { b, ma, r };
+    return { b, ma, r, antes: null };
   });
   return {
+    preparar() {
+      for (const it of itens) it.antes = null;
+    },
     update(dt, t, tf) {
       for (const { b, ma } of itens) {
         ma.position.set(0, (b.y0 + b.y1) / 2 + barraSobe(b, tf), 0);
@@ -992,15 +995,17 @@ function pecaBarras(f, lista) {
     tocar(ctx) {
       const p = ctx.p;
       const tf = ctx.tf;
-      for (const { b, r } of itens) {
-        if (tf < b.desde || !(p.y < b.y1 && p.y + ALTURA > b.y0)) continue;
+      for (const it of itens) {
+        const { b, r } = it;
         const a = barraAngulo(b, tf);
+        // o ângulo do quadro anterior (depois de um engasgo grande, só o de agora)
+        const antes = it.antes !== null && Math.abs(a - it.antes) < 0.8 ? it.antes : a;
+        it.antes = a;
+        if (tf < b.desde || !(p.y < b.y1 && p.y + ALTURA > b.y0)) continue;
+        if (Math.hypot(p.x, p.z) > b.raio + HW || !barraPassou(antes, a, p, r + HW + 0.1)) continue;
         const cx = Math.cos(a);
         const cz = Math.sin(a);
         const s = limitar(p.x * cx + p.z * cz, -b.raio, b.raio);
-        const dx = p.x - cx * s;
-        const dz = p.z - cz * s;
-        if (dx * dx + dz * dz > (r + HW + 0.1) ** 2) continue;
         const w = barraVel(b, tf);
         const sinal = Math.sign(w) * Math.sign(s || 1);
         // devagar, a barra só derruba; rápida, joga longe (para fora da arena)
