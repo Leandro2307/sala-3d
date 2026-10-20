@@ -19,6 +19,7 @@ const { ligarSinuca } = require('./sinuca-servidor.js');
 const { ligarGolfe } = require('./golfe-servidor.js');
 const { ligarCartas } = require('./cartas-servidor.js');
 const { ligarGincana } = require('./gincana-servidor.js');
+const { ligarKart } = require('./kart-servidor.js');
 const { ligarCeu } = require('./ceu-servidor.js');
 const { ligarBatalha } = require('./batalha-servidor.js');
 // a planta do escritório é a mesma do navegador (public/js/escritorio.js); carrega em main()
@@ -414,7 +415,7 @@ const CLIMAS_SALA = ['auto', 'sol', 'nublado', 'chuva', 'tempestade'];
 const HORARIOS_SALA = ['ciclo', 'manha', 'dia', 'tarde', 'noite'];
 const JOGOS_SALA = ['parkour', 'ringue', 'corrida', 'futebol', 'volei', 'basquete', 'boliche', 'surf', 'matamata', 'batalha', 'xadrez', 'dama', 'velha', 'dados', 'poderes', 'armas',
   // o parque (public/js/parque-dados.js)
-  'pingue', 'queimada', 'sinuca', 'golfe', 'truco', 'uno', 'gincana'];
+  'pingue', 'queimada', 'sinuca', 'golfe', 'truco', 'uno', 'gincana', 'kart'];
 const configPadrao = () => ({
   modulo: 'lazer',
   mundo: 'classico',
@@ -1000,6 +1001,7 @@ function attachSockets(io) {
   const golfeDoSocket = ligarGolfe(io, rooms, jogoLigado, moedasDoJogo); // minigolfe (golfe-servidor.js)
   const cartasDoSocket = ligarCartas(io, rooms, jogoLigado, moedasDoJogo); // truco e uno (cartas-servidor.js)
   const gincanaDoSocket = ligarGincana(io, rooms, jogoLigado, moedasDoJogo); // gincana no céu (gincana-servidor.js)
+  const kartDoSocket = ligarKart(io, rooms, jogoLigado, moedasDoJogo); // kart (kart-servidor.js)
   // alerta para os gestores que estão na sala (menos a própria pessoa)
   function avisarGestores(room, user, tipo, texto) {
     for (const u of room.users.values()) {
@@ -1056,6 +1058,7 @@ function attachSockets(io) {
     golfeDoSocket(socket, () => ({ room, user }));
     cartasDoSocket(socket, () => ({ room, user }));
     gincanaDoSocket(socket, () => ({ room, user }));
+    kartDoSocket(socket, () => ({ room, user }));
 
     let entrando = false;
     let dono = false; // esta conexão provou ser o dono da sala (senha)

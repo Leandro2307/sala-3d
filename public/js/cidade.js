@@ -15,6 +15,7 @@ import { ESTADIO } from './futebol.js';
 import { VOLEI, BASQUETE, BOLICHE } from './quadras-fisica.js';
 import { SURF } from './ceu-dados.js';
 import { PARQUE, RUAS_PARQUE, SALAO, QUEIMADA, PINTA_ARENA, GOLFE_AREA, KART_AREA } from './parque-dados.js';
+import { LINHA as LINHA_KART, KART } from './kart-dados.js';
 import * as moduloQualidade from './qualidade.js';
 
 const ESC = moduloQualidade.ESCALA_TEXTURA ?? 1;
@@ -719,14 +720,20 @@ function texturaMapa(aqui) {
     bloco(QUEIMADA.cx - QUEIMADA.comp / 2, QUEIMADA.cz - QUEIMADA.larg / 2, QUEIMADA.cx + QUEIMADA.comp / 2, QUEIMADA.cz + QUEIMADA.larg / 2, '#f97316');
     const PA = PINTA_ARENA;
     bloco(PA.cx - PA.lado / 2, PA.cz - PA.lado / 2, PA.cx + PA.lado / 2, PA.cz + PA.lado / 2, '#d946ef');
+    // o kartódromo: o traçado de verdade
     ctx.strokeStyle = '#1f2430';
-    ctx.lineWidth = 3;
-    {
-      const [ka, kb] = px(KART_AREA.x0 + 6, KART_AREA.z1 - 6);
-      const [kc, kd] = px(KART_AREA.x1 - 6, KART_AREA.z0 + 6);
-      roundRect(ctx, Math.min(ka, kc), Math.min(kb, kd), Math.abs(kc - ka), Math.abs(kd - kb), 30);
-      ctx.stroke();
-    }
+    ctx.lineWidth = KART.largura * esc + 3;
+    ctx.beginPath();
+    LINHA_KART.forEach(([x, z], i) => {
+      const [qx, qy] = px(x, z);
+      if (i) ctx.lineTo(qx, qy);
+      else ctx.moveTo(qx, qy);
+    });
+    ctx.closePath();
+    ctx.stroke();
+    ctx.strokeStyle = '#facc15';
+    ctx.lineWidth = 2;
+    ctx.stroke();
     ctx.fillStyle = '#e9e3d6';
     for (const c of [PRACA, PRACA_AVENTURA, MIRANTE, PARQUE]) {
       const [qx, qy] = px(c.x, c.z);

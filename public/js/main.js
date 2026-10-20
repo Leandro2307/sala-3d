@@ -35,6 +35,7 @@ import { Sinuca } from './sinuca.js';
 import { Golfe } from './golfe.js';
 import { Cartas } from './cartas.js';
 import { Gincana } from './gincana.js';
+import { Kart } from './kart.js';
 import { hud as hudJogos } from './hud-jogos.js';
 import { Surf, MataMata, dicaDoPortal } from './ceu.js';
 import { Batalha } from './batalha.js';
@@ -200,6 +201,23 @@ const gincana = new Gincana({
   },
 });
 jogosDoParque.push(gincana);
+// kart no kartódromo do parque: na corrida o boneco vira o carro dele (o mesmo do autódromo, mas
+// com a física do kart) mesmo com a pista de corrida desligada
+const kart = new Kart({
+  world, player, sfx, ligado: () => jogoLigado('kart'), posDe: posDoId,
+  carro: (on) => {
+    if (on) {
+      if (player.voando) toggleVoar();
+      if (player.puloAlto) togglePuloAlto();
+      if (player.sitting) toggleSit();
+    }
+    if (player.veiculo === on) return;
+    player.setVeiculo(on);
+    atualizarHudCorrida();
+    touchPad?.showCarro?.(on);
+  },
+});
+jogosDoParque.push(kart);
 // surf e mata-mata (no céu; portais perto da porta do cinema)
 const surf = new Surf({
   world, player, sfx, toast: (...a) => toast(...a), ligado: () => jogoLigado('surf'), socket: () => socket,
@@ -2484,8 +2502,9 @@ const JOGOS_DA_SALA = [
   ['truco', 'Truco', 'Truco paulista em duplas, com robôs'],
   ['uno', 'Uno', 'Até 6 na mesa, com robôs'],
   ['gincana', 'Gincana', 'Corrida de obstáculos no céu e o piso que cai'],
+  ['kart', 'Kart', 'Kartódromo com itens, 3 voltas'],
 ];
-const AREAS_DE_JOGO = ['parkour', 'ringue', 'corrida', 'futebol', 'volei', 'basquete', 'boliche', 'surf', 'matamata', 'batalha', 'xadrez', 'dama', 'velha', 'dados', 'pingue', 'queimada', 'sinuca', 'golfe', 'cartas', 'gincana'];
+const AREAS_DE_JOGO = ['parkour', 'ringue', 'corrida', 'futebol', 'volei', 'basquete', 'boliche', 'surf', 'matamata', 'batalha', 'xadrez', 'dama', 'velha', 'dados', 'pingue', 'queimada', 'sinuca', 'golfe', 'cartas', 'gincana', 'kart'];
 // parkour e ringue ficam dentro do cinema: no escritório não existem
 const SO_NO_CINEMA = ['parkour', 'ringue'];
 const modoEscritorio = () => state.sala?.modulo === 'escritorio' && state.sala.departamentos?.length > 0;
@@ -5794,7 +5813,7 @@ function soltarAcaoDosJogos() {
 if (params.get('debug') === '1') {
   window.__sala3d = {
     state, player, combat, run, corrida, world, settings, punch, goToRing, respawn, mataMata, batalha, anuncios,
-    toggleVeiculo, irParaLargada, jogos, irParaMesa, exitFocus, dados, quadras, jogosDoParque, pingue, queimada, sinuca, golfe, cartas, gincana,
+    toggleVeiculo, irParaLargada, jogos, irParaMesa, exitFocus, dados, quadras, jogosDoParque, pingue, queimada, sinuca, golfe, cartas, gincana, kart,
     tocarTela, telasMudas, liberarSomDasTelas, makeVideo, mesa, controle, abrirMesa, fecharMesa, marcaDaAba,
     publishShare, stopShare, acharTela, telasNoAr, get rtc() { return rtc; }, clima, ligarLuneta,
   };
