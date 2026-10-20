@@ -33,6 +33,7 @@ import { Pingue } from './pingue.js';
 import { Queimada } from './queimada.js';
 import { Sinuca } from './sinuca.js';
 import { Golfe } from './golfe.js';
+import { Cartas } from './cartas.js';
 import { hud as hudJogos } from './hud-jogos.js';
 import { Surf, MataMata, dicaDoPortal } from './ceu.js';
 import { Batalha } from './batalha.js';
@@ -179,6 +180,14 @@ jogosDoParque.push(sinuca);
 // minigolfe, a oeste da praça do parque
 const golfe = new Golfe({ world, player, sfx, ligado: () => jogoLigado('golfe'), posDe: posDoId });
 jogosDoParque.push(golfe);
+// truco e uno nas mesas redondas do salão: sentado, a câmera fica atrás da cadeira e o mouse solto
+// para clicar nas cartas (um foco, como o da sinuca)
+const cartas = new Cartas({
+  world, player, sfx, ligado: (jogo) => jogoLigado(jogo),
+  focar: () => focarCartas(),
+  soltarFoco: () => { if (state.focus?.kind === 'cartas') sairDoFoco(); },
+});
+jogosDoParque.push(cartas);
 // surf e mata-mata (no céu; portais perto da porta do cinema)
 const surf = new Surf({
   world, player, sfx, toast: (...a) => toast(...a), ligado: () => jogoLigado('surf'), socket: () => socket,
@@ -2460,8 +2469,10 @@ const JOGOS_DA_SALA = [
   ['queimada', 'Queimada', 'Times Azul × Vermelho, com cemitério'],
   ['sinuca', 'Sinuca', 'Bola 8 no salão de jogos, até dois por mesa'],
   ['golfe', 'Minigolfe', '9 buracos com moinho, morros e água'],
+  ['truco', 'Truco', 'Truco paulista em duplas, com robôs'],
+  ['uno', 'Uno', 'Até 6 na mesa, com robôs'],
 ];
-const AREAS_DE_JOGO = ['parkour', 'ringue', 'corrida', 'futebol', 'volei', 'basquete', 'boliche', 'surf', 'matamata', 'batalha', 'xadrez', 'dama', 'velha', 'dados', 'pingue', 'queimada', 'sinuca', 'golfe'];
+const AREAS_DE_JOGO = ['parkour', 'ringue', 'corrida', 'futebol', 'volei', 'basquete', 'boliche', 'surf', 'matamata', 'batalha', 'xadrez', 'dama', 'velha', 'dados', 'pingue', 'queimada', 'sinuca', 'golfe', 'cartas'];
 // parkour e ringue ficam dentro do cinema: no escritório não existem
 const SO_NO_CINEMA = ['parkour', 'ringue'];
 const modoEscritorio = () => state.sala?.modulo === 'escritorio' && state.sala.departamentos?.length > 0;
@@ -2531,7 +2542,8 @@ function aplicarSala(cfg) {
   clima.setConfig(cfg);
   if (state.room) salas.visitar(state.room, { empresa: cfg.empresa, temSenha: cfg.temSenha });
   let mudou = false;
-  for (const j of AREAS_DE_JOGO) mudou = world.ligarArea(j, jogoLigado(j)) || mudou;
+  // as mesas de cartas são uma área só, ligada se o truco ou o uno estiver
+  for (const j of AREAS_DE_JOGO) mudou = world.ligarArea(j, j === 'cartas' ? jogoLigado('truco') || jogoLigado('uno') : jogoLigado(j)) || mudou;
   if (mudou) world.aquecerShaders(); // o número de luzes pode ter mudado
   // o cinema (Lazer) ou o prédio do escritório com os departamentos escolhidos
   if (world.setModo(cfg)) {
@@ -3138,7 +3150,7 @@ setInterval(() => { if (state.panel === 'sala') renderIrPara(); }, 3000);
 // "Ir para" de cada jogo do parque (o parque fica longe da entrada): cada jogo diz onde se começa
 // (lugar()) e com que nome
 function renderParque() {
-  const lista = jogosDoParque.filter((j) => j.lugar && jogoLigado(j.id));
+  const lista = jogosDoParque.filter((j) => j.lugar && (j.algumLigado ? j.algumLigado() : jogoLigado(j.id)));
   $('#parque-lista').innerHTML = lista.map((j) => {
     const l = j.lugar();
     return `<button type="button" data-ir="${j.id}"><i style="--c:${l.cor}"></i><span><b>${esc(l.nome)}</b><small>${esc(l.desc)}</small></span></button>`;
@@ -4990,6 +5002,19 @@ function focarSinuca() {
   return true;
 }
 
+// Sentou numa mesa de cartas (cartas.js): o mouse fica solto para o painel das cartas
+function focarCartas() {
+  if (state.focus?.kind === 'cartas') return true;
+  if (state.focus || state.panel || mesa.aberta || !state.joined) return false;
+  fecharMesa(false);
+  if (document.pointerLockElement) document.exitPointerLock();
+  if (player.veiculo) toggleVeiculo();
+  state.focus = { kind: 'cartas' };
+  $('#hover-hint').hidden = true;
+  syncTouchVisibility();
+  return true;
+}
+
 function enterFocus(info) {
   if (!info) return;
   exitFocus();
@@ -5095,6 +5120,8 @@ function exitFocus() {
     dados.sair();
   } else if (state.focus.kind === 'sinuca') {
     sinuca.sairDaMira();
+  } else if (state.focus.kind === 'cartas') {
+    cartas.sairDaMesa();
   } else if (state.focus.kind === 'tv') {
     player.override = null;
     world.travarTelao(null);
@@ -5609,7 +5636,7 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   // comandando um tabuleiro: as teclas de andar/voar/socar ficam com o jogo
-  if (['jogo', 'dados', 'sinuca'].includes(state.focus?.kind) && !['KeyE', 'KeyM', 'KeyT', 'Enter'].includes(e.code)) return;
+  if (['jogo', 'dados', 'sinuca', 'cartas'].includes(state.focus?.kind) && !['KeyE', 'KeyM', 'KeyT', 'Enter'].includes(e.code)) return;
   switch (e.code) {
     case 'KeyE':
       if (state.focus) sairDoFoco();
@@ -5752,7 +5779,7 @@ function soltarAcaoDosJogos() {
 if (params.get('debug') === '1') {
   window.__sala3d = {
     state, player, combat, run, corrida, world, settings, punch, goToRing, respawn, mataMata, batalha, anuncios,
-    toggleVeiculo, irParaLargada, jogos, irParaMesa, exitFocus, dados, quadras, jogosDoParque, pingue, queimada, sinuca, golfe,
+    toggleVeiculo, irParaLargada, jogos, irParaMesa, exitFocus, dados, quadras, jogosDoParque, pingue, queimada, sinuca, golfe, cartas,
     tocarTela, telasMudas, liberarSomDasTelas, makeVideo, mesa, controle, abrirMesa, fecharMesa, marcaDaAba,
     publishShare, stopShare, acharTela, telasNoAr, get rtc() { return rtc; }, clima, ligarLuneta,
   };

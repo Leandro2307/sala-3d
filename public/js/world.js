@@ -24,6 +24,7 @@ import { construirPingue } from './pingue.js';
 import { construirQueimada } from './queimada.js';
 import { construirSinuca } from './sinuca.js';
 import { construirGolfe } from './golfe.js';
+import { construirCartas } from './cartas.js';
 
 // Área jogável inteira (cercada): a sala do cinema num canto, em volta da origem, o
 // autódromo ao ar livre a leste e, no norte, o parque (parque-dados.js), que levou a cerca de
@@ -797,6 +798,8 @@ export class World {
     this.queimada3d = this.area('queimada', () => construirQueimada(this));
     this.sinuca3d = this.area('sinuca', () => construirSinuca(this));
     this.golfe3d = this.area('golfe', () => construirGolfe(this));
+    // as duas mesas de cartas (truco e uno) são uma área só: some se o dono desligar os dois
+    this.cartas3d = this.area('cartas', () => construirCartas(this));
     // surf e mata-mata, no céu; os portais ficam perto da porta (o jogo é do ceu.js)
     this.ceu = {
       surf: this.area('surf', () => (construirPortal(this, 'surf'), construirSurf(this))),

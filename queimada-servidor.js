@@ -172,8 +172,11 @@ function ligarQueimada(io, rooms, jogoLigado, darMoedas) {
       if (!q?.jogadores.size) continue;
       for (const j of [...q.jogadores.values()]) {
         const p = ondeEsta(room.users.get(j.id));
+        // longe por mais de 3 s (a posição chega um tiquinho depois de um teleporte)
         const longe = !p || p.x < A.x0 - 20 || p.x > A.x1 + 20 || p.z < A.z0 - 20 || p.z > A.z1 + 20;
-        if (longe || !jogoLigado(room, 'queimada')) tirar(room, j.id);
+        if (!longe) j.longeDesde = 0;
+        else j.longeDesde ||= Date.now();
+        if ((longe && Date.now() - j.longeDesde > 3000) || !jogoLigado(room, 'queimada')) tirar(room, j.id);
       }
     }
   }, 1000);

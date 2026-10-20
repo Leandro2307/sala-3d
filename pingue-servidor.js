@@ -208,7 +208,15 @@ function ligarPingue(io, rooms, jogoLigado, darMoedas) {
         for (const id of m.lados) {
           if (!id || id === ROBO) continue;
           const pos = ondeEsta(room.users.get(id));
-          if (!pos || Math.hypot(pos.x - mesa.x, pos.z - mesa.z) > 16 || !jogoLigado(room, 'pingue')) sairDaMesa(room, id);
+          // longe por mais de 3 s (a posição chega um tiquinho depois de um teleporte)
+          const longe = !pos || Math.hypot(pos.x - mesa.x, pos.z - mesa.z) > 16;
+          m.longe ||= new Map();
+          if (!longe) m.longe.delete(id);
+          else if (!m.longe.has(id)) m.longe.set(id, Date.now());
+          if (!jogoLigado(room, 'pingue') || (longe && Date.now() - m.longe.get(id) > 3000)) {
+            m.longe.delete(id);
+            sairDaMesa(room, id);
+          }
         }
       }
     }

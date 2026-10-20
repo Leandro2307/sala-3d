@@ -28,6 +28,15 @@ const triangulo = () => F.arrumarTriangulo(embaralhar([1, 2, 3, 4, 5, 6, 7, 9, 1
 const novaMesa = (i) => ({ i, jogadores: [], vez: 0, fase: 'espera', bolas: triangulo(), saida: true, ate: 0, vencedor: null, aviso: '', desde: Date.now() });
 const mesasDa = (room) => (room.sinuca ||= F.SINUCA.mesas.map((_, i) => novaMesa(i)));
 
+// longe da mesa há mais de 3 s (a posição que o servidor tem chega um tiquinho depois de um teleporte)
+const longeDemais = (j, longe) => {
+  if (!longe) {
+    j.longeDesde = 0;
+    return false;
+  }
+  j.longeDesde ||= Date.now();
+  return Date.now() - j.longeDesde > 3000;
+};
 const doGrupo = (n, g) => (g === 'lisas' ? F.lisa(n) : g === 'listradas' ? F.listrada(n) : false);
 const bolasPublicas = (bolas) => bolas.map((b) => [b.n, b.x, b.z, b.fora ? 1 : 0]);
 const mesaPublica = (m) => ({
@@ -153,7 +162,7 @@ function ligarSinuca(io, rooms, jogoLigado, darMoedas) {
         const mesa = F.SINUCA.mesas[m.i];
         for (const j of [...m.jogadores]) {
           const p = ondeEsta(room.users.get(j.id));
-          if (!p || Math.hypot(p.x - mesa.x, p.z - mesa.z) > 14 || !jogoLigado(room, 'sinuca')) sair(room, j.id);
+          if (!jogoLigado(room, 'sinuca') || longeDemais(j, !p || Math.hypot(p.x - mesa.x, p.z - mesa.z) > 14)) sair(room, j.id);
         }
       }
     }
