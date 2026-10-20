@@ -29,7 +29,7 @@ export function construirPingue(world) {
     ctx.lineTo(w, h / 2);
     ctx.stroke();
   });
-  const matTampo = new THREE.MeshStandardMaterial({ map: tampo, roughness: 0.45 });
+  const matTampo = new THREE.MeshStandardMaterial({ map: tampo, roughness: 0.45, emissive: 0xffffff, emissiveMap: tampo, emissiveIntensity: 0.18 });
   const matBorda = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.6 });
   const matPe = new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.5, roughness: 0.4 });
   const malha = texturaViva(THREE, 256, 32, (ctx, w, h) => {

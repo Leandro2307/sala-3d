@@ -111,23 +111,26 @@ export function texturaViva(THREE, w, h, desenhar) {
 
 export const FONTE = (p, peso = 800) => `${peso} ${p}px 'Plus Jakarta Sans', system-ui, sans-serif`;
 
-// Painel de duas faces (nenhuma espelhada) num poste: placar das mesas e quadras
+// Painel de duas faces (nenhuma espelhada) num poste: placar das mesas e quadras. Devolve as malhas.
 export function painelDuasFaces(THREE, g, tex, larg, alt, x, y, z, ry, { poste = true } = {}) {
+  const malhas = [];
   const mat = new THREE.MeshBasicMaterial({ map: tex, toneMapped: false });
   for (const f of [0, Math.PI]) {
     const m = new THREE.Mesh(new THREE.PlaneGeometry(larg, alt), mat);
     m.position.set(x, y, z);
     m.rotation.y = ry + f;
     m.translateZ(0.03);
-    g.add(m);
+    malhas.push(m);
   }
   const fundo = new THREE.Mesh(new THREE.BoxGeometry(larg + 0.12, alt + 0.12, 0.05), new THREE.MeshStandardMaterial({ color: 0x111827 }));
   fundo.position.set(x, y, z);
   fundo.rotation.y = ry;
-  g.add(fundo);
+  malhas.push(fundo);
   if (poste) {
     const p = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, y - alt / 2, 8), new THREE.MeshStandardMaterial({ color: 0x334155 }));
     p.position.set(x, (y - alt / 2) / 2, z);
-    g.add(p);
+    malhas.push(p);
   }
+  g.add(...malhas);
+  return malhas;
 }

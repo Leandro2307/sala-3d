@@ -1,6 +1,8 @@
 // Sinuca (bola 8) no salão de jogos do parque: duas mesas, até dois por mesa (sozinho é treino).
-// E perto da mesa pega um lugar. Na sua vez, mira com a câmera (a linha mostra onde a branca bate e
-// para onde a bola vai), segura o clique (ou F) para a força e solta para a tacada. O servidor
+// E perto da mesa pega um lugar. Na sua vez a câmera vai para cima da mesa e o cursor aparece: a
+// mira vai da branca até onde ele aponta no pano (a faixa mostra onde a branca bate e para onde a
+// bola tocada vai); segurar o clique dá a força e soltar é a tacada. Na vez do outro, dá para andar
+// em volta da mesa; quando a vez volta, a câmera volta para cima dela sozinha. O servidor
 // (sinuca-servidor.js) simula e julga; todo mundo anima a mesma tacada com a mesma conta
 // (sinuca-fisica.js) e, no fim, as bolas ficam onde ele disse.
 import * as THREE from 'three';
@@ -44,13 +46,16 @@ export function construirSinuca(world) {
   const g = new THREE.Group();
   world.fora.add(g);
   const madeira = new THREE.MeshStandardMaterial({ color: 0x5b3418, roughness: 0.55 });
-  const pano = new THREE.MeshStandardMaterial({ color: 0x0f7a3d, roughness: 0.95 });
+  // um brilho próprio leve: à noite o pano e as bolas continuam legíveis (sem luz de verdade, que pesa)
+  const pano = new THREE.MeshStandardMaterial({ color: 0x0f7a3d, roughness: 0.95, emissive: 0x0a4a26, emissiveIntensity: 0.6 });
   const tabela = new THREE.MeshStandardMaterial({ color: 0x0b5e2f, roughness: 0.9 });
   const preto = new THREE.MeshBasicMaterial({ color: 0x050505 });
   const W = S.comp;
   const D = S.larg;
-  const placares = S.mesas.map((m) => {
+  // por mesa: o placar e o que fica entre a câmera de cima e o pano (some para quem está mirando)
+  const mesas = S.mesas.map((m) => {
     const y = S.altura;
+    const emCima = [];
     const panoM = new THREE.Mesh(new THREE.PlaneGeometry(W, D).rotateX(-Math.PI / 2), pano);
     panoM.position.set(m.x, y, m.z);
     panoM.receiveShadow = true;
@@ -89,18 +94,20 @@ export function construirSinuca(world) {
     const brilho = new THREE.Mesh(new THREE.PlaneGeometry(W * 0.68, 0.46).rotateX(Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xfff1c9, toneMapped: false }));
     brilho.position.set(m.x, y + 2.03, m.z);
     g.add(luz, brilho);
+    emCima.push(luz, brilho);
     for (const s of [-1, 1]) {
       const fio = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 4.4, 4), new THREE.MeshBasicMaterial({ color: 0x111111 }));
       fio.position.set(m.x + s * W * 0.3, y + 2.1 + 2.2, m.z);
       g.add(fio);
+      emCima.push(fio);
     }
     world.addBox({ min: [m.x - W / 2 - BORDA, 0, m.z - D / 2 - BORDA], max: [m.x + W / 2 + BORDA, y + 0.1, m.z + D / 2 + BORDA] });
     const placar = texturaViva(THREE, 512, 220, (ctx, w, h, e) => desenharPlacar(ctx, w, h, e));
     // pendurado em cima da mesa, acima da luminária: dá para ler dos dois lados compridos
-    painelDuasFaces(THREE, g, placar, 2.6, 1.12, m.x, y + 3.0, m.z, 0, { poste: false });
-    return placar;
+    emCima.push(...painelDuasFaces(THREE, g, placar, 2.6, 1.12, m.x, y + 3.0, m.z, 0, { poste: false }));
+    return { placar, emCima };
   });
-  return { grupo: g, placares };
+  return { grupo: g, placares: mesas.map((x) => x.placar), emCima: mesas.map((x) => x.emCima) };
 }
 
 const restam = (e, grupo) => e.bolas.filter(([n, , , fora]) => !fora && (grupo === 'lisas' ? lisa(n) : listrada(n))).length;
@@ -145,7 +152,8 @@ function desenharPlacar(ctx, w, h, e) {
 
 // ------------------------------------------------------------------ o jogo no navegador
 export class Sinuca {
-  // opts: world, player, sfx, ligado()
+  // opts: world, player, sfx, ligado(), focar() (o main.js põe a sinuca em foco: câmera de cima e o
+  // cursor solto; devolve se deu), soltarFoco() (sai do foco e volta a andar)
   constructor(opts) {
     Object.assign(this, opts);
     this.id = 'sinuca';
@@ -153,12 +161,18 @@ export class Sinuca {
     this.eu = null;
     this.g3d = opts.world.sinuca3d;
     this.carga = null;
-    this.sensAntes = null;
+    this.mirando = false; // em foco: a câmera de cima da mesa
+    this.focoPedido = false; // a vez chegou: entra na mira no próximo quadro que der
+    this.ang = 0;
+    this.zoom = 1;
+    this.raio = new THREE.Raycaster();
+    this.ponteiro = new THREE.Vector2();
     const geoBola = new THREE.SphereGeometry(R, 18, 12);
     this.mesas = S.mesas.map((m, i) => {
       const malhas = [];
       for (let n = 0; n < 16; n++) {
-        const b = new THREE.Mesh(geoBola, new THREE.MeshStandardMaterial({ map: texturaBola(n), roughness: 0.25 }));
+        const tex = texturaBola(n);
+        const b = new THREE.Mesh(geoBola, new THREE.MeshStandardMaterial({ map: tex, roughness: 0.25, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.28 }));
         b.castShadow = true;
         b.visible = false;
         this.g3d.grupo.add(b);
@@ -166,7 +180,7 @@ export class Sinuca {
       }
       return { i, m, e: null, bolas: null, malhas, filme: null, t: 0 };
     });
-    // o taco e a linha de mira (só na sua vez)
+    // o taco e a mira no pano (só na sua vez)
     this.taco = new THREE.Group();
     const vara = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.022, 2.4, 10).rotateZ(Math.PI / 2).translate(-1.2, 0, 0), new THREE.MeshStandardMaterial({ color: 0xd6a35c, roughness: 0.5 }));
     const ponta = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.011, 0.04, 8).rotateZ(Math.PI / 2).translate(-0.02, 0, 0), new THREE.MeshStandardMaterial({ color: 0x1e3a8a }));
@@ -185,6 +199,8 @@ export class Sinuca {
     this.fantasma = new THREE.Mesh(new THREE.TorusGeometry(R, 0.008, 6, 24).rotateX(Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false }));
     this.fantasma.visible = false;
     this.g3d.grupo.add(this.fantasma);
+    this.montarHud();
+    this.ligarPonteiro();
   }
 
   // ---------------------------------------------------------------- rede
@@ -202,6 +218,10 @@ export class Sinuca {
     return this.mesas.find((P) => P.e?.jogadores.some((j) => j.id === this.eu)) || null;
   }
 
+  minhaVez(P) {
+    return !!P?.e && P.e.fase === 'jogando' && !P.filme && P.e.jogadores[P.e.vez]?.id === this.eu;
+  }
+
   estado(e) {
     const P = this.mesas[e.mesa];
     if (!P) return;
@@ -213,10 +233,16 @@ export class Sinuca {
     if (!minha) return;
     const vez = e.jogadores[e.vez]?.id === this.eu && e.fase === 'jogando';
     const eraVez = antes && antes.jogadores[antes.vez]?.id === this.eu && antes.fase === 'jogando';
-    if (vez && !eraVez && e.jogadores.length === 2) {
-      hud.mensagem('Sua vez!', e.aviso || 'Mire com a câmera · segure o clique e solte', 2200, '#4ade80');
-      this.sfx.message();
+    // a vez chegou (ou continua depois de encaçapar): a câmera vai para cima da mesa
+    if (vez && !eraVez) {
+      this.focoPedido = true;
+      if (e.jogadores.length === 2) {
+        hud.mensagem('Sua vez!', e.aviso || 'Aponte no pano para mirar · segure o clique e solte', 2200, '#4ade80');
+        this.sfx.message();
+      }
     }
+    // a vez passou para o outro: livre para andar em volta da mesa
+    if (e.fase === 'jogando' && !vez && this.mirando) this.soltarFoco?.();
     if (e.fase === 'fim' && antes?.fase !== 'fim') {
       const v = e.jogadores.find((j) => j.id === e.vencedor);
       hud.mensagem(e.jogadores.length < 2 ? 'Mesa limpa!' : `${v?.nome || ''} venceu!`, e.aviso, 5000, '#facc15');
@@ -252,6 +278,96 @@ export class Sinuca {
     return Math.hypot(p.x - m.x, p.z - m.z) < raio;
   }
 
+  // ---------------------------------------------------------------- foco (câmera de cima)
+  // A câmera em cima do pano, um pouco puxada para o lado de quem joga (esse lado fica embaixo na
+  // tela), alta o bastante para a mesa inteira caber. A roda do mouse aproxima e afasta.
+  pose(P) {
+    const cam = this.world.camera;
+    const fovV = THREE.MathUtils.degToRad(cam.fov);
+    const tanH = Math.tan(fovV / 2) * cam.aspect;
+    const h = Math.max((S.larg + 2 * BORDA + 0.5) / 2 / Math.tan(fovV / 2), (S.comp + 2 * BORDA + 0.5) / 2 / tanH) * this.zoom;
+    const lado = this.player.pos.z < P.m.z ? -1 : 1;
+    return {
+      position: new THREE.Vector3(P.m.x, S.altura + h, P.m.z + lado * h * 0.12),
+      target: new THREE.Vector3(P.m.x, S.altura, P.m.z),
+    };
+  }
+
+  // o main.js pôs a sinuca em foco
+  entrarNaMira() {
+    const P = this.minhaMesa();
+    if (!P) return;
+    this.mirando = true;
+    this.zoom = 1.3;
+    this.player.override = this.pose(P);
+    for (const o of this.g3d.emCima[P.i]) o.visible = false;
+    // começa mirando no triângulo (ou no que estiver do outro lado)
+    const branca = P.bolas.find((b) => b.n === 0);
+    this.ang = branca.x < 0 ? 0 : Math.PI;
+    this.hudMira.hidden = false;
+  }
+
+  // o main.js tirou o foco (a vez passou, Esc, E, o botão)
+  sairDaMira() {
+    if (!this.mirando) return;
+    this.mirando = false;
+    this.carga = null;
+    this.player.override = null;
+    for (const lista of this.g3d.emCima) for (const o of lista) o.visible = !o.userData.areaDesligada;
+    this.hudMira.hidden = true;
+    this.world.canvas.style.cursor = '';
+  }
+
+  // o cursor (ou o dedo) no pano: a mira vai da branca até ele
+  ligarPonteiro() {
+    const canvas = this.world.canvas;
+    const apontar = (e) => {
+      const P = this.minhaMesa();
+      if (!P?.bolas) return;
+      const r = canvas.getBoundingClientRect();
+      this.ponteiro.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+      this.raio.setFromCamera(this.ponteiro, this.world.camera);
+      const { origin: o, direction: d } = this.raio.ray;
+      if (Math.abs(d.y) < 1e-4) return;
+      const t = (S.altura + R - o.y) / d.y;
+      if (t <= 0) return;
+      const branca = P.bolas.find((b) => b.n === 0);
+      const dx = o.x + d.x * t - (P.m.x + branca.x);
+      const dz = o.z + d.z * t - (P.m.z + branca.z);
+      if (dx * dx + dz * dz > 1e-4) this.ang = Math.atan2(dz, dx);
+    };
+    canvas.addEventListener('pointermove', (e) => {
+      if (!this.mirando || document.pointerLockElement) return;
+      apontar(e);
+      canvas.style.cursor = 'crosshair';
+    });
+    canvas.addEventListener('pointerdown', (e) => {
+      if (!this.mirando || document.pointerLockElement || e.button !== 0) return;
+      apontar(e);
+      if (this.minhaVez(this.minhaMesa())) this.carga = { desde: performance.now() };
+    });
+    window.addEventListener('pointerup', (e) => {
+      if (!this.mirando || e.button !== 0 || !this.carga) return;
+      this.tacada();
+    });
+    canvas.addEventListener('wheel', (e) => {
+      if (!this.mirando) return;
+      this.zoom = THREE.MathUtils.clamp(this.zoom * (e.deltaY > 0 ? 1.08 : 0.92), 0.6, 2);
+      const P = this.minhaMesa();
+      if (P) this.player.override = this.pose(P);
+    }, { passive: true });
+  }
+
+  tacada() {
+    const c = this.carga;
+    this.carga = null;
+    const P = this.minhaMesa();
+    if (!c || !this.minhaVez(P)) return;
+    const forca = vaiEVolta(c.desde, 1400);
+    this.socket?.emit('sn-tacada', { mesa: P.i, ang: this.ang, forca: Math.round(forca * 1000) / 1000 });
+    this.taco.visible = false;
+  }
+
   // ---------------------------------------------------------------- todo quadro
   update(dt) {
     for (const P of this.mesas) {
@@ -283,33 +399,31 @@ export class Sinuca {
         if (P.e) this.arrumar(P, P.e.bolas);
       }
     }
-    this.mirar();
+    const P = this.minhaMesa();
+    // a vez chegou: a câmera vai para cima da mesa (se o boneco estiver por perto)
+    if (this.focoPedido && this.minhaVez(P) && this.ligado()) {
+      this.focoPedido = false;
+      if (!this.mirando && this.perto(P.m, 14)) this.focar?.();
+    }
+    // saiu da mesa (ou o jogo foi desligado) com a mira aberta
+    if (this.mirando && (!P || !this.ligado())) this.soltarFoco?.();
+    this.mirar(P);
   }
 
-  // na sua vez, perto da mesa: o taco, a linha e a bola fantasma; a câmera gira mais devagar
-  mirar() {
-    const P = this.minhaMesa();
-    const pode = P && this.ligado() && P.e.fase === 'jogando' && !P.filme && P.e.jogadores[P.e.vez]?.id === this.eu && this.perto(P.m, S.comp / 2 + 3.5);
-    this.taco.visible = this.fantasma.visible = this.faixaBranca.visible = !!pode;
-    if (!pode) this.faixaBola.visible = false;
-    if (pode && this.sensAntes === null) {
-      this.sensAntes = this.player.sensitivity;
-      this.player.sensitivity = this.sensAntes * 0.45;
-    } else if (!pode && this.sensAntes !== null) {
-      this.player.sensitivity = this.sensAntes;
-      this.sensAntes = null;
-    }
+  // em foco, na sua vez: o taco, a faixa até onde a branca bate e a bola fantasma
+  mirar(P) {
+    const pode = this.mirando && this.minhaVez(P);
+    this.taco.visible = this.fantasma.visible = this.faixaBranca.visible = pode;
     if (!pode) {
-      if (this.carga) this.carga = null;
+      this.faixaBola.visible = false;
+      if (this.carga && !this.mirando) this.carga = null;
       if (this.mostrandoForca) {
         hud.forca(null);
         this.mostrandoForca = false;
       }
       return;
     }
-    const olhar = this.player.lookDirection(_a);
-    const ang = Math.atan2(olhar.z, olhar.x);
-    this.ang = ang;
+    const ang = this.ang;
     const branca = P.bolas.find((b) => b.n === 0);
     const y = S.altura + R;
     const bx = P.m.x + branca.x;
@@ -369,28 +483,20 @@ export class Sinuca {
       return true;
     }
     this.socket?.emit('sn-entrar', { mesa: P.i }, (r) => {
-      if (r?.ok) hud.mensagem('Sinuca', 'Mire com a câmera · segure o clique e solte para a tacada', 3000, '#4ade80');
+      if (r?.ok) hud.mensagem('Sinuca', 'Na sua vez a câmera vai para cima da mesa: aponte no pano, segure o clique e solte', 3200, '#4ade80');
     });
     return true;
   }
 
+  // clique (ou F) andando, na sua vez: volta para a mira
   apertou() {
     const P = this.minhaMesa();
     if (!P || !this.ligado()) return false;
-    if (this.taco.visible) this.carga = { desde: performance.now() };
+    if (this.minhaVez(P) && !this.mirando && this.perto(P.m, 14)) this.focar?.();
     return true; // na mesa, o clique é da sinuca (não soca nem foca tela)
   }
 
-  soltou() {
-    const c = this.carga;
-    if (!c) return;
-    this.carga = null;
-    const P = this.minhaMesa();
-    if (!P || !this.taco.visible) return;
-    const forca = vaiEVolta(c.desde, 1400);
-    this.socket?.emit('sn-tacada', { mesa: P.i, ang: this.ang, forca: Math.round(forca * 1000) / 1000 });
-    this.taco.visible = false;
-  }
+  soltou() {}
 
   ativo() {
     return this.ligado() && !!this.minhaMesa();
@@ -401,9 +507,10 @@ export class Sinuca {
     const minha = this.minhaMesa();
     if (minha) {
       const e = minha.e;
+      if (this.mirando) return this.minhaVez(minha) ? 'Aponte no pano para mirar · <kbd>Clique</kbd>segure e solte · roda do mouse aproxima · <kbd>Esc</kbd>andar' : '';
       if (e.fase === 'rolando' || minha.filme) return '';
-      if (e.jogadores[e.vez]?.id === this.eu) return this.taco.visible ? 'Mire com a câmera · <kbd>Clique</kbd>segure e solte para a tacada · <kbd>E</kbd>sair' : 'Chegue perto da mesa para jogar';
-      return `Vez de ${e.jogadores[e.vez]?.nome || '…'} · <kbd>E</kbd>sair da mesa`;
+      if (e.jogadores[e.vez]?.id === this.eu) return '<kbd>Clique</kbd>voltar para a mira · <kbd>E</kbd>sair da mesa';
+      return `Vez de ${e.jogadores[e.vez]?.nome || '…'}: ande à vontade · <kbd>E</kbd>sair da mesa`;
     }
     const P = this.mesaPerto();
     if (!P) return '';
@@ -414,5 +521,21 @@ export class Sinuca {
   lugar() {
     const m = S.mesas[0];
     return { nome: 'Sinuca', desc: 'Salão de jogos · bola 8, até dois por mesa', cor: '#16a34a', pos: [m.x, 0, m.z - S.larg / 2 - 1.6], yaw: Math.PI };
+  }
+
+  // o botão de sair da mira (no celular não tem Esc)
+  montarHud() {
+    this.hudMira = document.createElement('button');
+    this.hudMira.type = 'button';
+    this.hudMira.id = 'sn-sair-mira';
+    this.hudMira.hidden = true;
+    this.hudMira.textContent = 'Andar (sair da mira)';
+    this.hudMira.addEventListener('click', () => this.soltarFoco?.());
+    const css = document.createElement('style');
+    css.textContent = `#sn-sair-mira { position: fixed; top: 64px; right: 16px; z-index: 32; padding: 9px 14px; border-radius: 10px; border: 1px solid rgba(255,255,255,.18);
+  background: rgba(15,23,42,.86); color: #f8fafc; font: 700 14px 'Plus Jakarta Sans', system-ui, sans-serif; cursor: pointer; }
+#sn-sair-mira[hidden] { display: none; }`;
+    document.head.appendChild(css);
+    document.body.appendChild(this.hudMira);
   }
 }

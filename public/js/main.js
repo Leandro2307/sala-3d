@@ -168,7 +168,12 @@ jogosDoParque.push(pingue);
 const queimada = new Queimada({ world, player, sfx, ligado: () => jogoLigado('queimada'), posDe: posDoId, yawDe: (id) => state.users.get(id)?.avatar.inner.rotation.y ?? null });
 jogosDoParque.push(queimada);
 // sinuca, no salão de jogos
-const sinuca = new Sinuca({ world, player, sfx, ligado: () => jogoLigado('sinuca') });
+const sinuca = new Sinuca({
+  world, player, sfx, ligado: () => jogoLigado('sinuca'),
+  // na vez: câmera de cima da mesa, com o cursor solto (um foco, como o dos tabuleiros)
+  focar: () => focarSinuca(),
+  soltarFoco: () => { if (state.focus?.kind === 'sinuca') sairDoFoco(); },
+});
 jogosDoParque.push(sinuca);
 // surf e mata-mata (no céu; portais perto da porta do cinema)
 const surf = new Surf({
@@ -4964,6 +4969,22 @@ function updateHover() {
   }
 }
 
+// A sinuca na sua vez: a câmera vai para cima da mesa e o mouse fica solto para mirar no pano
+// (sinuca.js). Não toma o lugar de outra coisa em foco (uma tela, o telão, a mesa de telas).
+function focarSinuca() {
+  if (state.focus?.kind === 'sinuca') return true;
+  if (state.focus || state.panel || mesa.aberta || !state.joined) return false;
+  fecharMesa(false);
+  if (document.pointerLockElement) document.exitPointerLock();
+  if (player.sitting) toggleSit();
+  if (player.veiculo) toggleVeiculo();
+  state.focus = { kind: 'sinuca' };
+  sinuca.entrarNaMira();
+  $('#hover-hint').hidden = true;
+  syncTouchVisibility();
+  return true;
+}
+
 function enterFocus(info) {
   if (!info) return;
   exitFocus();
@@ -5067,6 +5088,8 @@ function exitFocus() {
     jogos.sair();
   } else if (state.focus.kind === 'dados') {
     dados.sair();
+  } else if (state.focus.kind === 'sinuca') {
+    sinuca.sairDaMira();
   } else if (state.focus.kind === 'tv') {
     player.override = null;
     world.travarTelao(null);
@@ -5581,7 +5604,7 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   // comandando um tabuleiro: as teclas de andar/voar/socar ficam com o jogo
-  if ((state.focus?.kind === 'jogo' || state.focus?.kind === 'dados') && !['KeyE', 'KeyM', 'KeyT', 'Enter'].includes(e.code)) return;
+  if (['jogo', 'dados', 'sinuca'].includes(state.focus?.kind) && !['KeyE', 'KeyM', 'KeyT', 'Enter'].includes(e.code)) return;
   switch (e.code) {
     case 'KeyE':
       if (state.focus) sairDoFoco();
@@ -5815,7 +5838,8 @@ function slowUpdate() {
   quadras.atualizarDica(!state.focus && !state.panel && !futebol.jogando);
   // a dica do primeiro jogo do parque que tiver uma
   {
-    const livre = !state.focus && !state.panel && !futebol.jogando;
+    // a mira da sinuca é um foco, mas a dica dela continua aparecendo
+    const livre = (!state.focus || state.focus.kind === 'sinuca') && !state.panel && !futebol.jogando;
     let d = '';
     for (const j of jogosDoParque) if ((d = j.dica(livre))) break;
     hudJogos.dica(d);
