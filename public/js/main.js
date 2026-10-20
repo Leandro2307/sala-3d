@@ -34,6 +34,7 @@ import { Queimada } from './queimada.js';
 import { Sinuca } from './sinuca.js';
 import { Golfe } from './golfe.js';
 import { Cartas } from './cartas.js';
+import { Gincana } from './gincana.js';
 import { hud as hudJogos } from './hud-jogos.js';
 import { Surf, MataMata, dicaDoPortal } from './ceu.js';
 import { Batalha } from './batalha.js';
@@ -188,6 +189,17 @@ const cartas = new Cartas({
   soltarFoco: () => { if (state.focus?.kind === 'cartas') sairDoFoco(); },
 });
 jogosDoParque.push(cartas);
+// gincana no céu (o portal fica ao sul da Rua dos Esportes)
+const gincana = new Gincana({
+  world, player, sfx, ligado: () => jogoLigado('gincana'),
+  aoEntrar: () => {
+    if (player.veiculo) toggleVeiculo();
+    if (player.voando) toggleVoar();
+    if (player.puloAlto) togglePuloAlto();
+    if (player.sitting) toggleSit();
+  },
+});
+jogosDoParque.push(gincana);
 // surf e mata-mata (no céu; portais perto da porta do cinema)
 const surf = new Surf({
   world, player, sfx, toast: (...a) => toast(...a), ligado: () => jogoLigado('surf'), socket: () => socket,
@@ -882,7 +894,7 @@ async function join() {
     touchPad = setupTouchControls(player, {
       use: () => { if (state.hovered) enterFocus(state.hovered); else if (state.focus) exitFocus(); },
       view: toggleView,
-      respawn: () => { if (!state.focus) respawn(); },
+      respawn: () => { if (!state.focus && !jogosDoParque.some((j) => j.teclaR?.())) respawn(); },
       punch: () => punch(),
       sit: () => toggleSit(),
       car: () => toggleVeiculo(),
@@ -2471,8 +2483,9 @@ const JOGOS_DA_SALA = [
   ['golfe', 'Minigolfe', '9 buracos com moinho, morros e água'],
   ['truco', 'Truco', 'Truco paulista em duplas, com robôs'],
   ['uno', 'Uno', 'Até 6 na mesa, com robôs'],
+  ['gincana', 'Gincana', 'Corrida de obstáculos no céu e o piso que cai'],
 ];
-const AREAS_DE_JOGO = ['parkour', 'ringue', 'corrida', 'futebol', 'volei', 'basquete', 'boliche', 'surf', 'matamata', 'batalha', 'xadrez', 'dama', 'velha', 'dados', 'pingue', 'queimada', 'sinuca', 'golfe', 'cartas'];
+const AREAS_DE_JOGO = ['parkour', 'ringue', 'corrida', 'futebol', 'volei', 'basquete', 'boliche', 'surf', 'matamata', 'batalha', 'xadrez', 'dama', 'velha', 'dados', 'pingue', 'queimada', 'sinuca', 'golfe', 'cartas', 'gincana'];
 // parkour e ringue ficam dentro do cinema: no escritório não existem
 const SO_NO_CINEMA = ['parkour', 'ringue'];
 const modoEscritorio = () => state.sala?.modulo === 'escritorio' && state.sala.departamentos?.length > 0;
@@ -5583,6 +5596,7 @@ window.addEventListener('keydown', (e) => {
     else if (surf.ativo) surf.sair();
     else if (mataMata.ativo) mataMata.sair();
     else if (batalha.ativo) batalha.sair();
+    else if (jogosDoParque.some((j) => j.esc?.())) { /* a gincana sai */ }
     else run.abandon(); // preso no parkour? Esc sai da corrida
     return;
   }
@@ -5648,6 +5662,7 @@ window.addEventListener('keydown', (e) => {
       break;
     case 'KeyR':
       if (state.focus) break;
+      if (jogosDoParque.some((j) => j.teclaR?.())) break; // gincana: volta no último ponto
       if (temArma() && recarregar()) break;
       if (!mataMata.ativo && !batalha.ativo) respawn(); // no mata-mata o R só recarrega
       break;
@@ -5779,7 +5794,7 @@ function soltarAcaoDosJogos() {
 if (params.get('debug') === '1') {
   window.__sala3d = {
     state, player, combat, run, corrida, world, settings, punch, goToRing, respawn, mataMata, batalha, anuncios,
-    toggleVeiculo, irParaLargada, jogos, irParaMesa, exitFocus, dados, quadras, jogosDoParque, pingue, queimada, sinuca, golfe, cartas,
+    toggleVeiculo, irParaLargada, jogos, irParaMesa, exitFocus, dados, quadras, jogosDoParque, pingue, queimada, sinuca, golfe, cartas, gincana,
     tocarTela, telasMudas, liberarSomDasTelas, makeVideo, mesa, controle, abrirMesa, fecharMesa, marcaDaAba,
     publishShare, stopShare, acharTela, telasNoAr, get rtc() { return rtc; }, clima, ligarLuneta,
   };

@@ -18,6 +18,7 @@ const { ligarQueimada } = require('./queimada-servidor.js');
 const { ligarSinuca } = require('./sinuca-servidor.js');
 const { ligarGolfe } = require('./golfe-servidor.js');
 const { ligarCartas } = require('./cartas-servidor.js');
+const { ligarGincana } = require('./gincana-servidor.js');
 const { ligarCeu } = require('./ceu-servidor.js');
 const { ligarBatalha } = require('./batalha-servidor.js');
 // a planta do escritório é a mesma do navegador (public/js/escritorio.js); carrega em main()
@@ -413,7 +414,7 @@ const CLIMAS_SALA = ['auto', 'sol', 'nublado', 'chuva', 'tempestade'];
 const HORARIOS_SALA = ['ciclo', 'manha', 'dia', 'tarde', 'noite'];
 const JOGOS_SALA = ['parkour', 'ringue', 'corrida', 'futebol', 'volei', 'basquete', 'boliche', 'surf', 'matamata', 'batalha', 'xadrez', 'dama', 'velha', 'dados', 'poderes', 'armas',
   // o parque (public/js/parque-dados.js)
-  'pingue', 'queimada', 'sinuca', 'golfe', 'truco', 'uno'];
+  'pingue', 'queimada', 'sinuca', 'golfe', 'truco', 'uno', 'gincana'];
 const configPadrao = () => ({
   modulo: 'lazer',
   mundo: 'classico',
@@ -998,6 +999,7 @@ function attachSockets(io) {
   const sinucaDoSocket = ligarSinuca(io, rooms, jogoLigado, moedasDoJogo); // sinuca (sinuca-servidor.js)
   const golfeDoSocket = ligarGolfe(io, rooms, jogoLigado, moedasDoJogo); // minigolfe (golfe-servidor.js)
   const cartasDoSocket = ligarCartas(io, rooms, jogoLigado, moedasDoJogo); // truco e uno (cartas-servidor.js)
+  const gincanaDoSocket = ligarGincana(io, rooms, jogoLigado, moedasDoJogo); // gincana no céu (gincana-servidor.js)
   // alerta para os gestores que estão na sala (menos a própria pessoa)
   function avisarGestores(room, user, tipo, texto) {
     for (const u of room.users.values()) {
@@ -1036,6 +1038,7 @@ function attachSockets(io) {
   }, 30);
 
   io.on('connection', (socket) => {
+    socket.setMaxListeners(30); // cada jogo (quadras, parque...) escuta o próprio 'disconnect'
     let room = null;
     let user = null;
     // sem chamar o next o pacote some, sem chegar a nenhum handler (ver fundoDemais)
@@ -1052,6 +1055,7 @@ function attachSockets(io) {
     sinucaDoSocket(socket, () => ({ room, user }));
     golfeDoSocket(socket, () => ({ room, user }));
     cartasDoSocket(socket, () => ({ room, user }));
+    gincanaDoSocket(socket, () => ({ room, user }));
 
     let entrando = false;
     let dono = false; // esta conexão provou ser o dono da sala (senha)
