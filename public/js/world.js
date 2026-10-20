@@ -27,6 +27,7 @@ import { construirGolfe } from './golfe.js';
 import { construirCartas } from './cartas.js';
 import { construirGincana } from './gincana.js';
 import { construirKart } from './kart.js';
+import { construirPinta } from './pinta.js';
 
 // Área jogável inteira (cercada): a sala do cinema num canto, em volta da origem, o
 // autódromo ao ar livre a leste e, no norte, o parque (parque-dados.js), que levou a cerca de
@@ -805,6 +806,7 @@ export class World {
     // a gincana fica no céu, acima do parque; o portal, no chão
     this.gincana3d = this.area('gincana', () => construirGincana(this));
     this.kart3d = this.area('kart', () => construirKart(this));
+    this.pinta3d = this.area('pinta', () => construirPinta(this));
     // surf e mata-mata, no céu; os portais ficam perto da porta (o jogo é do ceu.js)
     this.ceu = {
       surf: this.area('surf', () => (construirPortal(this, 'surf'), construirSurf(this))),

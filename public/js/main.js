@@ -36,6 +36,7 @@ import { Golfe } from './golfe.js';
 import { Cartas } from './cartas.js';
 import { Gincana } from './gincana.js';
 import { Kart } from './kart.js';
+import { Pinta } from './pinta.js';
 import { hud as hudJogos } from './hud-jogos.js';
 import { Surf, MataMata, dicaDoPortal } from './ceu.js';
 import { Batalha } from './batalha.js';
@@ -218,6 +219,17 @@ const kart = new Kart({
   },
 });
 jogosDoParque.push(kart);
+// pinta-território, na arena depois da queimada
+const pinta = new Pinta({
+  world, player, sfx, ligado: () => jogoLigado('pinta'), posDe: posDoId,
+  aoEntrar: () => {
+    if (player.veiculo) toggleVeiculo();
+    if (player.voando) toggleVoar();
+    if (player.puloAlto) togglePuloAlto();
+    if (player.sitting) toggleSit();
+  },
+});
+jogosDoParque.push(pinta);
 // surf e mata-mata (no céu; portais perto da porta do cinema)
 const surf = new Surf({
   world, player, sfx, toast: (...a) => toast(...a), ligado: () => jogoLigado('surf'), socket: () => socket,
@@ -2503,8 +2515,9 @@ const JOGOS_DA_SALA = [
   ['uno', 'Uno', 'Até 6 na mesa, com robôs'],
   ['gincana', 'Gincana', 'Corrida de obstáculos no céu e o piso que cai'],
   ['kart', 'Kart', 'Kartódromo com itens, 3 voltas'],
+  ['pinta', 'Pinta-território', 'Times pintam o chão com tinta'],
 ];
-const AREAS_DE_JOGO = ['parkour', 'ringue', 'corrida', 'futebol', 'volei', 'basquete', 'boliche', 'surf', 'matamata', 'batalha', 'xadrez', 'dama', 'velha', 'dados', 'pingue', 'queimada', 'sinuca', 'golfe', 'cartas', 'gincana', 'kart'];
+const AREAS_DE_JOGO = ['parkour', 'ringue', 'corrida', 'futebol', 'volei', 'basquete', 'boliche', 'surf', 'matamata', 'batalha', 'xadrez', 'dama', 'velha', 'dados', 'pingue', 'queimada', 'sinuca', 'golfe', 'cartas', 'gincana', 'kart', 'pinta'];
 // parkour e ringue ficam dentro do cinema: no escritório não existem
 const SO_NO_CINEMA = ['parkour', 'ringue'];
 const modoEscritorio = () => state.sala?.modulo === 'escritorio' && state.sala.departamentos?.length > 0;
@@ -5813,7 +5826,7 @@ function soltarAcaoDosJogos() {
 if (params.get('debug') === '1') {
   window.__sala3d = {
     state, player, combat, run, corrida, world, settings, punch, goToRing, respawn, mataMata, batalha, anuncios,
-    toggleVeiculo, irParaLargada, jogos, irParaMesa, exitFocus, dados, quadras, jogosDoParque, pingue, queimada, sinuca, golfe, cartas, gincana, kart,
+    toggleVeiculo, irParaLargada, jogos, irParaMesa, exitFocus, dados, quadras, jogosDoParque, pingue, queimada, sinuca, golfe, cartas, gincana, kart, pinta,
     tocarTela, telasMudas, liberarSomDasTelas, makeVideo, mesa, controle, abrirMesa, fecharMesa, marcaDaAba,
     publishShare, stopShare, acharTela, telasNoAr, get rtc() { return rtc; }, clima, ligarLuneta,
   };
