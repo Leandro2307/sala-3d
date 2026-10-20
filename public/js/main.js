@@ -29,6 +29,9 @@ import { DEPARTAMENTOS, IDS_DEPARTAMENTOS, MAX_SALAS, rotuloDoPosto, portaDa, co
 import { Dados, MESA_DADOS } from './dados.js';
 import { Futebol } from './futebol.js';
 import { Quadras } from './quadras.js';
+import { Pingue } from './pingue.js';
+import { Queimada } from './queimada.js';
+import { hud as hudJogos } from './hud-jogos.js';
 import { Surf, MataMata, dicaDoPortal } from './ceu.js';
 import { Batalha } from './batalha.js';
 import { TIMES } from './batalha-dados.js';
@@ -47,7 +50,7 @@ const typing = () => {
 
 const COLORS = ['#7c9cff', '#6ee7c8', '#f472b6', '#fbbf24', '#a78bfa', '#fb7185', '#38bdf8', '#a3e635', '#f97316', '#e2e8f0'];
 const EMOTE_KEYS = ['wave', 'party', 'laugh', 'heart', 'clap', 'fire'];
-const PANEL_TITLES = { people: 'Pessoas', chat: 'Chat da sala', telao: 'Telão', parkour: 'Parkour', ringue: 'Ringue de luta', corrida: 'Pista de corrida', jogos: 'Jogos, dados e moedas', sala: 'Sala da empresa', settings: 'Ajustes' };
+const PANEL_TITLES = { people: 'Pessoas', chat: 'Chat da sala', telao: 'Telão', parkour: 'Parkour', ringue: 'Ringue de luta', corrida: 'Pista de corrida', jogos: 'Jogos, dados e moedas', parque: 'Parque', sala: 'Sala da empresa', settings: 'Ajustes' };
 
 // ------------------------------------------------------------------ ajustes salvos
 const DEFAULTS = {
@@ -145,6 +148,9 @@ player.balancoVisao = settings.balancoVisao;
 const futebol = new Futebol({
   world, player, avatarLocal: localAvatar, sfx, toast: (...a) => toast(...a), estaLigado: () => jogoLigado('futebol'),
 });
+// os jogos do parque (pingue-pongue, queimada...): cada um entra nesta lista quando é criado, e o
+// main.js repassa a eles a rede, o quadro, o E, a ação (clique/F) e a dica (ver acaoDosJogos)
+const jogosDoParque = [];
 // vôlei, basquete e boliche (a pé, com o boneco)
 const quadras = new Quadras({
   world, player, sfx, toast: (...a) => toast(...a), ligado: (j) => jogoLigado(j),
@@ -152,6 +158,14 @@ const quadras = new Quadras({
   posDe: (id) => state.users.get(id)?.avatar.group.position ?? null,
   yawDe: (id) => state.users.get(id)?.avatar.inner.rotation.y ?? null,
 });
+// onde está o boneco de alguém da sala (pelo id), para os jogos do parque
+const posDoId = (id) => state.users.get(id)?.avatar.group.position ?? null;
+// pingue-pongue no salão de jogos do parque
+const pingue = new Pingue({ world, player, sfx, ligado: () => jogoLigado('pingue'), posDe: posDoId });
+jogosDoParque.push(pingue);
+// queimada, na quadra do parque
+const queimada = new Queimada({ world, player, sfx, ligado: () => jogoLigado('queimada'), posDe: posDoId, yawDe: (id) => state.users.get(id)?.avatar.inner.rotation.y ?? null });
+jogosDoParque.push(queimada);
 // surf e mata-mata (no céu; portais perto da porta do cinema)
 const surf = new Surf({
   world, player, sfx, toast: (...a) => toast(...a), ligado: () => jogoLigado('surf'), socket: () => socket,
@@ -769,6 +783,7 @@ async function join() {
   combat.socket = socket;
   futebol.ligar(socket);
   quadras.ligar(socket);
+  for (const j of jogosDoParque) j.ligar(socket);
   surf.ligar(socket);
   mataMata.ligar(socket);
   batalha.ligar(socket);
@@ -852,6 +867,14 @@ async function join() {
       voar: () => toggleVoar(),
       puloAlto: () => togglePuloAlto(),
       tiro: () => puxarGatilho(),
+      // jogos com bola: o E e a ação (o clique do computador)
+      jogoE: () => { if (!quadras.usarE()) jogosDoParque.some((j) => j.usarE?.()); },
+      jogoAcao: () => { if (acaoDosJogos()) cliqueDoJogo = true; },
+      jogoSoltar: () => {
+        if (!cliqueDoJogo) return;
+        cliqueDoJogo = false;
+        soltarAcaoDosJogos();
+      },
       luneta: () => ligarLuneta(!luneta),
       soltarTiro: () => soltarGatilho(),
       fullscreen: async () => {
@@ -899,6 +922,10 @@ function applyJoined(data) {
   futebol.eu = data.selfId;
   quadras.eu = data.selfId;
   quadras.ver();
+  for (const j of jogosDoParque) {
+    j.eu = data.selfId;
+    j.ver?.();
+  }
   mataMata.ver();
   batalha.ver();
   futebol.verPartida(); // numa reconexão, quem estava jogando volta a pé (o servidor esqueceu)
@@ -2416,8 +2443,10 @@ const JOGOS_DA_SALA = [
   ['dados', 'Mesa de dados', 'Apostas com moedas'],
   ['poderes', 'Poderes', 'Voar e pulo alto'],
   ['armas', 'Arma da camiseta 22', ''],
+  ['pingue', 'Pingue-pongue', 'Salão de jogos do parque; sozinho, contra o robô'],
+  ['queimada', 'Queimada', 'Times Azul × Vermelho, com cemitério'],
 ];
-const AREAS_DE_JOGO = ['parkour', 'ringue', 'corrida', 'futebol', 'volei', 'basquete', 'boliche', 'surf', 'matamata', 'batalha', 'xadrez', 'dama', 'velha', 'dados'];
+const AREAS_DE_JOGO = ['parkour', 'ringue', 'corrida', 'futebol', 'volei', 'basquete', 'boliche', 'surf', 'matamata', 'batalha', 'xadrez', 'dama', 'velha', 'dados', 'pingue', 'queimada'];
 // parkour e ringue ficam dentro do cinema: no escritório não existem
 const SO_NO_CINEMA = ['parkour', 'ringue'];
 const modoEscritorio = () => state.sala?.modulo === 'escritorio' && state.sala.departamentos?.length > 0;
@@ -3089,6 +3118,29 @@ $('#irpara-lista').addEventListener('click', (e) => {
   if (isTouch) closePanel();
 });
 setInterval(() => { if (state.panel === 'sala') renderIrPara(); }, 3000);
+
+// ------------------------------------------------------------------ parque
+// "Ir para" de cada jogo do parque (o parque fica longe da entrada): cada jogo diz onde se começa
+// (lugar()) e com que nome
+function renderParque() {
+  const lista = jogosDoParque.filter((j) => j.lugar && jogoLigado(j.id));
+  $('#parque-lista').innerHTML = lista.map((j) => {
+    const l = j.lugar();
+    return `<button type="button" data-ir="${j.id}"><i style="--c:${l.cor}"></i><span><b>${esc(l.nome)}</b><small>${esc(l.desc)}</small></span></button>`;
+  }).join('') || '<p class="hint">Os jogos do parque estão desligados nesta sala.</p>';
+}
+$('#parque-lista').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-ir]');
+  const jogo = b && jogosDoParque.find((j) => j.id === b.dataset.ir);
+  if (!jogo) return;
+  const l = jogo.lugar();
+  run.abandon();
+  if (player.veiculo) toggleVeiculo();
+  exitFocus();
+  player.teleport([l.pos[0] + (Math.random() - 0.5) * 1.2, l.pos[1], l.pos[2] + (Math.random() - 0.5) * 1.2], l.yaw);
+  sfx.teleport();
+  closePanel();
+});
 
 // a conexão caiu e voltou: o servidor esqueceu quem era dono, então prova de novo com a senha
 function reentrarComoDono() {
@@ -5151,6 +5203,7 @@ function openPanel(name) {
   $$('#panel section').forEach((s) => s.classList.toggle('active', s.dataset.section === name));
   $('#panel-title').textContent = PANEL_TITLES[name];
   $$('[data-panel]').forEach((b) => b.classList.toggle('on', b.dataset.panel === name));
+  if (name === 'parque') renderParque();
   if (name === 'chat') {
     state.unread = 0;
     $('#chat-dot').hidden = true;
@@ -5482,6 +5535,7 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   if (e.code === 'KeyE' && !state.focus && quadras.usarE()) return; // fila do boliche
+  if (e.code === 'KeyE' && !state.focus && jogosDoParque.some((j) => j.usarE?.())) return; // jogos do parque
   if (e.code === 'KeyE' && !state.focus && surf.pertoDoPortal()) {
     surf.entrar();
     return;
@@ -5544,7 +5598,9 @@ window.addEventListener('keydown', (e) => {
       tocarSino(); // Sala Comercial: fechei uma venda
       break;
     case 'KeyF':
-      punch();
+      // perto de um jogo com bola, o F faz o mesmo que o clique; fora deles, soca
+      if (acaoDosJogos()) fDoJogo = true;
+      else punch();
       break;
     case 'KeyC':
       if (!player.voando) toggleSit(); // voando, C é descer
@@ -5622,18 +5678,48 @@ document.addEventListener('mousedown', (e) => {
     batalha.trocarAlvo(1);
     return;
   }
+  // nos jogos com bola (quadras e parque) o clique é a ação: segurar carrega, soltar arremessa
+  if (!state.focus && acaoDosJogos()) {
+    cliqueDoJogo = true;
+    return;
+  }
   // dentro do ringue o botão esquerdo é o soco; fora dele continua focando telas
   if (combat.inRing && !state.focus) punch();
   else if (state.hovered) enterFocus(state.hovered);
   else if (temArma()) puxarGatilho();
 });
 
+// o clique (ou o F) que começou uma ação de jogo termina nela (soltar = arremessar)
+let cliqueDoJogo = false;
+let fDoJogo = false;
+window.addEventListener('keyup', (e) => {
+  if (e.code !== 'KeyF' || !fDoJogo) return;
+  fDoJogo = false;
+  soltarAcaoDosJogos();
+});
+document.addEventListener('mouseup', (e) => {
+  if (e.button !== 0 || !cliqueDoJogo) return;
+  cliqueDoJogo = false;
+  soltarAcaoDosJogos();
+});
+
+// Ação dos jogos (clique esquerdo, F ou o botão de toque): o primeiro jogo que tiver o que fazer
+// agora fica com ela. Devolve se algum usou.
+function acaoDosJogos() {
+  if (!state.joined || state.focus || futebol.jogando || typing()) return false;
+  return quadras.apertouF() || jogosDoParque.some((j) => j.apertou?.());
+}
+function soltarAcaoDosJogos() {
+  quadras.soltouF();
+  for (const j of jogosDoParque) j.soltou?.();
+}
+
 // Ponto de inspeção para testes automatizados. Só existe com ?debug=1 na URL —
 // em uso normal nada disso fica exposto.
 if (params.get('debug') === '1') {
   window.__sala3d = {
     state, player, combat, run, corrida, world, settings, punch, goToRing, respawn, mataMata, batalha, anuncios,
-    toggleVeiculo, irParaLargada, jogos, irParaMesa, exitFocus, dados,
+    toggleVeiculo, irParaLargada, jogos, irParaMesa, exitFocus, dados, quadras, jogosDoParque, pingue, queimada,
     tocarTela, telasMudas, liberarSomDasTelas, makeVideo, mesa, controle, abrirMesa, fecharMesa, marcaDaAba,
     publishShare, stopShare, acharTela, telasNoAr, get rtc() { return rtc; }, clima, ligarLuneta,
   };
@@ -5722,6 +5808,18 @@ function slowUpdate() {
   navegadores.atualizar();
   futebol.atualizarDica(!state.focus && !state.panel);
   quadras.atualizarDica(!state.focus && !state.panel && !futebol.jogando);
+  // a dica do primeiro jogo do parque que tiver uma
+  {
+    const livre = !state.focus && !state.panel && !futebol.jogando;
+    let d = '';
+    for (const j of jogosDoParque) if ((d = j.dica(livre))) break;
+    hudJogos.dica(d);
+    // no celular: o E e a ação aparecem perto de um jogo
+    touchPad?.setJogo({
+      e: livre && (/kbd>E</.test(d) || /kbd>E</.test(quadras.dicaAntes || '')),
+      acao: livre && (quadras.ativo() || jogosDoParque.some((j) => j.ativo?.())),
+    });
+  }
   dicaDoPortal(state.focus || state.panel ? '' : surf.pertoDoPortal() ? 'Ir para o surf' : mataMata.pertoDoPortal() ? 'Entrar no mata-mata'
     : batalha.pertoDoPortal() ? 'Entrar no mata-mata em times' : '');
   if (batalha.ativo && !jogoLigado('batalha')) batalha.sair(); // o dono da sala desligou
@@ -6089,6 +6187,7 @@ function frame(ts = performance.now()) {
     else player.update(dt);
     futebol.animar(dt);
     quadras.update(dt, t);
+    for (const j of jogosDoParque) j.update(dt, t);
     surf.update(dt);
     mataMata.update(dt);
     batalha.update(dt);

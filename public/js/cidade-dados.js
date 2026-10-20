@@ -60,7 +60,7 @@ export const PLACAS = [
     x: AV + 10,
     z: PRACA.z + PRACA.r - 3,
     giro: Math.PI,
-    linhas: [['↑  ESTÁDIO', '#22d3ee'], ['↑  QUADRAS', '#facc15'], ['↑  PRAÇA DOS JOGOS', '#a78bfa'], ['↑  AVENTURA', '#f472b6'], ['↑  LAGO', '#60a5fa']],
+    linhas: [['↑  ESTÁDIO', '#22d3ee'], ['↑  QUADRAS', '#facc15'], ['↑  PRAÇA DOS JOGOS', '#a78bfa'], ['↑  AVENTURA', '#f472b6'], ['↑  LAGO', '#60a5fa'], ['↑  PARQUE', '#4ade80']],
   },
   { x: PRACA.x - PRACA.r + 3, z: 39, giro: Math.PI / 2, linhas: [['↑  PRÉDIO', '#e2e8f0']] },
 ];
@@ -80,4 +80,7 @@ export const BOSQUES = [
   { x0: 100, x1: 150, z0: 330, z1: 420 },
   { x0: -52, x1: 36, z0: 230, z1: 335 }, // atrás das quadras
   { x0: -52, x1: 480, z0: 420, z1: 530 }, // o bosque do norte, em volta do lago
+  // o parque (parque-dados.js): mata atrás dos jogos e em volta do kartódromo (a pista fica livre)
+  { x0: -52, x1: 186, z0: 678, z1: 860 },
+  { x0: 186, x1: 480, z0: 540, z1: 860 },
 ];

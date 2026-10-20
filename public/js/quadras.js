@@ -1,12 +1,13 @@
 // Vôlei, basquete e boliche, jogados a pé com o próprio boneco, numa faixa ao norte do estádio.
 //
-// - Vôlei: encostar na bola é manchete (vai para onde a câmera olha, por cima); F perto da bola,
+// O botão de ação é o clique esquerdo (segurar e soltar carrega a força); o F faz o mesmo.
+// - Vôlei: encostar na bola é manchete (vai para onde a câmera olha, por cima); clique perto da bola,
 //   de preferência pulando, é cortada. Ponto quando a bola cai no chão; 4 toques do mesmo lado é
 //   falta. 15 pontos com 2 de diferença.
-// - Basquete: passou perto da bola solta, pega. Segurando F carrega o arremesso (a barra mostra o
+// - Basquete: passou perto da bola solta, pega. Segurando o clique carrega o arremesso (a barra mostra o
 //   ponto certo); soltou, arremessa na cesta para onde está olhando — olhando para outro lado, é
-//   passe. F perto de quem está com a bola tenta roubar. Placar de cada um (2 ou 3 pontos).
-// - Boliche: E na pista entra na fila (até 4). Na sua vez, segure F e solte para jogar; mira com
+//   passe. Clique perto de quem está com a bola tenta roubar. Placar de cada um (2 ou 3 pontos).
+// - Boliche: E na pista entra na fila (até 4). Na sua vez, segure o clique e solte para jogar; mira com
 //   a câmera e o lado de onde sai é onde você está. Placar de 10 quadros, com strike e spare.
 //
 // O servidor (quadras-servidor.js) manda no placar e na vez; a física é a mesma dos dois lados
@@ -127,7 +128,7 @@ export function construirVolei(world) {
       ctx.fillText('VÔLEI', w / 2, h / 2 - 22);
       ctx.font = FONTE(26, 600);
       ctx.fillStyle = '#94a3b8';
-      ctx.fillText('encoste na bola para sacar · F corta', w / 2, h / 2 + 44);
+      ctx.fillText('encoste na bola para sacar · clique corta', w / 2, h / 2 + 44);
       return;
     }
     ctx.font = FONTE(110);
@@ -231,7 +232,7 @@ export function construirBasquete(world) {
     if (!lista.length) {
       ctx.font = FONTE(24, 600);
       ctx.fillStyle = '#94a3b8';
-      ctx.fillText('pegue a bola · segure F e solte na hora certa', w / 2, h / 2 + 20);
+      ctx.fillText('pegue a bola · segure o clique e solte na hora certa', w / 2, h / 2 + 20);
       return;
     }
     ctx.font = FONTE(30, 700);
@@ -439,7 +440,7 @@ function pinoMalha() {
 
 // ------------------------------------------------------------------ o jogo no navegador
 export class Quadras {
-  // opts: world, player, sfx, toast, ligado(nome), livre() (dá para usar F/E agora), posDe(id),
+  // opts: world, player, sfx, toast, ligado(nome), livre() (dá para usar clique/F/E agora), posDe(id),
   // yawDe(id) (onde está e para onde olha cada pessoa da sala)
   constructor(opts) {
     Object.assign(this, opts);
@@ -471,15 +472,9 @@ export class Quadras {
       return { z, e: null, pinos, bola, filme: null, t: 0, carga: null };
     });
 
-    this.carga = null; // { jogo, desde } enquanto F está apertado
+    this.carga = null; // { jogo, desde } enquanto o clique (ou o F) está apertado
     this.montarHud();
-    window.addEventListener('keydown', (e) => {
-      if (e.code !== 'KeyF' || e.repeat || !this.livre()) return;
-      this.apertouF();
-    });
-    window.addEventListener('keyup', (e) => {
-      if (e.code === 'KeyF') this.soltouF();
-    });
+    // o clique esquerdo e o F chegam pelo main.js (acaoDosJogos), que decide qual jogo usa
   }
 
   // ---------------------------------------------------------------- rede
@@ -620,7 +615,7 @@ export class Quadras {
       }
     }
     if (e.dono === this.eu && antes?.dono !== this.eu) {
-      this.toast('Bola com você: segure F e solte na hora certa para arremessar.', 'info', 2600);
+      this.toast('Bola com você: segure o clique e solte na hora certa para arremessar.', 'info', 2600);
       this.sfx.message();
     }
     if (e.dono !== this.eu && this.carga?.jogo === 'basquete') this.carga = null;
@@ -694,7 +689,7 @@ export class Quadras {
     }
   }
 
-  // soltou o F com a bola: arremesso na cesta para onde olha (ou passe, olhando para outro lado)
+  // soltou o clique (ou o F) com a bola: arremesso na cesta para onde olha (ou passe, olhando para outro lado)
   arremessar(carga) {
     const S = this.bas;
     const pl = this.player;
@@ -743,7 +738,7 @@ export class Quadras {
     const minha = e.jogadores[e.vez]?.id === this.eu && e.fase === 'jogando';
     const eraMinha = antes && antes.jogadores[antes.vez]?.id === this.eu && antes.fase === 'jogando';
     if (minha && !eraMinha) {
-      this.mensagem('Sua vez!', 'Segure F e solte para jogar. Mire com a câmera.', 2200, '#facc15');
+      this.mensagem('Sua vez!', 'Segure o clique e solte para jogar. Mire com a câmera.', 2200, '#facc15');
       this.sfx.message();
     }
     if (e.fase === 'fim' && antes?.fase !== 'fim' && e.jogadores.some((j) => j.id === this.eu)) {
@@ -836,7 +831,8 @@ export class Quadras {
   }
 
   // ---------------------------------------------------------------- teclas
-  // F apertado: começa a carregar (basquete com a bola, boliche na vez), ou bate/rouba na hora
+  // Clique (ou F) apertado: começa a carregar (basquete com a bola, boliche na vez), ou bate/rouba
+  // na hora. Devolve se usou o clique (o main.js não soca nem foca tela com ele).
   apertouF() {
     const agora = performance.now();
     // vôlei: cortada (ou toque) com a bola perto
@@ -845,7 +841,7 @@ export class Quadras {
       const p = this.player.pos;
       if (_a.set(p.x, p.y + 1.9, p.z).distanceTo(V.bola.p) < 1.9) {
         this.baterVolei(true);
-        return;
+        return true;
       }
     }
     // basquete
@@ -853,14 +849,14 @@ export class Quadras {
     if (this.ligado('basquete') && e) {
       if (e.dono === this.eu) {
         this.carga = { jogo: 'basquete', desde: agora };
-        return;
+        return true;
       }
       if (e.dono) {
         const pos = this.posDe(e.dono);
         const p = this.player.pos;
         if (pos && Math.hypot(pos.x - p.x, pos.z - p.z) < 1.9) {
           this.socket?.emit('bas-roubar');
-          return;
+          return true;
         }
       }
     }
@@ -869,22 +865,33 @@ export class Quadras {
     const P = this.bol[i];
     if (i >= 0 && this.ligado('boliche') && P.e?.fase === 'jogando' && P.e.jogadores[P.e.vez]?.id === this.eu && !P.filme) {
       this.carga = { jogo: 'boliche', pista: i, desde: agora };
+      return true;
     }
+    return false;
   }
 
   soltouF() {
     const c = this.carga;
-    if (!c) return;
+    if (!c) return false;
     this.carga = null;
     const carga = this.valorCarga(c);
     if (c.jogo === 'basquete' && this.bas.e?.dono === this.eu) this.arremessar(carga);
     else if (c.jogo === 'boliche') this.jogarBoliche(c.pista, carga);
+    return true;
   }
 
   // vai e volta: 0 -> 1 em 1,1 s, depois volta (segurar demais não ajuda)
   valorCarga(c) {
     const s = ((performance.now() - c.desde) / 1100) % 2;
     return s <= 1 ? s : 2 - s;
+  }
+
+  // a ação (clique, F ou o botão do celular) vale agora: na areia do vôlei, na quadra de basquete ou
+  // na sua pista do boliche
+  ativo() {
+    return (this.ligado('volei') && this.perto({ x: VOLEI.cx, z: VOLEI.cz }, 16))
+      || (this.ligado('basquete') && this.perto({ x: BASQUETE.cx, z: BASQUETE.cz }, 18))
+      || (this.ligado('boliche') && this.minhaPista() >= 0 && this.pistaPerto() === this.minhaPista());
   }
 
   // E: entrar ou sair da fila de uma pista do boliche. Devolve se usou o E.
@@ -903,7 +910,7 @@ export class Quadras {
       return true;
     }
     this.socket?.emit('bol-entrar', { pista: i }, (r) => {
-      if (r?.ok) this.toast(`Você entrou na pista ${i + 1}. Na sua vez: segure F e solte.`, 'info', 3200);
+      if (r?.ok) this.toast(`Você entrou na pista ${i + 1}. Na sua vez: segure o clique e solte.`, 'info', 3200);
       else if (r?.erro === 'cheia') this.toast('Pista cheia (4 jogadores). Tente a outra.', 'warn', 2200);
     });
     return true;
@@ -914,7 +921,7 @@ export class Quadras {
     this.updateVolei(dt, t);
     this.updateBasquete(dt, t);
     this.updateBoliche(dt);
-    // a barra de força enquanto F está apertado
+    // a barra de força enquanto o clique (ou o F) está apertado
     if (this.carga) {
       const v = this.valorCarga(this.carga);
       this.forca.hidden = false;
@@ -935,7 +942,7 @@ export class Quadras {
       const minha = this.minhaPista();
       if (minha === i) {
         const vez = P.e?.jogadores[P.e.vez];
-        txt = P.e?.fase === 'jogando' && vez?.id === this.eu ? '<kbd>F</kbd>Segure e solte para jogar · <kbd>E</kbd>sair' : `Vez de ${vez?.nome || '…'} · <kbd>E</kbd>sair da pista`;
+        txt = P.e?.fase === 'jogando' && vez?.id === this.eu ? '<kbd>Clique</kbd>Segure e solte para jogar · <kbd>E</kbd>sair' : `Vez de ${vez?.nome || '…'} · <kbd>E</kbd>sair da pista`;
       } else if (minha < 0) txt = `<kbd>E</kbd>Jogar boliche na pista ${i + 1}`;
     }
     if (txt !== this.dicaAntes) {

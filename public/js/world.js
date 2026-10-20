@@ -19,10 +19,16 @@ import { planta, salaEm, rotuloDaTela, postoDaTela, chaveDaTela, DEPARTAMENTOS, 
 import * as moduloQualidade from './qualidade.js';
 import { NOVO } from './mundo.js';
 import { construirCidade } from './cidade.js';
+import { construirParque } from './parque.js';
+import { construirPingue } from './pingue.js';
+import { construirQueimada } from './queimada.js';
 
-// Área jogável inteira (cercada): a sala do cinema num canto, em volta da origem, e o
-// autódromo ao ar livre a leste. O telão do cinema continua em minZ, perto da plateia.
-export const ROOM = { minX: -52, maxX: 480, minZ: -40, maxZ: 530, height: 60 };
+// Área jogável inteira (cercada): a sala do cinema num canto, em volta da origem, o
+// autódromo ao ar livre a leste e, no norte, o parque (parque-dados.js), que levou a cerca de
+// z = 530 para 860. O telão do cinema continua em minZ, perto da plateia.
+export const ROOM = { minX: -52, maxX: 480, minZ: -40, maxZ: 860, height: 60 };
+// a área de antes do parque: o lago do mundo clássico continua sendo procurado só nela (ver criarNatureza)
+const ROOM_ANTES_DO_PARQUE = { ...ROOM, maxZ: 530 };
 // A sala do cinema: fechada e igual por dentro ao que sempre foi. A porta fica na parede
 // leste, virada para o autódromo.
 export const SALA = { minX: ROOM.minX, maxX: 60, minZ: ROOM.minZ, maxZ: 60, height: ROOM.height, porta: { z0: 14, z1: 46, altura: 18 } };
@@ -783,6 +789,10 @@ export class World {
     };
     // no mundo novo as placas ficam na praça (cidade.js)
     if (!NOVO) this.placaDirecao(69, 58, -Math.PI / 2, 'VÔLEI · BASQUETE · BOLICHE  →', '#facc15');
+    // o parque, no norte: praça, ruas e o salão de jogos (os jogos de lá vêm a seguir, cada um uma área)
+    this.parque = construirParque(this);
+    this.pingue3d = this.area('pingue', () => construirPingue(this));
+    this.queimada3d = this.area('queimada', () => construirQueimada(this));
     // surf e mata-mata, no céu; os portais ficam perto da porta (o jogo é do ceu.js)
     this.ceu = {
       surf: this.area('surf', () => (construirPortal(this, 'surf'), construirSurf(this))),
@@ -794,7 +804,7 @@ export class World {
     this.reservas.push(...RESERVAS_JOGOS);
     if (!NOVO) this.placaDirecao(SALA.maxX + 9, SALA.porta.z0 + 2, -Math.PI / 2, '↖  JOGOS E DADOS', '#a78bfa');
     this.natureza = criarNatureza(this.scene, this.renderer, {
-      area: ROOM, sala: SALA, reservas: this.reservas, estradas: this.estradas, addBox: (o) => this.addBox(o), grupo: this.fora,
+      area: ROOM, areaLago: ROOM_ANTES_DO_PARQUE, sala: SALA, reservas: this.reservas, estradas: this.estradas, addBox: (o) => this.addBox(o), grupo: this.fora,
       ...(this.cidade?.natureza || {}),
     });
     const P = SALA.porta;

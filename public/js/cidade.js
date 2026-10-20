@@ -14,6 +14,7 @@ import { PISTA, CAMINHO, pontoEm } from './pista.js';
 import { ESTADIO } from './futebol.js';
 import { VOLEI, BASQUETE, BOLICHE } from './quadras-fisica.js';
 import { SURF } from './ceu-dados.js';
+import { PARQUE, RUAS_PARQUE, SALAO, QUEIMADA, PINTA_ARENA, GOLFE_AREA, KART_AREA } from './parque-dados.js';
 import * as moduloQualidade from './qualidade.js';
 
 const ESC = moduloQualidade.ESCALA_TEXTURA ?? 1;
@@ -43,7 +44,7 @@ function textura(w, h, desenhar, { repetir = false } = {}) {
 }
 
 // várias geometrias numa malha só (um desenho)
-function fundir(geos, mat, { sombra = false, recebe = false } = {}) {
+export function fundir(geos, mat, { sombra = false, recebe = false } = {}) {
   const m = new THREE.Mesh(mergeGeometries(geos.map((g) => (g.index ? g.toNonIndexed() : g))), mat);
   for (const g of geos) g.dispose();
   m.castShadow = sombra;
@@ -57,7 +58,7 @@ const no = (geo, x, y, z, giro = 0) => geo.applyMatrix4(_m.compose(_p.set(x, y, 
 // Peças do mesmo material entram num lote e viram uma malha só no fim (construirCidade): o ferro
 // escuro (postes, pés de banco, corrimão, pilares, hastes de placa), a madeira dos bancos e o fundo
 // escuro das placas e do mapa. Cada lote é um desenho a menos por peça.
-const novosLotes = () => ({ ferro: [], madeira: [], escuro: [] });
+export const novosLotes = () => ({ ferro: [], madeira: [], escuro: [] });
 
 // cor por vértice, para juntar peças de cores diferentes num desenho só
 function pintar(geo, cor) {
@@ -158,7 +159,7 @@ function texturaPraca() {
 }
 
 // pracinha de pedra com anéis na cor da área (aventura, mirante)
-function texturaRedonda(cor) {
+export function texturaRedonda(cor) {
   return textura(512, 512, (ctx, w) => {
     const c = w / 2;
     ctx.fillStyle = '#d8d1c3';
@@ -225,7 +226,7 @@ function texturaCortina() {
   }, { repetir: true });
 }
 
-function texturaPlaca(texto, cor, { w = 1024, h = 192, tam = 104 } = {}) {
+export function texturaPlaca(texto, cor, { w = 1024, h = 192, tam = 104 } = {}) {
   return textura(w, h, (ctx) => {
     ctx.fillStyle = '#101826';
     ctx.fillRect(0, 0, w, h);
@@ -255,7 +256,7 @@ function ruasComPista() {
 }
 
 // uma fita de pedra por trecho reto, com uma rodela de emenda nas curvas
-function construirRuas(g, ruas) {
+export function construirRuas(g, ruas) {
   const tex = texturaRua();
   const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.92 });
   const geos = [];
@@ -389,7 +390,7 @@ function construirPraca(g, world, decor, L, saidas) {
   g.add(fundir(sebe, new THREE.MeshStandardMaterial({ color: 0x3f7a3a, roughness: 0.95 }), { sombra: true, recebe: true }));
 }
 
-function plantarFlores(g, flores, y) {
+export function plantarFlores(g, flores, y) {
   const geo = new THREE.IcosahedronGeometry(0.22, 0);
   const mat = new THREE.MeshStandardMaterial({ roughness: 0.8 });
   const malha = new THREE.InstancedMesh(geo, mat, flores.length);
@@ -459,7 +460,7 @@ function construirFonte(g, world, decor) {
 }
 
 // bancos de madeira com pés de ferro; o assento é colisor de sofá (C senta)
-function construirBancos(L, world, bancos) {
+export function construirBancos(L, world, bancos) {
   const { madeira, ferro } = L;
   for (const b of bancos) {
     madeira.push(no(new THREE.BoxGeometry(2.6, 0.1, 0.62), b.x, 0.5, b.z, b.giro));
@@ -496,6 +497,7 @@ function construirPracinhas(g, world, L) {
   const A = PRACA_AVENTURA;
   const luzes = [];
   for (let k = 1; k < 8; k++) {
+    if (k === 2 || k === 6) continue; // a Rua do Parque atravessa a praça de norte a sul (parque-dados.js)
     const a = (k / 8) * Math.PI * 2;
     const px = A.x + Math.cos(a) * (A.r - 1);
     const pz = A.z + Math.sin(a) * (A.r - 1);
@@ -524,7 +526,9 @@ function construirPracinhas(g, world, L) {
 // ------------------------------------------------------------------ postes de luz
 // Postes de praça (haste escura e lanterna que acende à noite), alternando os lados das ruas e em
 // volta da praça. Sem luz de verdade: só a lanterna brilha (muitas luzes pesariam no shader).
-function construirPostes(g, ruas, L, saidas) {
+// praca: false nas ruas do parque (parque.js), que não passam pela praça central; evitar: círculos
+// { x, z, r } onde não vai poste (as pracinhas por onde a rua passa)
+export function construirPostes(g, ruas, L, saidas, { praca = true, evitar = [] } = {}) {
   const hastes = L.ferro;
   const lanternas = [];
   const poste = (x, z) => {
@@ -532,7 +536,8 @@ function construirPostes(g, ruas, L, saidas) {
     hastes.push(new THREE.CylinderGeometry(0.2, 0.2, 0.12, 8).translate(x, 4.25, z));
     lanternas.push(new THREE.SphereGeometry(0.34, 14, 10).translate(x, 4.6, z));
   };
-  const naPraca = (x, z, folga) => Math.hypot(x - PRACA.x, z - PRACA.z) < PRACA.r + folga;
+  const naPraca = (x, z, folga) => Math.hypot(x - PRACA.x, z - PRACA.z) < PRACA.r + folga
+    || evitar.some((c) => Math.hypot(x - c.x, z - c.z) < c.r + folga);
   for (const r of ruas) {
     for (let i = 0; i < r.pontos.length - 1; i++) {
       const [x0, z0] = r.pontos[i];
@@ -549,13 +554,16 @@ function construirPostes(g, ruas, L, saidas) {
       }
     }
   }
-  for (let k = 0; k < 12; k++) {
+  for (let k = 0; praca && k < 12; k++) {
     const a = (k / 12) * Math.PI * 2 + Math.PI / 12;
     if (naSaida(saidas, a, PRACA.r - 3, 1)) continue;
     poste(PRACA.x + Math.cos(a) * (PRACA.r - 3), PRACA.z + Math.sin(a) * (PRACA.r - 3));
   }
-  g.add(fundir(lanternas, new THREE.MeshBasicMaterial({ color: 0xfff1c9, toneMapped: false })));
+  return lanternas;
 }
+
+// as lanternas acesas, todas numa malha só
+export const malhaLanternas = (lanternas) => fundir(lanternas, new THREE.MeshBasicMaterial({ color: 0xfff1c9, toneMapped: false }));
 
 // a rua passa a menos de (largura/2 + folga) do ponto?
 function pertoDe(rua, x, z, folga) {
@@ -571,9 +579,9 @@ function pertoDe(rua, x, z, folga) {
 }
 
 // ------------------------------------------------------------------ pórticos das áreas
-function construirPorticos(g, world, L) {
+export function construirPorticos(g, world, L, lista = PORTICOS) {
   const pilar = [];
-  for (const p of PORTICOS) {
+  for (const p of lista) {
     const meio = p.vao / 2 + 0.7;
     const altura = 7.2;
     const grupo = new THREE.Group();
@@ -600,7 +608,7 @@ function construirPorticos(g, world, L) {
 // ------------------------------------------------------------------ placas e mapa
 // Poste com placas empilhadas, uma por destino (texto já com a seta): todas numa textura só, num
 // plano só, com um fio transparente entre uma placa e a outra.
-function placaDeSaida(g, L, x, z, giro, linhas) {
+export function placaDeSaida(g, L, x, z, giro, linhas) {
   const LW = 768;
   const LH = 128;
   const VAO = 26;
@@ -634,7 +642,7 @@ function texturaMapa(aqui) {
   const x0 = -60;
   const x1 = 488;
   const z0 = -48;
-  const z1 = 538;
+  const z1 = 868; // até a cerca do norte, com o parque
   // Quem lê o mapa está de frente para leste (de costas para o prédio): o leste fica para cima e o
   // norte à esquerda, como o que a pessoa tem à frente.
   const marg = 60;
@@ -693,7 +701,7 @@ function texturaMapa(aqui) {
     // ruas e praças
     ctx.strokeStyle = '#d6cfc2';
     ctx.lineCap = 'round';
-    for (const r of Object.values(RUAS)) {
+    for (const r of [...Object.values(RUAS), ...Object.values(RUAS_PARQUE)]) {
       ctx.lineWidth = Math.max(6, r.largura * esc);
       ctx.beginPath();
       r.pontos.forEach(([x, z], i) => {
@@ -705,8 +713,22 @@ function texturaMapa(aqui) {
     }
     const J = PRACA_JOGOS;
     bloco(J.x0, J.z0, J.x1, J.z1, '#8b7fb8');
+    // o parque: salão de jogos, minigolfe, queimada, pinta-território e kartódromo
+    bloco(SALAO.x0, SALAO.z0, SALAO.x1, SALAO.z1, '#16a34a');
+    bloco(GOLFE_AREA.x0, GOLFE_AREA.z0, GOLFE_AREA.x1, GOLFE_AREA.z1, '#4ade80');
+    bloco(QUEIMADA.cx - QUEIMADA.comp / 2, QUEIMADA.cz - QUEIMADA.larg / 2, QUEIMADA.cx + QUEIMADA.comp / 2, QUEIMADA.cz + QUEIMADA.larg / 2, '#f97316');
+    const PA = PINTA_ARENA;
+    bloco(PA.cx - PA.lado / 2, PA.cz - PA.lado / 2, PA.cx + PA.lado / 2, PA.cz + PA.lado / 2, '#d946ef');
+    ctx.strokeStyle = '#1f2430';
+    ctx.lineWidth = 3;
+    {
+      const [ka, kb] = px(KART_AREA.x0 + 6, KART_AREA.z1 - 6);
+      const [kc, kd] = px(KART_AREA.x1 - 6, KART_AREA.z0 + 6);
+      roundRect(ctx, Math.min(ka, kc), Math.min(kb, kd), Math.abs(kc - ka), Math.abs(kd - kb), 30);
+      ctx.stroke();
+    }
     ctx.fillStyle = '#e9e3d6';
-    for (const c of [PRACA, PRACA_AVENTURA, MIRANTE]) {
+    for (const c of [PRACA, PRACA_AVENTURA, MIRANTE, PARQUE]) {
       const [qx, qy] = px(c.x, c.z);
       ctx.beginPath();
       ctx.arc(qx, qy, Math.max(8, c.r * esc), 0, Math.PI * 2);
@@ -735,6 +757,10 @@ function texturaMapa(aqui) {
     nome('ESTÁDIO', ESTADIO.cx, ESTADIO.cz, '#a5f3fc');
     nome('QUADRAS', 22, 196, '#fde68a', 22);
     nome('AVENTURA', PRACA_AVENTURA.x, PRACA_AVENTURA.z + 22, '#fbcfe8', 22);
+    nome('PARQUE', PARQUE.x, PARQUE.z, '#0f172a', 20);
+    nome('SALÃO', (SALAO.x0 + SALAO.x1) / 2, (SALAO.z0 + SALAO.z1) / 2, '#dcfce7', 20);
+    nome('GOLFE', (GOLFE_AREA.x0 + GOLFE_AREA.x1) / 2, (GOLFE_AREA.z0 + GOLFE_AREA.z1) / 2, '#14532d', 20);
+    nome('KART', (KART_AREA.x0 + KART_AREA.x1) / 2, (KART_AREA.z0 + KART_AREA.z1) / 2, '#fef08a', 26);
     for (const [t, x, z, cor, tam] of NOMES_DO_MAPA) nome(t, x, z, cor, tam);
     // você está aqui
     const [vx, vy] = px(aqui.x, aqui.z);
@@ -756,6 +782,7 @@ function texturaMapa(aqui) {
     const legenda = [
       ['Praça central', '#e9e3d6'], ['Ruas', '#d6cfc2'], ['Autódromo', '#ef4444'], ['Estádio', '#0e7490'],
       ['Quadras', '#ca8a04'], ['Praça dos jogos', '#8b7fb8'], ['Aventura', '#f472b6'], ['Lago', '#3b82c4'], ['Bosque', '#25492e'],
+      ['Salão de jogos', '#16a34a'], ['Minigolfe', '#4ade80'], ['Queimada', '#f97316'], ['Pinta-território', '#d946ef'],
     ];
     legenda.forEach(([t, c], i) => {
       ctx.fillStyle = c;
@@ -827,7 +854,7 @@ export function construirCidade(world) {
   construirRuas(g, ruas);
   construirPraca(g, world, decor, L, saidas);
   construirPracinhas(g, world, L);
-  construirPostes(g, ruas, L, saidas);
+  g.add(malhaLanternas(construirPostes(g, ruas, L, saidas)));
   construirPorticos(g, world, L);
   construirMapa(g, world, L);
   for (const p of PLACAS) placaDeSaida(g, L, p.x, p.z, p.giro, p.linhas);

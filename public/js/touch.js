@@ -174,6 +174,12 @@ export function setupTouchControls(player, actions = {}) {
   const luneta = root.querySelector('#tb-luneta');
   if (luneta && actions.luneta) setupButton(luneta, { onPress: actions.luneta });
 
+  // jogos do parque e quadras: o E e a ação (segurar carrega, soltar arremessa)
+  const jogoE = root.querySelector('#tb-jogo-e');
+  if (jogoE && actions.jogoE) setupButton(jogoE, { onPress: actions.jogoE });
+  const jogoAcao = root.querySelector('#tb-jogo-acao');
+  if (jogoAcao && actions.jogoAcao) setupButton(jogoAcao, { onPress: actions.jogoAcao, onRelease: actions.jogoSoltar });
+
   const descer = root.querySelector('#tb-descer');
   if (descer) {
     setupButton(descer, {
@@ -245,6 +251,12 @@ export function setupTouchControls(player, actions = {}) {
         pedais.acelera = pedais.freio = false;
         atualizarPedal();
       }
+    },
+    // perto de um jogo: e = dá para entrar/sair com o E; acao = o botão de ação vale agora
+    setJogo({ e = false, acao = false } = {}) {
+      if ($b('#tb-jogo-e').hidden === !e && $b('#tb-jogo-acao').hidden === !acao) return;
+      $b('#tb-jogo-e').hidden = !e;
+      $b('#tb-jogo-acao').hidden = !acao;
     },
     showPunch(on) {
       const el = root.querySelector('#tb-punch');

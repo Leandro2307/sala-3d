@@ -217,6 +217,7 @@
           <span><kbd>P</kbd> trocar personagem</span>
           <span data-jogo="corrida"><kbd>G</kbd> virar carro</span>
           <span data-jogo="ringue"><kbd>F</kbd> socar</span>
+          <span class="wide"><kbd>Clique</kbd> jogar a bola (quadras e parque)</span>
           <span data-jogo="poderes"><kbd>Q</kbd> voar</span>
           <span data-jogo="poderes"><kbd>J</kbd> pulo alto</span>
           <span id="help-tiro" hidden><kbd>X</kbd> atirar</span>
@@ -236,6 +237,7 @@
           <span><b>⤢</b> tela cheia · <b>😊</b> reações</span>
           <span><b>Asa</b> voar · <b>seta</b> pulo alto</span>
           <span><b>Luva</b> soca em qualquer lugar</span>
+          <span><b>Mira amarela</b> joga a bola · <b>E</b> entra no jogo</span>
         </div>
       </div>
     </div>
@@ -260,6 +262,11 @@
       <button type="button" class="tb pedal" id="tb-freio" hidden aria-label="Freio e ré"><i data-icon="freio" data-size="22"></i><span class="tb-label">Freio</span></button>
       <button type="button" class="tb big pedal" id="tb-acelera" hidden aria-label="Acelerar"><i data-icon="acelera" data-size="26"></i><span class="tb-label">Acelera</span></button>
       <button type="button" class="tb big" id="tb-jump" aria-label="Pular"><i data-icon="jump" data-size="26"></i></button>
+    </div>
+    <!-- jogos com bola (quadras e parque): o E e a ação (o clique do computador), só perto de um jogo -->
+    <div class="touch-jogo">
+      <button type="button" class="tb" id="tb-jogo-e" hidden aria-label="Entrar ou sair do jogo"><span class="tb-letra">E</span></button>
+      <button type="button" class="tb big acao" id="tb-jogo-acao" hidden aria-label="Ação do jogo"><i data-icon="mira" data-size="24"></i><span class="tb-label">Ação</span></button>
     </div>
     <button type="button" class="tb corner" id="tb-full" aria-label="Tela cheia"><i data-icon="maximize" data-size="18"></i></button>
     <div class="touch-poderes">
@@ -319,6 +326,7 @@
       <button type="button" class="ghost" data-panel="ringue" data-jogo="ringue" data-tip="Ringue de luta"><i data-icon="fist"></i></button>
       <button type="button" class="ghost" data-panel="corrida" data-jogo="corrida" data-tip="Pista de corrida"><i data-icon="car"></i></button>
       <button type="button" class="ghost" data-panel="jogos" data-jogo="xadrez dama velha dados" data-tip="Jogos, dados e moedas"><i data-icon="xadrez"></i></button>
+      <button type="button" class="ghost" data-panel="parque" data-jogo="pingue queimada" data-tip="Parque: pingue-pongue, queimada, sinuca e mais"><i data-icon="gamepad"></i></button>
       <button type="button" class="ghost" id="btn-personagem" data-tip="Personagem, cor e arma (P)"><i data-icon="user"></i></button>
       <button type="button" class="ghost" data-panel="settings" data-tip="Ajustes"><i data-icon="settings"></i></button>
       <!-- tela cheia também some com os avisos "Compartilhando … com esta guia" do Chrome -->
@@ -486,6 +494,17 @@
       <button type="button" class="secondary" id="jogos-dama" style="margin-top:8px"><i data-icon="goto" data-size="18"></i>Ir para a dama</button>
       <button type="button" class="secondary" id="jogos-velha" style="margin-top:8px"><i data-icon="goto" data-size="18"></i>Ir para o jogo da velha</button>
       <button type="button" class="secondary" id="jogos-dados" style="margin-top:8px"><i data-icon="dado" data-size="18"></i>Ir para a mesa de dados</button>
+    </section>
+
+    <!-- o parque (parque-dados.js): "Ir para" de cada jogo, montado pelo main.js (renderParque) -->
+    <section data-section="parque">
+      <p class="lead">No norte do mapa, subindo a Rua do Parque (atrás das quadras), fica o parque: salão de jogos, quadra e pistas. Escolha onde ir.</p>
+      <div class="irpara" id="parque-lista"></div>
+      <ul class="rules">
+        <li>Chegue no lugar de começar e aperte <kbd>E</kbd> para entrar no jogo (de novo, para sair).</li>
+        <li>O <kbd>clique</kbd> é a ação: segurar carrega a força, soltar arremessa ou tacada.</li>
+        <li>Quem vence ganha moedas.</li>
+      </ul>
     </section>
 
     <section data-section="corrida">

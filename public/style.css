@@ -1026,6 +1026,17 @@ body.touch .help-grid[data-input="touch"] { display: grid; }
 .tb.on { background: rgba(52, 99, 94, 0.7); border-color: rgba(110, 231, 200, 0.55); color: var(--accent); }
 .tb-label { font-size: 9px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
 .tb-label:empty { display: none; }
+/* E e ação dos jogos do parque e das quadras: acima dos botões de ação */
+.touch-jogo {
+  position: absolute;
+  right: calc(18px + env(safe-area-inset-right));
+  bottom: calc(118px + env(safe-area-inset-bottom));
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+.tb-letra { font-size: 20px; font-weight: 800; }
+.tb.big.acao { background: rgba(74, 52, 18, 0.7); border-color: rgba(250, 204, 21, 0.5); color: #facc15; }
 .tb.corner {
   position: absolute;
   right: calc(16px + env(safe-area-inset-right));

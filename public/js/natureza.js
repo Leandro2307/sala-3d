@@ -651,8 +651,10 @@ function criarCerca(scene, area, sala) {
 // Mundo novo (cidade.js): opts.lago { x, z, r } põe o lago no lugar em vez de procurar o maior que
 // cabe; opts.bosques [{ x0, x1, z0, z1 }] limita a mata de dentro da cerca a esses retângulos (o resto
 // é gramado limpo); opts.fileiras [{ x, z }] são as árvores das avenidas, plantadas uma a uma.
+// opts.areaLago: onde procurar o lago (o mundo clássico procura na área de antes do parque: o lago
+// continua onde sempre esteve)
 export function criarNatureza(scene, renderer, {
-  area, sala, reservas = [], estradas = [], addBox, grupo = scene, lago: lagoFixo = null, bosques = null, fileiras = [],
+  area, areaLago = area, sala, reservas = [], estradas = [], addBox, grupo = scene, lago: lagoFixo = null, bosques = null, fileiras = [],
 }) {
   const decorar = [];
   const ceu = criarCeu(grupo, SOL);
@@ -678,11 +680,12 @@ export function criarNatureza(scene, renderer, {
   // reservas e na cerca (o contorno chega a 1,12x o raio, mais a margem de areia)
   let melhor = lagoFixo ? { ...lagoFixo } : null;
   const ate = (d) => (d - 12) / 1.3; // maior raio que ainda deixa d metros de folga
-  for (let x = area.minX + 30; !lagoFixo && x < area.maxX - 30; x += 8) {
-    for (let z = area.minZ + 30; z < area.maxZ - 30; z += 8) {
+  const AL = areaLago;
+  for (let x = AL.minX + 30; !lagoFixo && x < AL.maxX - 30; x += 8) {
+    for (let z = AL.minZ + 30; z < AL.maxZ - 30; z += 8) {
       let r = Math.min(58, (distPista(x, z) - meia - 30) * 0.75);
       const dSala = Math.hypot(Math.max(0, x - sala.maxX), Math.max(0, z - sala.maxZ));
-      r = Math.min(r, ate(dSala), ate(x - area.minX), ate(area.maxX - x), ate(z - area.minZ), ate(area.maxZ - z));
+      r = Math.min(r, ate(dSala), ate(x - AL.minX), ate(AL.maxX - x), ate(z - AL.minZ), ate(AL.maxZ - z));
       for (const res of reservas) r = Math.min(r, ate(Math.hypot(x - res.x, z - res.z) - res.r));
       for (const { pontos, largura } of estradas) {
         for (let i = 0; i < pontos.length - 1; i++) r = Math.min(r, ate(distSegmento(x, z, ...pontos[i], ...pontos[i + 1]) - largura / 2));
