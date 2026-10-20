@@ -191,7 +191,7 @@ const cartas = new Cartas({
   soltarFoco: () => { if (state.focus?.kind === 'cartas') sairDoFoco(); },
 });
 jogosDoParque.push(cartas);
-// gincana no céu (o portal fica ao sul da Rua dos Esportes)
+// gincana: 10 fases e a final, bem longe do mapa (o portal fica ao sul da Rua dos Esportes)
 const gincana = new Gincana({
   world, player, sfx, ligado: () => jogoLigado('gincana'),
   aoEntrar: () => {
@@ -2513,7 +2513,7 @@ const JOGOS_DA_SALA = [
   ['golfe', 'Minigolfe', '9 buracos com moinho, morros e água'],
   ['truco', 'Truco', 'Truco paulista em duplas, com robôs'],
   ['uno', 'Uno', 'Até 6 na mesa, com robôs'],
-  ['gincana', 'Gincana', 'Corrida de obstáculos no céu e o piso que cai'],
+  ['gincana', 'Gincana', '10 fases estilo Fall Guys e a final dos hexágonos'],
   ['kart', 'Kart', 'Kartódromo com itens, 3 voltas'],
   ['pinta', 'Pinta-território', 'Times pintam o chão com tinta'],
 ];

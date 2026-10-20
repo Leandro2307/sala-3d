@@ -803,7 +803,7 @@ export class World {
     this.golfe3d = this.area('golfe', () => construirGolfe(this));
     // as duas mesas de cartas (truco e uno) são uma área só: some se o dono desligar os dois
     this.cartas3d = this.area('cartas', () => construirCartas(this));
-    // a gincana fica no céu, acima do parque; o portal, no chão
+    // o portal da gincana, no parque (as fases ficam bem longe e só nascem quando alguém entra)
     this.gincana3d = this.area('gincana', () => construirGincana(this));
     this.kart3d = this.area('kart', () => construirKart(this));
     this.pinta3d = this.area('pinta', () => construirPinta(this));
@@ -1167,6 +1167,7 @@ export class World {
     this.quadroSombra = 0;
     this.dirSombra = new THREE.Vector3(); // direção do sol no último mapa
     this.solNaSala = false; // caixa do sol presa a uma sala do escritório (ver focarSol)
+    this.alturaSol = null; // o chão sob a caixa do sol, quando não é o do mapa (a gincana, no céu)
     this.sunOffset = sun.position.clone().sub(sun.target.position);
     this.scene.add(sun, sun.target);
 
@@ -1206,13 +1207,15 @@ export class World {
       this.sombraSuja = true;
     }
     const alvo = this.sun.target.position;
+    // na gincana (lá longe, no céu) a caixa do sol desce até o chão das fases (ver alturaSol)
+    const chao = sala ? 0 : this.alturaSol ?? 0;
     if (sala) {
       // dentro da sala, o centro exato dela (sem a folga de 6 m de fora)
       x = (sala.x0 + sala.x1) / 2;
       z = (sala.z0 + sala.z1) / 2;
-      if (alvo.x === x && alvo.z === z) return;
-    } else if (Math.abs(alvo.x - x) < 6 && Math.abs(alvo.z - z) < 6) return;
-    alvo.set(x, 0, z);
+      if (alvo.x === x && alvo.z === z && alvo.y === chao) return;
+    } else if (Math.abs(alvo.x - x) < 6 && Math.abs(alvo.z - z) < 6 && alvo.y === chao) return;
+    alvo.set(x, chao, z);
     this.sun.position.copy(alvo).add(this.sunOffset);
     this.sun.target.updateMatrixWorld();
     this.sombraSuja = true;
