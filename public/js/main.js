@@ -32,6 +32,7 @@ import { Quadras } from './quadras.js';
 import { Pingue } from './pingue.js';
 import { Queimada } from './queimada.js';
 import { Sinuca } from './sinuca.js';
+import { Golfe } from './golfe.js';
 import { hud as hudJogos } from './hud-jogos.js';
 import { Surf, MataMata, dicaDoPortal } from './ceu.js';
 import { Batalha } from './batalha.js';
@@ -175,6 +176,9 @@ const sinuca = new Sinuca({
   soltarFoco: () => { if (state.focus?.kind === 'sinuca') sairDoFoco(); },
 });
 jogosDoParque.push(sinuca);
+// minigolfe, a oeste da praça do parque
+const golfe = new Golfe({ world, player, sfx, ligado: () => jogoLigado('golfe'), posDe: posDoId });
+jogosDoParque.push(golfe);
 // surf e mata-mata (no céu; portais perto da porta do cinema)
 const surf = new Surf({
   world, player, sfx, toast: (...a) => toast(...a), ligado: () => jogoLigado('surf'), socket: () => socket,
@@ -2455,8 +2459,9 @@ const JOGOS_DA_SALA = [
   ['pingue', 'Pingue-pongue', 'Salão de jogos do parque; sozinho, contra o robô'],
   ['queimada', 'Queimada', 'Times Azul × Vermelho, com cemitério'],
   ['sinuca', 'Sinuca', 'Bola 8 no salão de jogos, até dois por mesa'],
+  ['golfe', 'Minigolfe', '9 buracos com moinho, morros e água'],
 ];
-const AREAS_DE_JOGO = ['parkour', 'ringue', 'corrida', 'futebol', 'volei', 'basquete', 'boliche', 'surf', 'matamata', 'batalha', 'xadrez', 'dama', 'velha', 'dados', 'pingue', 'queimada', 'sinuca'];
+const AREAS_DE_JOGO = ['parkour', 'ringue', 'corrida', 'futebol', 'volei', 'basquete', 'boliche', 'surf', 'matamata', 'batalha', 'xadrez', 'dama', 'velha', 'dados', 'pingue', 'queimada', 'sinuca', 'golfe'];
 // parkour e ringue ficam dentro do cinema: no escritório não existem
 const SO_NO_CINEMA = ['parkour', 'ringue'];
 const modoEscritorio = () => state.sala?.modulo === 'escritorio' && state.sala.departamentos?.length > 0;
@@ -5747,7 +5752,7 @@ function soltarAcaoDosJogos() {
 if (params.get('debug') === '1') {
   window.__sala3d = {
     state, player, combat, run, corrida, world, settings, punch, goToRing, respawn, mataMata, batalha, anuncios,
-    toggleVeiculo, irParaLargada, jogos, irParaMesa, exitFocus, dados, quadras, jogosDoParque, pingue, queimada, sinuca,
+    toggleVeiculo, irParaLargada, jogos, irParaMesa, exitFocus, dados, quadras, jogosDoParque, pingue, queimada, sinuca, golfe,
     tocarTela, telasMudas, liberarSomDasTelas, makeVideo, mesa, controle, abrirMesa, fecharMesa, marcaDaAba,
     publishShare, stopShare, acharTela, telasNoAr, get rtc() { return rtc; }, clima, ligarLuneta,
   };
