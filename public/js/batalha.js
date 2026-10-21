@@ -12,6 +12,7 @@ import { BATALHA, TIMES, naBatalha } from './batalha-dados.js';
 import { PORTAIS } from './ceu-dados.js';
 import { textura, placaTexto } from './ceu.js';
 import { criarArma, ARMAS } from './armas.js';
+import { isTouch } from './touch.js';
 
 const FONTE = (p, peso = 800) => `${peso} ${p}px 'Plus Jakarta Sans', system-ui, sans-serif`;
 const VALENDO = ['preparo', 'luta', 'fimRodada'];
@@ -293,7 +294,9 @@ export class Batalha {
       this.sfx.teleport();
       this.anuncios.limpar();
       this.ver();
-      this.toast('Mata-mata em times: derrube o time inteiro do outro lado. Caiu, assiste até a rodada acabar. Armas no chão; clique ou X atira. N troca de time · Esc sai.', 'info', 8000);
+      this.toast(isTouch
+        ? 'Mata-mata em times: derrube o time inteiro do outro lado. Caiu, assiste até a rodada acabar. Armas no chão; a mira atira. O X do canto sai.'
+        : 'Mata-mata em times: derrube o time inteiro do outro lado. Caiu, assiste até a rodada acabar. Armas no chão; clique ou X atira. N troca de time · Esc sai.', 'info', 8000);
     });
   }
 
@@ -617,8 +620,10 @@ export class Batalha {
     this.hudEspectador = document.createElement('div');
     this.hudEspectador.className = 'bt-espectador';
     this.hudEspectador.hidden = true;
-    this.hudEspectador.innerHTML = 'ESPECTADOR · assistindo <b></b><small>clique ou <kbd>←</kbd> <kbd>→</kbd> troca · <kbd>N</kbd> troca de time · <kbd>Esc</kbd> sai</small>';
+    this.hudEspectador.innerHTML = `ESPECTADOR · assistindo <b></b><small>${isTouch ? 'toque aqui para trocar' : 'clique ou <kbd>←</kbd> <kbd>→</kbd> troca · <kbd>N</kbd> troca de time · <kbd>Esc</kbd> sai'}</small>`;
     this.hudAlvo = this.hudEspectador.querySelector('b');
+    // no celular não tem clique nem setas: tocar na faixa troca de quem se assiste
+    this.hudEspectador.addEventListener('pointerdown', () => this.trocarAlvo(1));
     this.hudContagem = document.createElement('div');
     this.hudContagem.className = 'bt-contagem';
     this.hudContagem.hidden = true;

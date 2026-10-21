@@ -928,7 +928,10 @@ async function join() {
     touchPad = setupTouchControls(player, {
       use: () => { if (state.hovered) enterFocus(state.hovered); else if (state.focus) exitFocus(); },
       view: toggleView,
-      respawn: () => { if (!state.focus && !jogosDoParque.some((j) => j.teclaR?.())) respawn(); },
+      respawn: () => teclaR(),
+      sairJogo: () => sairDoJogo(),
+      // em jogo a barra do topo some; o ☰ traz ela de volta
+      menu: () => document.body.classList.toggle('barra-aberta'),
       punch: () => punch(),
       sit: () => toggleSit(),
       car: () => toggleVeiculo(),
@@ -936,7 +939,7 @@ async function join() {
       puloAlto: () => togglePuloAlto(),
       tiro: () => puxarGatilho(),
       // jogos com bola: o E e a ação (o clique do computador)
-      jogoE: () => { if (!quadras.usarE()) jogosDoParque.some((j) => j.usarE?.()); },
+      jogoE: () => usarEDosJogos(),
       jogoAcao: () => { if (acaoDosJogos()) cliqueDoJogo = true; },
       jogoSoltar: () => {
         if (!cliqueDoJogo) return;
@@ -4681,13 +4684,20 @@ estiloMunicao.textContent = `#municao { position: fixed; right: 22px; bottom: 96
   color: #f8fafc; font: 800 22px 'Plus Jakarta Sans', system-ui, sans-serif; font-variant-numeric: tabular-nums; pointer-events: none; text-align: right; }
 #municao small { display: block; font-size: 11px; font-weight: 600; color: #94a3b8; letter-spacing: .06em; }
 #municao.vazio { color: #f87171; }
-#municao[hidden] { display: none; }`;
+#municao[hidden] { display: none; }
+body.touch #municao { pointer-events: auto; }`;
 document.head.appendChild(estiloMunicao);
+// no celular não tem R: tocar no pente recarrega
+elMunicao.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  recarregar();
+});
 let municaoAntes = '';
 function mostrarMunicao() {
   const arma = armaAtual();
   const ver = temArma() && state.joined && !player.veiculo;
-  const txt = !ver ? '' : recarga ? `…|${defArma(arma).nome} · recarregando` : `${balasDe(arma)} / ${pente(arma)}|${defArma(arma).nome}${mataMata.ativo || batalha.ativo ? ' · R recarrega' : ''}`;
+  const r = isTouch ? ' · toque para recarregar' : ' · R recarrega';
+  const txt = !ver ? '' : recarga ? `…|${defArma(arma).nome} · recarregando` : `${balasDe(arma)} / ${pente(arma)}|${defArma(arma).nome}${mataMata.ativo || batalha.ativo ? r : ''}`;
   if (txt === municaoAntes) return;
   municaoAntes = txt;
   elMunicao.hidden = !txt;
@@ -5628,36 +5638,14 @@ window.addEventListener('keydown', (e) => {
     else if (state.focus) sairDoFoco();
     else if (!$('#react-pop').hidden) $('#react-pop').hidden = true;
     else if (state.panel) closePanel();
-    else if (futebol.jogando) futebol.sair();
-    else if (surf.ativo) surf.sair();
-    else if (mataMata.ativo) mataMata.sair();
-    else if (batalha.ativo) batalha.sair();
-    else if (jogosDoParque.some((j) => j.esc?.())) { /* a gincana sai */ }
-    else run.abandon(); // preso no parkour? Esc sai da corrida
+    else sairDoJogo(); // futebol, céu, gincana, kart... ou preso no parkour
     return;
   }
   if (typing() || e.repeat || guia.aberto || escolha.aberto || avisoSite.aberto || !$('#tela-mais').hidden) return;
   // jogando futebol de carro: as letras são do carro (futebol.js); ficam só microfone, câmera,
   // chat e esconder a tela
   if (futebol.jogando && !['KeyM', 'KeyK', 'KeyT', 'Enter', 'KeyH'].includes(e.code)) return;
-  if (e.code === 'KeyE' && !state.focus && futebol.pertoDaEntrada()) {
-    futebol.entrar();
-    return;
-  }
-  if (e.code === 'KeyE' && !state.focus && quadras.usarE()) return; // fila do boliche
-  if (e.code === 'KeyE' && !state.focus && jogosDoParque.some((j) => j.usarE?.())) return; // jogos do parque
-  if (e.code === 'KeyE' && !state.focus && surf.pertoDoPortal()) {
-    surf.entrar();
-    return;
-  }
-  if (e.code === 'KeyE' && !state.focus && mataMata.pertoDoPortal()) {
-    mataMata.entrar();
-    return;
-  }
-  if (e.code === 'KeyE' && !state.focus && batalha.pertoDoPortal()) {
-    batalha.entrar();
-    return;
-  }
+  if (e.code === 'KeyE' && usarEDosJogos()) return; // futebol, boliche, parque e portais do céu
   // em times: N troca de time; assistindo, as setas trocam de quem se assiste
   if (batalha.ativo && !state.focus && e.code === 'KeyN') {
     batalha.trocarTime();
@@ -5665,11 +5653,6 @@ window.addEventListener('keydown', (e) => {
   }
   if (batalha.espectando && (e.code === 'ArrowLeft' || e.code === 'ArrowRight')) {
     batalha.trocarAlvo(e.code === 'ArrowRight' ? 1 : -1);
-    return;
-  }
-  // no surf, R volta para a etapa (não para a entrada do mapa)
-  if (e.code === 'KeyR' && surf.ativo && !state.focus) {
-    surf.voltar();
     return;
   }
   // usando o navegador da tela: as letras são do site, não atalhos do jogo (só o Esc sai)
@@ -5697,10 +5680,7 @@ window.addEventListener('keydown', (e) => {
       abrirMesa();
       break;
     case 'KeyR':
-      if (state.focus) break;
-      if (jogosDoParque.some((j) => j.teclaR?.())) break; // gincana: volta no último ponto
-      if (temArma() && recarregar()) break;
-      if (!mataMata.ativo && !batalha.ativo) respawn(); // no mata-mata o R só recarrega
+      teclaR(); // no surf volta para a etapa; no mata-mata recarrega
       break;
     case 'KeyV':
       toggleView();
@@ -5825,6 +5805,78 @@ function soltarAcaoDosJogos() {
   for (const j of jogosDoParque) j.soltou?.();
 }
 
+// O E dos jogos (tecla ou o botão E do celular): futebol, boliche, jogos do parque e os portais
+// do céu. Devolve se algum usou.
+function usarEDosJogos() {
+  if (state.focus) return false;
+  if (futebol.pertoDaEntrada()) { futebol.entrar(); return true; }
+  if (quadras.usarE() || jogosDoParque.some((j) => j.usarE?.())) return true;
+  if (surf.pertoDoPortal()) { surf.entrar(); return true; }
+  if (mataMata.pertoDoPortal()) { mataMata.entrar(); return true; }
+  if (batalha.pertoDoPortal()) { batalha.entrar(); return true; }
+  return false;
+}
+
+// O R (tecla ou o botão de voltar do celular): cada jogo decide o que é "voltar"
+function teclaR() {
+  if (state.focus) return;
+  if (surf.ativo) { surf.voltar(); return; }
+  if (jogosDoParque.some((j) => j.teclaR?.())) return; // gincana: volta no último ponto
+  if (temArma() && recarregar()) return;
+  if (!mataMata.ativo && !batalha.ativo) respawn(); // no mata-mata o R só recarrega
+}
+
+// Sair do jogo em que se está (o Esc do teclado; no celular, o X do canto). Devolve se saiu.
+function sairDoJogo() {
+  if (futebol.jogando) futebol.sair();
+  else if (surf.ativo) surf.sair();
+  else if (mataMata.ativo) mataMata.sair();
+  else if (batalha.ativo) batalha.sair();
+  else if (jogosDoParque.some((j) => j.esc?.())) { /* gincana, pinta e kart (correndo) saem */ }
+  else if (kart.inscrito) {
+    kart.sairDaCorrida(); // esperando a largada
+    hudJogos.mensagem('Saiu do kart', '', 1200);
+  } else if (run.state !== 'idle') run.abandon();
+  else return false;
+  return true;
+}
+
+// Em que jogo a pessoa está agora (ou ''): no celular, isso deixa a tela só com o que o jogo usa
+// (body[data-jogo]), e o X do canto aparece quando o jogo não tem um E para sair
+function jogoAtual() {
+  if (futebol.jogando) return 'futebol';
+  if (surf.ativo) return 'surf';
+  if (mataMata.ativo) return 'matamata';
+  if (batalha.ativo) return 'batalha';
+  if (gincana.dentro) return 'gincana';
+  if (kart.ativo() || (kart.ligado() && kart.inscrito)) return 'kart';
+  if (pinta.ativo()) return 'pinta';
+  if (queimada.ativo()) return 'queimada';
+  if (pingue.ativo()) return 'pingue';
+  if (sinuca.ativo()) return 'sinuca';
+  if (golfe.ativo()) return 'golfe';
+  if (quadras.ativo()) return 'quadras';
+  if (player.veiculo && (corrida.naPista || corrida.ativa)) return 'corrida';
+  if (combat.inRing) return 'ringue';
+  if (run.state !== 'idle') return 'parkour';
+  return '';
+}
+const SAI_COM_X = ['futebol', 'surf', 'matamata', 'batalha', 'gincana', 'kart', 'pinta', 'parkour'];
+let jogoNaTela = '';
+let armadoNaTela = false;
+function marcarJogoAtual() {
+  const j = state.joined && !state.focus ? jogoAtual() : ''; // num foco (sinuca, cartas) a barra fica
+  if (j === jogoNaTela) return;
+  jogoNaTela = j;
+  if (j) document.body.dataset.jogo = j;
+  else {
+    delete document.body.dataset.jogo;
+    document.body.classList.remove('barra-aberta');
+  }
+  const x = $('#tb-sair-jogo');
+  if (x) x.hidden = !SAI_COM_X.includes(j);
+}
+
 // Ponto de inspeção para testes automatizados. Só existe com ?debug=1 na URL —
 // em uso normal nada disso fica exposto.
 if (params.get('debug') === '1') {
@@ -5832,7 +5884,7 @@ if (params.get('debug') === '1') {
     state, player, combat, run, corrida, world, settings, punch, goToRing, respawn, mataMata, batalha, anuncios,
     toggleVeiculo, irParaLargada, jogos, irParaMesa, exitFocus, dados, quadras, jogosDoParque, pingue, queimada, sinuca, golfe, cartas, gincana, kart, pinta,
     tocarTela, telasMudas, liberarSomDasTelas, makeVideo, mesa, controle, abrirMesa, fecharMesa, marcaDaAba,
-    publishShare, stopShare, acharTela, telasNoAr, get rtc() { return rtc; }, clima, ligarLuneta,
+    publishShare, stopShare, acharTela, telasNoAr, get rtc() { return rtc; }, clima, ligarLuneta, futebol, surf, run,
   };
 }
 
@@ -5926,11 +5978,19 @@ function slowUpdate() {
     let d = '';
     for (const j of jogosDoParque) if ((d = j.dica(livre))) break;
     hudJogos.dica(d);
-    // no celular: o E e a ação aparecem perto de um jogo
+    // no celular: o E e a ação aparecem perto de um jogo (e dos portais do céu e do futebol)
     touchPad?.setJogo({
-      e: livre && (/kbd>E</.test(d) || /kbd>E</.test(quadras.dicaAntes || '')),
+      e: livre && (/kbd>E</.test(d) || /kbd>E</.test(quadras.dicaAntes || '') || futebol.pertoDaEntrada()
+        || surf.pertoDoPortal() || mataMata.pertoDoPortal() || batalha.pertoDoPortal()),
       acao: livre && (quadras.ativo() || jogosDoParque.some((j) => j.ativo?.())),
     });
+  }
+  marcarJogoAtual();
+  // a arma do mata-mata chega pela rede e pode trocar depois do aviso ao boneco: o botão de
+  // atirar do celular confere aqui
+  if (temArma() !== armadoNaTela) {
+    armadoNaTela = temArma();
+    poderesMudaram();
   }
   dicaDoPortal(state.focus || state.panel ? '' : surf.pertoDoPortal() ? 'Ir para o surf' : mataMata.pertoDoPortal() ? 'Entrar no mata-mata'
     : batalha.pertoDoPortal() ? 'Entrar no mata-mata em times' : '');

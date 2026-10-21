@@ -2435,6 +2435,126 @@ body.touch #panel {
   body.touch #controls-help:not(.collapsed) { max-height: calc(100vh - 150px); overflow-y: auto; }
 }
 
+/* avisos no celular: abaixo da barra e do botão de tela cheia, numa coluna estreita à direita
+   (no alto ficam a barra, os placares e a dica do jogo) */
+body.touch #toasts {
+  top: calc(108px + env(safe-area-inset-top));
+  right: calc(10px + env(safe-area-inset-right));
+  width: min(300px, 36vw);
+  gap: 6px;
+}
+body.touch .toast { padding: 8px 11px; font-size: 12px; line-height: 1.35; }
+@media (orientation: portrait) {
+  body.touch #toasts { top: calc(150px + env(safe-area-inset-top)); width: min(360px, calc(100vw - 20px)); }
+  /* em pé a dica de entrar num jogo bateria na etiqueta dos controles: fica embaixo dela */
+  body.touch:not([data-jogo]) :is(#pq-dica, #q-dica, #fut-dica, #ceu-dica) { top: calc(104px + env(safe-area-inset-top)); }
+}
+/* em pé a fileira de botões não cabe ao lado do analógico: os pequenos sobem para uma linha de
+   cima, e o soco e o pulo ficam embaixo; a coluna de poderes e a do jogo sobem junto */
+@media (orientation: portrait) {
+  body.touch .touch-actions { flex-wrap: wrap; justify-content: flex-end; align-content: flex-end; max-width: calc(100vw - 190px); row-gap: 8px; }
+  body.touch .touch-poderes, body.touch .touch-jogo { bottom: calc(170px + env(safe-area-inset-bottom)); }
+  body.touch[data-jogo] .touch-poderes, body.touch[data-jogo] .touch-jogo { bottom: calc(118px + env(safe-area-inset-bottom)); }
+}
+/* a dica de sentar tem botão próprio no celular (#tb-sit) */
+body.touch #sit-hint { display: none !important; }
+
+/* ------------------------------------------------------------ celular em jogo (body[data-jogo])
+   Jogando, a tela fica só com o que o jogo usa: a barra do topo some (o ☰ traz de volta), a ajuda
+   e os botões de passeio (voar, câmera, sentar...) saem, e os placares ficam com o topo. */
+.touch-jogo-topo {
+  position: absolute;
+  left: calc(10px + env(safe-area-inset-left));
+  top: calc(8px + env(safe-area-inset-top));
+  display: none;
+  gap: 8px;
+}
+body.touch[data-jogo] .touch-jogo-topo { display: flex; }
+body.touch[data-jogo]:not(.barra-aberta) #bar { display: none; }
+body.touch[data-jogo]:not(.barra-aberta) .tb.corner { top: calc(8px + env(safe-area-inset-top)); }
+body.touch.barra-aberta .touch-jogo-topo { top: calc(60px + env(safe-area-inset-top)); }
+body.touch.barra-aberta #tb-menu { background: rgba(110, 231, 200, 0.22); border-color: rgba(110, 231, 200, 0.5); }
+#tb-sair-jogo { color: #fb7185; border-color: rgba(244, 63, 94, 0.45); }
+#tb-sair-jogo[hidden] { display: none; }
+body.touch[data-jogo] #controls-help,
+body.touch[data-jogo] #hover-hint,
+body.touch[data-jogo] #tb-view,
+body.touch[data-jogo] #tb-sit,
+body.touch[data-jogo] #tb-use,
+body.touch[data-jogo] #tb-voar,
+body.touch[data-jogo] #tb-pulo,
+body.touch[data-jogo] #tb-descer { display: none !important; }
+/* carro e turbo só nas corridas e no futebol de carro; soco só onde se briga; o voltar (R) onde
+   ele faz sentido no jogo (nos outros ele tiraria a pessoa da partida) */
+body.touch[data-jogo]:not([data-jogo="corrida"]) #tb-car,
+body.touch[data-jogo]:not([data-jogo="corrida"]):not([data-jogo="futebol"]) #tb-run,
+body.touch[data-jogo]:not([data-jogo="ringue"]):not([data-jogo="matamata"]):not([data-jogo="batalha"]) #tb-punch,
+body.touch[data-jogo]:is([data-jogo="pingue"], [data-jogo="sinuca"], [data-jogo="golfe"], [data-jogo="queimada"], [data-jogo="pinta"],
+  [data-jogo="quadras"], [data-jogo="futebol"], [data-jogo="ringue"]) #tb-respawn { display: none !important; }
+/* perto de um jogo, o E e a ação ficam no lugar de voar e pulo alto */
+#touch.perto-de-jogo #tb-voar, #touch.perto-de-jogo #tb-pulo, #touch.perto-de-jogo #tb-descer { display: none; }
+
+/* sem a barra, os painéis dos jogos sobem para o topo */
+body.touch[data-jogo]:not(.barra-aberta) #race-hud,
+body.touch[data-jogo]:not(.barra-aberta) #parkour-hud,
+body.touch[data-jogo]:not(.barra-aberta) #fight-hud,
+body.touch[data-jogo]:not(.barra-aberta) #poderes-hud { top: calc(8px + env(safe-area-inset-top)); }
+body.touch[data-jogo] :is(.ceu-hud, .bt-hud, .fut-placar, #pq-placar, #race-hud, #parkour-hud, #fight-hud) { max-width: calc(100vw - 216px); }
+body.touch .ceu-hud { top: calc(8px + env(safe-area-inset-top)); gap: 10px; padding: 6px 12px; font-size: 12px; }
+body.touch .ceu-hud b { font-size: 17px; }
+body.touch .ceu-hud small:empty { display: none; }
+body.touch .bt-hud { top: calc(8px + env(safe-area-inset-top)); }
+body.touch .bt-time { padding: 4px 9px; }
+body.touch .bt-time b { font-size: 20px; }
+body.touch .bt-meio { min-width: 70px; padding: 2px 8px; }
+body.touch .bt-meio b { font-size: 16px; }
+body.touch .bt-eu { font-size: 11px; }
+body.touch .bt-espectador { pointer-events: auto; bottom: auto; top: calc(96px + env(safe-area-inset-top)); padding: 8px 14px; font-size: 13px; }
+body.touch .bt-contagem { font-size: 80px; }
+/* em pé não cabem os nomes dos times: a cor de cada lado já diz quem é quem */
+@media (max-width: 560px) {
+  body.touch .bt-time span { display: none; }
+  body.touch .bt-meio { min-width: 64px; }
+  body.touch .bt-meio small { font-size: 10px; text-align: center; }
+}
+body.touch.barra-aberta :is(.ceu-hud, .bt-hud, #pq-placar) { top: calc(60px + env(safe-area-inset-top)); }
+
+/* futebol de carro: placar menor, turbo no canto de cima (embaixo são os botões) e a ajuda curta */
+body.touch .fut-placar { top: calc(8px + env(safe-area-inset-top)); }
+body.touch .fut-placar b { min-width: 40px; font-size: 20px; padding: 2px 8px; }
+body.touch .fut-placar time { min-width: 70px; font-size: 16px; }
+body.touch .fut-turbo { top: calc(56px + env(safe-area-inset-top)); right: calc(10px + env(safe-area-inset-right)); bottom: auto; width: 64px; height: 64px; }
+body.touch .fut-turbo::before { inset: 6px; }
+body.touch .fut-turbo b { font-size: 20px; }
+body.touch .fut-turbo small { font-size: 7px; }
+body.touch #fut-msg b { font-size: clamp(34px, 9vw, 64px); }
+body.touch #fut-msg span { font-size: 14px; }
+body.touch #fut-ajuda { top: calc(56px + env(safe-area-inset-top)); bottom: auto; font-size: 12px; max-width: calc(100vw - 180px); }
+
+/* dicas e mensagens das quadras, do futebol e dos portais do céu: no alto, embaixo da barra */
+body.touch :is(#q-dica, #fut-dica, #ceu-dica) {
+  top: calc(60px + env(safe-area-inset-top));
+  bottom: auto;
+  padding: 7px 12px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  max-width: calc(100vw - 132px);
+  text-align: center;
+}
+body.touch[data-jogo] #q-dica { top: calc(56px + env(safe-area-inset-top)); }
+body.touch #q-dica kbd { background: #facc15; }
+body.touch #q-msg { top: 26%; padding: 0 16px; }
+body.touch #q-msg b { font-size: clamp(30px, 8vw, 52px); }
+body.touch #q-msg span { font-size: 14px; }
+body.touch #q-forca { bottom: calc(34px + env(safe-area-inset-bottom)); width: min(240px, calc(100vw - 420px)); min-width: 120px; height: 14px; }
+
+/* o pente da arma: tocar recarrega. Fica entre o analógico e os botões */
+body.touch #municao { right: auto; left: 50%; bottom: calc(22px + env(safe-area-inset-bottom)); transform: translateX(-50%); padding: 6px 12px; font-size: 18px; text-align: center; }
+@media (orientation: portrait) {
+  body.touch #q-forca { bottom: calc(190px + env(safe-area-inset-bottom)); width: 56vw; }
+  body.touch #municao { left: calc(22px + env(safe-area-inset-left)); transform: none; bottom: calc(176px + env(safe-area-inset-bottom)); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 1ms !important; transition-duration: 1ms !important; }
 }

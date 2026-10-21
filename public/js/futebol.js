@@ -12,6 +12,7 @@ import * as THREE from 'three';
 import { CAMPO, BOLA, ALMOFADAS, andarBola, colidirCampo, lugarDaSaida } from './futebol-fisica.js';
 import { NOVO } from './mundo.js';
 import { criarPersonagem, PERSONAGENS } from './modelo.js';
+import { isTouch } from './touch.js';
 
 export const ESTADIO = { cx: 18, cz: 125, giro: Math.PI / 2 };
 const W = CAMPO.largura / 2;
@@ -1117,9 +1118,11 @@ export class Futebol {
       <div class="fut-placar"><b class="t0" id="fut-p0">0</b><time id="fut-tempo">5:00</time><b class="t1" id="fut-p1">0</b></div>
       <div class="fut-turbo" id="fut-turbo" style="--t:33"><b>33</b><small>TURBO</small></div>
       <div id="fut-msg" hidden><b></b><span></span></div>
-      <div id="fut-ajuda" hidden>
+      <div id="fut-ajuda" hidden>${isTouch ? `
+        Analógico: acelerar, ré e virar · pulo: pular (de novo no ar: pulo duplo)<br>
+        correr ou analógico na borda: turbo (no ar, voa) · o X do canto sai` : `
         <kbd>W</kbd><kbd>S</kbd> acelerar e ré · <kbd>A</kbd><kbd>D</kbd> virar · <kbd>Espaço</kbd> pular (de novo no ar: pulo duplo; com direção: mortal)<br>
-        <kbd>Shift</kbd> ou clique: turbo (no ar, voa) · no ar: <kbd>W</kbd><kbd>S</kbd> empinar, <kbd>A</kbd><kbd>D</kbd> girar, <kbd>Q</kbd><kbd>E</kbd> rolar · <kbd>B</kbd> câmera na bola · <kbd>Esc</kbd> sair
+        <kbd>Shift</kbd> ou clique: turbo (no ar, voa) · no ar: <kbd>W</kbd><kbd>S</kbd> empinar, <kbd>A</kbd><kbd>D</kbd> girar, <kbd>Q</kbd><kbd>E</kbd> rolar · <kbd>B</kbd> câmera na bola · <kbd>Esc</kbd> sair`}
       </div>`;
     document.body.appendChild(this.hud);
     this.msg = this.hud.querySelector('#fut-msg');

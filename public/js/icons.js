@@ -69,6 +69,7 @@ const P = {
   salas: '<rect width="7" height="7" x="3" y="3" rx="3.5"/><rect width="7" height="7" x="3" y="14" rx="3.5"/><path d="M14 6.5h7"/><path d="M14 17.5h7"/>',
   luneta: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="1"/><path d="M12 3v5"/><path d="M12 16v5"/><path d="M3 12h5"/><path d="M16 12h5"/>',
   link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+  menu: '<path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/>',
 };
 
 export function icon(name, size = 20) {

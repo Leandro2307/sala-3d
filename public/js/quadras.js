@@ -17,6 +17,7 @@ import {
   VOLEI, andarVolei, ladoVolei, BASQUETE, aroBasquete, andarBasquete, forcaIdeal, ANGULO_ARREMESSO,
   BOLICHE, PINOS, simularBoliche, quadrosBoliche,
 } from './quadras-fisica.js';
+import { paraToque } from './hud-jogos.js';
 
 const LADOS = [{ nome: 'Azul', cor: '#3b82f6' }, { nome: 'Vermelho', cor: '#ef4444' }];
 const FONTE = (p, peso = 800) => `${peso} ${p}px 'Plus Jakarta Sans', system-ui, sans-serif`;
@@ -615,7 +616,7 @@ export class Quadras {
       }
     }
     if (e.dono === this.eu && antes?.dono !== this.eu) {
-      this.toast('Bola com você: segure o clique e solte na hora certa para arremessar.', 'info', 2600);
+      this.toast(paraToque('Bola com você: segure o clique e solte na hora certa para arremessar.'), 'info', 2600);
       this.sfx.message();
     }
     if (e.dono !== this.eu && this.carga?.jogo === 'basquete') this.carga = null;
@@ -910,7 +911,7 @@ export class Quadras {
       return true;
     }
     this.socket?.emit('bol-entrar', { pista: i }, (r) => {
-      if (r?.ok) this.toast(`Você entrou na pista ${i + 1}. Na sua vez: segure o clique e solte.`, 'info', 3200);
+      if (r?.ok) this.toast(paraToque(`Você entrou na pista ${i + 1}. Na sua vez: segure o clique e solte.`), 'info', 3200);
       else if (r?.erro === 'cheia') this.toast('Pista cheia (4 jogadores). Tente a outra.', 'warn', 2200);
     });
     return true;
@@ -947,7 +948,7 @@ export class Quadras {
     }
     if (txt !== this.dicaAntes) {
       this.dicaAntes = txt;
-      this.dica.innerHTML = txt;
+      this.dica.innerHTML = paraToque(txt);
       this.dica.hidden = !txt;
     }
   }
@@ -988,7 +989,7 @@ export class Quadras {
   mensagem(titulo, texto, ms, cor = '#f8fafc') {
     this.msg.querySelector('b').textContent = titulo;
     this.msg.querySelector('b').style.color = cor;
-    this.msg.querySelector('span').textContent = texto || '';
+    this.msg.querySelector('span').textContent = paraToque(texto || '');
     this.msg.hidden = false;
     clearTimeout(this.tMsg);
     this.tMsg = setTimeout(() => { this.msg.hidden = true; }, ms);

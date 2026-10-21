@@ -33,8 +33,9 @@ export const OBSTACULOS = [
   [-22, 0, -20, -19, 2, -17], [19, 0, 17, 22, 2, 20],
 ].map(([x0, y0, z0, x1, y1, z1]) => [A.cx + x0, y0, A.cz + z0, A.cx + x1, y1, A.cz + z1]);
 
-// as bases (onde cada time nasce), nos lados oeste e leste
-export const BASES = [{ x: A.cx - 24, z: A.cz }, { x: A.cx + 24, z: A.cz }];
+// as bases (onde cada time nasce), nos lados oeste e leste: a 8 m do muro, para a câmera (uns 6 m
+// atrás do boneco, que nasce olhando para o meio) não ficar do lado de fora
+export const BASES = [{ x: A.cx - 20, z: A.cz }, { x: A.cx + 20, z: A.cz }];
 // a entrada, do lado de fora do muro sul
 export const ENTRADA_PINTA = { x: A.cx, z: Z0 - 2.5 };
 

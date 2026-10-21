@@ -194,6 +194,8 @@ export function setupTouchControls(player, actions = {}) {
     '#tb-pulo': actions.puloAlto,
     '#tb-view': actions.view,
     '#tb-respawn': actions.respawn,
+    '#tb-sair-jogo': actions.sairJogo,
+    '#tb-menu': actions.menu,
     '#tb-punch': actions.punch,
     '#tb-sit': actions.sit,
     '#tb-car': actions.car,
@@ -255,6 +257,8 @@ export function setupTouchControls(player, actions = {}) {
     // perto de um jogo: e = dá para entrar/sair com o E; acao = o botão de ação vale agora
     setJogo({ e = false, acao = false } = {}) {
       if ($b('#tb-jogo-e').hidden === !e && $b('#tb-jogo-acao').hidden === !acao) return;
+      // o E e a ação ficam onde estavam voar e pulo alto: esses saem enquanto isso
+      root.classList.toggle('perto-de-jogo', e || acao);
       $b('#tb-jogo-e').hidden = !e;
       $b('#tb-jogo-acao').hidden = !acao;
     },

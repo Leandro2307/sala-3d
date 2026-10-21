@@ -13,6 +13,7 @@ import * as THREE from 'three';
 import { PORTAIS, SURF, ARENA, naArena } from './ceu-dados.js';
 import { criarArma, ARMAS } from './armas.js';
 import { NOVO } from './mundo.js';
+import { isTouch } from './touch.js';
 
 const FONTE = (p, peso = 800) => `${peso} ${p}px 'Plus Jakarta Sans', system-ui, sans-serif`;
 const CIMA = new THREE.Vector3(0, 1, 0);
@@ -366,7 +367,9 @@ export class Surf {
     this.voltar();
     this.socket()?.emit('surf-ver', (lista) => this.world.ceu.surf.placar.userData.redesenhar(lista));
     this.sfx.teleport();
-    this.toast('Surf: em cima da rampa, segure A ou D para o lado dela (sem W) e deslize. No ar, A ou D com o mouse virando para o mesmo lado ganha velocidade. Os anéis salvam o ponto de volta (R) · Esc sai.', 'info', 10000);
+    this.toast(isTouch
+      ? 'Surf: em cima da rampa, empurre o analógico para o lado dela (sem ir para a frente) e deslize. Os anéis salvam o ponto de volta (↺) · o X do canto sai.'
+      : 'Surf: em cima da rampa, segure A ou D para o lado dela (sem W) e deslize. No ar, A ou D com o mouse virando para o mesmo lado ganha velocidade. Os anéis salvam o ponto de volta (R) · Esc sai.', 'info', 10000);
   }
 
   ligarFisica() {
@@ -541,7 +544,7 @@ export class Surf {
     this.hud = document.createElement('div');
     this.hud.className = 'ceu-hud';
     this.hud.hidden = true;
-    this.hud.innerHTML = '<b>0.0 s</b><span>0 km/h</span><small><kbd>R</kbd> volta · <kbd>Esc</kbd> sai</small>';
+    this.hud.innerHTML = `<b>0.0 s</b><span>0 km/h</span><small>${isTouch ? '' : '<kbd>R</kbd> volta · <kbd>Esc</kbd> sai'}</small>`;
     this.hudTempo = this.hud.querySelector('b');
     this.hudVel = this.hud.querySelector('span');
     document.body.appendChild(this.hud);
@@ -608,7 +611,9 @@ export class MataMata {
       this.nascer();
       this.hud.hidden = false;
       this.sfx.teleport();
-      this.toast('Mata-mata: pegue as armas do chão passando por cima. Clique ou X atira, F soca. Esc sai.', 'info', 7000);
+      this.toast(isTouch
+        ? 'Mata-mata: pegue as armas do chão passando por cima. A mira atira, a luva soca, o X do canto sai.'
+        : 'Mata-mata: pegue as armas do chão passando por cima. Clique ou X atira, F soca. Esc sai.', 'info', 7000);
     });
   }
 
@@ -698,7 +703,7 @@ export class MataMata {
     this.hud = document.createElement('div');
     this.hud.className = 'ceu-hud';
     this.hud.hidden = true;
-    this.hud.innerHTML = '<b>Pistola</b><span>0 abates</span><small><kbd>Esc</kbd> sai</small>';
+    this.hud.innerHTML = `<b>Pistola</b><span>0 abates</span><small>${isTouch ? '' : '<kbd>Esc</kbd> sai'}</small>`;
     this.hudArma = this.hud.querySelector('b');
     this.hudPlacar = this.hud.querySelector('span');
     document.body.appendChild(this.hud);

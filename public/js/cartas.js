@@ -10,7 +10,7 @@ import {
   podeJogarUno, coringa, corUno, rotuloUno, HEX_COR, NOME_COR, CORES_UNO,
 } from './cartas-regras.js';
 import { MESAS_CARTAS } from './parque-dados.js';
-import { hud, texturaViva, FONTE } from './hud-jogos.js';
+import { hud, texturaViva, FONTE, paraToque } from './hud-jogos.js';
 
 const LUGARES = { truco: 4, uno: 6 };
 const R_MESA = 1.15;
@@ -325,7 +325,17 @@ export class Cartas {
 #ct-cores { position: fixed; inset: 0; z-index: 34; display: grid; place-items: center; background: rgba(0,0,0,.45); }
 #ct-cores div { display: flex; gap: 12px; padding: 16px; border-radius: 16px; background: #0b1020; }
 #ct-cores button { width: 64px; height: 64px; border-radius: 14px; border: 0; cursor: pointer; }
-body.touch #ct-ui { bottom: 8px; }`;
+body.touch #ct-ui { bottom: calc(6px + env(safe-area-inset-bottom)); gap: 5px; padding: 8px 10px; border-radius: 14px; font-size: 12.5px;
+  max-height: calc(100dvh - 64px - env(safe-area-inset-top)); overflow-y: auto; }
+body.touch .ct-topo { gap: 6px; }
+body.touch .ct-topo b { font-size: 15px; }
+body.touch .ct-ui-btn, body.touch .ct-acoes button { padding: 6px 10px; font-size: 12px; }
+body.touch .ct-lugares span { padding: 2px 8px; font-size: 11.5px; }
+body.touch .ct-meio { gap: 10px; min-height: 0; }
+body.touch .ct-aviso { min-height: 0; }
+body.touch .ct-carta { width: 48px; height: 68px; }
+body.touch .ct-carta.peq { width: 34px; height: 48px; }
+body.touch #ct-cores button { width: 52px; height: 52px; }`;
     document.head.appendChild(css);
     this.ui = document.createElement('div');
     this.ui.id = 'ct-ui';
@@ -386,7 +396,7 @@ body.touch #ct-ui { bottom: 8px; }`;
     const meuTime = M.lugar % 2;
     $('.ct-placar').innerHTML = truco && e.pontos
       ? `${TIMES[meuTime]} <b>${e.pontos[meuTime]}</b> × <b>${e.pontos[1 - meuTime]}</b> ${TIMES[1 - meuTime]} · mão vale <b>${e.vale}</b>`
-      : !truco && e.fase !== 'espera' ? `Monte: ${e.monte} · sentido ${e.sentido > 0 ? '↻' : '↺'}` : 'Sente quem quiser e clique em Começar (a mesa completa com robôs)';
+      : !truco && e.fase !== 'espera' ? `Monte: ${e.monte} · sentido ${e.sentido > 0 ? '↻' : '↺'}` : paraToque('Sente quem quiser e clique em Começar (a mesa completa com robôs)');
     $('[data-acao="comecar"]').hidden = e.fase !== 'espera' && e.fase !== 'fim';
     // os lugares (no truco, a cor do time)
     $('.ct-lugares').innerHTML = e.lugares.map((l, k) => {
@@ -409,7 +419,7 @@ body.touch #ct-ui { bottom: 8px; }`;
     // a vez e os avisos
     const minhaVez = e.vez === M.lugar && e.fase === 'jogando';
     let aviso = e.aviso || '';
-    if (e.fase === 'jogando' && !aviso) aviso = minhaVez ? 'Sua vez: clique numa carta' : `Vez de ${esc(e.lugares[e.vez]?.nome || '…')}`;
+    if (e.fase === 'jogando' && !aviso) aviso = minhaVez ? paraToque('Sua vez: clique numa carta') : `Vez de ${esc(e.lugares[e.vez]?.nome || '…')}`;
     if (e.fase === 'espera') aviso = 'Esperando começar';
     $('.ct-aviso').textContent = aviso;
     // os botões
