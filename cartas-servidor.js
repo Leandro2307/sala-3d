@@ -9,6 +9,9 @@
 // que a mesa ouve. Carta coberta da segunda rodada em diante, mão de dez (o time com 10 vê as
 // cartas do parceiro e decide) e mão de ferro (10 a 10: ninguém vê as cartas); 12 pontos ganha.
 // Os avisos falam das duplas como «0» e «1»: cada um lê "sua dupla" ou "a outra dupla" (cartas.js).
+//
+// Nas duas mesas: zoeira ('ct-zoar', as frases de ZOEIRA, gritadas como os pedidos) e, de
+// brincadeira, tapa e tiro em quem está sentado ('ct-acao'), gente ou robô — o robô reclama.
 // Uno: até 6 lugares; bloqueio, inverter, +2, coringa e +4 (sem acumular); comprou e não serve,
 // passa. Quem fica com uma carta tem uns segundos para dizer "UNO!", senão compra duas.
 const { carregarPorMapa, comMapa } = require('./mapa-servidor.js');
@@ -28,6 +31,9 @@ const LUGARES = { truco: 4, uno: 6 };
 const NOMES_ROBO = ['Robô Zé', 'Robô Lia', 'Robô Tião', 'Robô Bia', 'Robô Nico'];
 const ESPERA_ROBO = 1300; // ms que o robô "pensa"
 const ESPERA_GENTE = 45_000; // parado na vez: o robô joga por ele
+const ESPERA_RESPOSTA = 25_000; // sem responder o truco (ou decidir a mão de dez): aceita por ele
+const INTERVALO_ACAO = { tapa: 500, tiro: 2500 }; // ms entre dois tapas (tiros) da mesma pessoa
+const INTERVALO_ZOEIRA = 2500;
 
 const novaMesa = (i) => ({ i, jogo: MESAS.MESAS_CARTAS[i].jogo, lugares: Array(LUGARES[MESAS.MESAS_CARTAS[i].jogo]).fill(null), fase: 'espera', aviso: '', vencedor: null, ate: 0, botAte: 0, vezDesde: 0, t: null, u: null });
 const mesasDa = (room) => (room.cartas ||= MESAS.MESAS_CARTAS.map((_, i) => novaMesa(i)));
@@ -55,8 +61,11 @@ const longeDemais = (l, longe) => {
 
 // ------------------------------------------------------------------ o que vai para cada um
 function publico(m) {
+  // quanto falta para o servidor decidir sozinho (a barra do tempo no painel)
+  const espera = m.t?.pedido || m.fase === 'dez' ? ESPERA_RESPOSTA : ESPERA_GENTE;
   const base = {
     mesa: m.i, jogo: m.jogo, fase: m.fase, aviso: m.aviso, vencedor: m.vencedor,
+    prazo: Math.max(0, m.vezDesde + espera - Date.now()), prazoTotal: espera,
     lugares: m.lugares.map((l, k) => (l ? { id: l.bot ? null : l.id, nome: l.nome, cor: l.cor, bot: !!l.bot, cartas: (m.t?.maos[k] || m.u?.maos[k] || []).length } : null)),
   };
   if (m.t) {
@@ -88,12 +97,20 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
     });
   }
 
-  // o grito vai para a sala toda: quem está perto da mesa ouve (cartas.js decide pela distância)
-  function gritar(room, m, k, tipo) {
+  // O grito vai para a sala toda: quem está perto da mesa ouve (cartas.js decide pela distância).
+  // frase: uma escolhida (a zoeira); senão sorteia a do tipo. alvo: o lugar de quem foi trucado.
+  function gritar(room, m, k, tipo, { frase = null, alvo = null } = {}) {
     const frases = R.GRITOS[tipo];
-    if (!frases) return;
-    const frase = frases[Math.floor(Math.random() * frases.length)];
-    io.to(room.id).emit('ct-grito', { mesa: m.i, lugar: k, tipo, nome: m.lugares[k]?.nome || '', frase });
+    if (!frase && !frases) return;
+    frase ||= frases[Math.floor(Math.random() * frases.length)];
+    io.to(room.id).emit('ct-grito', { mesa: m.i, lugar: k, tipo, nome: m.lugares[k]?.nome || '', frase, alvo });
+  }
+
+  // o robô que fez a rodada zoa de vez em quando (no máximo uma vez a cada 8 s na mesa)
+  function roboZoa(room, m, k) {
+    if (!m.lugares[k]?.bot || Math.random() > 0.3 || Date.now() - (m.zoouEm || 0) < 8000) return;
+    m.zoouEm = Date.now();
+    gritar(room, m, k, 'zoeira', { frase: R.ZOEIRA[Math.floor(Math.random() * R.ZOEIRA.length)] });
   }
   const humanos = (m) => m.lugares.filter((l) => l && !l.bot);
   const robo = (m, k) => ({ id: `robo-${m.i}-${k}`, nome: NOMES_ROBO[k % NOMES_ROBO.length], cor: '#94a3b8', bot: true });
@@ -246,6 +263,7 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
     }
     // quem fez a rodada começa a próxima; no empate, quem pôs a primeira das cartas que empataram
     t.inicio = fortes[0].lugar;
+    if (res !== 'e') roboZoa(room, m, fortes[0].lugar);
     t.vez = t.inicio;
     m.aviso = res === 'e' ? 'Rodada empatada' : `Rodada para ${dupla(res)}`;
     avisar(room, m);
@@ -259,7 +277,7 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
     if (m.fase !== 'jogando' || t.vez !== k || !podeTrucar(t, timeDe(k))) return false;
     t.pedido = { valor: proximoPedido(t.vale), porTime: timeDe(k), de: k };
     m.aviso = `${m.lugares[k].nome}: ${R.NOME_PEDIDO[t.pedido.valor]}!`;
-    gritar(room, m, k, R.GRITO_DO_PEDIDO[t.pedido.valor]);
+    gritar(room, m, k, R.GRITO_DO_PEDIDO[t.pedido.valor], { alvo: (k + 1) % 4 });
     m.vezDesde = Date.now();
     m.botAte = Date.now() + ESPERA_ROBO + 900; // dá tempo do grito
     avisar(room, m);
@@ -281,7 +299,7 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
       t.vale = p.valor; // aumentar é aceitar o pedido e pedir mais
       t.pedido = { valor: proximoPedido(p.valor), porTime: timeDe(k), de: k };
       m.aviso = `${nome}: ${R.NOME_PEDIDO[t.pedido.valor]}!`;
-      gritar(room, m, k, R.GRITO_DO_PEDIDO[t.pedido.valor]);
+      gritar(room, m, k, R.GRITO_DO_PEDIDO[t.pedido.valor], { alvo: (k + 1) % 4 });
     } else {
       t.vale = p.valor;
       t.pedido = null;
@@ -379,7 +397,7 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
     if (m.fase === 'dez') {
       const time = t.maoDeDez;
       const gente = [time, time + 2].some((k) => vezDeGente(m, k));
-      if ((!gente && agora >= m.botAte) || agora - m.vezDesde > 25_000) {
+      if ((!gente && agora >= m.botAte) || agora - m.vezDesde > ESPERA_RESPOSTA) {
         const f = forcaDaMao(t, time) + forcaDaMao(t, time + 2);
         maoDeDez(room, m, time, f > 6 ? 'jogar' : 'correr');
       }
@@ -389,7 +407,7 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
       const oponentes = [0, 1, 2, 3].filter((k) => timeDe(k) !== t.pedido.porTime);
       const gente = oponentes.some((k) => vezDeGente(m, k));
       if (!gente && agora >= m.botAte) botResponde(room, m, oponentes.find((k) => k === (t.pedido.de + 1) % 4) ?? oponentes[0]);
-      else if (gente && agora - m.vezDesde > 25_000) responder(room, m, oponentes.find((k) => vezDeGente(m, k)), 'aceitar');
+      else if (gente && agora - m.vezDesde > ESPERA_RESPOSTA) responder(room, m, oponentes.find((k) => vezDeGente(m, k)), 'aceitar');
       return;
     }
     if (m.fase !== 'jogando') return;
@@ -692,6 +710,36 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
         passarVez(m);
         avisar(room, m);
       }
+    });
+
+    // zoeira: uma das frases de ZOEIRA, gritada para a mesa (a qualquer hora, sentado nela)
+    socket.on('ct-zoar', (msg) => {
+      const { room, user, mesas } = daSala();
+      const m = mesas?.[msg?.mesa];
+      const k = m ? meuLugar(m, user) : -1;
+      const i = msg?.i;
+      if (k < 0 || !Number.isInteger(i) || !R.ZOEIRA[i]) return;
+      if (Date.now() - (user.zoouEm || 0) < INTERVALO_ZOEIRA) return;
+      user.zoouEm = Date.now();
+      gritar(room, m, k, 'zoeira', { frase: R.ZOEIRA[i] });
+    });
+
+    // Tapa e tiro na mesa, de brincadeira: em quem está sentado nela (gente ou robô). Não mexe no
+    // jogo; quem levou tremeu (e caiu da cadeira, no tiro) em cartas.js, e o robô reclama.
+    socket.on('ct-acao', (msg) => {
+      const { room, user, mesas } = daSala();
+      const m = mesas?.[msg?.mesa];
+      const k = m ? meuLugar(m, user) : -1;
+      const tipo = msg?.tipo;
+      const alvo = msg?.alvo;
+      if (k < 0 || !Object.hasOwn(INTERVALO_ACAO, tipo) || !jogoLigado(room, tipo)) return;
+      if (!Number.isInteger(alvo) || alvo === k || !m.lugares[alvo]) return;
+      const chave = tipo === 'tiro' ? 'tiroNaMesaEm' : 'tapaNaMesaEm';
+      if (Date.now() - (user[chave] || 0) < INTERVALO_ACAO[tipo]) return;
+      user[chave] = Date.now();
+      const l = m.lugares[alvo];
+      io.to(room.id).emit('ct-acao', { mesa: m.i, tipo, de: k, alvo, deNome: user.name, alvoId: l.bot ? null : l.id });
+      if (l.bot) gritar(room, m, alvo, tipo === 'tiro' ? 'baleado' : 'apanhou');
     });
 
     socket.on('disconnect', () => {

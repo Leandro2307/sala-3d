@@ -868,8 +868,9 @@ export class Avatar {
   }
 
   // levou um tapa vindo da direção dir ([x, z], de quem bateu para quem levou): tomba para lá e o
-  // "PLAFT!" sobe da cabeça (plaft = false: quem levou já vê o PLAFT! na tela, ver leveiTapa)
-  levarTapa(dir, plaft = true) {
+  // "PLAFT!" sobe da cabeça (plaft = false: quem levou já vê o PLAFT! na tela, ver leveiTapa). O
+  // tiro de brincadeira da mesa de cartas usa o mesmo tranco, com outro texto.
+  levarTapa(dir, plaft = true, texto = 'PLAFT!') {
     const [dx, dz] = Array.isArray(dir) ? dir : [0, 0];
     const n = Math.hypot(dx, dz) || 1;
     this.trancoDir = [dx / n, dz / n];
@@ -882,9 +883,9 @@ export class Avatar {
     e.ctx.lineJoin = 'round';
     e.ctx.lineWidth = 12;
     e.ctx.strokeStyle = '#7f1d1d';
-    e.ctx.strokeText('PLAFT!', 128, 66);
+    e.ctx.strokeText(texto, 128, 66);
     e.ctx.fillStyle = '#fde047';
-    e.ctx.fillText('PLAFT!', 128, 66);
+    e.ctx.fillText(texto, 128, 66);
     e.tex.needsUpdate = true;
     e.sprite.position.set((Math.random() - 0.5) * 0.4, 2.1, 0);
     e.life = 0;

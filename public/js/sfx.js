@@ -164,6 +164,16 @@ export const sfx = {
   // a mão passando no vazio
   tapaVento: () => ruido({ dur: 0.16, gain: 0.04, type: 'bandpass', freq: 2200, toFreq: 700, q: 1 }),
 
+  // Cartas (como no Balatro): o clique de escolher sobe de tom a cada carta, a carta voando, o tique
+  // de cada ponto contado (subindo também) e o fogo do truco
+  cartaSel: (n = 0) => tone({ freq: 520 * 2 ** ((n * 2) / 12), dur: 0.06, type: 'square', gain: 0.022 }),
+  cartaVoa: () => ruido({ dur: 0.14, gain: 0.05, type: 'bandpass', freq: 3200, toFreq: 1400, q: 1.4 }),
+  ponto: (n = 0) => tone({ freq: 620 * 2 ** (Math.min(n, 24) / 12), dur: 0.07, type: 'triangle', gain: 0.04 }),
+  fogo: () => {
+    ruido({ dur: 0.5, gain: 0.07, type: 'bandpass', freq: 600, toFreq: 2400, q: 0.8 });
+    tone({ freq: 90, to: 180, dur: 0.4, type: 'sawtooth', gain: 0.025 });
+  },
+
   // Murro na mesa (o grito do truco vem com a mão na madeira): baque de madeira e as cartas pulando
   murroMesa: (vol = 1) => {
     if (vol <= 0.02) return;

@@ -191,7 +191,9 @@ const cartas = new Cartas({
   world, player, sfx, ligado: (jogo) => jogoLigado(jogo),
   focar: () => focarCartas(),
   soltarFoco: () => { if (state.focus?.kind === 'cartas') sairDoFoco(); },
-  tapa: (id) => darTapa(id), // a mãozinha ao lado do nome de quem está na mesa
+  avatarDe: (id) => state.users.get(id)?.avatar ?? null, // gritos, tapa e tiro mexem no boneco de quem está na mesa
+  levou: (tipo, nome, dir) => (tipo === 'tiro' ? leveiTiro(nome) : leveiTapa(nome, dir)),
+  tiroFx: (de, ate) => desenharTiro(de, ate),
 });
 jogosDoParque.push(cartas);
 // gincana: 10 fases e a final, bem longe do mapa (o portal fica ao sul da Rua dos Esportes)
@@ -2542,6 +2544,7 @@ const JOGOS_DA_SALA = [
   ['kart', 'Kart', 'Kartódromo com itens, 3 voltas'],
   ['pinta', 'Pinta-território', 'Times pintam o chão com tinta'],
   ['tapa', 'Tapa', 'Y dá um tapa em quem está na frente (não tira vida)'],
+  ['tiro', 'Tiro na mesa de cartas', 'De brincadeira: derruba da cadeira, não tira vida'],
 ];
 const AREAS_DE_JOGO = ['parkour', 'ringue', 'corrida', 'futebol', 'volei', 'basquete', 'boliche', 'surf', 'matamata', 'batalha', 'xadrez', 'dama', 'velha', 'dados', 'pingue', 'queimada', 'sinuca', 'golfe', 'cartas', 'gincana', 'kart', 'pinta'];
 // parkour e ringue ficam dentro do cinema: no escritório não existem
@@ -4938,23 +4941,37 @@ function leveiTapa(nome, dir) {
     player.ground = null;
   }
   player.addShake(0.8);
+  marcaNaTela('🖐️', 'PLAFT!', nome ? `${nome} te deu um tapa!` : 'Levou um tapa!', false);
+}
+
+// levei um tiro de brincadeira na mesa de cartas: a tela treme mais, o clarão e o BANG!
+function leveiTiro(nome) {
+  player.addShake(1.3);
+  marcaNaTela('💥', 'BANG!', nome ? `${nome} te deu um tiro!` : 'Levou um tiro!', true);
+}
+
+// a marca de quem levou (a mão do tapa ou o estouro do tiro), que some sozinha
+function marcaNaTela(icone, titulo, texto, tiro) {
   let el = $('#tapa-marca');
   if (!el) {
     el = document.createElement('div');
     el.id = 'tapa-marca';
-    el.innerHTML = '<i class="mao" aria-hidden="true">🖐️</i><b>PLAFT!</b><span></span>';
+    el.innerHTML = '<i class="mao" aria-hidden="true"></i><b></b><span></span>';
     document.body.append(el);
   }
   const direita = Math.random() < 0.5;
   el.style.setProperty('--lado', direita ? '72%' : '28%');
   el.style.setProperty('--giro', direita ? '18deg' : '-18deg');
-  el.querySelector('span').textContent = nome ? `${nome} te deu um tapa!` : 'Levou um tapa!';
+  el.classList.toggle('tiro', tiro);
+  el.querySelector('.mao').textContent = icone;
+  el.querySelector('b').textContent = titulo;
+  el.querySelector('span').textContent = texto;
   el.hidden = false;
   el.classList.remove('anda');
   void el.offsetWidth; // recomeça a animação (tapa em cima de tapa)
   el.classList.add('anda');
-  clearTimeout(leveiTapa.t);
-  leveiTapa.t = setTimeout(() => { el.hidden = true; }, 1150);
+  clearTimeout(marcaNaTela.t);
+  marcaNaTela.t = setTimeout(() => { el.hidden = true; }, 1150);
 }
 
 function goToRing() {

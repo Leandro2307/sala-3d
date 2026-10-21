@@ -2329,6 +2329,8 @@ body.touch .rh-time { font-size: 20px; }
   0% { transform: translate(-50%, -50%) rotate(var(--giro, -18deg)) scale(1.6); opacity: 0; }
   15%, 100% { transform: translate(-50%, -50%) rotate(var(--giro, -18deg)) scale(1); opacity: 0.8; }
 }
+#tapa-marca.tiro::before { background: radial-gradient(ellipse at var(--lado, 30%) 50%, rgba(255, 244, 214, 0.75), rgba(239, 68, 68, 0.3) 35%, transparent 65%); }
+#tapa-marca.tiro .mao { filter: none; opacity: 0.95; }
 @media (prefers-reduced-motion: reduce) { #tapa-marca.anda .mao { animation: none; } }
 /* pedais do carro: freio vermelho, acelerador verde, os dois com o rótulo embaixo do ícone */
 .tb.pedal { width: 64px; height: 64px; border-radius: 22px; }

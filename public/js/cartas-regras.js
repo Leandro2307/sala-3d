@@ -48,7 +48,13 @@ export const GRITOS = {
   corro: ['Corro!', 'Tô fora!', 'Corri, sô.', 'Leva, leva.', 'Vai, pode levar.'],
   dez: ['Vamo jogar, uai!', 'Bora pra mão de dez!', 'Mão de dez, desce!'],
   dezCorro: ['Essa eu corro.', 'Mão de dez não, sô.'],
+  // o robô que levou um tapa ou um tiro na mesa (de brincadeira)
+  apanhou: ['Ai! Isso não vale!', 'Tá nervoso, é?', 'Bate, mas o truco é meu!', 'Vou contar pro juiz!', 'Ô trem doído, sô!'],
+  baleado: ['Fui atingido!', 'Ai, meu zap!', 'Isso é jogo de truco, sô!', 'Volto pra assombrar!', 'Errou! Quer dizer... acertou.'],
 };
+// A zoeira: o que dá para gritar na mesa a qualquer hora (o botão de megafone), no truco e no uno.
+// Os robôs também zoam quando fazem uma rodada.
+export const ZOEIRA = ['Tá com medo, é?', 'Pode vir que eu tô armado!', 'Desce, marreco!', 'Ô dó!', 'Aqui é Minas, sô!', 'Hoje não!', 'Cadê o truco, uai?', 'Vai chorar?'];
 export const GRITO_DO_PEDIDO = { 4: 'truco', 8: 'seis', 10: 'nove', 12: 'doze' };
 
 // ------------------------------------------------------------------ uno
