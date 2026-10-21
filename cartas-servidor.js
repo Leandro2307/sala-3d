@@ -6,13 +6,15 @@
 // robô. Vira e manilhas, 3 rodadas por mão, truco/seis/nove/doze, mão de onze; 12 pontos ganha.
 // Uno: até 6 lugares; bloqueio, inverter, +2, coringa e +4 (sem acumular); comprou e não serve,
 // passa. Quem fica com uma carta tem uns segundos para dizer "UNO!", senão compra duas.
+const { carregarPorMapa, comMapa } = require('./mapa-servidor.js');
 
 let R = null;
 let MESAS = null;
-Promise.all([import('./public/js/cartas-regras.js'), import('./public/js/parque-dados.js')])
+const DADOS = carregarPorMapa('parque-dados.js'); // um módulo por mapa (mapa-servidor.js)
+Promise.all([import('./public/js/cartas-regras.js'), DADOS.pronto])
   .then(([regras, dados]) => {
     R = regras;
-    MESAS = dados.MESAS_CARTAS;
+    MESAS = dados; // a ponte: as mesas do mapa em uso (MESAS.MESAS_CARTAS)
   })
   .catch((err) => console.warn('  Regras das cartas não carregaram:', err.message));
 
@@ -22,8 +24,8 @@ const NOMES_ROBO = ['Robô Zé', 'Robô Lia', 'Robô Tião', 'Robô Bia', 'Robô
 const ESPERA_ROBO = 1300; // ms que o robô "pensa"
 const ESPERA_GENTE = 45_000; // parado na vez: o robô joga por ele
 
-const novaMesa = (i) => ({ i, jogo: MESAS[i].jogo, lugares: Array(LUGARES[MESAS[i].jogo]).fill(null), fase: 'espera', aviso: '', vencedor: null, ate: 0, botAte: 0, vezDesde: 0, t: null, u: null });
-const mesasDa = (room) => (room.cartas ||= MESAS.map((_, i) => novaMesa(i)));
+const novaMesa = (i) => ({ i, jogo: MESAS.MESAS_CARTAS[i].jogo, lugares: Array(LUGARES[MESAS.MESAS_CARTAS[i].jogo]).fill(null), fase: 'espera', aviso: '', vencedor: null, ate: 0, botAte: 0, vezDesde: 0, t: null, u: null });
+const mesasDa = (room) => (room.cartas ||= MESAS.MESAS_CARTAS.map((_, i) => novaMesa(i)));
 const timeDe = (lugar) => lugar % 2;
 // longe da mesa há mais de 3 s (a posição que o servidor tem chega um tiquinho depois de um teleporte)
 const longeDemais = (l, longe) => {
@@ -508,9 +510,10 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
     if (!R) return;
     const agora = Date.now();
     for (const room of rooms.values()) {
+      DADOS.usar(room);
       for (const m of room.cartas || []) {
         // quem foi embora da mesa
-        const M = MESAS[m.i];
+        const M = MESAS.MESAS_CARTAS[m.i];
         for (const l of [...m.lugares]) {
           if (!l || l.bot) continue;
           const p = ondeEsta(room.users.get(l.id));
@@ -533,7 +536,8 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
   }, 250);
 
   // ------------------------------------------------------------------ recados de cada um
-  return function porSocket(socket, quem) {
+  return function porSocket(socket, quemDaSala) {
+    const quem = comMapa(quemDaSala, DADOS);
     const daSala = () => {
       const { room, user } = quem();
       if (!room || !user || !R) return {};

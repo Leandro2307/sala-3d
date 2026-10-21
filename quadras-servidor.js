@@ -5,9 +5,11 @@
 // sentido (perto da bola e da pessoa), anda com a bola daí em diante e decide os pontos.
 // No boliche o servidor simula a jogada inteira (a mesma conta do navegador, determinística) e
 // conta os pinos.
+const { carregarPorMapa, comMapa } = require('./mapa-servidor.js');
 
 let F = null; // a física (módulo ES)
-import('./public/js/quadras-fisica.js')
+const DADOS = carregarPorMapa('quadras-fisica.js'); // um módulo por mapa (mapa-servidor.js)
+DADOS.pronto
   .then((m) => { F = m; })
   .catch((err) => console.warn('  Física das quadras não carregou (vôlei, basquete e boliche parados):', err.message));
 
@@ -212,6 +214,7 @@ function ligarQuadras(io, rooms, jogoLigado) {
   setInterval(() => {
     if (!F) return;
     for (const room of rooms.values()) {
+      DADOS.usar(room);
       if (!room.quadras) continue;
       room.quadras.boliche.forEach((p) => {
         for (const j of [...p.jogadores]) {
@@ -236,6 +239,7 @@ function ligarQuadras(io, rooms, jogoLigado) {
     if (!F) return;
     for (; sobra >= PASSO; sobra -= PASSO) {
       for (const room of rooms.values()) {
+      DADOS.usar(room);
         if (!room.quadras || !room.users.size) continue;
         if (jogoLigado(room, 'volei')) ticVolei(room);
         if (jogoLigado(room, 'basquete')) ticBasquete(room);
@@ -245,7 +249,8 @@ function ligarQuadras(io, rooms, jogoLigado) {
   }, PASSO * 1000);
 
   // ---------------------------------------------------------------- recados de cada um
-  return function porSocket(socket, quem) {
+  return function porSocket(socket, quemDaSala) {
+    const quem = comMapa(quemDaSala, DADOS);
     const daSala = () => {
       const { room, user } = quem();
       if (!room || !user || !F) return {};

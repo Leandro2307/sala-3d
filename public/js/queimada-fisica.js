@@ -5,7 +5,10 @@
 // A quadra tem o comprimento no eixo x: o time 0 (Azul) fica em x < cx e o 1 (Vermelho) em x > cx.
 // Quem é queimado vai para o "cemitério", que é a volta do campo do outro time (os dois lados e o
 // fundo): de lá ainda dá para pegar a bola e queimar — e quem queima do cemitério volta para o campo.
-import { QUEIMADA as Q } from './parque-dados.js';
+import { parqueDe, mapaDoModulo } from './mapas-dados.js';
+
+// o mapa deste módulo (no servidor vem no endereço: ?mapa=)
+const { QUEIMADA: Q } = parqueDe(mapaDoModulo(import.meta.url));
 
 export const QUEIMADA = {
   ...Q,

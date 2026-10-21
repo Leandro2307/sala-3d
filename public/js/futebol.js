@@ -10,11 +10,12 @@
 // cima. O grupo do estádio é girado e posto no mundo; tudo da partida mora dentro dele.
 import * as THREE from 'three';
 import { CAMPO, BOLA, ALMOFADAS, andarBola, colidirCampo, lugarDaSaida } from './futebol-fisica.js';
-import { NOVO } from './mundo.js';
 import { criarPersonagem, PERSONAGENS } from './modelo.js';
 import { isTouch } from './touch.js';
+import { MAPAS, MAPA_DA_PAGINA } from './mapas-dados.js';
 
-export const ESTADIO = { cx: 18, cz: 125, giro: Math.PI / 2 };
+// onde o mapa da sala põe o estádio (a física do campo é no sistema dele, então o servidor não liga)
+export const ESTADIO = { ...MAPAS[MAPA_DA_PAGINA].atracoes.estadio };
 const W = CAMPO.largura / 2;
 const L = CAMPO.comprimento / 2;
 const G = CAMPO.gol;
@@ -288,7 +289,6 @@ export function construirEstadio(world) {
   g.add(quadro, haste);
 
   // placa na porta do cinema (no mundo novo as placas ficam na praça: cidade.js)
-  if (!NOVO) world.placaDirecao(69, 52, -Math.PI / 2, 'FUTEBOL DE CARRO  →', '#22d3ee');
 
   return { grupo: g, placar, faixa };
 }

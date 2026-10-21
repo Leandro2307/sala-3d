@@ -49,8 +49,6 @@
       <span id="room-name">principal</span>
       <span class="sep">·</span>
       <span id="room-count">1 pessoa</span>
-      <span class="sep">·</span>
-      <span class="clima-chip" id="clima-chip" title="Clima e hora na sala"></span>
       <span class="sep onde" hidden>·</span>
       <span class="onde-chip onde" id="onde-chip" hidden title="Onde você está no escritório"></span>
       <span class="sep">·</span>
@@ -207,6 +205,7 @@
           <span class="wide"><kbd>Clique</kbd> olhar com o mouse</span>
           <span><kbd>E</kbd> focar na tela</span>
           <span><kbd>Tab</kbd> mesa de telas</span>
+          <span><kbd>L</kbd> mapa</span>
           <span><kbd>V</kbd> 1ª/3ª pessoa</span>
           <span><kbd>R</kbd> voltar ao checkpoint</span>
           <span><kbd>T</kbd> chat</span>
@@ -230,6 +229,7 @@
           <span><b>Arraste a tela</b> olhar</span>
           <span><b>Pinça</b> aproximar</span>
           <span><b>Toque numa tela</b> focar</span>
+          <span><b>Mapa</b> na barra de cima: toque numa área para ir</span>
           <span><b>Luva</b> socar · <b>cadeira</b> sentar</span>
           <span><b>Carro</b> vira carro: pedais à direita, analógico é o volante</span>
           <span><b>Corrida</b> no carro: botão de correr = turbo</span>
@@ -321,6 +321,7 @@
     </div>
 
     <div class="bar-right">
+      <button type="button" class="ghost" id="btn-mapa" data-tip="Mapa (L)"><i data-icon="mapa"></i></button>
       <button type="button" class="ghost" id="btn-salas" data-tip="Suas salas"><i data-icon="salas"></i></button>
       <button type="button" class="ghost" id="btn-mesa" data-tip="Mesa: todas as telas lado a lado (Tab)"><i data-icon="monitores"></i></button>
       <button type="button" class="ghost" data-panel="sala" data-tip="Sala da empresa: ambiente e jogos"><i data-icon="predio"></i></button>
@@ -574,10 +575,12 @@
         </div>
         <label class="field"><span>Comunicado <small class="opt">(faixa no topo para todo mundo)</small></span><textarea name="aviso" maxlength="200" rows="2" placeholder="Ex.: Reunião geral às 15h na sala de Reunião"></textarea></label>
         <div class="field">
+          <span>Mapa <small class="opt">(o mundo em volta do prédio: cada um com outros lugares e outra paisagem)</small></span>
+          <div class="modulos" id="sala-mapas"></div>
+        </div>
+        <div class="field">
           <span>Ambiente</span>
           <div class="modulos" id="sala-modulos"></div>
-          <span class="sub-campo">Mundo em volta do prédio</span>
-          <div class="modulos" id="sala-mundos"></div>
           <small class="hint" id="deptos-hint" hidden>Marque os departamentos da empresa: cada um vira uma sala com a cara do setor, e elas se encaixam dos dois lados de um corredor, com a recepção na entrada.</small>
           <div class="deptos" id="sala-deptos" hidden></div>
           <label class="toggle-row compact" id="campo-privacidade" hidden>
@@ -589,13 +592,6 @@
           <span><b>Aparecer nas salas ao vivo</b><small>Mostra a sala e quem está nela na tela de entrada (com senha, só a quantidade)</small></span>
           <input type="checkbox" name="listada" class="switch">
         </label>
-        <div class="field">
-          <span>Clima e hora <small class="opt">(todo mundo vê igual)</small></span>
-          <div class="clima-linha">
-            <select name="clima" aria-label="Clima"></select>
-            <select name="horario" aria-label="Hora do dia"></select>
-          </div>
-        </div>
         <div class="field" id="placar-editor" hidden>
           <span>Placar de metas <small class="opt">(Sala Comercial)</small></span>
           <input name="placarTitulo" maxlength="40" placeholder="Título — ex.: Metas de outubro">

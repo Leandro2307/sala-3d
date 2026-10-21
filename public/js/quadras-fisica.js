@@ -1,11 +1,15 @@
 // Vôlei, basquete e boliche: onde fica cada quadra e a física das bolas. Sem three.js, para rodar
 // igual no navegador (bola prevista, pinos animados) e no servidor (que manda no placar).
-// Coordenadas do mundo: as três ficam ao norte do estádio do futebol, lado a lado no eixo x.
+// Coordenadas do mundo: as três lado a lado no eixo x, onde o mapa da sala põe (mapas-dados.js; no
+// servidor este módulo é carregado uma vez por mapa, com ?mapa= no endereço).
+import { deslocamento, mapaDoModulo } from './mapas-dados.js';
+
+const D = deslocamento(mapaDoModulo(import.meta.url), 'quadras');
 
 // ------------------------------------------------------------------ vôlei
 // Quadra de 18 x 9 m na areia, rede no meio (x = cx). Lado 0: x < cx; lado 1: x > cx.
 export const VOLEI = {
-  cx: -20, cz: 196,
+  cx: -20 + D.dx, cz: 196 + D.dz,
   comp: 18, larg: 9,
   rede: { altura: 2.35, base: 0.9 }, // a rede vai de 0,9 m até 2,35 m (embaixo passa a bola)
   raio: 0.4, // a bola é maior que a de verdade: dá para ver de longe
@@ -51,7 +55,7 @@ export const saqueVolei = (lado) => ({ x: VOLEI.cx + (lado === 0 ? -1 : 1) * (VO
 // ------------------------------------------------------------------ basquete
 // Quadra de 28 x 15 m, uma cesta em cada ponta (aro a 3,05 m).
 export const BASQUETE = {
-  cx: 22, cz: 196,
+  cx: 22 + D.dx, cz: 196 + D.dz,
   comp: 28, larg: 15,
   aro: { altura: 3.05, raio: 0.34, dist: 12.4 }, // centro do aro a 12,4 m do meio
   tabela: { dist: 12.85, larg: 1.8, alt: 1.05, base: 2.9 },
@@ -145,8 +149,8 @@ export function forcaIdeal(d, h, ang = ANGULO_ARREMESSO) {
 // que o de verdade (fator K), para dar para ver da sala.
 const K = 1.4;
 export const BOLICHE = {
-  x0: 54, // linha de falta
-  pistas: [193.5, 198.5], // z do meio de cada pista
+  x0: 54 + D.dx, // linha de falta
+  pistas: [193.5 + D.dz, 198.5 + D.dz], // z do meio de cada pista
   comprimento: 16, // da linha de falta ao pino da frente
   largura: 1.05 * K,
   canaleta: 0.25 * K,

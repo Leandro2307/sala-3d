@@ -4,7 +4,10 @@
 // Os buracos ficam numa grade de 3 x 3 dentro de GOLFE_AREA (parque-dados.js), em zigue-zague: a
 // fila de baixo vai de leste para oeste, a do meio volta, a de cima vai de novo. Cada buraco é
 // descrito no sistema dele: u de lado (para leste), v ao longo (para o norte), a partir do tee.
-import { GOLFE_AREA as A } from './parque-dados.js';
+import { parqueDe, mapaDoModulo } from './mapas-dados.js';
+
+// o mapa deste módulo (no servidor vem no endereço: ?mapa=)
+const { GOLFE_AREA: A } = parqueDe(mapaDoModulo(import.meta.url));
 
 export const GOLFE = {
   raio: 0.09, // a bolinha (bem maior que a de verdade: dá para ver)

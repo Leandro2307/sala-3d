@@ -23,6 +23,7 @@ const { ligarKart } = require('./kart-servidor.js');
 const { ligarPinta } = require('./pinta-servidor.js');
 const { ligarCeu } = require('./ceu-servidor.js');
 const { ligarBatalha } = require('./batalha-servidor.js');
+const { MAPAS_SALA, MAPA_PADRAO } = require('./mapa-servidor.js');
 // a planta do escritório é a mesma do navegador (public/js/escritorio.js); carrega em main()
 let ESCRITORIO = null;
 
@@ -452,23 +453,16 @@ function mudarSaldo(nome, delta) {
 // departamentos que a empresa tem —, quais jogos aparecem, o nome da empresa e o placar de metas
 // do Comercial. Guardado pelo banco.js.
 const MODULOS = ['lazer', 'escritorio'];
-// o mundo em volta do prédio (public/js/mundo.js): o de sempre ou o da praça central
-const MUNDOS_SALA = ['classico', 'novo'];
-// clima e hora do dia (public/js/clima.js): auto/ciclo = muda sozinho, igual para todos
-const CLIMAS_SALA = ['auto', 'sol', 'nublado', 'chuva', 'tempestade'];
-const HORARIOS_SALA = ['ciclo', 'manha', 'dia', 'tarde', 'noite'];
 const JOGOS_SALA = ['parkour', 'ringue', 'corrida', 'futebol', 'volei', 'basquete', 'boliche', 'surf', 'matamata', 'batalha', 'xadrez', 'dama', 'velha', 'dados', 'poderes', 'armas',
   // o parque (public/js/parque-dados.js)
   'pingue', 'queimada', 'sinuca', 'golfe', 'truco', 'uno', 'gincana', 'kart', 'pinta'];
 const configPadrao = () => ({
   modulo: 'lazer',
-  mundo: 'classico',
+  mapa: MAPA_PADRAO, // o mapa em volta do prédio (public/js/mapas-dados.js)
   departamentos: [],
   jogos: Object.fromEntries(JOGOS_SALA.map((j) => [j, true])),
   empresa: '',
   placar: { titulo: 'Metas do mês', itens: [] },
-  clima: 'auto',
-  horario: 'ciclo',
   aviso: '', // comunicado da empresa: faixa no topo para todo mundo
   privacidade: true, // escritório: voz só dentro da mesma sala de departamento
   listada: true, // aparece na lista de salas ao vivo do saguão
@@ -499,12 +493,10 @@ function limparConfig(raw, base = configPadrao()) {
   const limpar = ESCRITORIO?.limparDepartamentos ?? (() => []);
   return {
     modulo: antigo ? 'escritorio' : MODULOS.includes(c.modulo) ? c.modulo : base.modulo,
-    mundo: MUNDOS_SALA.includes(c.mundo) ? c.mundo : base.mundo || 'classico',
+    mapa: MAPAS_SALA.includes(c.mapa) ? c.mapa : MAPAS_SALA.includes(base.mapa) ? base.mapa : MAPA_PADRAO,
     departamentos: antigo ? [c.modulo] : c.departamentos === undefined ? base.departamentos : limpar(c.departamentos),
     jogos: Object.fromEntries(JOGOS_SALA.map((j) => [j, typeof jogos[j] === 'boolean' ? jogos[j] : base.jogos[j]])),
     empresa: typeof c.empresa === 'string' ? cleanText(c.empresa, 40) : base.empresa,
-    clima: CLIMAS_SALA.includes(c.clima) ? c.clima : base.clima || 'auto',
-    horario: HORARIOS_SALA.includes(c.horario) ? c.horario : base.horario || 'ciclo',
     aviso: typeof c.aviso === 'string' ? cleanText(c.aviso, 200) : base.aviso ?? '',
     privacidade: typeof c.privacidade === 'boolean' ? c.privacidade : base.privacidade ?? true,
     listada: typeof c.listada === 'boolean' ? c.listada : base.listada ?? true,
@@ -1249,6 +1241,10 @@ function attachSockets(io) {
         return r({ ok: false, erro: 'Não deu para guardar agora. Tente de novo.' });
       }
       r({ ok: true });
+      // outro mapa: os jogos que dependem de onde as coisas ficam começam do zero (todo mundo recarrega)
+      if (antes.mapa !== room.config.mapa) {
+        for (const k of ['pingue', 'quadras', 'queimada', 'sinuca', 'golfe', 'cartas', 'kart', 'pinta']) delete room[k];
+      }
       io.to(room.id).emit('sala', { ...salaPublica(room), por: user.name });
       lobbyMudou();
     });

@@ -4,11 +4,10 @@
 import * as THREE from 'three';
 import { sfx } from './sfx.js';
 import { isTouch } from './touch.js';
-import { NOVO } from './mundo.js';
 import { MESAS_NOVO } from './cidade-dados.js';
 
 // ao lado do jogo da velha (no mundo novo, na praça dos jogos: cidade-dados.js)
-export const MESA_DADOS = NOVO ? { ...MESAS_NOVO.dados } : { x: 176, z: -12 };
+export const MESA_DADOS = { ...MESAS_NOVO.dados };
 const FELTRO = { w: 11, d: 8 };
 const Y = 0.17;
 const T = 1.1; // lado do dado

@@ -1,6 +1,10 @@
 // Pista de corrida: um circuito fechado em volta da sala, com largada/chegada,
 // setores para não deixar cortar caminho, e cronometragem de volta.
 import * as THREE from 'three';
+import { MAPAS, MAPA_DA_PAGINA } from './mapas-dados.js';
+
+// o centro e o giro vêm do mapa da sala (mapas-dados.js); a pista só existe no navegador
+const NO_MAPA = MAPAS[MAPA_DA_PAGINA].atracoes.pista;
 
 export const PISTA = {
   // O autódromo fica numa ala própria, a nordeste do cinema.
@@ -10,10 +14,10 @@ export const PISTA = {
   // separadas. Fica numa ala própria, longe o bastante do cinema para nada se
   // sobrepor — a ligação com o telão é feita pelo telão da pista, não pela
   // proximidade.
-  cx: 321,
-  cz: 252,
+  cx: NO_MAPA.cx,
+  cz: NO_MAPA.cz,
   escala: 1.05, // coordenadas do desenho -> metros
-  giro: -0.95,
+  giro: NO_MAPA.giro,
   largura: 16,
   y: 0.14,
   setores: 12,

@@ -1429,7 +1429,6 @@ body.touch #cam-preview { right: auto; left: 12px; bottom: auto; top: calc(108px
 .modulo:has(input:checked) { border-color: var(--accent); background: rgba(110, 231, 200, 0.08); }
 .modulo:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
 .modulo.breve { opacity: 0.55; cursor: default; }
-.sub-campo { display: block; margin-top: 10px; color: var(--muted); font-size: 12px; }
 .jogos-lista { display: grid; }
 .deptos { display: grid; margin-top: 4px; }
 .deptos .toggle-row.compact { padding: 8px 0; }
@@ -2740,8 +2739,6 @@ body.touch .salas-add { align-self: center; }
 body.touch .salas-nova { left: 8px; right: 8px; width: auto; bottom: 60px; }
 
 /* clima (clima.js): indicador no topo e escolha no painel da sala */
-.clima-chip { font-variant-numeric: tabular-nums; white-space: nowrap; }
-.clima-linha { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 
 /* luneta da sniper: tudo escuro em volta de uma lente redonda com retículo */
 #luneta {

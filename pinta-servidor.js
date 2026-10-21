@@ -4,9 +4,11 @@
 // Quem atira manda o tiro (os outros veem a tinta voando) e, quando ela cai no chão, onde caiu: o
 // servidor pinta a grade e repassa para todos desenharem. Acertou alguém do outro time, o navegador
 // de quem atirou avisa; com 3 acertos ele volta para a base (e fica uns segundos protegido).
+const { carregarPorMapa, comMapa } = require('./mapa-servidor.js');
 
 let P = null;
-import('./public/js/pinta-dados.js')
+const DADOS = carregarPorMapa('pinta-dados.js'); // um módulo por mapa (mapa-servidor.js)
+DADOS.pronto
   .then((m) => { P = m; })
   .catch((err) => console.warn('  Dados do pinta-território não carregaram:', err.message));
 
@@ -46,6 +48,7 @@ function ligarPinta(io, rooms, jogoLigado, darMoedas) {
     if (!P) return;
     const agora = Date.now();
     for (const room of rooms.values()) {
+      DADOS.usar(room);
       const pt = room.pinta;
       if (!pt) continue;
       if (!jogoLigado(room, 'pinta')) {
@@ -98,7 +101,8 @@ function ligarPinta(io, rooms, jogoLigado, darMoedas) {
     }
   }, 1000);
 
-  return function porSocket(socket, quem) {
+  return function porSocket(socket, quemDaSala) {
+    const quem = comMapa(quemDaSala, DADOS);
     const daSala = () => {
       const { room, user } = quem();
       if (!room || !user || !P) return {};

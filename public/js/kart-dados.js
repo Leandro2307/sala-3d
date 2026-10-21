@@ -4,7 +4,10 @@
 //
 // O traçado é uma curva suave pelos pontos do DESENHO (Catmull-Rom centrípeta), amostrada numa
 // linha de pontos. Volta só conta passando por todos os setores, em ordem (como no autódromo).
-import { KART_AREA } from './parque-dados.js';
+import { mapaDoModulo, transformarKart } from './mapas-dados.js';
+
+// o mapa deste módulo (no servidor vem no endereço: ?mapa=): o desenho é girado e posto no lugar dele
+const NO_MAPA = transformarKart(mapaDoModulo(import.meta.url));
 
 export const KART = {
   largura: 14,
@@ -63,7 +66,7 @@ function amostrar(pontos, passo = 1) {
   return saida;
 }
 
-export const LINHA = amostrar(DESENHO);
+export const LINHA = amostrar(DESENHO.map(NO_MAPA));
 const ACUM = (() => {
   const a = [0];
   for (let i = 1; i <= LINHA.length; i++) {
@@ -162,4 +165,7 @@ export function sortearItem(posicao, total, aleatorio = Math.random) {
 }
 
 // a placa de entrar, no fim da Rua dos Esportes
-export const ENTRADA_KART = { x: KART_AREA.x0 + 3, z: 606 };
+export const ENTRADA_KART = (() => {
+  const [x, z] = NO_MAPA([189, 606]);
+  return { x, z };
+})();

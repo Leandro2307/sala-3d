@@ -4,9 +4,11 @@
 // a bolinha nova; o servidor confere (perto da bolinha e da pessoa, do lado certo, depois do quique)
 // e anda com ela daí em diante, contando quiques e pontos. Mesa com uma pessoa só: o robô assume o
 // outro lado (erra de vez em quando). Chegou a segunda pessoa, o robô sai e o placar zera.
+const { carregarPorMapa, comMapa } = require('./mapa-servidor.js');
 
 let F = null; // a física (módulo ES)
-import('./public/js/pingue-fisica.js')
+const DADOS = carregarPorMapa('pingue-fisica.js'); // um módulo por mapa (mapa-servidor.js)
+DADOS.pronto
   .then((m) => { F = m; })
   .catch((err) => console.warn('  Física do pingue-pongue não carregou:', err.message));
 
@@ -203,6 +205,7 @@ function ligarPingue(io, rooms, jogoLigado, darMoedas) {
   setInterval(() => {
     if (!F) return;
     for (const room of rooms.values()) {
+      DADOS.usar(room);
       for (const m of room.pingue || []) {
         const mesa = F.PINGUE.mesas[m.i];
         for (const id of m.lados) {
@@ -232,13 +235,15 @@ function ligarPingue(io, rooms, jogoLigado, darMoedas) {
     if (!F) return;
     for (; sobra >= PASSO; sobra -= PASSO) {
       for (const room of rooms.values()) {
+      DADOS.usar(room);
         if (!room.pingue || !room.users.size || !jogoLigado(room, 'pingue')) continue;
         for (const m of room.pingue) if (m.fase !== 'espera') tic(room, m);
       }
     }
   }, PASSO * 1000);
 
-  return function porSocket(socket, quem) {
+  return function porSocket(socket, quemDaSala) {
+    const quem = comMapa(quemDaSala, DADOS);
     const daSala = () => {
       const { room, user } = quem();
       if (!room || !user || !F) return {};

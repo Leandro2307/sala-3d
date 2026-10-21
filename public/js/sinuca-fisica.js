@@ -3,7 +3,10 @@
 // servidor simula a tacada inteira e conta o que caiu; cada navegador simula a mesma tacada para
 // animar e, no fim, as bolas ficam onde o servidor disse.
 // Tudo no sistema da mesa: x ao longo do comprimento, z de lado, a origem no meio do pano.
-import { MESAS_SINUCA } from './parque-dados.js';
+import { parqueDe, mapaDoModulo } from './mapas-dados.js';
+
+// o mapa deste módulo (no servidor vem no endereço: ?mapa=)
+const { MESAS_SINUCA } = parqueDe(mapaDoModulo(import.meta.url));
 
 export const SINUCA = {
   mesas: MESAS_SINUCA,

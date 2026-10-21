@@ -1,6 +1,9 @@
 // Pinta-território (como no Splatoon): a arena do parque, os obstáculos e a grade do chão. Sem
 // three.js: o servidor guarda de quem é cada metro do chão (a grade) e conta a área de cada time.
-import { PINTA_ARENA as A } from './parque-dados.js';
+import { parqueDe, mapaDoModulo } from './mapas-dados.js';
+
+// o mapa deste módulo (no servidor vem no endereço: ?mapa=)
+const { PINTA_ARENA: A } = parqueDe(mapaDoModulo(import.meta.url));
 
 export const PINTA = {
   ...A,

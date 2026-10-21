@@ -5,7 +5,6 @@ import { Avatar } from './avatars.js';
 import { PERSONAGENS } from './modelo.js';
 import { EscolherPersonagem } from './escolher-personagem.js';
 import { SalasLaterais } from './salas.js';
-import { MUNDO, MUNDOS, lembrarMundo } from './mundo.js';
 import { AoVivo, cartaoDoSaguao, COR_STATUS } from './aovivo.js';
 import { Player } from './player.js';
 import { RTC, presetDe } from './rtc.js';
@@ -15,7 +14,7 @@ import { Combat } from './combat.js';
 import { RING, COMBAT, ringCorners } from './arena.js';
 import { Corrida, PISTA, largada, formatarVolta, projetar, pontoEm } from './pista.js';
 import { sfx, audioContext, setSfxEnabled } from './sfx.js';
-import { Clima, CLIMAS, HORARIOS } from './clima.js';
+import { Clima } from './clima.js';
 import { ARMAS, IDS_ARMAS, ARMA_PADRAO, defArma, VisaoArma, iniciarCapsulas, atualizarCapsulas, preCarregarArma } from './armas.js';
 import { Jogos } from './jogos.js';
 import { Controle, versaoNum } from './controle.js';
@@ -38,6 +37,9 @@ import { Gincana } from './gincana.js';
 import { Kart } from './kart.js';
 import { Pinta } from './pinta.js';
 import { hud as hudJogos } from './hud-jogos.js';
+import { MapaTela } from './mapa.js';
+import { MAPAS, MAPA_DA_PAGINA, lembrarMapa } from './mapas-dados.js';
+import { AREAS } from './cidade-dados.js';
 import { Surf, MataMata, dicaDoPortal } from './ceu.js';
 import { Batalha } from './batalha.js';
 import { TIMES } from './batalha-dados.js';
@@ -117,7 +119,7 @@ const navegadores = new Navegadores(world, {
   },
   aoTrocarTela: (lado) => irParaTelaDoLado(lado),
 });
-// sol, lua, chuva e tempestade (clima.js): o dono da sala pode fixar, senão muda sozinho
+// o céu do meio-dia, com sol (clima.js)
 const clima = new Clima(world);
 const qualidade = new Qualidade(world, {
   modo: settings.qualidade,
@@ -758,14 +760,15 @@ $('#lobby-form').addEventListener('submit', (e) => {
 // Trocar de sala recarrega a página já entrando na outra (?entrar=1): voz, telas e jogos começam
 // do zero, do mesmo jeito que na primeira entrada. Sala com senha sem passe para no saguão.
 // Também serve para voltar à mesma sala (servidor novo no ar, 3D que não voltou sozinho).
-function recarregarNaSala(id = state.room, mundo = null) {
+function recarregarNaSala(id = state.room, mapa = null) {
   const url = new URL(window.location.href);
   if (id) url.searchParams.set('sala', id);
   url.searchParams.set('entrar', '1');
-  // trocando de sala, o mundo é o que a outra sala usa (mundo.js lembra); só vai no endereço quando
-  // é para montar outro mundo nesta (assim funciona até sem localStorage)
-  if (mundo) url.searchParams.set('mundo', mundo);
-  else if (id !== state.room) url.searchParams.delete('mundo');
+  url.searchParams.delete('mundo'); // de quando havia dois mundos
+  // trocando de sala, o mapa é o que a outra sala usa (mapas-dados.js lembra); só vai no endereço
+  // quando é para montar outro mapa nesta (assim funciona até sem localStorage)
+  if (mapa) url.searchParams.set('mapa', mapa);
+  else if (id !== state.room) url.searchParams.delete('mapa');
   window.location.href = url;
 }
 const salas = new SalasLaterais({
@@ -832,7 +835,6 @@ async function join() {
   btn.disabled = true;
   btn.textContent = 'Entrando…';
   audioContext();
-  clima.ligarSom();
 
   if (!(await liberarSala(idDaSala(state.roomRequested), $('#in-senha-sala').value))) {
     btn.disabled = false;
@@ -2537,7 +2539,7 @@ function irParaEntrada() {
   if (player.veiculo) toggleVeiculo();
   player.teleport([e.pos[0] + (Math.random() - 0.5) * 4, 0, e.pos[2] + (Math.random() - 0.5) * 3], e.yaw);
 }
-// Trocar de mundo recarrega a página (mundoDaSala): quem era dono ou gestor continua sendo do outro
+// Trocar de mapa recarrega a página (mapaDaSala): quem era dono ou gestor continua sendo do outro
 // lado. As senhas passam só por essa recarga, nesta aba, e são apagadas assim que lidas.
 const CHAVE_RECARGA = 'sala3d-recarga';
 const senhasDaRecarga = (() => {
@@ -2568,30 +2570,29 @@ function aplicarLogo(src) {
   img.src = src;
 }
 
-// A sala usa outro mundo que o montado nesta página (ver mundo.js): recarrega já entrando nela, com o
-// mundo certo. Acontece na primeira visita a uma sala do mundo novo e quando o dono troca o mundo
+// A sala usa outro mapa que o montado nesta página (mapas-dados.js): recarrega já entrando nela, com
+// o mapa certo. Acontece na primeira visita a uma sala de outro mapa e quando o dono troca o mapa
 // com gente dentro.
-function mundoDaSala(cfg) {
-  const mundo = MUNDOS[cfg.mundo] ? cfg.mundo : 'classico';
+function mapaDaSala(cfg) {
+  const mapa = MAPAS[cfg.mapa] ? cfg.mapa : MAPA_DA_PAGINA;
   if (!state.room) return false;
-  lembrarMundo(state.room, mundo);
-  if (mundo === MUNDO) return false;
-  toast(`Indo para o mundo ${MUNDOS[mundo].nome}…`, 'info', 6000);
+  lembrarMapa(state.room, mapa);
+  if (mapa === MAPA_DA_PAGINA) return false;
+  toast(`Indo para o mapa ${MAPAS[mapa].nome}…`, 'info', 6000);
   if (senhaDono || senhaGestor) {
     try {
       sessionStorage.setItem(CHAVE_RECARGA, JSON.stringify({ sala: state.room, dono: senhaDono, gestor: senhaGestor }));
     } catch { /* sem sessionStorage: entra de novo como dono pelo painel */ }
   }
-  recarregarNaSala(state.room, mundo);
+  recarregarNaSala(state.room, mapa);
   return true;
 }
 
 function aplicarSala(cfg) {
   if (!cfg) return;
-  if (mundoDaSala(cfg)) return;
+  if (mapaDaSala(cfg)) return;
   state.sala = cfg;
   aplicarLogo(cfg.logo || '');
-  clima.setConfig(cfg);
   if (state.room) salas.visitar(state.room, { empresa: cfg.empresa, temSenha: cfg.temSenha });
   let mudou = false;
   // as mesas de cartas são uma área só, ligada se o truco ou o uno estiver
@@ -2636,7 +2637,7 @@ function renderSala() {
   const desligados = JOGOS_DA_SALA.filter(([j]) => !jogoLigado(j)).length;
   $('#sala-resumo').innerHTML = `<div class="sala-chip">${icon('predio', 18)}<span>
     <b>${esc(cfg.empresa || 'Sem nome de empresa')}</b>
-    <small>Ambiente: ${esc(amb.nome)} · Mundo: ${esc((MUNDOS[cfg.mundo] || MUNDOS.classico).nome)} · ${desligados ? `${desligados} ${desligados === 1 ? 'jogo desligado' : 'jogos desligados'}` : 'todos os jogos ligados'}${cfg.temSenha ? ' · com senha' : ''}${modoEscritorio() && cfg.privacidade !== false ? ' · salas à prova de som' : ''}</small>
+    <small>Mapa: ${esc((MAPAS[cfg.mapa] || MAPAS[MAPA_DA_PAGINA]).nome)} · Ambiente: ${esc(amb.nome)} · ${desligados ? `${desligados} ${desligados === 1 ? 'jogo desligado' : 'jogos desligados'}` : 'todos os jogos ligados'}${cfg.temSenha ? ' · com senha' : ''}${modoEscritorio() && cfg.privacidade !== false ? ' · salas à prova de som' : ''}</small>
   </span></div>${state.donoDaSala ? '<p class="hint">Você é o dono desta sala.</p>' : souGestor() ? '<p class="hint">Você é gestor desta sala.</p>' : ''}`;
   $('#sala-gestor').hidden = !cfg.temGestor || souGestor() || state.donoDaSala;
   $('#gestor-status').textContent = cfg.temGestor
@@ -2667,16 +2668,13 @@ function preencherConfig(forcar = false) {
   f.aviso.value = cfg.aviso || '';
   f.privacidade.checked = cfg.privacidade !== false;
   f.listada.checked = cfg.listada !== false;
-  const opcoes = (lista, atual) => Object.entries(lista).map(([id, o]) => `<option value="${id}"${id === atual ? ' selected' : ''}>${o.nome}</option>`).join('');
-  $('#sala-config').elements.clima.innerHTML = opcoes(CLIMAS, cfg.clima || 'auto');
-  $('#sala-config').elements.horario.innerHTML = opcoes(HORARIOS, cfg.horario || 'ciclo');
+  $('#sala-mapas').innerHTML = Object.entries(MAPAS).map(([id, m]) => `<label class="modulo mapa-op" style="--c:${m.cor}">
+      <input type="radio" name="mapa" value="${id}"${(cfg.mapa || MAPA_DA_PAGINA) === id ? ' checked' : ''}>
+      <b>${m.nome}</b><small>${m.desc}</small>
+    </label>`).join('');
   $('#sala-modulos').innerHTML = MODOS.map((a) => `<label class="modulo">
       <input type="radio" name="modulo" value="${a.id}"${cfg.modulo === a.id ? ' checked' : ''}>
       <b>${a.nome}</b><small>${a.desc}</small>
-    </label>`).join('');
-  $('#sala-mundos').innerHTML = Object.entries(MUNDOS).map(([id, m]) => `<label class="modulo">
-      <input type="radio" name="mundo" value="${id}"${(cfg.mundo || 'classico') === id ? ' checked' : ''}>
-      <b>${m.nome}</b><small>${m.desc}</small>
     </label>`).join('');
   // departamentos do escritório: cada um vira uma sala (a ordem é a das vagas, a partir da recepção)
   $('#sala-deptos').innerHTML = IDS_DEPARTAMENTOS.map((id) => {
@@ -3198,11 +3196,48 @@ $('#irpara-lista').addEventListener('click', (e) => {
 });
 setInterval(() => { if (state.panel === 'sala') renderIrPara(); }, 3000);
 
+// ------------------------------------------------------------------ mapa
+// O mapa da tela (mapa.js): botão na barra ou L. Tocar numa área (ou num jogo do parque) leva até ela.
+const jogosDoParqueLigados = () => jogosDoParque.filter((j) => j.lugar && (j.algumLigado ? j.algumLigado() : jogoLigado(j.id)));
+const mapaTela = new MapaTela({
+  posicao: () => ({ x: player.pos.x, z: player.pos.z, yaw: player.yaw }),
+  pessoas: () => [...state.users.values()].filter((u) => !u.isSelf && u.avatar).map((u) => ({ x: u.avatar.group.position.x, z: u.avatar.group.position.z })),
+  jogosDoParque: () => jogosDoParqueLigados().filter((j) => !AREAS[j.id]).map((j) => {
+    const l = j.lugar();
+    return { id: j.id, nome: l.nome, desc: l.desc, cor: l.cor };
+  }),
+  ir: (id) => irParaArea(id),
+});
+function abrirMapa() {
+  if (!state.joined) return;
+  if (document.pointerLockElement) document.exitPointerLock();
+  mapaTela.alternar();
+}
+$('#btn-mapa').addEventListener('click', abrirMapa);
+// o lago congelado (Vila da Neve): em cima dele o boneco escorrega (player.js)
+function naPistaDeGelo(p) {
+  const g = world.natureza?.gelo;
+  return !!g && p.y < 0.5 && Math.hypot(p.x - g.x, p.z - g.z) < g.raioAgua;
+}
+
+function irParaArea(id) {
+  const jogo = jogosDoParque.find((j) => j.id === id);
+  const alvo = id === 'predio' ? world.entrada() : jogo ? jogo.lugar() : AREAS[id]?.ir;
+  if (!alvo || !state.joined) return;
+  sairDoJogo(); // futebol, céu, gincana... saem antes de ir
+  run.abandon();
+  if (player.veiculo) toggleVeiculo();
+  exitFocus();
+  if (state.panel) closePanel();
+  player.teleport([alvo.pos[0] + (Math.random() - 0.5) * 1.2, alvo.pos[1] ?? 0, alvo.pos[2] + (Math.random() - 0.5) * 1.2], alvo.yaw);
+  sfx.teleport();
+}
+
 // ------------------------------------------------------------------ parque
 // "Ir para" de cada jogo do parque (o parque fica longe da entrada): cada jogo diz onde se começa
 // (lugar()) e com que nome
 function renderParque() {
-  const lista = jogosDoParque.filter((j) => j.lugar && (j.algumLigado ? j.algumLigado() : jogoLigado(j.id)));
+  const lista = jogosDoParqueLigados();
   $('#parque-lista').innerHTML = lista.map((j) => {
     const l = j.lugar();
     return `<button type="button" data-ir="${j.id}"><i style="--c:${l.cor}"></i><span><b>${esc(l.nome)}</b><small>${esc(l.desc)}</small></span></button>`;
@@ -3278,13 +3313,11 @@ $('#sala-config').addEventListener('submit', (e) => {
   const cfg = {
     empresa: form.elements.empresa.value.trim(),
     modulo: form.querySelector('[name="modulo"]:checked')?.value || 'lazer',
-    mundo: form.querySelector('[name="mundo"]:checked')?.value || 'classico',
+    mapa: form.querySelector('[name="mapa"]:checked')?.value || MAPA_DA_PAGINA,
     departamentos: $$('#sala-deptos input:checked').map((i) => i.value),
     jogos: Object.fromEntries($$('#sala-jogos input').map((i) => [i.value, i.checked])),
     placar: lerPlacar(),
     paginas: lerPaginas(),
-    clima: form.elements.clima.value,
-    horario: form.elements.horario.value,
     aviso: form.elements.aviso.value.trim(),
     ...(logoNovo !== undefined ? { logo: logoNovo } : {}),
     privacidade: form.elements.privacidade.checked,
@@ -5629,7 +5662,8 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'Escape') {
     // Esc sai de vez (mesmo controlando a tela) e devolve o mouse para a visão do boneco — com um
     // aviso do site aberto, ele só responde o aviso (cancela)
-    if (avisoSite.aberto) avisoSite.esc();
+    if (mapaTela.aberto) mapaTela.fechar();
+    else if (avisoSite.aberto) avisoSite.esc();
     else if (typing()) document.activeElement.blur();
     else if (!$('#tela-mais').hidden) fecharMenuDaTela(true);
     else if (guia.aberto) guia.fechar();
@@ -5684,6 +5718,9 @@ window.addEventListener('keydown', (e) => {
       break;
     case 'KeyV':
       toggleView();
+      break;
+    case 'KeyL':
+      abrirMapa();
       break;
     case 'KeyB':
       tocarSino(); // Sala Comercial: fechei uma venda
@@ -5996,7 +6033,6 @@ function slowUpdate() {
     : batalha.pertoDoPortal() ? 'Entrar no mata-mata em times' : '');
   if (batalha.ativo && !jogoLigado('batalha')) batalha.sair(); // o dono da sala desligou
   if (futebol.jogando && !jogoLigado('futebol')) futebol.sair(); // o dono da sala desligou
-  $('#clima-chip').textContent = clima.rotulo();
   updateVolumes();
   lodDosBonecos();
   vigiarContexto();
@@ -6356,7 +6392,10 @@ function frame(ts = performance.now()) {
 
   if (state.joined) {
     if (futebol.jogando) futebol.update(dt); // no campo: o carro do futebol no lugar do boneco
-    else player.update(dt);
+    else {
+      player.noGelo = naPistaDeGelo(player.pos);
+      player.update(dt);
+    }
     futebol.animar(dt);
     quadras.update(dt, t);
     for (const j of jogosDoParque) j.update(dt, t);

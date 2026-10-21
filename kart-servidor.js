@@ -5,9 +5,11 @@
 // sai a ordem. Caixa pega some por uns segundos para todos e dá um item sorteado pela colocação
 // (quem vem atrás ganha mais turbo e míssil). A casca fica no chão até alguém passar por cima; o
 // míssil vai no carro da frente e chega depois de um tempo (quem leva é que roda, no navegador dele).
+const { carregarPorMapa, comMapa } = require('./mapa-servidor.js');
 
 let K = null;
-import('./public/js/kart-dados.js')
+const DADOS = carregarPorMapa('kart-dados.js'); // um módulo por mapa (mapa-servidor.js)
+DADOS.pronto
   .then((m) => { K = m; })
   .catch((err) => console.warn('  Dados do kart não carregaram:', err.message));
 
@@ -76,6 +78,7 @@ function ligarKart(io, rooms, jogoLigado, darMoedas) {
     if (!K) return;
     const agora = Date.now();
     for (const room of rooms.values()) {
+      DADOS.usar(room);
       const k = room.kart;
       if (!k) continue;
       if (!jogoLigado(room, 'kart')) {
@@ -111,12 +114,14 @@ function ligarKart(io, rooms, jogoLigado, darMoedas) {
   setInterval(() => {
     if (!K) return;
     for (const room of rooms.values()) {
+      DADOS.usar(room);
       const k = room.kart;
       if (k?.fase === 'corrida' && k.pilotos.size) io.to(room.id).volatile.emit('kt-ordem', ordem(k).map((p) => [p.id, p.volta, p.chegou]));
     }
   }, 500);
 
-  return function porSocket(socket, quem) {
+  return function porSocket(socket, quemDaSala) {
+    const quem = comMapa(quemDaSala, DADOS);
     const daSala = () => {
       const { room, user } = quem();
       if (!room || !user || !K) return {};

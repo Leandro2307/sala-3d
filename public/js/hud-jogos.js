@@ -24,6 +24,7 @@ const TOQUE = [
   // pinta-território: no celular não tem E lá dentro, quem sai é o X do canto
   [/tanque enche rápido · E sai/, 'tanque enche rápido · o X do canto sai'],
   [/(você: (?:Rosa|Verde)) · E sai/, '$1'],
+  [/(você: (?:em campo|no cemitério)) · E sai/, '$1'],
   [/ · <kbd>Esc<\/kbd> ?sai/g, ''],
   [/ · Esc sai/g, ''],
   [/<kbd>R<\/kbd> volta/g, '↺ volta'],

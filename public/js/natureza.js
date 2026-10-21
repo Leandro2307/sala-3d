@@ -1,5 +1,6 @@
-// Natureza em volta do autódromo: céu de fim de tarde, serra no horizonte, floresta, lago,
-// flores, nuvens e pássaros. Nada disso aparece dentro da sala do cinema (paredes e teto tampam).
+// Natureza do mapa, no tema dele (temas3d.js): céu do meio-dia, serra (ou mar) no horizonte, mata,
+// água (lagoa, lago congelado ou lago de carpas), flores, nuvens, pássaros e, no outono, folhas
+// caindo. Nada disso aparece dentro da sala do cinema (paredes e teto tampam).
 //
 // Tudo é sorteado com semente fixa: cada jogador monta o mesmo mundo, com as mesmas árvores
 // nos mesmos lugares, sem precisar mandar nada pela rede.
@@ -7,6 +8,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { isTouch } from './touch.js';
 import { CAMINHO, PISTA } from './pista.js';
+import { TEMA, arvoresDoTema, pintar as pintarTema } from './temas3d.js';
 
 const LEVE = isTouch; // celular: menos árvores, terreno mais grosso
 // Lado do pedaço do mapa em que as plantas são agrupadas (ver instanciar). No celular, pedaços
@@ -114,9 +116,23 @@ function foraDaArea(x, z, area) {
   return Math.hypot(dx, dz);
 }
 
+const RELEVO = TEMA.relevo;
+// fundo do mar (praia): a terra desce logo depois da cerca e o mar (y = NIVEL_MAR) cobre
+const NIVEL_MAR = -0.6;
 export function alturaTerreno(x, z, area) {
   const d = foraDaArea(x, z, area);
   if (d <= 0) return 0;
+  const terra = alturaDaTerra(x, z, area, d) * RELEVO.serra;
+  if (!RELEVO.mar) return terra;
+  // só o lado norte (+z) é terra firme; os outros viram mar, com uma faixa de praia na cerca
+  const cx = x - (area.minX + area.maxX) / 2;
+  const cz = z - (area.minZ + area.maxZ) / 2;
+  const norte = cz / (Math.hypot(cx, cz) || 1);
+  const firme = suave(0.15, 0.55, norte + (fbm(x * 0.004, z * 0.004, 3) - 0.5) * 0.4);
+  const fundo = 1.2 - suave(6, 60, d) * 9 - suave(60, 400, d) * 20;
+  return fundo + (terra - fundo) * firme;
+}
+function alturaDaTerra(x, z, area, d) {
   // vale na direção do pôr do sol: colinas e serra baixam nesse trecho do horizonte
   const cx = x - (area.minX + area.maxX) / 2;
   const cz = z - (area.minZ + area.maxZ) / 2;
@@ -172,13 +188,14 @@ function distSegmento(px, pz, ax, az, bx, bz) {
 function criarCeu(scene, solDir) {
   const mat = new THREE.ShaderMaterial({
     uniforms: {
-      topo: { value: new THREE.Color('#122152') },
-      meio: { value: new THREE.Color('#3d5596') },
-      horizonte: { value: new THREE.Color('#f0956c') },
-      base: { value: new THREE.Color('#4d4f7e') },
-      brilho: { value: new THREE.Color('#ffb06a') },
-      solDir: { value: solDir.clone() },
-      disco: { value: new THREE.Color(1.6, 1.38, 1.06) }, // sol (ou lua, de noite); preto = encoberto
+      // o céu do meio-dia (o mesmo do clima.js): já nasce assim, e o reflexo do lago sai certo
+      topo: { value: new THREE.Color(TEMA.ceu[0]) },
+      meio: { value: new THREE.Color(TEMA.ceu[1]) },
+      horizonte: { value: new THREE.Color(TEMA.ceu[2]) },
+      base: { value: new THREE.Color(TEMA.ceu[3]) },
+      brilho: { value: new THREE.Color(TEMA.ceu[4]) },
+      solDir: { value: new THREE.Vector3(0, 0.92, -0.38).normalize() },
+      disco: { value: new THREE.Color(1.6, 1.58, 1.46) },
     },
     vertexShader: /* glsl */ `
       varying vec3 vDir;
@@ -336,17 +353,21 @@ function criarTerreno(scene, area) {
     const x = pos.getX(i) + cx;
     const z = pos.getZ(i) + cz;
     const h = alturaTerreno(x, z, area);
-    pos.setXYZ(i, x, h > 0 ? h : -0.03, z);
+    pos.setXYZ(i, x, h > 0 || RELEVO.mar ? (foraDaArea(x, z, area) > 0 ? h : -0.03) : -0.03, z);
   }
   geo.computeVertexNormals();
 
   const cores = new Float32Array(pos.count * 3);
-  const grama = new THREE.Color('#4f7f3c');
-  const gramaSeca = new THREE.Color('#878c46');
-  const mata = new THREE.Color('#2f5a33');
-  const rocha = new THREE.Color('#77706a');
-  const rochaFria = new THREE.Color('#5c5a73');
-  const neve = new THREE.Color('#eef2f8');
+  const T = TEMA.cores;
+  const grama = new THREE.Color(T.grama);
+  const gramaSeca = new THREE.Color(T.gramaSeca);
+  const mata = new THREE.Color(T.mata);
+  const rocha = new THREE.Color(T.rocha);
+  const rochaFria = new THREE.Color(T.rochaFria);
+  const neve = new THREE.Color(T.neve);
+  const areia = new THREE.Color(T.areia);
+  const areiaMolhada = new THREE.Color(T.areiaMolhada);
+  const neveDe = RELEVO.neveAcima;
   const c = new THREE.Color();
   const normal = geo.attributes.normal;
   for (let i = 0; i < pos.count; i++) {
@@ -358,7 +379,11 @@ function criarTerreno(scene, area) {
     c.lerp(mata, suave(18, 90, h) * 0.85);
     c.lerp(rocha, Math.max(suave(0.28, 0.55, inclinacao), suave(170, 300, h)));
     c.lerp(rochaFria, suave(260, 420, h) * 0.5);
-    c.lerp(neve, suave(360, 440, h + fbm(x * 0.01, z * 0.01, 3) * 70) * (1 - suave(0.45, 0.7, inclinacao)));
+    c.lerp(neve, suave(neveDe, neveDe + 80, h + fbm(x * 0.01, z * 0.01, 3) * 70) * (1 - suave(0.45, 0.7, inclinacao)));
+    if (RELEVO.mar && foraDaArea(x, z, area) > 0) {
+      const y = pos.getY(i);
+      if (y < 2.2) c.copy(areiaMolhada).lerp(areia, suave(NIVEL_MAR - 0.4, 1.4, y));
+    }
     cores.set([c.r, c.g, c.b], i * 3);
   }
   geo.setAttribute('color', new THREE.BufferAttribute(cores, 3));
@@ -400,28 +425,6 @@ function pintar(geo, cor) {
   g.setAttribute('color', new THREE.BufferAttribute(arr, 3));
   g.deleteAttribute('uv');
   return g;
-}
-
-function geoPinheiro() {
-  const partes = [
-    pintar(new THREE.CylinderGeometry(0.32, 0.48, 3.2, 6, 1, true).translate(0, 1.6, 0), '#5b3d2a'),
-    pintar(new THREE.ConeGeometry(2.7, 4.4, 7, 1, true).translate(0, 4.6, 0), '#2e6a41'),
-    pintar(new THREE.ConeGeometry(2.1, 3.8, 7, 1, true).translate(0, 6.7, 0), '#357a48'),
-    pintar(new THREE.ConeGeometry(1.35, 3.2, 7, 1, true).translate(0, 8.6, 0), '#3d8a51'),
-  ];
-  return mergeGeometries(partes);
-}
-
-function geoFrondosa() {
-  const copa1 = new THREE.IcosahedronGeometry(2.7, 0).scale(1, 0.85, 1).translate(0, 5.6, 0);
-  const copa2 = new THREE.IcosahedronGeometry(1.9, 0).translate(1.4, 6.6, 0.6);
-  const copa3 = new THREE.IcosahedronGeometry(1.7, 0).translate(-1.3, 6.2, -0.8);
-  return mergeGeometries([
-    pintar(new THREE.CylinderGeometry(0.3, 0.45, 4.4, 6, 1, true).translate(0, 2.2, 0), '#6a4a33'),
-    pintar(copa1, '#5c8f3e'),
-    pintar(copa2, '#68a046'),
-    pintar(copa3, '#4f8238'),
-  ]);
 }
 
 // Agrupa instâncias por pedaço do mapa: assim o three descarta (frustum culling) os pedaços
@@ -476,8 +479,74 @@ function instanciar(scene, geo, mat, itens, { pedaco = PEDACO, sombra = true } =
   return malhas;
 }
 
-// ------------------------------------------------------------------ lago
-function criarLago(scene, renderer, ceuMat, x, z, raio, decorar) {
+// ------------------------------------------------------------------ o mar (praia)
+// Um plano grande no nível do mar, com o reflexo do céu e ondinhas que andam; o relevo desce até ele
+function criarMar(scene, renderer, ceuMat, area, decorar) {
+  const cenaCeu = new THREE.Scene();
+  cenaCeu.add(new THREE.Mesh(new THREE.SphereGeometry(50, 32, 16), ceuMat.clone()));
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const env = pmrem.fromScene(cenaCeu, 0.02, 0.1, 200).texture;
+  pmrem.dispose();
+  const normalMap = texturaAgua();
+  normalMap.repeat.set(220, 220);
+  const mar = new THREE.Mesh(
+    new THREE.PlaneGeometry(9000, 9000).rotateX(-Math.PI / 2),
+    soSol(new THREE.MeshStandardMaterial({
+      color: '#0e8fb3', roughness: 0.12, metalness: 0.15, envMap: env, envMapIntensity: 0.7,
+      normalMap, normalScale: new THREE.Vector2(0.5, 0.5),
+    })),
+  );
+  mar.position.set((area.minX + area.maxX) / 2, NIVEL_MAR, (area.minZ + area.maxZ) / 2);
+  mar.receiveShadow = true;
+  scene.add(mar);
+  decorar.push((t) => normalMap.offset.set(t * 0.004, t * 0.0025));
+}
+
+// ------------------------------------------------------------------ lagos
+// textura do gelo: branco azulado com rachaduras finas e manchas mais claras
+function texturaGelo() {
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = 512;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#d8ecfb';
+  ctx.fillRect(0, 0, 512, 512);
+  const rnd = semente(41);
+  for (let i = 0; i < 60; i++) {
+    ctx.fillStyle = `rgba(255,255,255,${(0.15 + rnd() * 0.3).toFixed(2)})`;
+    ctx.beginPath();
+    ctx.ellipse(rnd() * 512, rnd() * 512, 20 + rnd() * 70, 8 + rnd() * 30, rnd() * 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.strokeStyle = 'rgba(120,160,200,0.55)';
+  ctx.lineWidth = 1.4;
+  for (let i = 0; i < 26; i++) {
+    let x = rnd() * 512;
+    let y = rnd() * 512;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    for (let k = 0; k < 6; k++) {
+      x += (rnd() - 0.5) * 90;
+      y += (rnd() - 0.5) * 90;
+      ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  return tex;
+}
+
+// as cores de cada tipo de água: a água, o fundo da margem e quanto a margem passa da água
+const TIPOS_AGUA = {
+  lago: { cor: '#1f5a82', margem: '#9a8c6c', borda: 1.12 },
+  lagoa: { cor: '#14b8c4', margem: '#ecd9a5', borda: 1.35 },
+  gelo: { cor: '#8fc3ea', margem: '#ffffff', borda: 1.18 },
+  carpas: { cor: '#1d6b6e', margem: '#7d7468', borda: 1.1 },
+};
+
+function criarLago(scene, renderer, ceuMat, x, z, raio, decorar, tipo = 'lago') {
+  const T = TIPOS_AGUA[tipo] || TIPOS_AGUA.lago;
   // reflexo do céu: o céu renderizado num mapa de ambiente que só a água usa (pôr no
   // scene.environment mudaria a luz do cinema também). A cena do céu fica guardada: o mapa é
   // feito na placa de vídeo e some se o contexto do WebGL se perder (ver refazer). Com uma cópia
@@ -502,13 +571,20 @@ function criarLago(scene, renderer, ceuMat, x, z, raio, decorar) {
   }
   const normalMap = texturaAgua();
   normalMap.repeat.set(raio / 7, raio / 7);
+  // o gelo: liso e claro, com as rachaduras (sem ondas); a água das outras com ondinhas que andam
+  const gelo = tipo === 'gelo';
+  const mapaGelo = gelo ? texturaGelo() : null;
+  if (mapaGelo) mapaGelo.repeat.set(raio / 18, raio / 18);
+  // a ShapeGeometry tem uv = posição: a textura repete a cada 1 m sem isto
+  const geoAgua = new THREE.ShapeGeometry(forma, 6);
+  const uvs = geoAgua.attributes.uv;
+  for (let i = 0; i < uvs.count; i++) uvs.setXY(i, uvs.getX(i) / raio, uvs.getY(i) / raio);
   const agua = new THREE.Mesh(
-    new THREE.ShapeGeometry(forma, 6),
+    geoAgua,
     new THREE.MeshStandardMaterial({
-      // reflexo moderado: forte demais, de perto do chão ela espelha o horizonte laranja e
-      // fica com cara de areia
-      color: '#1f5a82', roughness: 0.1, metalness: 0.1, envMap: gerarAmbiente(), envMapIntensity: 0.55,
-      normalMap, normalScale: new THREE.Vector2(0.35, 0.35),
+      color: T.cor, roughness: gelo ? 0.08 : 0.1, metalness: gelo ? 0.12 : 0.1, envMap: gerarAmbiente(), envMapIntensity: gelo ? 0.9 : 0.6,
+      map: mapaGelo, normalMap: gelo ? null : normalMap, normalScale: new THREE.Vector2(0.35, 0.35),
+      transparent: tipo === 'lagoa', opacity: tipo === 'lagoa' ? 0.88 : 1,
     }),
   );
   agua.rotation.x = -Math.PI / 2; // ShapeGeometry nasce de pé, no plano XY
@@ -518,10 +594,19 @@ function criarLago(scene, renderer, ceuMat, x, z, raio, decorar) {
 
   const margem = new THREE.Mesh(
     new THREE.ShapeGeometry(forma, 6),
-    new THREE.MeshLambertMaterial({ color: '#9a8c6c', map: texturaGrao(64, 0.9, 0.2, 9) }),
+    new THREE.MeshLambertMaterial({ color: T.margem, map: texturaGrao(64, 0.9, 0.2, 9) }),
   );
   margem.rotation.x = -Math.PI / 2;
-  margem.scale.set(1.12, 1.12, 1);
+  margem.scale.set(T.borda, T.borda, 1);
+  // a lagoa é rasa: o fundo de areia aparece pela água (um disco claro embaixo dela)
+  if (tipo === 'lagoa') {
+    const fundo = new THREE.Mesh(new THREE.ShapeGeometry(forma, 6), new THREE.MeshLambertMaterial({ color: '#7fd6cf' }));
+    fundo.rotation.x = -Math.PI / 2;
+    fundo.scale.set(0.97, 0.97, 1);
+    fundo.position.set(x, 0.025, z);
+    scene.add(fundo);
+  }
+  if (tipo === 'carpas') criarCarpas(scene, x, z, raio, decorar);
   margem.position.set(x, 0.02, z);
   margem.receiveShadow = true;
   scene.add(margem);
@@ -530,18 +615,64 @@ function criarLago(scene, renderer, ceuMat, x, z, raio, decorar) {
     normalMap.offset.set(t * 0.012, t * 0.007);
   });
   return {
-    x, z, raio: raio * 1.2,
+    x, z, raio: raio * 1.2, tipo, raioAgua: raio * 0.8,
     // contexto do WebGL restaurado: o mapa antigo era do contexto perdido (nada de dispose nele)
     refazer: () => { agua.material.envMap = gerarAmbiente(); },
   };
 }
 
+// As carpas: peixes laranja, brancos e vermelhos nadando em volta do lago, e vitórias-régias
+function criarCarpas(scene, x, z, raio, decorar) {
+  const rnd = semente(88);
+  const corpo = new THREE.SphereGeometry(0.32, 8, 6).scale(1, 0.45, 2.4);
+  const rabo = new THREE.ConeGeometry(0.28, 0.6, 4).rotateX(-Math.PI / 2).scale(1, 0.3, 1).translate(0, 0, -0.95);
+  const peixe = mergeGeometries([corpo, rabo]);
+  const qtd = 18;
+  const malha = new THREE.InstancedMesh(peixe, new THREE.MeshLambertMaterial({ color: '#ffffff' }), qtd);
+  const cores = ['#f97316', '#f8fafc', '#ef4444', '#fb923c', '#fde68a'];
+  const cor = new THREE.Color();
+  const peixes = [];
+  for (let i = 0; i < qtd; i++) {
+    malha.setColorAt(i, cor.set(cores[i % cores.length]));
+    peixes.push({ r: raio * (0.2 + rnd() * 0.55), fase: rnd() * Math.PI * 2, vel: (0.12 + rnd() * 0.12) * (rnd() < 0.5 ? 1 : -1), onda: rnd() * 6 });
+  }
+  malha.frustumCulled = false;
+  scene.add(malha);
+  const m = new THREE.Matrix4();
+  const q = new THREE.Quaternion();
+  const s = new THREE.Vector3(1, 1, 1);
+  const p = new THREE.Vector3();
+  const eixo = new THREE.Vector3(0, 1, 0);
+  decorar.push((t) => {
+    peixes.forEach((f, i) => {
+      const a = f.fase + t * f.vel;
+      const r = f.r + Math.sin(t * 0.3 + f.onda) * 2;
+      p.set(x + Math.cos(a) * r, -0.05, z + Math.sin(a) * r);
+      // de frente para onde nada (a tangente do círculo) e balançando o rabo
+      q.setFromAxisAngle(eixo, -a + (f.vel > 0 ? 0 : Math.PI) + Math.sin(t * 6 + f.onda) * 0.15);
+      malha.setMatrixAt(i, m.compose(p, q, s));
+    });
+    malha.instanceMatrix.needsUpdate = true;
+  });
+  // vitórias-régias: discos verdes com um corte, algumas com flor rosa
+  const folhas = [];
+  for (let i = 0; i < 26; i++) {
+    const a = rnd() * Math.PI * 2;
+    const r = raio * (0.3 + rnd() * 0.6);
+    const rr = 0.5 + rnd() * 0.7;
+    folhas.push(pintarTema(new THREE.CircleGeometry(rr, 10, 0.3, Math.PI * 2 - 0.3).rotateX(-Math.PI / 2).rotateY(rnd() * 6).translate(x + Math.cos(a) * r, 0.06, z + Math.sin(a) * r), '#3f8f3a'));
+    if (i % 4 === 0) folhas.push(pintarTema(new THREE.IcosahedronGeometry(0.22, 0).translate(x + Math.cos(a) * r, 0.18, z + Math.sin(a) * r), '#f9a8d4'));
+  }
+  const regias = new THREE.Mesh(mergeGeometries(folhas), new THREE.MeshLambertMaterial({ vertexColors: true }));
+  scene.add(regias);
+}
+
 // ------------------------------------------------------------------ nuvens e pássaros
-let nuvensMat = null; // o clima (clima.js) escurece as nuvens na chuva e de noite
+let nuvensMat = null; // o clima (clima.js) pinta as nuvens com a cor do meio-dia
 function criarNuvens(scene, centro, decorar) {
   const rnd = semente(31);
   // lá no alto nenhuma luz pontual chega: shader só de sol
-  const mat = soSol(new THREE.MeshLambertMaterial({ color: '#f4dfe3', emissive: '#4a3550', emissiveIntensity: 0.55, flatShading: true }));
+  const mat = soSol(new THREE.MeshLambertMaterial({ color: TEMA.nuvens, emissive: '#8a96a8', emissiveIntensity: 0.55, flatShading: true }));
   const nuvens = [];
   const qtd = LEVE ? 9 : 16;
   for (let n = 0; n < qtd; n++) {
@@ -571,7 +702,7 @@ function criarNuvens(scene, centro, decorar) {
 }
 
 function criarPassaros(scene, bandos, decorar) {
-  const mat = new THREE.MeshBasicMaterial({ color: '#1b1726', side: THREE.DoubleSide });
+  const mat = new THREE.MeshBasicMaterial({ color: TEMA.passaros, side: THREE.DoubleSide });
   const asaGeo = new THREE.BufferGeometry();
   asaGeo.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0.35, 0, 0, -0.35, 1.6, 0, 0], 3));
   asaGeo.computeVertexNormals();
@@ -614,7 +745,7 @@ function criarPassaros(scene, bandos, decorar) {
 
 // ------------------------------------------------------------------ cerca da área jogável
 function criarCerca(scene, area, sala) {
-  const madeira = new THREE.MeshLambertMaterial({ color: '#6b4e36' });
+  const madeira = new THREE.MeshLambertMaterial({ color: TEMA.cerca });
   const lados = [
     { a: [area.minX, area.maxZ], b: [area.maxX, area.maxZ] },
     { a: [area.maxX, area.minZ], b: [area.maxX, area.maxZ] },
@@ -644,22 +775,65 @@ function criarCerca(scene, area, sala) {
   scene.add(poste);
 }
 
+// ------------------------------------------------------------------ folhas caindo (outono)
+// Folhas vermelhas e laranja caindo e rodopiando numa caixa em volta da câmera (quando uma passa do
+// chão, volta lá para cima). Só no lado de fora.
+function criarFolhas(scene, decorar) {
+  const qtd = LEVE ? 140 : 320;
+  const geo = new THREE.PlaneGeometry(0.16, 0.11);
+  const mat = new THREE.MeshBasicMaterial({ color: '#ffffff', side: THREE.DoubleSide, transparent: true, opacity: 0.9 });
+  const malha = new THREE.InstancedMesh(geo, mat, qtd);
+  malha.frustumCulled = false;
+  const rnd = semente(19);
+  const cor = new THREE.Color();
+  const cores = ['#dc2626', '#ea580c', '#f59e0b', '#b91c1c', '#f9a8d4'];
+  const folhas = [];
+  const CAIXA = 46;
+  for (let i = 0; i < qtd; i++) {
+    malha.setColorAt(i, cor.set(cores[i % cores.length]));
+    folhas.push({ x: (rnd() - 0.5) * CAIXA, y: rnd() * 18, z: (rnd() - 0.5) * CAIXA, vel: 0.6 + rnd() * 0.7, fase: rnd() * 6, giro: rnd() * 6 });
+  }
+  scene.add(malha);
+  const m = new THREE.Matrix4();
+  const e = new THREE.Euler();
+  const q = new THREE.Quaternion();
+  const s = new THREE.Vector3(1, 1, 1);
+  const p = new THREE.Vector3();
+  let cam = null;
+  decorar.push((t, dt) => {
+    if (!cam) return;
+    folhas.forEach((f, i) => {
+      f.y -= f.vel * dt;
+      if (f.y < 0) f.y += 18;
+      // a folha anda presa à câmera (ela pode ir longe), com um balanço de lado
+      const x = Math.round((cam.x - f.x) / CAIXA) * CAIXA + f.x + Math.sin(t * 0.9 + f.fase) * 0.8;
+      const z = Math.round((cam.z - f.z) / CAIXA) * CAIXA + f.z + Math.cos(t * 0.7 + f.fase) * 0.8;
+      // perto demais da câmera a folha tapa a tela: pula para o outro lado da caixa
+      const perto = Math.hypot(x - cam.x, f.y - cam.y, z - cam.z) < 4;
+      p.set(perto ? x + CAIXA / 2 : x, f.y, z);
+      q.setFromEuler(e.set(t * 1.7 + f.giro, t * 1.1 + f.fase, t * 0.6));
+      malha.setMatrixAt(i, m.compose(p, q, s));
+    });
+    malha.instanceMatrix.needsUpdate = true;
+  });
+  return (c) => { cam = c; };
+}
+
 // ------------------------------------------------------------------ tudo junto
 // opts.reservas: círculos { x, z, r } onde não nasce árvore (arquibancada, telão...)
 // opts.estradas: listas de pontos [[x, z], ...] com largura, para deixar caminho livre
-// opts.colliders: função para registrar colisores (só os troncos dentro da área jogável)
-// Mundo novo (cidade.js): opts.lago { x, z, r } põe o lago no lugar em vez de procurar o maior que
-// cabe; opts.bosques [{ x0, x1, z0, z1 }] limita a mata de dentro da cerca a esses retângulos (o resto
-// é gramado limpo); opts.fileiras [{ x, z }] são as árvores das avenidas, plantadas uma a uma.
-// opts.areaLago: onde procurar o lago (o mundo clássico procura na área de antes do parque: o lago
-// continua onde sempre esteve)
+// opts.addBox: registra colisores (só os troncos dentro da área jogável)
+// opts.agua: [{ x, z, r, tipo }] a água do mapa (lagoa, gelo, carpas); opts.bosques [{ x0, x1, z0, z1 }]
+// limita a mata de dentro da cerca a esses retângulos (o resto é gramado limpo); opts.fileiras
+// [{ x, z, tipo }] são as árvores das ruas, plantadas uma a uma.
 export function criarNatureza(scene, renderer, {
-  area, areaLago = area, sala, reservas = [], estradas = [], addBox, grupo = scene, lago: lagoFixo = null, bosques = null, fileiras = [],
+  area, sala, reservas = [], estradas = [], addBox, grupo = scene, agua = [], bosques = null, fileiras = [],
 }) {
   const decorar = [];
   const ceu = criarCeu(grupo, SOL);
   // névoa na cor do horizonte: a serra lá longe se dissolve no céu em vez de cortar seco
-  scene.fog = new THREE.Fog(0x6d6489, 320, 2100);
+  scene.fog = new THREE.Fog(TEMA.nevoa.cor, TEMA.nevoa.perto, TEMA.nevoa.longe);
+  if (RELEVO.mar) criarMar(grupo, renderer, ceu.mat, area, decorar);
 
   criarTerreno(grupo, area);
   criarCerca(grupo, area, sala);
@@ -676,26 +850,10 @@ export function criarNatureza(scene, renderer, {
   const reservado = (x, z, folga) => reservas.some((r) => Math.hypot(x - r.x, z - r.z) < r.r + folga);
   const dentro = (x, z) => x > area.minX && x < area.maxX && z > area.minZ && z < area.maxZ;
 
-  // lago: o maior que couber na área sem encostar na pista, na sala, na estrada, nas
-  // reservas e na cerca (o contorno chega a 1,12x o raio, mais a margem de areia)
-  let melhor = lagoFixo ? { ...lagoFixo } : null;
-  const ate = (d) => (d - 12) / 1.3; // maior raio que ainda deixa d metros de folga
-  const AL = areaLago;
-  for (let x = AL.minX + 30; !lagoFixo && x < AL.maxX - 30; x += 8) {
-    for (let z = AL.minZ + 30; z < AL.maxZ - 30; z += 8) {
-      let r = Math.min(58, (distPista(x, z) - meia - 30) * 0.75);
-      const dSala = Math.hypot(Math.max(0, x - sala.maxX), Math.max(0, z - sala.maxZ));
-      r = Math.min(r, ate(dSala), ate(x - AL.minX), ate(AL.maxX - x), ate(z - AL.minZ), ate(AL.maxZ - z));
-      for (const res of reservas) r = Math.min(r, ate(Math.hypot(x - res.x, z - res.z) - res.r));
-      for (const { pontos, largura } of estradas) {
-        for (let i = 0; i < pontos.length - 1; i++) r = Math.min(r, ate(distSegmento(x, z, ...pontos[i], ...pontos[i + 1]) - largura / 2));
-      }
-      if (!melhor || r > melhor.r) melhor = { x, z, r };
-    }
-  }
-  let lago = null;
-  if (melhor && melhor.r > 20) lago = criarLago(grupo, renderer, ceu.mat, melhor.x, melhor.z, melhor.r, decorar);
-  const noLago = (x, z, folga) => lago && Math.hypot(x - lago.x, z - lago.z) < lago.raio + folga;
+  // a água do mapa
+  const lagos = agua.map((a) => criarLago(grupo, renderer, ceu.mat, a.x, a.z, a.r, decorar, a.tipo));
+  const lago = lagos[0] || null;
+  const noLago = (x, z, folga) => lagos.some((l) => Math.hypot(x - l.x, z - l.z) < l.raio + folga);
 
   // folgaPista: árvore grande fica longe (postes, placas e guard-rail até ~21 m do eixo);
   // pedra e flor podem chegar mais perto, mas nunca na área de escape
@@ -707,10 +865,15 @@ export function criarNatureza(scene, renderer, {
     && !noLago(x, z, 3)
     && noBosque(x, z);
 
-  // ---------------------------------------------------------- árvores
+  // ---------------------------------------------------------- árvores do tema
+  const tipos = Object.entries(TEMA.arvores);
+  const sortearTipo = (r) => {
+    let soma = 0;
+    for (const [k, peso] of tipos) if (r < (soma += peso)) return k;
+    return tipos[0][0];
+  };
+  const listas = Object.fromEntries(tipos.map(([k]) => [k, []]));
   const rnd = semente(2024);
-  const pinheiros = [];
-  const frondosas = [];
   const arbustos = [];
   const pedras = [];
   const flores = [];
@@ -723,8 +886,8 @@ export function criarNatureza(scene, renderer, {
       const mancha = fbm(px * 0.009 + 3, pz * 0.009 - 8, 3);
       const dentroArea = dentro(px, pz);
       if (dentroArea) {
-        // bosques espalhados pela área, com clareiras (no mundo novo, só nos bosques: mais cheios)
-        if (mancha < (bosques ? 0.5 : 0.56) || !podeDentro(px, pz)) continue;
+        // bosques espalhados pela área, com clareiras (só nos bosques do mapa)
+        if (mancha < 0.5 || !podeDentro(px, pz)) continue;
       } else {
         const fora = foraDaArea(px, pz, area);
         if (fora < 3 || mancha < 0.4) continue;
@@ -732,26 +895,36 @@ export function criarNatureza(scene, renderer, {
       }
       const y = dentroArea ? 0 : alturaTerreno(px, pz, area);
       if (y > 270) continue; // acima disso é pedra e neve
-      const item = {
-        x: px, y: y - 0.2, z: pz, rot: rnd() * Math.PI * 2, escala: 0.75 + rnd() * 0.85,
-        matiz: 0.0, sat: 0, luz: 0.82 + rnd() * 0.32,
-      };
-      if (y > 60 || rnd() < 0.55) pinheiros.push(item);
-      else {
-        // algumas frondosas já amarelando: dá cor ao bosque no fim de tarde
-        if (rnd() < 0.18) Object.assign(item, { matiz: 0.11, sat: 0.55, luz: 0.62 });
-        frondosas.push(item);
-      }
+      if (!dentroArea && RELEVO.mar && y < 0.8) continue; // na água e na areia molhada não
+      const r = rnd();
+      // longe e no alto, o que cresce é o pinheiro (ou a árvore mais comum do tema)
+      const tipo = !dentroArea && y > 60 && listas.pinheiroNeve ? 'pinheiroNeve' : sortearTipo(r);
+      const item = { x: px, y: y - 0.2, z: pz, rot: rnd() * Math.PI * 2, escala: 0.75 + rnd() * 0.85, matiz: 0, sat: 0, luz: 0.82 + rnd() * 0.32 };
+      listas[tipo].push(item);
       if (rnd() < 0.35) {
         arbustos.push({ x: px + (rnd() - 0.5) * 6, y: y - 0.3, z: pz + (rnd() - 0.5) * 6, rot: rnd() * 6, escala: 0.7 + rnd() * 0.8, luz: 0.8 + rnd() * 0.3 });
       }
     }
   }
 
-  // árvores das avenidas (mundo novo): frondosas do mesmo tamanho, em fileira
+  // árvores das ruas: do mesmo tamanho, em fileira
   for (const f of fileiras) {
     if (distPista(f.x, f.z) < meia + 20 || reservado(f.x, f.z, 0) || noLago(f.x, f.z, 3)) continue;
-    frondosas.push({ x: f.x, y: -0.2, z: f.z, rot: rnd() * Math.PI * 2, escala: 1.05 + rnd() * 0.12, matiz: 0, sat: 0, luz: 0.9 + rnd() * 0.12 });
+    const lista = listas[f.tipo] || (listas[f.tipo] = []);
+    lista.push({ x: f.x, y: -0.2, z: f.z, rot: rnd() * Math.PI * 2, escala: 1.05 + rnd() * 0.12, matiz: 0, sat: 0, luz: 0.9 + rnd() * 0.12 });
+  }
+
+  // na lagoa: coqueiros na areia em volta
+  for (const l of lagos) {
+    if (l.tipo !== 'lagoa' || !listas.palmeira) continue;
+    for (let i = 0; i < 22; i++) {
+      const a = (i / 22) * Math.PI * 2 + rnd() * 0.2;
+      const r = l.raio * (1.05 + rnd() * 0.12);
+      const x = l.x + Math.cos(a) * r;
+      const z = l.z + Math.sin(a) * r;
+      if (!dentro(x, z) || pertoDeEstrada(x, z, 3) || reservado(x, z, 0) || distPista(x, z) < meia + 20) continue;
+      listas[i % 3 ? 'palmeira' : 'palmeiraBaixa'].push({ x, y: -0.2, z, rot: rnd() * 6, escala: 0.85 + rnd() * 0.3, matiz: 0, sat: 0, luz: 0.95 });
+    }
   }
 
   // pedras, flores e arbustos soltos pela grama
@@ -762,20 +935,21 @@ export function criarNatureza(scene, renderer, {
     const r = rnd();
     if (r < 0.12) pedras.push({ x: px, y: 0, z: pz, rot: rnd() * 6, escala: 0.5 + rnd() * 1.6, sx: 1 + rnd(), sy: 0.6 + rnd() * 0.5, luz: 0.75 + rnd() * 0.3 });
     else if (r < 0.3) arbustos.push({ x: px, y: -0.2, z: pz, rot: rnd() * 6, escala: 0.5 + rnd() * 0.7, luz: 0.8 + rnd() * 0.3 });
-    else flores.push({ x: px, y: 0.25, z: pz, rot: 0, escala: 0.8 + rnd() * 0.6, matiz: [0.13, 0.95, 0.83, 0.0, 0.75][Math.floor(rnd() * 5)], sat: 0.75, luz: 0.62 });
+    else if (TEMA.flores.length) flores.push({ x: px, y: 0.25, z: pz, rot: 0, escala: 0.8 + rnd() * 0.6, matiz: TEMA.flores[Math.floor(rnd() * TEMA.flores.length)], sat: 0.75, luz: 0.62 });
   }
-  // pedras e juncos em volta do lago
-  if (lago) {
+  // pedras em volta dos lagos (no gelo, montes de neve)
+  for (const l of lagos) {
     for (let i = 0; i < 46; i++) {
       const a = rnd() * Math.PI * 2;
-      const r = lago.raio * (0.95 + rnd() * 0.25);
-      pedras.push({ x: lago.x + Math.cos(a) * r, y: 0, z: lago.z + Math.sin(a) * r, rot: rnd() * 6, escala: 0.6 + rnd() * 1.3, sx: 1.3, sy: 0.7, luz: 0.7 + rnd() * 0.3 });
+      const r = l.raio * (0.95 + rnd() * 0.25);
+      pedras.push({ x: l.x + Math.cos(a) * r, y: 0, z: l.z + Math.sin(a) * r, rot: rnd() * 6, escala: 0.6 + rnd() * 1.3, sx: 1.3, sy: 0.7, luz: 0.7 + rnd() * 0.3 });
     }
   }
 
   // dois lados: os cones e troncos não têm tampa embaixo, e quem olha de baixo veria através
   const matPlanta = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, side: THREE.DoubleSide });
-  for (const a of [...pinheiros, ...frondosas]) a.fixa = dentro(a.x, a.z);
+  const todas = Object.values(listas).flat();
+  for (const a of todas) a.fixa = dentro(a.x, a.z);
   // No PC, as árvores a mais de 60 m da cerca usam o shader só de sol. No celular ficam num
   // material só: lá o pixel é pouco, e o desenho a mais pesaria mais que o que ele poupa.
   const matPlantaLonge = LEVE ? null : soSol(matPlanta.clone());
@@ -784,14 +958,20 @@ export function criarNatureza(scene, renderer, {
     instanciar(grupo, geo, matPlanta, lista.filter((a) => !longe(a)));
     if (matPlantaLonge) instanciar(grupo, geo, matPlantaLonge, lista.filter(longe));
   };
-  plantar(geoPinheiro(), pinheiros);
-  plantar(geoFrondosa(), frondosas);
-  instanciar(grupo, pintar(new THREE.IcosahedronGeometry(1.1, 0).scale(1.3, 0.8, 1.3), '#4e7f39'), matPlanta, arbustos, { sombra: false });
-  instanciar(grupo, pintar(new THREE.DodecahedronGeometry(1, 0), '#8a837c'), matPlanta, pedras, { sombra: false });
-  instanciar(grupo, new THREE.IcosahedronGeometry(0.22, 0), new THREE.MeshLambertMaterial({ color: '#ffffff', flatShading: true }), flores, { sombra: false });
+  const geos = arvoresDoTema();
+  for (const [tipo, lista] of Object.entries(listas)) {
+    if (!lista.length) continue;
+    plantar(geos[tipo] || geos[Object.keys(geos)[0]], lista);
+  }
+  const arbusto = TEMA.id === 'neve'
+    ? pintar(new THREE.IcosahedronGeometry(1.1, 1).scale(1.4, 0.55, 1.4), TEMA.arbusto)
+    : pintar(new THREE.IcosahedronGeometry(1.1, 0).scale(1.3, 0.8, 1.3), TEMA.arbusto);
+  if (arbustos.length) instanciar(grupo, arbusto, matPlanta, arbustos, { sombra: false });
+  if (pedras.length) instanciar(grupo, pintar(new THREE.DodecahedronGeometry(1, 0), TEMA.pedra), matPlanta, pedras, { sombra: false });
+  if (flores.length) instanciar(grupo, new THREE.IcosahedronGeometry(0.22, 0), new THREE.MeshLambertMaterial({ color: '#ffffff', flatShading: true }), flores, { sombra: false });
 
   // tronco das árvores dentro da área jogável é sólido (as de fora nem dá para alcançar)
-  for (const a of [...pinheiros, ...frondosas]) {
+  for (const a of todas) {
     if (!dentro(a.x, a.z)) continue;
     const r = 0.45 * a.escala;
     addBox({ min: [a.x - r, 0, a.z - r], max: [a.x + r, 3.5 * a.escala, a.z + r], data: { type: 'tree' } });
@@ -803,15 +983,22 @@ export function criarNatureza(scene, renderer, {
   const bandos = [{ x: centro.x + 60, z: centro.z - 40, raio: 120, y: 70, vel: 0.11, qtd: 9 }];
   if (lago) bandos.push({ x: lago.x, z: lago.z, raio: 45, y: 34, vel: 0.2, qtd: 6 });
   criarPassaros(grupo, bandos, decorar);
+  const seguirFolhas = TEMA.particulas === 'folhas' ? criarFolhas(grupo, decorar) : null;
 
   let anterior = null;
   return {
     lago,
-    // o clima (clima.js) muda as cores do céu, as estrelas e as nuvens, e esconde as estrelas de dia
+    lagos,
+    // o lago congelado do mapa (patinar), se tiver
+    gelo: lagos.find((l) => l.tipo === 'gelo') || null,
+    // o clima (clima.js) acerta as cores do céu e das nuvens e esconde as estrelas (é sempre de dia)
     ceu: { mat: ceu.mat, estrelasMat: ceu.estrelasMat, estrelas: ceu.estrelas, get nuvensMat() { return nuvensMat; } },
-    seguirCamera: (cam, t) => ceu.seguir(cam, t),
+    seguirCamera: (cam, t) => {
+      ceu.seguir(cam, t);
+      seguirFolhas?.(cam.position);
+    },
     // contexto do WebGL restaurado (o World chama): o reflexo do lago se foi com o contexto perdido
-    refazerAmbiente: () => lago?.refazer(),
+    refazerAmbiente: () => { for (const l of lagos) l.refazer(); },
     // qualidade: fração de árvores/arbustos/pedras desenhadas, e se as árvores fazem sombra
     ajustar({ densidade = 1, sombras = true }) {
       for (const m of densas) {

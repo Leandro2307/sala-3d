@@ -17,7 +17,6 @@ import { RESERVAS_JOGOS } from './tabuleiros.js';
 import { construirEscritorio } from './escritorio3d.js';
 import { planta, salaEm, rotuloDaTela, postoDaTela, chaveDaTela, DEPARTAMENTOS, PREDIO, zDaPorta } from './escritorio.js';
 import * as moduloQualidade from './qualidade.js';
-import { NOVO } from './mundo.js';
 import { construirCidade } from './cidade.js';
 import { construirParque } from './parque.js';
 import { construirPingue } from './pingue.js';
@@ -33,8 +32,6 @@ import { construirPinta } from './pinta.js';
 // autódromo ao ar livre a leste e, no norte, o parque (parque-dados.js), que levou a cerca de
 // z = 530 para 860. O telão do cinema continua em minZ, perto da plateia.
 export const ROOM = { minX: -52, maxX: 480, minZ: -40, maxZ: 860, height: 60 };
-// a área de antes do parque: o lago do mundo clássico continua sendo procurado só nela (ver criarNatureza)
-const ROOM_ANTES_DO_PARQUE = { ...ROOM, maxZ: 530 };
 // A sala do cinema: fechada e igual por dentro ao que sempre foi. A porta fica na parede
 // leste, virada para o autódromo.
 export const SALA = { minX: ROOM.minX, maxX: 60, minZ: ROOM.minZ, maxZ: 60, height: ROOM.height, porta: { z0: 14, z1: 46, altura: 18 } };
@@ -778,9 +775,9 @@ export class World {
     this.slotsEscritorio = [];
     this.telaoesEscritorio = [];
     this.buildScreens();
-    // Mundo novo (mundo.js): a praça na porta do prédio e as ruas até cada área. Antes do autódromo
-    // (o guard-rail abre passagem onde a avenida chega) e da natureza (não planta em cima das ruas).
-    this.cidade = NOVO ? construirCidade(this) : null;
+    // A praça na porta do prédio e as ruas até cada área (cidade.js). Antes do autódromo (o
+    // guard-rail abre passagem onde a rua chega) e da natureza (não planta em cima das ruas).
+    this.cidade = construirCidade(this);
     // cada jogo é uma área: o dono da sala pode desligar (ver ligarArea)
     this.area('parkour', () => this.buildCourse());
     this.area('ringue', () => this.buildRing());
@@ -793,8 +790,6 @@ export class World {
       basquete: this.area('basquete', () => construirBasquete(this)),
       boliche: this.area('boliche', () => construirBoliche(this)),
     };
-    // no mundo novo as placas ficam na praça (cidade.js)
-    if (!NOVO) this.placaDirecao(69, 58, -Math.PI / 2, 'VÔLEI · BASQUETE · BOLICHE  →', '#facc15');
     // o parque, no norte: praça, ruas e o salão de jogos (os jogos de lá vêm a seguir, cada um uma área)
     this.parque = construirParque(this);
     this.pingue3d = this.area('pingue', () => construirPingue(this));
@@ -816,10 +811,9 @@ export class World {
     };
     // praça do xadrez de bruxo e da dama (as peças em si ficam em jogos.js)
     this.reservas.push(...RESERVAS_JOGOS);
-    if (!NOVO) this.placaDirecao(SALA.maxX + 9, SALA.porta.z0 + 2, -Math.PI / 2, '↖  JOGOS E DADOS', '#a78bfa');
     this.natureza = criarNatureza(this.scene, this.renderer, {
-      area: ROOM, areaLago: ROOM_ANTES_DO_PARQUE, sala: SALA, reservas: this.reservas, estradas: this.estradas, addBox: (o) => this.addBox(o), grupo: this.fora,
-      ...(this.cidade?.natureza || {}),
+      area: ROOM, sala: SALA, reservas: this.reservas, estradas: this.estradas, addBox: (o) => this.addBox(o), grupo: this.fora,
+      ...this.cidade.natureza,
     });
     const P = SALA.porta;
     this.portaBox = new THREE.Box3(new THREE.Vector3(SALA.maxX - 1, 0, P.z0), new THREE.Vector3(SALA.maxX + 1, P.altura, P.z1));
@@ -1884,11 +1878,9 @@ export class World {
     fita(borda, borda + 6, 0.06, escapeMat, 8);
     fita(-borda - 6, -borda, 0.06, escapeMat, 8);
 
-    // 2) arquibancada e estrada do cinema primeiro: a estrada termina dentro da pista, e
-    //    guard-rail, postes e placas precisam saber onde deixar o vão dela
+    // 2) arquibancada (a rua da praça que chega na pista é do cidade.js, montado antes: guard-rail,
+    //    postes e placas já sabem onde deixar o vão dela)
     const arq = this.buildArquibancada(grupo, meia);
-    // no mundo novo quem chega na pista é a avenida da praça (cidade.js)
-    if (!NOVO) this.buildEstrada(arq, meia);
 
     // 3) guard-rail
     this.guardRail(grupo, borda + 6.5);
@@ -2319,89 +2311,6 @@ export class World {
   // Estrada de pedra da porta do cinema até a pista: passa pela ponta da arquibancada e entra
   // no asfalto no sentido do tráfego, uns 28 m antes da linha de largada — quem chega por ela
   // cruza a linha logo em seguida e a volta já começa a contar.
-  buildEstrada(arq, meia) {
-    const S = SALA;
-    const zPorta = (S.porta.z0 + S.porta.z1) / 2;
-    const arqPonta = [arq.x - arq.L / 2 - 4, arq.zFrente + 3];
-    const pj = pontoEm(PISTA.largadaT - 0.012);
-    const entrada = [pj.x + Math.cos(pj.angulo) * (meia - 1), pj.z - Math.sin(pj.angulo) * (meia - 1)];
-    const ctrl = [
-      [S.maxX + 1, zPorta], [S.maxX + 26, zPorta + 4], [S.maxX + 52, zPorta + 14],
-      [(S.maxX + 52 + arqPonta[0]) / 2, (zPorta + 14 + arqPonta[1]) / 2 + 4], arqPonta, entrada,
-    ].map(([x, z]) => new THREE.Vector3(x, 0, z));
-    const curva = new THREE.CatmullRomCurve3(ctrl, false, 'centripetal');
-    const pts = curva.getSpacedPoints(90);
-    const largura = 9;
-
-    const pedraTex = canvasTexture(128, 128, (ctx, w, h) => {
-      ctx.fillStyle = '#7d7468';
-      ctx.fillRect(0, 0, w, h);
-      for (let y = 0; y < 4; y++) {
-        for (let x = 0; x < 4; x++) {
-          const tom = 105 + Math.floor(Math.random() * 40);
-          ctx.fillStyle = `rgb(${tom + 12},${tom + 4},${tom - 8})`;
-          roundRect(ctx, x * 32 + (y % 2) * 16 + 2, y * 32 + 2, 28, 28, 6);
-          ctx.fill();
-        }
-      }
-    });
-    pedraTex.wrapS = pedraTex.wrapT = THREE.RepeatWrapping;
-    const pos = [];
-    const uv = [];
-    const idx = [];
-    let v = 0;
-    // lampiões: hastes numa malha e globos noutra
-    const hasteGeo = new THREE.CylinderGeometry(0.07, 0.09, 2.6, 6);
-    const globoGeo = new THREE.SphereGeometry(0.26, 12, 8);
-    const hastes = [];
-    const globos = [];
-    pts.forEach((p, i) => {
-      const a = pts[Math.max(0, i - 1)];
-      const b = pts[Math.min(pts.length - 1, i + 1)];
-      const dx = b.x - a.x;
-      const dz = b.z - a.z;
-      const c = Math.hypot(dx, dz) || 1;
-      const nx = -dz / c;
-      const nz = dx / c;
-      if (i > 0) v += p.distanceTo(pts[i - 1]);
-      // mesma ordem da fita da pista (lado - antes do +): os triângulos ficam virados para cima
-      // 0,07: acima da área de escape (0,06), então a pedra vai até a zebra
-      pos.push(p.x - nx * largura / 2, 0.07, p.z - nz * largura / 2, p.x + nx * largura / 2, 0.07, p.z + nz * largura / 2);
-      uv.push(0, v / 4, largura / 4, v / 4);
-      if (i < pts.length - 1) idx.push(i * 2, i * 2 + 1, i * 2 + 2, i * 2 + 1, i * 2 + 3, i * 2 + 2);
-      // lampiões dos dois lados, alternados
-      if (i % 6 === 3) {
-        const lado = (i / 6) % 2 < 1 ? 1 : -1;
-        const lx = p.x + nx * (largura / 2 + 1) * lado;
-        const lz = p.z + nz * (largura / 2 + 1) * lado;
-        if (projetar(lx, lz).dist < meia + 9) return; // perto do asfalto: sem lampião
-        hastes.push(hasteGeo.clone().translate(lx, 1.3, lz));
-        globos.push(globoGeo.clone().translate(lx, 2.75, lz));
-      }
-    });
-    this.fora.add(
-      fundir(hastes, new THREE.MeshStandardMaterial({ color: 0x2b2f3a })),
-      fundir(globos, new THREE.MeshBasicMaterial({ color: 0xffe2a8, toneMapped: false })),
-    );
-    hasteGeo.dispose();
-    globoGeo.dispose();
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
-    geo.setIndex(idx);
-    geo.computeVertexNormals();
-    const estrada = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: pedraTex, roughness: 0.95 }));
-    estrada.receiveShadow = true;
-    this.fora.add(estrada);
-    const pontos = pts.map((p) => [p.x, p.z]);
-    this.estradas.push({ pontos, largura });
-
-    // placa logo na saída do cinema
-    const zP = (S.porta.z0 + S.porta.z1) / 2;
-    this.placaDirecao(S.maxX + 9, zP - 8, -Math.PI / 2, 'AUTÓDROMO  ↗', '#6ee7c8');
-    return pontos;
-  }
-
   // Alguma estrada/entrada passa a menos de (largura/2 + folga) deste ponto?
   pertoDeVia(x, z, folga) {
     for (const { pontos, largura } of this.estradas) {
@@ -2415,37 +2324,6 @@ export class World {
       }
     }
     return false;
-  }
-
-  // Placa de direção num poste, com o texto dos dois lados.
-  placaDirecao(x, z, rotY, texto, cor) {
-    const tex = canvasTexture(512, 128, (ctx, w, h) => {
-      ctx.fillStyle = '#0f172a';
-      ctx.fillRect(0, 0, w, h);
-      ctx.fillStyle = cor;
-      ctx.fillRect(0, h - 12, w, 12);
-      ctx.fillStyle = '#f8fafc';
-      ctx.font = `800 58px ${FONT}`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(texto, w / 2, h / 2 - 4);
-    });
-    const verso = new THREE.MeshStandardMaterial({ color: 0x1b1f2a, roughness: 0.8 });
-    const frente = new THREE.MeshBasicMaterial({ map: tex, toneMapped: false });
-    // a caixa sem as duas faces grandes, e o texto num plano na frente e noutro atrás (girado),
-    // no lugar exato delas: 2 desenhos no lugar dos 6 grupos de material de antes
-    const placa = new THREE.Mesh(caixaSem(6, 1.5, 0.12, [4, 5]), verso);
-    const textos = fundir([
-      new THREE.PlaneGeometry(6, 1.5).translate(0, 0, 0.06),
-      new THREE.PlaneGeometry(6, 1.5).rotateY(Math.PI).translate(0, 0, -0.06),
-    ], frente);
-    for (const m of [placa, textos]) {
-      m.position.set(x, 3, z);
-      m.rotation.y = rotY;
-    }
-    const poste = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 3, 6), new THREE.MeshStandardMaterial({ color: 0x2b3245 }));
-    poste.position.set(x, 1.5, z);
-    this.fora.add(placa, textos, poste);
   }
 
   buildCourse() {

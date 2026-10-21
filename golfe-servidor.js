@@ -1,9 +1,11 @@
 // Minigolfe (parque): cada um joga a própria bolinha no navegador; o servidor guarda em que buraco
 // cada um está e as tacadas, repassa a posição das bolinhas para os outros verem e dá as moedas de
 // quem termina os 9 buracos (mais para quem fica no par ou abaixo dele).
+const { carregarPorMapa, comMapa } = require('./mapa-servidor.js');
 
 let G = null;
-import('./public/js/golfe-dados.js')
+const DADOS = carregarPorMapa('golfe-dados.js'); // um módulo por mapa (mapa-servidor.js)
+DADOS.pronto
   .then((m) => { G = m; })
   .catch((err) => console.warn('  Dados do minigolfe não carregaram:', err.message));
 
@@ -28,6 +30,7 @@ function ligarGolfe(io, rooms, jogoLigado, darMoedas) {
   setInterval(() => {
     if (!G) return;
     for (const room of rooms.values()) {
+      DADOS.usar(room);
       const g = room.golfe;
       if (!g?.jogadores.size) continue;
       for (const j of [...g.jogadores.values()]) {
@@ -38,7 +41,8 @@ function ligarGolfe(io, rooms, jogoLigado, darMoedas) {
     }
   }, 2000);
 
-  return function porSocket(socket, quem) {
+  return function porSocket(socket, quemDaSala) {
+    const quem = comMapa(quemDaSala, DADOS);
     const daSala = () => {
       const { room, user } = quem();
       if (!room || !user || !G) return {};

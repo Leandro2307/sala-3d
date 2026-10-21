@@ -1,18 +1,16 @@
-// O 3D do parque (parque-dados.js), igual nos dois mundos: a praça com o marco no meio, as ruas de
-// pedra com postes, o pórtico na entrada, as placas e o salão de jogos (piso de madeira, pilares e
-// telhado de vidro). As mesas, quadras e pistas em si são de cada jogo (pingue.js, sinuca.js...),
-// cada um numa área que o dono da sala pode desligar. Chamado pelo World antes da natureza: as ruas
-// entram em world.estradas e os jogos em world.reservas (lá não nasce árvore nem lago).
+// O 3D do parque (parque-dados.js): a praça com o marco no meio (nos mapas que têm uma), o pórtico na
+// entrada, a placa e o salão de jogos (piso de madeira, pilares e telhado de vidro). As ruas até cada
+// jogo são da cidade (cidade.js). As mesas, quadras e pistas em si são de cada jogo (pingue.js,
+// sinuca.js...), cada um numa área que o dono da sala pode desligar. Chamado pelo World antes da
+// natureza: os jogos entram em world.reservas (lá não nasce árvore nem lago).
 import * as THREE from 'three';
 import {
-  construirRuas, construirPostes, malhaLanternas, construirPorticos, placaDeSaida, novosLotes, fundir, texturaRedonda,
-  construirBancos, plantarFlores,
+  malhaLanternas, construirPorticos, placaDeSaida, novosLotes, fundir, texturaRedonda, construirBancos, plantarFlores, fecharLotes,
 } from './cidade.js';
 import {
-  PARQUE, RUAS_PARQUE, SALAO, PORTICO_PARQUE, QUEIMADA, PINTA_ARENA, GOLFE_AREA, PORTAL_GINCANA, KART_AREA,
+  PARQUE, SALAO, PORTICO_PARQUE, PLACA_PARQUE, QUEIMADA, PINTA_ARENA, GOLFE_AREA, PORTAL_GINCANA,
 } from './parque-dados.js';
-import { PRACA_AVENTURA } from './cidade-dados.js';
-import { NOVO } from './mundo.js';
+import { poste as posteDoTema } from './temas3d.js';
 
 const FONTE = (px, peso = 800) => `${peso} ${px}px 'Plus Jakarta Sans', system-ui, sans-serif`;
 const Y_PRACA = 0.07;
@@ -121,10 +119,7 @@ function construirPracaDoParque(g, world, L, lanternas) {
   for (let k = 0; k < 12; k++) {
     const a = (k / 12) * Math.PI * 2 + Math.PI / 12;
     if (!longeDasSaidas(a, 0.32)) continue;
-    const px = x + Math.cos(a) * (r - 1.5);
-    const pz = z + Math.sin(a) * (r - 1.5);
-    L.ferro.push(new THREE.CylinderGeometry(0.09, 0.13, 4.2, 8).translate(px, 2.1, pz));
-    lanternas.push(new THREE.SphereGeometry(0.34, 14, 10).translate(px, 4.6, pz));
+    posteDoTema(L, lanternas, x + Math.cos(a) * (r - 1.5), z + Math.sin(a) * (r - 1.5));
   }
 }
 
@@ -192,40 +187,27 @@ export function construirParque(world) {
   const g = new THREE.Group();
   world.fora.add(g);
   const L = novosLotes();
-  const ruas = Object.values(RUAS_PARQUE).map((r) => ({ ...r, pontos: r.pontos.map((p) => [...p]) }));
-  construirRuas(g, ruas);
-  // no mundo novo a Rua do Parque atravessa a praça da aventura: lá dentro não vai poste
-  const evitar = [{ ...PARQUE, r: PARQUE.r + 1 }, ...(NOVO ? [{ ...PRACA_AVENTURA, r: PRACA_AVENTURA.r + 1 }] : [])];
-  const lanternas = construirPostes(g, ruas, L, [], { praca: false, evitar });
-  construirPorticos(g, world, L, [PORTICO_PARQUE]);
-  construirPracaDoParque(g, world, L, lanternas);
+  const lanternas = [];
+  if (PORTICO_PARQUE) construirPorticos(g, world, L, [PORTICO_PARQUE]);
+  if (PARQUE.r > 0) construirPracaDoParque(g, world, L, lanternas);
   construirSalao(g, world, L);
-  // placas na saída da praça: para quem chega do sul, olhando para o norte
-  placaDeSaida(g, L, PARQUE.x + 6, PARQUE.z - PARQUE.r + 2.5, Math.PI, [
-    ['↑  SALÃO DE JOGOS', '#4ade80'], ['←  MINIGOLFE', '#a3e635'], ['→  QUEIMADA · PINTA', '#f97316'], ['→  GINCANA · KART', '#facc15'],
-  ]);
-  // no clássico, onde a Rua do Parque começa (atrás das quadras)
-  if (!NOVO) world.placaDirecao(RUAS_PARQUE.parque.pontos[0][0] + 7, RUAS_PARQUE.parque.pontos[0][1] + 2, Math.PI, '↑  PARQUE', '#4ade80');
-  g.add(
-    malhaLanternas(lanternas),
-    fundir(L.ferro, new THREE.MeshStandardMaterial({ color: 0x262b35, roughness: 0.5, metalness: 0.4 }), { sombra: true }),
-    fundir(L.madeira, new THREE.MeshStandardMaterial({ color: 0x9a6a3e, roughness: 0.75 }), { sombra: true, recebe: true }),
-    fundir(L.escuro, new THREE.MeshStandardMaterial({ color: 0x1b1f2a, roughness: 0.65 }), { sombra: true }),
-  );
+  // a placa na entrada do parque: a frente para quem chega, o verso para quem vai embora
+  const P = PLACA_PARQUE;
+  if (P) placaDeSaida(g, L, P.x, P.z, P.giro, P.frente, P.verso);
+  if (lanternas.length) g.add(malhaLanternas(lanternas));
+  fecharLotes(g, L);
 
-  for (const rua of ruas) world.estradas.push({ pontos: rua.pontos, largura: rua.largura });
   // nada de árvore (nem lago) em cima da praça e dos jogos
   const ret = (x0, x1, z0, z1, folga = 4) => ({ x: (x0 + x1) / 2, z: (z0 + z1) / 2, r: Math.hypot(x1 - x0, z1 - z0) / 2 + folga });
   const Q = QUEIMADA;
   const PA = PINTA_ARENA;
+  if (PARQUE.r > 0) world.reservas.push({ x: PARQUE.x, z: PARQUE.z, r: PARQUE.r + 4 });
   world.reservas.push(
-    { x: PARQUE.x, z: PARQUE.z, r: PARQUE.r + 4 },
     ret(SALAO.x0, SALAO.x1, SALAO.z0, SALAO.z1),
     ret(Q.cx - Q.comp / 2 - Q.cemiterio, Q.cx + Q.comp / 2 + Q.cemiterio, Q.cz - Q.larg / 2, Q.cz + Q.larg / 2),
     ret(PA.cx - PA.lado / 2, PA.cx + PA.lado / 2, PA.cz - PA.lado / 2, PA.cz + PA.lado / 2),
     ret(GOLFE_AREA.x0, GOLFE_AREA.x1, GOLFE_AREA.z0, GOLFE_AREA.z1, 2),
     { x: PORTAL_GINCANA.x, z: PORTAL_GINCANA.z, r: 6 },
-    { x: KART_AREA.x0 + 10, z: PARQUE.z, r: 12 }, // a chegada da rua no kartódromo
   );
   return { grupo: g };
 }

@@ -2,7 +2,10 @@
 // navegador (bola prevista) e no servidor (que manda no placar e na vez).
 // A mesa é maior que a de verdade e a bolinha mais lenta e flutuante: dá para ver de longe e para
 // chegar nela andando. O comprimento fica no eixo x: lado 0 é x < centro, lado 1 é x > centro.
-import { MESAS_PINGUE } from './parque-dados.js';
+import { parqueDe, mapaDoModulo } from './mapas-dados.js';
+
+// o mapa deste módulo (no servidor vem no endereço: ?mapa=)
+const { MESAS_PINGUE } = parqueDe(mapaDoModulo(import.meta.url));
 
 export const PINGUE = {
   mesas: MESAS_PINGUE,

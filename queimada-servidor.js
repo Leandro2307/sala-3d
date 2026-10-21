@@ -5,9 +5,11 @@
 // passo ele confere se a bola, ainda sem tocar no chão, encostou em alguém do outro time em campo:
 // queimou (vai para o cemitério) — a não ser que esse alguém estivesse defendendo, aí ele pega a
 // bola. Quem queima do cemitério volta para o campo. Time sem ninguém em campo perde a rodada.
+const { carregarPorMapa, comMapa } = require('./mapa-servidor.js');
 
 let F = null;
-import('./public/js/queimada-fisica.js')
+const DADOS = carregarPorMapa('queimada-fisica.js'); // um módulo por mapa (mapa-servidor.js)
+DADOS.pronto
   .then((m) => { F = m; })
   .catch((err) => console.warn('  Física da queimada não carregou:', err.message));
 
@@ -168,6 +170,7 @@ function ligarQueimada(io, rooms, jogoLigado, darMoedas) {
     if (!F) return;
     const A = F.AREA_QUEIMADA;
     for (const room of rooms.values()) {
+      DADOS.usar(room);
       const q = room.queimada;
       if (!q?.jogadores.size) continue;
       for (const j of [...q.jogadores.values()]) {
@@ -190,13 +193,15 @@ function ligarQueimada(io, rooms, jogoLigado, darMoedas) {
     if (!F) return;
     for (; sobra >= PASSO; sobra -= PASSO) {
       for (const room of rooms.values()) {
+      DADOS.usar(room);
         if (!room.queimada?.jogadores.size || !jogoLigado(room, 'queimada')) continue;
         tic(room);
       }
     }
   }, PASSO * 1000);
 
-  return function porSocket(socket, quem) {
+  return function porSocket(socket, quemDaSala) {
+    const quem = comMapa(quemDaSala, DADOS);
     const daSala = () => {
       const { room, user } = quem();
       if (!room || !user || !F) return {};

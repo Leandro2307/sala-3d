@@ -12,7 +12,6 @@
 import * as THREE from 'three';
 import { PORTAIS, SURF, ARENA, naArena } from './ceu-dados.js';
 import { criarArma, ARMAS } from './armas.js';
-import { NOVO } from './mundo.js';
 import { isTouch } from './touch.js';
 
 const FONTE = (p, peso = 800) => `${peso} ${p}px 'Plus Jakarta Sans', system-ui, sans-serif`;
@@ -178,7 +177,7 @@ export function construirSurf(world) {
   formas.push(planosDaCaixa(pmin, pmax));
   const tamP = pmax.clone().sub(pmin);
   // no mundo novo ela fica ao lado da praça da aventura: bem mais discreta (continua segurando)
-  const parede = new THREE.Mesh(new THREE.BoxGeometry(tamP.x, tamP.y, tamP.z), new THREE.MeshStandardMaterial({ color: 0x0e7490, transparent: true, opacity: NOVO ? 0.1 : 0.35, depthWrite: false }));
+  const parede = new THREE.Mesh(new THREE.BoxGeometry(tamP.x, tamP.y, tamP.z), new THREE.MeshStandardMaterial({ color: 0x0e7490, transparent: true, opacity: 0.1, depthWrite: false }));
   parede.position.copy(pmin).add(pmax).multiplyScalar(0.5);
   g.add(parede);
   // a chegada, no chão

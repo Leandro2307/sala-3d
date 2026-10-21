@@ -8,9 +8,11 @@
 // Falta (a branca cair, não tocar em nada ou tocar primeiro na bola errada) passa a vez e a branca
 // volta para a marca. Encaçapou bola sua sem falta, joga de novo. A 8 só no fim: antes, perde.
 // Sozinho na mesa é treino: sem vez e sem falta, a 8 que cai antes da hora volta para o pé da mesa.
+const { carregarPorMapa, comMapa } = require('./mapa-servidor.js');
 
 let F = null;
-import('./public/js/sinuca-fisica.js')
+const DADOS = carregarPorMapa('sinuca-fisica.js'); // um módulo por mapa (mapa-servidor.js)
+DADOS.pronto
   .then((m) => { F = m; })
   .catch((err) => console.warn('  Física da sinuca não carregou:', err.message));
 
@@ -144,6 +146,7 @@ function ligarSinuca(io, rooms, jogoLigado, darMoedas) {
     if (!F) return;
     const agora = Date.now();
     for (const room of rooms.values()) {
+      DADOS.usar(room);
       for (const m of room.sinuca || []) {
         if (m.fase === 'rolando' && agora >= m.ate) {
           m.fase = 'jogando';
@@ -168,7 +171,8 @@ function ligarSinuca(io, rooms, jogoLigado, darMoedas) {
     }
   }, 250);
 
-  return function porSocket(socket, quem) {
+  return function porSocket(socket, quemDaSala) {
+    const quem = comMapa(quemDaSala, DADOS);
     const daSala = () => {
       const { room, user } = quem();
       if (!room || !user || !F) return {};

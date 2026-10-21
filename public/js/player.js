@@ -404,8 +404,10 @@ export class Player {
     if (_dir.lengthSq() > 0) _dir.normalize();
     // o analógico anda mais devagar quando empurrado só um pouco (o teclado sempre dá 1)
     const mag = Math.min(1, Math.hypot(f, r));
-    const speed = (running ? RUN : WALK) * mag;
-    const accel = this.grounded ? 14 : hasInput ? 5 : 0.6;
+    // no gelo (o lago congelado da Vila da Neve) o boneco embala mais e demora a parar: escorrega
+    const gelo = this.noGelo && this.grounded;
+    const speed = (running ? RUN : WALK) * mag * (gelo ? 1.3 : 1);
+    const accel = gelo ? 1.2 : this.grounded ? 14 : hasInput ? 5 : 0.6;
     const t = Math.min(1, accel * dt);
     this.vel.x += ((hasInput ? _dir.x * speed : 0) - this.vel.x) * t;
     this.vel.z += ((hasInput ? _dir.z * speed : 0) - this.vel.z) * t;
