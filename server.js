@@ -135,19 +135,62 @@ const MEDIA_IDS = {
 };
 
 // STUN público + TURN. Sem TURN, amigos em redes diferentes (CGNAT da fibra, 4G, Brave) ficam
-// com a tela preta e sem voz: a conexão direta não fecha. O padrão é a conta grátis da Metered
-// do dono da sala (20 GB/mês); TURN_URL/TURN_USER/TURN_PASS no ambiente trocam por outro.
-// A senha do TURN não é segredo de verdade: ela vai para o navegador de todo mundo na sala.
+// com a tela preta e sem voz: a conexão direta não fecha. O TURN principal é o da Cloudflare
+// (1 TB/mês grátis), com CF_TURN_KEY_ID e CF_TURN_TOKEN no ambiente: o servidor gera uma
+// credencial temporária, então quem pega a senha do /config não gasta a cota para sempre.
+// Sem as variáveis (ou com a Cloudflare fora do ar) fica a conta grátis da Metered do dono
+// da sala (20 GB/mês); TURN_URL/TURN_USER/TURN_PASS trocam por outra.
 const METERED = 'global.relay.metered.ca';
 const TURN = {
   urls: (process.env.TURN_URL || `turn:${METERED}:80,turn:${METERED}:80?transport=tcp,turn:${METERED}:443,turns:${METERED}:443?transport=tcp`).split(','),
   username: process.env.TURN_USER || 'e78fbefbb1d65a8ea146708b',
   credential: process.env.TURN_PASS || 'syadTyT5gu9HJnrT',
 };
-const iceServers = [
-  { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
-  TURN,
-];
+const STUN = { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] };
+const iceReserva = [STUN, TURN];
+
+// A credencial da Cloudflare vale 48 h e é trocada a cada hora: quem entra sempre leva uma
+// com pelo menos 47 h pela frente (a página renova antes disso). O /config também é o health
+// check do Render, por isso o cache: senão seria uma chamada à Cloudflare a cada poucos segundos.
+const CF_TURN = process.env.CF_TURN_KEY_ID && process.env.CF_TURN_TOKEN
+  ? { id: process.env.CF_TURN_KEY_ID, token: process.env.CF_TURN_TOKEN }
+  : null;
+const CF_VALIDADE = 48 * 3600;
+let cfIce = null; // { servers, em }
+let cfBuscando = null;
+let cfFalhou = 0; // última falha: espera 1 min antes de tentar de novo
+async function buscarCfIce() {
+  const r = await fetch(`https://rtc.live.cloudflare.com/v1/turn/keys/${CF_TURN.id}/credentials/generate-ice-servers`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${CF_TURN.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ttl: CF_VALIDADE }),
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const { iceServers: lista } = await r.json();
+  // a porta 53 é barrada pelos navegadores: só faria o ICE esperar o tempo esgotar
+  const servers = (Array.isArray(lista) ? lista : [lista])
+    .map((s) => ({ ...s, urls: [].concat(s.urls).filter((u) => !/:53(\?|$)/.test(u)) }))
+    .filter((s) => s.urls.length);
+  if (!servers.some((s) => s.username)) throw new Error('resposta sem TURN');
+  return servers;
+}
+async function iceServers() {
+  if (!CF_TURN) return iceReserva;
+  if ((!cfIce || Date.now() - cfIce.em > 3600_000) && Date.now() - cfFalhou > 60_000) {
+    cfBuscando ||= buscarCfIce()
+      .then((servers) => { cfIce = { servers, em: Date.now() }; })
+      .catch((err) => {
+        cfFalhou = Date.now();
+        console.warn('[turn] Cloudflare:', err.message);
+      })
+      .finally(() => { cfBuscando = null; });
+    await cfBuscando;
+  }
+  // a Cloudflare falhou: a credencial anterior ainda vale enquanto não passar das 48 h
+  if (cfIce && Date.now() - cfIce.em < (CF_VALIDADE - 3600) * 1000) return [STUN, ...cfIce.servers];
+  return iceReserva;
+}
 
 const app = express();
 // Sem isto o navegador baixa tudo cru: só o three.js são 662 kB, e o cabeçalho
@@ -297,8 +340,8 @@ app.post('/salas-status', express.json({ limit: '8kb' }), (req, res) => {
   });
 });
 
-app.get('/config', (_req, res) => res.json({
-  iceServers,
+app.get('/config', async (_req, res) => res.json({
+  iceServers: await iceServers(),
   shareSlots: SHARE_SLOTS,
   extensao: VERSAO_EXTENSAO,
   browser: BROWSER && { ...BROWSER, sites: BROWSER_SITES.map(({ id, label, url }) => ({ id, label, host: new URL(url).hostname })) },

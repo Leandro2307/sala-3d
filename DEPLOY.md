@@ -66,22 +66,32 @@ funciona; em redes diferentes, muita internet no Brasil (fibra com CGNAT, 4G) e 
 a conexão direta — a tela fica preta e a sala avisa "Não deu para conectar voz e vídeo". O TURN é
 a ponte que resolve.
 
-**Já vem configurado:** o `server.js` usa por padrão a conta grátis da Metered do dono da sala.
-Só mexa nisto se quiser trocar de conta (ou a cota de 20 GB/mês acabar):
+**Recomendado: TURN da Cloudflare (grátis, 1 TB/mês).** O servidor gera uma credencial que vence
+em 48 h, então ninguém consegue usar a sua cota para sempre pegando a senha do site.
 
-1. Crie uma conta grátis em [metered.ca](https://www.metered.ca/stun-turn) (plano free: 20 GB/mês).
-2. No painel, crie um app e abra **TURN Credentials**: ele mostra um usuário, uma senha e a lista
-   de endereços.
-3. No Render: **Environment → Add Environment Variable**:
+1. Crie uma conta grátis em [dash.cloudflare.com](https://dash.cloudflare.com) (não precisa de domínio).
+2. No menu, abra **Realtime → TURN Server** e clique em **Create** (dê um nome, por exemplo `sala-3d`).
+3. Ele mostra o **Turn Token ID** e o **API Token**. Copie os dois na hora: o API Token só aparece uma vez.
+4. No Render: **Environment → Add Environment Variable**:
+
+| Chave | Valor |
+|---|---|
+| `CF_TURN_KEY_ID` | o Turn Token ID |
+| `CF_TURN_TOKEN` | o API Token |
+
+Salvar as variáveis reinicia o serviço sozinho. Para conferir, abra `https://sala-3d.onrender.com/config`:
+tem que aparecer `turn.cloudflare.com`.
+
+**Reserva:** sem essas variáveis (ou se a Cloudflare não responder), o `server.js` usa a conta grátis
+da Metered do dono da sala (20 GB/mês, e a senha fica exposta no `/config`). Para trocar de conta
+Metered, crie uma em [metered.ca](https://www.metered.ca/stun-turn), abra **TURN Credentials** e
+ponha no Render:
 
 | Chave | Valor |
 |---|---|
 | `TURN_URL` | `turn:global.relay.metered.ca:80,turn:global.relay.metered.ca:80?transport=tcp,turn:global.relay.metered.ca:443,turns:global.relay.metered.ca:443?transport=tcp` |
 | `TURN_USER` | (o usuário mostrado no painel) |
 | `TURN_PASS` | (a senha mostrada no painel) |
-
-Se o painel mostrar outro endereço (por exemplo `a.relay.metered.ca`), use o dele no lugar de
-`global.relay.metered.ca`. Salvar as variáveis reinicia o serviço sozinho.
 
 O TURN só entra como último recurso, quando a conexão direta falha. Ele repassa o vídeo inteiro:
 uma tela em 1080p gasta cerca de 1 GB por hora por pessoa assistindo.

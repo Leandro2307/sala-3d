@@ -700,6 +700,22 @@ export class RTC {
     return (peer.banda ??= bandaInicial(this.peers.size));
   }
 
+  // Credencial nova do TURN (a da Cloudflare vence em 48 h): vale para as conexões novas e para
+  // os próximos reinícios de ICE das que já existem.
+  trocarIce(iceServers) {
+    if (!Array.isArray(iceServers) || !iceServers.length) return;
+    this.iceServers = iceServers;
+    this.temTurn = iceServers.some((s) => [].concat(s.urls).some((u) => /^turns?:/.test(u)));
+    for (const { pc } of this.peers.values()) {
+      if (pc.connectionState === 'closed') continue;
+      try {
+        pc.setConfiguration({ ...pc.getConfiguration(), iceServers });
+      } catch (err) {
+        console.warn('[rtc] troca do TURN', err);
+      }
+    }
+  }
+
   send(to, data) {
     this.socket.emit('signal', { to, data: JSON.parse(JSON.stringify(data)) });
   }

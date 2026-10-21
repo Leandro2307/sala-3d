@@ -870,6 +870,10 @@ async function join() {
     },
   });
   rtc.onMicCaiu = religarMic;
+  // a credencial do TURN vence (48 h na Cloudflare): renova com a página aberta
+  setInterval(() => {
+    fetch('/config').then((r) => r.json()).then((c) => rtc.trocarIce(c.iceServers)).catch(() => {});
+  }, 6 * 3600_000);
   rtc.shareMode = settings.shareMode;
   preloadYouTube();
   $('#browser-block').hidden = !config.browser;
