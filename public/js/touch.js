@@ -197,6 +197,7 @@ export function setupTouchControls(player, actions = {}) {
     '#tb-sair-jogo': actions.sairJogo,
     '#tb-menu': actions.menu,
     '#tb-punch': actions.punch,
+    '#tb-tapa': actions.tapa,
     '#tb-sit': actions.sit,
     '#tb-car': actions.car,
   })) {
@@ -239,7 +240,8 @@ export function setupTouchControls(player, actions = {}) {
     // modo carro: pedais no lugar do pulo, o botão de correr vira turbo
     showCarro(on) {
       root.classList.toggle('carro', on);
-      $b('#tb-punch').hidden = on; // de carro não dá para socar
+      $b('#tb-punch').hidden = on; // de carro não dá para socar (nem dar tapa)
+      $b('#tb-tapa').hidden = on;
       $b('#tb-acelera').hidden = !on;
       $b('#tb-freio').hidden = !on;
       $b('#tb-jump').hidden = on;

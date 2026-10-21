@@ -1,17 +1,24 @@
-// Truco paulista e Uno: baralhos e regras das cartas. Sem three.js nem DOM: o servidor
+// Truco mineiro e Uno: baralhos e regras das cartas. Sem three.js nem DOM: o servidor
 // (cartas-servidor.js) conduz as partidas com isto, e o navegador (cartas.js) usa para mostrar as
 // cartas e saber quais dá para jogar.
 
-// ------------------------------------------------------------------ truco paulista
-// Baralho sem 8, 9 e 10. Carta: valor + naipe ('7o', 'Ap'...). Naipes, do mais fraco ao mais forte
-// entre as manilhas: ouros, espadas, copas, paus (o zap).
-export const VALORES_TRUCO = ['4', '5', '6', '7', 'Q', 'J', 'K', 'A', '2', '3'];
+// ------------------------------------------------------------------ truco mineiro
+// Baralho limpo (27 cartas): só 3, 2, A, K, J e Q de cada naipe, mais o 4 de paus e os dois setes
+// vermelhos — nenhum 4, 5, 6, 7, 8, 9 ou 10 fora das manilhas. Carta: valor + naipe ('7o', 'Ap'...).
+// Sem vira: as manilhas são sempre as mesmas quatro, e nas outras cartas o naipe não conta.
+export const VALORES_TRUCO = ['Q', 'J', 'K', 'A', '2', '3'];
 export const NAIPES = ['o', 'e', 'c', 'p'];
 export const SIMBOLO = { o: '♦', e: '♠', c: '♥', p: '♣' };
 export const NOME_NAIPE = { o: 'ouros', e: 'espadas', c: 'copas', p: 'paus' };
 export const naipeVermelho = (n) => n === 'o' || n === 'c';
-export const PASSOS_TRUCO = [1, 3, 6, 9, 12]; // quanto a mão vale a cada pedido
-export const NOME_PEDIDO = { 3: 'TRUCO', 6: 'SEIS', 9: 'NOVE', 12: 'DOZE' };
+// as manilhas, da mais fraca para a mais forte: pica-fumo (7 de ouros), espadilha (ás de espadas),
+// copas (7 de copas) e o zap (4 de paus)
+export const MANILHAS = ['7o', 'Ae', '7c', '4p'];
+export const NOME_MANILHA = { '7o': 'Pica-fumo', Ae: 'Espadilha', '7c': 'Copas', '4p': 'Zap' };
+// a mão vale 2; truco, seis, nove e doze (com os pontos sempre pares, a mão de onze é a de dez)
+export const PASSOS_TRUCO = [2, 4, 8, 10, 12];
+export const NOME_PEDIDO = { 4: 'TRUCO', 8: 'SEIS', 10: 'NOVE', 12: 'DOZE' };
+export const VALE_DEZ = 4; // a mão de dez vale 4; quem corre dela dá 2
 
 export const valorDe = (c) => c.slice(0, -1);
 export const naipeDe = (c) => c.slice(-1);
@@ -19,18 +26,30 @@ export const naipeDe = (c) => c.slice(-1);
 export function baralhoTruco() {
   const b = [];
   for (const v of VALORES_TRUCO) for (const n of NAIPES) b.push(v + n);
+  b.push('4p', '7c', '7o'); // as manilhas que não são de A a 3 (a espadilha já veio com os ases)
   return b;
 }
 
-// a manilha é o valor seguinte ao da vira (depois do 3 vem o 4)
-export const manilhaDa = (vira) => VALORES_TRUCO[(VALORES_TRUCO.indexOf(valorDe(vira)) + 1) % VALORES_TRUCO.length];
-
-// força da carta nesta mão: manilhas acima de tudo, pelo naipe; as outras pelo valor (naipe não conta)
-export function forcaTruco(carta, vira) {
-  const v = valorDe(carta);
-  if (v === manilhaDa(vira)) return 100 + NAIPES.indexOf(naipeDe(carta));
-  return VALORES_TRUCO.indexOf(v);
+// força da carta: manilhas acima de tudo; as outras pelo valor (3 > 2 > A > K > J > Q)
+export function forcaTruco(carta) {
+  const m = MANILHAS.indexOf(carta);
+  if (m >= 0) return 100 + m;
+  return VALORES_TRUCO.indexOf(valorDe(carta));
 }
+
+// Os gritos da mesa, como no boteco: o servidor sorteia a frase e todo mundo ouve a mesma. A voz
+// (cartas.js) fala a frase; a faixa mostra o grito em letra grande.
+export const GRITOS = {
+  truco: ['Truco!', 'Truco, ladrão!', 'Truco, marreco!', 'Toma truco, sô!', 'Truco nessa cambada!', 'Truco, uai!'],
+  seis: ['Seis!', 'Seis, ladrão!', 'Desce o seis!', 'É seis, sô!', 'Seis, que eu tô armado!', 'Seis, uai!'],
+  nove: ['Nove!', 'Nove, marreco!', 'Pede nove!', 'Nove, sô!', 'É nove, uai!'],
+  doze: ['Doze!', 'Doze, pra acabar!', 'Queda! Doze!', 'Doze, cambada!', 'Doze, uai!'],
+  aceito: ['Desce!', 'Cai dentro!', 'Aceito!', 'Manda que eu pago!', 'Vem, uai!', 'Bora!'],
+  corro: ['Corro!', 'Tô fora!', 'Corri, sô.', 'Leva, leva.', 'Vai, pode levar.'],
+  dez: ['Vamo jogar, uai!', 'Bora pra mão de dez!', 'Mão de dez, desce!'],
+  dezCorro: ['Essa eu corro.', 'Mão de dez não, sô.'],
+};
+export const GRITO_DO_PEDIDO = { 4: 'truco', 8: 'seis', 10: 'nove', 12: 'doze' };
 
 // ------------------------------------------------------------------ uno
 // Carta: cor + símbolo ('r7', 'gP2' = +2 verde, 'bB' = bloqueio azul, 'yI' = inverter amarelo) ou

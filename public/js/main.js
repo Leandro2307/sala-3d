@@ -191,6 +191,7 @@ const cartas = new Cartas({
   world, player, sfx, ligado: (jogo) => jogoLigado(jogo),
   focar: () => focarCartas(),
   soltarFoco: () => { if (state.focus?.kind === 'cartas') sairDoFoco(); },
+  tapa: (id) => darTapa(id), // a mãozinha ao lado do nome de quem está na mesa
 });
 jogosDoParque.push(cartas);
 // gincana: 10 fases e a final, bem longe do mapa (o portal fica ao sul da Rua dos Esportes)
@@ -935,6 +936,7 @@ async function join() {
       // em jogo a barra do topo some; o ☰ traz ela de volta
       menu: () => document.body.classList.toggle('barra-aberta'),
       punch: () => punch(),
+      tapa: () => darTapa(),
       sit: () => toggleSit(),
       car: () => toggleVeiculo(),
       voar: () => toggleVoar(),
@@ -1165,6 +1167,20 @@ function bindSocket() {
     if (!u || u.isSelf) return;
     u.avatar.punch();
     sfx.punchSwing();
+  });
+
+  // tapa (de alguém, em alguém): o braço de quem bateu, o PLAFT! em quem levou e, se fui eu, o
+  // empurrão e a marca da mão na tela
+  socket.on('tapa', ({ de, deNome, para, dir }) => {
+    const quem = state.users.get(de);
+    if (quem && !quem.isSelf) quem.avatar.tapa();
+    if (!para) return; // tapa no vento: só o braço
+    const alvo = state.users.get(para);
+    if (!alvo) return;
+    alvo.avatar.levarTapa(dir, !alvo.isSelf);
+    const d = localAvatar.group.position.distanceTo(alvo.avatar.group.position);
+    sfx.tapa(THREE.MathUtils.clamp(1 - d / 40, 0.05, 1));
+    if (alvo.isSelf) leveiTapa(deNome, dir);
   });
 
   socket.on('tiro', ({ id, de, ate, mais, arma }) => {
@@ -2520,11 +2536,12 @@ const JOGOS_DA_SALA = [
   ['queimada', 'Queimada', 'Times Azul × Vermelho, com cemitério'],
   ['sinuca', 'Sinuca', 'Bola 8 no salão de jogos, até dois por mesa'],
   ['golfe', 'Minigolfe', '9 buracos com moinho, morros e água'],
-  ['truco', 'Truco', 'Truco paulista em duplas, com robôs'],
+  ['truco', 'Truco', 'Truco mineiro em duplas, com os gritos e robôs'],
   ['uno', 'Uno', 'Até 6 na mesa, com robôs'],
   ['gincana', 'Gincana', '10 fases estilo Fall Guys e a final dos hexágonos'],
   ['kart', 'Kart', 'Kartódromo com itens, 3 voltas'],
   ['pinta', 'Pinta-território', 'Times pintam o chão com tinta'],
+  ['tapa', 'Tapa', 'Y dá um tapa em quem está na frente (não tira vida)'],
 ];
 const AREAS_DE_JOGO = ['parkour', 'ringue', 'corrida', 'futebol', 'volei', 'basquete', 'boliche', 'surf', 'matamata', 'batalha', 'xadrez', 'dama', 'velha', 'dados', 'pingue', 'queimada', 'sinuca', 'golfe', 'cartas', 'gincana', 'kart', 'pinta'];
 // parkour e ringue ficam dentro do cinema: no escritório não existem
@@ -4876,6 +4893,70 @@ function punch() {
   }
 }
 
+// ------------------------------------------------------------------ tapa (como no BOMBANANA)
+// Y (a mãozinha no celular, ou a do lado do nome na mesa de cartas): tapa de mão aberta em quem está
+// perto e na frente. Não tira vida: empurra, sacode a tela de quem levou e faz PLAFT! O servidor
+// confere o alcance e o intervalo (ver 'tapa' no server.js).
+const TAPA = { alcance: 2.3, cone: 0.25, intervalo: 0.55, empurrao: 11, pulo: 4.5 };
+let ultimoTapa = 0;
+function darTapa(alvoId = null) {
+  if (!state.joined || !jogoLigado('tapa') || combat.knockedOut) return;
+  const agora = performance.now() / 1000;
+  if (agora - ultimoTapa < TAPA.intervalo) return;
+  ultimoTapa = agora;
+  // sem alvo escolhido: o mais perto, na frente e mais ou menos na mesma altura
+  if (!alvoId) {
+    const fx = -Math.sin(player.yaw);
+    const fz = -Math.cos(player.yaw);
+    let perto = Infinity;
+    for (const u of state.users.values()) {
+      if (u.isSelf || !u.avatar) continue;
+      const p = u.avatar.group.position;
+      const dx = p.x - player.pos.x;
+      const dz = p.z - player.pos.z;
+      const d = Math.hypot(dx, dz);
+      if (d > TAPA.alcance || d < 0.01 || Math.abs(p.y - player.pos.y) > 2) continue;
+      if ((dx * fx + dz * fz) / d < TAPA.cone) continue;
+      if (d < perto) {
+        perto = d;
+        alvoId = u.id;
+      }
+    }
+  }
+  localAvatar.tapa();
+  sfx.tapaVento();
+  socket?.emit('tapa', { to: alvoId });
+}
+
+// levei um tapa: empurrão (em pé; sentado na mesa ou no sofá só a tela sacode) e a marca da mão
+function leveiTapa(nome, dir) {
+  if (!player.override && !player.sitting && Array.isArray(dir)) {
+    player.vel.x += dir[0] * TAPA.empurrao;
+    player.vel.z += dir[1] * TAPA.empurrao;
+    player.vel.y = Math.max(player.vel.y, TAPA.pulo);
+    player.grounded = false;
+    player.ground = null;
+  }
+  player.addShake(0.8);
+  let el = $('#tapa-marca');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'tapa-marca';
+    el.innerHTML = '<i class="mao" aria-hidden="true">🖐️</i><b>PLAFT!</b><span></span>';
+    document.body.append(el);
+  }
+  const direita = Math.random() < 0.5;
+  el.style.setProperty('--lado', direita ? '72%' : '28%');
+  el.style.setProperty('--giro', direita ? '18deg' : '-18deg');
+  el.querySelector('span').textContent = nome ? `${nome} te deu um tapa!` : 'Levou um tapa!';
+  el.hidden = false;
+  el.classList.remove('anda');
+  void el.offsetWidth; // recomeça a animação (tapa em cima de tapa)
+  el.classList.add('anda');
+  clearTimeout(leveiTapa.t);
+  leveiTapa.t = setTimeout(() => { el.hidden = true; }, 1150);
+}
+
 function goToRing() {
   if (!jogoLigado('ringue')) {
     toast('O ringue está desligado nesta sala.', 'info', 2600);
@@ -5741,6 +5822,9 @@ window.addEventListener('keydown', (e) => {
       break;
     case 'KeyX':
       puxarGatilho();
+      break;
+    case 'KeyY':
+      darTapa();
       break;
     case 'KeyZ':
       if (temSniper()) ligarLuneta(!luneta);

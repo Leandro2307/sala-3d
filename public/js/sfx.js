@@ -153,6 +153,25 @@ export const sfx = {
     ruido({ dur: 0.5, gain: 0.03, type: 'lowpass', freq: 500, toFreq: 120, delay: 0.1 });
   },
 
+  // Tapa (de mão aberta): estalo agudo e seco por cima de um "plaft" médio, quase sem grave — é o
+  // grave que faz o soco soar como soco.
+  tapa: (vol = 1) => {
+    if (vol <= 0.02) return;
+    ruido({ dur: 0.06, gain: 0.22 * vol, type: 'highpass', freq: 1800, q: 0.7 });
+    ruido({ dur: 0.12, gain: 0.12 * vol, type: 'bandpass', freq: 1150, toFreq: 600, q: 1.2 });
+    tone({ freq: 300, to: 120, dur: 0.08, type: 'triangle', gain: 0.05 * vol });
+  },
+  // a mão passando no vazio
+  tapaVento: () => ruido({ dur: 0.16, gain: 0.04, type: 'bandpass', freq: 2200, toFreq: 700, q: 1 }),
+
+  // Murro na mesa (o grito do truco vem com a mão na madeira): baque de madeira e as cartas pulando
+  murroMesa: (vol = 1) => {
+    if (vol <= 0.02) return;
+    tone({ freq: 115, to: 52, dur: 0.2, type: 'sine', gain: 0.2 * vol });
+    ruido({ dur: 0.09, gain: 0.13 * vol, type: 'lowpass', freq: 1500, toFreq: 280 });
+    ruido({ dur: 0.05, gain: 0.04 * vol, type: 'bandpass', freq: 2600, q: 2, delay: 0.03 });
+  },
+
   // Sequência de abates (double kill, triple...): um acorde subindo, mais alto e mais longo a cada nível
   serie: (nivel = 2) => {
     const base = 330 * 2 ** (Math.min(nivel, 7) / 12);

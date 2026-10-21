@@ -325,6 +325,9 @@ export class Avatar {
     this.chest = null; // estampa da camiseta
     this.health = 1; // 0..1 — barra só aparece quando leva porrada
     this.swing = 0; // animação do soco
+    this.tapaTempo = 0; // animação do tapa (1 → 0)
+    this.tranco = 0; // levou um tapa: o boneco tomba para o lado e volta balançando (1 → 0)
+    this.trancoDir = [0, 0];
     this.ko = false;
     this.sitting = false;
     this.armado = false; // camiseta 22: anda com a arma na mão
@@ -858,6 +861,38 @@ export class Avatar {
     this.personagem?.tocarGesto('punch'); // o robô tem clipe de soco de verdade
   }
 
+  // tapa de mão aberta: o braço abre para o lado e cruza na frente do corpo
+  tapa() {
+    this.tapaTempo = 1;
+    this.personagem?.tocarGesto('punch');
+  }
+
+  // levou um tapa vindo da direção dir ([x, z], de quem bateu para quem levou): tomba para lá e o
+  // "PLAFT!" sobe da cabeça (plaft = false: quem levou já vê o PLAFT! na tela, ver leveiTapa)
+  levarTapa(dir, plaft = true) {
+    const [dx, dz] = Array.isArray(dir) ? dir : [0, 0];
+    const n = Math.hypot(dx, dz) || 1;
+    this.trancoDir = [dx / n, dz / n];
+    this.tranco = 1;
+    if (!plaft) return;
+    const e = makeCanvasSprite(256, 128, 1.5, 0.75);
+    e.ctx.font = `900 64px ${FONT}`;
+    e.ctx.textAlign = 'center';
+    e.ctx.textBaseline = 'middle';
+    e.ctx.lineJoin = 'round';
+    e.ctx.lineWidth = 12;
+    e.ctx.strokeStyle = '#7f1d1d';
+    e.ctx.strokeText('PLAFT!', 128, 66);
+    e.ctx.fillStyle = '#fde047';
+    e.ctx.fillText('PLAFT!', 128, 66);
+    e.tex.needsUpdate = true;
+    e.sprite.position.set((Math.random() - 0.5) * 0.4, 2.1, 0);
+    e.life = 0;
+    e.largura = 2; // a faixa é o dobro de larga que alta (os emojis são quadrados)
+    this.emotes.push(e);
+    this.group.add(e.sprite);
+  }
+
   setColor(color) {
     this.color = color;
     this.material.color.set(color);
@@ -946,7 +981,7 @@ export class Avatar {
     const u = this._pose;
     if (!vis && !u.vis) return false; // escondido e continua escondido: não está na sombra
     const p = this.personagem;
-    const animando = this.anim === 1 || this.anim === 2 || this.anim === 3 || this.swing > 0 || this.waveTime > 0
+    const animando = this.anim === 1 || this.anim === 2 || this.anim === 3 || this.swing > 0 || this.waveTime > 0 || this.tapaTempo > 0 || this.tranco > 0
       || this.coice > 0 || this.mira > 0 || !!p?.gesto || !!p?.travado?.isRunning();
     if (!animando && vis === u.vis && Math.abs(g.x - u.x) < 0.001 && Math.abs(g.y - u.y) < 0.001 && Math.abs(g.z - u.z) < 0.001
       && Math.abs(r.y - u.ry) < 0.002 && Math.abs(r.z - u.rz) < 0.002) return false;
@@ -1071,12 +1106,21 @@ export class Avatar {
       }
     }
 
+    // o tranco do tapa: mola que tomba para o lado do tapa e volta balançando
+    if (this.tranco > 0) {
+      this.tranco = Math.max(0, this.tranco - dt / 0.9);
+      const tau = (1 - this.tranco) * 0.9;
+      const a = this.tranco > 0 ? Math.sin(tau * 16) * Math.exp(-tau * 4) * 0.45 : 0;
+      this.group.rotation.x = this.trancoDir[1] * a;
+      this.group.rotation.z = -this.trancoDir[0] * a;
+    }
+
     for (let i = this.emotes.length - 1; i >= 0; i--) {
       const e = this.emotes[i];
       e.life += dt;
       e.sprite.position.y = 2.1 + e.life * 1.1;
       const sc = 0.9 + Math.min(e.life * 3, 0.5);
-      e.sprite.scale.set(sc, sc, 1);
+      e.sprite.scale.set(sc * (e.largura || 1), sc, 1);
       e.sprite.material.opacity = Math.max(0, 1 - Math.max(0, e.life - 1.4) / 0.8);
       if (e.life > 2.2) {
         this.group.remove(e.sprite);
@@ -1170,7 +1214,7 @@ export class Avatar {
       // braços: balançam ao contrário das pernas
       this.arms.forEach(({ raiz, cotovelo, lado }, i) => {
         raiz.position.y = 1.18 + bob + alturaSentado;
-        if (this.swing > 0 && lado > 0) return; // o braço do soco é tratado abaixo
+        if ((this.swing > 0 || this.tapaTempo > 0) && lado > 0) return; // o braço do soco (e do tapa) é tratado abaixo
         if (sentado) {
           raiz.rotation.set(-0.5, 0, lado * 0.24);
           cotovelo.rotation.x = 0.75;
@@ -1231,6 +1275,15 @@ export class Avatar {
         esq.raiz.rotation.set(-1.1, 0, -0.2);
         esq.cotovelo.rotation.x = 1.3;
         this.body.rotation.y = -golpe * 0.28;
+      } else if (this.tapaTempo > 0) {
+        // tapa: abre o braço para o lado (prepara), cruza rápido na frente do corpo e volta
+        this.tapaTempo = Math.max(0, this.tapaTempo - dt / 0.34);
+        const u = 1 - this.tapaTempo;
+        const golpe = u < 0.35 ? -u / 0.35 : u < 0.6 ? -1 + ((u - 0.35) / 0.25) * 2 : 1 - (u - 0.6) / 0.4;
+        const dir = this.arms[1];
+        dir.raiz.rotation.set(-1.35, 0, 0.2 - golpe * 0.9);
+        dir.cotovelo.rotation.x = 0.25;
+        this.body.rotation.y = -golpe * 0.3;
       } else if (!this.ko) {
         this.body.rotation.y = 0;
       }
@@ -1245,6 +1298,7 @@ export class Avatar {
     // presos num valor, o boneco pareceria sempre em movimento (animação a pleno e sombra refeita)
     if (this.veiculo || this.personagem) {
       this.swing = Math.max(0, this.swing - dt / 0.26);
+      this.tapaTempo = Math.max(0, this.tapaTempo - dt / 0.34);
       this.waveTime = Math.max(0, this.waveTime - dt);
       this.mira = Math.max(0, this.mira - dt);
       this.coice = Math.max(0, this.coice - dt * 7);
@@ -1267,7 +1321,7 @@ export class Avatar {
     const p = this.personagem;
     // gesto, soco, aceno, carro e tiro recente (o clarão dura 0,05 s: com passo, sumia antes de
     // aparecer em quem atira longe) andam a cada quadro
-    if (p?.gesto || p?.travado?.isRunning() || this.swing > 0 || this.waveTime > 0 || this.veiculo || this.coice > 0) passo = 0;
+    if (p?.gesto || p?.travado?.isRunning() || this.swing > 0 || this.tapaTempo > 0 || this.waveTime > 0 || this.veiculo || this.coice > 0) passo = 0;
     if (this._dtAnim < passo) return;
     this.animar(this._dtAnim, t);
     this._dtAnim = 0;

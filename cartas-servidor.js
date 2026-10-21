@@ -2,8 +2,13 @@
 // conduz a vez, confere cada jogada (public/js/cartas-regras.js) e joga pelos robôs que completam a
 // mesa. Cada um recebe só a própria mão ('ct-mao'); o resto da mesa vai para todos ('ct-estado').
 //
-// Truco paulista: 4 lugares, em duplas (0 e 2 contra 1 e 3); quem não tem parceiro joga com um
-// robô. Vira e manilhas, 3 rodadas por mão, truco/seis/nove/doze, mão de onze; 12 pontos ganha.
+// Truco mineiro: 4 lugares, em duplas (0 e 2 contra 1 e 3); quem não tem parceiro joga com um
+// robô. Baralho limpo (27 cartas: de Q a 3, mais 4♣, 7♥ e 7♦), manilhas fixas (zap, copas,
+// espadilha e pica-fumo), 3 rodadas por mão; a mão vale 2, e o
+// truco 4, o seis 8, o nove 10 e o doze 12 — cada pedido e cada resposta é um grito ('ct-grito')
+// que a mesa ouve. Carta coberta da segunda rodada em diante, mão de dez (o time com 10 vê as
+// cartas do parceiro e decide) e mão de ferro (10 a 10: ninguém vê as cartas); 12 pontos ganha.
+// Os avisos falam das duplas como «0» e «1»: cada um lê "sua dupla" ou "a outra dupla" (cartas.js).
 // Uno: até 6 lugares; bloqueio, inverter, +2, coringa e +4 (sem acumular); comprou e não serve,
 // passa. Quem fica com uma carta tem uns segundos para dizer "UNO!", senão compra duas.
 const { carregarPorMapa, comMapa } = require('./mapa-servidor.js');
@@ -27,6 +32,17 @@ const ESPERA_GENTE = 45_000; // parado na vez: o robô joga por ele
 const novaMesa = (i) => ({ i, jogo: MESAS.MESAS_CARTAS[i].jogo, lugares: Array(LUGARES[MESAS.MESAS_CARTAS[i].jogo]).fill(null), fase: 'espera', aviso: '', vencedor: null, ate: 0, botAte: 0, vezDesde: 0, t: null, u: null });
 const mesasDa = (room) => (room.cartas ||= MESAS.MESAS_CARTAS.map((_, i) => novaMesa(i)));
 const timeDe = (lugar) => lugar % 2;
+const dupla = (time) => `«${time}»`;
+// Pode pedir truco (ou o seguinte) agora? Não na mão de dez nem na de ferro, nem com um pedido no
+// ar; depois de aceito, só quem aceitou sobe; e não se pede o que não muda nada (com o que a mão já
+// vale, o time já chegaria aos 12).
+const podeTrucar = (t, time) => !t.ferro && t.maoDeDez === null && !t.pedido && t.vale < 12
+  && (t.podeAumentar === null || t.podeAumentar === time) && t.pontos[time] + t.vale < 12;
+// responder subindo mais um: o mesmo limite, com o valor pedido (que quem responde já levaria)
+const podeSubir = (t) => !!t.pedido && t.pedido.valor < 12 && t.pontos[1 - t.pedido.porTime] + t.pedido.valor < 12;
+// a carta coberta não vale nada (nem empata)
+const forcaNaMesa = (j) => (j.coberta ? -1 : R.forcaTruco(j.carta));
+const tapada = (j) => (j.coberta ? { lugar: j.lugar, carta: 'verso', coberta: true } : j);
 // longe da mesa há mais de 3 s (a posição que o servidor tem chega um tiquinho depois de um teleporte)
 const longeDemais = (l, longe) => {
   if (!longe) {
@@ -46,8 +62,9 @@ function publico(m) {
   if (m.t) {
     const t = m.t;
     Object.assign(base, {
-      pontos: t.pontos, vira: t.vira, vale: t.vale, pedido: t.pedido, podeAumentar: t.podeAumentar, mesaCartas: t.mesa, ultimaVaza: t.ultimaVaza,
-      pausa: Math.max(0, t.pausaAte - Date.now()), rodadas: t.rodadas, vez: t.vez, dador: t.dador, maoDeOnze: t.maoDeOnze,
+      pontos: t.pontos, vale: t.vale, pedido: t.pedido, mesaCartas: t.mesa.map(tapada), ultimaVaza: t.ultimaVaza.map(tapada),
+      pausa: Math.max(0, t.pausaAte - Date.now()), rodadas: t.rodadas, vez: t.vez, dador: t.dador, maoDeDez: t.maoDeDez, ferro: t.ferro,
+      trucar: [0, 1].map((time) => podeTrucar(t, time)), subir: podeSubir(t),
     });
   }
   if (m.u) {
@@ -62,9 +79,21 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
     io.to(room.id).emit('ct-estado', publico(m));
     m.lugares.forEach((l, k) => {
       if (!l || l.bot) return;
-      const mao = m.t?.maos[k] || m.u?.maos[k] || [];
-      io.to(l.id).emit('ct-mao', { mesa: m.i, lugar: k, mao });
+      const t = m.t;
+      let mao = t?.maos[k] || m.u?.maos[k] || [];
+      const extra = {};
+      if (t?.ferro) mao = mao.map(() => 'verso'); // mão de ferro: nem o dono vê
+      if (t && m.fase === 'dez' && timeDe(k) === t.maoDeDez) extra.parceiro = t.maos[(k + 2) % 4];
+      io.to(l.id).emit('ct-mao', { mesa: m.i, lugar: k, mao, ...extra });
     });
+  }
+
+  // o grito vai para a sala toda: quem está perto da mesa ouve (cartas.js decide pela distância)
+  function gritar(room, m, k, tipo) {
+    const frases = R.GRITOS[tipo];
+    if (!frases) return;
+    const frase = frases[Math.floor(Math.random() * frases.length)];
+    io.to(room.id).emit('ct-grito', { mesa: m.i, lugar: k, tipo, nome: m.lugares[k]?.nome || '', frase });
   }
   const humanos = (m) => m.lugares.filter((l) => l && !l.bot);
   const robo = (m, k) => ({ id: `robo-${m.i}-${k}`, nome: NOMES_ROBO[k % NOMES_ROBO.length], cor: '#94a3b8', bot: true });
@@ -116,8 +145,7 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
     const t = m.t;
     const monte = R.embaralhar(R.baralhoTruco());
     t.maos = [0, 1, 2, 3].map(() => [monte.pop(), monte.pop(), monte.pop()]);
-    t.vira = monte.pop();
-    t.vale = 1;
+    t.vale = R.PASSOS_TRUCO[0];
     t.pedido = null;
     t.podeAumentar = null;
     t.rodadas = [];
@@ -126,12 +154,14 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
     t.pausaAte = 0;
     t.inicio = (t.dador + 1) % 4;
     t.vez = t.inicio;
-    t.maoDeOnze = null;
-    t.ferro = t.pontos[0] === 11 && t.pontos[1] === 11; // mão de ferro: sem truco
-    if (!t.ferro && (t.pontos[0] === 11 || t.pontos[1] === 11)) t.maoDeOnze = t.pontos[0] === 11 ? 0 : 1;
-    m.fase = t.maoDeOnze !== null ? 'onze' : 'jogando';
+    // mão de ferro: 10 a 10, ninguém vê as cartas (cada um vira a de cima) e não tem truco
+    t.ferro = t.pontos[0] === 10 && t.pontos[1] === 10;
+    // mão de dez: o time com 10 olha as cartas do parceiro e decide se joga (vale 4) ou corre (dá 2)
+    t.maoDeDez = !t.ferro && (t.pontos[0] === 10 || t.pontos[1] === 10) ? (t.pontos[0] === 10 ? 0 : 1) : null;
+    m.fase = t.maoDeDez !== null ? 'dez' : 'jogando';
     m.vencedor = null;
-    m.aviso = t.maoDeOnze !== null ? `Mão de onze: ${t.maoDeOnze === 0 ? 'Nós' : 'Eles'} decidem se jogam (vale 3)` : '';
+    m.aviso = t.maoDeDez !== null ? `Mão de dez: ${dupla(t.maoDeDez)} vê as cartas do parceiro e decide (vale ${R.VALE_DEZ})`
+      : t.ferro ? 'Mão de ferro: ninguém vê as cartas, cada um vira a de cima' : '';
     m.vezDesde = Date.now();
     m.botAte = Date.now() + ESPERA_ROBO + 600;
     avisar(room, m);
@@ -141,12 +171,12 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
     const t = m.t;
     t.pedido = null;
     if (time === 0 || time === 1) t.pontos[time] = Math.min(12, t.pontos[time] + t.vale);
-    m.aviso = time === 'e' ? 'Mão empatada: ninguém marca' : `${time === 0 ? 'Nós' : 'Eles'} +${t.vale}${motivo ? ` (${motivo})` : ''}`;
+    m.aviso = time === 'e' ? 'Mão empatada: ninguém marca' : `${dupla(time)} +${t.vale}${motivo ? ` (${motivo})` : ''}`;
     if (t.pontos[0] >= 12 || t.pontos[1] >= 12) {
       const v = t.pontos[0] >= 12 ? 0 : 1;
       m.fase = 'fim';
       m.vencedor = v;
-      m.aviso = `${v === 0 ? 'Nós' : 'Eles'} ganharam o truco!`;
+      m.aviso = `${dupla(v)} ganhou o truco!`;
       m.ate = Date.now() + 9000;
       const contraGente = m.lugares.some((l, k) => l && !l.bot && timeDe(k) !== v);
       m.lugares.forEach((l, k) => {
@@ -161,7 +191,8 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
     avisar(room, m);
   }
 
-  // quem ganhou a mão pelas rodadas (0, 1, 'e' empate) ou null: continua
+  // quem ganhou a mão pelas rodadas (0, 1, 'e' empate) ou null: continua. Rodada empatada: leva a
+  // mão quem ganhou a primeira que não empatou; as três empatadas, ninguém marca.
   function decideMao(r) {
     const v0 = r.filter((x) => x === 0).length;
     const v1 = r.filter((x) => x === 1).length;
@@ -178,15 +209,20 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
     return null;
   }
 
-  function jogarTruco(room, m, k, carta) {
+  // coberta: virada para baixo, só da segunda rodada em diante (e nunca ganha). Na mão de ferro
+  // ninguém sabe o que tem: sai a carta de cima, seja qual for a que veio.
+  function jogarTruco(room, m, k, carta, coberta = false) {
     const t = m.t;
     const mao = t.maos[k];
-    const i = mao.indexOf(carta);
-    if (i < 0) return false;
+    const i = t.ferro ? 0 : mao.indexOf(carta);
+    if (i < 0 || !mao.length) return false;
+    carta = mao[i];
+    coberta = !!coberta && !t.ferro && t.rodadas.length > 0;
     mao.splice(i, 1);
-    t.mesa.push({ lugar: k, carta });
+    t.mesa.push({ lugar: k, carta, coberta });
     m.vezDesde = Date.now();
     m.botAte = Date.now() + ESPERA_ROBO;
+    if (coberta) m.aviso = `${m.lugares[k].nome} jogou coberta`;
     if (t.mesa.length < 4) {
       t.vez = (t.vez + 1) % 4;
       avisar(room, m);
@@ -194,8 +230,8 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
     }
     // a rodada fechou: a carta mais forte leva (as duas mais fortes de times diferentes: empate)
     let melhor = -1;
-    for (const j of t.mesa) melhor = Math.max(melhor, R.forcaTruco(j.carta, t.vira));
-    const fortes = t.mesa.filter((j) => R.forcaTruco(j.carta, t.vira) === melhor);
+    for (const j of t.mesa) melhor = Math.max(melhor, forcaNaMesa(j));
+    const fortes = t.mesa.filter((j) => forcaNaMesa(j) === melhor);
     const times = new Set(fortes.map((j) => timeDe(j.lugar)));
     const res = times.size > 1 ? 'e' : timeDe(fortes[0].lugar);
     t.rodadas.push(res);
@@ -208,23 +244,24 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
       fimDaMao(room, m, fim);
       return true;
     }
-    if (res !== 'e') t.inicio = fortes[0].lugar;
+    // quem fez a rodada começa a próxima; no empate, quem pôs a primeira das cartas que empataram
+    t.inicio = fortes[0].lugar;
     t.vez = t.inicio;
-    m.aviso = res === 'e' ? 'Rodada empatada' : `Rodada para ${res === 0 ? 'Nós' : 'Eles'}`;
+    m.aviso = res === 'e' ? 'Rodada empatada' : `Rodada para ${dupla(res)}`;
     avisar(room, m);
     return true;
   }
 
   const proximoPedido = (v) => R.PASSOS_TRUCO[R.PASSOS_TRUCO.indexOf(v) + 1];
-  const podePedir = (t, k) => !t.ferro && t.maoDeOnze === null && !t.pedido && t.vale < 12 && (t.podeAumentar === null || t.podeAumentar === timeDe(k));
 
   function pedirTruco(room, m, k) {
     const t = m.t;
-    if (!podePedir(t, k) || t.vez !== k) return false;
+    if (m.fase !== 'jogando' || t.vez !== k || !podeTrucar(t, timeDe(k))) return false;
     t.pedido = { valor: proximoPedido(t.vale), porTime: timeDe(k), de: k };
     m.aviso = `${m.lugares[k].nome}: ${R.NOME_PEDIDO[t.pedido.valor]}!`;
+    gritar(room, m, k, R.GRITO_DO_PEDIDO[t.pedido.valor]);
     m.vezDesde = Date.now();
-    m.botAte = Date.now() + ESPERA_ROBO + 400;
+    m.botAte = Date.now() + ESPERA_ROBO + 900; // dá tempo do grito
     avisar(room, m);
     return true;
   }
@@ -235,78 +272,96 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
     if (!p || timeDe(k) === p.porTime) return false;
     const nome = m.lugares[k].nome;
     if (resp === 'correr') {
+      gritar(room, m, k, 'corro');
       fimDaMao(room, m, p.porTime, `${nome} correu`);
       return true;
     }
-    if (resp === 'aumentar' && p.valor < 12) {
+    if (resp === 'aumentar') {
+      if (!podeSubir(t)) return false;
       t.vale = p.valor; // aumentar é aceitar o pedido e pedir mais
       t.pedido = { valor: proximoPedido(p.valor), porTime: timeDe(k), de: k };
       m.aviso = `${nome}: ${R.NOME_PEDIDO[t.pedido.valor]}!`;
+      gritar(room, m, k, R.GRITO_DO_PEDIDO[t.pedido.valor]);
     } else {
       t.vale = p.valor;
       t.pedido = null;
       t.podeAumentar = timeDe(k); // quem aceitou é quem pode aumentar depois
       m.aviso = `${nome} aceitou: a mão vale ${t.vale}`;
+      gritar(room, m, k, 'aceito');
     }
+    m.vezDesde = Date.now();
+    m.botAte = Date.now() + ESPERA_ROBO + 600;
+    avisar(room, m);
+    return true;
+  }
+
+  function maoDeDez(room, m, k, resp) {
+    const t = m.t;
+    if (m.fase !== 'dez' || timeDe(k) !== t.maoDeDez) return false;
+    if (resp === 'correr') {
+      t.vale = R.PASSOS_TRUCO[0];
+      gritar(room, m, k, 'dezCorro');
+      fimDaMao(room, m, 1 - t.maoDeDez, 'correram da mão de dez');
+      return true;
+    }
+    t.vale = R.VALE_DEZ;
+    m.fase = 'jogando';
+    m.aviso = `Mão de dez: vale ${R.VALE_DEZ}`;
+    gritar(room, m, k, 'dez');
     m.vezDesde = Date.now();
     m.botAte = Date.now() + ESPERA_ROBO;
     avisar(room, m);
     return true;
   }
 
-  function maoDeOnze(room, m, k, resp) {
-    const t = m.t;
-    if (m.fase !== 'onze' || timeDe(k) !== t.maoDeOnze) return false;
-    if (resp === 'correr') {
-      t.vale = 1;
-      fimDaMao(room, m, 1 - t.maoDeOnze, 'correram da mão de onze');
-      return true;
-    }
-    t.vale = 3;
-    m.fase = 'jogando';
-    m.aviso = 'Mão de onze: vale 3';
-    m.vezDesde = Date.now();
-    avisar(room, m);
-    return true;
-  }
-
   // --- o robô do truco
-  const pesoTruco = (c, vira) => {
-    const f = R.forcaTruco(c, vira);
-    return f >= 100 ? 3 + (f - 100) * 0.4 : f >= 9 ? 2 : f >= 8 ? 1.5 : f >= 7 ? 1 : f >= 5 ? 0.5 : 0.1;
+  const pesoTruco = (c) => {
+    const f = R.forcaTruco(c);
+    return f >= 100 ? 3 + (f - 100) * 0.4 : f >= 5 ? 2 : f >= 4 ? 1.5 : f >= 3 ? 1 : f >= 1 ? 0.5 : 0.1; // manilha, 3, 2, A, K/J, Q
   };
-  const forcaDaMao = (t, k) => t.maos[k].reduce((s, c) => s + pesoTruco(c, t.vira), 0) + t.rodadas.filter((r) => r === timeDe(k)).length * 1.5;
+  const forcaDaMao = (t, k) => t.maos[k].reduce((s, c) => s + pesoTruco(c), 0) + t.rodadas.filter((r) => r === timeDe(k)).length * 1.5;
 
   function botTruco(room, m, k) {
     const t = m.t;
-    const mao = [...t.maos[k]].sort((a, b) => R.forcaTruco(a, t.vira) - R.forcaTruco(b, t.vira));
-    if (!mao.length) return;
-    if (podePedir(t, k) && forcaDaMao(t, k) > 5.5 && Math.random() < 0.35) {
+    if (!t.maos[k].length) return;
+    if (t.ferro) {
+      jogarTruco(room, m, k, null);
+      return;
+    }
+    const mao = [...t.maos[k]].sort((a, b) => R.forcaTruco(a) - R.forcaTruco(b));
+    // pede com a mão boa, e de vez em quando no blefe
+    if (podeTrucar(t, timeDe(k)) && ((forcaDaMao(t, k) > 5.5 && Math.random() < 0.35) || Math.random() < 0.05)) {
       pedirTruco(room, m, k);
       return;
     }
     let carta;
+    let coberta = false;
     if (!t.mesa.length) carta = t.rodadas.length === 0 && mao.length === 3 ? mao[1] : mao.at(-1);
     else {
       let melhor = -1;
       let dono = null;
       for (const j of t.mesa) {
-        const f = R.forcaTruco(j.carta, t.vira);
+        const f = forcaNaMesa(j);
         if (f > melhor) {
           melhor = f;
           dono = j.lugar;
         }
       }
-      if (timeDe(dono) === timeDe(k)) carta = mao[0]; // o parceiro já está ganhando
-      else carta = mao.find((c) => R.forcaTruco(c, t.vira) > melhor) || mao[0];
+      if (dono !== null && timeDe(dono) === timeDe(k)) carta = mao[0]; // o parceiro já está ganhando
+      else {
+        const ganha = mao.find((c) => R.forcaTruco(c) > melhor);
+        carta = ganha || mao[0];
+        // não dá para ganhar: às vezes esconde o que tinha
+        coberta = !ganha && t.rodadas.length > 0 && Math.random() < 0.5;
+      }
     }
-    jogarTruco(room, m, k, carta);
+    jogarTruco(room, m, k, carta, coberta);
   }
 
   function botResponde(room, m, k) {
     const t = m.t;
     const f = forcaDaMao(t, k) + (t.maos[(k + 2) % 4]?.length ? 1 : 0);
-    if (f > 7 && t.pedido.valor < 12 && Math.random() < 0.3) responder(room, m, k, 'aumentar');
+    if (f > 7 && podeSubir(t) && Math.random() < 0.3) responder(room, m, k, 'aumentar');
     else if (f > 3.2 + t.pedido.valor * 0.15) responder(room, m, k, 'aceitar');
     else responder(room, m, k, 'correr');
   }
@@ -321,13 +376,12 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
       return;
     }
     if (agora < t.pausaAte) return;
-    if (m.fase === 'onze') {
-      const time = t.maoDeOnze;
+    if (m.fase === 'dez') {
+      const time = t.maoDeDez;
       const gente = [time, time + 2].some((k) => vezDeGente(m, k));
       if ((!gente && agora >= m.botAte) || agora - m.vezDesde > 25_000) {
-        const k = time;
-        const f = forcaDaMao(t, k) + forcaDaMao(t, k + 2);
-        maoDeOnze(room, m, k, f > 6 ? 'jogar' : 'correr');
+        const f = forcaDaMao(t, time) + forcaDaMao(t, time + 2);
+        maoDeDez(room, m, time, f > 6 ? 'jogar' : 'correr');
       }
       return;
     }
@@ -590,22 +644,22 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
       if (k < 0 || m.fase !== 'jogando' || typeof msg?.carta !== 'string') return;
       if (m.jogo === 'truco') {
         if (m.t.vez !== k || m.t.pedido || Date.now() < m.t.pausaAte) return;
-        jogarTruco(room, m, k, msg.carta);
+        jogarTruco(room, m, k, msg.carta, msg.coberta === true);
       } else {
         if (m.u.vez !== k) return;
         jogarUno(room, m, k, msg.carta, msg.cor);
       }
     });
 
-    // truco: pedir (truco, seis...), responder (aceitar, correr, aumentar), mão de onze (jogar, correr)
+    // truco: pedir (truco, seis...), responder (aceitar, correr, aumentar), mão de dez (jogar, correr)
     socket.on('ct-truco', (msg) => {
       const { room, user, mesas } = daSala();
       const m = mesas?.[msg?.mesa];
       const k = m ? meuLugar(m, user) : -1;
       if (k < 0 || m.jogo !== 'truco' || !m.t) return;
-      if (msg.acao === 'pedir' && m.fase === 'jogando') pedirTruco(room, m, k);
+      if (msg.acao === 'pedir') pedirTruco(room, m, k);
       else if (['aceitar', 'correr', 'aumentar'].includes(msg.acao)) responder(room, m, k, msg.acao);
-      else if (msg.acao === 'onze-jogar' || msg.acao === 'onze-correr') maoDeOnze(room, m, k, msg.acao === 'onze-jogar' ? 'jogar' : 'correr');
+      else if (msg.acao === 'dez-jogar' || msg.acao === 'dez-correr') maoDeDez(room, m, k, msg.acao === 'dez-jogar' ? 'jogar' : 'correr');
     });
 
     // uno: comprar, passar (depois de comprar), dizer UNO

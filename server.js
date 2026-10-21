@@ -36,6 +36,10 @@ const MAX_PHOTO = 60_000; // data URL da foto do rosto (128x128 jpeg dá ~12 kB)
 // metros: folga sobre o alcance real (que cresce com o tamanho de quem apanha, como um robô de
 // carro), só para barrar absurdo
 const PUNCH_RANGE = 5.5;
+// tapa: alcance (com folga para o atraso da posição; cobre o outro lado da mesa de cartas) e o
+// intervalo mínimo entre dois tapas da mesma pessoa
+const TAPA_ALCANCE = 4.2;
+const TAPA_INTERVALO = 550;
 // armas da camiseta 22 (public/js/armas-dados.js, lido no main()): cadência, alcance e chumbos
 // de cada uma. O servidor aceita 15% de folga na cadência (a rede não entrega no compasso exato).
 let ARMAS = { pistola: { cadencia: 0.3, alcance: 70, chumbos: 1 } };
@@ -455,7 +459,8 @@ function mudarSaldo(nome, delta) {
 const MODULOS = ['lazer', 'escritorio'];
 const JOGOS_SALA = ['parkour', 'ringue', 'corrida', 'futebol', 'volei', 'basquete', 'boliche', 'surf', 'matamata', 'batalha', 'xadrez', 'dama', 'velha', 'dados', 'poderes', 'armas',
   // o parque (public/js/parque-dados.js)
-  'pingue', 'queimada', 'sinuca', 'golfe', 'truco', 'uno', 'gincana', 'kart', 'pinta'];
+  'pingue', 'queimada', 'sinuca', 'golfe', 'truco', 'uno', 'gincana', 'kart', 'pinta',
+  'tapa']; // tapa nos amigos, no mapa todo
 const configPadrao = () => ({
   modulo: 'lazer',
   mapa: MAPA_PADRAO, // o mapa em volta do prédio (public/js/mapas-dados.js)
@@ -1613,6 +1618,28 @@ function attachSockets(io) {
       const d = Array.isArray(dir) ? dir.slice(0, 2).map(Number) : [0, 0];
       if (!d.every(Number.isFinite)) return;
       io.to(to).emit('hit', { from: user.id, fromName: user.name, dir: d });
+    });
+
+    // ------------------------------------------------------------ tapa
+    // Tapa de mão aberta nos amigos (como no BOMBANANA): não tira vida, só empurra, sacode e estala.
+    // Vale no mapa todo e na mesa de cartas. Sem alvo (to vazio) é o tapa no vento: os outros só veem
+    // o braço. O servidor confere o alcance e o intervalo; o resto vai para a sala toda.
+    socket.on('tapa', (msg) => {
+      const { to } = obj(msg);
+      if (!user || !jogoLigado(room, 'tapa')) return;
+      const agora = Date.now();
+      if (agora - (user.ultimoTapa || 0) < TAPA_INTERVALO) return;
+      const alvo = typeof to === 'string' ? room.users.get(to) : null;
+      if (alvo && (alvo.id === user.id || dist(user.p, alvo.p) > TAPA_ALCANCE)) return;
+      user.ultimoTapa = agora;
+      if (!alvo) {
+        socket.to(room.id).emit('tapa', { de: user.id });
+        return;
+      }
+      const dx = alvo.p[0] - user.p[0];
+      const dz = alvo.p[2] - user.p[2];
+      const d = Math.hypot(dx, dz) || 1;
+      io.to(room.id).emit('tapa', { de: user.id, deNome: user.name, para: alvo.id, dir: [dx / d, dz / d] });
     });
 
     // Tiro: só quem está com a camiseta 22 — ou no mata-mata (sozinho ou em times), com a arma que

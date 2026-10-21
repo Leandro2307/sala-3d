@@ -1,23 +1,56 @@
-// Truco e Uno nas mesas redondas do salão de jogos do parque. E perto da mesa senta (no primeiro
-// lugar livre, ou no de um robô); a câmera fica atrás da sua cadeira e aparece o painel com as suas
-// cartas — é só clicar na carta para jogar. "Começar" completa a mesa com robôs. Esc (ou "Sair da
-// mesa") levanta; com a partida valendo, um robô assume as suas cartas. Quem só olha vê as cartas
-// da rodada no centro da mesa. O servidor (cartas-servidor.js) conduz tudo; as regras são as de
-// cartas-regras.js.
+// Truco (mineiro) e Uno nas mesas redondas do salão de jogos do parque. E perto da mesa senta (no
+// primeiro lugar livre, ou no de um robô); a câmera fica atrás da sua cadeira e aparece o painel com
+// as suas cartas — é só clicar na carta para jogar. "Começar" completa a mesa com robôs. Esc (ou
+// "Sair da mesa") levanta; com a partida valendo, um robô assume as suas cartas. Quem só olha vê as
+// cartas da rodada no centro da mesa. Cada truco, seis, nove e doze (e cada resposta) é um grito:
+// murro na mesa, a voz do navegador em português e, para quem está sentado, a faixa grande. Ao lado
+// do nome de cada pessoa da mesa tem a mãozinha do tapa. O servidor (cartas-servidor.js) conduz
+// tudo; as regras são as de cartas-regras.js.
 import * as THREE from 'three';
 import {
-  forcaTruco, manilhaDa, valorDe, naipeDe, SIMBOLO, naipeVermelho, NOME_PEDIDO, PASSOS_TRUCO,
+  forcaTruco, valorDe, naipeDe, SIMBOLO, naipeVermelho, NOME_PEDIDO, PASSOS_TRUCO, MANILHAS, NOME_MANILHA, VALE_DEZ,
   podeJogarUno, coringa, corUno, rotuloUno, HEX_COR, NOME_COR, CORES_UNO,
 } from './cartas-regras.js';
 import { MESAS_CARTAS } from './parque-dados.js';
 import { hud, texturaViva, FONTE, paraToque } from './hud-jogos.js';
+import { sfxLigado } from './sfx.js';
 
 const LUGARES = { truco: 4, uno: 6 };
 const R_MESA = 1.15;
 const R_CADEIRA = 1.75;
 const Y_MESA = 0.85;
-const TIMES = ['Nós', 'Eles'];
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const PEDIDOS = ['truco', 'seis', 'nove', 'doze'];
+const OUVE_ATE = 22; // metros: de mais longe que isso, o grito da mesa não chega
+
+// «0» e «1» (as duplas, nos avisos do servidor) viram "sua dupla" e "a outra dupla" para quem lê
+function comDuplas(texto, meuTime) {
+  return String(texto || '').replace(/«([01])»/g, (_, x, pos) => {
+    const n = meuTime < 0 ? (x === '0' ? 'A dupla azul' : 'A dupla vermelha') : Number(x) === meuTime ? 'Sua dupla' : 'A outra dupla';
+    return pos === 0 ? n : n[0].toLowerCase() + n.slice(1);
+  });
+}
+
+// ------------------------------------------------------------------ a voz dos gritos
+// A voz do sistema em português (speechSynthesis). Cada lugar da mesa grita com uma voz (das pt-BR
+// que o computador tiver) e um tom diferentes, para dar para saber quem gritou sem olhar.
+const TOM = [1.15, 0.75, 1.35, 0.9, 1.05, 0.8];
+let vozes = null;
+if (typeof window !== 'undefined' && window.speechSynthesis) speechSynthesis.addEventListener?.('voiceschanged', () => { vozes = null; });
+function falarGrito(frase, lugar, volume) {
+  if (!sfxLigado() || !window.speechSynthesis) return;
+  try {
+    vozes ||= speechSynthesis.getVoices().filter((v) => /^pt(-|_)BR/i.test(v.lang));
+    const u = new SpeechSynthesisUtterance(frase);
+    u.lang = 'pt-BR';
+    u.voice = vozes.length ? vozes[lugar % vozes.length] : null;
+    u.pitch = TOM[lugar % TOM.length];
+    u.rate = 1.12;
+    u.volume = volume;
+    speechSynthesis.cancel(); // o grito novo corta o anterior (truco e seis em seguida)
+    speechSynthesis.speak(u);
+  } catch { /* sem voz: fica o murro e a faixa */ }
+}
 
 // onde fica cada cadeira (lugar 0 ao sul, girando para leste)
 export function cadeira(m, k) {
@@ -58,11 +91,25 @@ function desenharCarta(ctx, w, h, c) {
   }
   if (/^[4-7QJKA23][oecp]$/.test(c)) {
     const cor = naipeVermelho(naipeDe(c)) ? '#dc2626' : '#111827';
+    // manilha: borda dourada e o apelido embaixo (zap, copas, espadilha, pica-fumo)
+    const manilha = NOME_MANILHA[c];
+    if (manilha) {
+      ctx.strokeStyle = '#d97706';
+      ctx.lineWidth = 6;
+      ctx.beginPath();
+      ctx.roundRect(6, 6, w - 12, h - 12, 11);
+      ctx.stroke();
+    }
     ctx.fillStyle = cor;
     ctx.font = FONTE(64);
-    ctx.fillText(valorDe(c), w / 2, h * 0.36);
+    ctx.fillText(valorDe(c), w / 2, h * (manilha ? 0.3 : 0.36));
     ctx.font = FONTE(60, 400);
-    ctx.fillText(SIMBOLO[naipeDe(c)], w / 2, h * 0.72);
+    ctx.fillText(SIMBOLO[naipeDe(c)], w / 2, h * (manilha ? 0.62 : 0.72));
+    if (manilha) {
+      ctx.fillStyle = '#b45309';
+      ctx.font = FONTE(manilha.length > 6 ? 17 : 22);
+      ctx.fillText(manilha.toUpperCase(), w / 2, h * 0.87);
+    }
     return;
   }
   // uno
@@ -134,7 +181,7 @@ export function construirCartas(world) {
 // ------------------------------------------------------------------ o jogo no navegador
 export class Cartas {
   // opts: world, player, sfx, ligado(jogo), focar(mesa) (main.js: câmera e mouse para o painel),
-  // soltarFoco()
+  // soltarFoco(), tapa(id) (dar um tapa em quem está na mesa)
   constructor(opts) {
     Object.assign(this, opts);
     this.id = 'cartas';
@@ -144,6 +191,7 @@ export class Cartas {
     this.mesas = MESAS_CARTAS.map((m, i) => ({ i, m, e: null, mao: [], lugar: -1 }));
     this.ativa = null; // a mesa em que estou sentado (com o painel aberto)
     this.esperandoCor = null; // coringa escolhido, esperando a cor
+    this.coberta = false; // truco: a próxima carta vai virada para baixo
     this.montarHud();
   }
 
@@ -151,13 +199,47 @@ export class Cartas {
   ligar(socket) {
     this.socket = socket;
     socket.on('ct-estado', (e) => this.estado(e));
-    socket.on('ct-mao', ({ mesa, lugar, mao }) => {
+    socket.on('ct-mao', ({ mesa, lugar, mao, parceiro }) => {
       const M = this.mesas[mesa];
       if (!M) return;
       M.mao = mao;
       M.lugar = lugar;
+      M.parceiro = parceiro || null; // mão de dez: as cartas do parceiro, para decidir
       if (this.ativa === M) this.desenhar();
     });
+    socket.on('ct-grito', (g) => this.grito(g));
+  }
+
+  // Alguém gritou na mesa (truco, seis..., desce, corro): murro na mesa e a voz para quem está perto;
+  // para quem está sentado nela, a faixa grande também.
+  grito({ mesa, lugar, tipo, nome, frase }) {
+    const M = this.mesas[mesa];
+    if (!M || !this.ligado(M.m.jogo) || typeof frase !== 'string') return;
+    const sentado = this.ativa === M;
+    const p = this.player.pos;
+    const d = Math.hypot(p.x - M.m.x, p.z - M.m.z);
+    if (!sentado && d > OUVE_ATE) return;
+    const vol = sentado ? 1 : Math.max(0.15, 1 - d / OUVE_ATE);
+    const pedido = PEDIDOS.includes(tipo);
+    if (pedido) this.sfx.murroMesa?.(vol);
+    falarGrito(frase, lugar, vol);
+    if (!sentado) return;
+    const nosso = lugar % 2 === M.lugar % 2;
+    this.faixaGrito(pedido ? `${tipo.toUpperCase()}!` : frase, `${lugar === M.lugar ? 'Você' : nome}: “${frase}”`, nosso);
+  }
+
+  faixaGrito(titulo, texto, nosso) {
+    const f = this.faixa;
+    f.querySelector('b').textContent = titulo;
+    f.querySelector('span').textContent = texto;
+    f.classList.toggle('nosso', nosso);
+    f.hidden = false;
+    // recomeça a animação (grito em cima de grito)
+    f.classList.remove('anda');
+    void f.offsetWidth;
+    f.classList.add('anda');
+    clearTimeout(this.tFaixa);
+    this.tFaixa = setTimeout(() => { f.hidden = true; }, 2300);
   }
 
   ver() {
@@ -185,12 +267,11 @@ export class Cartas {
       const vez = e.vez === M.lugar && e.fase === 'jogando';
       const eraVez = antes?.vez === M.lugar && antes?.fase === 'jogando';
       if (vez && !eraVez && !e.pedido) this.sfx.message();
-      if (e.aviso && e.aviso !== antes?.aviso) {
-        if (/TRUCO|SEIS|NOVE|DOZE|UNO/.test(e.aviso)) this.sfx.punchHit();
-      }
+      // o truco tem os gritos (ct-grito); o uno, o estalo do UNO!
+      if (e.aviso && e.aviso !== antes?.aviso && e.jogo === 'uno' && /UNO/.test(e.aviso)) this.sfx.punchHit();
       if (e.fase === 'fim' && antes?.fase !== 'fim') {
         const ganhei = e.jogo === 'truco' ? e.vencedor === M.lugar % 2 : e.vencedor === M.lugar;
-        hud.mensagem(ganhei ? 'Vocês venceram!' : 'Fim de jogo', e.aviso, 5000, ganhei ? '#facc15' : '#f8fafc');
+        hud.mensagem(ganhei ? 'Vocês venceram!' : 'Fim de jogo', comDuplas(e.aviso, M.lugar % 2), 5000, ganhei ? '#facc15' : '#f8fafc');
         if (ganhei) this.sfx.finish();
       }
     }
@@ -221,12 +302,10 @@ export class Cartas {
         por(i, j.carta);
         pos(j.lugar, i);
       });
-      if (e.vira) {
-        const i = 5;
-        por(i, e.vira);
-        cartas[i].position.set(M.m.x, Y_MESA + 0.004, M.m.z);
-        cartas[i].rotation.set(0, Math.PI / 4, 0);
-      }
+      // o monte no meio (no mineiro não tem vira)
+      por(5, 'verso');
+      cartas[5].position.set(M.m.x, Y_MESA + 0.004, M.m.z);
+      cartas[5].rotation.set(0, Math.PI / 4, 0);
     } else if (e.topo) {
       por(0, e.topo);
       cartas[0].position.set(M.m.x, Y_MESA + 0.01, M.m.z);
@@ -284,8 +363,10 @@ export class Cartas {
     if (!this.ativa) return;
     this.ativa = null;
     this.esperandoCor = null;
+    this.coberta = false;
     this.cores.hidden = true;
     this.ui.hidden = true;
+    this.faixa.hidden = true;
     this.player.override = null;
     this.player.stand();
     this.socket?.emit('ct-sair');
@@ -322,6 +403,23 @@ export class Cartas {
 .ct-carta.pode:hover { transform: translateY(-6px); }
 .ct-carta:disabled { opacity: .45; cursor: default; }
 .ct-carta.peq { width: 44px; height: 62px; cursor: default; }
+.ct-mao.cobrir .ct-carta.pode { outline: 3px dashed #93c5fd; outline-offset: 2px; }
+.ct-acoes button.liga { background: #1d4ed8; border-color: #93c5fd; }
+.ct-manilhas b { font-size: 15px; letter-spacing: .04em; }
+.ct-manilhas .v { color: #f87171; }
+.ct-parceiro { display: flex; gap: 4px; }
+.ct-lugares .ct-tapa { margin-left: 6px; padding: 0 2px; border: 0; background: none; cursor: pointer; font-size: 15px; line-height: 1; transition: transform .12s ease; }
+.ct-lugares .ct-tapa:hover { transform: scale(1.25) rotate(-18deg); }
+#ct-grito { position: fixed; left: 50%; top: 16%; transform: translateX(-50%); z-index: 35; pointer-events: none; text-align: center; width: max-content; max-width: 94vw; }
+#ct-grito[hidden] { display: none; }
+#ct-grito b { display: block; font: 900 clamp(46px, 10vw, 112px)/1.05 'Plus Jakarta Sans', system-ui, sans-serif; color: #fde047; letter-spacing: .02em;
+  -webkit-text-stroke: 3px #7f1d1d; text-shadow: 0 6px 0 #7f1d1d, 0 14px 34px rgba(0,0,0,.55); }
+#ct-grito.nosso b { -webkit-text-stroke-color: #1e3a8a; text-shadow: 0 6px 0 #1e3a8a, 0 14px 34px rgba(0,0,0,.55); }
+#ct-grito span { display: inline-block; margin-top: 10px; padding: 6px 14px; border-radius: 99px; background: rgba(10,14,24,.88); color: #f8fafc; font: 700 16px 'Plus Jakarta Sans', system-ui, sans-serif; }
+#ct-grito.anda b { animation: ct-grito .8s cubic-bezier(.2,1.5,.4,1) both; }
+@keyframes ct-grito { 0% { transform: scale(.3) rotate(-8deg); opacity: 0; } 40% { transform: scale(1.12) rotate(3deg); opacity: 1; }
+  55% { transform: translateX(-7px) rotate(-2deg); } 70% { transform: translateX(7px) rotate(2deg); } 100% { transform: none; } }
+@media (prefers-reduced-motion: reduce) { #ct-grito.anda b { animation: none; } }
 #ct-cores { position: fixed; inset: 0; z-index: 34; display: grid; place-items: center; background: rgba(0,0,0,.45); }
 #ct-cores div { display: flex; gap: 12px; padding: 16px; border-radius: 16px; background: #0b1020; }
 #ct-cores button { width: 64px; height: 64px; border-radius: 14px; border: 0; cursor: pointer; }
@@ -335,7 +433,9 @@ body.touch .ct-meio { gap: 10px; min-height: 0; }
 body.touch .ct-aviso { min-height: 0; }
 body.touch .ct-carta { width: 48px; height: 68px; }
 body.touch .ct-carta.peq { width: 34px; height: 48px; }
-body.touch #ct-cores button { width: 52px; height: 52px; }`;
+body.touch #ct-cores button { width: 52px; height: 52px; }
+body.touch #ct-grito { top: calc(10px + env(safe-area-inset-top)); }
+body.touch #ct-grito span { font-size: 13px; }`;
     document.head.appendChild(css);
     this.ui = document.createElement('div');
     this.ui.id = 'ct-ui';
@@ -346,7 +446,12 @@ body.touch #ct-cores button { width: 52px; height: 52px; }`;
     this.cores.id = 'ct-cores';
     this.cores.hidden = true;
     this.cores.innerHTML = `<div>${CORES_UNO.map((c) => `<button type="button" data-cor="${c}" style="background:${HEX_COR[c]}" aria-label="${NOME_COR[c]}"></button>`).join('')}</div>`;
-    document.body.append(this.ui, this.cores);
+    this.faixa = document.createElement('div');
+    this.faixa.id = 'ct-grito';
+    this.faixa.hidden = true;
+    this.faixa.setAttribute('aria-live', 'polite');
+    this.faixa.innerHTML = '<b></b><span></span>';
+    document.body.append(this.ui, this.cores, this.faixa);
     this.ui.addEventListener('click', (e) => {
       const b = e.target.closest('button');
       if (!b || !this.ativa) return;
@@ -354,7 +459,12 @@ body.touch #ct-cores button { width: 52px; height: 52px; }`;
       const mesa = this.ativa.i;
       const acao = b.dataset.acao;
       if (b.dataset.carta) return this.jogar(b.dataset.carta);
+      if (b.dataset.tapa) return this.tapa?.(b.dataset.tapa);
       if (acao === 'sair') return this.soltarFoco?.();
+      if (acao === 'coberta') {
+        this.coberta = !this.coberta;
+        return this.desenhar();
+      }
       if (acao === 'comecar') return this.socket?.emit('ct-comecar', { mesa });
       if (acao?.startsWith('truco:')) return this.socket?.emit('ct-truco', { mesa, acao: acao.slice(6) });
       if (acao?.startsWith('uno:')) return this.socket?.emit('ct-uno', { mesa, acao: acao.slice(4) });
@@ -376,7 +486,8 @@ body.touch #ct-cores button { width: 52px; height: 52px; }`;
       this.cores.hidden = false;
       return;
     }
-    this.socket?.emit('ct-jogar', { mesa: M.i, carta });
+    this.socket?.emit('ct-jogar', { mesa: M.i, carta, coberta: M.e?.jogo === 'truco' && this.coberta });
+    this.coberta = false;
     this.sfx.dado(0.8);
   }
 
@@ -395,22 +506,28 @@ body.touch #ct-cores button { width: 52px; height: 52px; }`;
     $('.ct-topo b').textContent = truco ? 'Truco' : 'Uno';
     const meuTime = M.lugar % 2;
     $('.ct-placar').innerHTML = truco && e.pontos
-      ? `${TIMES[meuTime]} <b>${e.pontos[meuTime]}</b> × <b>${e.pontos[1 - meuTime]}</b> ${TIMES[1 - meuTime]} · mão vale <b>${e.vale}</b>`
+      ? `Nós <b>${e.pontos[meuTime]}</b> × <b>${e.pontos[1 - meuTime]}</b> Eles · mão vale <b>${e.vale}</b>${e.ferro ? ' · <b>mão de ferro</b>' : ''}`
       : !truco && e.fase !== 'espera' ? `Monte: ${e.monte} · sentido ${e.sentido > 0 ? '↻' : '↺'}` : paraToque('Sente quem quiser e clique em Começar (a mesa completa com robôs)');
     $('[data-acao="comecar"]').hidden = e.fase !== 'espera' && e.fase !== 'fim';
-    // os lugares (no truco, a cor do time)
+    // os lugares (no truco, a cor do time); a mãozinha ao lado do nome dá um tapa na pessoa
+    const tapa = this.ligado('tapa') && !!this.tapa;
     $('.ct-lugares').innerHTML = e.lugares.map((l, k) => {
       if (!l) return `<span><i>lugar livre</i></span>`;
       const time = truco ? (k % 2 === meuTime ? '#60a5fa' : '#f87171') : l.cor;
       const vez = e.vez === k && e.fase === 'jogando';
-      return `<span class="${vez ? 'vez' : ''}" style="color:${time}">${k === M.lugar ? 'Você' : esc(l.nome)}<i>${l.cartas} ${l.cartas === 1 ? 'carta' : 'cartas'}</i></span>`;
+      const mao = tapa && l.id && l.id !== this.eu && k !== M.lugar
+        ? `<button type="button" class="ct-tapa" data-tapa="${esc(l.id)}" title="Dar um tapa" aria-label="Dar um tapa em ${esc(l.nome)}">👋</button>` : '';
+      return `<span class="${vez ? 'vez' : ''}" style="color:${time}">${k === M.lugar ? 'Você' : esc(l.nome)}<i>${l.cartas} ${l.cartas === 1 ? 'carta' : 'cartas'}</i>${mao}</span>`;
     }).join('');
-    // o meio da mesa
+    // o meio da mesa: no truco, as manilhas (fixas), as cartas da rodada e quem levou cada rodada
     let meio = '';
-    if (truco && e.vira) {
+    if (truco && e.fase !== 'espera' && e.pontos) {
       const lista = e.mesaCartas?.length ? e.mesaCartas : this.emPausa(M) ? e.ultimaVaza : [];
-      meio = `<div><small>vira</small>${this.carta(e.vira, { peq: true })}</div><div><small>manilha</small><b>${manilhaDa(e.vira)}</b></div>`
-        + lista.map((j) => `<div><small>${j.lugar === M.lugar ? 'você' : esc(e.lugares[j.lugar]?.nome || '')}</small>${this.carta(j.carta, { peq: true })}</div>`).join('')
+      const manilhas = [...MANILHAS].reverse()
+        .map((c) => `<b class="${naipeVermelho(naipeDe(c)) ? 'v' : ''}" title="${NOME_MANILHA[c]}">${valorDe(c)}${SIMBOLO[naipeDe(c)]}</b>`).join(' ');
+      meio = `<div class="ct-manilhas"><small>manilhas</small>${manilhas}</div>`
+        + (M.parceiro?.length && e.fase === 'dez' ? `<div><small>parceiro</small><div class="ct-parceiro">${M.parceiro.map((c) => this.carta(c, { peq: true })).join('')}</div></div>` : '')
+        + lista.map((j) => `<div><small>${j.lugar === M.lugar ? 'você' : esc(e.lugares[j.lugar]?.nome || '')}${j.coberta ? ' (coberta)' : ''}</small>${this.carta(j.carta, { peq: true })}</div>`).join('')
         + `<div><small>rodadas</small>${(e.rodadas || []).map((r) => (r === 'e' ? '⚪' : r === meuTime ? '🔵' : '🔴')).join(' ') || '—'}</div>`;
     } else if (!truco && e.topo) {
       meio = `<div><small>na mesa</small>${this.carta(e.topo, { peq: true })}</div><div><small>cor</small><b style="color:${HEX_COR[e.cor]}">${NOME_COR[e.cor] || ''}</b></div>`;
@@ -418,36 +535,39 @@ body.touch #ct-cores button { width: 52px; height: 52px; }`;
     $('.ct-meio').innerHTML = meio;
     // a vez e os avisos
     const minhaVez = e.vez === M.lugar && e.fase === 'jogando';
-    let aviso = e.aviso || '';
-    if (e.fase === 'jogando' && !aviso) aviso = minhaVez ? paraToque('Sua vez: clique numa carta') : `Vez de ${esc(e.lugares[e.vez]?.nome || '…')}`;
+    if (!minhaVez || e.pedido) this.coberta = false;
+    let aviso = comDuplas(e.aviso, meuTime);
+    if (e.fase === 'jogando' && !aviso) aviso = minhaVez ? paraToque(e.ferro ? 'Sua vez: clique numa carta (sai a de cima)' : 'Sua vez: clique numa carta') : `Vez de ${e.lugares[e.vez]?.nome || '…'}`;
     if (e.fase === 'espera') aviso = 'Esperando começar';
     $('.ct-aviso').textContent = aviso;
     // os botões
     const acoes = [];
+    const seguinte = (v) => NOME_PEDIDO[PASSOS_TRUCO[PASSOS_TRUCO.indexOf(v) + 1]];
     if (truco && e.fase === 'jogando') {
       const p = e.pedido;
       if (p && p.porTime !== meuTime) {
-        acoes.push(['truco:aceitar', 'Aceitar', 'bom'], ['truco:correr', 'Correr']);
-        if (p.valor < 12) acoes.push(['truco:aumentar', `${NOME_PEDIDO[PASSOS_TRUCO[PASSOS_TRUCO.indexOf(p.valor) + 1]]}!`, 'forte']);
+        acoes.push(['truco:aceitar', 'Desce! (aceitar)', 'bom'], ['truco:correr', 'Corro']);
+        if (e.subir) acoes.push(['truco:aumentar', `${seguinte(p.valor)}!`, 'forte']);
       } else if (p) acoes.push(['', `Esperando a resposta do ${NOME_PEDIDO[p.valor]}…`]);
-      else if (minhaVez && e.maoDeOnze === null && e.vale < 12 && (e.podeAumentar === null || e.podeAumentar === meuTime) && !(e.pontos[0] === 11 && e.pontos[1] === 11)) {
-        acoes.push(['truco:pedir', `${NOME_PEDIDO[PASSOS_TRUCO[PASSOS_TRUCO.indexOf(e.vale) + 1]]}!`, 'forte']);
-      }
+      else if (minhaVez && e.trucar?.[meuTime]) acoes.push(['truco:pedir', `${seguinte(e.vale)}!`, 'forte']);
+      // coberta: da segunda rodada em diante, na sua vez (a carta vai virada e não vale nada)
+      if (!p && minhaVez && !e.ferro && e.rodadas?.length > 0) acoes.push(['coberta', this.coberta ? 'Coberta: ligada' : 'Jogar coberta', this.coberta ? 'liga' : '']);
     }
-    if (truco && e.fase === 'onze' && e.maoDeOnze === meuTime) acoes.push(['truco:onze-jogar', 'Jogar a mão de onze (vale 3)', 'bom'], ['truco:onze-correr', 'Correr (eles +1)']);
+    if (truco && e.fase === 'dez' && e.maoDeDez === meuTime) acoes.push(['truco:dez-jogar', `Jogar a mão de dez (vale ${VALE_DEZ})`, 'bom'], ['truco:dez-correr', `Correr (a outra dupla +${PASSOS_TRUCO[0]})`]);
     if (!truco && e.fase === 'jogando') {
       if (minhaVez && !e.comprou) acoes.push(['uno:comprar', 'Comprar']);
       if (minhaVez && e.comprou) acoes.push(['uno:passar', 'Passar']);
       if (M.mao.length <= 2 && !e.disseUno?.includes(M.lugar)) acoes.push(['uno:uno', 'UNO!', 'uno']);
     }
     $('.ct-acoes').innerHTML = acoes.map(([a, t, c]) => (a ? `<button type="button" data-acao="${a}" class="${c || ''}">${t}</button>` : `<span>${t}</span>`)).join('');
-    // a minha mão: no truco, da mais fraca para a mais forte
-    const mao = truco && e.vira ? [...M.mao].sort((a, b) => forcaTruco(a, e.vira) - forcaTruco(b, e.vira)) : M.mao;
+    // a minha mão: no truco, da mais fraca para a mais forte (na mão de ferro, todas viradas)
+    const mao = truco && !e.ferro ? [...M.mao].sort((a, b) => forcaTruco(a) - forcaTruco(b)) : M.mao;
     const podeJogar = (c) => {
       if (!minhaVez) return false;
       if (truco) return !e.pedido && !this.emPausa(M);
       return podeJogarUno(c, e.topo, e.cor);
     };
+    $('.ct-mao').classList.toggle('cobrir', truco && this.coberta);
     $('.ct-mao').innerHTML = mao.map((c) => this.carta(c, { pode: podeJogar(c) })).join('') || '<span style="color:#94a3b8">sem cartas</span>';
   }
 
