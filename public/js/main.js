@@ -67,6 +67,8 @@ const DEFAULTS = {
   // qualidade gráfica: 'auto' ou um nível fixo; nivelAuto: onde o automático parou da última vez;
   // falhasAuto: quantas vezes cada nível caiu logo depois de subir (o automático espera mais para tentar)
   qualidade: 'auto', nivelAuto: null, falhasAuto: {}, mostrarFps: false,
+  // distância de visão: 'longe' (até a serra), 'media' ou 'perto' (ver DISTANCIAS)
+  distancia: 'longe',
   // economia de bateria: 'auto' (bateria fraca fora da tomada), 'sim' ou 'nao'
   economia: 'auto',
   // presença (ver "empresa") e se o gestor quer os alertas da equipe
@@ -196,7 +198,7 @@ const cartas = new Cartas({
   tiroFx: (de, ate) => desenharTiro(de, ate),
 });
 jogosDoParque.push(cartas);
-// gincana: 10 fases e a final, bem longe do mapa (o portal fica ao sul da Rua dos Esportes)
+// gincana: 10 fases e a final, bem longe do mapa (o portal fica na pracinha da aventura, com os do céu)
 const gincana = new Gincana({
   world, player, sfx, ligado: () => jogoLigado('gincana'),
   aoEntrar: () => {
@@ -5645,6 +5647,30 @@ $('#set-qualidade').addEventListener('click', (e) => {
   saveSettings();
   qualidade.definirModo(b.dataset.value);
   renderQualidade();
+});
+
+// ------------------------------------------------------------------ distância de visão
+// Metros até onde o 3D é desenhado (0 = tudo, até a serra). Para PC fraco: menos mato, morro e prédio
+// ao longe para a placa de vídeo pintar; a névoa esconde onde o mundo acaba (World.setDistancia).
+const DISTANCIAS = {
+  longe: { metros: 0, dica: 'Desenha tudo, até a serra no horizonte.' },
+  media: { metros: 700, dica: 'Até uns 700 m: a serra some na névoa e sobra placa de vídeo.' },
+  perto: { metros: 300, dica: 'Até uns 300 m, com a névoa mais perto. Para PC fraco.' },
+};
+if (!DISTANCIAS[settings.distancia]) settings.distancia = 'longe';
+function renderDistancia() {
+  $$('#set-distancia button').forEach((b) => b.classList.toggle('on', b.dataset.value === settings.distancia));
+  $('#distancia-hint').textContent = DISTANCIAS[settings.distancia].dica;
+}
+world.setDistancia(DISTANCIAS[settings.distancia].metros);
+renderDistancia();
+$('#set-distancia').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-value]');
+  if (!b) return;
+  settings.distancia = b.dataset.value;
+  saveSettings();
+  world.setDistancia(DISTANCIAS[settings.distancia].metros);
+  renderDistancia();
 });
 
 // ------------------------------------------------------------------ economia de bateria

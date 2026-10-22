@@ -49,8 +49,9 @@ export class Clima {
     const fog = w.scene.fog;
     if (fog) {
       fog.color.set(TEMA.nevoa.cor);
-      fog.near = TEMA.nevoa.perto;
-      fog.far = TEMA.nevoa.longe;
+      // perto/longe passam pela distância de visão dos Ajustes (World.aplicarNevoa)
+      w.nevoaBase = { perto: TEMA.nevoa.perto, longe: TEMA.nevoa.longe };
+      w.aplicarNevoa();
     }
     this.pronto = true;
   }

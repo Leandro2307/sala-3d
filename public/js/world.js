@@ -31,6 +31,8 @@ import { construirPinta } from './pinta.js';
 // Área jogável inteira (cercada): a sala do cinema num canto, em volta da origem, o
 // autódromo ao ar livre a leste e, no norte, o parque (parque-dados.js), que levou a cerca de
 // z = 530 para 860. O telão do cinema continua em minZ, perto da plateia.
+// far da câmera na distância de visão máxima: longe o bastante para a serra no horizonte
+const LONGE_MAX = 3000;
 export const ROOM = { minX: -52, maxX: 480, minZ: -40, maxZ: 860, height: 60 };
 // A sala do cinema: fechada e igual por dentro ao que sempre foi. A porta fica na parede
 // leste, virada para o autódromo.
@@ -708,7 +710,9 @@ export class World {
     this.cssScene = new THREE.Scene();
 
     // longe o bastante para a serra no horizonte (o céu é desenhado no fundo, sem limite)
-    this.camera = new THREE.PerspectiveCamera(68, window.innerWidth / window.innerHeight, 0.1, 3000);
+    this.camera = new THREE.PerspectiveCamera(68, window.innerWidth / window.innerHeight, 0.1, LONGE_MAX);
+    this.distancia = 0; // distância de visão em metros (0 = até a serra; ver setDistancia)
+    this.nevoaBase = null; // perto/longe da névoa do tema, antes da distância de visão
     this.camera.position.set(0, 12, 30);
 
     this.colliders = [];
@@ -798,7 +802,7 @@ export class World {
     this.golfe3d = this.area('golfe', () => construirGolfe(this));
     // as duas mesas de cartas (truco e uno) são uma área só: some se o dono desligar os dois
     this.cartas3d = this.area('cartas', () => construirCartas(this));
-    // o portal da gincana, no parque (as fases ficam bem longe e só nascem quando alguém entra)
+    // o portal da gincana, na pracinha da aventura (as fases ficam bem longe e só nascem quando alguém entra)
     this.gincana3d = this.area('gincana', () => construirGincana(this));
     this.kart3d = this.area('kart', () => construirKart(this));
     this.pinta3d = this.area('pinta', () => construirPinta(this));
@@ -2799,6 +2803,28 @@ export class World {
     this.natureza?.ajustar({ densidade, sombras: sombraArvores });
     this.videoFps = videoFps;
     if (recompila && aquecer) this.aquecerShaders({ malhas: false });
+  }
+
+  // Distância de visão (os Ajustes; 0 = máxima): o "far" da câmera encurta e a GPU não desenha nada
+  // além dele, e o three nem manda para a placa o que fica inteiro do lado de lá. A névoa do tema
+  // chega antes do corte, então o mundo some no horizonte em vez de acabar seco. O céu está no
+  // fundo do depth buffer (natureza.js) e não é cortado.
+  setDistancia(metros) {
+    this.distancia = metros > 0 ? metros : 0;
+    this.camera.far = this.distancia || LONGE_MAX;
+    this.camera.updateProjectionMatrix();
+    this.aplicarNevoa();
+  }
+
+  // névoa do tema (clima.js grava nevoaBase), apertada pela distância de visão
+  aplicarNevoa() {
+    const fog = this.scene.fog;
+    if (!fog) return;
+    if (!this.nevoaBase) this.nevoaBase = { perto: fog.near, longe: fog.far };
+    const { perto, longe } = this.nevoaBase;
+    const d = this.distancia;
+    fog.far = d ? Math.min(longe, d * 0.95) : longe;
+    fog.near = d ? Math.min(perto, d * 0.3) : perto;
   }
 
   // teto de luzes pontuais do modo atual (ver setQualidade)
