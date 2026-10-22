@@ -20,7 +20,7 @@ export const OUTONO = {
     queimada: { x: 0, z: 680 },
     pinta: { x: 0, z: 760 },
     golfe: { x: -15, z: 500 },
-    gincana: { x: 0, z: 832 },
+    gincana: { x: 5, z: 427 }, // na pracinha da aventura, junto dos portais do céu
   },
   cidade: {
     hub: { x: 100, z: 30, r: 28, nome: 'Praça do Pagode' },
@@ -41,12 +41,11 @@ export const OUTONO = {
       { nome: 'Trilha do Salão', pontos: [[36, 600], [31, 600]], largura: 6 },
       { nome: 'Trilha da Queimada', pontos: [[36, 664], [0, 664]], largura: 6 },
       { nome: 'Trilha do Pinta', pontos: [[36, 727], [0, 727]], largura: 6 },
-      { nome: 'Trilha da Gincana', pontos: [[36, 832], [6, 832]], largura: 6 },
     ],
     pracas: [{ x: 12, z: 420, r: 16, cor: '#f472b6' }],
     pisos: [{ x0: -40, x1: 80, z0: 96, z1: 234, tipo: 'cascalho' }],
     mesas: { xadrez: { x: 0, z: 130 }, dama: { x: 50, z: 130 }, velha: { x: 0, z: 200 }, dados: { x: 50, z: 200 } },
-    portais: { surf: { x: 18, z: 413 }, matamata: { x: 18, z: 427 }, times: { x: 5, z: 420 } },
+    portais: { surf: { x: 18, z: 413 }, matamata: { x: 18, z: 427 }, times: { x: 5, z: 413 } },
     agua: [{ x: 150, z: 320, r: 38, tipo: 'carpas' }],
     // um torii a cada 14 m no Caminho dos Torii (o trecho norte da Trilha do Jardim)
     toriis: { rua: 'Trilha do Jardim', z0: 446, z1: 842, passo: 14 },
@@ -60,8 +59,8 @@ export const OUTONO = {
       quadras: { nome: 'Quadras', sub: 'Vôlei, basquete e boliche', cor: '#facc15', ir: { pos: [10, 0, 280], yaw: Math.PI } },
       lago: { nome: 'Lago das carpas', sub: 'Peixes coloridos e a ponte vermelha', cor: '#fb7185', ir: { pos: [100, 0, 320], yaw: -Math.PI / 2 } },
       autodromo: { nome: 'Autódromo', sub: 'Corrida de carro contra o relógio', cor: '#6ee7c8', ir: { pos: [250, 0, 392], yaw: -Math.PI / 2 } },
-      aventura: { nome: 'Aventura', sub: 'Portais do céu: surf e mata-mata', cor: '#f472b6', ir: { pos: [34, 0, 420], yaw: Math.PI / 2 } },
-      parque: { nome: 'Caminho dos Torii', sub: 'Golfe, salão de jogos, queimada, pinta e gincana', cor: '#ef4444', ir: { pos: [36, 0, 448], yaw: Math.PI } },
+      aventura: { nome: 'Aventura', sub: 'Portais: surf, mata-mata e gincana', cor: '#f472b6', ir: { pos: [34, 0, 420], yaw: Math.PI / 2 } },
+      parque: { nome: 'Caminho dos Torii', sub: 'Golfe, salão de jogos, queimada e pinta', cor: '#ef4444', ir: { pos: [36, 0, 448], yaw: Math.PI } },
     },
     porticos: [
       { area: 'kart', x: 160, z: 57, giro: -Math.PI / 2 - 0.45, vao: 9 },
@@ -84,7 +83,7 @@ export const OUTONO = {
         verso: [['→', 'autodromo'], ['↓', 'quadras'], ['↓', 'estadio'], SUL],
       },
       { x: 58, z: 400, giro: Math.PI - 1.1, frente: [['→', 'aventura'], ['↑', 'parque']] },
-      { x: 44, z: 446, giro: Math.PI, frente: [['↑', 'parque', 'Golfe, salão, queimada, pinta e gincana']], verso: [['↓', 'aventura'], ['↓', 'lago'], SUL] },
+      { x: 44, z: 446, giro: Math.PI, frente: [['↑', 'parque', 'Golfe, salão, queimada e pinta']], verso: [['↓', 'aventura'], ['↓', 'lago'], SUL] },
     ],
     quadros: [
       {
@@ -109,11 +108,11 @@ export const OUTONO = {
       },
       {
         area: 'aventura', x: 40, z: 430, giro: Math.PI / 2,
-        linhas: ['Portais para o céu: entre com E', 'Surf: deslize de lado nas rampas', 'Mata-mata: pegue as armas do chão', 'Em times: derrube o time do outro lado'],
+        linhas: ['Portais com E · gincana: 10 fases e a final', 'Surf: deslize de lado nas rampas', 'Mata-mata: pegue as armas do chão', 'Em times: derrube o time do outro lado'],
       },
       {
         area: 'parque', x: 28, z: 452, giro: Math.PI,
-        linhas: ['Siga os torii: cada jogo tem uma trilha', 'Minigolfe, salão de jogos (pingue, sinuca, cartas)', 'Queimada, pinta-território e, no fim, a gincana', 'Em cada jogo: chegue perto e aperte E'],
+        linhas: ['Siga os torii: cada jogo tem uma trilha', 'Minigolfe, salão de jogos (pingue, sinuca, cartas)', 'Queimada e, no fim, o pinta-território', 'Em cada jogo: chegue perto e aperte E'],
       },
     ],
     mapasAqui: [

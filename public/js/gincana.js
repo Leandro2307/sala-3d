@@ -1,5 +1,5 @@
-// Gincana (como o Fall Guys): um show de 10 fases e a final, bem longe do mapa. O portal fica no
-// parque (E nele): quem entra vai para a largada da 1ª fase e espera o show começar. Cada fase
+// Gincana (como o Fall Guys): um show de 10 fases e a final, bem longe do mapa. O portal fica na
+// pracinha da aventura (E nele): quem entra vai para a largada da 1ª fase e espera o show começar. Cada fase
 // mostra o nome e conta 3, 2, 1. Corrida: até a chegada (caiu, volta no último ponto; R também;
 // na gosma, caiu está fora). Sobrevivência: fique em pé até o tempo acabar (caiu, assiste da
 // sacada). A final é o piso de hexágonos. Os pontos de cada fase somam e quem fizer mais leva a

@@ -21,7 +21,7 @@ export const { PINTA_ARENA } = P;
 // Minigolfe: 9 buracos (golfe-dados.js põe cada buraco aqui dentro)
 export const { GOLFE_AREA } = P;
 
-// Portal da gincana (a pista fica no céu, em gincana-dados.js)
+// Portal da gincana: fica na pracinha da aventura, com os do céu (as fases ficam longe, em gincana-dados.js)
 export const { PORTAL_GINCANA } = P;
 
 // Kartódromo: o retângulo em volta do traçado (o traçado é do kart-dados.js)

@@ -20,7 +20,7 @@ export const TROPICAL = {
     queimada: { x: 30, z: 760 },
     pinta: { x: 55, z: 637 },
     golfe: { x: -27, z: 757 },
-    gincana: { x: 84, z: 752 },
+    gincana: { x: 17, z: 392 }, // na pracinha da aventura, junto dos portais do céu
   },
   cidade: {
     hub: { x: 100, z: 30, r: 28, nome: 'Praça do Farol' },
@@ -41,7 +41,7 @@ export const TROPICAL = {
     pracas: [{ x: 25, z: 385, r: 16, cor: '#f472b6' }],
     pisos: [{ x0: 104, x1: 190, z0: 118, z1: 232 }],
     mesas: { xadrez: { x: 126, z: 150 }, dama: { x: 168, z: 150 }, velha: { x: 126, z: 200 }, dados: { x: 168, z: 200 } },
-    portais: { surf: { x: 31, z: 378 }, matamata: { x: 31, z: 392 }, times: { x: 17, z: 385 } },
+    portais: { surf: { x: 31, z: 378 }, matamata: { x: 31, z: 392 }, times: { x: 17, z: 378 } },
     agua: [{ x: 25, z: 475, r: 52, tipo: 'lagoa' }],
     parque: {
       praca: { x: AV, z: 700, r: 18 },
@@ -50,7 +50,6 @@ export const TROPICAL = {
         x: AV + 9, z: 683, giro: Math.PI,
         frente: [
           ['↑', { nome: 'Salão de jogos', sub: 'Pingue-pongue, sinuca, truco e uno', cor: '#4ade80' }],
-          ['↑', { nome: 'Gincana', sub: 'O portal das 10 fases', cor: '#f472b6' }],
           ['→', { nome: 'Minigolfe e queimada', sub: 'Pela Rua do Golfe', cor: '#a3e635' }],
         ],
         verso: [['↓', 'praca', 'O Calçadão: lagoa, praia, estádio e praça']],
@@ -63,10 +62,10 @@ export const TROPICAL = {
       jogos: { nome: 'Praça dos jogos', sub: 'Xadrez, dama, jogo da velha e dados', cor: '#a78bfa', ir: { pos: [108, 0, 175], yaw: -Math.PI / 2 } },
       estadio: { nome: 'Estádio', sub: 'Futebol de carro', cor: '#22d3ee', ir: { pos: [83, 0, 214], yaw: Math.PI / 2 } },
       quadras: { nome: 'Praia das quadras', sub: 'Vôlei de praia, basquete e boliche', cor: '#facc15', ir: { pos: [10, 0, 318], yaw: Math.PI } },
-      aventura: { nome: 'Aventura', sub: 'Portais do céu: surf e mata-mata', cor: '#f472b6', ir: { pos: [46, 0, 385], yaw: Math.PI / 2 } },
+      aventura: { nome: 'Aventura', sub: 'Portais: surf, mata-mata e gincana', cor: '#f472b6', ir: { pos: [46, 0, 385], yaw: Math.PI / 2 } },
       lago: { nome: 'Lagoa Azul', sub: 'Areia, píer e água transparente', cor: '#2dd4bf', ir: { pos: [88, 0, 475], yaw: Math.PI / 2 } },
       autodromo: { nome: 'Autódromo', sub: 'Corrida de carro contra o relógio', cor: '#6ee7c8', ir: { pos: [175, 0, 427], yaw: -Math.PI / 2 } },
-      parque: { nome: 'Parque', sub: 'Salão de jogos, queimada, pinta, golfe e gincana', cor: '#4ade80', ir: { pos: [AV, 0, 686], yaw: Math.PI } },
+      parque: { nome: 'Parque', sub: 'Salão de jogos, queimada, pinta e golfe', cor: '#4ade80', ir: { pos: [AV, 0, 686], yaw: Math.PI } },
     },
     porticos: [
       { area: 'kart', x: 160, z: 36.4, giro: -Math.PI / 2 - 0.13, vao: 10 },
@@ -123,7 +122,7 @@ export const TROPICAL = {
       },
       {
         area: 'aventura', x: 70, z: 376, giro: Math.PI / 2,
-        linhas: ['Portais para o céu: entre com E', 'Surf: deslize de lado nas rampas', 'Mata-mata: pegue as armas do chão', 'Em times: derrube o time do outro lado'],
+        linhas: ['Portais com E · gincana: 10 fases e a final', 'Surf: deslize de lado nas rampas', 'Mata-mata: pegue as armas do chão', 'Em times: derrube o time do outro lado'],
       },
       {
         area: 'autodromo', x: 140, z: 418, giro: -Math.PI / 2,
@@ -131,7 +130,7 @@ export const TROPICAL = {
       },
       {
         area: 'parque', x: AV - 9, z: 672, giro: Math.PI,
-        linhas: ['Salão de jogos: pingue-pongue, sinuca, truco e uno', 'Queimada, minigolfe e o portal da gincana', 'Pinta-território na rua antes da praça', 'Em cada jogo: chegue perto e aperte E'],
+        linhas: ['Salão de jogos: pingue-pongue, sinuca, truco e uno', 'Queimada e minigolfe pela Rua do Golfe', 'Pinta-território na rua antes da praça', 'Em cada jogo: chegue perto e aperte E'],
       },
     ],
     mapasAqui: [
