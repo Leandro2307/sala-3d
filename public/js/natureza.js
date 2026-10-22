@@ -8,7 +8,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { isTouch } from './touch.js';
 import { CAMINHO, PISTA } from './pista.js';
-import { TEMA, SOL_DA_TARDE, arvoresDoTema, pintar as pintarTema, texturaFoto, relevoFoto, materiaisCoqueiro } from './temas3d.js';
+import { TEMA, SOL_DA_TARDE, arvoresDoTema, pintar as pintarTema, texturaFoto, relevoFoto, materiaisArvore, CHAO_DO_TEMA, geoArbusto } from './temas3d.js';
 
 const LEVE = isTouch; // celular: menos árvores, terreno mais grosso
 // Lado do pedaço do mapa em que as plantas são agrupadas (ver instanciar). No celular, pedaços
@@ -374,10 +374,10 @@ function criarTerreno(scene, area) {
   }
   geo.setAttribute('color', new THREE.BufferAttribute(cores, 3));
 
-  // a foto da grama (em cinza: a cor é a do vértice, do tema) e o relevo dela, a cada 5 m
-  const fotoGrama = texturaFoto('grama');
+  // a foto do chão (grama ou neve, em cinza: a cor é a do vértice, do tema) e o relevo dela, a cada 5 m
+  const fotoGrama = texturaFoto(CHAO_DO_TEMA);
   fotoGrama.repeat.set(tamanho / 5, tamanho / 5);
-  const relevo = relevoFoto('grama');
+  const relevo = relevoFoto(CHAO_DO_TEMA);
   relevo.repeat.copy(fotoGrama.repeat);
   const mat = new THREE.MeshLambertMaterial({ vertexColors: true, map: fotoGrama, normalMap: relevo, normalScale: new THREE.Vector2(0.7, 0.7), flatShading: true });
   const matLonge = soSol(mat.clone());
@@ -406,6 +406,68 @@ function criarTerreno(scene, area) {
 }
 
 // ------------------------------------------------------------------ árvores e afins
+// Pedra: uma bola facetada amassada com ruído (cada face pega a luz de um jeito), com a foto da
+// rocha como detalhe e o relevo dela
+function geoPedra(cor) {
+  const g = new THREE.IcosahedronGeometry(1, 1);
+  const pos = g.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const y = pos.getY(i);
+    const z = pos.getZ(i);
+    const k = 0.78 + ruido(x * 1.7 + 3, z * 1.7 + y * 1.3) * 0.42;
+    pos.setXYZ(i, x * k, y * k * (y < 0 ? 0.6 : 1), z * k);
+  }
+  g.computeVertexNormals();
+  return pintarComUv(g, cor);
+}
+let matPedra = null;
+function materialPedra() {
+  if (matPedra) return matPedra;
+  const mapa = texturaFoto('rocha');
+  mapa.repeat.setScalar(2);
+  const relevo = relevoFoto('rocha');
+  relevo.repeat.setScalar(2);
+  matPedra = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, map: mapa, normalMap: relevo });
+  return matPedra;
+}
+
+// o borrão da sombra de contato: escuro no meio, sumindo até a borda
+function criarBorroes(scene, itens) {
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = 64;
+  const ctx = cv.getContext('2d');
+  const gr = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gr.addColorStop(0, 'rgba(0,0,0,1)');
+  gr.addColorStop(0.45, 'rgba(0,0,0,0.6)');
+  gr.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = gr;
+  ctx.fillRect(0, 0, 64, 64);
+  const mat = new THREE.MeshBasicMaterial({
+    map: new THREE.CanvasTexture(cv), transparent: true, opacity: 0.42, depthWrite: false,
+    polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+  });
+  const malha = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), mat, itens.length);
+  const m = new THREE.Matrix4();
+  itens.forEach((a, i) => {
+    const d = 5.5 * a.escala;
+    m.makeScale(d, 1, d).setPosition(a.x, (a.y ?? 0) + 0.24, a.z);
+    malha.setMatrixAt(i, m);
+  });
+  malha.computeBoundingSphere();
+  malha.renderOrder = -1;
+  scene.add(malha);
+}
+
+function pintarComUv(geo, cor) {
+  const g = geo.index ? geo.toNonIndexed() : geo;
+  const c = new THREE.Color(cor);
+  const arr = new Float32Array(g.attributes.position.count * 3);
+  for (let i = 0; i < arr.length; i += 3) arr.set([c.r, c.g, c.b], i);
+  g.setAttribute('color', new THREE.BufferAttribute(arr, 3));
+  return g;
+}
+
 function pintar(geo, cor) {
   const g = geo.index ? geo.toNonIndexed() : geo;
   const c = new THREE.Color(cor);
@@ -947,28 +1009,46 @@ export function criarNatureza(scene, renderer, {
   // No PC, as árvores a mais de 60 m da cerca usam o shader só de sol. No celular ficam num
   // material só: lá o pixel é pouco, e o desenho a mais pesaria mais que o que ele poupa.
   const matPlantaLonge = LEVE ? null : soSol(matPlanta.clone());
-  // o coqueiro tem dois materiais (tronco e folhas recortadas, ver temas3d.materiaisCoqueiro)
-  const matsCoqueiro = materiaisCoqueiro();
-  const matsCoqueiroLonge = LEVE ? null : matsCoqueiro.map((m) => soSol(m.clone()));
+  // Árvore com textura (coqueiro, copa de folhas, pinheiro): dois materiais, o sólido e o
+  // recortado (temas3d.materiaisArvore), um par por tipo. A mais de 60 m da cerca vai a versão
+  // simples dela (geo.userData.longe), no material de sempre: lá o recorte nem aparece e só pesaria.
+  const matsArvore = {};
   const plantar = (geo, lista) => {
-    const coqueiro = geo.userData.materiais === 'coqueiro';
-    const perto = coqueiro ? matsCoqueiro : matPlanta;
-    const daLonge = coqueiro ? matsCoqueiroLonge : matPlantaLonge;
-    const longe = (a) => !!daLonge && foraDaArea(a.x, a.z, area) > 60;
-    instanciar(grupo, geo, perto, lista.filter((a) => !longe(a)));
-    if (daLonge) instanciar(grupo, geo, daLonge, lista.filter(longe));
+    const tipo = geo.userData.materiais;
+    const simples = geo.userData.longe;
+    if (!tipo || !simples) {
+      const longe = (a) => !!matPlantaLonge && foraDaArea(a.x, a.z, area) > 60;
+      instanciar(grupo, geo, matPlanta, lista.filter((a) => !longe(a)));
+      if (matPlantaLonge) instanciar(grupo, geo, matPlantaLonge, lista.filter(longe));
+      return;
+    }
+    const longe = (a) => foraDaArea(a.x, a.z, area) > 60;
+    const perto = lista.filter((a) => !longe(a));
+    if (perto.length) instanciar(grupo, geo, matsArvore[tipo] ||= materiaisArvore(tipo), perto);
+    const distantes = lista.filter(longe);
+    if (distantes.length) instanciar(grupo, simples, matPlantaLonge || matPlanta, distantes);
   };
   const geos = arvoresDoTema();
   for (const [tipo, lista] of Object.entries(listas)) {
     if (!lista.length) continue;
     plantar(geos[tipo] || geos[Object.keys(geos)[0]], lista);
   }
-  const arbusto = TEMA.id === 'neve'
-    ? pintar(new THREE.IcosahedronGeometry(1.1, 1).scale(1.4, 0.55, 1.4), TEMA.arbusto)
-    : pintar(new THREE.IcosahedronGeometry(1.1, 0).scale(1.3, 0.8, 1.3), TEMA.arbusto);
-  if (arbustos.length) instanciar(grupo, arbusto, matPlanta, arbustos, { sombra: false });
-  if (pedras.length) instanciar(grupo, pintar(new THREE.DodecahedronGeometry(1, 0), TEMA.pedra), matPlanta, pedras, { sombra: false });
+  // arbustos: a mesma nuvem de folhas das árvores (perto) ou a bola simples (longe)
+  if (arbustos.length) {
+    const arbusto = geoArbusto(TEMA.arbusto);
+    const longe = (a) => foraDaArea(a.x, a.z, area) > 60;
+    const perto = arbustos.filter((a) => !longe(a));
+    if (perto.length) instanciar(grupo, arbusto, matsArvore.folhuda ||= materiaisArvore('folhuda'), perto, { sombra: false });
+    const distantes = arbustos.filter(longe);
+    if (distantes.length) instanciar(grupo, arbusto.userData.longe, matPlantaLonge || matPlanta, distantes, { sombra: false });
+  }
+  if (pedras.length) instanciar(grupo, geoPedra(TEMA.pedra), materialPedra(), pedras, { sombra: false });
   if (flores.length) instanciar(grupo, new THREE.IcosahedronGeometry(0.22, 0), new THREE.MeshLambertMaterial({ color: '#ffffff', flatShading: true }), flores, { sombra: false });
+
+  // sombra de contato sob as árvores da área jogável (e um pouco além): embaixo da copa a luz do
+  // céu não chega. Um borrão escuro por árvore, todos num desenho só.
+  const comBorrao = todas.filter((a) => foraDaArea(a.x, a.z, area) < 30);
+  if (comBorrao.length) criarBorroes(grupo, comBorrao);
 
   // tronco das árvores dentro da área jogável é sólido (as de fora nem dá para alcançar)
   for (const a of todas) {

@@ -63,10 +63,14 @@ export function texturaFoto(nome, { cor = true } = {}) {
 }
 export const relevoFoto = (nome) => texturaFoto(`${nome}-n`, { cor: false });
 
-// o relevo das tábuas, quando a rua do tema é de madeira (a mesma repetição da texturaRua)
+// o relevo da rua do tema: as tábuas (a mesma repetição da texturaRua), o cascalho ou a neve
+// pisada sobre os paralelepípedos
 export function relevoRua() {
-  return TEMA.rua.tipo === 'madeira' ? relevoFoto('deque') : null;
+  const tipo = TEMA.rua.tipo;
+  return relevoFoto(tipo === 'madeira' ? 'deque' : tipo === 'cascalho' ? 'cascalho' : 'neve');
 }
+// a foto do chão do tema, em cinza (multiplica a cor do terreno): grama, ou neve na vila da neve
+export const CHAO_DO_TEMA = TEMA.id === 'neve' ? 'neve' : 'grama';
 
 function roundRect(ctx, x, y, w, h, r) {
   ctx.beginPath();
@@ -215,50 +219,225 @@ function geoCoqueiro(altura = 9, folhas = 8, seed = 3) {
   }
   const geo = mergeGeometries([juntar(tronco), juntar(copa)], true);
   geo.userData.materiais = 'coqueiro';
+  geo.userData.longe = geoCoqueiroLonge(altura, folhas, seed);
   return geo;
 }
 
-function geoPinheiro(neve) {
-  const partes = [pintar(new THREE.CylinderGeometry(0.32, 0.48, 3.2, 6, 1, true).translate(0, 1.6, 0), '#5b3d2a')];
-  const camadas = [[2.7, 4.4, 4.6, '#2e6a41'], [2.1, 3.8, 6.7, '#357a48'], [1.35, 3.2, 8.6, '#3d8a51']];
-  for (const [r, h, y, cor] of camadas) {
-    partes.push(pintar(new THREE.ConeGeometry(r, h, 7, 1, true).translate(0, y, 0), neve ? '#245a3c' : cor));
-    // neve: um cone branco menor, por cima da metade de cima de cada camada
-    if (neve) partes.push(pintar(new THREE.ConeGeometry(r * 0.78, h * 0.55, 7, 1, true).translate(0, y + h * 0.24, 0), '#f6f9fc'));
+// O coqueiro de longe (a mais de 60 m da cerca): sem textura, folhas inteiras e menos gomos. Lá
+// longe os folíolos recortados nem aparecem (o mipmap apaga o recorte) e só pesariam.
+function geoCoqueiroLonge(altura, folhas, seed) {
+  const rnd = semente(seed);
+  const partes = [];
+  const gomos = 5;
+  let x = 0;
+  let y = 0;
+  for (let i = 0; i < gomos; i++) {
+    const h = altura / gomos;
+    const incl = (i / gomos) * 0.55;
+    const g = new THREE.CylinderGeometry(0.27 - i * 0.02, 0.3 - i * 0.02, h * 1.04, 5, 1, true).translate(0, h / 2, 0).rotateZ(-incl).translate(x, y, 0);
+    partes.push(pintar(g, '#86705a'));
+    x += Math.sin(incl) * h;
+    y += Math.cos(incl) * h;
+  }
+  for (let i = 0; i < folhas; i++) {
+    const a = (i / folhas) * Math.PI * 2 + rnd() * 0.35;
+    const f = folhaCoqueiro(3.8 + rnd() * 1.5, 0.6, 1.6 + rnd() * 1.6).rotateY(a).translate(x, y + 0.05, 0);
+    f.deleteAttribute('uv');
+    partes.push(pintar(f, i % 2 ? '#3f8f3a' : '#4a9a40'));
   }
   return juntar(partes);
 }
 
+// ------------------------------------------------------------------ árvores de folhas
+// A copa é feita de "nuvens" de folhas: uma bola por dentro (a sombra entre as folhas) e, por
+// fora, cartões com a textura de um cacho de folhas recortado. A normal de cada cartão aponta
+// para fora da nuvem: a luz cai na copa como numa bola fofa, e não chapada em cada cartão.
+
+// cacho de folhas pontudas, em tons claros (a cor vem do vértice: cada árvore pinta a sua)
+let texFolhas = null;
+function texturaFolhas() {
+  if (texFolhas) return texFolhas;
+  const rnd = semente(31);
+  texFolhas = textura(256, 256, (ctx, w, h) => {
+    for (let i = 0; i < 95; i++) {
+      // mais folhas no meio, poucas na borda: o recorte do cartão some
+      const a = rnd() * Math.PI * 2;
+      const d = Math.sqrt(rnd()) * w * 0.4;
+      const x = w / 2 + Math.cos(a) * d;
+      const y = h / 2 + Math.sin(a) * d;
+      const tam = 13 + rnd() * 11;
+      const giro = rnd() * Math.PI * 2;
+      const tom = Math.round(150 + rnd() * 105);
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(giro);
+      ctx.fillStyle = `rgb(${tom},${tom},${tom})`;
+      ctx.beginPath();
+      ctx.moveTo(-tam, 0);
+      ctx.quadraticCurveTo(0, -tam * 0.5, tam, 0);
+      ctx.quadraticCurveTo(0, tam * 0.5, -tam, 0);
+      ctx.fill();
+      // a nervura, um pouco mais escura
+      ctx.strokeStyle = `rgba(0,0,0,0.18)`;
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(-tam * 0.9, 0);
+      ctx.lineTo(tam * 0.9, 0);
+      ctx.stroke();
+      ctx.restore();
+    }
+  });
+  return texFolhas;
+}
+
+// agulhas de pinheiro: riscos finos pendurados, com a borda de baixo desfiada (recortada)
+let texAgulhas = null;
+function texturaAgulhas() {
+  if (texAgulhas) return texAgulhas;
+  const rnd = semente(32);
+  texAgulhas = textura(256, 256, (ctx, w, h) => {
+    ctx.lineCap = 'round';
+    for (let i = 0; i < 900; i++) {
+      const x = rnd() * w;
+      const y = rnd() * h * 0.95;
+      const tom = Math.round(140 + rnd() * 115);
+      ctx.strokeStyle = `rgb(${tom},${tom},${tom})`;
+      ctx.lineWidth = 1.6;
+      const comp = 12 + rnd() * 16;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + (rnd() - 0.5) * 8, Math.min(h - 1, y + comp));
+      ctx.stroke();
+    }
+    // a parte de cima, inteira (a camada de cima cobre)
+    ctx.fillStyle = 'rgb(170,170,170)';
+    ctx.fillRect(0, 0, w, h * 0.12);
+  }, { repetir: true });
+  texAgulhas.wrapT = THREE.ClampToEdgeWrapping;
+  texAgulhas.repeat.x = 4; // u dá a volta no cone: sem isto as agulhas esticam
+  return texAgulhas;
+}
+
+// cartões de folhas espalhados pela superfície de uma nuvem (cx, cy, cz, raio, achatada em y)
+function cartoesDaNuvem(rnd, cx, cy, cz, r, sy, qtd, cor) {
+  const partes = [];
+  const n = new THREE.Vector3();
+  for (let i = 0; i < qtd; i++) {
+    // ponto na superfície, mais em cima e dos lados que embaixo
+    const u = rnd() * 2 - 1;
+    const yN = u < -0.5 ? u * 0.5 : u;
+    const a = rnd() * Math.PI * 2;
+    const rr = Math.sqrt(1 - yN * yN);
+    n.set(Math.cos(a) * rr, yN, Math.sin(a) * rr).normalize();
+    const lado = r * (0.95 + rnd() * 0.4);
+    const g = new THREE.PlaneGeometry(lado, lado);
+    // de frente para fora, girado no próprio eixo
+    g.rotateZ(rnd() * Math.PI * 2);
+    g.lookAt(n);
+    g.translate(cx + n.x * r * 0.78, cy + n.y * r * 0.78 * sy, cz + n.z * r * 0.78);
+    // a normal de cada vértice aponta para fora do centro da nuvem
+    const pos = g.attributes.position;
+    const nor = g.attributes.normal;
+    for (let k = 0; k < pos.count; k++) {
+      n.set(pos.getX(k) - cx, (pos.getY(k) - cy) / sy, pos.getZ(k) - cz).normalize();
+      nor.setXYZ(k, n.x, n.y, n.z);
+    }
+    partes.push(pintar(g, cor, true));
+  }
+  return partes;
+}
+
+// troncos: [{ raio0, raio1, altura, giroZ, x, y, z }]; nuvens: [[x, y, z, raio, cor, achatar]]
+function geoFolhuda(troncos, corTronco, nuvens, seed) {
+  const rnd = semente(seed);
+  const solido = [];
+  const cartoes = [];
+  const longe = [];
+  for (const t of troncos) {
+    const g = () => new THREE.CylinderGeometry(t.r1, t.r0, t.h, 7, 1, true).translate(0, t.h / 2, 0).rotateZ(t.giro ?? 0).translate(t.x ?? 0, t.y ?? 0, t.z ?? 0);
+    solido.push(pintar(g(), corTronco, true));
+    longe.push(pintar(g(), corTronco));
+  }
+  for (const [x, y, z, r, cor, sy = 0.85] of nuvens) {
+    const escura = new THREE.Color(cor).multiplyScalar(0.55);
+    solido.push(pintar(new THREE.IcosahedronGeometry(r * 0.82, 1).scale(1, sy, 1).translate(x, y, z), escura, true));
+    cartoes.push(...cartoesDaNuvem(rnd, x, y, z, r, sy, Math.round(6 + r * 4), cor));
+    longe.push(pintar(new THREE.IcosahedronGeometry(r, 0).scale(1, sy, 1).translate(x, y, z), cor));
+  }
+  const geo = mergeGeometries([juntar(solido), juntar(cartoes)], true);
+  geo.userData.materiais = 'folhuda';
+  geo.userData.longe = juntar(longe);
+  return geo;
+}
+
 function geoCopa(cores, tronco = '#6a4a33', altura = 1) {
   const s = altura;
-  return juntar([
-    pintar(new THREE.CylinderGeometry(0.3 * s, 0.45 * s, 4.4 * s, 6, 1, true).translate(0, 2.2 * s, 0), tronco),
-    pintar(new THREE.IcosahedronGeometry(2.7 * s, 0).scale(1, 0.85, 1).translate(0, 5.6 * s, 0), cores[0]),
-    pintar(new THREE.IcosahedronGeometry(1.9 * s, 0).translate(1.4 * s, 6.6 * s, 0.6 * s), cores[1]),
-    pintar(new THREE.IcosahedronGeometry(1.7 * s, 0).translate(-1.3 * s, 6.2 * s, -0.8 * s), cores[2]),
-    pintar(new THREE.IcosahedronGeometry(1.4 * s, 0).translate(0.2 * s, 7.4 * s, -0.9 * s), cores[0]),
-  ]);
+  return geoFolhuda([{ r0: 0.45 * s, r1: 0.3 * s, h: 4.6 * s }], tronco, [
+    [0, 5.6 * s, 0, 2.7 * s, cores[0]],
+    [1.4 * s, 6.6 * s, 0.6 * s, 1.9 * s, cores[1]],
+    [-1.3 * s, 6.2 * s, -0.8 * s, 1.7 * s, cores[2]],
+    [0.2 * s, 7.4 * s, -0.9 * s, 1.4 * s, cores[0]],
+  ], 41);
 }
 
 // bordo japonês: tronco escuro inclinado e uma copa larga e baixa, em camadas, vermelha
 function geoBordo() {
-  const partes = [
-    pintar(new THREE.CylinderGeometry(0.22, 0.38, 3.2, 6, 1, true).translate(0, 1.6, 0).rotateZ(0.12), '#3e2a22'),
-    pintar(new THREE.CylinderGeometry(0.12, 0.2, 2.2, 5, 1, true).translate(0, 1.1, 0).rotateZ(-0.7).translate(0.4, 2.8, 0), '#3e2a22'),
-  ];
-  const nuvens = [[0, 4.4, 0, 2.9, '#c2261b'], [1.8, 4.0, 0.8, 2.0, '#e0461d'], [-1.6, 4.1, -0.6, 2.1, '#a51d16'], [0.4, 5.4, -0.4, 2.0, '#ef6a24'], [-0.5, 4.8, 1.4, 1.7, '#d93a1b']];
-  for (const [x, y, z, r, cor] of nuvens) partes.push(pintar(new THREE.IcosahedronGeometry(r, 0).scale(1, 0.62, 1).translate(x, y, z), cor));
-  return juntar(partes);
+  return geoFolhuda([
+    { r0: 0.38, r1: 0.22, h: 3.4, giro: 0.12 },
+    { r0: 0.2, r1: 0.12, h: 2.2, giro: -0.7, x: 0.4, y: 2.8 },
+  ], '#3e2a22', [
+    [0, 4.4, 0, 2.9, '#c2261b', 0.62], [1.8, 4.0, 0.8, 2.0, '#e0461d', 0.62], [-1.6, 4.1, -0.6, 2.1, '#a51d16', 0.62],
+    [0.4, 5.4, -0.4, 2.0, '#ef6a24', 0.62], [-0.5, 4.8, 1.4, 1.7, '#d93a1b', 0.62],
+  ], 42);
 }
 
 function geoCerejeira() {
-  const partes = [
-    pintar(new THREE.CylinderGeometry(0.24, 0.4, 3.4, 6, 1, true).translate(0, 1.7, 0), '#4a3030'),
-    pintar(new THREE.CylinderGeometry(0.12, 0.2, 2.4, 5, 1, true).translate(0, 1.2, 0).rotateZ(0.8).translate(-0.4, 2.9, 0), '#4a3030'),
+  return geoFolhuda([
+    { r0: 0.4, r1: 0.24, h: 3.6 },
+    { r0: 0.2, r1: 0.12, h: 2.4, giro: 0.8, x: -0.4, y: 2.9 },
+  ], '#4a3030', [
+    [0, 4.8, 0, 2.6, '#f9a8d4', 0.7], [-1.9, 4.3, 0.5, 1.9, '#fbcfe8', 0.7], [1.7, 4.5, -0.6, 2.0, '#f472b6', 0.7],
+    [0.3, 5.9, 0.4, 1.8, '#fbcfe8', 0.7], [0.6, 4.4, 1.7, 1.6, '#f9a8d4', 0.7],
+  ], 43);
+}
+
+// Pinheiro: camadas de cone com a textura de agulhas (a borda de baixo desfiada e recortada) e,
+// na neve, um chapéu branco em cada camada
+function geoPinheiro(neve) {
+  const solido = [pintar(new THREE.CylinderGeometry(0.32, 0.48, 3.2, 6, 1, true).translate(0, 1.6, 0), '#5b3d2a', true)];
+  const agulhas = [];
+  const longe = [pintar(new THREE.CylinderGeometry(0.32, 0.48, 3.2, 6, 1, true).translate(0, 1.6, 0), '#5b3d2a')];
+  const camadas = [[2.7, 4.4, 4.6, '#2e6a41'], [2.1, 3.8, 6.7, '#357a48'], [1.35, 3.2, 8.6, '#3d8a51']];
+  for (const [r, h, y, cor] of camadas) {
+    const c = neve ? '#2c6a46' : cor;
+    // o miolo escuro e, por fora, um cone um pouco maior com as agulhas
+    solido.push(pintar(new THREE.ConeGeometry(r * 0.8, h * 0.9, 8, 1, true).translate(0, y - h * 0.05, 0), new THREE.Color(c).multiplyScalar(0.5), true));
+    agulhas.push(pintar(new THREE.ConeGeometry(r, h, 10, 1, true).translate(0, y, 0), c, true));
+    if (neve) solido.push(pintar(new THREE.ConeGeometry(r * 0.78, h * 0.55, 8, 1, true).translate(0, y + h * 0.24, 0), '#f6f9fc', true));
+    longe.push(pintar(new THREE.ConeGeometry(r, h, 7, 1, true).translate(0, y, 0), c));
+    if (neve) longe.push(pintar(new THREE.ConeGeometry(r * 0.78, h * 0.55, 7, 1, true).translate(0, y + h * 0.24, 0), '#f6f9fc'));
+  }
+  const geo = mergeGeometries([juntar(solido), juntar(agulhas)], true);
+  geo.userData.materiais = 'pinheiro';
+  geo.userData.longe = juntar(longe);
+  return geo;
+}
+
+// arbusto: uma nuvem de folhas baixa, sem tronco (na neve, um monte arredondado mais achatado)
+export function geoArbusto(cor) {
+  return TEMA.id === 'neve'
+    ? geoFolhuda([], '#000000', [[0, 0.5, 0, 1.2, cor, 0.5]], 44)
+    : geoFolhuda([], '#000000', [[0, 0.7, 0, 1.15, cor, 0.72]], 45);
+}
+
+// Os materiais de cada tipo de árvore com textura: [o sólido (tronco, miolo), o recortado]
+export function materiaisArvore(tipo) {
+  if (tipo === 'coqueiro') return materiaisCoqueiro();
+  const recorte = tipo === 'pinheiro' ? texturaAgulhas() : texturaFolhas();
+  return [
+    new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }),
+    new THREE.MeshLambertMaterial({ vertexColors: true, map: recorte, alphaTest: 0.45, side: THREE.DoubleSide }),
   ];
-  const nuvens = [[0, 4.8, 0, 2.6, '#f9a8d4'], [-1.9, 4.3, 0.5, 1.9, '#fbcfe8'], [1.7, 4.5, -0.6, 2.0, '#f472b6'], [0.3, 5.9, 0.4, 1.8, '#fbcfe8'], [0.6, 4.4, 1.7, 1.6, '#f9a8d4']];
-  for (const [x, y, z, r, cor] of nuvens) partes.push(pintar(new THREE.IcosahedronGeometry(r, 0).scale(1, 0.7, 1).translate(x, y, z), cor));
-  return juntar(partes);
 }
 
 function geoBambu() {
@@ -519,6 +698,12 @@ export function texturaRua() {
   }, { repetir: true });
 }
 
+// o relevo (foto) que a cidade põe junto do piso, na mesma repetição
+function comRelevo(nome, t) {
+  t.userData.relevo = nome;
+  return t;
+}
+
 // piso dos retângulos (praça dos jogos): deque, lajes com neve ou cascalho varrido
 export function texturaPiso() {
   // a foto do deque de pé (tábuas no sentido z); metros: o lado de cada repetição
@@ -530,7 +715,7 @@ export function texturaPiso() {
     return t;
   }
   if (TEMA.piso === 'cascalho') {
-    return textura(256, 256, (ctx, w, h) => {
+    return comRelevo('cascalho', textura(256, 256, (ctx, w, h) => {
       ctx.fillStyle = '#d6cbb0';
       ctx.fillRect(0, 0, w, h);
       for (let i = 0; i < 3000; i++) {
@@ -546,10 +731,10 @@ export function texturaPiso() {
         for (let x = 0; x <= w; x += 8) ctx.lineTo(x, y + Math.sin((x / w) * Math.PI * 2) * 4);
         ctx.stroke();
       }
-    }, { repetir: true });
+    }, { repetir: true }));
   }
   // lajes de pedra com neve nas juntas
-  return textura(256, 256, (ctx, w, h) => {
+  return comRelevo('neve', textura(256, 256, (ctx, w, h) => {
     ctx.fillStyle = '#f2f6fb';
     ctx.fillRect(0, 0, w, h);
     for (let y = 0; y < 4; y++) {
@@ -560,7 +745,7 @@ export function texturaPiso() {
         ctx.fill();
       }
     }
-  }, { repetir: true });
+  }, { repetir: true }));
 }
 
 // o chão da praça do meio (um círculo, raio R na textura inteira)

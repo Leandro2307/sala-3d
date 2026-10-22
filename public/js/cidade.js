@@ -182,7 +182,7 @@ export function construirRuas(g, ruas, L) {
   const tex = texturaRua();
   // a foto do deque tem tábuas de ~1 m: três repetições na largura, para não esticar
   const relevo = relevoRua();
-  if (relevo) {
+  if (TEMA.rua.tipo === 'madeira') {
     tex.repeat.x = 3;
     relevo.repeat.x = 3;
   }
@@ -210,7 +210,7 @@ function construirPier(g, r, L) {
   const tex = texturaRua();
   tex.repeat.set(1, comp / 3);
   const relevo = relevoRua();
-  relevo?.repeat.copy(tex.repeat);
+  relevo.repeat.copy(tex.repeat);
   const deque = new THREE.Mesh(new THREE.BoxGeometry(r.largura, 0.18, comp + 4), new THREE.MeshStandardMaterial({ map: tex, normalMap: relevo, roughness: 0.8 }));
   no(deque.geometry, (x0 + x1) / 2, 0.11, (z0 + z1) / 2, giro);
   deque.receiveShadow = true;
