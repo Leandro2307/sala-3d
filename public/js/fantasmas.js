@@ -154,32 +154,67 @@ function estilos() {
 #fs-morto[hidden] { display: none; }
 .fs-modal { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; background: rgba(2,3,6,.78); font-family: 'Plus Jakarta Sans', system-ui, sans-serif; color: #e2e8f0; padding: 16px; }
 .fs-modal[hidden] { display: none; }
-.fs-caixa { width: min(980px, 100%); max-height: calc(100vh - 32px); overflow: auto; background: #0b0d12; border: 1px solid #1f2937; border-radius: 16px; padding: 18px 20px; box-shadow: 0 20px 80px rgba(0,0,0,.6); }
-.fs-caixa h2 { margin: 0 0 4px; font-size: 22px; color: ${COR}; }
-.fs-caixa > p { margin: 0 0 14px; color: #94a3b8; font-size: 14px; }
-.fs-fechar { float: right; border: 0; background: #1f2937; color: #e2e8f0; border-radius: 8px; padding: 6px 12px; font: 700 13px inherit; cursor: pointer; }
-.fs-casas { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
-.fs-casas button { text-align: left; padding: 14px; border-radius: 12px; border: 1px solid #1f2937; background: #11141b; color: inherit; cursor: pointer; font: inherit; }
-.fs-casas button:hover { border-color: var(--c); background: #151a22; }
-.fs-casas b { display: block; color: var(--c); font-size: 15px; }
-.fs-casas small { display: block; color: #64748b; margin: 2px 0 6px; font-size: 12px; }
-.fs-casas span { font-size: 12.5px; color: #94a3b8; }
-.fs-provas { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
-.fs-provas button { padding: 7px 10px; border-radius: 9px; border: 1px solid #334155; background: #11141b; color: #cbd5e1; font: 700 12.5px inherit; cursor: pointer; }
-.fs-provas button.sim { border-color: #4ade80; background: #0f2a17; color: #86efac; }
-.fs-provas button.nao { border-color: #7f1d1d; color: #64748b; text-decoration: line-through; }
-.fs-monstros { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
-.fs-monstros button { text-align: left; padding: 10px 12px; border-radius: 11px; border: 1px solid #1f2937; background: #11141b; color: inherit; cursor: pointer; font: inherit; }
-.fs-monstros button.fora { opacity: .32; }
-.fs-monstros button.escolhido { border-color: #facc15; box-shadow: 0 0 0 1px #facc15 inset; }
-.fs-monstros b { color: var(--c); font-size: 15px; }
-.fs-monstros i { display: inline-block; font-style: normal; font-size: 11px; padding: 2px 6px; border-radius: 6px; margin: 4px 4px 0 0; background: #1e293b; color: #cbd5e1; }
+.fs-caixa { position: relative; width: min(1040px, 100%); max-height: calc(100dvh - 32px); overflow: auto; background: #0b0d12; border: 1px solid #263041; border-radius: 18px; padding: 22px 26px 18px; box-shadow: 0 20px 80px rgba(0,0,0,.6); font-size: 15px; line-height: 1.5; }
+.fs-caixa h2 { margin: 0 0 6px; font-size: 26px; line-height: 1.2; color: ${COR}; }
+.fs-caixa h3 { margin: 18px 0 10px; font-size: 13px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #94a3b8; }
+.fs-caixa > p { margin: 0 0 14px; color: #cbd5e1; font-size: 15px; }
+.fs-caixa > .fs-lead { font-size: 16.5px; color: #e2e8f0; max-width: 62ch; }
+.fs-caixa > .fs-credito { margin: 14px 0 0; font-size: 12.5px; color: #64748b; }
+.fs-caixa kbd { display: inline-block; min-width: 1.7em; padding: 0 6px; margin: 0 1px; border-radius: 6px; border: 1px solid #334155; border-bottom-width: 2px; background: #1e293b; color: #f1f5f9; font-family: inherit; font-size: 13px; font-weight: 800; line-height: 1.5; text-align: center; }
+.fs-fechar { position: sticky; top: 0; float: right; z-index: 1; margin-left: 12px; border: 1px solid #334155; background: #1e293b; color: #f1f5f9; border-radius: 10px; padding: 8px 14px; font-family: inherit; font-size: 14px; font-weight: 700; cursor: pointer; box-shadow: 0 6px 18px rgba(0,0,0,.55); }
+.fs-fechar:hover { background: #334155; }
+.fs-colunas { display: grid; grid-template-columns: 1.2fr 1fr; gap: 0 24px; }
+.fs-passos { list-style: none; counter-reset: passo; margin: 0; padding: 0; display: grid; gap: 8px; }
+.fs-passos li { counter-increment: passo; position: relative; padding: 11px 14px 11px 52px; border-radius: 12px; background: #11151d; border: 1px solid #1f2937; }
+.fs-passos li::before { content: counter(passo); position: absolute; left: 14px; top: 12px; width: 26px; height: 26px; border-radius: 50%; background: ${COR}; color: #0b0d12; font-weight: 800; font-size: 14px; display: grid; place-items: center; }
+.fs-passos b { color: #f8fafc; font-size: 15.5px; }
+.fs-passos p { margin: 3px 0 0; color: #cbd5e1; font-size: 14.5px; }
+.fs-passos p b { font-size: inherit; }
+.fs-perigo { margin-top: 12px; padding: 0 16px 10px; border-radius: 12px; border: 1px solid #7f1d1d; background: #170b0e; }
+.fs-perigo h3 { margin-top: 12px; color: #fca5a5; }
+.fs-perigo ul { margin: 0; padding-left: 18px; }
+.fs-perigo li { margin: 6px 0; color: #e2e8f0; font-size: 14.5px; }
+.fs-perigo b { color: #fecaca; }
+.fs-nota { margin: -4px 0 10px; color: #94a3b8; font-size: 14px; }
+.fs-casas { display: grid; gap: 8px; }
+.fs-casas button { display: block; width: 100%; text-align: left; padding: 12px 14px; border-radius: 12px; border: 1px solid #1f2937; border-left: 4px solid var(--c); background: #11151d; color: inherit; cursor: pointer; font: inherit; transition: background .15s, border-color .15s; }
+.fs-casas button:hover, .fs-casas button:focus-visible { border-color: var(--c); background: #171d28; outline: none; }
+.fs-casas b { display: block; color: var(--c); font-size: 16px; }
+.fs-casas small { display: block; color: #94a3b8; margin: 1px 0 4px; font-size: 13px; }
+.fs-casas span { display: block; font-size: 14px; color: #cbd5e1; }
+.fs-casas em { display: block; margin-top: 6px; font-style: normal; font-weight: 800; font-size: 13.5px; color: var(--c); }
+.fs-casas .fs-casa-unica { padding: 16px; }
+.fs-mais { margin-top: 10px; border-top: 1px solid #1f2937; }
+.fs-mais summary { cursor: pointer; padding: 12px 0 4px; font-weight: 800; font-size: 15px; color: #e2e8f0; }
+.fs-mais summary::marker { color: ${COR}; }
+.fs-lista { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 8px; padding: 8px 0 4px; }
+.fs-lista > div { display: flex; gap: 10px; align-items: flex-start; padding: 9px 12px; border-radius: 10px; background: #11151d; }
+.fs-lista span { font-size: 22px; line-height: 1.2; }
+.fs-lista i { flex: none; width: 12px; height: 12px; margin-top: 5px; border-radius: 50%; }
+.fs-lista p { margin: 0; font-size: 14px; color: #cbd5e1; }
+.fs-lista b { display: block; color: #f1f5f9; font-size: 14.5px; }
+.fs-controles { margin: 6px 0 4px; padding-left: 18px; }
+.fs-controles li { margin: 7px 0; color: #cbd5e1; }
+.fs-provas { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.fs-provas button { display: inline-flex; align-items: center; gap: 7px; padding: 9px 12px; border-radius: 10px; border: 1px solid #334155; background: #11151d; color: #e2e8f0; font-family: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
+.fs-provas button i { width: 10px; height: 10px; border-radius: 50%; }
+.fs-provas button.sim { border-color: #4ade80; background: #0f2a17; color: #bbf7d0; }
+.fs-provas button.nao { border-color: #7f1d1d; background: #1a0b0d; color: #94a3b8; text-decoration: line-through; }
+.fs-caixa > .fs-legenda { margin: 0 0 14px; font-size: 13.5px; color: #94a3b8; }
+.fs-contagem { display: inline-block; margin-left: 10px; text-transform: none; letter-spacing: 0; padding: 2px 10px; border-radius: 999px; background: #1e293b; color: #e2e8f0; font-size: 13px; font-weight: 800; vertical-align: middle; }
+.fs-monstros { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
+.fs-monstros button { text-align: left; padding: 12px 14px; border-radius: 12px; border: 1px solid #1f2937; background: #11151d; color: inherit; cursor: pointer; font: inherit; }
+.fs-monstros button:hover { border-color: #334155; }
+.fs-monstros button.fora { opacity: .3; }
+.fs-monstros button.escolhido { border-color: #facc15; box-shadow: 0 0 0 1px #facc15 inset; background: #1a1708; }
+.fs-monstros b { color: var(--c); font-size: 16.5px; }
+.fs-monstros i { display: inline-block; font-style: normal; font-size: 12.5px; font-weight: 700; padding: 3px 8px; border-radius: 7px; margin: 6px 4px 0 0; background: #1e293b; color: #cbd5e1; }
 .fs-monstros i.tem { background: #14532d; color: #bbf7d0; }
-.fs-monstros p { margin: 6px 0 0; font-size: 12px; color: #94a3b8; }
-.fs-monstros p em { color: #fca5a5; font-style: normal; }
-.fs-monstros p u { color: #86efac; text-decoration: none; }
-.fs-dica { margin-top: 12px; font-size: 13px; color: #94a3b8; }
-.fs-dica kbd { padding: 1px 6px; border-radius: 5px; background: #1f2937; color: #e2e8f0; font: inherit; font-weight: 800; }
+.fs-monstros p { margin: 7px 0 0; font-size: 13.5px; line-height: 1.45; color: #cbd5e1; }
+.fs-monstros p em { color: #fca5a5; font-style: normal; font-weight: 700; }
+.fs-monstros p u { color: #86efac; text-decoration: none; font-weight: 700; }
+.fs-caixa > .fs-dica { margin: 14px 0 0; font-size: 14px; color: #cbd5e1; }
+@media (max-width: 760px) { .fs-colunas { grid-template-columns: 1fr; } .fs-caixa { padding: 16px; } .fs-caixa h2 { font-size: 22px; } }
 .fs-fim li { display: flex; gap: 10px; align-items: center; padding: 8px 0; border-top: 1px solid #1f2937; list-style: none; }
 .fs-fim ul { padding: 0; margin: 10px 0 0; }
 .fs-fim li i { width: 10px; height: 10px; border-radius: 50%; }
@@ -469,13 +504,16 @@ export class Fantasmas {
     this.socket?.emit('fs-ver', (r) => {
       if (!r) return;
       if (r.estado?.fase === 'fim') return hud.mensagem('Caça-Fantasmas', 'A investigação está acabando. Tente já já.', 2500, COR);
-      if (r.estado) this.entrar(null);
-      else this.escolherCasa();
+      // com investigação em andamento, o mesmo modal explica o jogo e só tem o botão de entrar nela
+      this.escolherCasa(r.estado?.casa || null);
     });
     return true;
   }
 
-  escolherCasa() {
+  // O modal da entrada: o que é, como se joga em 4 passos, o perigo da caçada, a escolha da casa (ou
+  // entrar na que já está em andamento), e embaixo, para abrir, os aparelhos, as provas e os
+  // controles. emAndamento: o id da casa em que o time já está (null: quem entra escolhe).
+  escolherCasa(emAndamento = null) {
     estilos();
     let m = document.getElementById('fs-escolha');
     if (!m) {
@@ -487,15 +525,71 @@ export class Fantasmas {
         const b = ev.target.closest('[data-casa]');
         if (b) {
           this.fecharModal(m);
-          this.entrar(b.dataset.casa);
+          this.entrar(b.dataset.casa || null);
         } else if (ev.target.closest('.fs-fechar') || ev.target === m) this.fecharModal(m);
       });
     }
-    m.innerHTML = `<div class="fs-caixa"><button class="fs-fechar" type="button">Fechar</button><h2>Caça-Fantasmas</h2>
-      <p>Escolha a casa assombrada. Quem entrar depois cai na mesma investigação. Ache 3 provas, descubra qual dos 12 monstros é e saia vivo.</p>
-      <div class="fs-casas">${CASAS_RESUMO.map((c) => `<button type="button" data-casa="${c.id}" style="--c:${c.cor}"><b>${esc(c.nome)}</b><small>${esc(c.sub)}</small><span>${esc(c.desc)}</span></button>`).join('')}</div>
-      <p class="fs-dica"><kbd>F</kbd> lanterna · <kbd>1</kbd>–<kbd>9</kbd> aparelhos · <kbd>Clique</kbd> usa · <kbd>E</kbd> portas, luzes e esconderijos · <kbd>J</kbd> diário · <kbd>Shift</kbd> corre (pouco)</p>
-      <p class="fs-dica">Monstros 3D: Quaternius (poly.pizza) — CC0; a Banshee (Witch) e o Revenant (Animated Zombie) são CC BY 3.0.</p></div>`;
+    const andamento = emAndamento && CASAS_RESUMO.find((c) => c.id === emAndamento);
+    const TAMANHO = { pequena: 'Boa para começar', media: 'Para quem já jogou', grande: 'Difícil: muitos cômodos e caçada longa' };
+    const casas = andamento
+      ? `<p class="fs-nota">O time já está investigando esta casa. Você entra junto, na mesma partida.</p>
+        <div class="fs-casas"><button type="button" data-casa="" style="--c:${andamento.cor}" class="fs-casa-unica">
+          <b>${esc(andamento.nome)}</b><small>${esc(andamento.sub)}</small><span>${esc(andamento.desc)}</span><em>Entrar na investigação →</em></button></div>`
+      : `<p class="fs-nota">Quem entrar depois de você cai na mesma casa.</p>
+        <div class="fs-casas">${CASAS_RESUMO.map((c) => `<button type="button" data-casa="${c.id}" style="--c:${c.cor}">
+          <b>${esc(c.nome)}</b><small>${esc(c.sub)} · ${esc(TAMANHO[c.tam] || '')}</small><span>${esc(c.desc)}</span><em>Entrar →</em></button>`).join('')}</div>`;
+    const controles = isTouch
+      ? `<li>Toque num aparelho na barra de cima para escolher, e toque de novo para usar</li>
+        <li><b>🔦 Lanterna</b> e <b>📓 Diário</b>: os botões embaixo da tela</li>
+        <li><b>E</b>: abre portas, acende luzes, liga o disjuntor, pega o que você pôs no chão e entra no armário</li>`
+      : `<li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> anda · <kbd>Shift</kbd> corre (cansa rápido) · o mouse olha</li>
+        <li><kbd>F</kbd> liga e desliga a lanterna</li>
+        <li><kbd>1</kbd> a <kbd>9</kbd> (ou a roda do mouse) trocam o aparelho · <kbd>Clique</kbd> usa</li>
+        <li><kbd>E</kbd> abre portas, acende luzes, liga o disjuntor, pega o que você pôs no chão e entra no armário</li>
+        <li><kbd>J</kbd> abre o diário</li>`;
+    m.innerHTML = `<div class="fs-caixa fs-entrada" role="dialog" aria-labelledby="fs-titulo">
+      <button class="fs-fechar" type="button">Fechar ✕</button>
+      <h2 id="fs-titulo">👻 Caça-Fantasmas</h2>
+      <p class="fs-lead">Uma casa assombrada, de noite. Ache as provas, descubra <b>qual dos 12 monstros</b> mora lá e saia vivo.
+        Dá para ir sozinho, mas em grupo é bem melhor.</p>
+      <div class="fs-colunas">
+        <div>
+          <h3>Como jogar</h3>
+          <ol class="fs-passos">
+            <li><b>Ache o cômodo dele</b><p>Ande pela casa com a lanterna. Onde ele vive o leitor EMF apita, o termômetro cai e as coisas se mexem sozinhas.</p></li>
+            <li><b>Junte 3 provas</b><p>Cada monstro deixa <b>3 das 7 provas</b>. Use os aparelhos no cômodo dele: cada um mostra uma prova (lista lá embaixo).</p></li>
+            <li><b>Marque no diário</b><p>No diário, marque o que achou (✓) e o que não tem (✗). Os monstros que não batem ficam apagados.</p></li>
+            <li><b>Termine na van</b><p>Escolha o monstro no diário, volte à van e aperte o <b>botão vermelho</b>. Acertou: <b>+${JOGO.moedas.acertou} moedas</b> (+${JOGO.moedas.acertouMorto} se morreu). Só sobreviver: +${JOGO.moedas.sobreviveu}.</p></li>
+          </ol>
+          <div class="fs-perigo">
+            <h3>⚠️ Cuidado com a caçada</h3>
+            <ul>
+              <li>A <b>sanidade</b> (a barra no canto) cai no escuro e toda vez que você vê o fantasma. Luz acesa ajuda, e o remédio da van devolve ${JOGO.remedio}% (uma vez).</li>
+              <li>Com a sanidade baixa ele <b>caça</b>: as luzes piscam, a porta da rua tranca e ele vem atrás de alguém. Se pegar, você morre.</li>
+              <li>Ele acha quem ele vê, quem está com a lanterna ou um aparelho ligado e quem fala no microfone. Para escapar: <b>esconda-se num armário</b>, apague tudo e fique calado.</li>
+              <li>O <b>crucifixo</b> no chão impede caçadas perto dele, e o <b>incenso</b> aceso perto dele o acalma (ou o cega, na caçada).</li>
+            </ul>
+          </div>
+        </div>
+        <div>
+          <h3>${andamento ? 'Investigação em andamento' : 'Escolha a casa'}</h3>
+          ${casas}
+        </div>
+      </div>
+      <details class="fs-mais">
+        <summary>Os 9 aparelhos</summary>
+        <div class="fs-lista">${ITENS.map((it) => `<div><span>${ICONES[it.id]}</span><p><b>${isTouch ? '' : `<kbd>${it.tecla}</kbd> `}${esc(it.nome)}</b>${esc(it.dica)}${it.limite ? ` · você tem ${it.limite}` : ''}</p></div>`).join('')}</div>
+      </details>
+      <details class="fs-mais">
+        <summary>As 7 provas</summary>
+        <div class="fs-lista">${IDS_PROVAS.map((p) => `<div><i style="background:${PROVAS[p].cor}"></i><p><b>${esc(PROVAS[p].nome)}</b>${esc(PROVAS[p].dica)}</p></div>`).join('')}</div>
+      </details>
+      <details class="fs-mais">
+        <summary>Controles</summary>
+        <ul class="fs-controles">${controles}</ul>
+      </details>
+      <p class="fs-credito">Monstro 3D: “Ghost Lady v2”, de Loves_Art (Sketchfab), licença CC BY 4.0.</p>
+    </div>`;
     this.abrirModal(m);
   }
 
@@ -1125,17 +1219,22 @@ export class Fantasmas {
     const nao = IDS_PROVAS.filter((p) => this.provas[p] === -1);
     const servem = new Set(possiveis(sim, nao).map((x) => x.id));
     const e = this.e;
-    m.innerHTML = `<div class="fs-caixa"><button class="fs-fechar" type="button">Fechar (J)</button>
-      <h2>Diário de investigação</h2>
-      <p>${esc(this.C?.nome || '')} · Fantasma: <b>${esc(e?.nome || '?')}</b>${e ? `, ${e.idade} anos` : ''}. Clique numa prova para marcar (✓ achei / ✗ descartei). Cada monstro deixa 3 provas.</p>
+    const palpite = this.palpite && MONSTRO[this.palpite];
+    m.innerHTML = `<div class="fs-caixa"><button class="fs-fechar" type="button">Fechar${isTouch ? '' : ' (J)'}</button>
+      <h2>📓 Diário de investigação</h2>
+      <p>${esc(this.C?.nome || '')} · O fantasma: <b>${esc(e?.nome || '?')}</b>${e ? `, ${e.idade} anos` : ''}.</p>
+      <h3>1. As provas que você achou</h3>
       <div class="fs-provas">${IDS_PROVAS.map((p) => {
     const s = this.provas[p];
-    return `<button type="button" data-prova="${p}" class="${s === 1 ? 'sim' : s === -1 ? 'nao' : ''}" title="${esc(PROVAS[p].dica)}">${s === 1 ? '✓ ' : s === -1 ? '✗ ' : ''}${esc(PROVAS[p].nome)}</button>`;
+    return `<button type="button" data-prova="${p}" class="${s === 1 ? 'sim' : s === -1 ? 'nao' : ''}" title="${esc(PROVAS[p].dica)}"><i style="background:${PROVAS[p].cor}"></i>${s === 1 ? '✓ ' : s === -1 ? '✗ ' : ''}${esc(PROVAS[p].nome)}</button>`;
   }).join('')}</div>
+      <p class="fs-legenda">Clique numa prova: 1ª vez <b>✓ achei</b>, 2ª vez <b>✗ não tem</b>, 3ª vez limpa. Cada monstro deixa 3 provas; passe o mouse numa prova para ver como achá-la.</p>
+      <h3>2. Qual monstro é? <span class="fs-contagem">${servem.size === 1 ? 'Só 1 bate' : `${servem.size} de ${MONSTROS.length} batem`}</span></h3>
       <div class="fs-monstros">${MONSTROS.map((x) => `<button type="button" data-monstro="${x.id}" style="--c:${x.cor}" class="${servem.has(x.id) ? '' : 'fora'} ${this.palpite === x.id ? 'escolhido' : ''}">
         <b>${this.palpite === x.id ? '★ ' : ''}${esc(x.nome)}</b><br>${x.provas.map((p) => `<i class="${this.provas[p] === 1 ? 'tem' : ''}">${esc(PROVAS[p].curto)}</i>`).join('')}
         <p>${esc(x.desc)}</p><p><em>Força:</em> ${esc(x.forca)}</p><p><u>Fraqueza:</u> ${esc(x.fraqueza)}</p></button>`).join('')}</div>
-      <p class="fs-dica">Escolha o monstro (clique) e volte à van: o <b>botão vermelho</b> termina a investigação. Acertou, ganha moedas. ${IDS_PROVAS.map((p) => `<br>· <b>${esc(PROVAS[p].curto)}</b>: ${esc(PROVAS[p].dica)}`).join('')}</p></div>`;
+      <p class="fs-dica">3. ${palpite ? `Seu palpite: <b style="color:${palpite.cor}">${esc(palpite.nome)}</b>. Volte à van e aperte o <b>botão vermelho</b> para terminar.` : 'Clique no monstro que você acha que é (★) e depois aperte o <b>botão vermelho</b> da van para terminar.'}
+        Acertou: +${JOGO.moedas.acertou} moedas.</p></div>`;
   }
 
   mostrarFim(f) {
@@ -1265,7 +1364,7 @@ export class Fantasmas {
         m.setModo('inteiro');
         // na caçada ele pisca
         const ritmo = (Math.sin(t * 9.1) + Math.sin(t * 5.3 + 1) + Math.sin(t * 13.7)) / 3;
-        visivel = ritmo > (m.def.id === 'oni' ? -0.6 : -0.25);
+        visivel = ritmo > (this.e?.pisca ?? -0.25);
         brilho = 1;
         interferencia = Math.max(0, 1 - distG / 14);
       }

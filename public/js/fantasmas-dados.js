@@ -21,103 +21,97 @@ export const PROVAS = {
 export const IDS_PROVAS = Object.keys(PROVAS);
 
 // ------------------------------------------------------------------ os 12 monstros
-// modelo: o .glb (public/models/fantasmas, Quaternius; os créditos estão no README de lá). clipes:
-// pedaços do nome das animações, na ordem de preferência. velocidade: m/s andando à toa;
-// caca: m/s na caçada, sem ver ninguém / vendo alguém. sanidade: abaixo dela (média do time) ele
-// pode caçar. voa: flutua (anda sem pé no chão).
+// Todos aparecem como a mesma dama de véu (como no Phasmophobia, a cara não entrega o tipo: só as
+// provas). DAMA: o .glb (public/models/fantasmas/dama.glb, ver scripts/preparar-dama.js e o README
+// de public/models), a altura, a cor da borda que brilha e os clipes (pedaços do nome das animações,
+// na ordem de preferência). olhos: false (o rosto fica sob o cabelo); voa: flutua, sem pé no chão.
+// velocidade: m/s andando à toa; caca: m/s na caçada, sem ver ninguém / vendo alguém. sanidade:
+// abaixo dela (média do time) ele pode caçar.
+const DAMA = {
+  modelo: 'dama', altura: 1.8, borda: '#7dd3fc', olhos: false,
+  clipes: { parado: ['Idle'], andar: ['Walk'], correr: ['Run'], ataque: ['Attack'] },
+};
 export const MONSTROS = [
   {
     id: 'espirito', nome: 'Espírito', provas: ['emf', 'spirit', 'escrita'], cor: '#93c5fd',
-    modelo: 'espirito', altura: 1.75, voa: true, flutua: 0.35, olhos: false,
-    clipes: { parado: ['Flying_Idle'], andar: ['Flying_Idle'], correr: ['Fast_Flying'], ataque: ['Headbutt', 'Punch'] },
+    ...DAMA,
     velocidade: 1.6, caca: [1.7, 2.4], sanidade: 50,
     desc: 'Um espírito comum, preso a este lugar. Ninguém sabe o que ele quer.',
     forca: 'Nenhuma conhecida.', fraqueza: 'O incenso o acalma por muito mais tempo: 3 minutos sem caçar.',
   },
   {
     id: 'espectro', nome: 'Espectro', provas: ['emf', 'spirit', 'dots'], cor: '#c4b5fd',
-    modelo: 'espectro', altura: 1.9, voa: true, flutua: 0.45,
-    clipes: { parado: ['Flying_Idle'], andar: ['Flying_Idle'], correr: ['Fast_Flying'], ataque: ['Headbutt', 'Punch'] },
+    ...DAMA,
     velocidade: 1.6, caca: [1.7, 2.5], sanidade: 50,
-    desc: 'Flutua sem tocar o chão e some de um lugar para aparecer em outro.',
+    desc: 'Some de um lugar para aparecer em outro, sem passar pelo meio.',
     forca: 'Às vezes se teleporta para perto de alguém (o EMF marca 2 onde ele chega).', fraqueza: 'O incenso o deixa tonto por mais tempo na caçada.',
   },
   {
     id: 'poltergeist', nome: 'Poltergeist', provas: ['spirit', 'digitais', 'escrita'], cor: '#fca5a5',
-    modelo: 'poltergeist', altura: 1.6, voa: true, flutua: 0.6,
-    clipes: { parado: ['Flying_Idle'], andar: ['Flying_Idle'], correr: ['Fast_Flying'], ataque: ['Headbutt', 'Punch'] },
+    ...DAMA,
     velocidade: 1.7, caca: [1.7, 2.4], sanidade: 50,
-    desc: 'A caveira barulhenta: adora arremessar coisas e bater portas.',
+    desc: 'O barulhento: adora arremessar coisas e bater portas.',
     forca: 'Joga vários objetos de uma vez, e cada arremesso assusta quem vê.', fraqueza: 'Num cômodo vazio, sem nada para jogar, fica inofensivo.',
   },
   {
     id: 'banshee', nome: 'Banshee', provas: ['digitais', 'orbes', 'dots'], cor: '#f0abfc',
-    modelo: 'banshee', altura: 1.75,
-    clipes: { parado: ['Idle_Neutral', 'Idle'], andar: ['Walk'], correr: ['Run'], ataque: ['Punch_Right', 'Sword_Slash'] },
+    ...DAMA,
     velocidade: 1.6, caca: [1.7, 2.4], sanidade: 50,
-    desc: 'A bruxa que escolhe uma vítima e só larga quando ela morre. Às vezes grita no Spirit Box.',
+    desc: 'Escolhe uma vítima e só larga quando ela morre. Às vezes grita no Spirit Box.',
     forca: 'Caça pela sanidade de UMA pessoa só, a escolhida, não pela média do time.', fraqueza: 'O crucifixo a segura mais longe (5 m).',
   },
   {
     id: 'mare', nome: 'Pesadelo', provas: ['spirit', 'orbes', 'escrita'], cor: '#94a3b8',
-    modelo: 'mare', altura: 1.85, olhos: false,
-    clipes: { parado: ['Idle'], andar: ['Running', 'Run'], correr: ['Running', 'Run'], ataque: ['Attack'] },
+    ...DAMA,
     velocidade: 1.6, caca: [1.7, 2.4], sanidade: 50,
-    desc: 'O esqueleto que vive no escuro. Odeia luz e apaga tudo o que encontra aceso.',
+    desc: 'Vive no escuro. Odeia luz e apaga tudo o que encontra aceso.',
     forca: 'No escuro caça mais cedo (60% de sanidade).', fraqueza: 'Com a luz acesa no cômodo dele, só caça abaixo de 40%. Nunca acende uma luz.',
   },
   {
     id: 'revenant', nome: 'Revenant', provas: ['orbes', 'escrita', 'frio'], cor: '#a3e635',
-    modelo: 'revenant', altura: 1.8,
-    clipes: { parado: ['ZombieIdle', 'Idle'], andar: ['ZombieWalk', 'Walk'], correr: ['ZombieRun', 'Run'], ataque: ['ZombieBite', 'Attack'] },
+    ...DAMA,
     velocidade: 1.1, caca: [1.0, 3.2], sanidade: 50,
     desc: 'O morto que voltou. Lento quando não vê ninguém; quando vê, é o mais rápido de todos.',
     forca: 'Vendo você na caçada, corre a mais de 3 m/s.', fraqueza: 'Sem ver ninguém anda devagar: esconda-se e ele perde o rastro.',
   },
   {
     id: 'demonio', nome: 'Demônio', provas: ['digitais', 'escrita', 'frio'], cor: '#ef4444',
-    modelo: 'demonio', altura: 2.1,
-    clipes: { parado: ['Idle'], andar: ['Walk'], correr: ['Run'], ataque: ['Punch', 'Weapon'] },
+    ...DAMA,
     velocidade: 1.7, caca: [1.8, 2.5], sanidade: 70,
     desc: 'O mais agressivo: caça cedo e caça sempre.',
     forca: 'Caça com 70% de sanidade e com menos espera entre uma caçada e outra.', fraqueza: 'O crucifixo o segura de mais longe (5 m).',
   },
   {
     id: 'oni', nome: 'Oni', provas: ['emf', 'frio', 'dots'], cor: '#60a5fa',
-    modelo: 'oni', altura: 2.2,
-    clipes: { parado: ['Idle'], andar: ['Walk'], correr: ['Run2', 'Run'], ataque: ['Punch', 'Weapon'] },
+    ...DAMA,
     velocidade: 1.8, caca: [1.8, 2.5], sanidade: 50,
-    desc: 'O demônio azul, cheio de energia. Fica mais ativo com gente por perto.',
+    desc: 'Um demônio cheio de energia. Fica mais ativo com gente por perto.',
     forca: 'Aparece muito mais e mexe em tudo; na caçada pisca menos (fica mais tempo à vista).', fraqueza: 'Tão exibido que é fácil de achar.',
   },
   {
     id: 'hantu', nome: 'Hantu', provas: ['digitais', 'orbes', 'frio'], cor: '#bae6fd',
-    modelo: 'hantu', altura: 2.0, olhos: false,
-    clipes: { parado: ['Idle'], andar: ['Walk'], correr: ['Walk'], ataque: ['Bite_Front', 'Attack'] },
+    ...DAMA,
     velocidade: 1.4, caca: [1.4, 2.0], sanidade: 50,
-    desc: 'A fera das neves. Fica mais forte quanto mais frio estiver.',
+    desc: 'Gosta do frio. Fica mais forte quanto mais gelado estiver o cômodo.',
     forca: 'Nos cômodos gelados (abaixo de 3 °C) corre bem mais (2,7 m/s).', fraqueza: 'Em cômodo quente é lento. Nunca liga o disjuntor.',
   },
   {
     id: 'raiju', nome: 'Raiju', provas: ['emf', 'orbes', 'dots'], cor: '#facc15',
-    modelo: 'raiju', altura: 1.3,
-    clipes: { parado: ['Idle'], andar: ['Walk'], correr: ['Run'], ataque: ['Headbutt', 'Attack'] },
+    ...DAMA,
     velocidade: 1.7, caca: [1.7, 2.4], sanidade: 50,
-    desc: 'O lobo do trovão, que se alimenta de eletricidade.',
+    desc: 'O espírito do trovão, que se alimenta de eletricidade.',
     forca: 'Perto de lanternas e aparelhos ligados corre a 2,6 m/s, e embaralha tudo de mais longe.', fraqueza: 'Com tudo desligado, é um fantasma comum.',
   },
   {
     id: 'yokai', nome: 'Yokai', provas: ['spirit', 'orbes', 'dots'], cor: '#86efac',
-    modelo: 'yokai', altura: 1.4,
-    clipes: { parado: ['Idle'], andar: ['Walk'], correr: ['Run'], ataque: ['Attack'] },
+    ...DAMA,
     velocidade: 1.7, caca: [1.7, 2.4], sanidade: 50,
-    desc: 'O duende que se irrita com barulho. Falar no microfone perto dele é pedir para ser caçado.',
+    desc: 'Se irrita com barulho. Falar no microfone perto dele é pedir para ser caçado.',
     forca: 'Gente falando perto faz ele caçar com 80% de sanidade.', fraqueza: 'Na caçada só escuta quem fala muito perto (2 m).',
   },
   {
     id: 'deogen', nome: 'Deogen', provas: ['spirit', 'escrita', 'dots'], cor: '#e5e7eb',
-    modelo: 'deogen', altura: 1.9,
-    clipes: { parado: ['Alien_Idle', 'Idle'], andar: ['Alien_Walk', 'Walk'], correr: ['Alien_Run', 'Run'], ataque: ['Alien_Punch', 'Punch'] },
+    ...DAMA,
     velocidade: 1.5, caca: [3.0, 3.0], sanidade: 40,
     desc: 'Sempre sabe onde você está. Ninguém se esconde dele.',
     forca: 'Na caçada vem direto até você, muito rápido, mesmo escondido.', fraqueza: 'Bem perto fica lentíssimo (0,4 m/s): dá para correr em círculos em volta dele.',

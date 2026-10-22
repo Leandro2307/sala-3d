@@ -9,6 +9,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { PAREDE, linhaDoLado, caixaDoMovel, MODELO_URL, semente } from './fantasmas-dados.js';
 
@@ -1717,7 +1718,7 @@ export class Casa3D {
 }
 
 // ------------------------------------------------------------------ o monstro
-const loader = new GLTFLoader();
+const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder); // a dama vem com meshopt
 const MODELOS = new Map();
 
 function acharClipe(clipes, nomes) {
@@ -1729,42 +1730,53 @@ function acharClipe(clipes, nomes) {
 }
 
 // o material de assombração: a cor do modelo escurecida, com a borda brilhando na cor do monstro
-// Os modelos (Quaternius) pintam cada parte com uma cor lisa: a parte cinza-clara sem cor (olho,
-// dente, garra) vira brasa vermelha, e o resto do boneco de desenho animado fica podre — sem cor e
-// escuro. olhos: false nos que são claros inteiros (o esqueleto, o lençol, o pelo do yeti).
+// Nos modelos de cor lisa (os de desenho animado), a parte cinza-clara sem cor (olho, dente, garra)
+// vira brasa vermelha, e o resto fica podre — sem cor e escuro. olhos: false nos que não têm olho
+// para acender (a dama, com o rosto sob o cabelo). Com textura (a dama), escurece menos (o vestido
+// já é preto e a pele pálida é o que aparece na lanterna) e a borda brilha menos e mais na beirada:
+// o vestido é cheio de dobras, e a borda de antes acendia todas, deixando a dama azul-clara.
 function materialAssombrado(original, cor, modo, olhos = true) {
   const base = original.color ? original.color.clone() : new THREE.Color(0xffffff);
   const hsl = base.getHSL({}, THREE.SRGBColorSpace);
   // no vulto (a sombra preta) os olhos também ficam acesos
-  const olho = olhos && !original.map && hsl.s < 0.25 && hsl.l > 0.42;
-  if (modo === 'inteiro' && !olho) base.setHSL(hsl.h, hsl.s * 0.4, hsl.l * 0.45, THREE.SRGBColorSpace);
+  const textura = !!original.map;
+  const olho = olhos && !textura && hsl.s < 0.25 && hsl.l > 0.42;
+  if (modo === 'inteiro' && !olho) base.setHSL(hsl.h, hsl.s * 0.4, hsl.l * (textura ? 0.75 : 0.45), THREE.SRGBColorSpace);
   const aro = new THREE.Color(cor).multiplyScalar(0.55);
   const m = new THREE.MeshStandardMaterial({
     map: modo === 'inteiro' ? original.map || null : null,
     color: modo === 'vulto' ? new THREE.Color(0x020203) : olho ? new THREE.Color(0x0a0000) : base,
-    roughness: 0.85,
+    roughness: textura ? 0.9 : 0.85,
+    side: original.side, // o pano da dama é uma folha só: o avesso também aparece
     metalness: 0,
     transparent: true,
     opacity: 1,
     emissive: olho ? new THREE.Color(0xff1a05) : aro,
-    emissiveIntensity: olho ? 2.4 : modo === 'vulto' ? 0.02 : 0.04,
+    emissiveIntensity: olho ? 2.4 : modo === 'vulto' ? 0.02 : textura ? 0.005 : 0.04,
     // a sombra nunca é toda opaca: dá para ver a parede através dela
     depthWrite: modo !== 'vulto',
   });
   m.userData.olho = olho;
-  m.userData.borda = { value: modo === 'vulto' ? 1.6 : 0.45 };
+  // bordaBase e emissivo: quanto a borda e o corpo brilham parados (Monstro3D.update soma o brilho
+  // da caçada). Na textura escura da dama, o brilho do corpo de antes já a pintava de azul-claro.
+  m.userData.bordaBase = modo === 'vulto' ? (textura ? 1.1 : 1.6) : textura ? 0.12 : 0.45;
+  m.userData.borda = { value: m.userData.bordaBase };
+  m.userData.bordaPot = { value: textura ? 5 : 2.2 };
+  m.userData.emissivo = modo === 'vulto' ? 0.02 : textura ? 0.005 : 0.04;
+  m.userData.emissivoCaca = textura ? 0.03 : 0.1;
   m.userData.cor = { value: modo === 'vulto' ? new THREE.Color(cor) : aro };
   m.onBeforeCompile = (sh) => {
     sh.uniforms.uBorda = m.userData.borda;
+    sh.uniforms.uBordaPot = m.userData.bordaPot;
     sh.uniforms.uBordaCor = m.userData.cor;
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform float uBorda;\nuniform vec3 uBordaCor;')
+      .replace('#include <common>', '#include <common>\nuniform float uBorda;\nuniform float uBordaPot;\nuniform vec3 uBordaCor;')
       // a textura (os modelos que têm) também perde a cor
       .replace('#include <color_fragment>', `#include <color_fragment>
         float fsLum = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
         diffuseColor.rgb = mix(vec3(fsLum), diffuseColor.rgb, 0.55) * vec3(0.95, 0.88, 0.85);`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
-        float aro = pow(1.0 - abs(dot(normal, normalize(vViewPosition))), 2.2);
+        float aro = pow(1.0 - abs(dot(normal, normalize(vViewPosition))), uBordaPot);
         totalEmissiveRadiance += uBordaCor * aro * uBorda;`);
   };
   m.customProgramCacheKey = () => `assombrado-${modo}`;
@@ -1911,9 +1923,9 @@ export class Monstro3D {
     for (const { mats } of this.malhas) {
       for (const m of [].concat(mats.vulto, mats.inteiro)) {
         m.opacity = opacidade;
-        m.userData.borda.value = (this.modo === 'vulto' ? 1.6 : 0.45) + brilho * (this.modo === 'vulto' ? 1.5 : 0.5);
+        m.userData.borda.value = m.userData.bordaBase + brilho * (this.modo === 'vulto' ? 1.5 : 0.5);
         // os olhos em brasa pulsam
-        m.emissiveIntensity = m.userData.olho ? 1.8 + brilho * 1.5 + Math.sin(this.t * 6) * 0.4 : (this.modo === 'vulto' ? 0.02 : 0.04) + brilho * 0.1;
+        m.emissiveIntensity = m.userData.olho ? 1.8 + brilho * 1.5 + Math.sin(this.t * 6) * 0.4 : m.userData.emissivo + brilho * m.userData.emissivoCaca;
       }
     }
     if (visivel) this.mixer.update(dt);
