@@ -8,7 +8,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { isTouch } from './touch.js';
 import { CAMINHO, PISTA } from './pista.js';
-import { TEMA, SOL_DA_TARDE, arvoresDoTema, pintar as pintarTema } from './temas3d.js';
+import { TEMA, SOL_DA_TARDE, arvoresDoTema, pintar as pintarTema, texturaFoto, relevoFoto, materiaisCoqueiro } from './temas3d.js';
 
 const LEVE = isTouch; // celular: menos árvores, terreno mais grosso
 // Lado do pedaço do mapa em que as plantas são agrupadas (ver instanciar). No celular, pedaços
@@ -304,23 +304,6 @@ function criarCeu(scene, solDir) {
 }
 
 // ------------------------------------------------------------------ texturas
-function texturaGrao(tamanho, base, variacao, seed) {
-  const rnd = semente(seed);
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = tamanho;
-  const ctx = canvas.getContext('2d');
-  const img = ctx.createImageData(tamanho, tamanho);
-  for (let i = 0; i < tamanho * tamanho; i++) {
-    const v = Math.round(255 * (base + (rnd() - 0.5) * variacao));
-    img.data.set([v, v, v, 255], i * 4);
-  }
-  ctx.putImageData(img, 0, 0);
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
-
 // normal map da água: ondinhas feitas de senos com frequência inteira, para emendar sem costura
 function texturaAgua(tamanho = 128) {
   const ondas = [[3, 1, 0.9, 0.3], [1, 4, 0.7, 1.7], [5, -2, 0.45, 2.9], [-2, 6, 0.35, 4.1], [7, 3, 0.25, 0.8]];
@@ -391,9 +374,12 @@ function criarTerreno(scene, area) {
   }
   geo.setAttribute('color', new THREE.BufferAttribute(cores, 3));
 
-  const grao = texturaGrao(128, 0.92, 0.16, 5);
-  grao.repeat.set(tamanho / 6, tamanho / 6);
-  const mat = new THREE.MeshLambertMaterial({ vertexColors: true, map: grao, flatShading: true });
+  // a foto da grama (em cinza: a cor é a do vértice, do tema) e o relevo dela, a cada 5 m
+  const fotoGrama = texturaFoto('grama');
+  fotoGrama.repeat.set(tamanho / 5, tamanho / 5);
+  const relevo = relevoFoto('grama');
+  relevo.repeat.copy(fotoGrama.repeat);
+  const mat = new THREE.MeshLambertMaterial({ vertexColors: true, map: fotoGrama, normalMap: relevo, normalScale: new THREE.Vector2(0.7, 0.7), flatShading: true });
   const matLonge = soSol(mat.clone());
   // Duas malhas: os triângulos até 80 m da cerca (pelo centro), onde luz pontual ainda chega, e o
   // resto com o shader só de sol. Os mesmos atributos nas duas (sobem uma vez para a placa de
@@ -595,9 +581,14 @@ function criarLago(scene, renderer, ceuMat, x, z, raio, decorar, tipo = 'lago') 
   agua.receiveShadow = true;
   scene.add(agua);
 
+  // a margem: a foto da areia (uv da ShapeGeometry em metros: uma repetição a cada 4 m)
+  const areia = texturaFoto('areia');
+  areia.repeat.setScalar(1 / 4);
+  const relevoAreia = relevoFoto('areia');
+  relevoAreia.repeat.copy(areia.repeat);
   const margem = new THREE.Mesh(
     new THREE.ShapeGeometry(forma, 6),
-    new THREE.MeshLambertMaterial({ color: T.margem, map: texturaGrao(64, 0.9, 0.2, 9) }),
+    new THREE.MeshLambertMaterial({ color: T.margem, map: areia, normalMap: relevoAreia }),
   );
   margem.rotation.x = -Math.PI / 2;
   margem.scale.set(T.borda, T.borda, 1);
@@ -956,10 +947,16 @@ export function criarNatureza(scene, renderer, {
   // No PC, as árvores a mais de 60 m da cerca usam o shader só de sol. No celular ficam num
   // material só: lá o pixel é pouco, e o desenho a mais pesaria mais que o que ele poupa.
   const matPlantaLonge = LEVE ? null : soSol(matPlanta.clone());
+  // o coqueiro tem dois materiais (tronco e folhas recortadas, ver temas3d.materiaisCoqueiro)
+  const matsCoqueiro = materiaisCoqueiro();
+  const matsCoqueiroLonge = LEVE ? null : matsCoqueiro.map((m) => soSol(m.clone()));
   const plantar = (geo, lista) => {
-    const longe = (a) => !!matPlantaLonge && foraDaArea(a.x, a.z, area) > 60;
-    instanciar(grupo, geo, matPlanta, lista.filter((a) => !longe(a)));
-    if (matPlantaLonge) instanciar(grupo, geo, matPlantaLonge, lista.filter(longe));
+    const coqueiro = geo.userData.materiais === 'coqueiro';
+    const perto = coqueiro ? matsCoqueiro : matPlanta;
+    const daLonge = coqueiro ? matsCoqueiroLonge : matPlantaLonge;
+    const longe = (a) => !!daLonge && foraDaArea(a.x, a.z, area) > 60;
+    instanciar(grupo, geo, perto, lista.filter((a) => !longe(a)));
+    if (daLonge) instanciar(grupo, geo, daLonge, lista.filter(longe));
   };
   const geos = arvoresDoTema();
   for (const [tipo, lista] of Object.entries(listas)) {

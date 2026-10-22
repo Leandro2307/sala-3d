@@ -15,13 +15,14 @@ export const SOL_DA_TARDE = [0.55, 0.62, -0.56];
 const ESC = moduloQualidade.ESCALA_TEXTURA ?? 1;
 
 // ------------------------------------------------------------------ utilidades
-export function pintar(geo, cor) {
+// comUv: guarda as coordenadas de textura (as peças texturizadas do coqueiro)
+export function pintar(geo, cor, comUv = false) {
   const g = geo.index ? geo.toNonIndexed() : geo;
   const c = new THREE.Color(cor);
   const arr = new Float32Array(g.attributes.position.count * 3);
   for (let i = 0; i < arr.length; i += 3) arr.set([c.r, c.g, c.b], i);
   g.setAttribute('color', new THREE.BufferAttribute(arr, 3));
-  if (g.attributes.uv) g.deleteAttribute('uv');
+  if (g.attributes.uv && !comUv) g.deleteAttribute('uv');
   return g;
 }
 const juntar = (partes) => mergeGeometries(partes);
@@ -50,65 +51,171 @@ export function textura(w, h, desenhar, { repetir = false } = {}) {
   if (repetir) tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   return tex;
 }
+// As fotos de textura do chão (public/img/texturas, ver scripts/texturas.js). cor: a imagem é cor
+// (sRGB); o relevo (-n) não. A imagem chega depois: até lá o material fica sem ela.
+const carregador = new THREE.TextureLoader();
+export function texturaFoto(nome, { cor = true } = {}) {
+  const t = carregador.load(`/img/texturas/${nome}.webp`);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = 8;
+  if (cor) t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+export const relevoFoto = (nome) => texturaFoto(`${nome}-n`, { cor: false });
+
+// o relevo das tábuas, quando a rua do tema é de madeira (a mesma repetição da texturaRua)
+export function relevoRua() {
+  return TEMA.rua.tipo === 'madeira' ? relevoFoto('deque') : null;
+}
+
 function roundRect(ctx, x, y, w, h, r) {
   ctx.beginPath();
   ctx.roundRect ? ctx.roundRect(x, y, w, h, r) : ctx.rect(x, y, w, h);
 }
 
 // ------------------------------------------------------------------ árvores
-// Folha de coqueiro: uma tira que sai do topo, arqueia e cai, afinando na ponta (dois lados)
+// Folha de coqueiro: uma tira que sai do topo, arqueia e cai, afinando na ponta. As duas metades
+// caem um pouco para os lados (forma de V). uv: u ao longo da folha, v de um lado ao outro (0,5 é
+// a nervura): a textura desenha os folíolos e o resto é recortado (alphaTest).
 function folhaCoqueiro(comp, larg, queda) {
-  const n = 7;
+  const n = 8;
   const pos = [];
+  const uv = [];
+  const ponto = (t) => [t * comp, Math.sin(t * Math.PI * 0.9) * comp * 0.16 - t * t * queda];
+  const largura = (t) => larg * Math.pow(Math.sin(Math.PI * (0.06 + t * 0.94)), 0.6) * (1 - t * 0.3);
   for (let i = 0; i < n; i++) {
     const t0 = i / n;
     const t1 = (i + 1) / n;
-    const ponto = (t) => [t * comp, Math.sin(t * Math.PI * 0.9) * comp * 0.18 - t * t * queda];
     const [x0, y0] = ponto(t0);
     const [x1, y1] = ponto(t1);
-    const w0 = larg * Math.sin(Math.PI * (0.15 + t0 * 0.85)) * (1 - t0 * 0.6);
-    const w1 = larg * Math.sin(Math.PI * (0.15 + t1 * 0.85)) * (1 - t1 * 0.6);
-    // as duas metades da folha caem um pouco para os lados (forma de V)
-    pos.push(x0, y0, 0, x1, y1, 0, x0, y0 - w0 * 0.25, w0, x1, y1, 0, x1, y1 - w1 * 0.25, w1, x0, y0 - w0 * 0.25, w0);
-    pos.push(x0, y0, 0, x0, y0 - w0 * 0.25, -w0, x1, y1, 0, x1, y1, 0, x0, y0 - w0 * 0.25, -w0, x1, y1 - w1 * 0.25, -w1);
+    const w0 = largura(t0);
+    const w1 = largura(t1);
+    for (const lado of [1, -1]) {
+      const v = 0.5 + lado * 0.5;
+      const a = [x0, y0, 0, t0, 0.5];
+      const b = [x1, y1, 0, t1, 0.5];
+      const c = [x1, y1 - w1 * 0.3, w1 * lado, t1, v];
+      const d = [x0, y0 - w0 * 0.3, w0 * lado, t0, v];
+      for (const p of lado > 0 ? [a, b, c, a, c, d] : [a, c, b, a, d, c]) {
+        pos.push(p[0], p[1], p[2]);
+        uv.push(p[3], p[4]);
+      }
+    }
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
   g.computeVertexNormals();
   return g;
 }
 
+// A textura da folha: a nervura no meio e os folíolos saindo dela inclinados para a ponta, longos
+// no meio da folha e curtos nas pontas. Fundo transparente (o material recorta).
+let texFolha = null;
+function texturaFolhaCoqueiro() {
+  if (texFolha) return texFolha;
+  const rnd = semente(21);
+  texFolha = textura(512, 128, (ctx, w, h) => {
+    const meio = h / 2;
+    ctx.lineCap = 'round';
+    for (let x = 6; x < w - 4; x += 4.2) {
+      const t = x / w;
+      const comp = (h / 2 - 3) * Math.pow(Math.sin(Math.PI * (0.06 + t * 0.94)), 0.5) * (0.85 + rnd() * 0.15);
+      for (const lado of [1, -1]) {
+        if (rnd() < 0.06) continue; // um folíolo faltando aqui e ali
+        const tom = 0.8 + rnd() * 0.35;
+        ctx.strokeStyle = `rgb(${Math.round(70 * tom)},${Math.round(150 * tom)},${Math.round(55 * tom)})`;
+        ctx.lineWidth = 2.6;
+        ctx.beginPath();
+        ctx.moveTo(x, meio);
+        // o folíolo sai para a ponta da folha e cai um pouco no fim
+        ctx.quadraticCurveTo(x + comp * 0.35, meio + lado * comp * 0.75, x + comp * 0.75, meio + lado * comp);
+        ctx.stroke();
+      }
+    }
+    // a nervura
+    ctx.strokeStyle = '#9fb25a';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(0, meio);
+    ctx.lineTo(w, meio);
+    ctx.stroke();
+  });
+  return texFolha;
+}
+
+// a casca: anéis escuros (as cicatrizes das folhas velhas) num cinza-marrom, dois por gomo
+let texCasca = null;
+function texturaCasca() {
+  if (texCasca) return texCasca;
+  const rnd = semente(22);
+  texCasca = textura(64, 128, (ctx, w, h) => {
+    ctx.fillStyle = '#8c7458';
+    ctx.fillRect(0, 0, w, h);
+    for (let i = 0; i < 260; i++) {
+      const t = 110 + Math.floor(rnd() * 60);
+      ctx.fillStyle = `rgba(${t},${t - 18},${t - 40},0.5)`;
+      ctx.fillRect(rnd() * w, rnd() * h, 1 + rnd() * 3, 1);
+    }
+    for (const y of [0, h / 2]) {
+      ctx.fillStyle = 'rgba(55,40,28,0.75)';
+      ctx.fillRect(0, y, w, 5);
+      ctx.fillStyle = 'rgba(190,170,140,0.35)';
+      ctx.fillRect(0, y + 5, w, 2);
+    }
+  }, { repetir: true });
+  return texCasca;
+}
+
+// Os dois materiais do coqueiro (grupo 0: tronco e cocos; grupo 1: folhas). A natureza faz cópias
+// com o shader só de sol para os de longe.
+export function materiaisCoqueiro() {
+  return [
+    new THREE.MeshLambertMaterial({ vertexColors: true, map: texturaCasca() }),
+    new THREE.MeshLambertMaterial({ vertexColors: true, map: texturaFolhaCoqueiro(), alphaTest: 0.4, side: THREE.DoubleSide }),
+  ];
+}
+
 function geoCoqueiro(altura = 9, folhas = 8, seed = 3) {
   const rnd = semente(seed);
-  const partes = [];
-  // tronco curvo: gomos que vão inclinando, com anéis mais escuros
+  const tronco = [];
+  const copa = [];
+  // tronco curvo: gomos que vão inclinando, mais grosso no pé
   const gomos = 9;
   let x = 0;
   let y = 0;
   const curva = 0.55;
   for (let i = 0; i < gomos; i++) {
     const h = altura / gomos;
-    const r0 = 0.32 - i * 0.012;
-    const r1 = r0 - 0.012;
+    const r0 = 0.3 - i * 0.011 + (i === 0 ? 0.08 : 0);
+    const r1 = 0.3 - (i + 1) * 0.011;
     const incl = (i / gomos) * curva;
-    const g = new THREE.CylinderGeometry(r1, r0, h * 1.04, 7, 1, true).translate(0, h / 2, 0).rotateZ(-incl).translate(x, y, 0);
-    partes.push(pintar(g, i % 2 ? '#8a6a45' : '#7a5a38'));
+    const g = new THREE.CylinderGeometry(r1, r0, h * 1.04, 8, 1, true).translate(0, h / 2, 0).rotateZ(-incl).translate(x, y, 0);
+    tronco.push(pintar(g, '#ffffff', true));
     x += Math.sin(incl) * h;
     y += Math.cos(incl) * h;
-  }
-  // a copa: folhas em volta do topo, algumas mais caídas
-  for (let i = 0; i < folhas; i++) {
-    const a = (i / folhas) * Math.PI * 2 + rnd() * 0.3;
-    const comp = 3.6 + rnd() * 1.4;
-    const f = folhaCoqueiro(comp, 0.62, 1.4 + rnd() * 1.4).rotateY(a).translate(x, y + 0.1, 0);
-    partes.push(pintar(f, i % 3 === 0 ? '#3f8f3a' : i % 3 === 1 ? '#4fa443' : '#2f7a33'));
   }
   // cocos
   for (let i = 0; i < 4; i++) {
     const a = (i / 4) * Math.PI * 2;
-    partes.push(pintar(new THREE.IcosahedronGeometry(0.22, 0).translate(x + Math.cos(a) * 0.32, y - 0.25, Math.sin(a) * 0.32), '#6b4a22'));
+    tronco.push(pintar(new THREE.IcosahedronGeometry(0.22, 1).translate(x + Math.cos(a) * 0.3, y - 0.25, Math.sin(a) * 0.3), '#7a5a30', true));
   }
-  return juntar(partes);
+  // a copa: folhas em volta do topo, as de baixo mais caídas, e três novas quase em pé
+  const tons = ['#ffffff', '#e6f2c8', '#d2e6a8', '#f4f0c0'];
+  for (let i = 0; i < folhas; i++) {
+    const a = (i / folhas) * Math.PI * 2 + rnd() * 0.35;
+    const comp = 3.8 + rnd() * 1.5;
+    const f = folhaCoqueiro(comp, 0.85, 1.6 + rnd() * 1.6).rotateZ(-0.1 + rnd() * 0.2).rotateY(a).translate(x, y + 0.05, 0);
+    copa.push(pintar(f, tons[i % tons.length], true));
+  }
+  for (let i = 0; i < 3; i++) {
+    const a = rnd() * Math.PI * 2;
+    const f = folhaCoqueiro(2.4 + rnd() * 0.6, 0.6, 0.4).rotateZ(0.7 + rnd() * 0.3).rotateY(a).translate(x, y + 0.1, 0);
+    copa.push(pintar(f, '#f2ffd8', true));
+  }
+  const geo = mergeGeometries([juntar(tronco), juntar(copa)], true);
+  geo.userData.materiais = 'coqueiro';
+  return geo;
 }
 
 function geoPinheiro(neve) {
@@ -350,20 +457,8 @@ export function pecaDaPraca(g, L, world, x, z, decor) {
 // rua: u atravessa, v vai ao longo. Sem guia: o meio-fio é uma faixa embaixo (cidade.js)
 export function texturaRua() {
   const tipo = TEMA.rua.tipo;
-  if (tipo === 'madeira') {
-    // deque de tábuas atravessadas, com frestas
-    return textura(256, 256, (ctx, w, h) => {
-      for (let i = 0; i < 8; i++) {
-        const tom = 150 + Math.floor(Math.random() * 30);
-        ctx.fillStyle = `rgb(${tom},${Math.round(tom * 0.72)},${Math.round(tom * 0.47)})`;
-        ctx.fillRect(0, (i * h) / 8, w, h / 8);
-        ctx.fillStyle = 'rgba(40,20,5,0.55)';
-        ctx.fillRect(0, (i * h) / 8, w, 3);
-        ctx.fillStyle = 'rgba(40,20,5,0.25)';
-        for (const px of [w * 0.2 + i * 13, w * 0.7 - i * 7]) ctx.fillRect(px % w, (i * h) / 8 + 6, 4, 4);
-      }
-    }, { repetir: true });
-  }
+  // deque de tábuas atravessadas (a foto: 12 tábuas a cada repetição)
+  if (tipo === 'madeira') return texturaFoto('deque');
   if (tipo === 'cascalho') {
     // cascalho claro varrido em linhas (como no jardim de pedras), com pedras de pisar no meio
     return textura(256, 256, (ctx, w, h) => {
@@ -426,16 +521,13 @@ export function texturaRua() {
 
 // piso dos retângulos (praça dos jogos): deque, lajes com neve ou cascalho varrido
 export function texturaPiso() {
+  // a foto do deque de pé (tábuas no sentido z); metros: o lado de cada repetição
   if (TEMA.piso === 'deck') {
-    return textura(256, 256, (ctx, w, h) => {
-      for (let i = 0; i < 8; i++) {
-        const tom = 165 + Math.floor(Math.random() * 25);
-        ctx.fillStyle = `rgb(${tom},${Math.round(tom * 0.75)},${Math.round(tom * 0.52)})`;
-        ctx.fillRect((i * w) / 8, 0, w / 8, h);
-        ctx.fillStyle = 'rgba(40,20,5,0.4)';
-        ctx.fillRect((i * w) / 8, 0, 3, h);
-      }
-    }, { repetir: true });
+    const t = texturaFoto('deque');
+    t.rotation = Math.PI / 2;
+    t.userData.metros = 3;
+    t.userData.relevo = 'deque';
+    return t;
   }
   if (TEMA.piso === 'cascalho') {
     return textura(256, 256, (ctx, w, h) => {

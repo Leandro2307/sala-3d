@@ -16,7 +16,7 @@ import {
 import { desenharMapa } from './mapa.js';
 import { PISTA, pontoEm } from './pista.js';
 import {
-  TEMA, textura, texturaRua, texturaPiso, texturaPracaCentral, poste as posteDoTema, estruturaPortico, pecaDaPraca, ARVORE_DA_RUA,
+  TEMA, textura, texturaRua, relevoRua, relevoFoto, texturaPiso, texturaPracaCentral, poste as posteDoTema, estruturaPortico, pecaDaPraca, ARVORE_DA_RUA,
 } from './temas3d.js';
 
 const FONTE = (px, peso = 800) => `${peso} ${px}px 'Plus Jakarta Sans', system-ui, sans-serif`;
@@ -180,7 +180,13 @@ function trechos(pontos, w, y, passo) {
 // ruas se encontram, o calçamento de uma passa por cima do meio-fio da outra.
 export function construirRuas(g, ruas, L) {
   const tex = texturaRua();
-  const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.9 });
+  // a foto do deque tem tábuas de ~1 m: três repetições na largura, para não esticar
+  const relevo = relevoRua();
+  if (relevo) {
+    tex.repeat.x = 3;
+    relevo.repeat.x = 3;
+  }
+  const mat = new THREE.MeshStandardMaterial({ map: tex, normalMap: relevo, roughness: 0.82 });
   const guia = new THREE.MeshStandardMaterial({ color: TEMA.rua.guia, roughness: 0.85 });
   const calcadas = [];
   const guias = [];
@@ -203,7 +209,9 @@ function construirPier(g, r, L) {
   const giro = Math.atan2(x1 - x0, z1 - z0);
   const tex = texturaRua();
   tex.repeat.set(1, comp / 3);
-  const deque = new THREE.Mesh(new THREE.BoxGeometry(r.largura, 0.18, comp + 4), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.85 }));
+  const relevo = relevoRua();
+  relevo?.repeat.copy(tex.repeat);
+  const deque = new THREE.Mesh(new THREE.BoxGeometry(r.largura, 0.18, comp + 4), new THREE.MeshStandardMaterial({ map: tex, normalMap: relevo, roughness: 0.8 }));
   no(deque.geometry, (x0 + x1) / 2, 0.11, (z0 + z1) / 2, giro);
   deque.receiveShadow = true;
   deque.castShadow = true;
@@ -293,7 +301,12 @@ const naSaida = (saidas, a, raio, folga) => saidas.some((s) => {
 
 function construirPraca(g, world, decor, L, saidas, luzes) {
   const { x, z, r } = PRACA;
-  const piso = new THREE.Mesh(new THREE.CircleGeometry(r, 128).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ map: texturaPracaCentral(r), roughness: 0.88 }));
+  // o desenho da praça e, por cima, o relevo das pedrinhas (uma repetição a cada 0,9 m)
+  const pedras = relevoFoto('pedras');
+  pedras.repeat.setScalar((r * 2) / 0.9);
+  const piso = new THREE.Mesh(new THREE.CircleGeometry(r, 128).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({
+    map: texturaPracaCentral(r), normalMap: pedras, normalScale: new THREE.Vector2(0.9, 0.9), roughness: 0.8,
+  }));
   piso.position.set(x, Y_PRACA, z);
   piso.receiveShadow = true;
   g.add(piso);
@@ -413,8 +426,14 @@ function construirPracinhas(g, world, L) {
   // os pisos retangulares (a praça dos jogos), com uma beirada de pedra
   for (const P of PISOS) {
     const tex = texturaPiso();
-    tex.repeat.set((P.x1 - P.x0) / 8, (P.z1 - P.z0) / 8);
-    const piso = new THREE.Mesh(new THREE.PlaneGeometry(P.x1 - P.x0, P.z1 - P.z0).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.9 }));
+    const metros = tex.userData.metros ?? 8;
+    tex.repeat.set((P.x1 - P.x0) / metros, (P.z1 - P.z0) / metros);
+    const relevo = tex.userData.relevo ? relevoFoto(tex.userData.relevo) : null;
+    if (relevo) {
+      relevo.repeat.copy(tex.repeat);
+      relevo.rotation = tex.rotation;
+    }
+    const piso = new THREE.Mesh(new THREE.PlaneGeometry(P.x1 - P.x0, P.z1 - P.z0).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ map: tex, normalMap: relevo, roughness: 0.85 }));
     piso.position.set((P.x0 + P.x1) / 2, 0.035, (P.z0 + P.z1) / 2);
     piso.receiveShadow = true;
     g.add(piso);
