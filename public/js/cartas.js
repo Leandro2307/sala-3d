@@ -318,7 +318,7 @@ function desenharCarta21(ctx, w, h, c, corpo) {
   ctx.stroke();
   ctx.fillStyle = T.cor;
   ctx.font = fontePx(12);
-  ctx.fillText('TRUNFO', w / 2, 24);
+  ctx.fillText(T.mesa ? 'FICA NA MESA' : 'TRUNFO', w / 2, 24);
   if (/^\d+$/.test(T.icone)) {
     ctx.font = fonteNum(58);
     ctx.fillText(T.icone, w / 2, h * 0.44);
@@ -378,7 +378,7 @@ export function construirCartas(world) {
     // as cartas do centro (as da rodada e o monte no truco; o topo do descarte e o monte no uno; as
     // duas mãos e o monte no 21)
     const cartas = [];
-    for (let k = 0; k < (m.jogo === 'vinteum' ? 16 : 6); k++) {
+    for (let k = 0; k < (m.jogo === 'vinteum' ? 28 : 6); k++) {
       const c = new THREE.Mesh(geoCarta, new THREE.MeshBasicMaterial({ map: texturaCarta('verso'), toneMapped: false }));
       c.visible = false;
       c.userData = { chave: '', alvo: { x: m.x, y: Y_MESA, z: m.z, ry: 0 }, voo: null, sai: null };
@@ -579,10 +579,14 @@ export class Cartas {
           this.sfx.punchTaken?.();
         } else this.sfx.punchHit?.();
       });
-      if (e.aposta > antes.aposta) {
+      // a minha aposta subiu (trunfo do rival) ou a dele subiu (meu)
+      const eu = Math.max(0, M.lugar);
+      if ((e.aposta?.[eu] ?? 0) > (antes.aposta?.[eu] ?? 0)) {
         this.pular(this.$('.ct-vale'));
         this.sfx.fogo?.();
       }
+      if ((e.aposta?.[1 - eu] ?? 0) > (antes.aposta?.[1 - eu] ?? 0)) this.pular(this.$('.ct-vale2'));
+      if (e.silencio?.[eu] && !antes.silencio?.[eu]) this.faixaGrito('SILÊNCIO!', 'O rival te calou: você não pode pedir carta', false);
       if (e.meta !== antes.meta) this.pular(this.$('.ct-meta'));
       if (e.fase === 'fimDaRodada' && antes.fase !== 'fimDaRodada') this.sfx.rodada?.();
     }
@@ -677,7 +681,20 @@ export class Cartas {
             if (i < 15) por(i++, face, alvo, { de: { x: M.m.x, y: Y_MESA + 0.2, z: M.m.z }, chave: `${k}:${j}:${face}` });
           });
         }
-        if (e.monte) por(15, 'verso', { x: M.m.x, y: Y_MESA + 0.006, z: M.m.z, ry: Math.PI / 2 + 0.15, esc: 0.78 }, { chave: 'monte' });
+        // os trunfos que cada um pôs na mesa, pequenos, mais para a beirada do lado do dono
+        let t = 16;
+        for (const k of [0, 1]) {
+          const lista = e.mesa21?.[k] || [];
+          const c = cadeira(M.m, k);
+          const dx = (c.x - M.m.x) / R_CADEIRA;
+          const dz = (c.z - M.m.z) / R_CADEIRA;
+          lista.forEach((tr, j) => {
+            const off = (j - (lista.length - 1) / 2) * 0.2;
+            const alvo = { x: M.m.x + dx * 0.88 - dz * off, y: Y_MESA + 0.008, z: M.m.z + dz * 0.88 + dx * off, ry: -c.a + Math.PI / 2, esc: 0.42 };
+            if (t < cartas.length) por(t++, `T:${tr}`, alvo, { de: { x: c.x, y: 1.2, z: c.z }, chave: `m${k}:${j}:${tr}` });
+          });
+        }
+        if (e.monte) por(15, 'verso',{ x: M.m.x, y: Y_MESA + 0.006, z: M.m.z, ry: Math.PI / 2 + 0.15, esc: 0.78 }, { chave: 'monte' });
       } else if (e.topo) {
         por(0, e.topo, { x: M.m.x, y: Y_MESA + 0.012, z: M.m.z, ry: 0.3 }, { chave: `topo:${e.topo}:${e.monte}` });
         por(1, 'verso', { x: M.m.x + 0.5, y: Y_MESA + 0.01, z: M.m.z, ry: -0.2 }, { chave: 'monte' });
@@ -906,6 +923,7 @@ export class Cartas {
     const M = this.ativa;
     if (!this.minhaVez21(M)) return;
     if (acao === 'pedir' && !M.e.monte) return hud.mensagem('O baralho acabou', 'Agora é parar', 1400);
+    if (acao === 'pedir' && M.e.silencio?.[M.lugar]) return hud.mensagem('Silêncio!', 'Você não pode pedir carta: destrua o Silêncio do rival', 1800);
     this.socket?.emit('ct-21', { mesa: M.i, acao, trunfo });
     if (acao === 'pedir') this.sfx.cartaVoa?.();
     else if (acao === 'parar') this.sfx.bip?.();
@@ -1091,11 +1109,17 @@ body.touch .ct-b { padding: 7px 10px; font-size: 13px; } body.touch .ct-b.grande
 body.touch .ct-pergunta { top: 8%; min-width: 0; width: min(92vw, 360px); } body.touch .ct-pergunta h2 { font-size: 40px; }
 body.touch .ct-placa { font-size: 12px; }
 /* os números do placar na fonte cheia (na pixelada o 2 parece 3) */
-.ct-num, .ct-vale, .ct-monte, .ct-meta { font-family: ${NUMERO}; font-weight: 800; }
+.ct-num, .ct-vale, .ct-vale2, .ct-monte, .ct-meta { font-family: ${NUMERO}; font-weight: 800; }
+.ct-vale2 { min-width: 44px; text-align: center; font-size: 22px; padding: 0 8px; border-radius: 8px; background: #5f7377; box-shadow: 0 3px 0 #3a4a4d; }
+.ct-mesa21 { padding: 6px 8px 8px; } .ct-mesa21 small { display: block; font-size: 11px; color: #a9bfc2; text-align: center; letter-spacing: .08em; }
+.ct-namesa { display: flex; flex-wrap: wrap; justify-content: center; gap: 3px; margin-top: 4px; }
+.ct-namesa img { width: 30px; height: 40px; border-radius: 4px; box-shadow: 0 2px 0 rgba(0,0,0,.35); }
+.ct-namesa em { font-size: 12px; color: #6b8285; }
+.ct-rival .ct-namesa { margin: 0; max-width: 140px; }
 /* 21: o placar dos dedos, a meta, a contagem das cartas */
 .ct-titulo.v21 { background: #4bc292; box-shadow: 0 4px 0 #2b7a5b; font: 800 30px ${NUMERO}; padding: 4px 4px 6px; }
 .ct-meta { min-width: 44px; text-align: center; font-size: 24px; padding: 0 8px; border-radius: 8px; background: #a782d1; box-shadow: 0 3px 0 #6b4f8f; }
-.ct-dedos { display: flex; justify-content: center; gap: 3px; margin-top: 5px; }
+.ct-dedos { display: flex; flex-wrap: wrap; justify-content: center; gap: 3px; width: 52px; margin: 5px auto 0; }
 .ct-dedos i { width: 7px; height: 15px; border-radius: 4px 4px 2px 2px; background: #f6d7b0; box-shadow: 0 2px 0 rgba(0,0,0,.35); }
 .ct-dedos i.foi { background: #2b3d40; box-shadow: inset 0 2px 0 rgba(0,0,0,.4); }
 .ct-conta { padding: 6px 8px 8px; } .ct-conta small { display: block; font-size: 11px; color: #a9bfc2; text-align: center; letter-spacing: .08em; }
@@ -1299,7 +1323,9 @@ body.touch .ct-conta { display: none; } body.touch #ct-trunfo img { width: 96px;
         ? `<div class="ct-titulo v21 ondas">${ondas('21')}</div>
 <div class="ct-placar ct-caixa"><div><small>VOCÊ</small><b class="ct-num azul" data-p="nos">${DEDOS_21}</b><span class="ct-dedos" data-d="nos"></span></div><span class="ct-x">×</span><div><small>RIVAL</small><b class="ct-num vermelho" data-p="eles">${DEDOS_21}</b><span class="ct-dedos" data-d="eles"></span></div></div>
 <div class="ct-linha2 ct-caixa"><small>META</small><b class="ct-meta">21</b></div>
-<div class="ct-linha2 ct-caixa"><small>APOSTA (DEDOS)</small><b class="ct-vale">1</b></div>
+<div class="ct-linha2 ct-caixa" title="Quantos dedos você perde se perder a rodada"><small>SUA APOSTA</small><b class="ct-vale">1</b></div>
+<div class="ct-linha2 ct-caixa" title="Quantos dedos o rival perde se perder a rodada"><small>APOSTA DO RIVAL</small><b class="ct-vale2">1</b></div>
+<div class="ct-mesa21 ct-caixa"><small>SEUS TRUNFOS NA MESA</small><span class="ct-namesa"></span></div>
 <div class="ct-conta ct-caixa"><small>CONTAGEM · NO MONTE <b class="ct-monte">–</b></small><span>${conta}</span></div>
 ${espera ? comecar : ''}<button type="button" class="ct-b cinza" data-acao="sair">Sair da mesa</button>`
         : truco
@@ -1340,11 +1366,22 @@ ${espera ? comecar : ''}<button type="button" class="ct-b cinza" data-acao="sair
         lado.querySelector(`[data-d="${k}"]`).innerHTML = Array.from({ length: DEDOS_21 }, (_, i) => `<i${i < vidas[lugar] ? '' : ' class="foi"'}></i>`).join('');
       }
       lado.querySelector('.ct-meta').textContent = e.meta ?? 21;
+      // as apostas: a minha (o que eu perco se perder) pega fogo quando sobe
+      const minha = e.aposta?.[eu] ?? 1;
       const vale = lado.querySelector('.ct-vale');
-      vale.textContent = e.aposta ?? 1;
-      const fogo = (e.aposta ?? 1) >= 6 ? 3 : (e.aposta ?? 1) >= 4 ? 2 : (e.aposta ?? 1) >= 2 ? 1 : 0;
+      vale.textContent = minha;
+      const fogo = minha >= 6 ? 3 : minha >= 4 ? 2 : minha >= 2 ? 1 : 0;
       if (fogo) vale.dataset.fogo = fogo;
       else delete vale.dataset.fogo;
+      lado.querySelector('.ct-vale2').textContent = e.aposta?.[ele] ?? 1;
+      // os meus trunfos na mesa
+      const naMesa = e.mesa21?.[eu] || [];
+      const caixa = lado.querySelector('.ct-namesa');
+      const htmlMesa = naMesa.length ? naMesa.map((c) => `<img src="${urlCarta(`T:${c}`)}" alt="${esc(TRUNFOS_21[c]?.nome || c)}" title="${esc(`${TRUNFOS_21[c]?.nome}: ${TRUNFOS_21[c]?.desc}`)}">`).join('') : '<em>nenhum</em>';
+      if (caixa.dataset.html !== htmlMesa) {
+        caixa.dataset.html = htmlMesa;
+        caixa.innerHTML = htmlMesa;
+      }
       lado.querySelector('.ct-monte').textContent = e.monte ?? '–';
       // a contagem: o que eu já vi de cada número (meu, do rival, tirado do jogo); o resto está no
       // monte ou é a carta fechada do rival
@@ -1465,7 +1502,7 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
         + `<b class="${r.somas[k] > r.meta ? 'passou' : ''}">${r.somas[k]}</b></div>`;
       const dedos = (n) => `${n} dedo${n === 1 ? '' : 's'}`;
       const sub = empate ? 'Empate: ninguém perde dedo'
-        : !r.dano ? 'O escudo segurou o golpe'
+        : !r.dano ? 'Os escudos seguraram o golpe'
           : ganhei ? `${nome} perde ${dedos(r.dano)}` : `Você perde ${dedos(r.dano)}`;
       html = `<h2 class="ondas ${empate ? 'empate' : ganhei ? 'ganhou' : ''}">${ondas(empate ? 'EMPATE' : ganhei ? 'GANHOU!' : 'PERDEU!')}</h2>
 <div class="ct-res">${mao(eu, 'VOCÊ')}<span class="ct-x">×</span>${mao(ele, nome)}</div><p>${sub} · meta ${r.meta}</p>`;
@@ -1493,12 +1530,13 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
     const fechada = cartas.some((x) => x.c === 'verso');
     const vista = soma21(cartas.map((x) => x.c).filter((c) => c !== 'verso'));
     const extras = [`🃏 ${e.trunfosN?.[ele] ?? 0} trunfo${e.trunfosN?.[ele] === 1 ? '' : 's'}`];
-    if (e.escudo?.[ele]) extras.push(`🛡️×${e.escudo[ele]}`);
-    if (e.contra?.[ele]) extras.push('🚫 contra-ataque armado');
     if (e.raiox?.[ele]) extras.push('👁️ vê a sua fechada');
+    if (e.silencio?.[ele]) extras.push('🤐 calado');
+    // os trunfos que ele pôs na mesa (o Destruir tira o último)
+    const mesa = (e.mesa21?.[ele] || []).map((c) => `<img src="${urlCarta(`T:${c}`)}" alt="${esc(TRUNFOS_21[c]?.nome || c)}" title="${esc(`${TRUNFOS_21[c]?.nome}: ${TRUNFOS_21[c]?.desc}`)}">`).join('');
     const html = `<div class="ct-quem">${l?.bot ? '🤖 ' : ''}${esc(l?.nome || 'Rival')}<small>${extras.join(' · ')}</small></div>
 <span class="ct-cartas">${cartas.map((x) => `<img src="${urlCarta(x.c)}" alt="${x.c === 'verso' ? 'carta fechada' : numero21(x.c)}"${x.raiox ? ' class="raiox" title="Raio-X"' : ''}>`).join('')}</span>
-<b class="ct-somar" title="O que dá para ver da soma dele">${fechada ? `? + ${vista}` : vista}</b>`;
+<b class="ct-somar" title="O que dá para ver da soma dele">${fechada ? `? + ${vista}` : vista}</b>${mesa ? `<span class="ct-namesa" title="Trunfos dele na mesa">${mesa}</span>` : ''}`;
     if (el.dataset.html === html) return;
     el.dataset.html = html;
     el.innerHTML = html;
@@ -1629,7 +1667,7 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
       const nome = NOME_PEDIDO[PASSOS_TRUCO[PASSOS_TRUCO.indexOf(e.vale) + 1]];
       dir.push(`<button type="button" class="ct-b vermelho grande truco" data-acao="truco:pedir" title="Espaço">${nome}!</button>`);
     }
-    if (!truco && e.fase === 'jogando') {
+    if (e.jogo === 'uno' && e.fase === 'jogando') {
       if (minhaVez && !e.comprou) esq.push('<button type="button" class="ct-b verde" data-acao="uno:comprar">Comprar</button>');
       if (minhaVez && e.comprou) esq.push('<button type="button" class="ct-b cinza" data-acao="uno:passar">Passar</button>');
       if (M.mao.length <= 2 && !e.disseUno?.includes(M.lugar)) dir.push('<button type="button" class="ct-b ouro grande truco" data-acao="uno:uno">UNO!</button>');
@@ -1639,7 +1677,8 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
       const s = soma21(M.mao);
       const meta = e.meta ?? 21;
       esq.push(`<div class="ct-soma ct-caixa${s > meta ? ' passou' : s === meta ? ' cravou' : ''}"><small>SUA MÃO</small><b>${s}</b><small>META ${meta}</small></div>`);
-      esq.push(`<button type="button" class="ct-b verde grande" data-acao="v21:pedir" title="Espaço"${vez && e.monte ? '' : ' disabled'}>Pedir carta</button>`);
+      const calado = !!e.silencio?.[M.lugar];
+      esq.push(`<button type="button" class="ct-b verde grande" data-acao="v21:pedir" title="${calado ? 'O rival pôs Silêncio na mesa' : 'Espaço'}"${vez && e.monte && !calado ? '' : ' disabled'}>${calado ? '🤐 Calado' : 'Pedir carta'}</button>`);
       if (vez) dir.push('<div class="ct-vez21">SUA VEZ!</div>');
       dir.push(`<button type="button" class="ct-b vermelho grande" data-acao="v21:parar" title="S"${vez ? '' : ' disabled'}>Parar</button>`);
     }

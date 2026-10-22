@@ -89,8 +89,10 @@ function publico(m) {
     // fim da rodada: as cartas fechadas abrem para todo mundo
     const abre = m.fase === 'fimDaRodada' || m.fase === 'fim';
     Object.assign(base, {
-      vez: v.vez, meta: v.meta, aposta: v.aposta, vidas: v.vidas, escudo: v.escudo, contra: v.contra, raiox: v.raiox, rodada: v.rodada,
-      monte: v.monte.length, fora: v.fora.map(R.carta21), passes: v.passes, trunfosN: v.trunfos.map((t) => t.length),
+      vez: v.vez, meta: R.meta21(v.mesa), aposta: [0, 1].map((k) => R.aposta21(v.mesa, k, v.rodada)), base: R.apostaBase21(v.rodada),
+      vidas: v.vidas, raiox: v.raiox, rodada: v.rodada, mesa21: v.mesa.map((l) => l.map((t) => t.c)),
+      silencio: [0, 1].map((k) => R.silenciado21(v.mesa, k)),
+      monte: v.monte.length, passes: v.passes, trunfosN: v.trunfos.map((t) => t.length),
       maos21: v.maos.map((mao) => mao.map((n, i) => (i === 0 && !abre ? 'verso' : R.carta21(n)))),
       resultado: abre ? v.resultado : null,
     });
@@ -603,10 +605,12 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
   }
 
   // ------------------------------------------------------------------ 21
+  // Como no 21 do Resident Evil 7: os trunfos de aposta, escudo, meta e silêncio ficam na mesa
+  // (v.mesa) e valem enquanto estiverem lá; o Destruir do rival tira. Cada um tem a sua aposta.
   const nome21 = (m, k) => m.lugares[k]?.nome || '…';
   const dedos = (n) => `${n} dedo${n === 1 ? '' : 's'}`;
-  function darTrunfo(v, k) {
-    if (v.trunfos[k].length < R.MAX_TRUNFOS_21) v.trunfos[k].push(R.sortearTrunfo21());
+  function darTrunfo(v, k, n = 1) {
+    for (let i = 0; i < n; i++) if (v.trunfos[k].length < R.MAX_TRUNFOS_21) v.trunfos[k].push(R.sortearTrunfo21());
   }
 
   function novaPartida21(room, m) {
@@ -620,25 +624,20 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
     const v = m.v;
     v.monte = R.embaralhar(R.baralho21());
     v.maos = [[v.monte.pop(), v.monte.pop()], [v.monte.pop(), v.monte.pop()]];
-    v.meta = R.META_21;
-    v.aposta = 1;
-    v.escudo = [0, 0];
+    v.mesa = [[], []];
+    v.ordem = 0;
     v.raiox = [false, false];
-    v.contra = [false, false];
-    v.fora = [];
     v.passes = 0;
     v.rodada += 1;
     v.resultado = null;
     v.inicio = 1 - v.inicio; // cada rodada começa um
     v.vez = v.inicio;
     v.usouNaVez = 0;
-    for (const k of [0, 1]) {
-      darTrunfo(v, k);
-      if (perdeu === k) darTrunfo(v, k);
-    }
+    for (const k of [0, 1]) darTrunfo(v, k, perdeu === k ? 2 : 1);
     m.fase = 'jogando';
     m.vencedor = null;
-    m.aviso = `Rodada ${v.rodada}: ${nome21(m, v.vez)} começa`;
+    const base = R.apostaBase21(v.rodada);
+    m.aviso = `Rodada ${v.rodada}${base > 1 ? ` (aposta base ${base})` : ''}: ${nome21(m, v.vez)} começa`;
     m.vezDesde = Date.now();
     m.botAte = Date.now() + ESPERA_ROBO + 900;
     avisar(room, m);
@@ -654,7 +653,7 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
 
   function pedir21(room, m, k) {
     const v = m.v;
-    if (m.fase !== 'jogando' || v.vez !== k || !v.monte.length) return false;
+    if (m.fase !== 'jogando' || v.vez !== k || !v.monte.length || R.silenciado21(v.mesa, k)) return false;
     const n = v.monte.pop();
     v.maos[k].push(n);
     v.passes = 0;
@@ -682,22 +681,36 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
   }
 
   // O efeito de cada trunfo: devolve o texto do que aconteceu, ou null se não dá para usar agora
-  // (aí ele não é gasto).
+  // (aí ele não é gasto). Os de mesa entram na mesa de quem usou.
   function efeito21(v, k, chave) {
     const o = 1 - k;
     const minha = v.maos[k];
     const dele = v.maos[o];
-    const folga = v.meta - R.soma21(minha);
+    const folga = R.meta21(v.mesa) - R.soma21(minha);
     const tirarDoMonte = (n) => v.monte.splice(v.monte.indexOf(n), 1);
+    const T = R.TRUNFOS_21[chave];
+    if (/^c\d$/.test(chave)) {
+      const n = Number(chave.slice(1));
+      if (!v.monte.includes(n)) return `o ${n} não estava no baralho`; // gasta: e conta onde ele está
+      tirarDoMonte(n);
+      minha.push(n);
+      return `comprou o ${n}`;
+    }
+    if (T.mesa) {
+      // a mesma meta que já vale não muda nada
+      if (/^meta/.test(chave) && R.meta21(v.mesa) === Number(chave.slice(4))) return null;
+      if (chave === 'silencio' && R.silenciado21(v.mesa, o)) return null;
+      v.mesa[k].push({ c: chave, n: ++v.ordem });
+      if (chave === 'mais1' || chave === 'mais2') {
+        darTrunfo(v, k);
+        return `a aposta do rival foi para ${R.aposta21(v.mesa, o, v.rodada)} (e ganhou um trunfo)`;
+      }
+      if (chave === 'escudo' || chave === 'escudo2') return `a sua aposta desceu para ${R.aposta21(v.mesa, k, v.rodada)}`;
+      if (chave === 'silencio') return 'o rival não pode pedir carta';
+      if (chave === 'colheita') return 'cada trunfo daqui pra frente dá outro';
+      return `a meta virou ${R.meta21(v.mesa)}`;
+    }
     switch (chave) {
-      case 'mais1': v.aposta += 1; return `a aposta foi para ${v.aposta}`;
-      case 'mais2': v.aposta += 2; return `a aposta foi para ${v.aposta}`;
-      case 'dobro': v.aposta *= 2; return `a aposta dobrou: ${v.aposta}`;
-      case 'ancora':
-        if (v.aposta <= 1) return null;
-        v.aposta = Math.max(1, v.aposta - 2);
-        return `a aposta desceu para ${v.aposta}`;
-      case 'escudo': v.escudo[k] += 1; return 'perde 1 dedo a menos se perder';
       case 'devolver': {
         if (minha.length < 2) return null;
         const n = minha.pop();
@@ -705,11 +718,12 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
         R.embaralhar(v.monte);
         return `devolveu o ${n} para o baralho`;
       }
-      case 'destruir': {
+      case 'remover': {
         if (dele.length < 2) return null;
         const n = dele.pop();
-        v.fora.push(n);
-        return `tirou o ${n} do jogo`;
+        v.monte.push(n);
+        R.embaralhar(v.monte);
+        return `mandou o ${n} do rival de volta para o baralho`;
       }
       case 'troca': {
         if (minha.length < 2 || dele.length < 2) return null;
@@ -719,13 +733,6 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
         dele.push(a);
         return `trocou o ${a} pelo ${b}`;
       }
-      case 'ame': {
-        if (!v.monte.length) return null;
-        const n = Math.max(...v.monte);
-        tirarDoMonte(n);
-        dele.push(n);
-        return `o rival comprou o ${n}`;
-      }
       case 'perfeita': {
         const cabe = v.monte.filter((n) => n <= folga);
         if (!cabe.length) return null;
@@ -734,35 +741,38 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
         minha.push(n);
         return `comprou o ${n}`;
       }
-      case 'adrenalina': {
+      case 'presente': {
         if (!v.monte.length) return null;
-        const a = v.monte.pop();
-        if (!v.monte.length) {
-          minha.push(a);
-          return `comprou o ${a}`;
-        }
-        const b = v.monte.pop();
-        const cabeA = a <= folga;
-        const cabeB = b <= folga;
-        const fica = cabeA && cabeB ? Math.max(a, b) : cabeA ? a : cabeB ? b : Math.min(a, b);
-        minha.push(fica);
-        v.monte.push(fica === a ? b : a);
-        R.embaralhar(v.monte);
-        return `ficou com o ${fica} e devolveu a outra`;
+        const n = Math.max(...v.monte);
+        tirarDoMonte(n);
+        dele.push(n);
+        return `o rival comprou o ${n}`;
       }
       case 'raiox':
         if (v.raiox[k]) return null;
         v.raiox[k] = true;
         return 'está vendo a carta fechada do rival';
-      case 'contra':
-        if (v.contra[k]) return null;
-        v.contra[k] = true;
-        return 'o próximo trunfo do rival não vale';
-      case 'meta17': case 'meta24': case 'meta27': {
-        const meta = Number(chave.slice(4));
-        if (v.meta === meta) return null;
-        v.meta = meta;
-        return `a meta virou ${meta}`;
+      case 'trocaTrunfos': {
+        // (este já saiu da mão) descarta até 2 dos outros, sorteados, e ganha 3
+        const meus = v.trunfos[k];
+        for (let i = 0; i < 2 && meus.length; i++) meus.splice(Math.floor(Math.random() * meus.length), 1);
+        darTrunfo(v, k, 3);
+        return 'trocou trunfos: ganhou 3 novos';
+      }
+      case 'feliz':
+        darTrunfo(v, k);
+        darTrunfo(v, o);
+        return 'os dois ganharam um trunfo';
+      case 'destruir': {
+        const t = v.mesa[o].pop();
+        if (!t) return null;
+        return `destruiu ${R.TRUNFOS_21[t.c].nome} do rival`;
+      }
+      case 'destruirTudo': {
+        if (!v.mesa[o].length) return null;
+        const n = v.mesa[o].length;
+        v.mesa[o] = [];
+        return `limpou a mesa do rival (${n} trunfo${n === 1 ? '' : 's'})`;
       }
       default: return null;
     }
@@ -773,17 +783,14 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
     const T = R.TRUNFOS_21[chave];
     const i = v.trunfos[k].indexOf(chave);
     if (m.fase !== 'jogando' || v.vez !== k || !T || i < 0) return false;
-    const o = 1 - k;
-    let texto;
-    if (v.contra[o]) {
-      // o contra-ataque do rival come este trunfo
-      v.contra[o] = false;
-      texto = `o Contra-Ataque de ${nome21(m, o)} anulou`;
-    } else {
-      texto = efeito21(v, k, chave);
-      if (!texto) return false;
-    }
+    const colhe = v.mesa[k].some((t) => t.c === 'colheita'); // a colheita vale para os próximos
     v.trunfos[k].splice(i, 1);
+    const texto = efeito21(v, k, chave);
+    if (!texto) {
+      v.trunfos[k].splice(i, 0, chave); // não deu: volta para a mão
+      return false;
+    }
+    if (colhe) darTrunfo(v, k);
     v.passes = 0; // o rival pode responder ao trunfo
     m.aviso = `${nome21(m, k)} usou ${T.nome}: ${texto}`;
     gritar(room, m, k, 'trunfo', { frase: `${T.nome}!`, trunfo: chave });
@@ -796,8 +803,9 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
   // quem passou da meta perde (os dois passaram: perde quem passou mais); senão, ganha o mais perto
   function resolver21(room, m) {
     const v = m.v;
+    const meta = R.meta21(v.mesa);
     const s = v.maos.map(R.soma21);
-    const passou = s.map((x) => x > v.meta);
+    const passou = s.map((x) => x > meta);
     let venc;
     if (passou[0] && passou[1]) venc = s[0] === s[1] ? 'e' : s[0] < s[1] ? 0 : 1;
     else if (passou[0] || passou[1]) venc = passou[0] ? 1 : 0;
@@ -806,16 +814,16 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
     v.perdeu = null;
     if (venc !== 'e') {
       const p = 1 - venc;
-      dano = Math.max(0, v.aposta - v.escudo[p]);
+      dano = R.aposta21(v.mesa, p, v.rodada);
       v.vidas[p] = Math.max(0, v.vidas[p] - dano);
       v.perdeu = p;
     }
-    v.resultado = { somas: s, vencedor: venc, dano, meta: v.meta };
+    v.resultado = { somas: s, vencedor: venc, dano, meta };
     if (venc === 'e') m.aviso = `Empate em ${s[0]}: ninguém perde dedo`;
     else {
       const perdeu = nome21(m, 1 - venc);
       m.aviso = `${nome21(m, venc)} ganhou a rodada (${s[venc]} × ${s[1 - venc]}): `
-        + (dano ? `${perdeu} perde ${dedos(dano)}` : `o escudo de ${perdeu} segurou`);
+        + (dano ? `${perdeu} perde ${dedos(dano)}` : `os escudos de ${perdeu} seguraram`);
       if (m.lugares[venc]?.bot && Math.random() < 0.6) gritar(room, m, venc, 'ganhou21');
     }
     if (venc !== 'e' && v.vidas[1 - venc] <= 0) {
@@ -836,48 +844,59 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
     avisar(room, m);
   }
 
-  // --- o robô do 21: conta as cartas que viu (as dele, as abertas do rival e as tiradas do jogo)
+  // --- o robô do 21: conta as cartas que viu (as dele e as abertas do rival); não sabe a fechada
   function leitura21(v, k) {
     const o = 1 - k;
+    const meta = R.meta21(v.mesa);
     const minha = R.soma21(v.maos[k]);
     const abertas = v.raiox[k] ? v.maos[o] : v.maos[o].slice(1);
-    const sei = new Set([...v.maos[k], ...abertas, ...v.fora]);
+    const sei = new Set([...v.maos[k], ...abertas]);
     const incertas = R.baralho21().filter((n) => !sei.has(n));
-    const folga = v.meta - minha;
+    const folga = meta - minha;
     const estouro = incertas.length ? incertas.filter((n) => n > folga).length / incertas.length : 1;
     const media = incertas.length ? incertas.reduce((a, b) => a + b, 0) / incertas.length : 6;
     const rival = R.soma21(abertas) + (v.raiox[k] ? 0 : media);
-    return { minha, folga, estouro, rival, rivalCerto: v.raiox[k] };
+    return { meta, minha, folga, estouro, rival, rivalCerto: v.raiox[k], incertas };
   }
 
   function escolherTrunfo21(v, k) {
     const o = 1 - k;
     const tem = new Set(v.trunfos[k]);
-    if (!tem.size || Math.random() < 0.25) return null;
+    if (!tem.size || Math.random() < 0.2) return null;
     const L = leitura21(v, k);
-    const passei = L.minha > v.meta;
-    const rivalPassou = L.rival > v.meta + (L.rivalCerto ? 0 : 2);
+    const passei = L.minha > L.meta;
+    const rivalPassou = L.rival > L.meta + (L.rivalCerto ? 0 : 2);
     const ganhando = !passei && (rivalPassou || L.minha >= L.rival + 2);
     const perdendo = passei || L.minha < L.rival - 1;
-    const cabe = v.monte.some((n) => n <= L.folga);
+    const dele = v.mesa[o].map((t) => t.c);
+    const ruimPraMim = dele.at(-1);
     const nota = {
       devolver: passei && v.maos[k].length > 1 ? 100 : 0,
-      meta24: passei && L.minha <= 24 && v.meta < 24 ? 95 : 0,
-      meta27: passei && L.minha <= 27 && v.meta < 27 ? 90 : 0,
+      destruir: !ruimPraMim ? 0 : ruimPraMim === 'silencio' && !passei && L.folga >= 3 ? 97
+        : /^mais/.test(ruimPraMim) ? 66 : /^escudo/.test(ruimPraMim) && ganhando ? 52 : /^meta/.test(ruimPraMim) && passei ? 88 : 30,
+      destruirTudo: dele.length >= 2 ? 72 : 0,
+      meta24: passei && L.minha <= 24 ? 92 : 0,
+      meta27: passei && L.minha <= 27 ? 90 : 0,
       troca: passei && v.maos[k].length > 1 && v.maos[o].length > 1 && v.maos[k].at(-1) > v.maos[o].at(-1) ? 85 : 0,
-      meta17: !passei && L.minha <= 17 && L.minha >= 14 && L.rival > 17 && v.meta !== 17 ? 72 : 0,
-      perfeita: !passei && L.folga >= 2 && cabe ? 70 : 0,
-      destruir: v.maos[o].length > 1 && v.maos[o].at(-1) >= 5 && !rivalPassou ? 62 : 0,
-      ame: !rivalPassou && L.rival >= v.meta - 5 && v.monte.length ? 56 : 0,
-      dobro: ganhando && v.aposta >= 2 ? 54 : 0,
-      mais2: ganhando ? 52 : 0,
-      mais1: ganhando ? 50 : 0,
-      escudo: perdendo && v.escudo[k] === 0 ? 46 : 0,
-      ancora: perdendo && v.aposta >= 3 ? 44 : 0,
+      perfeita: !passei && L.folga >= 2 ? 75 : 0,
+      meta17: !passei && L.minha <= 17 && L.minha >= 14 && L.rival > 17 ? 70 : 0,
+      silencio: ganhando && !rivalPassou ? 68 : 0,
+      mais2: ganhando ? 62 : 36,
+      remover: v.maos[o].length > 1 && v.maos[o].at(-1) >= 5 && !rivalPassou ? 58 : 0,
+      mais1: ganhando ? 56 : 38,
+      escudo2: perdendo ? 58 : 18,
+      presente: !rivalPassou && L.rival >= L.meta - 4 && v.monte.length ? 52 : 0,
+      escudo: perdendo ? 50 : 16,
+      colheita: v.trunfos[k].length >= 3 ? 45 : 0,
       raiox: !v.raiox[k] ? 40 : 0,
-      adrenalina: !passei && L.folga >= 4 && v.monte.length ? 35 : 0,
-      contra: !v.contra[k] && v.trunfos[o].length > 0 ? 30 : 0,
+      trocaTrunfos: v.trunfos[k].length >= 4 ? 26 : 0,
+      feliz: 22,
     };
+    // as cartas de número: a que crava a meta é ótima; uma que cabe, boa (se ainda pode estar no monte)
+    for (let n = 2; n <= 7; n++) {
+      if (passei || !L.incertas.includes(n) || n > L.folga) continue;
+      nota[`c${n}`] = n === L.folga ? 95 : 50 + n * 3;
+    }
     let melhor = null;
     for (const c of tem) if ((nota[c] || 0) > (nota[melhor] || 0)) melhor = c;
     return melhor && nota[melhor] > 0 ? melhor : null;
@@ -885,8 +904,8 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
 
   function bot21(room, m, k) {
     const v = m.v;
-    // até dois trunfos por vez, um de cada vez (para dar tempo de ver)
-    if (v.usouNaVez < 2) {
+    // até três trunfos por vez, um de cada vez (para dar tempo de ver)
+    if (v.usouNaVez < 3) {
       const t = escolherTrunfo21(v, k);
       if (t && usar21(room, m, k, t)) {
         v.usouNaVez += 1;
@@ -896,9 +915,9 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
     const L = leitura21(v, k);
     const rivalParou = v.passes === 1;
     let pede;
-    if (!v.monte.length || L.minha >= v.meta) pede = false;
+    if (!v.monte.length || L.minha >= L.meta || R.silenciado21(v.mesa, k)) pede = false;
     else if (rivalParou) pede = L.minha <= L.rival ? L.estouro < 0.8 : L.estouro < 0.2;
-    else pede = L.estouro <= 0.3 || (L.minha < 15 && L.estouro < 0.55) || (L.minha < L.rival - 2 && L.estouro < 0.6);
+    else pede = L.estouro <= 0.3 || (L.minha < L.meta - 6 && L.estouro < 0.55) || (L.minha < L.rival - 2 && L.estouro < 0.6);
     if (pede) pedir21(room, m, k);
     else parar21(room, m, k);
   }
@@ -1101,3 +1120,333 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
 }
 
 module.exports = { ligarCartas };
+  // ------------------------------------------------------------------ 21
+  // Como no 21 do Resident Evil 7: os trunfos de aposta, escudo, meta e silêncio ficam na mesa
+  // (v.mesa) e valem enquanto estiverem lá; o Destruir do rival tira. Cada um tem a sua aposta.
+  const nome21 = (m, k) => m.lugares[k]?.nome || '…';
+  const dedos = (n) => `${n} dedo${n === 1 ? '' : 's'}`;
+  function darTrunfo(v, k, n = 1) {
+    for (let i = 0; i < n; i++) if (v.trunfos[k].length < R.MAX_TRUNFOS_21) v.trunfos[k].push(R.sortearTrunfo21());
+  }
+
+  function novaPartida21(room, m) {
+    m.v = { vidas: [R.DEDOS_21, R.DEDOS_21], rodada: 0, inicio: Math.floor(Math.random() * 2), trunfos: [[], []] };
+    for (const k of [0, 1]) darTrunfo(m.v, k); // a primeira rodada começa com um a mais
+    novaRodada21(room, m, null);
+  }
+
+  // perdeu: o lugar de quem perdeu a rodada passada (ganha um trunfo a mais, para reagir)
+  function novaRodada21(room, m, perdeu) {
+    const v = m.v;
+    v.monte = R.embaralhar(R.baralho21());
+    v.maos = [[v.monte.pop(), v.monte.pop()], [v.monte.pop(), v.monte.pop()]];
+    v.mesa = [[], []];
+    v.ordem = 0;
+    v.raiox = [false, false];
+    v.passes = 0;
+    v.rodada += 1;
+    v.resultado = null;
+    v.inicio = 1 - v.inicio; // cada rodada começa um
+    v.vez = v.inicio;
+    v.usouNaVez = 0;
+    for (const k of [0, 1]) darTrunfo(v, k, perdeu === k ? 2 : 1);
+    m.fase = 'jogando';
+    m.vencedor = null;
+    const base = R.apostaBase21(v.rodada);
+    m.aviso = `Rodada ${v.rodada}${base > 1 ? ` (aposta base ${base})` : ''}: ${nome21(m, v.vez)} começa`;
+    m.vezDesde = Date.now();
+    m.botAte = Date.now() + ESPERA_ROBO + 900;
+    avisar(room, m);
+  }
+
+  function passarVez21(m) {
+    const v = m.v;
+    v.vez = 1 - v.vez;
+    v.usouNaVez = 0;
+    m.vezDesde = Date.now();
+    m.botAte = Date.now() + ESPERA_ROBO;
+  }
+
+  function pedir21(room, m, k) {
+    const v = m.v;
+    if (m.fase !== 'jogando' || v.vez !== k || !v.monte.length || R.silenciado21(v.mesa, k)) return false;
+    const n = v.monte.pop();
+    v.maos[k].push(n);
+    v.passes = 0;
+    m.aviso = `${nome21(m, k)} pediu carta: ${n}`;
+    if (Math.random() < 0.35) gritar(room, m, k, 'pede21');
+    passarVez21(m);
+    avisar(room, m);
+    return true;
+  }
+
+  // parar não tranca: se o rival mexer depois, a vez volta. Dois parados em seguida fecham a rodada.
+  function parar21(room, m, k) {
+    const v = m.v;
+    if (m.fase !== 'jogando' || v.vez !== k) return false;
+    v.passes += 1;
+    if (Math.random() < 0.4) gritar(room, m, k, 'para21');
+    if (v.passes >= 2) {
+      resolver21(room, m);
+      return true;
+    }
+    m.aviso = `${nome21(m, k)} parou`;
+    passarVez21(m);
+    avisar(room, m);
+    return true;
+  }
+
+  // O efeito de cada trunfo: devolve o texto do que aconteceu, ou null se não dá para usar agora
+  // (aí ele não é gasto). Os de mesa entram na mesa de quem usou.
+  function efeito21(v, k, chave) {
+    const o = 1 - k;
+    const minha = v.maos[k];
+    const dele = v.maos[o];
+    const folga = R.meta21(v.mesa) - R.soma21(minha);
+    const tirarDoMonte = (n) => v.monte.splice(v.monte.indexOf(n), 1);
+    const T = R.TRUNFOS_21[chave];
+    if (/^c\d$/.test(chave)) {
+      const n = Number(chave.slice(1));
+      if (!v.monte.includes(n)) return `o ${n} não estava no baralho`; // gasta: e conta onde ele está
+      tirarDoMonte(n);
+      minha.push(n);
+      return `comprou o ${n}`;
+    }
+    if (T.mesa) {
+      // a mesma meta que já vale não muda nada
+      if (/^meta/.test(chave) && R.meta21(v.mesa) === Number(chave.slice(4))) return null;
+      if (chave === 'silencio' && R.silenciado21(v.mesa, o)) return null;
+      v.mesa[k].push({ c: chave, n: ++v.ordem });
+      if (chave === 'mais1' || chave === 'mais2') {
+        darTrunfo(v, k);
+        return `a aposta do rival foi para ${R.aposta21(v.mesa, o, v.rodada)} (e ganhou um trunfo)`;
+      }
+      if (chave === 'escudo' || chave === 'escudo2') return `a sua aposta desceu para ${R.aposta21(v.mesa, k, v.rodada)}`;
+      if (chave === 'silencio') return 'o rival não pode pedir carta';
+      if (chave === 'colheita') return 'cada trunfo daqui pra frente dá outro';
+      return `a meta virou ${R.meta21(v.mesa)}`;
+    }
+    switch (chave) {
+      case 'devolver': {
+        if (minha.length < 2) return null;
+        const n = minha.pop();
+        v.monte.push(n);
+        R.embaralhar(v.monte);
+        return `devolveu o ${n} para o baralho`;
+      }
+      case 'remover': {
+        if (dele.length < 2) return null;
+        const n = dele.pop();
+        v.monte.push(n);
+        R.embaralhar(v.monte);
+        return `mandou o ${n} do rival de volta para o baralho`;
+      }
+      case 'troca': {
+        if (minha.length < 2 || dele.length < 2) return null;
+        const a = minha.pop();
+        const b = dele.pop();
+        minha.push(b);
+        dele.push(a);
+        return `trocou o ${a} pelo ${b}`;
+      }
+      case 'perfeita': {
+        const cabe = v.monte.filter((n) => n <= folga);
+        if (!cabe.length) return null;
+        const n = Math.max(...cabe);
+        tirarDoMonte(n);
+        minha.push(n);
+        return `comprou o ${n}`;
+      }
+      case 'presente': {
+        if (!v.monte.length) return null;
+        const n = Math.max(...v.monte);
+        tirarDoMonte(n);
+        dele.push(n);
+        return `o rival comprou o ${n}`;
+      }
+      case 'raiox':
+        if (v.raiox[k]) return null;
+        v.raiox[k] = true;
+        return 'está vendo a carta fechada do rival';
+      case 'trocaTrunfos': {
+        // (este já saiu da mão) descarta até 2 dos outros, sorteados, e ganha 3
+        const meus = v.trunfos[k];
+        for (let i = 0; i < 2 && meus.length; i++) meus.splice(Math.floor(Math.random() * meus.length), 1);
+        darTrunfo(v, k, 3);
+        return 'trocou trunfos: ganhou 3 novos';
+      }
+      case 'feliz':
+        darTrunfo(v, k);
+        darTrunfo(v, o);
+        return 'os dois ganharam um trunfo';
+      case 'destruir': {
+        const t = v.mesa[o].pop();
+        if (!t) return null;
+        return `destruiu ${R.TRUNFOS_21[t.c].nome} do rival`;
+      }
+      case 'destruirTudo': {
+        if (!v.mesa[o].length) return null;
+        const n = v.mesa[o].length;
+        v.mesa[o] = [];
+        return `limpou a mesa do rival (${n} trunfo${n === 1 ? '' : 's'})`;
+      }
+      default: return null;
+    }
+  }
+
+  function usar21(room, m, k, chave) {
+    const v = m.v;
+    const T = R.TRUNFOS_21[chave];
+    const i = v.trunfos[k].indexOf(chave);
+    if (m.fase !== 'jogando' || v.vez !== k || !T || i < 0) return false;
+    const colhe = v.mesa[k].some((t) => t.c === 'colheita'); // a colheita vale para os próximos
+    v.trunfos[k].splice(i, 1);
+    const texto = efeito21(v, k, chave);
+    if (!texto) {
+      v.trunfos[k].splice(i, 0, chave); // não deu: volta para a mão
+      return false;
+    }
+    if (colhe) darTrunfo(v, k);
+    v.passes = 0; // o rival pode responder ao trunfo
+    m.aviso = `${nome21(m, k)} usou ${T.nome}: ${texto}`;
+    gritar(room, m, k, 'trunfo', { frase: `${T.nome}!`, trunfo: chave });
+    m.vezDesde = Date.now();
+    m.botAte = Date.now() + ESPERA_ROBO + 400;
+    avisar(room, m);
+    return true;
+  }
+
+  // quem passou da meta perde (os dois passaram: perde quem passou mais); senão, ganha o mais perto
+  function resolver21(room, m) {
+    const v = m.v;
+    const meta = R.meta21(v.mesa);
+    const s = v.maos.map(R.soma21);
+    const passou = s.map((x) => x > meta);
+    let venc;
+    if (passou[0] && passou[1]) venc = s[0] === s[1] ? 'e' : s[0] < s[1] ? 0 : 1;
+    else if (passou[0] || passou[1]) venc = passou[0] ? 1 : 0;
+    else venc = s[0] === s[1] ? 'e' : s[0] > s[1] ? 0 : 1;
+    let dano = 0;
+    v.perdeu = null;
+    if (venc !== 'e') {
+      const p = 1 - venc;
+      dano = R.aposta21(v.mesa, p, v.rodada);
+      v.vidas[p] = Math.max(0, v.vidas[p] - dano);
+      v.perdeu = p;
+    }
+    v.resultado = { somas: s, vencedor: venc, dano, meta };
+    if (venc === 'e') m.aviso = `Empate em ${s[0]}: ninguém perde dedo`;
+    else {
+      const perdeu = nome21(m, 1 - venc);
+      m.aviso = `${nome21(m, venc)} ganhou a rodada (${s[venc]} × ${s[1 - venc]}): `
+        + (dano ? `${perdeu} perde ${dedos(dano)}` : `os escudos de ${perdeu} seguraram`);
+      if (m.lugares[venc]?.bot && Math.random() < 0.6) gritar(room, m, venc, 'ganhou21');
+    }
+    if (venc !== 'e' && v.vidas[1 - venc] <= 0) {
+      m.fase = 'fim';
+      m.vencedor = venc;
+      m.aviso = `${nome21(m, venc)} ganhou o 21!`;
+      m.ate = Date.now() + 9000;
+      const l = m.lugares[venc];
+      if (l && !l.bot) {
+        const u = room.users.get(l.id);
+        const contraGente = !m.lugares[1 - venc]?.bot;
+        if (u) darMoedas?.(room, u, contraGente ? 30 : 12, 'vitória no 21');
+      }
+    } else {
+      m.fase = 'fimDaRodada';
+      m.ate = Date.now() + 5200;
+    }
+    avisar(room, m);
+  }
+
+  // --- o robô do 21: conta as cartas que viu (as dele e as abertas do rival); não sabe a fechada
+  function leitura21(v, k) {
+    const o = 1 - k;
+    const meta = R.meta21(v.mesa);
+    const minha = R.soma21(v.maos[k]);
+    const abertas = v.raiox[k] ? v.maos[o] : v.maos[o].slice(1);
+    const sei = new Set([...v.maos[k], ...abertas]);
+    const incertas = R.baralho21().filter((n) => !sei.has(n));
+    const folga = meta - minha;
+    const estouro = incertas.length ? incertas.filter((n) => n > folga).length / incertas.length : 1;
+    const media = incertas.length ? incertas.reduce((a, b) => a + b, 0) / incertas.length : 6;
+    const rival = R.soma21(abertas) + (v.raiox[k] ? 0 : media);
+    return { meta, minha, folga, estouro, rival, rivalCerto: v.raiox[k], incertas };
+  }
+
+  function escolherTrunfo21(v, k) {
+    const o = 1 - k;
+    const tem = new Set(v.trunfos[k]);
+    if (!tem.size || Math.random() < 0.2) return null;
+    const L = leitura21(v, k);
+    const passei = L.minha > L.meta;
+    const rivalPassou = L.rival > L.meta + (L.rivalCerto ? 0 : 2);
+    const ganhando = !passei && (rivalPassou || L.minha >= L.rival + 2);
+    const perdendo = passei || L.minha < L.rival - 1;
+    const dele = v.mesa[o].map((t) => t.c);
+    const ruimPraMim = dele.at(-1);
+    const nota = {
+      devolver: passei && v.maos[k].length > 1 ? 100 : 0,
+      destruir: !ruimPraMim ? 0 : ruimPraMim === 'silencio' && !passei && L.folga >= 3 ? 97
+        : /^mais/.test(ruimPraMim) ? 66 : /^escudo/.test(ruimPraMim) && ganhando ? 52 : /^meta/.test(ruimPraMim) && passei ? 88 : 30,
+      destruirTudo: dele.length >= 2 ? 72 : 0,
+      meta24: passei && L.minha <= 24 ? 92 : 0,
+      meta27: passei && L.minha <= 27 ? 90 : 0,
+      troca: passei && v.maos[k].length > 1 && v.maos[o].length > 1 && v.maos[k].at(-1) > v.maos[o].at(-1) ? 85 : 0,
+      perfeita: !passei && L.folga >= 2 ? 75 : 0,
+      meta17: !passei && L.minha <= 17 && L.minha >= 14 && L.rival > 17 ? 70 : 0,
+      silencio: ganhando && !rivalPassou ? 68 : 0,
+      mais2: ganhando ? 62 : 36,
+      remover: v.maos[o].length > 1 && v.maos[o].at(-1) >= 5 && !rivalPassou ? 58 : 0,
+      mais1: ganhando ? 56 : 38,
+      escudo2: perdendo ? 58 : 18,
+      presente: !rivalPassou && L.rival >= L.meta - 4 && v.monte.length ? 52 : 0,
+      escudo: perdendo ? 50 : 16,
+      colheita: v.trunfos[k].length >= 3 ? 45 : 0,
+      raiox: !v.raiox[k] ? 40 : 0,
+      trocaTrunfos: v.trunfos[k].length >= 4 ? 26 : 0,
+      feliz: 22,
+    };
+    // as cartas de número: a que crava a meta é ótima; uma que cabe, boa (se ainda pode estar no monte)
+    for (let n = 2; n <= 7; n++) {
+      if (passei || !L.incertas.includes(n) || n > L.folga) continue;
+      nota[`c${n}`] = n === L.folga ? 95 : 50 + n * 3;
+    }
+    let melhor = null;
+    for (const c of tem) if ((nota[c] || 0) > (nota[melhor] || 0)) melhor = c;
+    return melhor && nota[melhor] > 0 ? melhor : null;
+  }
+
+  function bot21(room, m, k) {
+    const v = m.v;
+    // até três trunfos por vez, um de cada vez (para dar tempo de ver)
+    if (v.usouNaVez < 3) {
+      const t = escolherTrunfo21(v, k);
+      if (t && usar21(room, m, k, t)) {
+        v.usouNaVez += 1;
+        return;
+      }
+    }
+    const L = leitura21(v, k);
+    const rivalParou = v.passes === 1;
+    let pede;
+    if (!v.monte.length || L.minha >= L.meta || R.silenciado21(v.mesa, k)) pede = false;
+    else if (rivalParou) pede = L.minha <= L.rival ? L.estouro < 0.8 : L.estouro < 0.2;
+    else pede = L.estouro <= 0.3 || (L.minha < L.meta - 6 && L.estouro < 0.55) || (L.minha < L.rival - 2 && L.estouro < 0.6);
+    if (pede) pedir21(room, m, k);
+    else parar21(room, m, k);
+  }
+
+  function ticVinte(room, m, agora) {
+    if (m.fase === 'fimDaRodada') {
+      if (agora >= m.ate) novaRodada21(room, m, m.v.perdeu);
+      return;
+    }
+    if (m.fase !== 'jogando') return;
+    const k = m.v.vez;
+    if (!vezDeGente(m, k)) {
+      if (agora >= m.botAte) bot21(room, m, k);
+    } else if (agora - m.vezDesde > ESPERA_GENTE) parar21(room, m, k); // parado na vez: para por ele
+  }
+
