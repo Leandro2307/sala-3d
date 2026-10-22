@@ -5,8 +5,8 @@
 //     manilhas; no uno o monte, o sentido e a cor);
 //   - a plaquinha de cada lugar flutuando em cima da cadeira (nome, cartas, a vez, o balão do grito,
 //     e o tapa e o tiro de brincadeira);
-//   - a mão embaixo: as cartas balançam e inclinam com o mouse; clique escolhe (sobe), clique de
-//     novo (ou JOGAR) joga; COBERTA joga virada; TRUCO! grita; o megafone zoa;
+//   - a mão embaixo: as cartas balançam e inclinam com o mouse; um clique joga a carta; COBERTA
+//     liga e a próxima carta vai virada; TRUCO! grita; o megafone zoa;
 //   - a pergunta do truco (ou da mão de dez) no meio, com o tempo correndo.
 // Os robôs aparecem sentados nas cadeiras deles. Cada truco, seis, nove e doze (e cada resposta) é
 // um grito: murro na mesa, as cartas pulam, a voz do navegador em português e a faixa grande. "Começar"
@@ -87,10 +87,12 @@ function naMesa(m, k, raio) {
 }
 
 // ------------------------------------------------------------------ as cartas (com cache)
-// Desenhadas no tamanho das do Balatro (71 × 95) vezes 2. A fonte pixelada chega depois: quando
+// Desenhadas no tamanho das do Balatro (71 × 95) vezes 2, num canvas 3× maior (para a carta não
+// borrar deitada na mesa nem grande na mão). A fonte pixelada chega depois: quando
 // ela carrega, tudo o que já foi desenhado com a fonte reserva é redesenhado.
 const CW = 142;
 const CH = 190;
+const NITIDEZ = 3;
 const _tex = new Map();
 const _url = new Map();
 const quandoFonte = [];
@@ -107,7 +109,12 @@ const urlCarta = (c) => {
 };
 function texturaCarta(c) {
   if (_tex.has(c)) return _tex.get(c);
-  const t = texturaViva(THREE, CW, CH, (ctx, w, h) => desenharCarta(ctx, w, h, c));
+  const t = texturaViva(THREE, CW * NITIDEZ, CH * NITIDEZ, (ctx) => {
+    ctx.setTransform(NITIDEZ, 0, 0, NITIDEZ, 0, 0);
+    desenharCarta(ctx, CW, CH, c);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+  });
+  t.anisotropy = 16; // o three limita ao máximo da placa; deitada na mesa é o que segura a nitidez
   _tex.set(c, t);
   return t;
 }
@@ -313,7 +320,7 @@ export class Cartas {
     this.g3d = opts.world.cartas3d;
     this.mesas = MESAS_CARTAS.map((m, i) => ({ i, m, e: null, mao: [], lugar: -1, robos: [], pulo: 0, pausaDesde: 0 }));
     this.ativa = null; // a mesa em que estou sentado (com o painel aberto)
-    this.sel = null; // a carta escolhida (sobe na mão), antes de jogar
+    this.coberta = false; // COBERTA ligada: a próxima carta clicada vai virada
     this.esperandoCor = null; // coringa jogado, esperando a cor
     this.chaveMao = '';
     this.chavePergunta = '';
@@ -322,7 +329,7 @@ export class Cartas {
       this.chaveMao = '';
       if (this.ativa) this.desenhar();
     });
-    // 1, 2, 3...: escolhe a carta (de novo: joga); espaço: TRUCO!
+    // 1, 2, 3...: joga a carta; espaço: TRUCO!
     window.addEventListener('keydown', (ev) => this.tecla(ev));
   }
 
@@ -337,7 +344,6 @@ export class Cartas {
       M.mao = mao;
       M.lugar = lugar;
       M.parceiro = parceiro || null; // mão de dez: as cartas do parceiro, para decidir
-      if (this.sel && !mao.includes(this.sel)) this.sel = null;
       // mão nova (três cartas chegando, ou as sete do uno): as cartas entram distribuídas
       if (mao.length > (antes?.length || 0) + 1) this.distribuir = true;
       if (this.ativa === M) this.desenhar();
@@ -648,7 +654,7 @@ export class Cartas {
   sairDaMesa() {
     if (!this.ativa) return;
     this.ativa = null;
-    this.sel = null;
+    this.coberta = false;
     this.esperandoCor = null;
     this.cores.hidden = true;
     this.raiz.hidden = true;
@@ -670,7 +676,7 @@ export class Cartas {
     return podeJogarUno(c, e.topo, e.cor);
   }
 
-  // clique numa carta: escolhe (sobe); clique de novo na escolhida: joga
+  // clique numa carta: joga (virada, se a COBERTA estiver ligada)
   clicarCarta(c, el) {
     const M = this.ativa;
     if (!M) return;
@@ -680,11 +686,7 @@ export class Cartas {
       el?.classList.add('nao');
       return;
     }
-    if (this.sel === c) return this.jogar(c);
-    this.sel = c;
-    this.sfx.cartaSel?.(M.mao.indexOf(c));
-    this.marcarEscolhida();
-    this.desenharBotoes();
+    this.jogar(c, this.coberta);
   }
 
   jogar(carta, coberta = false) {
@@ -697,7 +699,8 @@ export class Cartas {
     }
     this.voarCarta(carta, coberta);
     this.socket?.emit('ct-jogar', { mesa: M.i, carta, coberta: M.e?.jogo === 'truco' && coberta });
-    this.sel = null;
+    this.coberta = false;
+    this.marcarCoberta();
     this.sfx.dado(0.8);
     this.sfx.cartaVoa?.();
   }
@@ -843,7 +846,9 @@ body.ct-sentado #controls-help, body.ct-sentado #sit-hint { display: none !impor
   transform: perspective(520px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)) translateY(var(--sobe, 0px)) scale(var(--zoom, 1));
   transition: transform .14s ease-out, box-shadow .14s, filter .14s; }
 .ct-carta.pode:hover .ct-face { --sobe: -14px; --zoom: 1.07; }
-.ct-carta.sel .ct-face { --sobe: -32px; --zoom: 1.08; box-shadow: 0 0 0 3px #fff, 0 12px 0 rgba(0,0,0,.25); }
+.ct-b.laranja.liga { --cor: #ffb74d; box-shadow: 0 4px 0 var(--sombra), 0 0 0 3px #fff, 0 0 18px #ff9800; }
+.ct-mao.coberta .ct-carta.pode .ct-face { box-shadow: 0 6px 0 rgba(0,0,0,.28), 0 0 0 3px #ff9800; }
+.ct-mao.coberta .ct-carta.pode:hover .ct-face { background-image: var(--verso) !important; }
 .ct-carta:not(.pode) .ct-face { filter: brightness(.74) saturate(.75); }
 .ct-carta:disabled { cursor: default; }
 /* a pergunta do truco e da mão de dez */
@@ -965,7 +970,6 @@ body.touch .ct-placa { font-size: 12px; }`;
       if (!b || !carta || !this.ativa) return;
       this.voarCarta(carta);
       this.socket?.emit('ct-jogar', { mesa: this.ativa.i, carta, cor: b.dataset.cor });
-      this.sel = null;
       this.sfx.dado(0.8);
     });
   }
@@ -996,8 +1000,10 @@ body.touch .ct-placa { font-size: 12px; }`;
       this.$('.ct-fim').hidden = true;
       return;
     }
-    if (acao === 'jogar') return this.jogar(this.sel);
-    if (acao === 'coberta') return this.jogar(this.sel, true);
+    if (acao === 'coberta') {
+      this.coberta = !this.coberta;
+      return this.marcarCoberta();
+    }
     if (acao === 'zoar') {
       this.zoar.hidden = !this.zoar.hidden;
       return;
@@ -1176,7 +1182,7 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
     const pode = mao.map((c) => this.podeJogar(M, c));
     const chave = `${M.i}:${mao.join(',')}:${pode.join(',')}`;
     this.mao.classList.toggle('vez', e.vez === M.lugar && e.fase === 'jogando');
-    if (chave === this.chaveMao) return this.marcarEscolhida();
+    if (chave === this.chaveMao) return this.marcarCoberta();
     this.chaveMao = chave;
     const n = mao.length;
     const meio = (n - 1) / 2;
@@ -1192,14 +1198,17 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
         + `<div class="ct-balanca"><div class="ct-face" style="background-image:url(${urlCarta(c)})"></div></div></button>`;
     }).join('');
     if (distribuir && n) mao.forEach((_, i) => setTimeout(() => this.sfx.cartaSel?.(i), i * 90));
-    this.marcarEscolhida();
+    this.marcarCoberta();
   }
 
-  marcarEscolhida() {
-    for (const el of this.mao.children) el.classList.toggle('sel', !!this.sel && el.dataset.carta === this.sel);
+  // COBERTA ligada: o botão fica aceso e as cartas que dá para jogar mostram que vão viradas
+  marcarCoberta() {
+    this.mao.classList.toggle('coberta', this.coberta);
+    if (this.coberta) this.mao.style.setProperty('--verso', `url(${urlCarta('verso')})`);
+    this.$('[data-acao="coberta"]')?.classList.toggle('liga', this.coberta);
   }
 
-  // os botões dos lados da mão (Balatro: JOGAR azul, COBERTA laranja, TRUCO! vermelho)
+  // os botões dos lados da mão (Balatro: COBERTA laranja, TRUCO! vermelho)
   desenharBotoes() {
     const M = this.ativa;
     const e = M?.e;
@@ -1207,13 +1216,11 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
     const truco = e.jogo === 'truco';
     const meuTime = M.lugar % 2;
     const minhaVez = e.vez === M.lugar && e.fase === 'jogando';
-    const temSel = !!this.sel && this.podeJogar(M, this.sel);
     const esq = [];
     const dir = [];
-    if (e.fase === 'jogando' && minhaVez && !e.pedido) {
-      esq.push(`<button type="button" class="ct-b" data-acao="jogar"${temSel ? '' : ' disabled'}>Jogar</button>`);
-      if (truco && !e.ferro && e.rodadas?.length > 0) esq.push(`<button type="button" class="ct-b laranja" data-acao="coberta"${temSel ? '' : ' disabled'}>Coberta</button>`);
-    }
+    const podeCobrir = truco && e.fase === 'jogando' && minhaVez && !e.pedido && !e.ferro && e.rodadas?.length > 0;
+    if (podeCobrir) esq.push('<button type="button" class="ct-b laranja" data-acao="coberta" title="A próxima carta vai virada">Coberta</button>');
+    else this.coberta = false;
     if (truco && e.fase === 'jogando' && minhaVez && !e.pedido && e.trucar?.[meuTime]) {
       const nome = NOME_PEDIDO[PASSOS_TRUCO[PASSOS_TRUCO.indexOf(e.vale) + 1]];
       dir.push(`<button type="button" class="ct-b vermelho grande truco" data-acao="truco:pedir" title="Espaço">${nome}!</button>`);
@@ -1236,6 +1243,7 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
       elDir.innerHTML = html(dir);
       elDir.append(this.zoar);
     }
+    this.marcarCoberta();
   }
 
   // a barra do tempo embaixo da mão, na minha vez
