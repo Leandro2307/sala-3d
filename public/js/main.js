@@ -108,7 +108,11 @@ function barraMais() {
   const btn = $('#btn-mais');
   const aberta = () => document.body.classList.contains('bar-mais');
   const conferir = () => {
-    if (!aberta()) btn.hidden = direita.scrollWidth <= direita.clientWidth + 1;
+    if (aberta()) return;
+    const cabe = direita.scrollWidth <= direita.clientWidth + 1;
+    // só quando muda: pôr hidden de novo (mesmo igual) gera outro aviso no MutationObserver lá
+    // embaixo, que chama o conferir de novo — um laço sem fim que travava a página no celular
+    if (btn.hidden !== cabe) btn.hidden = cabe;
   };
   const abrir = (on) => {
     document.body.classList.toggle('bar-mais', on);
