@@ -49,7 +49,7 @@ export const TROPICAL = {
       placa: {
         x: AV + 9, z: 683, giro: Math.PI,
         frente: [
-          ['↑', { nome: 'Salão de jogos', sub: 'Pingue-pongue, sinuca, truco e uno', cor: '#4ade80' }],
+          ['↑', { nome: 'Salão de jogos', sub: 'Pingue-pongue, sinuca, truco, uno e 21', cor: '#4ade80' }],
           ['→', { nome: 'Minigolfe e queimada', sub: 'Pela Rua do Golfe', cor: '#a3e635' }],
         ],
         verso: [['↓', 'praca', 'O Calçadão: lagoa, praia, estádio e praça']],
@@ -130,7 +130,7 @@ export const TROPICAL = {
       },
       {
         area: 'parque', x: AV - 9, z: 672, giro: Math.PI,
-        linhas: ['Salão de jogos: pingue-pongue, sinuca, truco e uno', 'Queimada e minigolfe pela Rua do Golfe', 'Pinta-território na rua antes da praça', 'Em cada jogo: chegue perto e aperte E'],
+        linhas: ['Salão de jogos: pingue-pongue, sinuca, truco, uno e 21', 'Queimada e minigolfe pela Rua do Golfe', 'Pinta-território na rua antes da praça', 'Em cada jogo: chegue perto e aperte E'],
       },
     ],
     mapasAqui: [

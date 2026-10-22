@@ -16,18 +16,25 @@ import * as THREE from 'three';
 import {
   forcaTruco, valorDe, naipeDe, SIMBOLO, NOME_PEDIDO, PASSOS_TRUCO, MANILHAS, NOME_MANILHA, VALE_DEZ, ZOEIRA,
   podeJogarUno, coringa, corUno, rotuloUno, HEX_COR, NOME_COR, CORES_UNO,
+  numero21, trunfo21, soma21, TRUNFOS_21, MAX_21, DEDOS_21,
 } from './cartas-regras.js';
 import { MESAS_CARTAS } from './parque-dados.js';
 import { hud, texturaViva, paraToque } from './hud-jogos.js';
 import { sfxLigado } from './sfx.js';
 import { Avatar } from './avatars.js';
 
-const LUGARES = { truco: 4, uno: 6 };
+const LUGARES = { truco: 4, uno: 6, vinteum: 2 };
+const NOME_JOGO = { truco: 'TRUCO', uno: 'UNO', vinteum: '21' };
+const COR_PLACA = { truco: '#fe5f55', uno: '#f5b244', vinteum: '#4bc292' };
 const R_MESA = 1.15;
 const R_CADEIRA = 1.75;
 const Y_MESA = 0.85;
 const PIXEL = "'Pixelify Sans', 'Plus Jakarta Sans', system-ui, sans-serif";
 const fontePx = (p, peso = 700) => `${peso} ${p}px ${PIXEL}`;
+// Os números e letras das cartas (e do placar) não vão na fonte pixelada: nela o 2 e o 3 quase não
+// se distinguem. Vão numa fonte cheia, de traço grosso.
+const NUMERO = "'Plus Jakarta Sans', 'Segoe UI', system-ui, sans-serif";
+const fonteNum = (p, peso = 800) => `${peso} ${p}px ${NUMERO}`;
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const PEDIDOS = ['truco', 'seis', 'nove', 'doze'];
 const OUVE_ATE = 22; // metros: de mais longe que isso, o grito da mesa não chega
@@ -96,12 +103,19 @@ const NITIDEZ = 3;
 const _tex = new Map();
 const _url = new Map();
 const quandoFonte = [];
+function redesenharTudo() {
+  for (const t of _tex.values()) t.userData.redesenhar();
+  _url.clear();
+  for (const f of quandoFonte) f();
+}
 if (typeof document !== 'undefined' && document.fonts?.load) {
-  document.fonts.load(fontePx(40)).then(() => {
-    for (const t of _tex.values()) t.userData.redesenhar();
-    _url.clear();
-    for (const f of quandoFonte) f();
-  }).catch(() => {});
+  Promise.all([document.fonts.load(fontePx(40)), document.fonts.load(fonteNum(40))]).then(redesenharTudo).catch(() => {});
+  // a folha das fontes do Google entra depois (media=print): quando as fontes chegarem de fato, redesenha
+  let tRedesenho = 0;
+  document.fonts.addEventListener?.('loadingdone', () => {
+    clearTimeout(tRedesenho);
+    tRedesenho = setTimeout(redesenharTudo, 120);
+  });
 }
 const urlCarta = (c) => {
   if (!_url.has(c)) _url.set(c, texturaCarta(c).image.toDataURL());
@@ -151,6 +165,7 @@ function desenharCarta(ctx, w, h, c) {
     ctx.fillText('♦', w / 2, h / 2 + 2);
     return;
   }
+  if (numero21(c) || trunfo21(c)) return desenharCarta21(ctx, w, h, c, corpo);
   if (/^[4-7QJKA23][oecp]$/.test(c)) {
     const v = valorDe(c);
     const n = naipeDe(c);
@@ -166,8 +181,8 @@ function desenharCarta(ctx, w, h, c) {
     // os cantos: valor e naipe (o de baixo, de ponta-cabeça)
     const canto = () => {
       ctx.fillStyle = cor;
-      ctx.font = fontePx(34);
-      ctx.fillText(v, 22, 26);
+      ctx.font = fonteNum(34);
+      ctx.fillText(v, 22, 27);
       ctx.font = fontePx(24, 400);
       ctx.fillText(SIMBOLO[n], 22, 52);
     };
@@ -237,14 +252,88 @@ function desenharCarta(ctx, w, h, c) {
   }
   ctx.restore();
   ctx.fillStyle = coringa(c) ? '#ffffff' : cor;
-  ctx.font = fontePx(rotuloUno(c).length > 1 ? 46 : 64);
+  ctx.font = fonteNum(rotuloUno(c).length > 1 ? 50 : 70);
   ctx.lineWidth = 6;
+  ctx.lineJoin = 'round';
   ctx.strokeStyle = '#1e2b2d';
-  if (coringa(c)) ctx.strokeText(rotuloUno(c), w / 2, h / 2 + 2);
-  ctx.fillText(rotuloUno(c), w / 2, h / 2 + 2);
+  if (coringa(c)) ctx.strokeText(rotuloUno(c), w / 2, h / 2 + 3);
+  ctx.fillText(rotuloUno(c), w / 2, h / 2 + 3);
+  // o canto, com contorno escuro para não sumir no amarelo
+  ctx.font = fonteNum(26);
+  ctx.lineWidth = 4;
+  ctx.strokeText(rotuloUno(c), 24, 26);
   ctx.fillStyle = '#ffffff';
-  ctx.font = fontePx(24);
-  ctx.fillText(rotuloUno(c), 22, 24);
+  ctx.fillText(rotuloUno(c), 24, 26);
+}
+
+// 21: a carta de número (cada número com a sua cor, o número grande no meio) e o trunfo (escuro,
+// com a borda na cor dele, o desenho grande e o nome embaixo)
+const COR_21 = ['#4bc292', '#009dff', '#a782d1', '#e8642c', '#e2304c', '#1f6b5f', '#3c4368', '#d97706', '#0e7490', '#be185d', '#7c2d12'];
+function desenharCarta21(ctx, w, h, c, corpo) {
+  const n = numero21(c);
+  if (n) {
+    const cor = COR_21[(n - 1) % COR_21.length];
+    corpo('#f6f1e6', '#cfc6b4');
+    // a faixa de cima na cor do número
+    ctx.fillStyle = cor;
+    ctx.beginPath();
+    ctx.roundRect(10, 10, w - 20, 18, 6);
+    ctx.fill();
+    ctx.font = fonteNum(n > 9 ? 84 : 98);
+    ctx.lineWidth = 8;
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = '#1e2b2d';
+    ctx.strokeText(String(n), w / 2, h / 2 + 8);
+    ctx.fillStyle = cor;
+    ctx.fillText(String(n), w / 2, h / 2 + 8);
+    // os cantos
+    ctx.fillStyle = '#1e2b2d';
+    ctx.font = fonteNum(24);
+    ctx.fillText(String(n), 22, 44);
+    ctx.save();
+    ctx.translate(w, h);
+    ctx.rotate(Math.PI);
+    ctx.fillText(String(n), 22, 26);
+    ctx.restore();
+    // as bolinhas: quantas cartas o número vale, para conferir de relance
+    ctx.fillStyle = cor;
+    const porLinha = Math.min(n, 6);
+    for (let i = 0; i < n; i++) {
+      const linha = Math.floor(i / 6);
+      const naLinha = linha ? n - 6 : porLinha;
+      const x = w / 2 + ((i % 6) - (naLinha - 1) / 2) * 13;
+      ctx.beginPath();
+      ctx.arc(x, h - 34 + linha * 13 - (n > 6 ? 6 : 0), 4.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    return;
+  }
+  const T = TRUNFOS_21[trunfo21(c)];
+  if (!T) return;
+  corpo('#1e2b2d', T.cor);
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = `${T.cor}88`;
+  ctx.beginPath();
+  ctx.roundRect(11, 11, w - 22, h - 22, 8);
+  ctx.stroke();
+  ctx.fillStyle = T.cor;
+  ctx.font = fontePx(12);
+  ctx.fillText('TRUNFO', w / 2, 24);
+  if (/^\d+$/.test(T.icone)) {
+    ctx.font = fonteNum(58);
+    ctx.fillText(T.icone, w / 2, h * 0.44);
+  } else {
+    ctx.font = `56px 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', sans-serif`;
+    ctx.fillText(T.icone, w / 2, h * 0.44);
+  }
+  // o nome, em uma ou duas linhas
+  const palavras = T.nome.split(' ');
+  const linhas = T.nome.length > 10 && palavras.length > 1
+    ? [palavras.slice(0, Math.ceil(palavras.length / 2)).join(' '), palavras.slice(Math.ceil(palavras.length / 2)).join(' ')]
+    : [T.nome];
+  ctx.fillStyle = '#fff4e6';
+  ctx.font = fonteNum(linhas.length > 1 ? 15 : 17);
+  linhas.forEach((l, i) => ctx.fillText(l.toUpperCase(), w / 2, h * 0.74 + (i - (linhas.length - 1) / 2) * 19));
 }
 
 // ------------------------------------------------------------------ as mesas (parte do mundo)
@@ -267,7 +356,7 @@ export function construirCartas(world) {
     world.addBox({ min: [m.x - R_MESA * 0.8, 0, m.z - R_MESA * 0.8], max: [m.x + R_MESA * 0.8, Y_MESA, m.z + R_MESA * 0.8] });
     for (let k = 0; k < LUGARES[m.jogo]; k++) {
       const c = cadeira(m, k);
-      const banco = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.24, 0.45, 16), new THREE.MeshStandardMaterial({ color: m.jogo === 'truco' ? (k % 2 ? 0xb91c1c : 0x1d4ed8) : 0x7c3aed, roughness: 0.7 }));
+      const banco = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.24, 0.45, 16), new THREE.MeshStandardMaterial({ color: m.jogo === 'truco' ? (k % 2 ? 0xb91c1c : 0x1d4ed8) : m.jogo === 'vinteum' ? 0x15803d : 0x7c3aed, roughness: 0.7 }));
       banco.position.set(c.x, 0.225, c.z);
       banco.castShadow = true;
       g.add(banco);
@@ -276,19 +365,20 @@ export function construirCartas(world) {
     const nome = texturaViva(THREE, 384, 96, (ctx, w, h) => {
       ctx.fillStyle = '#1e2b2d';
       ctx.fillRect(0, 0, w, h);
-      ctx.fillStyle = m.jogo === 'truco' ? '#fe5f55' : '#f5b244';
-      ctx.font = fontePx(60);
+      ctx.fillStyle = COR_PLACA[m.jogo];
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(m.jogo === 'truco' ? 'TRUCO' : 'UNO', w / 2, h / 2 + 2);
+      ctx.font = m.jogo === 'vinteum' ? fonteNum(64) : fontePx(60);
+      ctx.fillText(NOME_JOGO[m.jogo], w / 2, h / 2 + 2);
     });
     quandoFonte.push(() => nome.userData.redesenhar());
     const placa = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.4, 0.05), [madeira, madeira, madeira, madeira, new THREE.MeshBasicMaterial({ map: nome, toneMapped: false }), new THREE.MeshBasicMaterial({ map: nome, toneMapped: false })]);
     placa.position.set(m.x, 3.1, m.z);
     g.add(placa);
-    // as cartas do centro (as da rodada e o monte no truco; o topo do descarte e o monte no uno)
+    // as cartas do centro (as da rodada e o monte no truco; o topo do descarte e o monte no uno; as
+    // duas mãos e o monte no 21)
     const cartas = [];
-    for (let k = 0; k < 6; k++) {
+    for (let k = 0; k < (m.jogo === 'vinteum' ? 16 : 6); k++) {
       const c = new THREE.Mesh(geoCarta, new THREE.MeshBasicMaterial({ map: texturaCarta('verso'), toneMapped: false }));
       c.visible = false;
       c.userData = { chave: '', alvo: { x: m.x, y: Y_MESA, z: m.z, ry: 0 }, voo: null, sai: null };
@@ -337,15 +427,18 @@ export class Cartas {
   ligar(socket) {
     this.socket = socket;
     socket.on('ct-estado', (e) => this.estado(e));
-    socket.on('ct-mao', ({ mesa, lugar, mao, parceiro }) => {
+    socket.on('ct-mao', ({ mesa, lugar, mao, parceiro, trunfos, rivalOculta }) => {
       const M = this.mesas[mesa];
       if (!M) return;
       const antes = M.mao;
       M.mao = mao;
       M.lugar = lugar;
       M.parceiro = parceiro || null; // mão de dez: as cartas do parceiro, para decidir
+      M.trunfos = trunfos || []; // 21: os meus trunfos
+      M.rivalOculta = rivalOculta || null; // 21, com o raio-x: a carta fechada do rival
       // mão nova (três cartas chegando, ou as sete do uno): as cartas entram distribuídas
       if (mao.length > (antes?.length || 0) + 1) this.distribuir = true;
+      if (M.e?.jogo === 'vinteum') this.mostrar3d(M); // a minha carta fechada (e a do raio-x) no 3D
       if (this.ativa === M) this.desenhar();
     });
     socket.on('ct-grito', (g) => this.grito(g));
@@ -366,7 +459,7 @@ export class Cartas {
   // Alguém gritou na mesa (truco, seis..., desce, corro, a zoeira, o robô reclamando): a voz para quem
   // está perto, o balão em cima de quem gritou e, nos pedidos, o murro na mesa (as cartas pulam);
   // para quem está sentado nela, a faixa grande e a tela tremendo quando o grito é contra a gente.
-  grito({ mesa, lugar, tipo, nome, frase, alvo }) {
+  grito({ mesa, lugar, tipo, nome, frase, alvo, trunfo }) {
     const M = this.mesas[mesa];
     if (!M || !this.ligado(M.m.jogo) || typeof frase !== 'string') return;
     const sentado = this.ativa === M;
@@ -385,6 +478,7 @@ export class Cartas {
     falarGrito(frase, lugar, vol);
     if (!sentado) return;
     if (lugar !== M.lugar) this.balao(lugar, frase, pedido);
+    if (tipo === 'trunfo' && TRUNFOS_21[trunfo]) return this.mostrarTrunfo(trunfo, lugar === M.lugar ? 'Você' : nome, lugar === M.lugar);
     if (!pedido && tipo !== 'aceito' && tipo !== 'corro') return;
     const nosso = lugar % 2 === M.lugar % 2;
     const quem = lugar === M.lugar ? 'Você' : nome;
@@ -472,6 +566,26 @@ export class Cartas {
         this.sfx.ponto?.(r === meuTime ? 7 : 0);
       }
     }
+    if (e.jogo === 'vinteum' && antes?.vidas && e.vidas) {
+      // perdeu dedo: a tela treme (o meu) ou o número do rival pula
+      e.vidas.forEach((n, k) => {
+        if (n >= antes.vidas[k]) return;
+        const meu = k === M.lugar;
+        this.pular(this.$(`[data-p="${meu ? 'nos' : 'eles'}"]`));
+        this.flash(meu ? '#fe5f55' : '#009dff');
+        if (meu) {
+          this.tremerHud();
+          this.player.addShake?.(0.6);
+          this.sfx.punchTaken?.();
+        } else this.sfx.punchHit?.();
+      });
+      if (e.aposta > antes.aposta) {
+        this.pular(this.$('.ct-vale'));
+        this.sfx.fogo?.();
+      }
+      if (e.meta !== antes.meta) this.pular(this.$('.ct-meta'));
+      if (e.fase === 'fimDaRodada' && antes.fase !== 'fimDaRodada') this.sfx.rodada?.();
+    }
     if (e.fase === 'fim' && antes?.fase !== 'fim') {
       const ganhei = e.jogo === 'truco' ? e.vencedor === meuTime : e.vencedor === M.lugar;
       this.fim(ganhei, comDuplas(e.aviso, meuTime), e);
@@ -545,6 +659,25 @@ export class Cartas {
         // o monte, do lado de quem deu as cartas
         const pm = naMesa(M.m, e.dador ?? 0, 0.82);
         por(5, 'verso', { x: pm.x, y: Y_MESA + 0.006, z: pm.z, ry: pm.ry + 0.3 }, { chave: 'monte' });
+      } else if (e.jogo === 'vinteum') {
+        // as duas mãos, cada uma numa fileira na frente do dono; o monte no meio. A minha carta
+        // fechada eu vejo (e a do rival também, com o raio-x)
+        let i = 0;
+        for (const k of [0, 1]) {
+          const lista = e.maos21?.[k] || [];
+          const c = cadeira(M.m, k);
+          const dx = (c.x - M.m.x) / R_CADEIRA;
+          const dz = (c.z - M.m.z) / R_CADEIRA;
+          const sentado = this.ativa === M;
+          lista.forEach((carta, j) => {
+            let face = carta;
+            if (sentado && carta === 'verso') face = (k === M.lugar ? M.mao[j] : M.rivalOculta) || 'verso';
+            const off = (j - (lista.length - 1) / 2) * 0.25;
+            const alvo = { x: M.m.x + dx * 0.47 - dz * off, y: Y_MESA + 0.01 + j * 0.002, z: M.m.z + dz * 0.47 + dx * off, ry: -c.a + Math.PI / 2, esc: 0.78 };
+            if (i < 15) por(i++, face, alvo, { de: { x: M.m.x, y: Y_MESA + 0.2, z: M.m.z }, chave: `${k}:${j}:${face}` });
+          });
+        }
+        if (e.monte) por(15, 'verso', { x: M.m.x, y: Y_MESA + 0.006, z: M.m.z, ry: Math.PI / 2 + 0.15, esc: 0.78 }, { chave: 'monte' });
       } else if (e.topo) {
         por(0, e.topo, { x: M.m.x, y: Y_MESA + 0.012, z: M.m.z, ry: 0.3 }, { chave: `topo:${e.topo}:${e.monte}` });
         por(1, 'verso', { x: M.m.x + 0.5, y: Y_MESA + 0.01, z: M.m.z, ry: -0.2 }, { chave: 'monte' });
@@ -568,7 +701,7 @@ export class Cartas {
       const a = u.alvo;
       let { x, y, z, ry } = a;
       let rx = 0;
-      let esc = 1;
+      let esc = a.esc ?? 1;
       if (u.voo) {
         u.voo.t = Math.min(1, u.voo.t + dt / 0.42);
         const k = saida(u.voo.t);
@@ -584,7 +717,7 @@ export class Cartas {
         const k2 = k * k;
         x = lerp(x, lerp(M.m.x, u.sai.x, 0.75), k2);
         z = lerp(z, lerp(M.m.z, u.sai.z, 0.75), k2);
-        esc = 1 - 0.35 * k2;
+        esc *= 1 - 0.35 * k2;
       }
       if (M.pulo > 0) y += Math.abs(Math.sin((1 - M.pulo) * Math.PI * 3)) * 0.09 * M.pulo;
       s.position.set(x, y, z);
@@ -661,7 +794,9 @@ export class Cartas {
     this.zoar.hidden = true;
     this.$('.ct-fim').hidden = true;
     this.$('.ct-pergunta').hidden = true;
+    this.$('#ct-trunfo').hidden = true;
     this.chavePergunta = '';
+    this.armado = null;
     document.body.classList.remove('ct-sentado');
     this.player.override = null;
     this.player.stand();
@@ -672,6 +807,7 @@ export class Cartas {
   podeJogar(M, c) {
     const e = M.e;
     if (!e || e.fase !== 'jogando' || e.vez !== M.lugar) return false;
+    if (e.jogo === 'vinteum') return false; // no 21 não se joga carta: pede, para ou usa trunfo
     if (e.jogo === 'truco') return !e.pedido && !this.emPausa(M);
     return podeJogarUno(c, e.topo, e.cor);
   }
@@ -736,6 +872,15 @@ export class Cartas {
     if (!M || ev.repeat || ev.ctrlKey || ev.metaKey || ev.altKey) return;
     if (ev.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
     const n = Number(ev.key);
+    if (M.e?.jogo === 'vinteum') {
+      // 1, 2, 3...: usa o trunfo; espaço: pede carta; S: para
+      if (n >= 1 && n <= 9 && M.trunfos?.[n - 1]) this.usarTrunfo(M.trunfos[n - 1]);
+      else if (ev.code === 'Space' || ev.code === 'KeyS') {
+        ev.preventDefault();
+        this.emit21(ev.code === 'Space' ? 'pedir' : 'parar');
+      }
+      return;
+    }
     if (n >= 1 && n <= 9) {
       const mao = this.maoOrdenada(M);
       const c = mao[n - 1];
@@ -749,6 +894,33 @@ export class Cartas {
   emitTruco(acao) {
     const M = this.ativa;
     if (M) this.socket?.emit('ct-truco', { mesa: M.i, acao });
+  }
+
+  // 21: só na minha vez (o servidor confere de novo)
+  minhaVez21(M = this.ativa) {
+    const e = M?.e;
+    return !!e && e.jogo === 'vinteum' && e.fase === 'jogando' && e.vez === M.lugar;
+  }
+
+  emit21(acao, trunfo) {
+    const M = this.ativa;
+    if (!this.minhaVez21(M)) return;
+    if (acao === 'pedir' && !M.e.monte) return hud.mensagem('O baralho acabou', 'Agora é parar', 1400);
+    this.socket?.emit('ct-21', { mesa: M.i, acao, trunfo });
+    if (acao === 'pedir') this.sfx.cartaVoa?.();
+    else if (acao === 'parar') this.sfx.bip?.();
+  }
+
+  usarTrunfo(chave, el) {
+    const M = this.ativa;
+    if (!this.minhaVez21(M)) {
+      el?.classList.remove('nao');
+      void el?.offsetWidth;
+      el?.classList.add('nao');
+      return;
+    }
+    this.emit21('trunfo', chave);
+    this.sfx.dado?.(0.8);
   }
 
   maoOrdenada(M) {
@@ -917,7 +1089,60 @@ body.touch .ct-baixo { bottom: calc(6px + env(safe-area-inset-bottom)); gap: 4px
 body.touch .ct-carta { width: 64px; height: 86px; } body.touch .ct-mao { min-height: 86px; padding-top: 24px; }
 body.touch .ct-b { padding: 7px 10px; font-size: 13px; } body.touch .ct-b.grande { font-size: 17px; padding: 9px 12px; }
 body.touch .ct-pergunta { top: 8%; min-width: 0; width: min(92vw, 360px); } body.touch .ct-pergunta h2 { font-size: 40px; }
-body.touch .ct-placa { font-size: 12px; }`;
+body.touch .ct-placa { font-size: 12px; }
+/* os números do placar na fonte cheia (na pixelada o 2 parece 3) */
+.ct-num, .ct-vale, .ct-monte, .ct-meta { font-family: ${NUMERO}; font-weight: 800; }
+/* 21: o placar dos dedos, a meta, a contagem das cartas */
+.ct-titulo.v21 { background: #4bc292; box-shadow: 0 4px 0 #2b7a5b; font: 800 30px ${NUMERO}; padding: 4px 4px 6px; }
+.ct-meta { min-width: 44px; text-align: center; font-size: 24px; padding: 0 8px; border-radius: 8px; background: #a782d1; box-shadow: 0 3px 0 #6b4f8f; }
+.ct-dedos { display: flex; justify-content: center; gap: 3px; margin-top: 5px; }
+.ct-dedos i { width: 7px; height: 15px; border-radius: 4px 4px 2px 2px; background: #f6d7b0; box-shadow: 0 2px 0 rgba(0,0,0,.35); }
+.ct-dedos i.foi { background: #2b3d40; box-shadow: inset 0 2px 0 rgba(0,0,0,.4); }
+.ct-conta { padding: 6px 8px 8px; } .ct-conta small { display: block; font-size: 11px; color: #a9bfc2; text-align: center; letter-spacing: .08em; }
+.ct-conta small b { color: #fff; font-size: 13px; }
+.ct-conta > span { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; margin-top: 5px; }
+.ct-conta i { font: normal 800 13px/22px ${NUMERO}; text-align: center; border-radius: 5px; background: #2b3d40; color: #e9e4d6; }
+.ct-conta i.minha { background: #009dff; box-shadow: 0 2px 0 #00609c; } .ct-conta i.rival { background: #fe5f55; box-shadow: 0 2px 0 #a8352e; }
+.ct-conta i.fora { background: transparent; color: #6b8285; text-decoration: line-through; }
+/* 21: o rival lá em cima, a soma da minha mão, os trunfos */
+.ct-rival { position: absolute; left: 50%; top: 62px; translate: -50% 0; display: flex; align-items: center; gap: 10px; padding: 8px 12px; pointer-events: auto; }
+.ct-rival .ct-cartas { display: flex; gap: 4px; } .ct-rival img { width: 46px; height: 61px; border-radius: 6px; box-shadow: 0 3px 0 rgba(0,0,0,.3); }
+.ct-rival img.raiox { outline: 3px solid #73ffcc; }
+.ct-rival .ct-somar { font: 800 26px ${NUMERO}; padding: 2px 10px; border-radius: 8px; background: #fe5f55; box-shadow: 0 3px 0 #a8352e; white-space: nowrap; }
+.ct-rival .ct-quem { display: grid; gap: 2px; font-size: 14px; white-space: nowrap; } .ct-rival .ct-quem small { color: #a9bfc2; font-size: 12px; }
+.ct-soma { display: grid; justify-items: center; padding: 6px 12px; font: 800 36px/1 ${NUMERO}; }
+.ct-soma small { font: 700 11px ${PIXEL}; color: #a9bfc2; letter-spacing: .08em; margin: 2px 0; }
+.ct-soma.passou b { color: #fe5f55; } .ct-soma.cravou b { color: #f5b244; }
+.ct-vez21 { font-size: 14px; color: #f5b244; text-align: center; animation: ct-vez .8s ease-in-out infinite; }
+.ct-trunfos { position: relative; display: flex; gap: 8px; justify-content: center; pointer-events: auto; }
+.ct-trunfo { position: relative; width: 62px; height: 83px; padding: 0; border: 0; border-radius: 8px; background: center / 100% 100% no-repeat; box-shadow: 0 4px 0 rgba(0,0,0,.3); transition: transform .12s, filter .12s; }
+.ct-trunfo:hover, .ct-trunfo.armado { transform: translateY(-8px) scale(1.08) rotate(-2deg); }
+.ct-trunfo kbd { position: absolute; top: -8px; left: -6px; font: 800 11px ${NUMERO}; background: #1e2b2d; color: #fff; border-radius: 5px; padding: 1px 5px; }
+.ct-trunfos.longe .ct-trunfo { filter: brightness(.72) saturate(.7); }
+.ct-trunfo.nao { animation: ct-nao .3s linear; }
+.ct-tip { position: absolute; bottom: calc(100% + 12px); left: 50%; translate: -50% 0; width: 250px; padding: 8px 10px; font-size: 13px; line-height: 1.3; text-align: center; pointer-events: none; }
+.ct-tip b { display: block; font-size: 16px; margin-bottom: 3px; }
+.ct-mao.v21 .ct-carta .ct-face { filter: none; } .ct-mao.v21 .ct-carta { cursor: default; }
+.ct-fechada { position: absolute; left: 50%; bottom: -10px; translate: -50% 0; z-index: 2; font-size: 11px; padding: 1px 6px; border-radius: 6px; background: #1e2b2d; color: #f5b244; white-space: nowrap; pointer-events: none; }
+.ct-pergunta h2.ganhou { color: #f5b244; } .ct-pergunta h2.empate { color: #e9e4d6; }
+.ct-res { display: grid; grid-template-columns: 1fr auto 1fr; gap: 12px; align-items: center; margin: 8px 0 6px; }
+.ct-res > div { display: grid; justify-items: center; gap: 6px; } .ct-res .ct-cartas { display: flex; gap: 3px; }
+.ct-res img { width: 40px; height: 54px; border-radius: 5px; box-shadow: 0 2px 0 rgba(0,0,0,.3); }
+.ct-res b { font: 800 32px ${NUMERO}; } .ct-res b.passou { color: #fe5f55; text-decoration: line-through; }
+.ct-res small { color: #a9bfc2; font-size: 12px; }
+/* o trunfo que alguém usou: a carta grande no meio */
+#ct-trunfo { position: absolute; left: 50%; top: 36%; translate: -50% -50%; display: grid; justify-items: center; gap: 10px; pointer-events: none; }
+#ct-trunfo img { width: 130px; height: 174px; border-radius: 12px; box-shadow: 0 8px 0 rgba(0,0,0,.35), 0 0 46px var(--cor, #f5b244); }
+#ct-trunfo span { padding: 6px 14px; border-radius: 10px; background: #1e2b2d; box-shadow: 0 3px 0 #11191a; font-size: 17px; max-width: 86vw; text-align: center; }
+#ct-trunfo span small { display: block; font-size: 13px; color: #a9bfc2; margin-top: 2px; }
+#ct-trunfo.anda { animation: ct-trunfo 2s cubic-bezier(.2,1.4,.4,1) both; }
+@keyframes ct-trunfo { 0% { transform: scale(.2) rotate(-25deg); opacity: 0; } 16% { transform: scale(1.12) rotate(4deg); opacity: 1; } 26% { transform: none; }
+  82% { transform: none; opacity: 1; } 100% { transform: translateY(-30px) scale(.9); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { #ct-trunfo.anda, .ct-vez21 { animation: none; } }
+body.touch .ct-rival { left: auto; right: calc(6px + env(safe-area-inset-right)); translate: none; top: calc(54px + env(safe-area-inset-top)); padding: 5px 8px; gap: 6px; }
+body.touch .ct-rival img { width: 30px; height: 40px; } body.touch .ct-rival .ct-somar { font-size: 18px; }
+body.touch .ct-trunfo { width: 44px; height: 59px; } body.touch .ct-soma { font-size: 26px; padding: 4px 8px; }
+body.touch .ct-conta { display: none; } body.touch #ct-trunfo img { width: 96px; height: 128px; }`;
     document.head.appendChild(css);
 
     this.raiz = document.createElement('div');
@@ -928,8 +1153,11 @@ body.touch .ct-placa { font-size: 12px; }`;
 <div class="ct-assentos"></div>
 <div class="ct-pergunta ct-painel" hidden></div>
 <div id="ct-grito" hidden aria-live="polite"><b></b><span></span></div>
+<div class="ct-rival ct-painel" hidden></div>
+<div id="ct-trunfo" hidden><img alt=""><span></span></div>
 <div class="ct-baixo">
   <div class="ct-aviso"></div>
+  <div class="ct-trunfos" hidden></div>
   <div class="ct-linha"><div class="ct-esq"></div><div class="ct-mao"></div><div class="ct-dir"></div></div>
   <div class="ct-tempo" hidden><i></i></div>
 </div>
@@ -962,6 +1190,15 @@ body.touch .ct-placa { font-size: 12px; }`;
       face.style.removeProperty('--rx');
       face.style.removeProperty('--ry');
     });
+    // 21: passar o mouse num trunfo mostra o que ele faz
+    this.trunfosEl = this.$('.ct-trunfos');
+    this.trunfosEl.addEventListener('pointerover', (ev) => {
+      const b = ev.target.closest?.('[data-trunfo]');
+      if (b) this.dicaTrunfo(b.dataset.trunfo);
+    });
+    this.trunfosEl.addEventListener('pointerleave', () => {
+      if (!this.armado) this.dicaTrunfo(null);
+    });
     this.cores.addEventListener('click', (ev) => {
       const b = ev.target.closest('[data-cor]');
       this.cores.hidden = true;
@@ -982,6 +1219,19 @@ body.touch .ct-placa { font-size: 12px; }`;
     const mesa = M.i;
     const d = b.dataset;
     if (d.carta) return this.clicarCarta(d.carta, b);
+    if (d.trunfo) {
+      // no celular o primeiro toque mostra o que o trunfo faz; o segundo usa
+      if (document.body.classList.contains('touch') && this.armado !== d.trunfo) {
+        this.armado = d.trunfo;
+        this.trunfosEl.querySelectorAll('.armado').forEach((x) => x.classList.remove('armado'));
+        b.classList.add('armado');
+        return this.dicaTrunfo(d.trunfo);
+      }
+      this.armado = null;
+      this.dicaTrunfo(null);
+      return this.usarTrunfo(d.trunfo, b);
+    }
+    if (d.acao?.startsWith('v21:')) return this.emit21(d.acao.slice(4));
     if (d.tapa || d.tiro) {
       const tipo = d.tapa ? 'tapa' : 'tiro';
       return this.socket?.emit('ct-acao', { mesa, tipo, alvo: Number(d.tapa || d.tiro) });
@@ -1024,6 +1274,8 @@ body.touch .ct-placa { font-size: 12px; }`;
     this.desenharAssentos(M, e);
     this.desenharAviso(M, e);
     this.desenharPergunta(M, e);
+    this.desenharRival(M, e);
+    this.desenharTrunfos(M, e);
     this.desenharMao(M, e);
     this.desenharBotoes();
     this.desenharTempo(M, e);
@@ -1033,6 +1285,7 @@ body.touch .ct-placa { font-size: 12px; }`;
   desenharLado(M, e) {
     const lado = this.$('.ct-lado');
     const truco = e.jogo === 'truco';
+    const v21 = e.jogo === 'vinteum';
     const meuTime = M.lugar % 2;
     const espera = e.fase === 'espera' || e.fase === 'fim';
     const chave = `${e.jogo}:${espera}`;
@@ -1041,7 +1294,15 @@ body.touch .ct-placa { font-size: 12px; }`;
       const comecar = `<button type="button" class="ct-b verde grande" data-acao="comecar">Começar</button>
 <div class="ct-dica">${paraToque('Sente quem quiser e clique em Começar: a mesa completa com robôs')}</div>`;
       const manilhas = [...MANILHAS].reverse().map((c) => `<img src="${urlCarta(c)}" alt="${NOME_MANILHA[c]}" title="${NOME_MANILHA[c]}">`).join('');
-      lado.innerHTML = truco
+      const conta = Array.from({ length: MAX_21 }, (_, i) => `<i data-n="${i + 1}">${i + 1}</i>`).join('');
+      lado.innerHTML = v21
+        ? `<div class="ct-titulo v21 ondas">${ondas('21')}</div>
+<div class="ct-placar ct-caixa"><div><small>VOCÊ</small><b class="ct-num azul" data-p="nos">${DEDOS_21}</b><span class="ct-dedos" data-d="nos"></span></div><span class="ct-x">×</span><div><small>RIVAL</small><b class="ct-num vermelho" data-p="eles">${DEDOS_21}</b><span class="ct-dedos" data-d="eles"></span></div></div>
+<div class="ct-linha2 ct-caixa"><small>META</small><b class="ct-meta">21</b></div>
+<div class="ct-linha2 ct-caixa"><small>APOSTA (DEDOS)</small><b class="ct-vale">1</b></div>
+<div class="ct-conta ct-caixa"><small>CONTAGEM · NO MONTE <b class="ct-monte">–</b></small><span>${conta}</span></div>
+${espera ? comecar : ''}<button type="button" class="ct-b cinza" data-acao="sair">Sair da mesa</button>`
+        : truco
         ? `<div class="ct-titulo ondas">${ondas('TRUCO')}</div>
 <div class="ct-placar ct-caixa"><div><small>NÓS</small><b class="ct-num azul" data-p="nos">0</b></div><span class="ct-x">×</span><div><small>ELES</small><b class="ct-num vermelho" data-p="eles">0</b></div></div>
 <div class="ct-linha2 ct-caixa"><small>MÃO VALE</small><b class="ct-vale">2</b></div>
@@ -1069,6 +1330,30 @@ ${espera ? comecar : ''}<button type="button" class="ct-b cinza" data-acao="sair
         const r = e.rodadas?.[i];
         el.classList.remove('nos', 'eles', 'empate'); // (o carimbo, se estiver animando, fica)
         if (r !== undefined) el.classList.add(r === 'e' ? 'empate' : r === meuTime ? 'nos' : 'eles');
+      });
+    } else if (v21) {
+      const eu = Math.max(0, M.lugar);
+      const ele = 1 - eu;
+      const vidas = e.vidas || [DEDOS_21, DEDOS_21];
+      for (const [k, lugar] of [['nos', eu], ['eles', ele]]) {
+        lado.querySelector(`[data-p="${k}"]`).textContent = vidas[lugar];
+        lado.querySelector(`[data-d="${k}"]`).innerHTML = Array.from({ length: DEDOS_21 }, (_, i) => `<i${i < vidas[lugar] ? '' : ' class="foi"'}></i>`).join('');
+      }
+      lado.querySelector('.ct-meta').textContent = e.meta ?? 21;
+      const vale = lado.querySelector('.ct-vale');
+      vale.textContent = e.aposta ?? 1;
+      const fogo = (e.aposta ?? 1) >= 6 ? 3 : (e.aposta ?? 1) >= 4 ? 2 : (e.aposta ?? 1) >= 2 ? 1 : 0;
+      if (fogo) vale.dataset.fogo = fogo;
+      else delete vale.dataset.fogo;
+      lado.querySelector('.ct-monte').textContent = e.monte ?? '–';
+      // a contagem: o que eu já vi de cada número (meu, do rival, tirado do jogo); o resto está no
+      // monte ou é a carta fechada do rival
+      const minhas = new Set(M.mao.map(numero21));
+      const dele = new Set([...(e.maos21?.[ele] || []), M.rivalOculta].map(numero21));
+      const fora = new Set((e.fora || []).map(numero21));
+      lado.querySelectorAll('.ct-conta i').forEach((el) => {
+        const n = Number(el.dataset.n);
+        el.className = minhas.has(n) ? 'minha' : dele.has(n) ? 'rival' : fora.has(n) ? 'fora' : '';
       });
     } else {
       lado.querySelector('.ct-monte').textContent = e.monte ?? '–';
@@ -1101,7 +1386,9 @@ ${espera ? comecar : ''}<button type="button" class="ct-b cinza" data-acao="sair
       el.classList.toggle('vez', vez);
       el.style.setProperty('--time', truco ? (k % 2 === meuTime ? '#009dff' : '#fe5f55') : l.cor || '#5f7377');
       const dorso = '<i></i>'.repeat(Math.min(7, l.cartas));
-      const placa = `${l.bot ? '🤖 ' : ''}${esc(l.nome)}<span class="ct-dorso">${dorso}</span>${l.cartas > 7 ? `+${l.cartas - 7}` : ''}`;
+      const placa = e.jogo === 'vinteum'
+        ? `${l.bot ? '🤖 ' : ''}${esc(l.nome)} · ✋${e.vidas?.[k] ?? DEDOS_21} · 🃏${e.trunfosN?.[k] ?? 0}`
+        : `${l.bot ? '🤖 ' : ''}${esc(l.nome)}<span class="ct-dorso">${dorso}</span>${l.cartas > 7 ? `+${l.cartas - 7}` : ''}`;
       const p = el.querySelector('.ct-placa');
       if (p.dataset.html !== placa) {
         p.dataset.html = placa;
@@ -1165,6 +1452,23 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
 <div class="ct-parceiro">${(M.parceiro || []).map((c) => `<img src="${urlCarta(c)}" alt="${esc(c)}">`).join('')}</div>
 <div class="ct-botoes"><button type="button" class="ct-b verde grande" data-acao="truco:dez-jogar">Jogar!</button>
 <button type="button" class="ct-b cinza grande" data-acao="truco:dez-correr">Correr</button></div>${tempo}`;
+    } else if (e.jogo === 'vinteum' && e.fase === 'fimDaRodada' && e.resultado) {
+      // 21: a rodada fechou, as cartas fechadas abrem e o placar da rodada aparece
+      const r = e.resultado;
+      const eu = Math.max(0, M.lugar);
+      const ele = 1 - eu;
+      const nome = esc(e.lugares[ele]?.nome || 'Rival');
+      const empate = r.vencedor === 'e';
+      const ganhei = r.vencedor === eu;
+      chave = `r21:${e.rodada}`;
+      const mao = (k, quem) => `<div><small>${quem}</small><span class="ct-cartas">${(e.maos21?.[k] || []).map((c) => `<img src="${urlCarta(c)}" alt="${numero21(c)}">`).join('')}</span>`
+        + `<b class="${r.somas[k] > r.meta ? 'passou' : ''}">${r.somas[k]}</b></div>`;
+      const dedos = (n) => `${n} dedo${n === 1 ? '' : 's'}`;
+      const sub = empate ? 'Empate: ninguém perde dedo'
+        : !r.dano ? 'O escudo segurou o golpe'
+          : ganhei ? `${nome} perde ${dedos(r.dano)}` : `Você perde ${dedos(r.dano)}`;
+      html = `<h2 class="ondas ${empate ? 'empate' : ganhei ? 'ganhou' : ''}">${ondas(empate ? 'EMPATE' : ganhei ? 'GANHOU!' : 'PERDEU!')}</h2>
+<div class="ct-res">${mao(eu, 'VOCÊ')}<span class="ct-x">×</span>${mao(ele, nome)}</div><p>${sub} · meta ${r.meta}</p>`;
     }
     if (chave === this.chavePergunta) return;
     this.chavePergunta = chave;
@@ -1176,8 +1480,108 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
     el.style.animation = '';
   }
 
+  // 21: o rival lá em cima — as cartas dele (a fechada virada, ou aberta com o raio-x), quanto dá
+  // para ver da soma, os trunfos que ele tem e o que está armado
+  desenharRival(M, e) {
+    const el = this.$('.ct-rival');
+    const mostra = e.jogo === 'vinteum' && e.fase === 'jogando';
+    el.hidden = !mostra;
+    if (!mostra) return;
+    const ele = 1 - Math.max(0, M.lugar);
+    const l = e.lugares[ele];
+    const cartas = (e.maos21?.[ele] || []).map((c) => (c === 'verso' && M.rivalOculta ? { c: M.rivalOculta, raiox: true } : { c }));
+    const fechada = cartas.some((x) => x.c === 'verso');
+    const vista = soma21(cartas.map((x) => x.c).filter((c) => c !== 'verso'));
+    const extras = [`🃏 ${e.trunfosN?.[ele] ?? 0} trunfo${e.trunfosN?.[ele] === 1 ? '' : 's'}`];
+    if (e.escudo?.[ele]) extras.push(`🛡️×${e.escudo[ele]}`);
+    if (e.contra?.[ele]) extras.push('🚫 contra-ataque armado');
+    if (e.raiox?.[ele]) extras.push('👁️ vê a sua fechada');
+    const html = `<div class="ct-quem">${l?.bot ? '🤖 ' : ''}${esc(l?.nome || 'Rival')}<small>${extras.join(' · ')}</small></div>
+<span class="ct-cartas">${cartas.map((x) => `<img src="${urlCarta(x.c)}" alt="${x.c === 'verso' ? 'carta fechada' : numero21(x.c)}"${x.raiox ? ' class="raiox" title="Raio-X"' : ''}>`).join('')}</span>
+<b class="ct-somar" title="O que dá para ver da soma dele">${fechada ? `? + ${vista}` : vista}</b>`;
+    if (el.dataset.html === html) return;
+    el.dataset.html = html;
+    el.innerHTML = html;
+  }
+
+  // 21: os meus trunfos, em cima da mão (o número é a tecla)
+  desenharTrunfos(M, e) {
+    const el = this.trunfosEl;
+    const lista = e.jogo === 'vinteum' && (e.fase === 'jogando' || e.fase === 'fimDaRodada') ? M.trunfos || [] : [];
+    el.hidden = !lista.length;
+    el.classList.toggle('longe', !this.minhaVez21(M));
+    const html = lista.map((k, i) => `<button type="button" class="ct-trunfo" data-trunfo="${esc(k)}" style="background-image:url(${urlCarta(`T:${k}`)})" aria-label="${esc(`${TRUNFOS_21[k]?.nome}: ${TRUNFOS_21[k]?.desc}`)}">`
+      + `${i < 9 ? `<kbd>${i + 1}</kbd>` : ''}</button>`).join('');
+    if (el.dataset.html === html) return;
+    el.dataset.html = html;
+    el.innerHTML = html;
+    this.armado = null;
+    this.dicaTrunfo(null);
+  }
+
+  dicaTrunfo(chave) {
+    let tip = this.trunfosEl.querySelector('.ct-tip');
+    const T = TRUNFOS_21[chave];
+    if (!T) {
+      tip?.remove();
+      return;
+    }
+    if (!tip) {
+      tip = document.createElement('div');
+      tip.className = 'ct-tip ct-painel';
+      this.trunfosEl.append(tip);
+    }
+    const vez = this.minhaVez21();
+    tip.innerHTML = `<b style="color:${T.cor}">${esc(T.nome)}</b>${esc(T.desc)}${vez ? '' : '<br><small>(na sua vez)</small>'}`;
+  }
+
+  // alguém usou um trunfo: a carta aparece grande no meio da tela
+  mostrarTrunfo(chave, quem, meu) {
+    const T = TRUNFOS_21[chave];
+    const f = this.$('#ct-trunfo');
+    f.querySelector('img').src = urlCarta(`T:${chave}`);
+    f.querySelector('img').alt = T.nome;
+    f.style.setProperty('--cor', T.cor);
+    f.querySelector('span').innerHTML = `${esc(quem)}: ${esc(T.nome)}<small>${esc(T.desc)}</small>`;
+    f.hidden = false;
+    f.classList.remove('anda');
+    void f.offsetWidth;
+    f.classList.add('anda');
+    clearTimeout(this.tTrunfo);
+    this.tTrunfo = setTimeout(() => { f.hidden = true; }, 2000);
+    this.sfx.cartaVoa?.();
+    this.sfx.fogo?.();
+    if (!meu) this.flash(T.cor);
+  }
+
+  // 21: a minha mão (não se joga carta; a primeira é a fechada, que só eu vejo). Cada carta nova
+  // entra voando.
+  desenharMao21(M, e) {
+    const mao = M.mao;
+    this.mao.classList.add('v21');
+    this.mao.classList.toggle('vez', this.minhaVez21(M));
+    const chave = `${M.i}:21:${e.rodada}:${mao.join(',')}`;
+    if (chave === this.chaveMao) return;
+    this.chaveMao = chave;
+    const antes = this.mao21?.mesa === M.i && this.mao21.rodada === e.rodada ? Math.min(this.mao21.n, mao.length) : 0;
+    this.mao21 = { mesa: M.i, rodada: e.rodada, n: mao.length };
+    const n = mao.length;
+    const meio = (n - 1) / 2;
+    const passo = n > 4 ? 4 : 7;
+    this.mao.style.setProperty('--junta', `${(n > 4 ? -Math.min(40, 6 + (n - 4) * 5) : -6) / 2}px`);
+    this.mao.innerHTML = mao.map((c, i) => {
+      const off = i - meio;
+      const estilo = `--rot:${off * passo}deg;--desce:${off * off * 4}px;--atraso:${-i * 0.37}s;--chega:${Math.max(0, i - antes) * 0.12}s`;
+      return `<button type="button" class="ct-carta${i >= antes ? ' chega' : ''}" style="${estilo}" aria-label="${numero21(c)}${i === 0 ? ' (fechada)' : ''}" tabindex="-1">`
+        + `<div class="ct-balanca"><div class="ct-face" style="background-image:url(${urlCarta(c)})"></div></div>${i === 0 ? '<span class="ct-fechada">🔒 fechada</span>' : ''}</button>`;
+    }).join('');
+    for (let i = antes; i < n; i++) setTimeout(() => this.sfx.cartaSel?.(i), (i - antes) * 120);
+  }
+
   // a mão: refeita só quando muda o que tem nela (senão as cartas pulavam a cada aviso)
   desenharMao(M, e) {
+    if (e.jogo === 'vinteum') return this.desenharMao21(M, e);
+    this.mao.classList.remove('v21');
     const mao = this.maoOrdenada(M);
     const pode = mao.map((c) => this.podeJogar(M, c));
     const chave = `${M.i}:${mao.join(',')}:${pode.join(',')}`;
@@ -1230,6 +1634,15 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
       if (minhaVez && e.comprou) esq.push('<button type="button" class="ct-b cinza" data-acao="uno:passar">Passar</button>');
       if (M.mao.length <= 2 && !e.disseUno?.includes(M.lugar)) dir.push('<button type="button" class="ct-b ouro grande truco" data-acao="uno:uno">UNO!</button>');
     }
+    if (e.jogo === 'vinteum' && e.fase === 'jogando') {
+      const vez = this.minhaVez21(M);
+      const s = soma21(M.mao);
+      const meta = e.meta ?? 21;
+      esq.push(`<div class="ct-soma ct-caixa${s > meta ? ' passou' : s === meta ? ' cravou' : ''}"><small>SUA MÃO</small><b>${s}</b><small>META ${meta}</small></div>`);
+      esq.push(`<button type="button" class="ct-b verde grande" data-acao="v21:pedir" title="Espaço"${vez && e.monte ? '' : ' disabled'}>Pedir carta</button>`);
+      if (vez) dir.push('<div class="ct-vez21">SUA VEZ!</div>');
+      dir.push(`<button type="button" class="ct-b vermelho grande" data-acao="v21:parar" title="S"${vez ? '' : ' disabled'}>Parar</button>`);
+    }
     if (e.fase !== 'espera') dir.push('<button type="button" class="ct-b roxo" data-acao="zoar" title="Zoar a mesa">📣 Zoar</button>');
     const html = (l) => l.join('');
     const elEsq = this.$('.ct-esq');
@@ -1250,7 +1663,7 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
   desenharTempo(M, e) {
     const el = this.$('.ct-baixo > .ct-tempo');
     const minhaVez = e.vez === M.lugar && e.fase === 'jogando' && !e.pedido;
-    const chave = minhaVez ? `${e.vez}:${e.mesaCartas?.length}:${e.rodadas?.length}:${M.mao.length}:${e.topo}` : '';
+    const chave = minhaVez ? `${e.vez}:${e.mesaCartas?.length}:${e.rodadas?.length}:${M.mao.length}:${e.topo}:${e.aviso}` : '';
     if (chave === el.dataset.chave) return;
     el.dataset.chave = chave;
     el.hidden = !minhaVez;
@@ -1325,7 +1738,8 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
   fim(ganhei, texto, e) {
     const el = this.$('.ct-fim');
     const meuTime = this.ativa ? this.ativa.lugar % 2 : 0;
-    const placar = e.jogo === 'truco' && e.pontos ? `<p>Nós ${e.pontos[meuTime]} × ${e.pontos[1 - meuTime]} Eles</p>` : '';
+    const v21 = e.jogo === 'vinteum' && e.vidas ? `<p>Dedos: você ${e.vidas[Math.max(0, this.ativa?.lugar ?? 0)]} × ${e.vidas[1 - Math.max(0, this.ativa?.lugar ?? 0)]} rival</p>` : '';
+    const placar = e.jogo === 'truco' && e.pontos ? `<p>Nós ${e.pontos[meuTime]} × ${e.pontos[1 - meuTime]} Eles</p>` : v21;
     el.classList.toggle('perdeu', !ganhei);
     el.innerHTML = `<div class="ct-painel"><h2 class="ondas">${ondas(ganhei ? 'VITÓRIA!' : 'DERROTA')}</h2><p>${esc(texto)}</p>${placar}
 <button type="button" class="ct-b verde grande" data-acao="fechar-fim">${ganhei ? 'Bora de novo!' : 'Revanche!'}</button></div>`;
@@ -1391,9 +1805,9 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
     }
   }
 
-  // o painel do parque mostra "Truco e Uno" se um dos dois estiver ligado
+  // o painel do parque mostra "Truco, Uno e 21" se um dos três estiver ligado
   algumLigado() {
-    return this.ligado('truco') || this.ligado('uno');
+    return this.ligado('truco') || this.ligado('uno') || this.ligado('vinteum');
   }
 
   apertou() { return false; }
@@ -1407,12 +1821,12 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
     const M = this.mesaPerto();
     if (!M || !this.ligado(M.m.jogo)) return '';
     const gente = M.e?.lugares.filter((l) => l && !l.bot).length || 0;
-    const nome = M.m.jogo === 'truco' ? 'truco' : 'uno';
+    const nome = { truco: 'truco', uno: 'uno', vinteum: '21' }[M.m.jogo];
     return `<kbd>E</kbd>Sentar na mesa de ${nome}${gente ? ` (${gente} ${gente === 1 ? 'pessoa' : 'pessoas'})` : ''}`;
   }
 
   lugar() {
     const m = MESAS_CARTAS[0];
-    return { nome: 'Truco e Uno', desc: 'Mesas de cartas do salão · com robôs', cor: '#f87171', pos: [m.x, 0, m.z - R_CADEIRA - 0.7], yaw: Math.PI };
+    return { nome: 'Truco, Uno e 21', desc: 'Mesas de cartas do salão · com robôs', cor: '#f87171', pos: [m.x, 0, m.z - R_CADEIRA - 0.7], yaw: Math.PI };
   }
 }

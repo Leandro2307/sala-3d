@@ -56,7 +56,7 @@ export const NEVE = {
         x: 358, z: 701, giro: Math.PI,
         frente: [
           ['↖', { nome: 'Pinta-território', sub: 'Times pintam o chão', cor: '#d946ef' }],
-          ['↑', { nome: 'Salão de jogos', sub: 'Pingue-pongue, sinuca, truco e uno', cor: '#4ade80' }],
+          ['↑', { nome: 'Salão de jogos', sub: 'Pingue-pongue, sinuca, truco, uno e 21', cor: '#4ade80' }],
           ['↑', { nome: 'Queimada', sub: 'Dois times, uma bola', cor: '#f97316' }],
           ['→', { nome: 'Minigolfe', sub: '9 buracos', cor: '#a3e635' }],
         ],
@@ -138,7 +138,7 @@ export const NEVE = {
       },
       {
         area: 'parque', x: 342, z: 610, giro: Math.PI,
-        linhas: ['Salão de jogos: pingue-pongue, sinuca, truco e uno', 'Queimada, pinta-território e minigolfe', 'O salão fica no alto, no fim da subida', 'Em cada jogo: chegue perto e aperte E'],
+        linhas: ['Salão de jogos: pingue-pongue, sinuca, truco, uno e 21', 'Queimada, pinta-território e minigolfe', 'O salão fica no alto, no fim da subida', 'Em cada jogo: chegue perto e aperte E'],
       },
     ],
     mapasAqui: [

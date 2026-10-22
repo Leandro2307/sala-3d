@@ -51,6 +51,10 @@ export const GRITOS = {
   // o robô que levou um tapa ou um tiro na mesa (de brincadeira)
   apanhou: ['Ai! Isso não vale!', 'Tá nervoso, é?', 'Bate, mas o truco é meu!', 'Vou contar pro juiz!', 'Ô trem doído, sô!'],
   baleado: ['Fui atingido!', 'Ai, meu zap!', 'Isso é jogo de truco, sô!', 'Volto pra assombrar!', 'Errou! Quer dizer... acertou.'],
+  // o 21: pedir, parar, ganhar a rodada e perder a mão
+  pede21: ['Manda carta!', 'Mais uma!', 'Vem, carta!', 'Bora, mais uma!'],
+  para21: ['Parei.', 'Tô bem assim.', 'Fico aqui.', 'Chega pra mim.'],
+  ganhou21: ['Passa os dedos!', 'Contei as cartas, sô!', 'Essa foi fácil!', 'Mais um dedo pra coleção!'],
 };
 // A zoeira: o que dá para gritar na mesa a qualquer hora (o botão de megafone), no truco e no uno.
 // Os robôs também zoam quando fazem uma rodada.
@@ -100,4 +104,55 @@ export function embaralhar(lista, aleatorio = Math.random) {
     [lista[i], lista[j]] = [lista[j], lista[i]];
   }
   return lista;
+}
+
+// ------------------------------------------------------------------ 21 (o duelo dos trunfos)
+// Dois na mesa, um contra o outro (ou contra o robô). O baralho tem só 11 cartas, de 1 a 11, uma
+// de cada: dá para contar o que já saiu. Cada um começa a rodada com duas cartas, a primeira
+// fechada (o rival não vê). Na sua vez: usa quantos trunfos quiser e depois pede uma carta ou para.
+// A rodada fecha quando os dois param em seguida; quem passou da meta perde (os dois passaram:
+// perde quem passou mais), senão ganha quem chegou mais perto. Quem perde a rodada perde dedos —
+// tantos quanto a aposta. Sem dedos, acabou. Carta: 'n7'; o verso é 'verso'.
+export const MAX_21 = 11;
+export const DEDOS_21 = 5; // uma mão
+export const MAX_TRUNFOS_21 = 6;
+export const META_21 = 21;
+export const carta21 = (n) => `n${n}`;
+export const numero21 = (c) => (/^n\d+$/.test(c) ? Number(c.slice(1)) : 0);
+export const soma21 = (mao) => mao.reduce((s, n) => s + (typeof n === 'number' ? n : numero21(n)), 0);
+export function baralho21() {
+  const b = [];
+  for (let n = 1; n <= MAX_21; n++) b.push(n);
+  return b;
+}
+
+// Os trunfos (do jogo 21 original): nome, o que faz, o desenho, a cor e o peso no sorteio.
+export const TRUNFOS_21 = {
+  mais1: { nome: 'Aposta +1', desc: 'A aposta da rodada sobe 1: quem perder perde mais um dedo.', icone: '⚔️', cor: '#e6b800', peso: 12 },
+  mais2: { nome: 'Aposta +2', desc: 'A aposta da rodada sobe 2.', icone: '🗡️', cor: '#f59e0b', peso: 6 },
+  dobro: { nome: 'Dobrar', desc: 'Dobra a aposta da rodada.', icone: '✖️', cor: '#ffd700', peso: 2 },
+  ancora: { nome: 'Âncora', desc: 'A aposta desce 2 (nunca abaixo de 1).', icone: '⚓', cor: '#80aacc', peso: 6 },
+  escudo: { nome: 'Escudo', desc: 'Se você perder esta rodada, perde 1 dedo a menos.', icone: '🛡️', cor: '#4da6ff', peso: 10 },
+  devolver: { nome: 'Devolver', desc: 'Sua última carta aberta volta para o baralho.', icone: '↩️', cor: '#ff9966', peso: 8 },
+  destruir: { nome: 'Destruir', desc: 'Tira do jogo a última carta aberta do rival.', icone: '💥', cor: '#ff3333', peso: 6 },
+  troca: { nome: 'Troca', desc: 'Troca a sua última carta aberta com a do rival.', icone: '🔁', cor: '#ff6600', peso: 5 },
+  ame: { nome: 'Ame o Inimigo', desc: 'O rival compra a maior carta que ainda está no baralho.', icone: '🖤', cor: '#ff4da6', peso: 6 },
+  perfeita: { nome: 'Compra Perfeita', desc: 'Você compra a maior carta que não passa da meta (se houver).', icone: '✨', cor: '#cc66ff', peso: 4 },
+  adrenalina: { nome: 'Adrenalina', desc: 'Compra duas, fica com a melhor para a meta e devolve a outra.', icone: '💉', cor: '#ff4060', peso: 4 },
+  raiox: { nome: 'Raio-X', desc: 'Você vê a carta fechada do rival nesta rodada.', icone: '👁️', cor: '#73ffcc', peso: 7 },
+  contra: { nome: 'Contra-Ataque', desc: 'Anula o próximo trunfo que o rival usar nesta rodada.', icone: '🚫', cor: '#45d6ff', peso: 4 },
+  meta17: { nome: 'Meta 17', desc: 'A meta desta rodada vira 17.', icone: '17', cor: '#9ae6b4', peso: 3 },
+  meta24: { nome: 'Meta 24', desc: 'A meta desta rodada vira 24.', icone: '24', cor: '#aaaaff', peso: 3 },
+  meta27: { nome: 'Meta 27', desc: 'A meta desta rodada vira 27.', icone: '27', cor: '#8f8fff', peso: 2 },
+};
+export const trunfo21 = (c) => (typeof c === 'string' && c.startsWith('T:') ? c.slice(2) : null);
+
+export function sortearTrunfo21(aleatorio = Math.random) {
+  const lista = Object.entries(TRUNFOS_21);
+  let r = aleatorio() * lista.reduce((s, [, t]) => s + t.peso, 0);
+  for (const [k, t] of lista) {
+    r -= t.peso;
+    if (r < 0) return k;
+  }
+  return lista[0][0];
 }

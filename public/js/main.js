@@ -2606,6 +2606,7 @@ const JOGOS_DA_SALA = [
   ['golfe', 'Minigolfe', '9 buracos com moinho, morros e água'],
   ['truco', 'Truco', 'Truco mineiro em duplas, com os gritos e robôs'],
   ['uno', 'Uno', 'Até 6 na mesa, com robôs'],
+  ['vinteum', '21', 'Duelo de 21 com trunfos: conte as cartas, aposte dedos'],
   ['gincana', 'Gincana', '10 fases estilo Fall Guys e a final dos hexágonos'],
   ['kart', 'Kart', 'Kartódromo com itens, 3 voltas'],
   ['pinta', 'Pinta-território', 'Times pintam o chão com tinta'],
@@ -2681,8 +2682,8 @@ function aplicarSala(cfg) {
   aplicarLogo(cfg.logo || '');
   if (state.room) salas.visitar(state.room, { empresa: cfg.empresa, temSenha: cfg.temSenha });
   let mudou = false;
-  // as mesas de cartas são uma área só, ligada se o truco ou o uno estiver
-  for (const j of AREAS_DE_JOGO) mudou = world.ligarArea(j, j === 'cartas' ? jogoLigado('truco') || jogoLigado('uno') : jogoLigado(j)) || mudou;
+  // as mesas de cartas são uma área só, ligada se o truco, o uno ou o 21 estiver
+  for (const j of AREAS_DE_JOGO) mudou = world.ligarArea(j, j === 'cartas' ? jogoLigado('truco') || jogoLigado('uno') || jogoLigado('vinteum') : jogoLigado(j)) || mudou;
   if (mudou) world.aquecerShaders(); // o número de luzes pode ter mudado
   // o cinema (Lazer) ou o prédio do escritório com os departamentos escolhidos
   if (world.setModo(cfg)) {

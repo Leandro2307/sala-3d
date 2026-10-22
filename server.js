@@ -467,7 +467,7 @@ function mudarSaldo(nome, delta) {
 const MODULOS = ['lazer', 'escritorio'];
 const JOGOS_SALA = ['parkour', 'ringue', 'corrida', 'futebol', 'volei', 'basquete', 'boliche', 'surf', 'matamata', 'batalha', 'xadrez', 'dama', 'velha', 'dados', 'poderes', 'armas',
   // o parque (public/js/parque-dados.js)
-  'pingue', 'queimada', 'sinuca', 'golfe', 'truco', 'uno', 'gincana', 'kart', 'pinta',
+  'pingue', 'queimada', 'sinuca', 'golfe', 'truco', 'uno', 'vinteum', 'gincana', 'kart', 'pinta',
   'tapa', // tapa nos amigos, no mapa todo (e na mesa de cartas)
   'tiro']; // tiro de brincadeira na mesa de cartas
 const configPadrao = () => ({

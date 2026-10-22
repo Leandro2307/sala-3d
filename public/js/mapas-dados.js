@@ -90,7 +90,7 @@ export function parqueDe(mapa) {
     SALAO: { x0: -10 + s.dx, x1: 50 + s.dx, z0: 628 + s.dz, z1: 670 + s.dz, altura: 7.5 },
     MESAS_PINGUE: [{ x: 2 + s.dx, z: 638 + s.dz }, { x: 2 + s.dx, z: 660 + s.dz }],
     MESAS_SINUCA: [{ x: 22.5 + s.dx, z: 638 + s.dz }, { x: 22.5 + s.dx, z: 660 + s.dz }],
-    MESAS_CARTAS: [{ x: 41.5 + s.dx, z: 638 + s.dz, jogo: 'truco' }, { x: 41.5 + s.dx, z: 660 + s.dz, jogo: 'uno' }],
+    MESAS_CARTAS: [{ x: 41.5 + s.dx, z: 638 + s.dz, jogo: 'truco' }, { x: 41.5 + s.dx, z: 660 + s.dz, jogo: 'uno' }, { x: 41.5 + s.dx, z: 649 + s.dz, jogo: 'vinteum' }],
     QUEIMADA: { cx: 75 + q.dx, cz: 616 + q.dz, comp: 30, larg: 15, cemiterio: 5 },
     PINTA_ARENA: { cx: 133 + p.dx, cz: 637 + p.dz, lado: 56 },
     GOLFE_AREA: { x0: -48 + g.dx, x1: -6 + g.dx, z0: 548 + g.dz, z1: 626 + g.dz },
