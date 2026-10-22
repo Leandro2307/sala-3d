@@ -54,10 +54,22 @@
       <span class="sep">·</span>
       <span class="moedas-chip" id="moedas-chip" title="Suas moedas"><i data-icon="moeda" data-size="15"></i><b id="moedas-n">0</b></span>
       <button id="copy-invite" class="chip-btn" type="button"><i data-icon="link" data-size="15"></i>Copiar convite</button>
+      <span class="sep">·</span>
+      <button id="hud-btn-jogos" class="chip-btn chip-destaque" type="button" title="Abrir catálogo com 20+ jogos e teleporte"><i data-icon="gamepad" data-size="15"></i><b>Jogos & Teleporte</b></button>
+      <button id="hud-btn-galera" class="chip-btn chip-social" type="button" title="Teleportar até seus amigos" hidden><i data-icon="goto" data-size="15"></i><b>Ir até amigos</b></button>
     </div>
 
     <!-- topo, no meio: comunicado da empresa e "fulano está te chamando" (ver "empresa" no main.js) -->
     <div id="topo-centro">
+      <div class="guia-inicio" id="guia-inicio" hidden>
+        <span class="guia-inicio-ic"><i data-icon="gamepad" data-size="18"></i></span>
+        <div class="guia-inicio-txt">
+          <b>Bem-vindo! Use WASD para andar</b>
+          <span>Explore a sala ou clique em <b>Jogos & Teleporte</b> para ver as atividades!</span>
+        </div>
+        <button type="button" class="primary small" id="guia-inicio-jogos"><i data-icon="gamepad" data-size="14"></i>Ver Jogos</button>
+        <button type="button" class="icon-btn" id="guia-inicio-fechar" aria-label="Fechar dica"><i data-icon="x" data-size="14"></i></button>
+      </div>
       <div class="aviso-empresa" id="aviso-empresa" hidden>
         <span class="aviso-ic"><i data-icon="predio" data-size="16"></i></span>
         <span class="aviso-txt"><small>Comunicado</small><span id="aviso-texto"></span></span>
@@ -204,20 +216,26 @@
           <span><kbd>Shift</kbd> correr</span>
           <span class="wide"><kbd>Clique</kbd> olhar com o mouse</span>
           <span><kbd>E</kbd> focar na tela</span>
-          <span><kbd>Tab</kbd> mesa de telas</span>
-          <span><kbd>L</kbd> mapa</span>
-          <span><kbd>V</kbd> 1ª/3ª pessoa</span>
-          <span><kbd>R</kbd> voltar ao checkpoint</span>
-          <span><kbd>T</kbd> chat</span>
+          <span><kbd>L</kbd> mapa e destinos</span>
           <span><kbd>M</kbd> microfone</span>
-          <span><kbd>K</kbd> câmera</span>
-          <span><kbd>H</kbd> esconder a interface</span>
+          <span><kbd>T</kbd> chat</span>
+        </div>
+        <button type="button" class="help-mais-btn" id="help-mais-btn">
+          <span>Mais atalhos</span>
+          <i data-icon="chevron" data-size="12"></i>
+        </button>
+        <div class="help-grid help-extra" id="help-extra" data-input="keyboard" hidden>
+          <span><kbd>Tab</kbd> mesa de telas</span>
+          <span><kbd>V</kbd> 1ª/3ª pessoa</span>
           <span><kbd>C</kbd> sentar</span>
           <span><kbd>P</kbd> trocar personagem</span>
+          <span><kbd>R</kbd> voltar ao checkpoint</span>
+          <span><kbd>K</kbd> câmera</span>
+          <span><kbd>H</kbd> esconder interface</span>
           <span data-jogo="corrida"><kbd>G</kbd> virar carro</span>
           <span data-jogo="ringue"><kbd>F</kbd> socar</span>
           <span data-jogo="tapa"><kbd>Y</kbd> dar um tapa</span>
-          <span class="wide"><kbd>Clique</kbd> jogar a bola (quadras e parque)</span>
+          <span class="wide"><kbd>Clique</kbd> jogar a bola (jogos)</span>
           <span data-jogo="poderes"><kbd>Q</kbd> voar</span>
           <span data-jogo="poderes"><kbd>J</kbd> pulo alto</span>
           <span id="help-tiro" hidden><kbd>X</kbd> atirar</span>

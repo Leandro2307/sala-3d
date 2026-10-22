@@ -156,6 +156,26 @@ body.sem-hud #bar, body.sem-hud #cam-preview, body.sem-hud #touch { display: non
   pointer-events: auto;
 }
 .chip-btn:hover { background: rgba(255, 255, 255, 0.12); }
+.chip-btn.chip-destaque {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.22), rgba(16, 185, 129, 0.28));
+  border-color: rgba(52, 211, 153, 0.55);
+  color: #6ee7b7;
+}
+.chip-btn.chip-destaque:hover {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.38), rgba(16, 185, 129, 0.45));
+  border-color: #6ee7b7;
+  color: #fff;
+}
+.chip-btn.chip-social {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.22), rgba(99, 102, 241, 0.28));
+  border-color: rgba(129, 140, 248, 0.55);
+  color: #93c5fd;
+}
+.chip-btn.chip-social:hover {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.38), rgba(99, 102, 241, 0.45));
+  border-color: #93c5fd;
+  color: #fff;
+}
 
 /* ------------------------------------------------------------ campos */
 .field { display: grid; gap: 8px; margin-bottom: 16px; }
@@ -936,6 +956,38 @@ body.touch .jh-dica, body.touch #jh-sair kbd, body.touch #dh-sair kbd { display:
 .help-grid[data-input="touch"] { display: none; }
 body.touch .help-grid[data-input="keyboard"] { display: none; }
 body.touch .help-grid[data-input="touch"] { display: grid; }
+.help-mais-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  margin-top: 8px;
+  padding: 5px 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 180ms ease;
+}
+.help-mais-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--text);
+}
+.help-mais-btn.aberto i {
+  transform: rotate(180deg);
+}
+.help-extra {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line);
+}
+.help-extra[hidden] {
+  display: none !important;
+}
 
 /* ------------------------------------------------------------ controles de toque */
 #touch {
@@ -3092,6 +3144,47 @@ body.com-luneta #controls-help, body.com-luneta #salas, body.com-luneta .room-ch
 .chamado-txt { display: grid; gap: 1px; min-width: 0; font-size: 13px; }
 .chamado-txt small { color: var(--muted); }
 body.touch #topo-centro { top: calc(64px + env(safe-area-inset-top)); }
+.guia-inicio {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 100%;
+  padding: 8px 10px 8px 14px;
+  border-radius: 14px;
+  background: rgba(12, 16, 26, 0.94);
+  border: 1px solid rgba(110, 231, 200, 0.4);
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.55);
+  pointer-events: auto;
+  animation: rise 360ms var(--ease) both;
+}
+.guia-inicio[hidden] { display: none; }
+.guia-inicio-ic {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: rgba(110, 231, 200, 0.18);
+  color: var(--accent);
+}
+.guia-inicio-txt {
+  display: grid;
+  gap: 2px;
+  font-size: 13px;
+  line-height: 1.35;
+}
+.guia-inicio-txt b { color: #f0fdf4;
+ font-size: 13px;
+ font-weight: 700;
+ }
+.guia-inicio-txt span { color: #94a3b8;
+ font-size: 11.5px;
+ }
+.guia-inicio-txt span b { color: var(--accent);
+ font-weight: 600;
+ font-size: 11.5px;
+ }
 
 /* painel da sala: ir para, equipe */
 .sala-sub { margin-bottom: 16px; }

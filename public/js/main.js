@@ -1000,6 +1000,7 @@ async function join() {
 
   state.joined = true;
   $('#lobby').hidden = true;
+  iniciarGuiaBoasVindas();
   $('#hud').hidden = false;
   $('#bar').hidden = false;
   avisarExtensaoVelha();
@@ -1487,6 +1488,16 @@ function updateRoomInfo() {
   $('#room-count').textContent = `${n} ${n === 1 ? 'pessoa' : 'pessoas'}`;
   $('#people-badge').textContent = n;
   $('#invite-url').textContent = inviteUrl();
+  const btnGalera = $('#hud-btn-galera');
+  if (btnGalera) {
+    const temAmigos = state.users.size > 0;
+    btnGalera.hidden = !temAmigos;
+    if (temAmigos) {
+      const amigos = [...state.users.values()];
+      const txt = $('#hud-txt-galera');
+      if (txt) txt.textContent = amigos.length === 1 ? `Ir até ${amigos[0].name}` : `Ir até amigos (${amigos.length})`;
+    }
+  }
 }
 
 function statusText(u) {
@@ -5601,6 +5612,51 @@ function applyHelpCollapsed() {
   helpBtn.setAttribute('aria-expanded', String(!settings.helpCollapsed));
 }
 applyHelpCollapsed();
+const helpMaisBtn = $('#help-mais-btn');
+const helpExtra = $('#help-extra');
+if (helpMaisBtn && helpExtra) {
+  helpMaisBtn.addEventListener('click', () => {
+    const aberto = !helpExtra.hidden;
+    helpExtra.hidden = aberto;
+    helpMaisBtn.classList.toggle('aberto', !aberto);
+    const rotulo = helpMaisBtn.querySelector('span');
+    if (rotulo) rotulo.textContent = !aberto ? 'Menos atalhos' : 'Mais atalhos';
+  });
+}
+$('#hud-btn-jogos')?.addEventListener('click', () => {
+  catalogo.aberto ? catalogo.fechar() : catalogo.abrir();
+});
+$('#hud-btn-galera')?.addEventListener('click', () => {
+  const amigos = [...state.users.values()];
+  if (!amigos.length) return toast('Nenhum outro jogador na sala no momento.', 'info');
+  if (amigos.length === 1) {
+    irAte(amigos[0]);
+    toast(`Teleportado para ${amigos[0].name}!`, 'info');
+  } else {
+    openPanel('people');
+    toast('Escolha um amigo na lista para ir até ele!', 'info');
+  }
+});
+function iniciarGuiaBoasVindas() {
+  const g = $('#guia-inicio');
+  if (!g) return;
+  g.hidden = false;
+  const fechar = () => { g.hidden = true; };
+  $('#guia-inicio-fechar')?.addEventListener('click', fechar, { once: true });
+  $('#guia-inicio-jogos')?.addEventListener('click', () => {
+    fechar();
+    catalogo.abrir();
+  }, { once: true });
+  setTimeout(fechar, 16000);
+  const posOrig = localAvatar.group.position.clone();
+  const checarMov = setInterval(() => {
+    if (g.hidden) return clearInterval(checarMov);
+    if (localAvatar.group.position.distanceTo(posOrig) > 5) {
+      fechar();
+      clearInterval(checarMov);
+    }
+  }, 1000);
+}
 helpBtn.addEventListener('click', () => {
   settings.helpCollapsed = !settings.helpCollapsed;
   saveSettings();
