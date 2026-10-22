@@ -758,7 +758,7 @@ MAQUETES.uno = (g) => MAQUETES.cartas(g, 'uno');
 export class PalcoJogos {
   constructor(canvas) {
     this.canvas = canvas;
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, preserveDrawingBuffer: true });
     this.renderer.setPixelRatio(Math.min(isTouch ? 1.5 : 2, window.devicePixelRatio || 1));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -897,7 +897,13 @@ export class PalcoJogos {
     this.giro = 0.5;
     this.surgir = 0;
     this.quadro(this.t0 + 1200);
-    const url = this.canvas.toDataURL('image/webp', 0.85);
+    let url = '';
+    try {
+      url = this.canvas.toDataURL('image/webp', 0.85);
+      if (!url || url.length < 50) url = this.canvas.toDataURL('image/png');
+    } catch {
+      url = this.canvas.toDataURL('image/png');
+    }
     this.renderer.setPixelRatio(ratio);
     this.renderer.setSize(r.x, r.y, false);
     this.camera.aspect = r.x / r.y;

@@ -5260,11 +5260,9 @@ function updateHover() {
   const perto = state.focus ? null : jogos.maisPerto(player.pos);
   const mesa = perto && jogoLigado(perto) ? perto : null; // mesa desligada pelo dono da sala some
   const naMesaDeDados = !state.focus && !mesa && jogoLigado('dados') && dados.perto(player.pos);
-  const pertoDoTotem = !state.focus && !mesa && !naMesaDeDados && Math.hypot(player.pos.x - 68, player.pos.z - 30) < 6;
   const info = state.focus ? null
     : mesa ? { kind: 'jogo', mesa, label: jogos.rotulo(mesa) }
       : naMesaDeDados ? { kind: 'dados', label: 'Apostar nos dados' }
-      : pertoDoTotem ? { kind: 'totem_jogos', label: 'Explorar Jogos e Teleporte' }
       : infoDaMira(pickScreen());
   const changed = (info?.label ?? null) !== (state.hovered?.label ?? null);
   state.hovered = info;
@@ -5308,10 +5306,6 @@ function focarCartas() {
 
 function enterFocus(info) {
   if (!info) return;
-  if (info.kind === 'totem_jogos') {
-    catalogo.aberto ? catalogo.fechar() : catalogo.abrir();
-    return;
-  }
   exitFocus();
   fecharMesa(false);
   if (document.pointerLockElement) document.exitPointerLock();
@@ -5644,70 +5638,6 @@ $('#hud-btn-galera')?.addEventListener('click', () => {
     toast('Escolha um amigo na lista para ir até ele!', 'info');
   }
 });
-const PONTOS_BUSSOLA = [
-  { id: 'cinema', nome: 'Cinema', icone: '🎬', x: 0, z: -2 },
-  { id: 'praca', nome: 'Praça', icone: '🌟', x: 100, z: 30 },
-  { id: 'futebol', nome: 'Futebol', icone: '⚽', x: 20, z: 230 },
-  { id: 'volei', nome: 'Quadras', icone: '🏀', x: 160, z: 220 },
-  { id: 'corrida', nome: 'Corrida', icone: '🏎️', x: 260, z: 50 },
-  { id: 'kart', nome: 'Kart', icone: '🏎️', x: 160, z: 40 },
-  { id: 'pingue', nome: 'Parque', icone: '🎯', x: 240, z: 580 },
-  { id: 'gincana', nome: 'Gincana', icone: '✨', x: 80, z: 500 },
-];
-let bussolaTimer = 0;
-function atualizarBussola(dt) {
-  bussolaTimer += dt;
-  if (bussolaTimer < 0.08) return;
-  bussolaTimer = 0;
-  const el = $('#bussola-faixa');
-  if (!el || !state.joined) return;
-  const px = player.pos.x;
-  const pz = player.pos.z;
-  const pyaw = player.yaw;
-  const itens = [];
-  for (const u of state.users.values()) {
-    if (!u.avatar?.group?.position) continue;
-    const pos = u.avatar.group.position;
-    const dx = pos.x - px;
-    const dz = pos.z - pz;
-    const dist = Math.hypot(dx, dz);
-    if (dist < 2.5) continue;
-    const ang = Math.atan2(-dx, -dz);
-    let diff = ang - pyaw;
-    diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-    itens.push({ id: `u-${u.id}`, nome: u.name, dist: Math.round(dist), diff, icone: '👤', amigo: true, user: u });
-  }
-  for (const p of PONTOS_BUSSOLA) {
-    const dx = p.x - px;
-    const dz = p.z - pz;
-    const dist = Math.hypot(dx, dz);
-    if (dist < 12) continue;
-    const ang = Math.atan2(-dx, -dz);
-    let diff = ang - pyaw;
-    diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-    itens.push({ id: p.id, nome: p.nome, dist: Math.round(dist), diff, icone: p.icone, amigo: false });
-  }
-  const fov = Math.PI * 0.38;
-  const visiveis = itens.filter(it => Math.abs(it.diff) < fov);
-  el.innerHTML = visiveis.map(it => {
-    const pct = 50 + (it.diff / fov) * 44;
-    return `<div class="bussola-item${it.amigo ? ' amigo' : ''}" style="left:${pct.toFixed(1)}%" data-id="${esc(it.id)}" title="${esc(it.nome)} (${it.dist}m)"><span>${it.icone} ${esc(it.nome)}</span><small>${it.dist}m</small></div>`;
-  }).join('');
-}
-$('#bussola-faixa')?.addEventListener('click', (e) => {
-  const item = e.target.closest('.bussola-item');
-  if (!item) return;
-  const id = item.dataset.id;
-  if (id.startsWith('u-')) {
-    const uid = id.slice(2);
-    const u = state.users.get(uid);
-    if (u) { irAte(u); toast(`Teleportado para ${u.name}!`, 'info'); }
-  } else {
-    irParaArea(id);
-    toast(`Indo para ${item.querySelector('span')?.textContent || id}...`, 'info');
-  }
-});
-
 function iniciarGuiaBoasVindas() {
   const g = $('#guia-inicio');
   if (!g) return;
@@ -6800,7 +6730,6 @@ function frame(ts = performance.now()) {
     sendState(dt);
     updateHover();
     updateSitHint();
-    atualizarBussola(dt);
     world.focarSol(player.pos.x, player.pos.z, player.pos.y); // a altura diz se está dentro de uma sala do escritório
     slowTimer += dt;
     if (slowTimer > 0.25) {

@@ -128,10 +128,10 @@ export class CatalogoJogos {
       if (!this.aberto) return;
       this.palco = new PalcoJogos(this.canvas);
     }
-    this.ajustarTamanho();
-    this.palco.iniciar();
     const lista = this.visiveis();
     this.selecionar(lista.some((j) => j.id === this.selecionado) ? this.selecionado : lista[0]?.id);
+    this.ajustarTamanho();
+    this.palco.iniciar();
     this.tirarFotos();
   }
 
@@ -179,10 +179,16 @@ export class CatalogoJogos {
     const proxima = () => {
       const j = faltam.shift();
       if (!j || !this.palco || !this.aberto) return;
-      const url = this.palco.miniatura(j.id, j.cor);
-      this.fotos.set(j.id, url);
-      const foto = this.grade.querySelector(`[data-id="${j.id}"] .cj-foto`);
-      if (foto) foto.innerHTML = `<img src="${url}" alt="">`;
+      try {
+        const url = this.palco.miniatura(j.id, j.cor);
+        if (url) {
+          this.fotos.set(j.id, url);
+          const foto = this.grade.querySelector(`[data-id="${j.id}"] .cj-foto`);
+          if (foto) foto.innerHTML = `<img src="${url}" alt="">`;
+        }
+      } catch (err) {
+        console.warn("Miniatura falhou para", j.id, err);
+      }
       requestAnimationFrame(proxima);
     };
     requestAnimationFrame(proxima);
