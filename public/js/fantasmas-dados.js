@@ -127,7 +127,7 @@ export const MONSTROS = [
     // a "Ghost Lady v2" (ver scripts/preparar-dama.js): as provas de um Yurei do Phasmophobia,
     // a única combinação de três que nenhum outro usa
     id: 'dama', nome: 'Dama de Véu', provas: ['orbes', 'frio', 'dots'], cor: '#7dd3fc',
-    modelo: 'dama', altura: 1.8, olhos: false, realista: true,
+    modelo: 'dama', versao: 2, altura: 1.8, olhos: false, realista: true,
     clipes: { parado: ['Idle'], andar: ['Walk'], correr: ['Run'], ataque: ['Attack'] },
     velocidade: 1.3, caca: [1.5, 2.1], sanidade: 50,
     desc: 'A mulher de véu, com o cabelo no rosto, que anda pela casa desde a noite em que morreu nela.',
@@ -135,7 +135,9 @@ export const MONSTROS = [
   },
 ];
 export const MONSTRO = Object.fromEntries(MONSTROS.map((m) => [m.id, m]));
-export const MODELO_URL = (m) => `/models/fantasmas/${m.modelo}.glb?v=1`;
+// versao: a da dama anda junto com a do personagem jogável (public/js/personagens.js), que usa o
+// mesmo arquivo: o mesmo endereço nos dois, um download só
+export const MODELO_URL = (m) => `/models/fantasmas/${m.modelo}.glb?v=${m.versao || 1}`;
 
 // nomes do fantasma (como a pessoa que ele foi): aparece no quadro da van e no diário
 export const NOMES = ['Maria Aparecida', 'João Batista', 'Ana Clara', 'Benedito Souza', 'Rosa Maria', 'Severino Lima', 'Luzia Fernandes',

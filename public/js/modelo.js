@@ -320,7 +320,8 @@ export class Personagem {
     // como numa cadeira). O jogo põe o boneco com os pés na altura do assento: sem descer o
     // modelo até o quadril encostar nele, ele fica sentado no ar.
     this.quadril = null;
-    this.raiz.traverse((o) => { if (!this.quadril && o.isBone && /hips?$|pelvis/i.test(o.name)) this.quadril = o; });
+    // (o Mixamo da dama chega como "mixamorigHips_02")
+    this.raiz.traverse((o) => { if (!this.quadril && o.isBone && /hips?(_\d+)?$|pelvis/i.test(o.name)) this.quadril = o; });
     this.descida = 0;
 
     // molas de balanço (def.molas): a guerreira usa nos seios; ossos que casam com o padrão

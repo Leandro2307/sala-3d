@@ -43,6 +43,7 @@ outra na troca.
 | Optimus, Solus Prime | OrangeSauceu, a partir de *Transformers: Earth Wars* | marcado CC BY pelo autor do envio | 779 KB / 1,2 MB |
 | Bumblebee | Pipogame (@joseclaudio162001), a partir de *Transformers Alliance* | marcado CC BY pelo autor do envio | `bumblebee.glb` (1,1 MB) |
 | Jazz, Ratchet, Brawn | orangesauceu, a partir de *Transformers Alliance* | marcado CC BY pelo autor do envio | 1,1 / 1,1 / 1,2 MB |
+| Dama de Véu | “Ghost Lady v2”, de Loves_Art (Sketchfab) — o monstro do Caça-Fantasmas | CC BY 4.0 | `fantasmas/dama.glb` (682 KB) |
 
 O Atos não vem de pacote: o script modela a bola, monta o esqueleto, anima os 7
 clipes e exporta já com meshopt. Ele é a logo virada bola: visto de frente, a
@@ -394,6 +395,15 @@ vai para `models-brutos/ghost-lady.glb`, e `scripts/preparar-dama.js` grava o do
   tombada, com um tranco de vez em quando), a corrida da caçada (curvada, os braços esticados para
   pegar) e o ataque do susto (os braços sobem para agarrar o rosto de quem está na frente).
 
-Para mexer: mude os números no script, rode a linha do cabeçalho dele e suba o `?v=` de
-`MODELO_URL` em `fantasmas-dados.js`. Com `DEPURAR=1 SAIDA=<arquivo>` ele grava uma cópia com o
+Ela também é personagem jogável (`dama` em `personagens.js`), com o mesmo arquivo. Para isso
+`scripts/animar-dama.js` grava no `dama.glb` o que um monstro não usa: `Jump` (boiando, braços meio
+abertos), `Sit` (sentada numa cadeira, mãos no colo) e `Wave`; o soco é o `Attack`. Sentada, a saia
+que segue as coxas ficava espetada para a frente: o script dá à saia ossos próprios em faixas de
+altura (`Saia_Q*` no quadril, `Saia_E*`/`Saia_D*` nos joelhos), cópias dos originais que só as
+poses novas mexem. Idle, Walk, Run e Attack ficam iguais, e o Caça-Fantasmas não muda.
+
+Para mexer: mude os números no script, rode a linha do cabeçalho dele, rode também
+`scripts/animar-dama.js` (o primeiro grava o arquivo do zero) e suba `versao` da dama nos dois
+cadastros (`MONSTROS` em `fantasmas-dados.js` e `PERSONAGENS` em `personagens.js`: o mesmo
+endereço, um download só). Com `DEPURAR=1 SAIDA=<arquivo>` ele grava uma cópia com o
 vestido pintado por região (braços, tronco, pernas), para conferir num visor.

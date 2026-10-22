@@ -115,6 +115,20 @@ export const PERSONAGENS = {
     resumo: 'Anda, corre, pula, senta, soca e acena — com balanço nos seios',
     credito: 'Mixamo / Adobe',
   },
+  // o monstro do Caça-Fantasmas, no mesmo arquivo (um download só para os dois): Jump, Sit e Wave
+  // e os ossos da saia vêm de scripts/animar-dama.js. A versao anda junto com a de fantasmas-dados.js
+  dama: {
+    id: 'dama',
+    label: 'Dama de Véu',
+    url: '/models/fantasmas/dama.glb',
+    versao: 2, // 2: ganhou Jump, Sit e Wave
+    // magra como a guerreira: 1,9 deixa a cabeça (com o véu) um pouco acima da do boneco padrão
+    altura: 1.9,
+    // o ataque do susto (agarra o rosto de quem está na frente) é o soco
+    clipes: { idle: 'Idle', walk: 'Walk', run: 'Run', air: 'Jump', sit: 'Sit', punch: 'Attack', wave: 'Wave' },
+    resumo: 'O monstro do Caça-Fantasmas: anda curvada, corre para agarrar, flutua no pulo e assusta',
+    credito: 'Loves_Art, “Ghost Lady v2” (Sketchfab) — CC BY 4.0',
+  },
   mago: kaykit('mago', 'Mago', 'KayKit Adventurers, de Kay Lousberg — CC0'),
   ladino: kaykit('ladino', 'Ladino', 'KayKit Adventurers, de Kay Lousberg — CC0'),
   encapuzado: kaykit('encapuzado', 'Encapuzado', 'KayKit Adventurers, de Kay Lousberg — CC0'),
