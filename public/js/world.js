@@ -1446,6 +1446,124 @@ export class World {
     faixa2.position.set((S.minX + S.maxX) / 2, S.height - 3, S.maxZ + 0.65);
     this.fora.add(faixa1, faixa2);
 
+    // 1. Placa de SAÍDA pelo lado de dentro do cinema (acima da porta)
+    const texDentro = canvasTexture(1024, 256, (ctx, w, h) => {
+      ctx.fillStyle = '#0d1018';
+      roundRect(ctx, 8, 8, w - 16, h - 16, 40);
+      ctx.fill();
+      ctx.strokeStyle = '#34d399';
+      ctx.lineWidth = 10;
+      roundRect(ctx, 22, 22, w - 44, h - 44, 30);
+      ctx.stroke();
+      ctx.fillStyle = '#6ee7b7';
+      ctx.font = `800 70px ${FONT}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.shadowColor = '#10b981';
+      ctx.shadowBlur = 24;
+      ctx.fillText('🚪 SAÍDA · CIDADE & JOGOS ➔', w / 2, h / 2 + 4);
+    });
+    const placaDentro = new THREE.Mesh(new THREE.PlaneGeometry(largura, largura / 4), new THREE.MeshBasicMaterial({ map: texDentro, toneMapped: false }));
+    placaDentro.position.set(S.maxX - 0.1, P.altura + 3 + largura / 8, zc);
+    placaDentro.rotation.y = -Math.PI / 2;
+    this.scene.add(placaDentro);
+
+    // 2. Totem Direcional na saída (Hub de Destinos) na calçada logo em frente à porta
+    const tx = 68;
+    const tz = zc;
+    const totemGroup = new THREE.Group();
+    totemGroup.position.set(tx, 0, tz);
+
+    const texFrenteTotem = canvasTexture(1024, 1024, (ctx, w, h) => {
+      ctx.fillStyle = '#0c1017';
+      roundRect(ctx, 16, 16, w - 32, h - 32, 48);
+      ctx.fill();
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 10;
+      roundRect(ctx, 28, 28, w - 56, h - 56, 40);
+      ctx.stroke();
+
+      ctx.fillStyle = '#38bdf8';
+      ctx.font = `800 62px ${FONT}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.shadowColor = '#0284c7';
+      ctx.shadowBlur = 20;
+      ctx.fillText('🌟 GUIA DE DESTINOS', w / 2, 60);
+      ctx.shadowBlur = 0;
+
+      const itens = [
+        { seta: '⬆️', titulo: 'Praça Central & Farol', sub: 'Ponto de encontro e caminhos', cor: '#38bdf8' },
+        { seta: '⬅️', titulo: 'Estádio & Quadras', sub: 'Futebol, Vôlei, Basquete e Parque', cor: '#4ade80' },
+        { seta: '➡️', titulo: 'Autódromo & Kart', sub: 'Pista de corrida com turbo e karts', cor: '#f97316' },
+        { seta: '✨', titulo: 'Parque & Minijogos', sub: 'Sinuca, Truco, Caça-Fantasmas, Gincana', cor: '#a855f7' },
+      ];
+
+      itens.forEach((it, i) => {
+        const y = 175 + i * 165;
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+        roundRect(ctx, 50, y, w - 100, 140, 24);
+        ctx.fill();
+
+        ctx.fillStyle = it.cor;
+        roundRect(ctx, 65, y + 15, 110, 110, 20);
+        ctx.fill();
+
+        ctx.fillStyle = '#0f172a';
+        ctx.font = `800 56px ${FONT}`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(it.seta, 120, y + 70);
+
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#f8fafc';
+        ctx.font = `700 44px ${FONT}`;
+        ctx.fillText(it.titulo, 200, y + 50);
+
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = `500 30px ${FONT}`;
+        ctx.fillText(it.sub, 200, y + 96);
+      });
+
+      ctx.fillStyle = '#22c55e';
+      roundRect(ctx, 50, h - 145, w - 100, 95, 24);
+      ctx.fill();
+      ctx.fillStyle = '#052e16';
+      ctx.font = `800 38px ${FONT}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('[E] ABRIR CATÁLOGO DE JOGOS & TELEPORTE', w / 2, h - 98);
+    });
+
+    const totemW = 4.6;
+    const totemH = 4.6;
+    const totemY = 3.0;
+
+    const totemFrente = new THREE.Mesh(new THREE.PlaneGeometry(totemW, totemH), new THREE.MeshBasicMaterial({ map: texFrenteTotem, toneMapped: false }));
+    totemFrente.position.set(0, totemY, 0.08);
+    totemFrente.rotation.y = -Math.PI / 2;
+    totemGroup.add(totemFrente);
+
+    const totemVerso = new THREE.Mesh(new THREE.PlaneGeometry(totemW, totemH), new THREE.MeshBasicMaterial({ map: texFrenteTotem, toneMapped: false }));
+    totemVerso.position.set(0, totemY, -0.08);
+    totemVerso.rotation.y = Math.PI / 2;
+    totemGroup.add(totemVerso);
+
+    const corpoTotem = new THREE.Mesh(new THREE.BoxGeometry(0.14, totemH + 0.2, totemW + 0.2), new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.5, metalness: 0.8 }));
+    corpoTotem.position.set(0, totemY, 0);
+    totemGroup.add(corpoTotem);
+
+    const baseTotem = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.3, totemW + 0.6), new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.8 }));
+    baseTotem.position.set(0, 0.15, 0);
+    totemGroup.add(baseTotem);
+
+    const baseGlow = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.05, totemW + 0.8), new THREE.MeshBasicMaterial({ color: 0x38bdf8, toneMapped: false }));
+    baseGlow.position.set(0, 0.02, 0);
+    totemGroup.add(baseGlow);
+
+    this.fora.add(totemGroup);
+    this.addBox({ min: [tx - 0.4, 0, tz - totemW / 2], max: [tx + 0.4, totemY + totemH / 2, tz + totemW / 2] });
+
     // na saída: guarda o espaço para não nascer árvore na frente da porta
     this.reservas.push({ x: S.maxX + 18, z: zc, r: 26 });
   }

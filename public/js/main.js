@@ -5260,9 +5260,12 @@ function updateHover() {
   const perto = state.focus ? null : jogos.maisPerto(player.pos);
   const mesa = perto && jogoLigado(perto) ? perto : null; // mesa desligada pelo dono da sala some
   const naMesaDeDados = !state.focus && !mesa && jogoLigado('dados') && dados.perto(player.pos);
+  const pertoDoTotem = !state.focus && !mesa && !naMesaDeDados && Math.hypot(player.pos.x - 68, player.pos.z - 30) < 6;
   const info = state.focus ? null
     : mesa ? { kind: 'jogo', mesa, label: jogos.rotulo(mesa) }
-      : naMesaDeDados ? { kind: 'dados', label: 'Apostar nos dados' } : infoDaMira(pickScreen());
+      : naMesaDeDados ? { kind: 'dados', label: 'Apostar nos dados' }
+      : pertoDoTotem ? { kind: 'totem_jogos', label: 'Explorar Jogos e Teleporte' }
+      : infoDaMira(pickScreen());
   const changed = (info?.label ?? null) !== (state.hovered?.label ?? null);
   state.hovered = info;
   if (changed) {
@@ -5305,6 +5308,10 @@ function focarCartas() {
 
 function enterFocus(info) {
   if (!info) return;
+  if (info.kind === 'totem_jogos') {
+    catalogo.aberto ? catalogo.fechar() : catalogo.abrir();
+    return;
+  }
   exitFocus();
   fecharMesa(false);
   if (document.pointerLockElement) document.exitPointerLock();
