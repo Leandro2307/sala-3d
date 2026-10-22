@@ -254,6 +254,8 @@ export class Fantasmas {
     this.raio = 0;
     this.susto = null;
     this.passoT = 0;
+    this.vozT = 2; // a próxima voz do monstro na caçada
+    this.ferraoEm = 0; // o último ferrão (ele chegou perto na caçada)
     this.leituraT = 0;
     this.monitorT = 0;
     this.telasT = 0;
@@ -396,7 +398,10 @@ export class Fantasmas {
       case 'aparece':
         this.vistoNesta = false;
         if (this.C.comodos[e.sala] && c.luzes[e.sala]) c.luzes[e.sala].pisca = e.dur;
-        if (e.para === this.eu) this.som.tocar('respira', pos, 0.8);
+        if (e.para === this.eu) {
+          this.som.tocar('respira', pos, 0.8);
+          if (Math.random() < 0.5) this.som.ferroada(0.55);
+        }
         break;
       case 'some':
         this.som.tocar('teleporte', pos, 0.5);
@@ -406,7 +411,8 @@ export class Fantasmas {
         if (e.para === this.eu) this.perder(e.som === 'grito' ? 8 : 5);
         break;
       case 'cacada':
-        this.som.tocar('cacada', null, 1);
+        this.som.inicioCacada();
+        this.vozT = 2.5;
         this.som.tocar('bate', this.mundo(this.C.entrada.x, this.C.entrada.z, 1.2), 1);
         this.player.addShake?.(0.5);
         break;
@@ -416,7 +422,7 @@ export class Fantasmas {
       case 'morte':
         if (e.id === this.eu) this.morrer(true);
         else {
-          this.som.tocar('morte', pos, 1);
+          this.som.morteDeOutro(pos, 1);
           hud.mensagem(`${e.nome} morreu`, 'O fantasma pegou', 3000, '#ef4444');
           this.perder(15);
         }
@@ -509,7 +515,10 @@ export class Fantasmas {
     if (this.carregando) return;
     this.carregando = true;
     hud.mensagem('Caça-Fantasmas', 'Indo para a casa...', 3000, COR);
+    // sem resposta do servidor (caiu, reconectando): o portal não fica travado
+    const desiste = setTimeout(() => { this.carregando = false; }, 15000);
     this.socket?.emit('fs-entrar', { casa: casaId }, async (r) => {
+      clearTimeout(desiste);
       if (!r?.ok) {
         this.carregando = false;
         if (r?.erro) hud.mensagem('Caça-Fantasmas', 'Não deu para entrar agora.', 2200, '#fb7185');
@@ -972,7 +981,7 @@ export class Fantasmas {
     if (comSusto && this.monstro) {
       // o susto: ele cara a cara, o grito e a tela vermelha
       this.susto = { t: 0 };
-      this.som.tocar('susto', null, 1);
+      this.som.susto(1);
       this.player.addShake?.(1.4);
       const fl = document.getElementById('fs-flash');
       if (fl) {
@@ -1290,7 +1299,7 @@ export class Fantasmas {
         if (dir.normalize().dot(_f) > 0.55) {
           this.vistoNesta = true;
           this.perder(JOGO.sanidadeEvento);
-          this.som.tocar('susto', null, 0.35);
+          this.som.ferroada(0.8);
         }
       }
       // perto, as coisas falham
@@ -1302,6 +1311,19 @@ export class Fantasmas {
           this.passoT = g[4] === 2 ? 0.34 : 0.55;
           this.som.tocar('passo', this.mundo(g[0], g[1], 0.2), 1.4);
         }
+      }
+    }
+    // a caçada: o monstro fazendo barulho de onde está (rosnado, guincho, gemido...) e, quando chega
+    // perto, o ferrão (no máximo a cada 5 s)
+    if (cacando && g && !this.morto) {
+      this.vozT -= dt;
+      if (this.vozT <= 0) {
+        this.vozT = 2.2 + Math.random() * 3.5;
+        this.som.vozDaCacada(this.mundo(g[0], g[1], 1.4), Math.max(0, 1 - distG / 12));
+      }
+      if (distG < 4.5 && performance.now() - this.ferraoEm > 5000) {
+        this.ferraoEm = performance.now();
+        this.som.ferroada(1);
       }
     }
     // a caçada: estática, coração e luzes piscando
@@ -1480,7 +1502,7 @@ export class Fantasmas {
     if (!m || this.susto) return;
     // ele aparece um instante bem na frente e some
     this.susto = { t: 0.95 };
-    this.som.tocar('susto', null, 0.6);
+    this.som.susto(0.6, false);
     this.perder(5);
   }
 
