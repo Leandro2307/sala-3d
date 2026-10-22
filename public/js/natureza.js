@@ -8,7 +8,10 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { isTouch } from './touch.js';
 import { CAMINHO, PISTA } from './pista.js';
-import { TEMA, SOL_DA_TARDE, arvoresDoTema, pintar as pintarTema, texturaFoto, relevoFoto, materiaisArvore, CHAO_DO_TEMA, geoArbusto } from './temas3d.js';
+import {
+  TEMA, SOL_DA_TARDE, DETALHE, arvoresDoTema, pintar as pintarTema, texturaFoto, relevoFoto, materiaisArvore, CHAO_DO_TEMA, geoArbusto,
+  geoArbustoSimples, geoPedraSimples,
+} from './temas3d.js';
 
 const LEVE = isTouch; // celular: menos árvores, terreno mais grosso
 // Lado do pedaço do mapa em que as plantas são agrupadas (ver instanciar). No celular, pedaços
@@ -304,6 +307,24 @@ function criarCeu(scene, solDir) {
 }
 
 // ------------------------------------------------------------------ texturas
+// grão cinza (multiplica a cor do vértice): o chão e a margem nas texturas simples (DETALHE falso)
+function texturaGrao(tamanho, base, variacao, seed) {
+  const rnd = semente(seed);
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = tamanho;
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(tamanho, tamanho);
+  for (let i = 0; i < tamanho * tamanho; i++) {
+    const v = Math.round(255 * (base + (rnd() - 0.5) * variacao));
+    img.data.set([v, v, v, 255], i * 4);
+  }
+  ctx.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
 // normal map da água: ondinhas feitas de senos com frequência inteira, para emendar sem costura
 function texturaAgua(tamanho = 128) {
   const ondas = [[3, 1, 0.9, 0.3], [1, 4, 0.7, 1.7], [5, -2, 0.45, 2.9], [-2, 6, 0.35, 4.1], [7, 3, 0.25, 0.8]];
@@ -374,11 +395,12 @@ function criarTerreno(scene, area) {
   }
   geo.setAttribute('color', new THREE.BufferAttribute(cores, 3));
 
-  // a foto do chão (grama ou neve, em cinza: a cor é a do vértice, do tema) e o relevo dela, a cada 5 m
-  const fotoGrama = texturaFoto(CHAO_DO_TEMA);
-  fotoGrama.repeat.set(tamanho / 5, tamanho / 5);
+  // a foto do chão (grama ou neve, em cinza: a cor é a do vértice, do tema) e o relevo dela, a cada
+  // 5 m. Nas texturas simples, um grão cinza a cada 6 m, sem relevo.
+  const fotoGrama = DETALHE ? texturaFoto(CHAO_DO_TEMA) : texturaGrao(128, 0.92, 0.16, 5);
+  fotoGrama.repeat.set(tamanho / (DETALHE ? 5 : 6), tamanho / (DETALHE ? 5 : 6));
   const relevo = relevoFoto(CHAO_DO_TEMA);
-  relevo.repeat.copy(fotoGrama.repeat);
+  relevo?.repeat.copy(fotoGrama.repeat);
   const mat = new THREE.MeshLambertMaterial({ vertexColors: true, map: fotoGrama, normalMap: relevo, normalScale: new THREE.Vector2(0.7, 0.7), flatShading: true });
   const matLonge = soSol(mat.clone());
   // Duas malhas: os triângulos até 80 m da cerca (pelo centro), onde luz pontual ainda chega, e o
@@ -643,11 +665,12 @@ function criarLago(scene, renderer, ceuMat, x, z, raio, decorar, tipo = 'lago') 
   agua.receiveShadow = true;
   scene.add(agua);
 
-  // a margem: a foto da areia (uv da ShapeGeometry em metros: uma repetição a cada 4 m)
-  const areia = texturaFoto('areia');
-  areia.repeat.setScalar(1 / 4);
+  // a margem: a foto da areia (uv da ShapeGeometry em metros: uma repetição a cada 4 m), ou o grão
+  // nas texturas simples
+  const areia = DETALHE ? texturaFoto('areia') : texturaGrao(64, 0.9, 0.2, 9);
+  if (DETALHE) areia.repeat.setScalar(1 / 4);
   const relevoAreia = relevoFoto('areia');
-  relevoAreia.repeat.copy(areia.repeat);
+  relevoAreia?.repeat.copy(areia.repeat);
   const margem = new THREE.Mesh(
     new THREE.ShapeGeometry(forma, 6),
     new THREE.MeshLambertMaterial({ color: T.margem, map: areia, normalMap: relevoAreia }),
@@ -1033,8 +1056,10 @@ export function criarNatureza(scene, renderer, {
     if (!lista.length) continue;
     plantar(geos[tipo] || geos[Object.keys(geos)[0]], lista);
   }
-  // arbustos: a mesma nuvem de folhas das árvores (perto) ou a bola simples (longe)
-  if (arbustos.length) {
+  // arbustos: a mesma nuvem de folhas das árvores (perto) ou a bola simples (longe). Nas texturas
+  // simples, a bola em todo lugar, e a pedra é um dodecaedro liso no material das plantas.
+  if (arbustos.length && !DETALHE) instanciar(grupo, geoArbustoSimples(TEMA.arbusto), matPlanta, arbustos, { sombra: false });
+  if (arbustos.length && DETALHE) {
     const arbusto = geoArbusto(TEMA.arbusto);
     const longe = (a) => foraDaArea(a.x, a.z, area) > 60;
     const perto = arbustos.filter((a) => !longe(a));
@@ -1042,12 +1067,13 @@ export function criarNatureza(scene, renderer, {
     const distantes = arbustos.filter(longe);
     if (distantes.length) instanciar(grupo, arbusto.userData.longe, matPlantaLonge || matPlanta, distantes, { sombra: false });
   }
-  if (pedras.length) instanciar(grupo, geoPedra(TEMA.pedra), materialPedra(), pedras, { sombra: false });
+  if (pedras.length && DETALHE) instanciar(grupo, geoPedra(TEMA.pedra), materialPedra(), pedras, { sombra: false });
+  if (pedras.length && !DETALHE) instanciar(grupo, geoPedraSimples(TEMA.pedra), matPlanta, pedras, { sombra: false });
   if (flores.length) instanciar(grupo, new THREE.IcosahedronGeometry(0.22, 0), new THREE.MeshLambertMaterial({ color: '#ffffff', flatShading: true }), flores, { sombra: false });
 
   // sombra de contato sob as árvores da área jogável (e um pouco além): embaixo da copa a luz do
   // céu não chega. Um borrão escuro por árvore, todos num desenho só.
-  const comBorrao = todas.filter((a) => foraDaArea(a.x, a.z, area) < 30);
+  const comBorrao = DETALHE ? todas.filter((a) => foraDaArea(a.x, a.z, area) < 30) : [];
   if (comBorrao.length) criarBorroes(grupo, comBorrao);
 
   // tronco das árvores dentro da área jogável é sólido (as de fora nem dá para alcançar)

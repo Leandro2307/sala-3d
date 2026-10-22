@@ -13,6 +13,10 @@ export const TEMA = MAPA_INFO.tema;
 // do sudoeste. Mais baixo que o meio-dia: sombra mais comprida, luz de lado e mais contraste.
 export const SOL_DA_TARDE = [0.55, 0.62, -0.56];
 const ESC = moduloQualidade.ESCALA_TEXTURA ?? 1;
+// Texturas detalhadas (fotos no chão, folhas recortadas, relevo) ou a versão simples de antes, de
+// cor lisa, para PC fraco e celular (qualidade.js, TEXTURAS_DETALHADAS; vale ao recarregar). Sem a
+// constante lá (um qualidade.js velho no cache), as detalhadas.
+export const DETALHE = moduloQualidade.TEXTURAS_DETALHADAS ?? true;
 
 // ------------------------------------------------------------------ utilidades
 // comUv: guarda as coordenadas de textura (as peças texturizadas do coqueiro)
@@ -61,10 +65,11 @@ export function texturaFoto(nome, { cor = true } = {}) {
   if (cor) t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
-export const relevoFoto = (nome) => texturaFoto(`${nome}-n`, { cor: false });
+// nas texturas simples não tem relevo (null: o material fica sem normalMap)
+export const relevoFoto = (nome) => (DETALHE ? texturaFoto(`${nome}-n`, { cor: false }) : null);
 
 // o relevo da rua do tema: as tábuas (a mesma repetição da texturaRua), o cascalho ou a neve
-// pisada sobre os paralelepípedos
+// pisada sobre os paralelepípedos (null nas simples)
 export function relevoRua() {
   const tipo = TEMA.rua.tipo;
   return relevoFoto(tipo === 'madeira' ? 'madeira' : tipo === 'cascalho' ? 'cascalho' : 'neve');
@@ -459,9 +464,116 @@ function geoBambu() {
   return juntar(partes);
 }
 
+// ------------------------------------------------------------------ árvores simples
+// A versão de antes das texturas (DETALHE falso): só cor por vértice, sem recorte nem relevo, num
+// material só. É a que vai para PC fraco e celular.
+function folhaCoqueiroSimples(comp, larg, queda) {
+  const n = 7;
+  const pos = [];
+  for (let i = 0; i < n; i++) {
+    const t0 = i / n;
+    const t1 = (i + 1) / n;
+    const ponto = (t) => [t * comp, Math.sin(t * Math.PI * 0.9) * comp * 0.18 - t * t * queda];
+    const [x0, y0] = ponto(t0);
+    const [x1, y1] = ponto(t1);
+    const w0 = larg * Math.sin(Math.PI * (0.15 + t0 * 0.85)) * (1 - t0 * 0.6);
+    const w1 = larg * Math.sin(Math.PI * (0.15 + t1 * 0.85)) * (1 - t1 * 0.6);
+    // as duas metades da folha caem um pouco para os lados (forma de V)
+    pos.push(x0, y0, 0, x1, y1, 0, x0, y0 - w0 * 0.25, w0, x1, y1, 0, x1, y1 - w1 * 0.25, w1, x0, y0 - w0 * 0.25, w0);
+    pos.push(x0, y0, 0, x0, y0 - w0 * 0.25, -w0, x1, y1, 0, x1, y1, 0, x0, y0 - w0 * 0.25, -w0, x1, y1 - w1 * 0.25, -w1);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.computeVertexNormals();
+  return g;
+}
+
+function geoCoqueiroSimples(altura = 9, folhas = 8, seed = 3) {
+  const rnd = semente(seed);
+  const partes = [];
+  // tronco curvo: gomos que vão inclinando, com anéis mais escuros
+  const gomos = 9;
+  let x = 0;
+  let y = 0;
+  const curva = 0.55;
+  for (let i = 0; i < gomos; i++) {
+    const h = altura / gomos;
+    const r0 = 0.32 - i * 0.012;
+    const r1 = r0 - 0.012;
+    const incl = (i / gomos) * curva;
+    const g = new THREE.CylinderGeometry(r1, r0, h * 1.04, 7, 1, true).translate(0, h / 2, 0).rotateZ(-incl).translate(x, y, 0);
+    partes.push(pintar(g, i % 2 ? '#8a6a45' : '#7a5a38'));
+    x += Math.sin(incl) * h;
+    y += Math.cos(incl) * h;
+  }
+  // a copa: folhas em volta do topo, algumas mais caídas
+  for (let i = 0; i < folhas; i++) {
+    const a = (i / folhas) * Math.PI * 2 + rnd() * 0.3;
+    const comp = 3.6 + rnd() * 1.4;
+    const f = folhaCoqueiroSimples(comp, 0.62, 1.4 + rnd() * 1.4).rotateY(a).translate(x, y + 0.1, 0);
+    partes.push(pintar(f, i % 3 === 0 ? '#3f8f3a' : i % 3 === 1 ? '#4fa443' : '#2f7a33'));
+  }
+  // cocos
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2;
+    partes.push(pintar(new THREE.IcosahedronGeometry(0.22, 0).translate(x + Math.cos(a) * 0.32, y - 0.25, Math.sin(a) * 0.32), '#6b4a22'));
+  }
+  return juntar(partes);
+}
+
+function geoPinheiroSimples(neve) {
+  const partes = [pintar(new THREE.CylinderGeometry(0.32, 0.48, 3.2, 6, 1, true).translate(0, 1.6, 0), '#5b3d2a')];
+  const camadas = [[2.7, 4.4, 4.6, '#2e6a41'], [2.1, 3.8, 6.7, '#357a48'], [1.35, 3.2, 8.6, '#3d8a51']];
+  for (const [r, h, y, cor] of camadas) {
+    partes.push(pintar(new THREE.ConeGeometry(r, h, 7, 1, true).translate(0, y, 0), neve ? '#245a3c' : cor));
+    // neve: um cone branco menor, por cima da metade de cima de cada camada
+    if (neve) partes.push(pintar(new THREE.ConeGeometry(r * 0.78, h * 0.55, 7, 1, true).translate(0, y + h * 0.24, 0), '#f6f9fc'));
+  }
+  return juntar(partes);
+}
+
+function geoCopaSimples(cores, tronco = '#6a4a33', altura = 1) {
+  const s = altura;
+  return juntar([
+    pintar(new THREE.CylinderGeometry(0.3 * s, 0.45 * s, 4.4 * s, 6, 1, true).translate(0, 2.2 * s, 0), tronco),
+    pintar(new THREE.IcosahedronGeometry(2.7 * s, 0).scale(1, 0.85, 1).translate(0, 5.6 * s, 0), cores[0]),
+    pintar(new THREE.IcosahedronGeometry(1.9 * s, 0).translate(1.4 * s, 6.6 * s, 0.6 * s), cores[1]),
+    pintar(new THREE.IcosahedronGeometry(1.7 * s, 0).translate(-1.3 * s, 6.2 * s, -0.8 * s), cores[2]),
+    pintar(new THREE.IcosahedronGeometry(1.4 * s, 0).translate(0.2 * s, 7.4 * s, -0.9 * s), cores[0]),
+  ]);
+}
+
+function geoBordoSimples() {
+  const partes = [
+    pintar(new THREE.CylinderGeometry(0.22, 0.38, 3.2, 6, 1, true).translate(0, 1.6, 0).rotateZ(0.12), '#3e2a22'),
+    pintar(new THREE.CylinderGeometry(0.12, 0.2, 2.2, 5, 1, true).translate(0, 1.1, 0).rotateZ(-0.7).translate(0.4, 2.8, 0), '#3e2a22'),
+  ];
+  const nuvens = [[0, 4.4, 0, 2.9, '#c2261b'], [1.8, 4.0, 0.8, 2.0, '#e0461d'], [-1.6, 4.1, -0.6, 2.1, '#a51d16'], [0.4, 5.4, -0.4, 2.0, '#ef6a24'], [-0.5, 4.8, 1.4, 1.7, '#d93a1b']];
+  for (const [x, y, z, r, cor] of nuvens) partes.push(pintar(new THREE.IcosahedronGeometry(r, 0).scale(1, 0.62, 1).translate(x, y, z), cor));
+  return juntar(partes);
+}
+
+function geoCerejeiraSimples() {
+  const partes = [
+    pintar(new THREE.CylinderGeometry(0.24, 0.4, 3.4, 6, 1, true).translate(0, 1.7, 0), '#4a3030'),
+    pintar(new THREE.CylinderGeometry(0.12, 0.2, 2.4, 5, 1, true).translate(0, 1.2, 0).rotateZ(0.8).translate(-0.4, 2.9, 0), '#4a3030'),
+  ];
+  const nuvens = [[0, 4.8, 0, 2.6, '#f9a8d4'], [-1.9, 4.3, 0.5, 1.9, '#fbcfe8'], [1.7, 4.5, -0.6, 2.0, '#f472b6'], [0.3, 5.9, 0.4, 1.8, '#fbcfe8'], [0.6, 4.4, 1.7, 1.6, '#f9a8d4']];
+  for (const [x, y, z, r, cor] of nuvens) partes.push(pintar(new THREE.IcosahedronGeometry(r, 0).scale(1, 0.7, 1).translate(x, y, z), cor));
+  return juntar(partes);
+}
+
+// arbusto e pedra simples: a bola facetada de uma cor (natureza.js)
+export function geoArbustoSimples(cor) {
+  return TEMA.id === 'neve'
+    ? pintar(new THREE.IcosahedronGeometry(1.1, 1).scale(1.4, 0.55, 1.4), cor)
+    : pintar(new THREE.IcosahedronGeometry(1.1, 0).scale(1.3, 0.8, 1.3), cor);
+}
+export const geoPedraSimples = (cor) => pintar(new THREE.DodecahedronGeometry(1, 0), cor);
+
 // Árvores do tema: { nome: geometria }. As que o tema não usa nem são feitas.
 export function arvoresDoTema() {
-  const feitas = {
+  const feitas = DETALHE ? {
     palmeira: () => geoCoqueiro(9.5, 9, 3),
     palmeiraBaixa: () => geoCoqueiro(6, 10, 8),
     pinheiro: () => geoPinheiro(false),
@@ -470,6 +582,16 @@ export function arvoresDoTema() {
     frondosaOutono: () => geoCopa(['#d9a21b', '#e8b931', '#c4801a'], '#5a3f2a'),
     bordo: geoBordo,
     cerejeira: geoCerejeira,
+    bambu: geoBambu,
+  } : {
+    palmeira: () => geoCoqueiroSimples(9.5, 9, 3),
+    palmeiraBaixa: () => geoCoqueiroSimples(6, 10, 8),
+    pinheiro: () => geoPinheiroSimples(false),
+    pinheiroNeve: () => geoPinheiroSimples(true),
+    frondosa: () => geoCopaSimples(['#5c8f3e', '#68a046', '#4f8238']),
+    frondosaOutono: () => geoCopaSimples(['#d9a21b', '#e8b931', '#c4801a'], '#5a3f2a'),
+    bordo: geoBordoSimples,
+    cerejeira: geoCerejeiraSimples,
     bambu: geoBambu,
   };
   return Object.fromEntries(Object.keys(TEMA.arvores).map((k) => [k, feitas[k]()]));
@@ -590,7 +712,7 @@ export function pecaDaPraca(g, L, world, x, z, decor) {
   if (TEMA.id === 'neve') {
     // o pinheirão: um pinheiro de 18 m com bolas coloridas e a estrela
     const s = 2.1;
-    const arvore = geoPinheiro(true).scale(s, s, s).translate(x, 0, z);
+    const arvore = (DETALHE ? geoPinheiro : geoPinheiroSimples)(true).scale(s, s, s).translate(x, 0, z);
     L.cores.push(arvore);
     const rnd = semente(5);
     const cores = ['#ef4444', '#facc15', '#3b82f6', '#22c55e', '#f472b6', '#f97316'];
@@ -637,7 +759,21 @@ export function pecaDaPraca(g, L, world, x, z, decor) {
 export function texturaRua() {
   const tipo = TEMA.rua.tipo;
   // deque de tábuas atravessadas (a foto: 12 tábuas a cada repetição)
-  if (tipo === 'madeira') return texturaFoto('madeira');
+  if (tipo === 'madeira' && DETALHE) return texturaFoto('madeira');
+  if (tipo === 'madeira') {
+    // nas simples: tábuas desenhadas, com frestas
+    return textura(256, 256, (ctx, w, h) => {
+      for (let i = 0; i < 8; i++) {
+        const tom = 150 + Math.floor(Math.random() * 30);
+        ctx.fillStyle = `rgb(${tom},${Math.round(tom * 0.72)},${Math.round(tom * 0.47)})`;
+        ctx.fillRect(0, (i * h) / 8, w, h / 8);
+        ctx.fillStyle = 'rgba(40,20,5,0.55)';
+        ctx.fillRect(0, (i * h) / 8, w, 3);
+        ctx.fillStyle = 'rgba(40,20,5,0.25)';
+        for (const px of [w * 0.2 + i * 13, w * 0.7 - i * 7]) ctx.fillRect(px % w, (i * h) / 8 + 6, 4, 4);
+      }
+    }, { repetir: true });
+  }
   if (tipo === 'cascalho') {
     // cascalho claro varrido em linhas (como no jardim de pedras), com pedras de pisar no meio
     return textura(256, 256, (ctx, w, h) => {
@@ -698,14 +834,26 @@ export function texturaRua() {
   }, { repetir: true });
 }
 
-// o relevo (foto) que a cidade põe junto do piso, na mesma repetição
+// o relevo (foto) que a cidade põe junto do piso, na mesma repetição (nas simples, nenhum)
 function comRelevo(nome, t) {
-  t.userData.relevo = nome;
+  if (DETALHE) t.userData.relevo = nome;
   return t;
 }
 
 // piso dos retângulos (praça dos jogos): deque, lajes com neve ou cascalho varrido
 export function texturaPiso() {
+  if (TEMA.piso === 'deck' && !DETALHE) {
+    // nas simples: tábuas desenhadas, de pé
+    return textura(256, 256, (ctx, w, h) => {
+      for (let i = 0; i < 8; i++) {
+        const tom = 165 + Math.floor(Math.random() * 25);
+        ctx.fillStyle = `rgb(${tom},${Math.round(tom * 0.75)},${Math.round(tom * 0.52)})`;
+        ctx.fillRect((i * w) / 8, 0, w / 8, h);
+        ctx.fillStyle = 'rgba(40,20,5,0.4)';
+        ctx.fillRect((i * w) / 8, 0, 3, h);
+      }
+    }, { repetir: true });
+  }
   // a foto do deque de pé (tábuas no sentido z); metros: o lado de cada repetição
   if (TEMA.piso === 'deck') {
     const t = texturaFoto('madeira');

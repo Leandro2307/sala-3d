@@ -71,6 +71,8 @@ const DEFAULTS = {
   qualidade: 'auto', nivelAuto: null, falhasAuto: {}, mostrarFps: false,
   // distância de visão: 'longe' (até a serra), 'media' ou 'perto' (ver DISTANCIAS)
   distancia: 'longe',
+  // texturas do mapa: 'auto', 'detalhadas' ou 'simples' (lidas no qualidade.js, ao abrir a página)
+  texturas: 'auto',
   // economia de bateria: 'auto' (bateria fraca fora da tomada), 'sim' ou 'nao'
   economia: 'auto',
   // presença (ver "empresa") e se o gestor quer os alertas da equipe
@@ -5730,6 +5732,37 @@ $('#set-qualidade').addEventListener('click', (e) => {
   saveSettings();
   qualidade.definirModo(b.dataset.value);
   renderQualidade();
+  renderTexturas(); // na Automática, as texturas seguem a qualidade fixa
+});
+
+// ------------------------------------------------------------------ texturas do mapa
+// Fotos no chão e árvores de folhas recortadas (detalhadas) ou a versão de antes, de cor lisa
+// (simples). O mundo é montado ao abrir a página: a escolha vale ao recarregar (ver qualidade.js).
+if (!(moduloQualidade.OPCOES_TEXTURAS || ['auto']).includes(settings.texturas)) settings.texturas = 'auto';
+const texturasAgora = moduloQualidade.TEXTURAS_DETALHADAS ?? true;
+const texturasQuer = () => moduloQualidade.texturasDetalhadas?.(settings) ?? texturasAgora;
+function renderTexturas() {
+  $$('#set-texturas button').forEach((b) => b.classList.toggle('on', b.dataset.value === settings.texturas));
+  const nome = (d) => (d ? 'detalhadas' : 'simples');
+  let dica = settings.texturas === 'auto'
+    ? `Detalhadas com placa de vídeo boa (qualidade Alta) e simples no resto. Agora: ${nome(texturasAgora)}.`
+    : settings.texturas === 'detalhadas'
+      ? 'Fotos no chão, árvores e arbustos com folhas recortadas e pedras com relevo.'
+      : 'A versão leve, de cor lisa: para PC fraco e celular.';
+  if (texturasQuer() !== texturasAgora) dica += ` As ${nome(texturasQuer())} entram ao recarregar a página.`;
+  $('#texturas-hint').textContent = dica;
+}
+renderTexturas();
+$('#set-texturas').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-value]');
+  if (!b) return;
+  settings.texturas = b.dataset.value;
+  saveSettings();
+  renderTexturas();
+  if (texturasQuer() !== texturasAgora) {
+    toast(`As texturas ${texturasQuer() ? 'detalhadas' : 'simples'} entram ao recarregar a página.`, 'info', 8000, null,
+      { rotulo: 'Recarregar', fazer: () => location.reload() });
+  }
 });
 
 // ------------------------------------------------------------------ distância de visão

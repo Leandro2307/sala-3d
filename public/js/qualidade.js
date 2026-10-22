@@ -97,6 +97,24 @@ export function nivelInicial() {
   return 'alta';
 }
 
+// Texturas do mapa: 'detalhadas' (fotos no chão, árvores e arbustos de folhas recortadas, pedras
+// com relevo) ou 'simples' (a versão de antes, de cor lisa: bem mais leve para a placa de vídeo).
+// O mundo é montado uma vez, ao abrir a página, então a escolha é lida aqui do que os Ajustes
+// guardaram (main.js, chave 'texturas') e só muda ao recarregar. Na Automática, detalhadas só onde
+// a qualidade começa na Alta: placa de vídeo de verdade no PC, ou a Alta escolhida à mão. Pelo
+// aparelho, e não por onde o automático parou da última vez: senão as simples deixavam o jogo leve,
+// o automático subia para a Alta, e a próxima visita voltava às pesadas.
+export const OPCOES_TEXTURAS = ['auto', 'detalhadas', 'simples'];
+export function texturasDetalhadas(ajustes) {
+  if (ajustes?.texturas === 'detalhadas') return true;
+  if (ajustes?.texturas === 'simples') return false;
+  const fixa = NIVEIS[ajustes?.qualidade] ? ajustes.qualidade : null;
+  return (fixa || nivelInicial()) === 'alta';
+}
+export const TEXTURAS_DETALHADAS = texturasDetalhadas((() => {
+  try { return JSON.parse(localStorage.getItem('sala3d') || '{}'); } catch { return {}; }
+})());
+
 const LENTO_MS = 18.5; // média do quadro acima disso (< ~54 fps) = está pesado
 const ESCALA_MIN = 0.7;
 const JANELA_MS = 1000; // decide a cada segundo de medição

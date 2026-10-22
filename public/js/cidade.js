@@ -180,9 +180,10 @@ function trechos(pontos, w, y, passo) {
 // ruas se encontram, o calçamento de uma passa por cima do meio-fio da outra.
 export function construirRuas(g, ruas, L) {
   const tex = texturaRua();
-  // a foto do deque tem tábuas de ~1 m: três repetições na largura, para não esticar
+  // a foto do deque tem tábuas de ~1 m: três repetições na largura, para não esticar (nas texturas
+  // simples não tem foto nem relevo: as tábuas desenhadas já são estreitas)
   const relevo = relevoRua();
-  if (TEMA.rua.tipo === 'madeira') {
+  if (TEMA.rua.tipo === 'madeira' && relevo) {
     tex.repeat.x = 3;
     relevo.repeat.x = 3;
   }
@@ -210,7 +211,7 @@ function construirPier(g, r, L) {
   const tex = texturaRua();
   tex.repeat.set(1, comp / 3);
   const relevo = relevoRua();
-  relevo.repeat.copy(tex.repeat);
+  relevo?.repeat.copy(tex.repeat);
   const deque = new THREE.Mesh(new THREE.BoxGeometry(r.largura, 0.18, comp + 4), new THREE.MeshStandardMaterial({ map: tex, normalMap: relevo, roughness: 0.8 }));
   no(deque.geometry, (x0 + x1) / 2, 0.11, (z0 + z1) / 2, giro);
   deque.receiveShadow = true;
@@ -303,7 +304,7 @@ function construirPraca(g, world, decor, L, saidas, luzes) {
   const { x, z, r } = PRACA;
   // o desenho da praça e, por cima, o relevo das pedrinhas (uma repetição a cada 0,9 m)
   const pedras = relevoFoto('pedras');
-  pedras.repeat.setScalar((r * 2) / 0.9);
+  pedras?.repeat.setScalar((r * 2) / 0.9);
   const piso = new THREE.Mesh(new THREE.CircleGeometry(r, 128).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({
     map: texturaPracaCentral(r), normalMap: pedras, normalScale: new THREE.Vector2(0.9, 0.9), roughness: 0.8,
   }));
