@@ -332,11 +332,9 @@
       <button type="button" class="ghost" data-panel="telao" data-tip="Telão: vídeos e lives"><i data-icon="tv"></i></button>
       <button type="button" class="ghost" data-panel="people" data-tip="Pessoas"><i data-icon="users"></i><span class="badge" id="people-badge">1</span></button>
       <button type="button" class="ghost" data-panel="chat" data-tip="Chat (T)"><i data-icon="chat"></i><span class="dot" id="chat-dot" hidden></span></button>
-      <button type="button" class="ghost" data-panel="parkour" data-jogo="parkour" data-tip="Parkour"><i data-icon="trophy"></i></button>
-      <button type="button" class="ghost" data-panel="ringue" data-jogo="ringue" data-tip="Ringue de luta"><i data-icon="fist"></i></button>
-      <button type="button" class="ghost" data-panel="corrida" data-jogo="corrida" data-tip="Pista de corrida"><i data-icon="car"></i></button>
-      <button type="button" class="ghost" data-panel="jogos" data-jogo="xadrez dama velha dados" data-tip="Jogos, dados e moedas"><i data-icon="xadrez"></i></button>
-      <button type="button" class="ghost" data-panel="parque" data-jogo="pingue queimada sinuca golfe truco uno gincana kart pinta" data-tip="Parque: pingue-pongue, queimada, sinuca e mais"><i data-icon="gamepad"></i></button>
+      <!-- todos os jogos num modal só, por gênero (catalogo-jogos.js); as regras e os recordes de cada
+           um continuam nos painéis (parkour, ringue, corrida...), que o modal abre -->
+      <button type="button" class="ghost" id="btn-jogos" data-jogo="futebol volei basquete boliche pingue sinuca golfe queimada corrida kart matamata batalha ringue xadrez dama velha dados truco uno parkour gincana surf pinta" data-tip="Jogos"><i data-icon="gamepad"></i></button>
       <button type="button" class="ghost" id="btn-personagem" data-tip="Personagem, cor e arma (P)"><i data-icon="user"></i></button>
       <button type="button" class="ghost" data-panel="settings" data-tip="Ajustes"><i data-icon="settings"></i></button>
       <!-- tela cheia também some com os avisos "Compartilhando … com esta guia" do Chrome -->
@@ -777,6 +775,33 @@
       <b>Ninguém está compartilhando agora</b>
       <span>Quando alguém compartilhar uma aba, janela ou a tela inteira, ela aparece aqui como um monitor.</span>
       <button type="button" class="primary small" data-mesa="compartilhar"><i data-icon="share" data-size="16"></i>Compartilhar minha tela</button>
+    </div>
+  </div>
+
+  <!-- ============================================================ catálogo de jogos (ver catalogo-jogos.js) -->
+  <div id="catalogo-jogos" class="ep-fundo" hidden>
+    <div class="ep-card cj-card" role="dialog" aria-modal="true" aria-labelledby="cj-titulo">
+      <header class="guia-head">
+        <h2 id="cj-titulo">Jogos</h2>
+        <button type="button" class="icon-btn" data-cj="fechar" aria-label="Fechar"><i data-icon="x"></i></button>
+      </header>
+      <div class="cj-filtros" id="cj-filtros" role="group" aria-label="Filtrar por gênero"></div>
+      <div class="ep-corpo cj-corpo">
+        <div class="cj-grade" id="cj-grade"></div>
+        <div class="cj-palco" hidden>
+          <div class="cj-tela">
+            <canvas id="cj-canvas"></canvas>
+            <span class="cj-arraste">arraste para girar</span>
+          </div>
+          <div class="cj-info">
+            <span class="cj-genero" id="cj-genero"></span>
+            <b id="cj-nome"></b>
+            <small id="cj-desc"></small>
+          </div>
+          <button type="button" class="primary block" id="cj-ir"></button>
+          <button type="button" class="secondary block" id="cj-regras"><i data-icon="trophy" data-size="18"></i>Regras e recordes</button>
+        </div>
+      </div>
     </div>
   </div>
 

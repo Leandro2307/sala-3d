@@ -4,6 +4,7 @@ import { World, SPAWN } from './world.js';
 import { Avatar } from './avatars.js';
 import { PERSONAGENS } from './modelo.js';
 import { EscolherPersonagem } from './escolher-personagem.js';
+import { CatalogoJogos } from './catalogo-jogos.js';
 import { SalasLaterais } from './salas.js';
 import { AoVivo, cartaoDoSaguao, COR_STATUS } from './aovivo.js';
 import { Player } from './player.js';
@@ -733,6 +734,41 @@ $('#in-char').addEventListener('click', () => escolha.abrir(settings.char));
 // o modelo 3D do personagem só baixa depois que o mundo ficou pronto: não disputa a abertura
 world.pronto.then(() => aplicarPersonagem());
 $('#btn-personagem').addEventListener('click', () => escolha.abrir(settings.char));
+
+// Catálogo de jogos (catalogo-jogos.js): todos os jogos por gênero, com a maquete 3D de cada um.
+// Truco e uno ficam na mesma mesa de cartas; os jogos sem lugar próprio levam até a área deles.
+const AREA_DO_JOGO = { futebol: 'estadio', volei: 'quadras', basquete: 'quadras', boliche: 'quadras', surf: 'aventura', matamata: 'aventura', batalha: 'aventura', truco: 'cartas', uno: 'cartas' };
+function irParaJogo(id) {
+  if (!state.joined) return;
+  if (id === 'parkour') return goToStart();
+  if (id === 'ringue') return goToRing();
+  if (id === 'corrida') return irParaLargada();
+  if (['xadrez', 'dama', 'velha'].includes(id)) return irParaMesa(id);
+  if (id === 'dados') return $('#jogos-dados').click();
+  irParaArea(AREA_DO_JOGO[id] || id);
+}
+const catalogo = new CatalogoJogos({
+  raiz: $('#catalogo-jogos'),
+  ligado: (id) => jogoLigado(id),
+  ir: (id) => {
+    sairDoJogo(); // futebol, céu, gincana... saem antes de ir
+    run.abandon();
+    if (player.veiculo && id !== 'corrida') toggleVeiculo();
+    exitFocus();
+    irParaJogo(id);
+  },
+  painel: (nome) => openPanel(nome),
+  aoAbrir: () => {
+    if (document.pointerLockElement) document.exitPointerLock();
+    if (state.panel) closePanel();
+    player.enabled = false;
+    player.keys.clear();
+  },
+  aoFechar: () => {
+    if (state.joined) player.enabled = true;
+  },
+});
+$('#btn-jogos').addEventListener('click', () => (catalogo.aberto ? catalogo.fechar() : catalogo.abrir()));
 // P abre o personagem dentro da sala (trocar de boneco, cor, camiseta e arma sem sair)
 window.addEventListener('keydown', (e) => {
   if (e.code !== 'KeyP' || !state.joined || state.focus || escolha.aberto || avisoSite.aberto || e.repeat) return;
@@ -5820,6 +5856,7 @@ window.addEventListener('keydown', (e) => {
     else if (!$('#tela-mais').hidden) fecharMenuDaTela(true);
     else if (guia.aberto) guia.fechar();
     else if (escolha.aberto) escolha.fechar();
+    else if (catalogo.aberto) catalogo.fechar();
     else if (mesa.aberta) fecharMesa(true);
     else if (state.focus) sairDoFoco();
     else if (!$('#react-pop').hidden) $('#react-pop').hidden = true;
@@ -5827,7 +5864,7 @@ window.addEventListener('keydown', (e) => {
     else sairDoJogo(); // futebol, céu, gincana, kart... ou preso no parkour
     return;
   }
-  if (typing() || e.repeat || guia.aberto || escolha.aberto || avisoSite.aberto || !$('#tela-mais').hidden) return;
+  if (typing() || e.repeat || guia.aberto || escolha.aberto || catalogo.aberto || avisoSite.aberto || !$('#tela-mais').hidden) return;
   // jogando futebol de carro: as letras são do carro (futebol.js); ficam só microfone, câmera,
   // chat e esconder a tela
   if (futebol.jogando && !['KeyM', 'KeyK', 'KeyT', 'Enter', 'KeyH'].includes(e.code)) return;
@@ -6240,7 +6277,7 @@ function tetoDeQuadros() {
     const a = innerWidth / innerHeight;
     return Math.min(a, 16 / 9) / Math.max(a, 16 / 9) > 0.7 ? 12 : 30;
   }
-  if (escolha.aberto || guia.aberto || !escolherTelaEl.hidden || !telaMaisEl.hidden || (isTouch && state.panel)) return 20;
+  if (escolha.aberto || catalogo.aberto || guia.aberto || !escolherTelaEl.hidden || !telaMaisEl.hidden || (isTouch && state.panel)) return 20;
   if (!state.joined && (isTouch || innerWidth <= 860)) return 20;
   if (economiaLigada) return 30;
   return TETO_TOQUE;
