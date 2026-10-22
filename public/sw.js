@@ -5,13 +5,24 @@
 // ela falhar.
 // v2: as miniaturas dos personagens mudaram (sem as armas empilhadas do KayKit). Nome novo = todo
 // mundo baixa de novo uma vez; o activate apaga o cache velho.
-const CACHE = 'sala3d-v2';
+// v3: o visual novo do mapa (posprocesso.js) — havia quem ficasse com a página velha. Além de
+// apagar o cache velho, recarrega as abas abertas da sala para pegarem tudo novo.
+const CACHE = 'sala3d-v3';
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => {
   e.waitUntil((async () => {
-    for (const nome of await caches.keys()) if (nome !== CACHE) await caches.delete(nome);
+    let velho = false;
+    for (const nome of await caches.keys()) {
+      if (nome === CACHE) continue;
+      velho = true;
+      await caches.delete(nome);
+    }
     await self.clients.claim();
+    // só numa atualização (havia cache de outra versão): na primeira instalação não recarrega nada
+    if (velho) {
+      for (const c of await self.clients.matchAll({ type: 'window' })) c.navigate(c.url).catch(() => {});
+    }
   })());
 });
 

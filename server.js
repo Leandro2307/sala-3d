@@ -248,8 +248,16 @@ if (!(process.env.RENDER || process.env.NODE_ENV === 'production')) {
 }
 
 // a página inicial vai montada (ver pagina.js): com a lista de scripts para baixar de uma vez
-app.get(['/', '/index.html'], (_req, res) => {
+// LIMPEZA: quando muda, cada navegador (celular ou PC) recebe uma vez o Clear-Site-Data e apaga o
+// cache HTTP e o do service worker (configurações e nome no localStorage ficam). O cookie marca
+// quem já limpou, para não limpar a cada visita.
+const LIMPEZA = '3';
+app.get(['/', '/index.html'], (req, res) => {
   res.set('Cache-Control', 'no-cache');
+  if (!new RegExp(`(?:^|;\\s*)sala3d-limpo=${LIMPEZA}(?:;|$)`).test(req.headers.cookie || '')) {
+    res.set('Clear-Site-Data', '"cache"');
+    res.cookie('sala3d-limpo', LIMPEZA, { maxAge: 365 * 86400_000, sameSite: 'lax', secure: req.secure || req.get('x-forwarded-proto') === 'https' });
+  }
   res.type('html').send(paginaInicial());
 });
 // nossos módulos em produção, com os imports versionados (ver pagina.js): pedido com a
