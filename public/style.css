@@ -2507,12 +2507,63 @@ body.touch .toast { padding: 8px 11px; font-size: 12px; line-height: 1.35; }
   /* em pé a dica de entrar num jogo bateria na etiqueta dos controles: fica embaixo dela */
   body.touch:not([data-jogo]) :is(#pq-dica, #q-dica, #fut-dica, #ceu-dica) { top: calc(104px + env(safe-area-inset-top)); }
 }
-/* em pé a fileira de botões não cabe ao lado do analógico: os pequenos sobem para uma linha de
-   cima, e o soco e o pulo ficam embaixo; a coluna de poderes e a do jogo sobem junto */
+/* em pé a fileira de botões não cabe ao lado do analógico. As linhas se enchem de baixo para cima
+   e da direita para a esquerda: o pulo (ou o acelerador), o soco e o tapa ficam no canto de baixo
+   e os pequenos sobem para a linha de cima. Botões um pouco menores fazem tudo caber em duas linhas
+   num celular de 375 a 430 px (antes eram três, e a de cima ficava atrás da coluna de poderes). */
 @media (orientation: portrait) {
-  body.touch .touch-actions { flex-wrap: wrap; justify-content: flex-end; align-content: flex-end; max-width: calc(100vw - 190px); row-gap: 8px; }
-  body.touch .touch-poderes, body.touch .touch-jogo { bottom: calc(170px + env(safe-area-inset-bottom)); }
-  body.touch[data-jogo] .touch-poderes, body.touch[data-jogo] .touch-jogo { bottom: calc(118px + env(safe-area-inset-bottom)); }
+  body.touch #stick { width: 112px; height: 112px; }
+  body.touch .stick-knob { width: 48px; height: 48px; margin: -24px 0 0 -24px; }
+  body.touch .touch-actions {
+    flex-direction: row-reverse;
+    flex-wrap: wrap-reverse;
+    justify-content: flex-start;
+    align-content: flex-start;
+    align-items: flex-start; /* com wrap-reverse, o começo é embaixo: os botões assentam na linha */
+    max-width: calc(100vw - 162px - env(safe-area-inset-left) - env(safe-area-inset-right));
+    gap: 8px;
+  }
+  body.touch :is(#tb-jump, #tb-acelera) { order: -4; }
+  body.touch #tb-freio { order: -3; }
+  body.touch #tb-punch { order: -2; }
+  body.touch #tb-tapa { order: -1; }
+  body.touch :is(.touch-actions, .touch-jogo, .touch-poderes) .tb { width: 50px; height: 50px; }
+  body.touch :is(.touch-actions, .touch-jogo, .touch-poderes) .tb.small { width: 42px; height: 42px; }
+  body.touch :is(.touch-actions, .touch-jogo, .touch-poderes) .tb.big { width: 66px; height: 66px; }
+  body.touch .touch-actions .tb.pedal { width: 56px; height: 56px; }
+  body.touch .touch-actions .tb.big.pedal { width: 70px; height: 70px; }
+  body.touch .touch-poderes .tb.tiro { width: 54px; height: 54px; }
+  body.touch .touch-poderes, body.touch .touch-jogo { bottom: calc(160px + env(safe-area-inset-bottom)); }
+  body.touch[data-jogo] .touch-poderes, body.touch[data-jogo] .touch-jogo { bottom: calc(112px + env(safe-area-inset-bottom)); }
+}
+/* armado e perto de um jogo: o E e a ação ficam à esquerda do botão de atirar, não em cima dele
+   (as duas colunas ficavam no mesmo canto) */
+#touch.armado .touch-jogo { right: calc(18px + 58px + 12px + env(safe-area-inset-right)); }
+@media (max-height: 460px) {
+  body.touch .touch-jogo { bottom: calc(96px + env(safe-area-inset-bottom)); }
+  body.touch #touch.armado .touch-jogo { right: calc(18px + 50px + 10px + env(safe-area-inset-right)); }
+}
+@media (orientation: portrait) {
+  body.touch #touch.armado .touch-jogo { right: calc(18px + 54px + 10px + env(safe-area-inset-right)); }
+}
+
+/* barra do topo no celular: o ⋯ abre os ícones que não couberam numa grade embaixo dela */
+#btn-mais[hidden] { display: none; }
+body.bar-mais #btn-mais { background: rgba(110, 231, 200, 0.22); color: var(--accent); }
+body.touch.bar-mais .bar-right {
+  position: absolute;
+  top: calc(100% - 4px);
+  left: calc(8px + env(safe-area-inset-left));
+  right: calc(8px + env(safe-area-inset-right));
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  overflow: visible;
+  padding: 10px;
+  border-radius: 16px;
+  background: rgba(14, 16, 23, 0.96);
+  border: 1px solid var(--line-strong);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
 }
 /* a dica de sentar tem botão próprio no celular (#tb-sit) */
 body.touch #sit-hint { display: none !important; }

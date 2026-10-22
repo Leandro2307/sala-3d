@@ -688,8 +688,9 @@ export class World {
     this.extGpu = undefined;
     // Resolução = densidade de pixels da tela, limitada pela qualidade (pixelMax), vezes a escala
     // dinâmica (escala: a qualidade automática baixa um pouco quando o quadro passa do tempo).
-    // Telas de celular têm DPR 3: renderizar nisso tudo derruba o fps sem ganho visível.
-    this.pixelMax = isTouch ? 1.25 : 1.75;
+    // Telas de celular têm DPR 3: renderizar nisso tudo derruba o fps sem ganho visível (mas abaixo
+    // de 1,5 a tela pequena e densa fica borrada).
+    this.pixelMax = isTouch ? 1.5 : 1.75;
     this.escala = 1;
     this.maxLuzes = 8;
     this.videoFps = 60;

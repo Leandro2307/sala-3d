@@ -96,6 +96,34 @@ if (isTouch) {
   document.body.classList.add('touch');
   $('#lobby-note').hidden = true;
   $('#lobby-note-touch').hidden = false;
+  barraMais();
+}
+
+// Celular: a barra do topo tem mais ícones do que cabem (num iPhone em pé sobrava espaço para um
+// só, e o resto ficava escondido numa rolagem que ninguém percebia). Quando não cabem, aparece o
+// ⋯, que abre todos numa grade embaixo da barra.
+function barraMais() {
+  const direita = $('.bar-right');
+  const btn = $('#btn-mais');
+  const aberta = () => document.body.classList.contains('bar-mais');
+  const conferir = () => {
+    if (!aberta()) btn.hidden = direita.scrollWidth <= direita.clientWidth + 1;
+  };
+  const abrir = (on) => {
+    document.body.classList.toggle('bar-mais', on);
+    btn.setAttribute('aria-expanded', String(on));
+    if (!on) requestAnimationFrame(conferir);
+  };
+  btn.addEventListener('click', () => abrir(!aberta()));
+  // escolheu um ícone ou tocou fora: fecha
+  direita.addEventListener('click', () => abrir(false));
+  document.addEventListener('pointerdown', (e) => {
+    if (aberta() && !e.target.closest('.bar-right, #btn-mais')) abrir(false);
+  });
+  new ResizeObserver(conferir).observe(direita);
+  // botões que aparecem e somem (jogos ligados, sino) mudam o que cabe
+  new MutationObserver(conferir).observe($('#bar'), { attributes: true, attributeFilter: ['hidden'], subtree: true });
+  conferir();
 }
 let touchPad = null; // controles de toque (só no celular)
 

@@ -233,6 +233,7 @@ export function setupTouchControls(player, actions = {}) {
       marcar('#tb-pulo', puloAlto);
       $b('#tb-descer').hidden = !voando;
       $b('#tb-tiro').hidden = !armado;
+      root.classList.toggle('armado', !!armado); // o E dos jogos vai para o lado do tiro
       $b('#tb-luneta').hidden = !sniper;
       marcar('#tb-luneta', luneta);
       if (!voando) player.descerHeld = false;

@@ -24,17 +24,17 @@ import { isTouch } from './touch.js';
 // braços e mãos entram na sombra (o main.js lê a cada 250 ms).
 export const NIVEIS = {
   alta: {
-    nome: 'Alta', luzes: 8, luzesEscritorio: 7, sombra: 2048, pixelMax: isTouch ? 1.25 : 1.75, densidade: 1,
+    nome: 'Alta', luzes: 8, luzesEscritorio: 7, sombra: 2048, pixelMax: isTouch ? 2 : 1.75, densidade: 1,
     sombraArvores: true, videoFps: 60, antialias: true, holofote: true, luzSimples: false,
     bonecos: { sombras: 16, raioSombra: 40, nomes: 70, bracos: true },
   },
   media: {
-    nome: 'Média', luzes: 5, luzesEscritorio: 4, sombra: isTouch ? 0 : 1024, pixelMax: isTouch ? 1 : 1.25, densidade: 0.7,
+    nome: 'Média', luzes: 5, luzesEscritorio: 4, sombra: isTouch ? 0 : 1024, pixelMax: isTouch ? 1.5 : 1.25, densidade: 0.7,
     sombraArvores: false, videoFps: 30, antialias: !isTouch, holofote: false, luzSimples: false,
     bonecos: { sombras: isTouch ? 0 : 6, raioSombra: 28, nomes: 50, bracos: false },
   },
   baixa: {
-    nome: 'Leve', luzes: 3, luzesEscritorio: 3, sombra: 0, pixelMax: isTouch ? 0.8 : 1, densidade: 0.4,
+    nome: 'Leve', luzes: 3, luzesEscritorio: 3, sombra: 0, pixelMax: isTouch ? 1.15 : 1, densidade: 0.4,
     sombraArvores: false, videoFps: 24, antialias: false, holofote: false, luzSimples: true,
     bonecos: { sombras: 0, raioSombra: 0, nomes: 40, bracos: false },
   },
@@ -95,7 +95,7 @@ export function nivelInicial() {
 }
 
 const LENTO_MS = 18.5; // média do quadro acima disso (< ~54 fps) = está pesado
-const ESCALA_MIN = isTouch ? 0.6 : 0.7;
+const ESCALA_MIN = 0.7;
 const JANELA_MS = 1000; // decide a cada segundo de medição
 // Processador folgado para subir de nível (só no PC): 70% do quadro de 60 qps, nunca do intervalo
 // medido (a 144 Hz seriam 3 ms e o PC forte nunca subiria). Mais apertado que isso, a sala cheia
