@@ -67,7 +67,7 @@ export const relevoFoto = (nome) => texturaFoto(`${nome}-n`, { cor: false });
 // pisada sobre os paralelepípedos
 export function relevoRua() {
   const tipo = TEMA.rua.tipo;
-  return relevoFoto(tipo === 'madeira' ? 'deque' : tipo === 'cascalho' ? 'cascalho' : 'neve');
+  return relevoFoto(tipo === 'madeira' ? 'madeira' : tipo === 'cascalho' ? 'cascalho' : 'neve');
 }
 // a foto do chão do tema, em cinza (multiplica a cor do terreno): grama, ou neve na vila da neve
 export const CHAO_DO_TEMA = TEMA.id === 'neve' ? 'neve' : 'grama';
@@ -637,7 +637,7 @@ export function pecaDaPraca(g, L, world, x, z, decor) {
 export function texturaRua() {
   const tipo = TEMA.rua.tipo;
   // deque de tábuas atravessadas (a foto: 12 tábuas a cada repetição)
-  if (tipo === 'madeira') return texturaFoto('deque');
+  if (tipo === 'madeira') return texturaFoto('madeira');
   if (tipo === 'cascalho') {
     // cascalho claro varrido em linhas (como no jardim de pedras), com pedras de pisar no meio
     return textura(256, 256, (ctx, w, h) => {
@@ -708,10 +708,10 @@ function comRelevo(nome, t) {
 export function texturaPiso() {
   // a foto do deque de pé (tábuas no sentido z); metros: o lado de cada repetição
   if (TEMA.piso === 'deck') {
-    const t = texturaFoto('deque');
+    const t = texturaFoto('madeira');
     t.rotation = Math.PI / 2;
     t.userData.metros = 3;
-    t.userData.relevo = 'deque';
+    t.userData.relevo = 'madeira';
     return t;
   }
   if (TEMA.piso === 'cascalho') {

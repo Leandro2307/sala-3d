@@ -25,7 +25,7 @@ const PEDIDAS = process.argv.slice(2); // só estas (sem nada: todas)
 const TEXTURAS = [
   { nome: 'grama', id: 'sparse_grass', modo: 'detalhe', media: 0.9, contraste: 1.5, tam: 512 },
   { nome: 'areia', id: 'coast_sand_01', modo: 'detalhe', media: 0.92, contraste: 1.6, tam: 512 },
-  { nome: 'deque', id: 'wood_floor_deck', modo: 'cor', clarear: 1.75, saturacao: 0.5, tam: 1024 },
+  { nome: 'madeira', id: 'wood_floor_deck', modo: 'cor', clarear: 1.75, saturacao: 0.5, tam: 1024 },
   { nome: 'pedras', id: 'cobblestone_floor_08', modo: 'detalhe', media: 0.95, contraste: 1.1, tam: 512 },
   { nome: 'rocha', id: 'rock_boulder_dry', modo: 'detalhe', media: 0.92, contraste: 1.4, tam: 512 },
   { nome: 'cascalho', id: 'gravel', modo: 'detalhe', media: 0.92, contraste: 1.2, tam: 512 },
