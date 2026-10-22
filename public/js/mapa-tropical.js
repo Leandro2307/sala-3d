@@ -21,6 +21,7 @@ export const TROPICAL = {
     pinta: { x: 55, z: 637 },
     golfe: { x: -27, z: 757 },
     gincana: { x: 17, z: 392 }, // na pracinha da aventura, junto dos portais do céu
+    fantasmas: { x: 24, z: 385 }, // o caça-fantasmas, no meio da pracinha da aventura
   },
   cidade: {
     hub: { x: 100, z: 30, r: 28, nome: 'Praça do Farol' },
@@ -62,7 +63,7 @@ export const TROPICAL = {
       jogos: { nome: 'Praça dos jogos', sub: 'Xadrez, dama, jogo da velha e dados', cor: '#a78bfa', ir: { pos: [108, 0, 175], yaw: -Math.PI / 2 } },
       estadio: { nome: 'Estádio', sub: 'Futebol de carro', cor: '#22d3ee', ir: { pos: [83, 0, 214], yaw: Math.PI / 2 } },
       quadras: { nome: 'Praia das quadras', sub: 'Vôlei de praia, basquete e boliche', cor: '#facc15', ir: { pos: [10, 0, 318], yaw: Math.PI } },
-      aventura: { nome: 'Aventura', sub: 'Portais: surf, mata-mata e gincana', cor: '#f472b6', ir: { pos: [46, 0, 385], yaw: Math.PI / 2 } },
+      aventura: { nome: 'Aventura', sub: 'Portais: surf, mata-mata, gincana e caça-fantasmas', cor: '#f472b6', ir: { pos: [46, 0, 385], yaw: Math.PI / 2 } },
       lago: { nome: 'Lagoa Azul', sub: 'Areia, píer e água transparente', cor: '#2dd4bf', ir: { pos: [88, 0, 475], yaw: Math.PI / 2 } },
       autodromo: { nome: 'Autódromo', sub: 'Corrida de carro contra o relógio', cor: '#6ee7c8', ir: { pos: [175, 0, 427], yaw: -Math.PI / 2 } },
       parque: { nome: 'Parque', sub: 'Salão de jogos, queimada, pinta e golfe', cor: '#4ade80', ir: { pos: [AV, 0, 686], yaw: Math.PI } },
@@ -122,7 +123,7 @@ export const TROPICAL = {
       },
       {
         area: 'aventura', x: 70, z: 376, giro: Math.PI / 2,
-        linhas: ['Portais com E · gincana: 10 fases e a final', 'Surf: deslize de lado nas rampas', 'Mata-mata: pegue as armas do chão', 'Em times: derrube o time do outro lado'],
+        linhas: ['Portais com E · gincana e caça-fantasmas', 'Surf: deslize de lado nas rampas', 'Mata-mata: pegue as armas do chão', 'Em times: derrube o time do outro lado'],
       },
       {
         area: 'autodromo', x: 140, z: 418, giro: -Math.PI / 2,

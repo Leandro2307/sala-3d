@@ -2,7 +2,7 @@
 // áreas e pistas). Serve aos totens "você está aqui" do 3D (cidade.js) e ao mapa da tela (MapaTela),
 // que mostra onde você e os outros estão e leva até uma área com um toque.
 import { PRACA, PRACAS, PISOS, AGUA, BOSQUES, AREAS, ROTULOS, MAPA_INFO } from './cidade-dados.js';
-import { PARQUE, SALAO, QUEIMADA, PINTA_ARENA, GOLFE_AREA, PORTAL_GINCANA } from './parque-dados.js';
+import { PARQUE, SALAO, QUEIMADA, PINTA_ARENA, GOLFE_AREA, PORTAL_GINCANA, PORTAL_FANTASMAS } from './parque-dados.js';
 import { prepararRuas } from './cidade.js';
 import { PISTA, CAMINHO } from './pista.js';
 import { LINHA as LINHA_KART, KART } from './kart-dados.js';
@@ -27,6 +27,7 @@ const NO_PARQUE = [
   ['queimada', 'Queimada', QUEIMADA.cx, QUEIMADA.cz],
   ['pinta', 'Pinta', PINTA_ARENA.cx, PINTA_ARENA.cz],
   ['gincana', 'Gincana', PORTAL_GINCANA.x, PORTAL_GINCANA.z - 8],
+  ['fantasmas', 'Fantasmas', PORTAL_FANTASMAS.x, PORTAL_FANTASMAS.z + 9],
 ];
 
 function roundRect(ctx, x, y, w, h, r) {

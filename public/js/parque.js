@@ -8,7 +8,7 @@ import {
   malhaLanternas, construirPorticos, placaDeSaida, novosLotes, fundir, texturaRedonda, construirBancos, plantarFlores, fecharLotes,
 } from './cidade.js';
 import {
-  PARQUE, SALAO, PORTICO_PARQUE, PLACA_PARQUE, QUEIMADA, PINTA_ARENA, GOLFE_AREA, PORTAL_GINCANA,
+  PARQUE, SALAO, PORTICO_PARQUE, PLACA_PARQUE, QUEIMADA, PINTA_ARENA, GOLFE_AREA, PORTAL_GINCANA, PORTAL_FANTASMAS,
 } from './parque-dados.js';
 import { poste as posteDoTema } from './temas3d.js';
 
@@ -208,6 +208,7 @@ export function construirParque(world) {
     ret(PA.cx - PA.lado / 2, PA.cx + PA.lado / 2, PA.cz - PA.lado / 2, PA.cz + PA.lado / 2),
     ret(GOLFE_AREA.x0, GOLFE_AREA.x1, GOLFE_AREA.z0, GOLFE_AREA.z1, 2),
     { x: PORTAL_GINCANA.x, z: PORTAL_GINCANA.z, r: 6 },
+    { x: PORTAL_FANTASMAS.x, z: PORTAL_FANTASMAS.z, r: 6 },
   );
   return { grupo: g };
 }

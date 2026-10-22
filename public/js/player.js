@@ -60,6 +60,8 @@ export class Player {
     // física de fora (o surf, em ceu.js): (dt, frente, lado, correndo) no lugar do passo normal
     this.fisicaExterna = null;
     this.travado = false; // nocauteado: fica onde caiu, sem andar nem pular (só olha em volta)
+    // um jogo que muda o passo (o caça-fantasmas: gente com medo anda devagar): { andar, correr, pulo }
+    this.limites = null;
     // espectador (mata-mata em times, batalha.js): a posição de outro boneco. A câmera gira em volta
     // dele, em 3ª pessoa, com o mouse de sempre
     this.espectar = null;
@@ -406,7 +408,8 @@ export class Player {
     const mag = Math.min(1, Math.hypot(f, r));
     // no gelo (o lago congelado da Vila da Neve) o boneco embala mais e demora a parar: escorrega
     const gelo = this.noGelo && this.grounded;
-    const speed = (running ? RUN : WALK) * mag * (gelo ? 1.3 : 1);
+    const lim = this.limites;
+    const speed = (running ? lim?.correr ?? RUN : lim?.andar ?? WALK) * mag * (gelo ? 1.3 : 1);
     const accel = gelo ? 1.2 : this.grounded ? 14 : hasInput ? 5 : 0.6;
     const t = Math.min(1, accel * dt);
     this.vel.x += ((hasInput ? _dir.x * speed : 0) - this.vel.x) * t;
@@ -414,7 +417,7 @@ export class Player {
 
     // pulo (com buffer e coyote time)
     if (this.jumpBuffer > 0 && (this.grounded || this.coyote > 0) && !this.override) {
-      this.vel.y = JUMP * (this.puloAlto ? 2 : 1);
+      this.vel.y = (this.limites?.pulo ?? JUMP) * (this.puloAlto ? 2 : 1);
       this.jumpBuffer = 0;
       this.coyote = 0;
       this.grounded = false;
@@ -579,7 +582,8 @@ export class Player {
     const hs = Math.hypot(this.vel.x, this.vel.z);
     const pisando = this.grounded || this.coyote > 0;
     const vale = this.balancoVisao && !this.mirando && pisando && !this.sitting && !this.veiculo && !this.voando;
-    this.balanco += ((vale ? Math.min(1, hs / WALK) : 0) - this.balanco) * (1 - Math.exp(-dt * 8));
+    const andar = this.limites?.andar || WALK;
+    this.balanco += ((vale ? Math.min(1, hs / andar) : 0) - this.balanco) * (1 - Math.exp(-dt * 8));
     // ~2,4 passos por segundo andando, ~2,9 correndo
     this.passo = (this.passo + dt * (4.2 + hs * 0.45)) % (Math.PI * 2);
 
@@ -590,7 +594,8 @@ export class Player {
 
     const k = this.balanco;
     if (k < 0.001) return 0;
-    const correndo = THREE.MathUtils.clamp((hs - WALK) / (RUN - WALK), 0, 1);
+    const correr = this.limites?.correr || RUN;
+    const correndo = correr > andar ? THREE.MathUtils.clamp((hs - andar) / (correr - andar), 0, 1) : 0;
     const s = Math.sin(this.passo);
     // |sen| tem média 2/π: descontada, o pé no chão fica abaixo da altura padrão e o meio do passo acima
     cam.position.y += (Math.abs(s) - 2 / Math.PI) * (0.05 + correndo * 0.025) * k;

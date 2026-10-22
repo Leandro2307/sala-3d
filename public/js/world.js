@@ -25,6 +25,7 @@ import { construirSinuca } from './sinuca.js';
 import { construirGolfe } from './golfe.js';
 import { construirCartas } from './cartas.js';
 import { construirGincana } from './gincana.js';
+import { construirPortalFantasmas } from './fantasmas.js';
 import { construirKart } from './kart.js';
 import { construirPinta } from './pinta.js';
 import { PosProcesso } from './posprocesso.js';
@@ -819,6 +820,8 @@ export class World {
     this.cartas3d = this.area('cartas', () => construirCartas(this));
     // o portal da gincana, na pracinha da aventura (as fases ficam bem longe e só nascem quando alguém entra)
     this.gincana3d = this.area('gincana', () => construirGincana(this));
+    // o portal do caça-fantasmas, no meio da pracinha da aventura (as casas ficam longe, ver fantasmas.js)
+    this.fantasmas3d = this.area('fantasmas', () => construirPortalFantasmas(this));
     this.kart3d = this.area('kart', () => construirKart(this));
     this.pinta3d = this.area('pinta', () => construirPinta(this));
     // surf e mata-mata, no céu; os portais ficam perto da porta (o jogo é do ceu.js)
@@ -2836,6 +2839,12 @@ export class World {
   // estouravam). Dentro do cinema e do prédio o céu quase não entra: lá fica a luz de sempre. A
   // troca é suave, na velocidade de quem passa pela porta. ja: sem transição (troca de nível).
   acertarLuzFora(ja = false, dt = 0) {
+    // a noite do caça-fantasmas: sem a luz do céu e com o hemisfério quase apagado
+    if (this.luzNoturna) {
+      this.scene.environmentIntensity = this.luzNoturna.ambiente;
+      if (this.hemi) this.hemi.intensity = this.luzNoturna.hemi;
+      return;
+    }
     const alvo = this.ambienteNivel && !this.cameraDentro ? 1 : 0;
     this.luzFora = ja ? alvo : this.luzFora + Math.sign(alvo - this.luzFora) * Math.min(Math.abs(alvo - this.luzFora), dt * 2);
     const k = this.luzFora;

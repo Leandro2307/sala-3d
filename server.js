@@ -19,6 +19,7 @@ const { ligarSinuca } = require('./sinuca-servidor.js');
 const { ligarGolfe } = require('./golfe-servidor.js');
 const { ligarCartas } = require('./cartas-servidor.js');
 const { ligarGincana } = require('./gincana-servidor.js');
+const { ligarFantasmas } = require('./fantasmas-servidor.js');
 const { ligarKart } = require('./kart-servidor.js');
 const { ligarPinta } = require('./pinta-servidor.js');
 const { ligarCeu } = require('./ceu-servidor.js');
@@ -467,7 +468,7 @@ function mudarSaldo(nome, delta) {
 const MODULOS = ['lazer', 'escritorio'];
 const JOGOS_SALA = ['parkour', 'ringue', 'corrida', 'futebol', 'volei', 'basquete', 'boliche', 'surf', 'matamata', 'batalha', 'xadrez', 'dama', 'velha', 'dados', 'poderes', 'armas',
   // o parque (public/js/parque-dados.js)
-  'pingue', 'queimada', 'sinuca', 'golfe', 'truco', 'uno', 'vinteum', 'gincana', 'kart', 'pinta',
+  'pingue', 'queimada', 'sinuca', 'golfe', 'truco', 'uno', 'vinteum', 'gincana', 'fantasmas', 'kart', 'pinta',
   'tapa', // tapa nos amigos, no mapa todo (e na mesa de cartas)
   'tiro']; // tiro de brincadeira na mesa de cartas
 const configPadrao = () => ({
@@ -1051,6 +1052,7 @@ function attachSockets(io) {
   const golfeDoSocket = ligarGolfe(io, rooms, jogoLigado, moedasDoJogo); // minigolfe (golfe-servidor.js)
   const cartasDoSocket = ligarCartas(io, rooms, jogoLigado, moedasDoJogo); // truco e uno (cartas-servidor.js)
   const gincanaDoSocket = ligarGincana(io, rooms, jogoLigado, moedasDoJogo); // gincana no céu (gincana-servidor.js)
+  const fantasmasDoSocket = ligarFantasmas(io, rooms, jogoLigado, moedasDoJogo); // caça-fantasmas (fantasmas-servidor.js)
   const kartDoSocket = ligarKart(io, rooms, jogoLigado, moedasDoJogo); // kart (kart-servidor.js)
   const pintaDoSocket = ligarPinta(io, rooms, jogoLigado, moedasDoJogo); // pinta-território (pinta-servidor.js)
   // alerta para os gestores que estão na sala (menos a própria pessoa)
@@ -1109,6 +1111,7 @@ function attachSockets(io) {
     golfeDoSocket(socket, () => ({ room, user }));
     cartasDoSocket(socket, () => ({ room, user }));
     gincanaDoSocket(socket, () => ({ room, user }));
+    fantasmasDoSocket(socket, () => ({ room, user }));
     kartDoSocket(socket, () => ({ room, user }));
     pintaDoSocket(socket, () => ({ room, user }));
 

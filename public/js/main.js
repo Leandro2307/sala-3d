@@ -35,6 +35,7 @@ import { Sinuca } from './sinuca.js';
 import { Golfe } from './golfe.js';
 import { Cartas } from './cartas.js';
 import { Gincana } from './gincana.js';
+import { Fantasmas } from './fantasmas.js';
 import { Kart } from './kart.js';
 import { Pinta } from './pinta.js';
 import { hud as hudJogos } from './hud-jogos.js';
@@ -242,6 +243,18 @@ const gincana = new Gincana({
   },
 });
 jogosDoParque.push(gincana);
+// caça-fantasmas (como o Phasmophobia): 12 monstros em 5 casas assombradas, bem longe do mapa (o
+// portal fica no meio da pracinha da aventura)
+const fantasmas = new Fantasmas({
+  world, player, sfx, clima, ligado: () => jogoLigado('fantasmas'), posDe: posDoId, falando: () => state.speaking,
+  aoEntrar: () => {
+    if (player.veiculo) toggleVeiculo();
+    if (player.voando) toggleVoar();
+    if (player.puloAlto) togglePuloAlto();
+    if (player.sitting) toggleSit();
+  },
+});
+jogosDoParque.push(fantasmas);
 // kart no kartódromo do parque: na corrida o boneco vira o carro dele (o mesmo do autódromo, mas
 // com a física do kart) mesmo com a pista de corrida desligada
 const kart = new Kart({
@@ -2612,12 +2625,13 @@ const JOGOS_DA_SALA = [
   ['uno', 'Uno', 'Até 6 na mesa, com robôs'],
   ['vinteum', '21', 'Duelo de 21 com trunfos: conte as cartas, aposte dedos'],
   ['gincana', 'Gincana', '10 fases estilo Fall Guys e a final dos hexágonos'],
+  ['fantasmas', 'Caça-Fantasmas', '12 monstros em 5 casas assombradas, como o Phasmophobia'],
   ['kart', 'Kart', 'Kartódromo com itens, 3 voltas'],
   ['pinta', 'Pinta-território', 'Times pintam o chão com tinta'],
   ['tapa', 'Tapa', 'Y dá um tapa em quem está na frente (não tira vida)'],
   ['tiro', 'Tiro na mesa de cartas', 'De brincadeira: derruba da cadeira, não tira vida'],
 ];
-const AREAS_DE_JOGO = ['parkour', 'ringue', 'corrida', 'futebol', 'volei', 'basquete', 'boliche', 'surf', 'matamata', 'batalha', 'xadrez', 'dama', 'velha', 'dados', 'pingue', 'queimada', 'sinuca', 'golfe', 'cartas', 'gincana', 'kart', 'pinta'];
+const AREAS_DE_JOGO = ['parkour', 'ringue', 'corrida', 'futebol', 'volei', 'basquete', 'boliche', 'surf', 'matamata', 'batalha', 'xadrez', 'dama', 'velha', 'dados', 'pingue', 'queimada', 'sinuca', 'golfe', 'cartas', 'gincana', 'fantasmas', 'kart', 'pinta'];
 // parkour e ringue ficam dentro do cinema: no escritório não existem
 const SO_NO_CINEMA = ['parkour', 'ringue'];
 const modoEscritorio = () => state.sala?.modulo === 'escritorio' && state.sala.departamentos?.length > 0;
@@ -5874,6 +5888,7 @@ window.addEventListener('keydown', (e) => {
   // chat e esconder a tela
   if (futebol.jogando && !['KeyM', 'KeyK', 'KeyT', 'Enter', 'KeyH'].includes(e.code)) return;
   if (e.code === 'KeyE' && usarEDosJogos()) return; // futebol, boliche, parque e portais do céu
+  if (fantasmas.tecla(e)) return; // dentro da casa assombrada: aparelhos, lanterna e diário
   // em times: N troca de time; assistindo, as setas trocam de quem se assiste
   if (batalha.ativo && !state.focus && e.code === 'KeyN') {
     batalha.trocarTime();
@@ -6083,6 +6098,7 @@ function jogoAtual() {
   if (mataMata.ativo) return 'matamata';
   if (batalha.ativo) return 'batalha';
   if (gincana.dentro) return 'gincana';
+  if (fantasmas.dentro) return 'fantasmas';
   if (kart.ativo() || (kart.ligado() && kart.inscrito)) return 'kart';
   if (pinta.ativo()) return 'pinta';
   if (queimada.ativo()) return 'queimada';
@@ -6095,7 +6111,7 @@ function jogoAtual() {
   if (run.state !== 'idle') return 'parkour';
   return '';
 }
-const SAI_COM_X = ['futebol', 'surf', 'matamata', 'batalha', 'gincana', 'kart', 'pinta', 'parkour'];
+const SAI_COM_X = ['futebol', 'surf', 'matamata', 'batalha', 'gincana', 'fantasmas', 'kart', 'pinta', 'parkour'];
 let jogoNaTela = '';
 let armadoNaTela = false;
 function marcarJogoAtual() {
@@ -6116,7 +6132,7 @@ function marcarJogoAtual() {
 if (params.get('debug') === '1') {
   window.__sala3d = {
     state, player, combat, run, corrida, world, settings, punch, goToRing, respawn, mataMata, batalha, anuncios,
-    toggleVeiculo, irParaLargada, jogos, irParaMesa, exitFocus, dados, quadras, jogosDoParque, pingue, queimada, sinuca, golfe, cartas, gincana, kart, pinta,
+    toggleVeiculo, irParaLargada, jogos, irParaMesa, exitFocus, dados, quadras, jogosDoParque, pingue, queimada, sinuca, golfe, cartas, gincana, fantasmas, kart, pinta,
     tocarTela, telasMudas, liberarSomDasTelas, makeVideo, mesa, controle, abrirMesa, fecharMesa, marcaDaAba,
     publishShare, stopShare, acharTela, telasNoAr, get rtc() { return rtc; }, clima, ligarLuneta, futebol, surf, run,
   };
@@ -6477,7 +6493,8 @@ function atualizarAvatares(dt, t, desenhando) {
     if (u.isSelf) continue;
     const a = u.avatar;
     // jogando futebol de carro: quem aparece é o carro dele no campo (futebol.js), não o boneco
-    const noCampo = futebol.joga(u.id);
+    // (e no caça-fantasmas, quem morreu ou está escondido no armário some)
+    const noCampo = futebol.joga(u.id) || fantasmas.oculto(u.id);
     if (a.group.visible === noCampo) a.group.visible = !noCampo;
     if (noCampo) continue;
     if (!a.animarCom) {

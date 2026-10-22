@@ -624,6 +624,45 @@ const MAQUETES = {
       b.position.set(de.x + (para.x - de.x) * f, de.y + (para.y - de.y) * f + Math.sin(f * Math.PI) * 0.35, de.z + (para.z - de.z) * f);
     };
   },
+  // a casa assombrada no gramado escuro, com janelas acesas, o fantasma rodando e o caçador de lanterna
+  fantasmas(g) {
+    chao(g, 3, 3, 0x1e2a16);
+    const casa = new THREE.Group();
+    caixa(casa, 1.6, 0.9, 1.1, mat(0x5a5048, { roughness: 0.9 }), 0, 0.06, 0);
+    const telhado = malha(new THREE.ConeGeometry(1.2, 0.6, 4), mat(0x2a1e1a, { roughness: 0.9 }));
+    telhado.rotation.y = Math.PI / 4;
+    telhado.scale.set(1, 1, 0.75);
+    telhado.position.y = 1.26;
+    casa.add(telhado);
+    const janelas = [];
+    for (const [x, y] of [[-0.45, 0.55], [0.45, 0.55]]) janelas.push(caixa(casa, 0.28, 0.24, 0.02, brilho(0xfacc15, 1.2), x, y - 0.12, 0.56));
+    caixa(casa, 0.26, 0.45, 0.02, mat(0x3a1f14), 0, 0.06, 0.56);
+    casa.position.z = -0.3;
+    g.add(casa);
+    const fantasma = new THREE.Group();
+    const ecto = new THREE.MeshStandardMaterial({ color: 0xe2e8f0, emissive: 0xa3e635, emissiveIntensity: 0.5, transparent: true, opacity: 0.8 });
+    bola(fantasma, 0.18, ecto, 0, 0.32);
+    const saia = malha(new THREE.ConeGeometry(0.18, 0.36, 16, 1, true), ecto);
+    saia.rotation.x = Math.PI;
+    saia.position.y = 0.16;
+    fantasma.add(saia);
+    bola(fantasma, 0.03, 0x050505, -0.06, 0.36, 0.15);
+    bola(fantasma, 0.03, 0x050505, 0.06, 0.36, 0.15);
+    g.add(fantasma);
+    const cacador = boneco(g, 0x334155, 0.9, 0.9, -2.4);
+    const cone = malha(new THREE.ConeGeometry(0.22, 0.9, 16, 1, true), new THREE.MeshBasicMaterial({ color: 0xfff1c8, transparent: true, opacity: 0.18, depthWrite: false }));
+    cone.rotation.x = -Math.PI / 2;
+    cone.position.set(0, 0.42, 0.5);
+    cacador.add(cone);
+    return (t) => {
+      const a = t * 0.9;
+      fantasma.position.set(Math.cos(a) * 1.1, 0.5 + Math.sin(t * 3) * 0.08, Math.sin(a) * 0.7 + 0.2);
+      fantasma.rotation.y = -a;
+      ecto.opacity = 0.45 + Math.abs(Math.sin(t * 2.3)) * 0.45;
+      janelas.forEach((j, i) => { j.visible = Math.sin(t * 4 + i * 2) > -0.6; });
+      cacador.rotation.y = Math.atan2(fantasma.position.x - cacador.position.x, fantasma.position.z - cacador.position.z);
+    };
+  },
   gincana(g) {
     const cores = [0xf472b6, 0xfacc15, 0x60a5fa, 0x4ade80, 0xa78bfa, 0xfb923c];
     const hexes = [];

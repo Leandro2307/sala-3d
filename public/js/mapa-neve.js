@@ -27,6 +27,7 @@ export const NEVE = {
     pinta: { x: 430, z: 720 },
     golfe: { x: 275, z: 690 },
     gincana: { x: -32, z: 477 }, // na pracinha da aventura, junto dos portais do céu
+    fantasmas: { x: -25.5, z: 470 }, // o caça-fantasmas, no meio da pracinha da aventura
   },
   cidade: {
     hub: { x: 100, z: 30, r: 28, nome: 'Praça do Pinheirão' },
@@ -71,7 +72,7 @@ export const NEVE = {
       lago: { nome: 'Lago congelado', sub: 'Pista de patinação no gelo', cor: '#93c5fd', ir: { pos: [114, 0, 300], yaw: Math.PI / 2 } },
       quadras: { nome: 'Quadras', sub: 'Vôlei, basquete e boliche', cor: '#facc15', ir: { pos: [14, 0, 392], yaw: Math.PI } },
       jogos: { nome: 'Praça dos jogos', sub: 'Xadrez, dama, jogo da velha e dados', cor: '#a78bfa', ir: { pos: [22, 0, 490], yaw: -Math.PI / 2 } },
-      aventura: { nome: 'Aventura', sub: 'Portais: surf, mata-mata e gincana', cor: '#f472b6', ir: { pos: [-4, 0, 470], yaw: Math.PI / 2 } },
+      aventura: { nome: 'Aventura', sub: 'Portais: surf, mata-mata, gincana e caça-fantasmas', cor: '#f472b6', ir: { pos: [-4, 0, 470], yaw: Math.PI / 2 } },
       kart: { nome: 'Kartódromo', sub: 'Corrida de kart com itens', cor: '#facc15', ir: { pos: [-37, 0, 596], yaw: Math.PI } },
       parque: { nome: 'Vale do parque', sub: 'Salão de jogos, queimada, pinta e golfe', cor: '#4ade80', ir: { pos: [350, 0, 690], yaw: Math.PI } },
     },
@@ -130,7 +131,7 @@ export const NEVE = {
       },
       {
         area: 'aventura', x: 2, z: 461, giro: Math.PI / 2,
-        linhas: ['Portais com E · gincana: 10 fases e a final', 'Surf: deslize de lado nas rampas', 'Mata-mata: pegue as armas do chão', 'Em times: derrube o time do outro lado'],
+        linhas: ['Portais com E · gincana e caça-fantasmas', 'Surf: deslize de lado nas rampas', 'Mata-mata: pegue as armas do chão', 'Em times: derrube o time do outro lado'],
       },
       {
         area: 'kart', x: -29, z: 590, giro: Math.PI,

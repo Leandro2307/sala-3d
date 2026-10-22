@@ -348,3 +348,28 @@ banco gratuito: quem fez o upload não detém esse direito.
 público (CC0). As medidas de cada uma (empunhadura, boca do cano, janela de ejeção) e os números
 de jogo (cadência, dano, alcance) ficam em `public/js/armas-dados.js`; coice, clarão, cápsulas e
 a visão em 1ª pessoa, em `public/js/armas.js`.
+
+## Monstros do Caça-Fantasmas
+
+`fantasmas/*.glb` são os 12 monstros do Caça-Fantasmas (`public/js/fantasmas*.js`), todos de
+[Quaternius](https://quaternius.com), baixados do [poly.pizza](https://poly.pizza) já com as
+animações. O jogo escurece e tira a cor de cada um, acende os olhos em vermelho e põe o brilho
+na borda (`materialAssombrado` em `fantasmas-3d.js`); as animações usadas (parado, andar, correr,
+ataque) estão em `MONSTROS` (`fantasmas-dados.js`).
+
+| Arquivo | Monstro no jogo | Modelo original | Licença |
+|---|---|---|---|
+| `espirito.glb` | Espírito | [Ghost](https://poly.pizza/m/Iip30bDHmu) | CC0 |
+| `espectro.glb` | Espectro | [Tribal](https://poly.pizza/m/t91lDHaqRW) | CC0 |
+| `poltergeist.glb` | Poltergeist | [Ghost Skull](https://poly.pizza/m/TX8r9WBXpe) | CC0 |
+| `banshee.glb` | Banshee | [Witch](https://poly.pizza/m/QBEOV9ZUT8) | CC BY 3.0 (Quaternius) |
+| `mare.glb` | Pesadelo | [Skeleton](https://poly.pizza/m/wODZYCgX5Z) | CC0 |
+| `revenant.glb` | Revenant | [Animated Zombie](https://poly.pizza/m/jkrEvQZb8J) | CC BY 3.0 (Quaternius) |
+| `demonio.glb` | Demônio | [Demon](https://poly.pizza/m/LnfIziKv4o) | CC0 |
+| `oni.glb` | Oni | [Blue Demon](https://poly.pizza/m/S7jYW6Amye) | CC0 |
+| `hantu.glb` | Hantu | [Yeti](https://poly.pizza/m/S1E7idPFhe) | CC0 |
+| `raiju.glb` | Raiju | [Wolf](https://poly.pizza/m/XU7oNeKShV) | CC0 |
+| `yokai.glb` | Yokai | [Goblin](https://poly.pizza/m/OdCOFSmEhl) | CC0 |
+| `deogen.glb` | Deogen | [Alien](https://poly.pizza/m/HYUUkdugoP) | CC0 |
+
+Os dois CC BY pedem o crédito, que também aparece na tela de escolha da casa.

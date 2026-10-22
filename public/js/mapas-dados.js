@@ -95,6 +95,7 @@ export function parqueDe(mapa) {
     PINTA_ARENA: { cx: 133 + p.dx, cz: 637 + p.dz, lado: 56 },
     GOLFE_AREA: { x0: -48 + g.dx, x1: -6 + g.dx, z0: 548 + g.dz, z1: 626 + g.dz },
     PORTAL_GINCANA: { ...M.atracoes.gincana },
+    PORTAL_FANTASMAS: { ...M.atracoes.fantasmas },
     KART: { ...M.atracoes.kart },
   };
 }

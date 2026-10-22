@@ -24,6 +24,9 @@ export const { GOLFE_AREA } = P;
 // Portal da gincana: fica na pracinha da aventura, com os do céu (as fases ficam longe, em gincana-dados.js)
 export const { PORTAL_GINCANA } = P;
 
+// Portal do caça-fantasmas: no meio da pracinha da aventura (as casas assombradas ficam longe, em fantasmas-dados.js)
+export const { PORTAL_FANTASMAS } = P;
+
 // Kartódromo: o retângulo em volta do traçado (o traçado é do kart-dados.js)
 export const KART_AREA = (() => {
   const k = P.KART;
