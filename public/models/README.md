@@ -349,14 +349,36 @@ público (CC0). As medidas de cada uma (empunhadura, boca do cano, janela de eje
 de jogo (cadência, dano, alcance) ficam em `public/js/armas-dados.js`; coice, clarão, cápsulas e
 a visão em 1ª pessoa, em `public/js/armas.js`.
 
-## Monstro do Caça-Fantasmas
+## Monstros do Caça-Fantasmas
 
-`fantasmas/dama.glb` é o monstro do Caça-Fantasmas (`public/js/fantasmas*.js`): a
-["Ghost Lady v2 (WIP)"](https://sketchfab.com/3d-models/ghost-lady-v2-wip-a453a33fb311400d9dda4b113d59b7bc),
-de **Loves_Art**, licença **CC BY 4.0** (o crédito aparece na tela de entrada do jogo). Os 12 tipos
-aparecem como ela, como no Phasmophobia: a cara não entrega o tipo, só as provas (`DAMA` em
-`fantasmas-dados.js`). O jogo troca o material dela pelo assombrado (`materialAssombrado` em
-`fantasmas-3d.js`): mais escuro, com uma borda fria que acende na caçada.
+`fantasmas/*.glb` são os 13 monstros do Caça-Fantasmas (`public/js/fantasmas*.js`). Os 12 primeiros
+são de [Quaternius](https://quaternius.com), baixados do [poly.pizza](https://poly.pizza) já com as
+animações; a Dama de Véu vem do Sketchfab (ver abaixo). O jogo escurece e tira a cor de cada um,
+acende os olhos em vermelho e põe o brilho na borda (`materialAssombrado` em `fantasmas-3d.js`); as
+animações usadas (parado, andar, correr, ataque) estão em `MONSTROS` (`fantasmas-dados.js`).
+
+| Arquivo | Monstro no jogo | Modelo original | Licença |
+|---|---|---|---|
+| `espirito.glb` | Espírito | [Ghost](https://poly.pizza/m/Iip30bDHmu) | CC0 |
+| `espectro.glb` | Espectro | [Tribal](https://poly.pizza/m/t91lDHaqRW) | CC0 |
+| `poltergeist.glb` | Poltergeist | [Ghost Skull](https://poly.pizza/m/TX8r9WBXpe) | CC0 |
+| `banshee.glb` | Banshee | [Witch](https://poly.pizza/m/QBEOV9ZUT8) | CC BY 3.0 (Quaternius) |
+| `mare.glb` | Pesadelo | [Skeleton](https://poly.pizza/m/wODZYCgX5Z) | CC0 |
+| `revenant.glb` | Revenant | [Animated Zombie](https://poly.pizza/m/jkrEvQZb8J) | CC BY 3.0 (Quaternius) |
+| `demonio.glb` | Demônio | [Demon](https://poly.pizza/m/LnfIziKv4o) | CC0 |
+| `oni.glb` | Oni | [Blue Demon](https://poly.pizza/m/S7jYW6Amye) | CC0 |
+| `hantu.glb` | Hantu | [Yeti](https://poly.pizza/m/S1E7idPFhe) | CC0 |
+| `raiju.glb` | Raiju | [Wolf](https://poly.pizza/m/XU7oNeKShV) | CC0 |
+| `yokai.glb` | Yokai | [Goblin](https://poly.pizza/m/OdCOFSmEhl) | CC0 |
+| `deogen.glb` | Deogen | [Alien](https://poly.pizza/m/HYUUkdugoP) | CC0 |
+| `dama.glb` | Dama de Véu | [Ghost Lady v2 (WIP)](https://sketchfab.com/3d-models/ghost-lady-v2-wip-a453a33fb311400d9dda4b113d59b7bc), de Loves_Art | CC BY 4.0 |
+
+Os três CC BY pedem o crédito, que também aparece na tela de entrada do jogo.
+
+### A Dama de Véu
+
+É a única com textura de verdade: no jogo ela tem `realista: true` em `MONSTROS`, e o material
+assombrado a escurece menos e acende a borda só na beirada (as dobras do vestido acendiam todas).
 
 O `.glb` do botão de download (160 MB, 102 mil triângulos, texturas de 4096 px e só o clipe de andar)
 vai para `models-brutos/ghost-lady.glb`, e `scripts/preparar-dama.js` grava o do jogo (~600 KB,
@@ -375,6 +397,3 @@ vai para `models-brutos/ghost-lady.glb`, e `scripts/preparar-dama.js` grava o do
 Para mexer: mude os números no script, rode a linha do cabeçalho dele e suba o `?v=` de
 `MODELO_URL` em `fantasmas-dados.js`. Com `DEPURAR=1 SAIDA=<arquivo>` ele grava uma cópia com o
 vestido pintado por região (braços, tronco, pernas), para conferir num visor.
-
-Até outubro de 2026 eram 12 monstros de desenho animado de Quaternius (poly.pizza), um por tipo;
-estão no histórico do git.

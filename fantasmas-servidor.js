@@ -1,5 +1,5 @@
 // Caça-Fantasmas (como o Phasmophobia): o servidor manda no fantasma. Uma investigação por sala:
-// quem entra primeiro pelo portal escolhe a casa, o servidor sorteia o monstro (um dos 12), o
+// quem entra primeiro pelo portal escolhe a casa, o servidor sorteia o monstro (um dos 13), o
 // cômodo favorito dele e o nome que ele tinha em vida. Os outros que entrarem caem na mesma
 // investigação, na van.
 //
@@ -34,9 +34,6 @@ function ligarFantasmas(io, rooms, jogoLigado, darMoedas) {
     if (!s) return null;
     return {
       casa: s.casa, fase: s.fase, nome: s.nome, idade: s.idade, desde: s.desde, mx: s.monstro.modelo,
-      // na caçada ele pisca; o Oni pisca menos (fica mais tempo à vista). Vai o limiar e não o tipo:
-      // todos têm a mesma cara, e o navegador não precisa saber qual é
-      pisca: s.monstro.id === 'oni' ? -0.6 : -0.25,
       portas: s.portas, luzes: s.luzes, disjuntor: s.disjuntor, trancada: s.trancada,
       temps: s.temps.map((t) => Math.round(t * 10) / 10),
       orbes: s.monstro.provas.includes('orbes') ? s.favorito : -1,

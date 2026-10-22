@@ -2,7 +2,7 @@
 // Quem entra primeiro escolhe uma das 5 casas; quem vem depois cai na mesma investigação. Todo
 // mundo nasce na rua, ao lado da van, de noite. Lá dentro: lanterna (F), os aparelhos (1 a 9, ou
 // a roda do mouse; clique usa), portas, luzes, disjuntor e esconderijos (E), e o diário (J), onde
-// se marcam as provas e se escolhe qual dos 12 monstros é. O botão vermelho da van termina a
+// se marcam as provas e se escolhe qual dos 13 monstros é. O botão vermelho da van termina a
 // investigação: quem acertou ganha moedas.
 //
 // O servidor (fantasmas-servidor.js) manda no fantasma. Aqui: a casa em 3D (fantasmas-3d.js,
@@ -550,7 +550,7 @@ export class Fantasmas {
     m.innerHTML = `<div class="fs-caixa fs-entrada" role="dialog" aria-labelledby="fs-titulo">
       <button class="fs-fechar" type="button">Fechar ✕</button>
       <h2 id="fs-titulo">👻 Caça-Fantasmas</h2>
-      <p class="fs-lead">Uma casa assombrada, de noite. Ache as provas, descubra <b>qual dos 12 monstros</b> mora lá e saia vivo.
+      <p class="fs-lead">Uma casa assombrada, de noite. Ache as provas, descubra <b>qual dos ${MONSTROS.length} monstros</b> mora lá e saia vivo.
         Dá para ir sozinho, mas em grupo é bem melhor.</p>
       <div class="fs-colunas">
         <div>
@@ -588,7 +588,7 @@ export class Fantasmas {
         <summary>Controles</summary>
         <ul class="fs-controles">${controles}</ul>
       </details>
-      <p class="fs-credito">Monstro 3D: “Ghost Lady v2”, de Loves_Art (Sketchfab), licença CC BY 4.0.</p>
+      <p class="fs-credito">Monstros 3D: Quaternius (poly.pizza), CC0; a Banshee (Witch) e o Revenant (Animated Zombie) são CC BY 3.0. A Dama de Véu é a “Ghost Lady v2”, de Loves_Art (Sketchfab), CC BY 4.0.</p>
     </div>`;
     this.abrirModal(m);
   }
@@ -1364,7 +1364,7 @@ export class Fantasmas {
         m.setModo('inteiro');
         // na caçada ele pisca
         const ritmo = (Math.sin(t * 9.1) + Math.sin(t * 5.3 + 1) + Math.sin(t * 13.7)) / 3;
-        visivel = ritmo > (this.e?.pisca ?? -0.25);
+        visivel = ritmo > (m.def.id === 'oni' ? -0.6 : -0.25);
         brilho = 1;
         interferencia = Math.max(0, 1 - distG / 14);
       }
@@ -1388,7 +1388,7 @@ export class Fantasmas {
         }
       }
       m.update(dt, visivel, opac, brilho);
-      // ver o fantasma tira sanidade (uma vez por aparição)
+      // ver o fantasma tira sanidade (uma vez por aparição; a Dama de Véu, o dobro)
       if (vis && vis !== this.visAntes) this.vistoNesta = false;
       this.visAntes = vis;
       if (visivel && (vis === 1 || vis === 2 || vis === 4) && !this.vistoNesta && distG < 14 && !this.morto) {
@@ -1397,7 +1397,7 @@ export class Fantasmas {
         cam.getWorldDirection(_f);
         if (dir.normalize().dot(_f) > 0.55) {
           this.vistoNesta = true;
-          this.perder(JOGO.sanidadeEvento);
+          this.perder(JOGO.sanidadeEvento * (m.def.id === 'dama' ? 2 : 1));
           this.som.ferroada(0.8);
         }
       }
@@ -1626,6 +1626,6 @@ export class Fantasmas {
   }
 
   lugar() {
-    return { nome: 'Caça-Fantasmas', desc: '12 monstros, 5 casas assombradas', cor: COR, pos: [PORTAL_FANTASMAS.x, 0, PORTAL_FANTASMAS.z + 4], yaw: 0 };
+    return { nome: 'Caça-Fantasmas', desc: `${MONSTROS.length} monstros, 5 casas assombradas`, cor: COR, pos: [PORTAL_FANTASMAS.x, 0, PORTAL_FANTASMAS.z + 4], yaw: 0 };
   }
 }

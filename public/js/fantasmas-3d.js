@@ -1730,40 +1730,40 @@ function acharClipe(clipes, nomes) {
 }
 
 // o material de assombração: a cor do modelo escurecida, com a borda brilhando na cor do monstro
-// Nos modelos de cor lisa (os de desenho animado), a parte cinza-clara sem cor (olho, dente, garra)
-// vira brasa vermelha, e o resto fica podre — sem cor e escuro. olhos: false nos que não têm olho
-// para acender (a dama, com o rosto sob o cabelo). Com textura (a dama), escurece menos (o vestido
-// já é preto e a pele pálida é o que aparece na lanterna) e a borda brilha menos e mais na beirada:
-// o vestido é cheio de dobras, e a borda de antes acendia todas, deixando a dama azul-clara.
-function materialAssombrado(original, cor, modo, olhos = true) {
+// Os modelos de Quaternius pintam cada parte com uma cor lisa: a parte cinza-clara sem cor (olho,
+// dente, garra) vira brasa vermelha, e o resto do boneco de desenho animado fica podre — sem cor e
+// escuro. olhos: false nos que são claros inteiros (o esqueleto, o lençol, o pelo do yeti).
+// realista (a dama, com textura de verdade): escurece menos (o vestido já é preto e a pele pálida é
+// o que aparece na lanterna), mostra o avesso do pano e a borda brilha menos e só na beirada: o
+// vestido é cheio de dobras, e a borda dos outros acendia todas, deixando a dama azul-clara.
+function materialAssombrado(original, cor, modo, olhos = true, realista = false) {
   const base = original.color ? original.color.clone() : new THREE.Color(0xffffff);
   const hsl = base.getHSL({}, THREE.SRGBColorSpace);
   // no vulto (a sombra preta) os olhos também ficam acesos
-  const textura = !!original.map;
-  const olho = olhos && !textura && hsl.s < 0.25 && hsl.l > 0.42;
-  if (modo === 'inteiro' && !olho) base.setHSL(hsl.h, hsl.s * 0.4, hsl.l * (textura ? 0.75 : 0.45), THREE.SRGBColorSpace);
+  const olho = olhos && !original.map && hsl.s < 0.25 && hsl.l > 0.42;
+  if (modo === 'inteiro' && !olho) base.setHSL(hsl.h, hsl.s * 0.4, hsl.l * (realista ? 0.75 : 0.45), THREE.SRGBColorSpace);
   const aro = new THREE.Color(cor).multiplyScalar(0.55);
   const m = new THREE.MeshStandardMaterial({
     map: modo === 'inteiro' ? original.map || null : null,
     color: modo === 'vulto' ? new THREE.Color(0x020203) : olho ? new THREE.Color(0x0a0000) : base,
-    roughness: textura ? 0.9 : 0.85,
-    side: original.side, // o pano da dama é uma folha só: o avesso também aparece
+    roughness: realista ? 0.9 : 0.85,
+    side: realista ? original.side : THREE.FrontSide,
     metalness: 0,
     transparent: true,
     opacity: 1,
     emissive: olho ? new THREE.Color(0xff1a05) : aro,
-    emissiveIntensity: olho ? 2.4 : modo === 'vulto' ? 0.02 : textura ? 0.005 : 0.04,
+    emissiveIntensity: olho ? 2.4 : modo === 'vulto' ? 0.02 : realista ? 0.005 : 0.04,
     // a sombra nunca é toda opaca: dá para ver a parede através dela
     depthWrite: modo !== 'vulto',
   });
   m.userData.olho = olho;
   // bordaBase e emissivo: quanto a borda e o corpo brilham parados (Monstro3D.update soma o brilho
-  // da caçada). Na textura escura da dama, o brilho do corpo de antes já a pintava de azul-claro.
-  m.userData.bordaBase = modo === 'vulto' ? (textura ? 1.1 : 1.6) : textura ? 0.12 : 0.45;
+  // da caçada)
+  m.userData.bordaBase = modo === 'vulto' ? (realista ? 1.1 : 1.6) : realista ? 0.12 : 0.45;
   m.userData.borda = { value: m.userData.bordaBase };
-  m.userData.bordaPot = { value: textura ? 5 : 2.2 };
-  m.userData.emissivo = modo === 'vulto' ? 0.02 : textura ? 0.005 : 0.04;
-  m.userData.emissivoCaca = textura ? 0.03 : 0.1;
+  m.userData.bordaPot = { value: realista ? 5 : 2.2 };
+  m.userData.emissivo = modo === 'vulto' ? 0.02 : realista ? 0.005 : 0.04;
+  m.userData.emissivoCaca = realista ? 0.03 : 0.1;
   m.userData.cor = { value: modo === 'vulto' ? new THREE.Color(cor) : aro };
   m.onBeforeCompile = (sh) => {
     sh.uniforms.uBorda = m.userData.borda;
@@ -1836,8 +1836,8 @@ export class Monstro3D {
       o.castShadow = true;
       const orig = Array.isArray(o.material) ? o.material : [o.material];
       const mats = {
-        vulto: orig.map((mm) => materialAssombrado(mm, def.borda || def.cor, 'vulto', def.olhos !== false)),
-        inteiro: orig.map((mm) => materialAssombrado(mm, def.borda || def.cor, 'inteiro', def.olhos !== false)),
+        vulto: orig.map((mm) => materialAssombrado(mm, def.borda || def.cor, 'vulto', def.olhos !== false, !!def.realista)),
+        inteiro: orig.map((mm) => materialAssombrado(mm, def.borda || def.cor, 'inteiro', def.olhos !== false, !!def.realista)),
         dots: orig.map(() => dots),
       };
       const um = (lista) => (Array.isArray(o.material) ? lista : lista[0]);

@@ -37,7 +37,7 @@ export const CATALOGO = [
   { id: 'uno', nome: 'Uno', desc: 'Até 6 na mesa, com robôs', genero: 'mesa', cor: '#ef4444', painel: 'parque' },
   { id: 'parkour', nome: 'Parkour', desc: 'Circuito até o camarote VIP', genero: 'aventura', cor: '#8b5cf6', painel: 'parkour' },
   { id: 'gincana', nome: 'Gincana', desc: '10 fases estilo Fall Guys e a final', genero: 'aventura', cor: '#f472b6', painel: 'parque' },
-  { id: 'fantasmas', nome: 'Caça-Fantasmas', desc: '12 monstros em 5 casas assombradas', genero: 'terror', cor: '#a3e635' },
+  { id: 'fantasmas', nome: 'Caça-Fantasmas', desc: '13 monstros em 5 casas assombradas', genero: 'terror', cor: '#a3e635' },
   { id: 'surf', nome: 'Surf', desc: 'Rampas no céu, como no CS', genero: 'aventura', cor: '#38bdf8' },
   { id: 'pinta', nome: 'Pinta-território', desc: 'Times pintam o chão com tinta', genero: 'aventura', cor: '#ec4899', painel: 'parque' },
 ];

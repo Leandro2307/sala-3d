@@ -1,7 +1,7 @@
-// O monstro do Caça-Fantasmas: a "Ghost Lady v2 (WIP)" de Loves_Art (Sketchfab, CC BY 4.0,
-// https://sketchfab.com/3d-models/ghost-lady-v2-wip-a453a33fb311400d9dda4b113d59b7bc), a dama de véu
-// e vestido preto com o cabelo cobrindo o rosto. Lê models-brutos/ghost-lady.glb (o .glb do botão de
-// download, 160 MB) e grava public/models/fantasmas/dama.glb.
+// A Dama de Véu, o 13º monstro do Caça-Fantasmas: a "Ghost Lady v2 (WIP)" de Loves_Art (Sketchfab,
+// CC BY 4.0, https://sketchfab.com/3d-models/ghost-lady-v2-wip-a453a33fb311400d9dda4b113d59b7bc), de
+// véu e vestido preto, com o cabelo cobrindo o rosto. Lê models-brutos/ghost-lady.glb (o .glb do botão
+// de download, 160 MB) e grava public/models/fantasmas/dama.glb.
 //
 //   npm i --prefix ../gt @gltf-transform/core @gltf-transform/extensions @gltf-transform/functions meshoptimizer sharp
 //   NODE_PATH=../gt/node_modules node scripts/preparar-dama.js
