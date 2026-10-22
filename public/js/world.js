@@ -27,6 +27,7 @@ import { construirCartas } from './cartas.js';
 import { construirGincana } from './gincana.js';
 import { construirKart } from './kart.js';
 import { construirPinta } from './pinta.js';
+import { PosProcesso } from './posprocesso.js';
 
 // Área jogável inteira (cercada): a sala do cinema num canto, em volta da origem, o
 // autódromo ao ar livre a leste e, no norte, o parque (parque-dados.js), que levou a cerca de
@@ -50,6 +51,8 @@ const _m4 = new THREE.Matrix4();
 const _frustum = new THREE.Frustum();
 const _esfera = new THREE.Sphere();
 const _dirSol = new THREE.Vector3();
+const _solTela = new THREE.Vector3(); // o sol na tela, para o clarão (ver solNaTela)
+const _frente = new THREE.Vector3();
 const _escala = new THREE.Vector3();
 const _eixoY = new THREE.Vector3(0, 1, 0);
 const _mSombra = new THREE.Matrix4();
@@ -675,6 +678,10 @@ export class World {
     canvas.addEventListener('webglcontextrestored', () => {
       this.perdido = false;
       this.natureza?.refazerAmbiente?.();
+      if (this.natureza) {
+        this.ambiente = this.natureza.gerarAmbiente();
+        if (this.scene.environment) this.scene.environment = this.ambiente;
+      }
       this.luzesMudaram();
       this.sombraSuja = true;
       this.aquecerShaders();
@@ -702,6 +709,13 @@ export class World {
     this.renderer.toneMappingExposure = 1.05;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    // acabamento de cinema do lado de fora (ver posprocesso.js e setQualidade)
+    this.pos = new PosProcesso(this.renderer);
+    this.ultimoPos = performance.now();
+    this.ambiente = null; // o céu como luz de ambiente (natureza.gerarAmbiente)
+    this.ambienteNivel = false;
+    this.luzFora = 1; // 0 dentro do cinema ou do prédio, 1 fora (ver acertarLuzFora)
+    this.cameraDentro = false;
 
     this.css = new CSS3DRenderer({ element: cssContainer });
     this.css.setSize(window.innerWidth, window.innerHeight);
@@ -822,6 +836,7 @@ export class World {
     });
     const P = SALA.porta;
     this.portaBox = new THREE.Box3(new THREE.Vector3(SALA.maxX - 1, 0, P.z0), new THREE.Vector3(SALA.maxX + 1, P.altura, P.z1));
+    this.ambiente = this.natureza.gerarAmbiente();
     // qualidade antes do aquecimento: quantas luzes e se tem sombra fazem parte do shader
     if (qualidade) this.setQualidade(qualidade, { aquecer: false });
     this.aquecerShaders();
@@ -2760,8 +2775,10 @@ export class World {
   // sombra: tamanho do mapa (0 = sem sombra: aí a sombra redonda sob as pessoas); pixelMax: teto da
   // densidade de pixels; densidade: fração da vegetação de longe; sombraArvores: árvores, torcida e
   // pneus fazem sombra; videoFps: teto de quadros das telas no 3D; holofote: o cone do ringue;
-  // luzSimples: luz direta em Lambert (ver o começo do arquivo). Nível sem os campos novos: como era.
-  setQualidade({ luzes, luzesEscritorio = luzes, sombra, pixelMax, densidade, sombraArvores, videoFps, holofote = true, luzSimples = false }, { aquecer = true } = {}) {
+  // luzSimples: luz direta em Lambert (ver o começo do arquivo); ambiente: o céu como luz de
+  // ambiente e reflexo nos materiais; pos: o acabamento de cinema (posprocesso.js). Nível sem os
+  // campos novos: como era.
+  setQualidade({ luzes, luzesEscritorio = luzes, sombra, pixelMax, densidade, sombraArvores, videoFps, holofote = true, luzSimples = false, ambiente = false, pos = 0 }, { aquecer = true } = {}) {
     this.luzesPorModo = { lazer: luzes, escritorio: Math.min(luzes, luzesEscritorio) };
     const maxLuzes = this.luzesDoModo();
     // número de luzes, sombra ligada, holofote e luz simples fazem parte do shader: mudou, pré-compila
@@ -2780,6 +2797,15 @@ export class World {
       luzSimplesLigada = luzSimples;
       if (LUZ_SIMPLES_OK) trocaShader = recompila = true;
     }
+    // o mapa de ambiente também entra no shader de todo material padrão
+    const comAmbiente = ambiente && !!this.ambiente;
+    if (comAmbiente !== this.ambienteNivel) {
+      this.ambienteNivel = comAmbiente;
+      this.scene.environment = comAmbiente ? this.ambiente : null;
+      this.acertarLuzFora(true);
+      trocaShader = recompila = true;
+    }
+    this.pos.setNivel(pos);
     // ligar/desligar sombra (ou a luz simples) muda o shader de todos os materiais
     if (trocaShader) {
       this.scene.traverse((o) => {
@@ -2804,6 +2830,32 @@ export class World {
     this.natureza?.ajustar({ densidade, sombras: sombraArvores });
     this.videoFps = videoFps;
     if (recompila && aquecer) this.aquecerShaders({ malhas: false });
+  }
+
+  // Fora, a luz do céu vem do mapa de ambiente e a do hemisfério fica menor (as duas juntas
+  // estouravam). Dentro do cinema e do prédio o céu quase não entra: lá fica a luz de sempre. A
+  // troca é suave, na velocidade de quem passa pela porta. ja: sem transição (troca de nível).
+  acertarLuzFora(ja = false, dt = 0) {
+    const alvo = this.ambienteNivel && !this.cameraDentro ? 1 : 0;
+    this.luzFora = ja ? alvo : this.luzFora + Math.sign(alvo - this.luzFora) * Math.min(Math.abs(alvo - this.luzFora), dt * 2);
+    const k = this.luzFora;
+    this.scene.environmentIntensity = 0.1 + 0.4 * k;
+    // o clima acerta a força do hemisfério (TEMA.hemi.forca) e grava hemiBase
+    if (this.hemi && this.hemiBase != null) this.hemi.intensity = this.hemiBase * (1 - 0.4 * k);
+  }
+
+  // Onde o sol aparece na tela, para o clarão na lente (posprocesso.js): x e y de 0 a 1 e, em z,
+  // quanto ele está de frente (some perto das bordas e de costas). null se não aparece.
+  solNaTela() {
+    _dirSol.copy(this.sunOffset).normalize();
+    this.camera.getWorldDirection(_frente);
+    const frente = _frente.dot(_dirSol);
+    if (frente <= 0.2) return null;
+    _solTela.copy(this.camera.position).addScaledVector(_dirSol, 500).project(this.camera);
+    const borda = Math.max(Math.abs(_solTela.x), Math.abs(_solTela.y));
+    if (borda >= 1.1) return null;
+    const z = THREE.MathUtils.smoothstep(frente, 0.2, 0.5) * (1 - THREE.MathUtils.smoothstep(borda, 0.85, 1.1));
+    return _solTela.set(_solTela.x * 0.5 + 0.5, _solTela.y * 0.5 + 0.5, z);
   }
 
   // Distância de visão (os Ajustes; 0 = máxima): o "far" da câmera encurta e a GPU não desenha nada
@@ -3088,6 +3140,7 @@ export class World {
       const portal = ver && E ? this.portalDaCamera(p) : null;
       if (portal) ver = _frustum.intersectsBox(portal);
     }
+    this.cameraDentro = dentro;
     if (ver === this.fora.visible) return;
     this.fora.visible = ver;
     this.sombraSuja = true; // árvores e torcida entram (ou saem) do mapa de sombra
@@ -3197,16 +3250,22 @@ export class World {
       label.visible = label.material.opacity > 0.01;
     }
     this.atualizarSombra();
+    const agora = performance.now();
+    const dt = Math.min(0.1, (agora - this.ultimoPos) / 1000);
+    this.ultimoPos = agora;
+    this.acertarLuzFora(false, dt);
     const medindo = this.medirGpu && this.comecarGpu();
     try {
       this.renderer.render(this.scene, this.camera);
+      // logo depois do desenho principal: os quadros 4x4 do aquecimento usam o mesmo contador (e
+      // os desenhos do acabamento zerariam a conta)
+      const info = this.renderer.info.render;
+      this.ultimoQuadro.draws = info.calls;
+      this.ultimoQuadro.triangulos = info.triangles;
+      this.pos.desenhar(this.fora.visible && !this.cameraDentro, dt, this.solNaTela());
     } finally {
       if (medindo) this.terminarGpu();
     }
-    // logo depois do desenho principal: os quadros 4x4 do aquecimento usam o mesmo contador
-    const info = this.renderer.info.render;
-    this.ultimoQuadro.draws = info.calls;
-    this.ultimoQuadro.triangulos = info.triangles;
     // CSS3D (player do telão, navegadores) só com algo à mostra; o quadro a mais esconde o último
     // que sumiu
     let cssAtivo = false;

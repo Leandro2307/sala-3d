@@ -26,16 +26,19 @@ export const NIVEIS = {
   alta: {
     nome: 'Alta', luzes: 8, luzesEscritorio: 7, sombra: 2048, pixelMax: isTouch ? 2 : 1.75, densidade: 1,
     sombraArvores: true, videoFps: 60, antialias: true, holofote: true, luzSimples: false,
+    ambiente: true, pos: 2,
     bonecos: { sombras: 16, raioSombra: 40, nomes: 70, bracos: true },
   },
   media: {
     nome: 'Média', luzes: 5, luzesEscritorio: 4, sombra: isTouch ? 0 : 1024, pixelMax: isTouch ? 1.5 : 1.25, densidade: 0.7,
     sombraArvores: false, videoFps: 30, antialias: !isTouch, holofote: false, luzSimples: false,
+    ambiente: !isTouch, pos: isTouch ? 0 : 1,
     bonecos: { sombras: isTouch ? 0 : 6, raioSombra: 28, nomes: 50, bracos: false },
   },
   baixa: {
     nome: 'Leve', luzes: 3, luzesEscritorio: 3, sombra: 0, pixelMax: isTouch ? 1.15 : 1, densidade: 0.4,
     sombraArvores: false, videoFps: 24, antialias: false, holofote: false, luzSimples: true,
+    ambiente: false, pos: 0,
     bonecos: { sombras: 0, raioSombra: 0, nomes: 40, bracos: false },
   },
 };

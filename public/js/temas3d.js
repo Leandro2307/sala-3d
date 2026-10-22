@@ -9,6 +9,9 @@ import { MAPA_INFO } from './cidade-dados.js';
 import * as moduloQualidade from './qualidade.js';
 
 export const TEMA = MAPA_INFO.tema;
+// De onde vem o sol (o céu, o clima e a sombra usam): meio da tarde, a uns 38° de altura e vindo
+// do sudoeste. Mais baixo que o meio-dia: sombra mais comprida, luz de lado e mais contraste.
+export const SOL_DA_TARDE = [0.55, 0.62, -0.56];
 const ESC = moduloQualidade.ESCALA_TEXTURA ?? 1;
 
 // ------------------------------------------------------------------ utilidades

@@ -8,7 +8,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { isTouch } from './touch.js';
 import { CAMINHO, PISTA } from './pista.js';
-import { TEMA, arvoresDoTema, pintar as pintarTema } from './temas3d.js';
+import { TEMA, SOL_DA_TARDE, arvoresDoTema, pintar as pintarTema } from './temas3d.js';
 
 const LEVE = isTouch; // celular: menos árvores, terreno mais grosso
 // Lado do pedaço do mapa em que as plantas são agrupadas (ver instanciar). No celular, pedaços
@@ -194,7 +194,7 @@ function criarCeu(scene, solDir) {
       horizonte: { value: new THREE.Color(TEMA.ceu[2]) },
       base: { value: new THREE.Color(TEMA.ceu[3]) },
       brilho: { value: new THREE.Color(TEMA.ceu[4]) },
-      solDir: { value: new THREE.Vector3(0, 0.92, -0.38).normalize() },
+      solDir: { value: new THREE.Vector3(...SOL_DA_TARDE).normalize() },
       disco: { value: new THREE.Color(1.6, 1.58, 1.46) },
     },
     vertexShader: /* glsl */ `
@@ -219,8 +219,11 @@ function criarCeu(scene, solDir) {
         vec3 c = mix(horizonte, meio, smoothstep(0.0, 0.2, h));
         c = mix(c, topo, smoothstep(0.16, 0.8, h));
         float s = max(dot(d, solDir), 0.0);
-        // halo do pôr do sol perto do horizonte e o disco do sol
+        // a névoa clara que sobe do horizonte (o céu de verdade é mais branco embaixo)
+        c = mix(c, horizonte, (1.0 - smoothstep(-0.02, 0.32, h)) * 0.35);
+        // halo do pôr do sol perto do horizonte, o clarão em volta do sol e o disco
         c += brilho * pow(s, 7.0) * (1.0 - smoothstep(0.0, 0.5, h)) * 0.6;
+        c += brilho * (pow(s, 24.0) * 0.28 + pow(s, 280.0) * 0.6);
         c += disco * smoothstep(0.99935, 0.9997, s);
         c = mix(c, base, smoothstep(0.0, -0.1, h));
         gl_FragColor = vec4(c, 1.0);
@@ -492,7 +495,7 @@ function criarMar(scene, renderer, ceuMat, area, decorar) {
   const mar = new THREE.Mesh(
     new THREE.PlaneGeometry(9000, 9000).rotateX(-Math.PI / 2),
     soSol(new THREE.MeshStandardMaterial({
-      color: '#0e8fb3', roughness: 0.12, metalness: 0.15, envMap: env, envMapIntensity: 0.7,
+      color: '#0a6f93', roughness: 0.06, metalness: 0.05, envMap: env, envMapIntensity: 1.15,
       normalMap, normalScale: new THREE.Vector2(0.5, 0.5),
     })),
   );
@@ -582,8 +585,8 @@ function criarLago(scene, renderer, ceuMat, x, z, raio, decorar, tipo = 'lago') 
   const agua = new THREE.Mesh(
     geoAgua,
     new THREE.MeshStandardMaterial({
-      color: T.cor, roughness: gelo ? 0.08 : 0.1, metalness: gelo ? 0.12 : 0.1, envMap: gerarAmbiente(), envMapIntensity: gelo ? 0.9 : 0.6,
-      map: mapaGelo, normalMap: gelo ? null : normalMap, normalScale: new THREE.Vector2(0.35, 0.35),
+      color: T.cor, roughness: gelo ? 0.08 : 0.05, metalness: gelo ? 0.12 : 0.04, envMap: gerarAmbiente(), envMapIntensity: gelo ? 0.9 : 0.85,
+      map: mapaGelo, normalMap: gelo ? null : normalMap, normalScale: new THREE.Vector2(0.45, 0.45),
       transparent: tipo === 'lagoa', opacity: tipo === 'lagoa' ? 0.88 : 1,
     }),
   );
@@ -985,9 +988,25 @@ export function criarNatureza(scene, renderer, {
   criarPassaros(grupo, bandos, decorar);
   const seguirFolhas = TEMA.particulas === 'folhas' ? criarFolhas(grupo, decorar) : null;
 
+  // A luz do céu em todo material (scene.environment, ver World.setQualidade): o céu renderizado
+  // num mapa de ambiente, como o da água. Dá o reflexo do céu e a luz vinda de cima mais clara que a
+  // de baixo, que a luz do hemisfério sozinha deixa chapada.
+  // Embaixo do horizonte, a cor do chão do tema: a luz que sobe do gramado e da areia é quente, não
+  // o azul do céu.
+  const cenaAmbiente = new THREE.Scene();
+  const matAmbiente = ceu.mat.clone();
+  matAmbiente.uniforms.base.value.set(TEMA.hemi.chao).multiplyScalar(0.55);
+  cenaAmbiente.add(new THREE.Mesh(new THREE.SphereGeometry(50, 32, 16), matAmbiente));
+
   let anterior = null;
   return {
     lago,
+    gerarAmbiente: () => {
+      const pmrem = new THREE.PMREMGenerator(renderer);
+      const textura = pmrem.fromScene(cenaAmbiente, 0.03, 0.1, 200).texture;
+      pmrem.dispose();
+      return textura;
+    },
     lagos,
     // o lago congelado do mapa (patinar), se tiver
     gelo: lagos.find((l) => l.tipo === 'gelo') || null,
