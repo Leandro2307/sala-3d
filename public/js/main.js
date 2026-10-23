@@ -33,7 +33,7 @@ import { Pingue } from './pingue.js';
 import { Queimada } from './queimada.js';
 import { Sinuca } from './sinuca.js';
 import { Golfe } from './golfe.js';
-import { Cartas } from './cartas.js';
+import { Cartas, primarVoz } from './cartas.js';
 import { Gincana } from './gincana.js';
 import { Fantasmas } from './fantasmas.js';
 import { Kart } from './kart.js';
@@ -3972,6 +3972,7 @@ function tocarVoz(u) {
 
 // um toque, clique ou tecla de verdade: o navegador deixa tocar
 function liberarVozes() {
+  primarVoz(); // destrava o mp3 dos gritos no iOS/Android (valia o gesto antes do joined)
   if (!state.joined) return;
   audioContext(); // o analisador do microfone e os efeitos também param quando o contexto suspende
   for (const u of state.users.values()) if (!u.isSelf) tocarVoz(u);

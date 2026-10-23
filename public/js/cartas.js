@@ -38,6 +38,19 @@ const fontePx = (p, peso = 700) => `${peso} ${p}px ${PIXEL}`;
 const NUMERO = "'Plus Jakarta Sans', 'Segoe UI', system-ui, sans-serif";
 const fonteNum = (p, peso = 800) => `${peso} ${p}px ${NUMERO}`;
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+// O mp3 dos gritos sai SEMPRE por este único elemento. O iOS/Android só liberam o play() de um
+// elemento que já tocou dentro de um gesto do usuário; criar Audio novo a cada grito (que chega por
+// socket, sem gesto) volta a ser barrado. O primarVoz é chamado no primeiro toque/clique (main.js).
+const audioVoz = new Audio();
+audioVoz.preload = 'auto';
+// chiado de 0,05s: um play() com src real é o que o celular aceita como "destrave" do elemento
+const SILENCIO = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=';
+export function primarVoz() {
+  if (!audioVoz.paused) return;
+  audioVoz.src = SILENCIO;
+  audioVoz.play().then(() => audioVoz.pause()).catch(() => {});
+}
 const PEDIDOS = ['truco', 'seis', 'nove', 'doze'];
 const OUVE_ATE = 22; // metros: de mais longe que isso, o grito da mesa não chega
 // as cores do Balatro: naipes do baralho de 4 cores e os botões
@@ -510,14 +523,17 @@ export class Cartas {
 
   // o mp3 da voz neural do servidor (mesma voz para todo mundo, humano ou robô). O grito novo corta
   // o anterior, como no falarGrito. volume pela distância, como os gritos.
+  // Usa UM elemento de áudio só (audioVoz, no topo do módulo): no celular cada elemento novo
+  // volta a ser barrado pelo autoplay; o desbloqueio vem do primarVoz, chamado no primeiro gesto.
   tocarVoz(url, volume) {
     if (!sfxLigado()) return;
     try {
-      this.vozAtual?.pause();
-      const a = new Audio(url);
-      a.volume = Math.min(1, Math.max(0, volume));
-      this.vozAtual = a;
-      a.play().catch(() => {});
+      audioVoz.pause();
+      audioVoz.volume = Math.min(1, Math.max(0, volume));
+      audioVoz.src = url;
+      audioVoz.currentTime = 0;
+      this.vozAtual = audioVoz;
+      audioVoz.play().catch(() => {});
     } catch { /* sem áudio: fica a faixa e o murro */ }
   }
 
