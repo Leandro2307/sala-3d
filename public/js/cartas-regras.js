@@ -15,10 +15,10 @@ export const naipeVermelho = (n) => n === 'o' || n === 'c';
 // copas (7 de copas) e o zap (4 de paus)
 export const MANILHAS = ['7o', 'Ae', '7c', '4p'];
 export const NOME_MANILHA = { '7o': 'Pica-fumo', Ae: 'Espadilha', '7c': 'Copas', '4p': 'Zap' };
-// a mão vale 2; truco, seis, nove e doze (com os pontos sempre pares, a mão de onze é a de dez)
-export const PASSOS_TRUCO = [2, 4, 8, 10, 12];
-export const NOME_PEDIDO = { 4: 'TRUCO', 8: 'SEIS', 10: 'NOVE', 12: 'DOZE' };
-export const VALE_DEZ = 4; // a mão de dez vale 4; quem corre dela dá 2
+// a mão vale 1; truco vale 3, depois seis, nove e doze (a mão de onze é a de dez do mineiro)
+export const PASSOS_TRUCO = [1, 3, 6, 9, 12];
+export const NOME_PEDIDO = { 3: 'TRUCO', 6: 'SEIS', 9: 'NOVE', 12: 'DOZE' };
+export const VALE_DEZ = 3; // a mão de onze vale 3; quem corre dela dá 1
 
 export const valorDe = (c) => c.slice(0, -1);
 export const naipeDe = (c) => c.slice(-1);
@@ -46,8 +46,8 @@ export const GRITOS = {
   doze: ['Doze!', 'Doze, pra acabar!', 'Queda! Doze!', 'Doze, cambada!', 'Doze, uai!'],
   aceito: ['Desce!', 'Cai dentro!', 'Aceito!', 'Manda que eu pago!', 'Vem, uai!', 'Bora!'],
   corro: ['Corro!', 'Tô fora!', 'Corri, sô.', 'Leva, leva.', 'Vai, pode levar.'],
-  dez: ['Vamo jogar, uai!', 'Bora pra mão de dez!', 'Mão de dez, desce!'],
-  dezCorro: ['Essa eu corro.', 'Mão de dez não, sô.'],
+  dez: ['Vamo jogar, uai!', 'Bora pra mão de onze!', 'Mão de onze, desce!'],
+  dezCorro: ['Essa eu corro.', 'Mão de onze não, sô.'],
   // o robô que levou um tapa ou um tiro na mesa (de brincadeira)
   apanhou: ['Ai! Isso não vale!', 'Tá nervoso, é?', 'Bate, mas o truco é meu!', 'Vou contar pro juiz!', 'Ô trem doído, sô!'],
   baleado: ['Fui atingido!', 'Ai, meu zap!', 'Isso é jogo de truco, sô!', 'Volto pra assombrar!', 'Errou! Quer dizer... acertou.'],
@@ -68,7 +68,7 @@ export const ZOEIRA = [
   'Eu avisei, uai!', 'Segura essa, marreco!', 'Nem o padre te salva!', 'Passei o rodo, sô!',
   'Joga e chora depois!', 'Uai, perdeu já?', 'Isso não é jogo de dama não!', 'Devolve meu troco!',
 ];
-export const GRITO_DO_PEDIDO = { 4: 'truco', 8: 'seis', 10: 'nove', 12: 'doze' };
+export const GRITO_DO_PEDIDO = { 3: 'truco', 6: 'seis', 9: 'nove', 12: 'doze' };
 
 // Os sinais do truco: o cochicho que só o parceiro ouve ('ct-sinal' vai só para o lugar (k+2)%4).
 // As primeiras frases mostram a carta que você tem (a mini carta vai no balão); o robô parceiro

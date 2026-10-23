@@ -8,9 +8,10 @@
 //   - a mão embaixo: as cartas balançam e inclinam com o mouse; um clique joga a carta; COBERTA
 //     liga e a próxima carta vai virada; TRUCO! grita; o megafone zoa (com frase aleatória também);
 //     no truco, o 🤫 Sinal cochicha uma frase que só o parceiro vê;
-//   - a pergunta do truco (ou da mão de dez) no meio, com o tempo correndo.
+//   - a pergunta do truco (ou da mão de onze) no meio, com o tempo correndo.
 // Os robôs aparecem sentados nas cadeiras deles. Cada truco, seis, nove e doze (e cada resposta) é
-// um grito: murro na mesa, as cartas pulam, a voz do navegador em português e a faixa grande. "Começar"
+// um grito: murro na mesa, as cartas pulam, a voz neural (mp3 sintetizado no servidor, a mesma
+// para todo mundo) e a faixa grande. "Começar"
 // completa a mesa com robôs; Esc (ou "Sair") levanta e um robô assume as suas cartas. O servidor
 // (cartas-servidor.js) conduz tudo; as regras são as de cartas-regras.js.
 import * as THREE from 'three';
@@ -443,7 +444,7 @@ export class Cartas {
       const antes = M.mao;
       M.mao = mao;
       M.lugar = lugar;
-      M.parceiro = parceiro || null; // mão de dez: as cartas do parceiro, para decidir
+      M.parceiro = parceiro || null; // mão de onze: as cartas do parceiro, para decidir
       M.trunfos = trunfos || []; // 21: os meus trunfos
       M.rivalOculta = rivalOculta || null; // 21, com o raio-x: a carta fechada do rival
       // mão nova (três cartas chegando, ou as sete do uno): as cartas entram distribuídas
@@ -471,7 +472,8 @@ export class Cartas {
   // Alguém gritou na mesa (truco, seis..., desce, corro, a zoeira, o robô reclamando): a voz para quem
   // está perto, o balão em cima de quem gritou e, nos pedidos, o murro na mesa (as cartas pulam);
   // para quem está sentado nela, a faixa grande e a tela tremendo quando o grito é contra a gente.
-  grito({ mesa, lugar, tipo, nome, frase, alvo, trunfo }) {
+  // A voz é o mp3 neural do servidor ('voz'); sem ele, a voz do sistema do navegador (falarGrito).
+  grito({ mesa, lugar, tipo, nome, frase, alvo, trunfo, voz }) {
     const M = this.mesas[mesa];
     if (!M || !this.ligado(M.m.jogo) || typeof frase !== 'string') return;
     const sentado = this.ativa === M;
@@ -487,7 +489,8 @@ export class Cartas {
       boneco?.punch();
     }
     boneco?.say(frase);
-    falarGrito(frase, lugar, vol);
+    if (voz) this.tocarVoz(voz, vol);
+    else falarGrito(frase, lugar, vol);
     if (!sentado) return;
     if (lugar !== M.lugar) this.balao(lugar, frase, pedido);
     if (tipo === 'trunfo' && TRUNFOS_21[trunfo]) return this.mostrarTrunfo(trunfo, lugar === M.lugar ? 'Você' : nome, lugar === M.lugar);
@@ -503,6 +506,19 @@ export class Cartas {
       this.tremerHud();
       if (!nosso) this.player.addShake?.(0.7);
     }
+  }
+
+  // o mp3 da voz neural do servidor (mesma voz para todo mundo, humano ou robô). O grito novo corta
+  // o anterior, como no falarGrito. volume pela distância, como os gritos.
+  tocarVoz(url, volume) {
+    if (!sfxLigado()) return;
+    try {
+      this.vozAtual?.pause();
+      const a = new Audio(url);
+      a.volume = Math.min(1, Math.max(0, volume));
+      this.vozAtual = a;
+      a.play().catch(() => {});
+    } catch { /* sem áudio: fica a faixa e o murro */ }
   }
 
   // Tapa ou tiro de brincadeira na mesa: o braço de quem fez, o tranco (ou o tombo) de quem levou,
@@ -1158,7 +1174,7 @@ body.ct-sentado #controls-help, body.ct-sentado #sit-hint { display: none !impor
 .ct-mao.coberta .ct-carta.pode:hover .ct-face { background-image: var(--verso) !important; }
 .ct-carta:not(.pode) .ct-face { filter: brightness(.74) saturate(.75); }
 .ct-carta:disabled { cursor: default; }
-/* a pergunta do truco e da mão de dez */
+/* a pergunta do truco e da mão de onze */
 .ct-pergunta { position: absolute; left: 50%; top: 13%; translate: -50% 0; padding: 10px 16px 14px; min-width: 300px; text-align: center; pointer-events: auto;
   animation: ct-entra .42s cubic-bezier(.2,1.5,.4,1) both; }
 .ct-pergunta h2 { margin: 0; font-size: 56px; line-height: 1.1; font-weight: 700; color: #fe5f55; text-shadow: ${contorno('#1e2b2d', 3)}, 0 7px 0 #1e2b2d; }
@@ -1554,9 +1570,9 @@ ${espera ? comecar : ''}<button type="button" class="ct-b cinza" data-acao="sair
       if (!nos.dataset.contando) nos.textContent = p[meuTime];
       if (!eles.dataset.contando) eles.textContent = p[1 - meuTime];
       const vale = lado.querySelector('.ct-vale');
-      vale.textContent = e.vale ?? 2;
-      const fogo = { 4: 1, 8: 2, 10: 3, 12: 3 }[e.vale];
-      if (fogo) vale.dataset.fogo = fogo;
+      vale.textContent = e.vale ?? PASSOS_TRUCO[0];
+      const fogo = Math.min(3, PASSOS_TRUCO.indexOf(e.vale));
+      if (fogo > 0) vale.dataset.fogo = fogo;
       else delete vale.dataset.fogo;
       lado.querySelectorAll('.ct-rodadas i').forEach((el, i) => {
         const r = e.rodadas?.[i];
@@ -1674,7 +1690,7 @@ ${espera ? comecar : ''}<button type="button" class="ct-b cinza" data-acao="sair
     el.classList.add('novo');
   }
 
-  // o truco (ou a mão de dez) esperando a minha resposta, no meio da tela, com o tempo correndo
+  // o truco (ou a mão de onze) esperando a minha resposta, no meio da tela, com o tempo correndo
   desenharPergunta(M, e) {
     const el = this.$('.ct-pergunta');
     const meuTime = M.lugar % 2;
@@ -1692,7 +1708,7 @@ ${espera ? comecar : ''}<button type="button" class="ct-b cinza" data-acao="sair
 ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao="truco:aumentar">${seguinte}!</button>` : ''}</div>${tempo}`;
     } else if (e.jogo === 'truco' && e.fase === 'dez' && e.maoDeDez === meuTime) {
       chave = `dez:${(M.parceiro || []).join()}`;
-      html = `<h2 class="ondas dez">${ondas('MÃO DE DEZ')}</h2>
+      html = `<h2 class="ondas dez">${ondas('MÃO DE ONZE')}</h2>
 <p>As cartas do seu parceiro. Joga valendo ${VALE_DEZ}, ou corre e a outra dupla leva ${PASSOS_TRUCO[0]}?</p>
 <div class="ct-parceiro">${(M.parceiro || []).map((c) => `<img src="${urlCarta(c)}" alt="${esc(c)}">`).join('')}</div>
 <div class="ct-botoes"><button type="button" class="ct-b verde grande" data-acao="truco:dez-jogar">Jogar!</button>

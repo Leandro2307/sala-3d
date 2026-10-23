@@ -7,7 +7,7 @@
 // espadilha e pica-fumo), 3 rodadas por mão; a mão vale 2, e o
 // truco 4, o seis 8, o nove 10 e o doze 12 — cada pedido e cada resposta é um grito ('ct-grito')
 // que a mesa ouve. Carta coberta da segunda rodada em diante, mão de dez (o time com 10 vê as
-// cartas do parceiro e decide) e mão de ferro (10 a 10: ninguém vê as cartas); 12 pontos ganha.
+// cartas do parceiro e decide) e mão de ferro (11 a 11: ninguém vê as cartas); 12 pontos ganha.
 // Os avisos falam das duplas como «0» e «1»: cada um lê "sua dupla" ou "a outra dupla" (cartas.js).
 //
 // Nas duas mesas: zoeira ('ct-zoar', as frases de ZOEIRA, gritadas como os pedidos) e, de
@@ -20,6 +20,7 @@
 // 21: dois lugares, um contra o outro (o do jogo 21 original): 11 cartas de 1 a 11, a primeira de
 // cada um fechada, trunfos (TRUNFOS_21) e a aposta em dedos; 5 dedos cada, quem fica sem perde.
 const { carregarPorMapa, comMapa } = require('./mapa-servidor.js');
+const Voz = require('./voz-servidor.js'); // os gritos saem com voz neural (mp3 do servidor), não a do navegador
 
 let R = null;
 let MESAS = null;
@@ -28,6 +29,11 @@ Promise.all([import('./public/js/cartas-regras.js'), DADOS.pronto])
   .then(([regras, dados]) => {
     R = regras;
     MESAS = dados; // a ponte: as mesas do mapa em uso (MESAS.MESAS_CARTAS)
+    // a voz neural de todas as frases faladas da mesa (gritos, zoeira, trunfos), já na subida
+    const faladas = new Set(Object.values(R.GRITOS).flat());
+    for (const f of R.ZOEIRA) faladas.add(f);
+    for (const t of Object.values(R.TRUNFOS_21)) faladas.add(`${t.nome}!`);
+    Voz.esquentar([...faladas]);
   })
   .catch((err) => console.warn('  Regras das cartas não carregaram:', err.message));
 
@@ -133,7 +139,7 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
     const frases = R.GRITOS[tipo];
     if (!frase && !frases) return;
     frase ||= frases[Math.floor(Math.random() * frases.length)];
-    io.to(room.id).emit('ct-grito', { mesa: m.i, lugar: k, tipo, nome: m.lugares[k]?.nome || '', frase, alvo, trunfo });
+    io.to(room.id).emit('ct-grito', { mesa: m.i, lugar: k, tipo, nome: m.lugares[k]?.nome || '', frase, alvo, trunfo, voz: Voz.urlDaFrase(frase, k) });
   }
 
   // o robô que fez a rodada zoa de vez em quando (no máximo uma vez a cada 8 s na mesa)
@@ -214,13 +220,13 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
     t.pausaAte = 0;
     t.inicio = (t.dador + 1) % 4;
     t.vez = t.inicio;
-    // mão de ferro: 10 a 10, ninguém vê as cartas (cada um vira a de cima) e não tem truco
-    t.ferro = t.pontos[0] === 10 && t.pontos[1] === 10;
-    // mão de dez: o time com 10 olha as cartas do parceiro e decide se joga (vale 4) ou corre (dá 2)
-    t.maoDeDez = !t.ferro && (t.pontos[0] === 10 || t.pontos[1] === 10) ? (t.pontos[0] === 10 ? 0 : 1) : null;
+    // mão de ferro: 11 a 11, ninguém vê as cartas (cada um vira a de cima) e não tem truco
+    t.ferro = t.pontos[0] === 11 && t.pontos[1] === 11;
+    // mão de onze: o time com 11 olha as cartas do parceiro e decide se joga (vale 4) ou corre (dá 2)
+    t.maoDeDez = !t.ferro && (t.pontos[0] === 11 || t.pontos[1] === 11) ? (t.pontos[0] === 11 ? 0 : 1) : null;
     m.fase = t.maoDeDez !== null ? 'dez' : 'jogando';
     m.vencedor = null;
-    m.aviso = t.maoDeDez !== null ? `Mão de dez: ${dupla(t.maoDeDez)} vê as cartas do parceiro e decide (vale ${R.VALE_DEZ})`
+    m.aviso = t.maoDeDez !== null ? `Mão de Onze: ${dupla(t.maoDeDez)} vê as cartas do parceiro e decide (vale ${R.VALE_DEZ})`
       : t.ferro ? 'Mão de ferro: ninguém vê as cartas, cada um vira a de cima' : '';
     m.vezDesde = Date.now();
     m.botAte = Date.now() + ESPERA_ROBO + 600;
@@ -362,12 +368,12 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
     if (resp === 'correr') {
       t.vale = R.PASSOS_TRUCO[0];
       gritar(room, m, k, 'dezCorro');
-      fimDaMao(room, m, 1 - t.maoDeDez, 'correram da mão de dez');
+      fimDaMao(room, m, 1 - t.maoDeDez, 'correram da mão de onze');
       return true;
     }
     t.vale = R.VALE_DEZ;
     m.fase = 'jogando';
-    m.aviso = `Mão de dez: vale ${R.VALE_DEZ}`;
+    m.aviso = `Mão de Onze: vale ${R.VALE_DEZ}`;
     gritar(room, m, k, 'dez');
     m.vezDesde = Date.now();
     m.botAte = Date.now() + ESPERA_ROBO;
