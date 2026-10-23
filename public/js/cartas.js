@@ -4,9 +4,10 @@
 //   - a coluna do placar à esquerda (pontos que pulam, o valor da mão pegando fogo, rodadas,
 //     manilhas; no uno o monte, o sentido e a cor);
 //   - a plaquinha de cada lugar flutuando em cima da cadeira (nome, cartas, a vez, o balão do grito,
-//     e o tapa e o tiro de brincadeira);
+//     e o tapa, o tiro e o arremesso (tomate, galinha...) de brincadeira);
 //   - a mão embaixo: as cartas balançam e inclinam com o mouse; um clique joga a carta; COBERTA
-//     liga e a próxima carta vai virada; TRUCO! grita; o megafone zoa;
+//     liga e a próxima carta vai virada; TRUCO! grita; o megafone zoa (com frase aleatória também);
+//     no truco, o 🤫 Sinal cochicha uma frase que só o parceiro vê;
 //   - a pergunta do truco (ou da mão de dez) no meio, com o tempo correndo.
 // Os robôs aparecem sentados nas cadeiras deles. Cada truco, seis, nove e doze (e cada resposta) é
 // um grito: murro na mesa, as cartas pulam, a voz do navegador em português e a faixa grande. "Começar"
@@ -14,7 +15,7 @@
 // (cartas-servidor.js) conduz tudo; as regras são as de cartas-regras.js.
 import * as THREE from 'three';
 import {
-  forcaTruco, valorDe, naipeDe, SIMBOLO, NOME_PEDIDO, PASSOS_TRUCO, MANILHAS, NOME_MANILHA, VALE_DEZ, ZOEIRA,
+  forcaTruco, valorDe, naipeDe, SIMBOLO, NOME_PEDIDO, PASSOS_TRUCO, MANILHAS, NOME_MANILHA, VALE_DEZ, ZOEIRA, SINAIS, ARREMESSOS,
   podeJogarUno, coringa, corUno, rotuloUno, HEX_COR, NOME_COR, CORES_UNO,
   numero21, trunfo21, soma21, TRUNFOS_21, MAX_21, DEDOS_21,
 } from './cartas-regras.js';
@@ -443,6 +444,8 @@ export class Cartas {
     });
     socket.on('ct-grito', (g) => this.grito(g));
     socket.on('ct-acao', (a) => this.acao(a));
+    socket.on('ct-arremesso', (a) => this.arremesso(a));
+    socket.on('ct-sinal', (s) => this.sinal(s));
   }
 
   ver() {
@@ -523,6 +526,68 @@ export class Cartas {
     }
     if (this.ativa === M && alvo !== M.lugar) this.balao(alvo, tipo === 'tiro' ? 'BANG!' : 'PLAFT!', true);
     if (eu) this.levou?.(tipo, deNome, dir);
+  }
+
+  // O cochicho do truco chegou: só o parceiro recebe ('ct-sinal' vai só para ele). Balão roxo em
+  // cima de quem sinalizou — sem voz e sem a faixa, para o resto da mesa não perceber.
+  sinal({ mesa, lugar, frase }) {
+    const M = this.mesas[mesa];
+    if (!M || typeof frase !== 'string') return;
+    this.sfx.dado?.(0.5);
+    if (this.ativa === M) this.balao(lugar, `🤫 ${frase}`, false, 'segredo');
+  }
+
+  // Alguém jogou uma coisa (tomate, galinha...) em quem está na mesa: o objeto voa na tela de uma
+  // plaquinha até a outra e espirra; quem levou toma o tranco e, se fui eu, a marca na tela.
+  arremesso({ mesa, item, de, alvo, deNome, alvoId }) {
+    const M = this.mesas[mesa];
+    const A = ARREMESSOS[item];
+    if (!M || !A) return;
+    const a = cadeira(M.m, de);
+    const b = cadeira(M.m, alvo);
+    const n = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+    const dir = [(b.x - a.x) / n, (b.z - a.z) / n];
+    const p = this.player.pos;
+    const vol = Math.max(0.05, 1 - Math.hypot(p.x - M.m.x, p.z - M.m.z) / 40);
+    const quem = this.bonecoDe(M, de);
+    const levou = this.bonecoDe(M, alvo);
+    const eu = alvoId && alvoId === this.eu;
+    quem?.tapa(); // o braço do arremesso
+    this.sfx.tapa?.(vol);
+    if (this.ativa === M) this.voarCoisa(de, alvo, A.emoji);
+    setTimeout(() => {
+      levou?.levarTapa(dir, !eu);
+      levou?.say(A.emoji);
+      if (this.ativa === M && alvo !== M.lugar) this.balao(alvo, `${A.emoji} ${A.texto}`, true);
+      if (eu) this.levou?.('tapa', deNome, dir);
+    }, 480);
+  }
+
+  // o objeto voando de uma plaquinha até a outra (as cadeiras se movem com a câmera; o voo é curto)
+  voarCoisa(de, alvo, emoji) {
+    const elA = this.$(`.ct-assento[data-lugar="${de}"] .ct-placa`);
+    const elB = this.$(`.ct-assento[data-lugar="${alvo}"] .ct-placa`);
+    if (!elA || !elB) return;
+    const ra = elA.getBoundingClientRect();
+    const rb = elB.getBoundingClientRect();
+    const voo = document.createElement('div');
+    voo.className = 'ct-voo';
+    voo.textContent = emoji;
+    const x0 = ra.left + ra.width / 2;
+    const y0 = ra.top;
+    const x1 = rb.left + rb.width / 2;
+    const y1 = rb.top;
+    voo.style.left = `${x0}px`;
+    voo.style.top = `${y0}px`;
+    this.raiz.append(voo);
+    voo.animate(
+      [
+        { transform: 'translate(-50%,-50%) rotate(0deg) scale(.7)' },
+        { transform: `translate(calc(-50% + ${(x1 - x0) / 2}px), calc(-50% + ${(y1 - y0) / 2 - 70}px)) rotate(340deg) scale(1.25)`, offset: 0.55 },
+        { transform: `translate(calc(-50% + ${x1 - x0}px), calc(-50% + ${y1 - y0}px)) rotate(720deg) scale(1.5)` },
+      ],
+      { duration: 480, easing: 'cubic-bezier(.2,.6,.4,1)', fill: 'forwards' },
+    ).onfinish = () => voo.remove();
   }
 
   estado(e) {
@@ -809,6 +874,8 @@ export class Cartas {
     this.cores.hidden = true;
     this.raiz.hidden = true;
     this.zoar.hidden = true;
+    this.sinal.hidden = true;
+    this.menu.hidden = true;
     this.$('.ct-fim').hidden = true;
     this.$('.ct-pergunta').hidden = true;
     this.$('#ct-trunfo').hidden = true;
@@ -1051,11 +1118,24 @@ body.ct-sentado #controls-help, body.ct-sentado #sit-hint { display: none !impor
 .ct-pergunta .ct-parceiro { display: flex; gap: 6px; justify-content: center; margin-bottom: 10px; }
 .ct-pergunta .ct-parceiro img { width: 58px; height: 78px; border-radius: 7px; box-shadow: 0 4px 0 rgba(0,0,0,.3); }
 .ct-pergunta .ct-tempo { margin: 12px auto 0; }
-/* o megafone */
+/* o megafone e os sinais do truco */
 .ct-zoar { position: absolute; bottom: calc(100% + 10px); right: 0; padding: 8px; display: grid; gap: 6px; width: 230px; pointer-events: auto; animation: ct-balao .3s cubic-bezier(.2,1.6,.4,1) both; }
 .ct-zoar button { text-align: left; padding: 7px 10px; border: 0; border-radius: 8px; background: #1e2b2d; color: #fff; box-shadow: 0 2px 0 #11191a; }
 .ct-zoar button:hover { background: #a782d1; }
+.ct-zoar button.sorte { background: #5b3a8c; font-size: 13px; color: #f5e9ff; }
+.ct-sinais { right: 240px; }
+.ct-sinais button:hover { background: #4c7a3f; }
 .ct-dir { position: relative; }
+/* o sinal: balão roxo, segredo */
+.ct-balao.segredo { background: #6d4fa1; color: #fff; }
+.ct-balao.segredo::after { border-top-color: #6d4fa1; }
+.ct-assento.topo .ct-balao.segredo::after { border-top-color: transparent; border-bottom-color: #6d4fa1; }
+/* o menu do que jogar e o objeto voando */
+.ct-arremesso { position: absolute; bottom: calc(100% + 8px); left: 50%; translate: -50% 0; z-index: 3; display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; padding: 8px; pointer-events: auto; animation: ct-balao .25s cubic-bezier(.2,1.6,.4,1) both; }
+.ct-assento.topo .ct-arremesso { bottom: auto; top: calc(100% + 8px); }
+.ct-arremesso button { width: 40px; height: 38px; padding: 0; border: 0; border-radius: 9px; background: #1e2b2d; box-shadow: 0 2px 0 #11191a; font-size: 20px; transition: transform .1s; }
+.ct-arremesso button:hover { transform: scale(1.15) rotate(-8deg); }
+.ct-voo { position: absolute; z-index: 4; font-size: 34px; pointer-events: none; filter: drop-shadow(0 3px 2px rgba(0,0,0,.4)); }
 /* a faixa do grito, o clarão e o fim */
 #ct-grito { position: absolute; left: 50%; top: 30%; translate: -50% -50%; text-align: center; width: max-content; max-width: 96vw; pointer-events: none; }
 #ct-grito b { display: block; font-size: clamp(54px, 11vw, 128px); line-height: 1; color: #f5b244; text-shadow: ${contorno('#7f1d1d', 4)}, 0 10px 0 #7f1d1d; }
@@ -1190,7 +1270,18 @@ body.touch .ct-conta { display: none; } body.touch #ct-trunfo img { width: 96px;
     this.zoar = document.createElement('div');
     this.zoar.className = 'ct-zoar ct-painel';
     this.zoar.hidden = true;
-    this.zoar.innerHTML = ZOEIRA.map((f, i) => `<button type="button" data-zoar="${i}">${esc(f)}</button>`).join('');
+    this.zoar.innerHTML = `<button type="button" class="sorte" data-zoar="-1">🎲 Frase aleatória</button>`
+      + ZOEIRA.map((f, i) => `<button type="button" data-zoar="${i}">${esc(f)}</button>`).join('');
+    // o cochicho do truco (só o parceiro vê)
+    this.sinal = document.createElement('div');
+    this.sinal.className = 'ct-zoar ct-sinais ct-painel';
+    this.sinal.hidden = true;
+    this.sinal.innerHTML = SINAIS.map((s, i) => `<button type="button" data-sinal="${i}">${esc(s.f)}</button>`).join('');
+    // o menu do que jogar em alguém (abre dentro da plaquinha do alvo)
+    this.menu = document.createElement('div');
+    this.menu.className = 'ct-arremesso ct-painel';
+    this.menu.hidden = true;
+    this.menu.innerHTML = Object.entries(ARREMESSOS).map(([chave, a]) => `<button type="button" data-item="${chave}" title="${a.nome}">${a.emoji}</button>`).join('');
     this.cores = document.createElement('div');
     this.cores.id = 'ct-cores';
     this.cores.hidden = true;
@@ -1262,8 +1353,34 @@ body.touch .ct-conta { display: none; } body.touch #ct-trunfo img { width: 96px;
     }
     if (d.zoar) {
       this.zoar.hidden = true;
-      return this.socket?.emit('ct-zoar', { mesa, i: Number(d.zoar) });
+      const i = Number(d.zoar);
+      return this.socket?.emit('ct-zoar', { mesa, i: i >= 0 ? i : Math.floor(Math.random() * ZOEIRA.length) });
     }
+    if (d.sinal) {
+      this.sinal.hidden = true;
+      const i = Number(d.sinal);
+      // feedback: eu também vejo o balão que o parceiro vai ver
+      this.balao((M.lugar + 2) % 4, `🤫 ${SINAIS[i]?.f || ''}`, false, 'segredo');
+      return this.socket?.emit('ct-sinal', { mesa, i });
+    }
+    if (d.arremesso) {
+      // abre (ou fecha) o menu do que jogar, dentro da plaquinha do alvo
+      const assento = this.$(`.ct-assento[data-lugar="${d.arremesso}"]`);
+      if (!assento) return;
+      if (!this.menu.hidden && this.menu.parentElement === assento) {
+        this.menu.hidden = true;
+        return;
+      }
+      assento.append(this.menu);
+      this.menu.dataset.alvo = d.arremesso;
+      this.menu.hidden = false;
+      return;
+    }
+    if (d.item) {
+      this.menu.hidden = true;
+      return this.socket?.emit('ct-arremesso', { mesa, alvo: Number(this.menu.dataset.alvo), item: d.item });
+    }
+    if (!b.closest('.ct-arremesso')) this.menu.hidden = true; // clique fora: fecha o menu
     const acao = d.acao;
     if (acao === 'sair') return this.soltarFoco?.();
     if (acao === 'comecar') {
@@ -1280,6 +1397,12 @@ body.touch .ct-conta { display: none; } body.touch #ct-trunfo img { width: 96px;
     }
     if (acao === 'zoar') {
       this.zoar.hidden = !this.zoar.hidden;
+      if (!this.zoar.hidden) this.sinal.hidden = true;
+      return;
+    }
+    if (acao === 'sinal') {
+      this.sinal.hidden = !this.sinal.hidden;
+      if (!this.sinal.hidden) this.zoar.hidden = true;
       return;
     }
     if (acao?.startsWith('truco:')) {
@@ -1431,7 +1554,7 @@ ${espera ? comecar : ''}<button type="button" class="ct-b cinza" data-acao="sair
         p.dataset.html = placa;
         p.innerHTML = placa;
       }
-      const mini = `${tapa ? `<button type="button" data-tapa="${k}" title="Dar um tapa" aria-label="Dar um tapa em ${esc(l.nome)}">👋</button>` : ''}${tiro ? `<button type="button" data-tiro="${k}" title="Dar um tiro (de brincadeira)" aria-label="Dar um tiro em ${esc(l.nome)}">🔫</button>` : ''}`;
+      const mini = `${tapa ? `<button type="button" data-tapa="${k}" title="Dar um tapa" aria-label="Dar um tapa em ${esc(l.nome)}">👋</button>` : ''}${tiro ? `<button type="button" data-tiro="${k}" title="Dar um tiro (de brincadeira)" aria-label="Dar um tiro em ${esc(l.nome)}">🔫</button>` : ''}<button type="button" data-arremesso="${k}" title="Jogar alguma coisa" aria-label="Jogar alguma coisa em ${esc(l.nome)}">🍅</button>`;
       const b = el.querySelector('.ct-mini');
       if (b.dataset.html !== mini) {
         b.dataset.html = mini;
@@ -1440,13 +1563,13 @@ ${espera ? comecar : ''}<button type="button" class="ct-b cinza" data-acao="sair
     });
   }
 
-  // o balão em cima da plaquinha de quem gritou (some sozinho)
-  balao(k, texto, forte = false) {
+  // o balão em cima da plaquinha de quem gritou (some sozinho). classe: 'segredo' (o sinal, roxo)
+  balao(k, texto, forte = false, classe = '') {
     const el = this.$(`.ct-assento[data-lugar="${k}"]`);
     if (!el) return;
     el.querySelector('.ct-balao')?.remove();
     const b = document.createElement('div');
-    b.className = `ct-balao${forte ? ' forte' : ''}`;
+    b.className = `ct-balao${forte ? ' forte' : ''}${classe ? ` ${classe}` : ''}`;
     b.textContent = texto;
     el.append(b);
     setTimeout(() => b.remove(), 2600);
@@ -1683,6 +1806,9 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
       dir.push(`<button type="button" class="ct-b vermelho grande" data-acao="v21:parar" title="S"${vez ? '' : ' disabled'}>Parar</button>`);
     }
     if (e.fase !== 'espera') dir.push('<button type="button" class="ct-b roxo" data-acao="zoar" title="Zoar a mesa">📣 Zoar</button>');
+    // o sinal do truco: só aparece com um parceiro de gente na mesa (robô não lê cochicho)
+    const parceiro = truco && e.lugares[(M.lugar + 2) % 4];
+    if (truco && e.fase !== 'espera' && parceiro && !parceiro.bot) dir.push('<button type="button" class="ct-b roxo" data-acao="sinal" title="Cochichar um sinal que só o parceiro vê">🤫 Sinal</button>');
     const html = (l) => l.join('');
     const elEsq = this.$('.ct-esq');
     const elDir = this.$('.ct-dir');
@@ -1693,7 +1819,7 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
     if (elDir.dataset.html !== html(dir)) {
       elDir.dataset.html = html(dir);
       elDir.innerHTML = html(dir);
-      elDir.append(this.zoar);
+      elDir.append(this.zoar, this.sinal);
     }
     this.marcarCoberta();
   }

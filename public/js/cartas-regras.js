@@ -51,15 +51,49 @@ export const GRITOS = {
   // o robô que levou um tapa ou um tiro na mesa (de brincadeira)
   apanhou: ['Ai! Isso não vale!', 'Tá nervoso, é?', 'Bate, mas o truco é meu!', 'Vou contar pro juiz!', 'Ô trem doído, sô!'],
   baleado: ['Fui atingido!', 'Ai, meu zap!', 'Isso é jogo de truco, sô!', 'Volto pra assombrar!', 'Errou! Quer dizer... acertou.'],
+  // o robô que levou um arremesso na mesa (tomate, galinha...)
+  sujou: ['Tô todo melado!', 'Quem joga comida, sô?!', 'Ai, minha roupa nova!', 'Isso é falta de respeito!', 'Vou chamar a limpeza!', 'Lavar não adianta, a vergonha fica!'],
   // o 21: pedir, parar, ganhar a rodada e perder a mão
   pede21: ['Manda carta!', 'Mais uma!', 'Vem, carta!', 'Bora, mais uma!'],
   para21: ['Parei.', 'Tô bem assim.', 'Fico aqui.', 'Chega pra mim.'],
   ganhou21: ['Passa os dedos!', 'Contei as cartas, sô!', 'Essa foi fácil!', 'Mais um dedo pra coleção!'],
 };
 // A zoeira: o que dá para gritar na mesa a qualquer hora (o botão de megafone), no truco e no uno.
-// Os robôs também zoam quando fazem uma rodada.
-export const ZOEIRA = ['Tá com medo, é?', 'Pode vir que eu tô armado!', 'Desce, marreco!', 'Ô dó!', 'Aqui é Minas, sô!', 'Hoje não!', 'Cadê o truco, uai?', 'Vai chorar?'];
+// Os robôs também zoam quando fazem uma rodada, e de vez em quando soltam uma do nada no meio do jogo.
+export const ZOEIRA = [
+  'Tá com medo, é?', 'Pode vir que eu tô armado!', 'Desce, marreco!', 'Ô dó!', 'Aqui é Minas, sô!', 'Hoje não!',
+  'Cadê o truco, uai?', 'Vai chorar?', 'Ô trem ruim, sô!', 'Vou chamar o VAR!', 'Aprendi no boteco!',
+  'Tá jogando de graça?', 'Que mão é essa, uai?', 'Essa eu jogo de olho fechado!', 'Pode pedir música!',
+  'Ô lapada, sô!', 'Anota a placa!', 'Chama no truco, uai!', 'Essa carta tem dono!', 'Tá tremendo, é?',
+  'Eu avisei, uai!', 'Segura essa, marreco!', 'Nem o padre te salva!', 'Passei o rodo, sô!',
+  'Joga e chora depois!', 'Uai, perdeu já?', 'Isso não é jogo de dama não!', 'Devolve meu troco!',
+];
 export const GRITO_DO_PEDIDO = { 4: 'truco', 8: 'seis', 10: 'nove', 12: 'doze' };
+
+// Os sinais do truco: o cochicho que só o parceiro ouve ('ct-sinal' vai só para o lugar (k+2)%4).
+// bom: a frase combina com mão boa (true) ou ruim (false) — o robô parceiro escolhe a que combina com a dele.
+export const SINAIS = [
+  { f: 'Tenho o Zap! ♣️', bom: true }, { f: 'Tenho manilha na mão!', bom: true },
+  { f: 'Tô carregado, sô!', bom: true }, { f: 'Pede truco!', bom: true },
+  { f: 'Aumenta que eu cubro!', bom: true }, { f: 'Cai dentro que eu seguro!', bom: true },
+  { f: 'Tô fraquinho...', bom: false }, { f: 'Não truca não!', bom: false },
+  { f: 'Se trucarem, a gente corre!', bom: false }, { f: 'Só vim com lixo', bom: false },
+  { f: 'Cobre ela pra mim!', bom: null }, { f: 'Dribla essa rodada!', bom: null },
+  { f: 'Vou de coberta, hein?', bom: null }, { f: 'Segura a próxima!', bom: null },
+];
+
+// As coisas que dá para jogar em quem está na mesa ('ct-arremesso'), de brincadeira. texto: o barulho
+// do acerto no balão.
+export const ARREMESSOS = {
+  tomate: { nome: 'Tomate', emoji: '🍅', texto: 'SPLAT!' },
+  galinha: { nome: 'Galinha', emoji: '🐔', texto: 'COCORICÓ!' },
+  ovo: { nome: 'Ovo', emoji: '🥚', texto: 'PLOC!' },
+  torta: { nome: 'Torta', emoji: '🥧', texto: 'PÁ!' },
+  chinelo: { nome: 'Chinelo', emoji: '🩴', texto: 'CHAP!' },
+  peixe: { nome: 'Peixe', emoji: '🐟', texto: 'FLAP!' },
+  agua: { nome: 'Balão d’água', emoji: '💦', texto: 'SPLASH!' },
+  coco: { nome: 'Coco', emoji: '🥥', texto: 'TUM!' },
+};
 
 // ------------------------------------------------------------------ uno
 // Carta: cor + símbolo ('r7', 'gP2' = +2 verde, 'bB' = bloqueio azul, 'yI' = inverter amarelo) ou

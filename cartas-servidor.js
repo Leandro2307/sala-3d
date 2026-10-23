@@ -11,7 +11,10 @@
 // Os avisos falam das duplas como «0» e «1»: cada um lê "sua dupla" ou "a outra dupla" (cartas.js).
 //
 // Nas duas mesas: zoeira ('ct-zoar', as frases de ZOEIRA, gritadas como os pedidos) e, de
-// brincadeira, tapa e tiro em quem está sentado ('ct-acao'), gente ou robô — o robô reclama.
+// brincadeira, tapa e tiro ('ct-acao') e arremesso de tomate, galinha e afins ('ct-arremesso') em
+// quem está sentado, gente ou robô — o robô reclama. No truco, o sinal ('ct-sinal') é um cochicho
+// que só o parceiro recebe. Os robôs soltam zoeira aleatória no meio do jogo e o robô parceiro
+// manda sinal combinando com a mão dele.
 // Uno: até 6 lugares; bloqueio, inverter, +2, coringa e +4 (sem acumular); comprou e não serve,
 // passa. Quem fica com uma carta tem uns segundos para dizer "UNO!", senão compra duas.
 // 21: dois lugares, um contra o outro (o do jogo 21 original): 11 cartas de 1 a 11, a primeira de
@@ -36,6 +39,9 @@ const ESPERA_GENTE = 45_000; // parado na vez: o robô joga por ele
 const ESPERA_RESPOSTA = 25_000; // sem responder o truco (ou decidir a mão de dez): aceita por ele
 const INTERVALO_ACAO = { tapa: 500, tiro: 2500 }; // ms entre dois tapas (tiros) da mesma pessoa
 const INTERVALO_ZOEIRA = 2500;
+const INTERVALO_SINAL = 1500; // ms entre dois sinais da mesma pessoa (só o parceiro recebe)
+const INTERVALO_ARREMESSO = 1200; // ms entre dois arremessos da mesma pessoa
+const RESENHA_INTERVALO = 20000; // no mínimo isso entre duas zoeiras aleatórias na mesma mesa
 
 const novaMesa = (i) => ({ i, jogo: MESAS.MESAS_CARTAS[i].jogo, lugares: Array(LUGARES[MESAS.MESAS_CARTAS[i].jogo]).fill(null), fase: 'espera', aviso: '', vencedor: null, ate: 0, botAte: 0, vezDesde: 0, t: null, u: null, v: null });
 const mesasDa = (room) => (room.cartas ||= MESAS.MESAS_CARTAS.map((_, i) => novaMesa(i)));
@@ -135,6 +141,15 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
     if (!m.lugares[k]?.bot || Math.random() > 0.3 || Date.now() - (m.zoouEm || 0) < 8000) return;
     m.zoouEm = Date.now();
     gritar(room, m, k, 'zoeira', { frase: R.ZOEIRA[Math.floor(Math.random() * R.ZOEIRA.length)] });
+  }
+
+  // O cochicho do truco: o sinal vai só para o parceiro ((k+2)%4), e só se ele for gente.
+  function sinalar(room, m, k, frase) {
+    const p = (k + 2) % 4;
+    const l = m.lugares[p];
+    if (!l || l.bot) return false;
+    io.to(l.id).emit('ct-sinal', { mesa: m.i, lugar: k, nome: m.lugares[k]?.nome || '', frase });
+    return true;
   }
   const humanos = (m) => m.lugares.filter((l) => l && !l.bot);
   const robo = (m, k) => ({ id: `robo-${m.i}-${k}`, nome: NOMES_ROBO[k % NOMES_ROBO.length], cor: '#94a3b8', bot: true });
@@ -366,6 +381,17 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
   };
   const forcaDaMao = (t, k) => t.maos[k].reduce((s, c) => s + pesoTruco(c), 0) + t.rodadas.filter((r) => r === timeDe(k)).length * 1.5;
 
+  // o robô parceiro de vez em quando manda um sinal que combina com a mão dele
+  function roboSinala(room, m, k) {
+    if (Date.now() - (m.sinalEm || 0) < 15000 || Math.random() > 0.12) return;
+    if (!vezDeGente(m, (k + 2) % 4)) return;
+    m.sinalEm = Date.now();
+    const f = forcaDaMao(m.t, k);
+    const quais = R.SINAIS.filter((s) => (f > 5.5 ? s.bom === true : f < 3.5 ? s.bom === false : s.bom === null));
+    const s = quais[Math.floor(Math.random() * quais.length)];
+    if (s) sinalar(room, m, k, s.f);
+  }
+
   function botTruco(room, m, k) {
     const t = m.t;
     if (!t.maos[k].length) return;
@@ -373,6 +399,7 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
       jogarTruco(room, m, k, null);
       return;
     }
+    roboSinala(room, m, k);
     const mao = [...t.maos[k]].sort((a, b) => R.forcaTruco(a) - R.forcaTruco(b));
     // pede com a mão boa, e de vez em quando no blefe
     if (podeTrucar(t, timeDe(k)) && ((forcaDaMao(t, k) > 5.5 && Math.random() < 0.35) || Math.random() < 0.05)) {
@@ -935,6 +962,16 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
   }
 
   // ------------------------------------------------------------------ relógio
+  // Resenha da mesa: com o jogo rolando, um robô solta uma zoeira do nada (no máximo uma a cada
+  // RESENHA_INTERVALO por mesa, e com sorte a cada batida do relógio).
+  function resenha(room, m, agora) {
+    if (m.fase !== 'jogando' || agora - (m.resenhaEm || 0) < RESENHA_INTERVALO || Math.random() > 0.006) return;
+    const bots = m.lugares.map((l, k) => (l?.bot ? k : -1)).filter((k) => k >= 0);
+    if (!bots.length) return;
+    m.resenhaEm = agora;
+    gritar(room, m, bots[Math.floor(Math.random() * bots.length)], 'zoeira', { frase: R.ZOEIRA[Math.floor(Math.random() * R.ZOEIRA.length)] });
+  }
+
   setInterval(() => {
     if (!R) return;
     const agora = Date.now();
@@ -962,6 +999,7 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
         if (m.jogo === 'truco') ticTruco(room, m, agora);
         else if (m.jogo === 'vinteum') ticVinte(room, m, agora);
         else ticUno(room, m, agora);
+        resenha(room, m, agora);
       }
     }
   }, 250);
@@ -1110,6 +1148,34 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
       const l = m.lugares[alvo];
       io.to(room.id).emit('ct-acao', { mesa: m.i, tipo, de: k, alvo, deNome: user.name, alvoId: l.bot ? null : l.id });
       if (l.bot) gritar(room, m, alvo, tipo === 'tiro' ? 'baleado' : 'apanhou');
+    });
+
+    // Arremesso de brincadeira (tomate, galinha, ovo...): em quem está sentado na mesa, gente ou
+    // robô. Não mexe no jogo; o objeto voa e espirra na cara de quem levou, e o robô reclama.
+    socket.on('ct-arremesso', (msg) => {
+      const { room, user, mesas } = daSala();
+      const m = mesas?.[msg?.mesa];
+      const k = m ? meuLugar(m, user) : -1;
+      const item = msg?.item;
+      const alvo = msg?.alvo;
+      if (k < 0 || !R.ARREMESSOS[item] || !Number.isInteger(alvo) || alvo === k || !m.lugares[alvo]) return;
+      if (Date.now() - (user.arremessouEm || 0) < INTERVALO_ARREMESSO) return;
+      user.arremessouEm = Date.now();
+      const l = m.lugares[alvo];
+      io.to(room.id).emit('ct-arremesso', { mesa: m.i, item, de: k, alvo, deNome: user.name, alvoId: l.bot ? null : l.id });
+      if (l.bot) gritar(room, m, alvo, 'sujou');
+    });
+
+    // O sinal do truco: o cochicho que só o parceiro recebe (e só se ele for gente — robô não lê).
+    socket.on('ct-sinal', (msg) => {
+      const { room, user, mesas } = daSala();
+      const m = mesas?.[msg?.mesa];
+      const k = m ? meuLugar(m, user) : -1;
+      const i = msg?.i;
+      if (k < 0 || m.jogo !== 'truco' || !m.t || m.fase === 'espera') return;
+      if (!Number.isInteger(i) || !R.SINAIS[i]) return;
+      if (Date.now() - (user.sinalEm || 0) < INTERVALO_SINAL) return;
+      if (sinalar(room, m, k, R.SINAIS[i].f)) user.sinalEm = Date.now();
     });
 
     socket.on('disconnect', () => {
