@@ -58,15 +58,21 @@ function comDuplas(texto, meuTime) {
 const ondas = (texto) => [...String(texto)].map((c, i) => `<span style="--i:${i}">${c === ' ' ? '&nbsp;' : esc(c)}</span>`).join('');
 
 // ------------------------------------------------------------------ a voz dos gritos
-// A voz do sistema em português (speechSynthesis). Cada lugar da mesa grita com uma voz (das pt-BR
-// que o computador tiver) e um tom diferentes, para dar para saber quem gritou sem olhar.
+// A voz do sistema em português (speechSynthesis). Cada lugar da mesa grita com uma voz e um tom
+// diferentes, para dar para saber quem gritou sem olhar. As vozes "natural"/"neural" (Microsoft
+// Online, Google...) são muito mais lisas que as vozes de desktop antigas: se tiver, usa só essas
+// (as de desktop deixam o grito da pessoa robótico e arrastado).
 const TOM = [1.15, 0.75, 1.35, 0.9, 1.05, 0.8];
 let vozes = null;
 if (typeof window !== 'undefined' && window.speechSynthesis) speechSynthesis.addEventListener?.('voiceschanged', () => { vozes = null; });
 function falarGrito(frase, lugar, volume) {
   if (!sfxLigado() || !window.speechSynthesis) return;
   try {
-    vozes ||= speechSynthesis.getVoices().filter((v) => /^pt(-|_)BR/i.test(v.lang));
+    if (!vozes) {
+      const todas = speechSynthesis.getVoices().filter((v) => /^pt(-|_)BR/i.test(v.lang));
+      const naturais = todas.filter((v) => /natural|neural|online/i.test(v.name));
+      vozes = naturais.length ? naturais : todas;
+    }
     const u = new SpeechSynthesisUtterance(frase);
     u.lang = 'pt-BR';
     u.voice = vozes.length ? vozes[lugar % vozes.length] : null;
