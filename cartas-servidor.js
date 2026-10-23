@@ -1227,6 +1227,13 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
       if (sinalar(room, m, k, R.SINAIS[i].f, R.SINAIS[i].carta)) user.sinalEm = Date.now();
     });
 
+    // Celular (iOS): o cliente pede o MP3 da voz quando o grito chegou sem ele (ainda gerando)
+    socket.on('pedir-voz', ({ frase, lugar } = {}, ack) => {
+      if (typeof ack !== 'function') return;
+      if (typeof frase !== 'string' || typeof lugar !== 'number') return ack(null);
+      ack(Voz.urlDaFrase(frase, lugar));
+    });
+
     socket.on('disconnect', () => {
       const { room, user } = quem();
       if (room?.cartas && user) sair(room, user.id);

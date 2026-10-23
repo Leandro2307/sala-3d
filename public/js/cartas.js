@@ -48,10 +48,15 @@ audioVoz.muted = false; // garante nao mutado em mobile
 audioVoz.preload = 'auto';
 // chiado de 0,05s: um play() com src real é o que o celular aceita como "destrave" do elemento
 const SILENCIO = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=';
+let _vozDestravada = false;
 export function primarVoz() {
-  if (!audioVoz.paused) return;
+  // iOS/Safari: destrava o elemento de audio exatamente uma vez, de forma sincrona
+  // dentro do event handler do usuario (sem await/Promise antes desta chamada)
+  if (_vozDestravada) return;
+  _vozDestravada = true;
   audioVoz.src = SILENCIO;
-  audioVoz.play().then(() => audioVoz.pause()).catch(() => {});
+  const p = audioVoz.play();
+  if (p && typeof p.then === 'function') p.then(() => audioVoz.pause()).catch(() => { _vozDestravada = false; });
 }
 const PEDIDOS = ['truco', 'seis', 'nove', 'doze'];
 const OUVE_ATE = 22; // metros: de mais longe que isso, o grito da mesa não chega
@@ -504,8 +509,22 @@ export class Cartas {
       boneco?.punch();
     }
     boneco?.say(frase);
-    if (voz) this.tocarVoz(voz, vol);
-    else falarGrito(frase, lugar, vol);
+    if (voz) {
+      this.tocarVoz(voz, vol);
+    } else {
+      // iOS: speechSynthesis falha fora de gesto do usuario. Tentamos buscar o MP3
+      // gerado pelo servidor em background (pode demorar alguns segundos).
+      // Se chegar, toca via audioVoz (ja destravado); se nao, usa a voz do sistema.
+      const tentarVoz = (tentativa) => {
+        if (!this.socket) { falarGrito(frase, lugar, vol); return; }
+        this.socket.emit('pedir-voz', { frase, lugar }, (url) => {
+          if (url) this.tocarVoz(url, vol);
+          else if (tentativa < 3) setTimeout(() => tentarVoz(tentativa + 1), 1500);
+          else falarGrito(frase, lugar, vol);
+        });
+      };
+      tentarVoz(1);
+    }
     if (!sentado) return;
     if (lugar !== M.lugar) this.balao(lugar, frase, pedido);
     if (tipo === 'trunfo' && TRUNFOS_21[trunfo]) return this.mostrarTrunfo(trunfo, lugar === M.lugar ? 'Você' : nome, lugar === M.lugar);
@@ -533,6 +552,7 @@ export class Cartas {
       audioVoz.pause();
       audioVoz.volume = Math.min(1, Math.max(0, volume));
       audioVoz.src = url;
+      audioVoz.load(); // iOS: sem load() o play() pode sair mudo ao trocar o src
       audioVoz.currentTime = 0;
       this.vozAtual = audioVoz;
       audioVoz.play().catch(() => {});
