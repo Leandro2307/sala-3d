@@ -5260,9 +5260,11 @@ function updateHover() {
   const perto = state.focus ? null : jogos.maisPerto(player.pos);
   const mesa = perto && jogoLigado(perto) ? perto : null; // mesa desligada pelo dono da sala some
   const naMesaDeDados = !state.focus && !mesa && jogoLigado('dados') && dados.perto(player.pos);
+  const pertoDoTotem = !state.focus && !mesa && !naMesaDeDados && Math.hypot(player.pos.x - 65, player.pos.z - 22) < 4.5;
   const info = state.focus ? null
     : mesa ? { kind: 'jogo', mesa, label: jogos.rotulo(mesa) }
       : naMesaDeDados ? { kind: 'dados', label: 'Apostar nos dados' }
+      : pertoDoTotem ? { kind: 'totem_jogos', label: 'Ver Guia de Destinos' }
       : infoDaMira(pickScreen());
   const changed = (info?.label ?? null) !== (state.hovered?.label ?? null);
   state.hovered = info;
@@ -5306,6 +5308,10 @@ function focarCartas() {
 
 function enterFocus(info) {
   if (!info) return;
+  if (info.kind === 'totem_jogos') {
+    catalogo.aberto ? catalogo.fechar() : catalogo.abrir();
+    return;
+  }
   exitFocus();
   fecharMesa(false);
   if (document.pointerLockElement) document.exitPointerLock();
@@ -5638,6 +5644,131 @@ $('#hud-btn-galera')?.addEventListener('click', () => {
     toast('Escolha um amigo na lista para ir até ele!', 'info');
   }
 });
+const bussolaCanvas = $('#bussola-canvas');
+const bussolaCtx = bussolaCanvas?.getContext('2d');
+let alvosBussola = [];
+const PONTOS_BUSSOLA = [
+  { id: 'cinema', nome: 'Cinema', icone: '🎬', x: 0, z: -2, cor: '#38bdf8' },
+  { id: 'praca', nome: 'Praça', icone: '🌟', x: 100, z: 30, cor: '#facc15' },
+  { id: 'futebol', nome: 'Futebol', icone: '⚽', x: 20, z: 230, cor: '#4ade80' },
+  { id: 'volei', nome: 'Quadras', icone: '🏀', x: 160, z: 220, cor: '#60a5fa' },
+  { id: 'corrida', nome: 'Corrida', icone: '🏎️', x: 260, z: 50, cor: '#f97316' },
+  { id: 'kart', nome: 'Kart', icone: '🏎️', x: 160, z: 40, cor: '#fbbf24' },
+  { id: 'pingue', nome: 'Parque', icone: '🎯', x: 240, z: 580, cor: '#c084fc' },
+  { id: 'gincana', nome: 'Gincana', icone: '✨', x: 80, z: 500, cor: '#f472b6' },
+];
+function renderBussola() {
+  if (!bussolaCtx || !state.joined) return;
+  const w = bussolaCanvas.width;
+  const h = bussolaCanvas.height;
+  const ctx = bussolaCtx;
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = 'rgba(11, 15, 23, 0.88)';
+  ctx.beginPath();
+  ctx.roundRect ? ctx.roundRect(0, 0, w, h, h / 2) : ctx.rect(0, 0, w, h);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  const cx = w / 2;
+  ctx.fillStyle = '#34d399';
+  ctx.fillRect(cx - 1, 0, 2, h);
+  const fov = Math.PI * 0.72;
+  const px = player.pos.x;
+  const pz = player.pos.z;
+  const pyaw = player.yaw;
+  alvosBussola = [];
+  const cardeais = [
+    { label: 'N', ang: Math.PI },
+    { label: 'L', ang: -Math.PI / 2 },
+    { label: 'S', ang: 0 },
+    { label: 'O', ang: Math.PI / 2 },
+  ];
+  ctx.font = '700 10px "Plus Jakarta Sans", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#94a3b8';
+  for (const c of cardeais) {
+    let diff = c.ang - pyaw;
+    diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+    if (Math.abs(diff) < fov / 2) {
+      const x = cx + (diff / (fov / 2)) * (w * 0.44);
+      ctx.fillText(c.label, x, h / 2);
+    }
+  }
+  for (const p of PONTOS_BUSSOLA) {
+    const dx = p.x - px;
+    const dz = p.z - pz;
+    const dist = Math.hypot(dx, dz);
+    if (dist < 12) continue;
+    const ang = Math.atan2(-dx, -dz);
+    let diff = ang - pyaw;
+    diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+    if (Math.abs(diff) < fov / 2) {
+      const x = cx + (diff / (fov / 2)) * (w * 0.44);
+      const txt = `${p.icone} ${p.nome}`;
+      ctx.font = '700 10.5px "Plus Jakarta Sans", sans-serif';
+      const tw = ctx.measureText(txt).width;
+      const pad = 6;
+      const bx = x - tw / 2 - pad;
+      const bw = tw + pad * 2;
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
+      ctx.beginPath();
+      ctx.roundRect ? ctx.roundRect(bx, 4, bw, h - 8, 6) : ctx.rect(bx, 4, bw, h - 8);
+      ctx.fill();
+      ctx.strokeStyle = p.cor;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.fillStyle = '#f8fafc';
+      ctx.fillText(txt, x, h / 2);
+      alvosBussola.push({ xMin: bx, xMax: bx + bw, id: p.id, tipo: 'area', nome: p.nome });
+    }
+  }
+  for (const u of state.users.values()) {
+    if (!u.avatar?.group?.position) continue;
+    const pos = u.avatar.group.position;
+    const dx = pos.x - px;
+    const dz = pos.z - pz;
+    const dist = Math.hypot(dx, dz);
+    if (dist < 2.5) continue;
+    const ang = Math.atan2(-dx, -dz);
+    let diff = ang - pyaw;
+    diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+    if (Math.abs(diff) < fov / 2) {
+      const x = cx + (diff / (fov / 2)) * (w * 0.44);
+      const txt = `👤 ${u.name} ${Math.round(dist)}m`;
+      ctx.font = '700 10.5px "Plus Jakarta Sans", sans-serif';
+      const tw = ctx.measureText(txt).width;
+      const pad = 7;
+      const bx = x - tw / 2 - pad;
+      const bw = tw + pad * 2;
+      ctx.fillStyle = 'rgba(29, 78, 216, 0.92)';
+      ctx.beginPath();
+      ctx.roundRect ? ctx.roundRect(bx, 3, bw, h - 6, 6) : ctx.rect(bx, 3, bw, h - 6);
+      ctx.fill();
+      ctx.strokeStyle = '#93c5fd';
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+      ctx.fillStyle = '#eff6ff';
+      ctx.fillText(txt, x, h / 2);
+      alvosBussola.push({ xMin: bx, xMax: bx + bw, id: u.id, tipo: 'user', user: u });
+    }
+  }
+}
+bussolaCanvas?.addEventListener('click', (e) => {
+  const r = bussolaCanvas.getBoundingClientRect();
+  const clickX = ((e.clientX - r.left) / r.width) * bussolaCanvas.width;
+  const alvo = alvosBussola.find((a) => clickX >= a.xMin && clickX <= a.xMax);
+  if (!alvo) return;
+  if (alvo.tipo === 'user') {
+    irAte(alvo.user);
+    toast(`Teleportado para ${alvo.user.name}!`, 'info');
+  } else {
+    irParaArea(alvo.id);
+    toast(`Indo para ${alvo.nome}...`, 'info');
+  }
+});
+
 function iniciarGuiaBoasVindas() {
   const g = $('#guia-inicio');
   if (!g) return;
@@ -6730,6 +6861,7 @@ function frame(ts = performance.now()) {
     sendState(dt);
     updateHover();
     updateSitHint();
+    renderBussola();
     world.focarSol(player.pos.x, player.pos.z, player.pos.y); // a altura diz se está dentro de uma sala do escritório
     slowTimer += dt;
     if (slowTimer > 0.25) {

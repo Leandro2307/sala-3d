@@ -1468,6 +1468,102 @@ export class World {
     placaDentro.rotation.y = -Math.PI / 2;
     this.scene.add(placaDentro);
 
+    // Placa direcional na saída do cinema (ao lado da calçada, sem obstruir a passagem)
+    const tx = 65;
+    const tz = 22;
+    const totemGroup = new THREE.Group();
+    totemGroup.position.set(tx, 0, tz);
+
+    const texFrenteTotem = canvasTexture(1024, 768, (ctx, w, h) => {
+      ctx.fillStyle = '#0a0f1d';
+      roundRect(ctx, 16, 16, w - 32, h - 32, 40);
+      ctx.fill();
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 12;
+      roundRect(ctx, 24, 24, w - 48, h - 48, 34);
+      ctx.stroke();
+
+      ctx.fillStyle = '#38bdf8';
+      ctx.font = `800 58px ${FONT}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText('🌟 GUIA DE DESTINOS', w / 2, 50);
+
+      const itens = [
+        { seta: '⬆️', titulo: 'Praça Central & Farol', sub: 'Ponto de encontro', cor: '#38bdf8' },
+        { seta: '⬅️', titulo: 'Estádio & Quadras', sub: 'Futebol, Basquete, Vôlei', cor: '#4ade80' },
+        { seta: '➡️', titulo: 'Autódromo & Kart', sub: 'Pista de corrida com turbo', cor: '#f97316' },
+        { seta: '✨', titulo: 'Parque & Minijogos', sub: 'Sinuca, Truco, Gincana', cor: '#a855f7' },
+      ];
+
+      itens.forEach((it, i) => {
+        const y = 145 + i * 122;
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.06)';
+        roundRect(ctx, 45, y, w - 90, 105, 20);
+        ctx.fill();
+
+        ctx.fillStyle = it.cor;
+        roundRect(ctx, 58, y + 12, 80, 80, 16);
+        ctx.fill();
+
+        ctx.fillStyle = '#0f172a';
+        ctx.font = `800 44px ${FONT}`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(it.seta, 98, y + 52);
+
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#f8fafc';
+        ctx.font = `700 38px ${FONT}`;
+        ctx.fillText(it.titulo, 155, y + 38);
+
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = `500 26px ${FONT}`;
+        ctx.fillText(it.sub, 155, y + 76);
+      });
+
+      ctx.fillStyle = '#22c55e';
+      roundRect(ctx, 45, h - 105, w - 90, 72, 18);
+      ctx.fill();
+      ctx.fillStyle = '#052e16';
+      ctx.font = `800 32px ${FONT}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('[E] ABRIR MENU DE JOGOS & TELEPORTE', w / 2, h - 70);
+    });
+
+    const totemW = 3.6;
+    const totemH = 2.7;
+    const totemY = 2.4;
+
+    // Placa frontal (olhando para o cinema, -X)
+    const totemFrente = new THREE.Mesh(new THREE.PlaneGeometry(totemW, totemH), new THREE.MeshBasicMaterial({ map: texFrenteTotem, toneMapped: false }));
+    totemFrente.position.set(-0.06, totemY, 0);
+    totemFrente.rotation.y = -Math.PI / 2;
+    totemGroup.add(totemFrente);
+
+    // Placa verso (olhando para a rua, +X)
+    const totemVerso = new THREE.Mesh(new THREE.PlaneGeometry(totemW, totemH), new THREE.MeshBasicMaterial({ map: texFrenteTotem, toneMapped: false }));
+    totemVerso.position.set(0.06, totemY, 0);
+    totemVerso.rotation.y = Math.PI / 2;
+    totemGroup.add(totemVerso);
+
+    // Chapa central entre as faces
+    const corpoTotem = new THREE.Mesh(new THREE.BoxGeometry(0.1, totemH, totemW), new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.6 }));
+    corpoTotem.position.set(0, totemY, 0);
+    totemGroup.add(corpoTotem);
+
+    // Dois postes de ferro nas laterais
+    const posteMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.4, metalness: 0.8 });
+    for (const pz of [-totemW / 2, totemW / 2]) {
+      const p = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, totemY + totemH / 2 + 0.1, 16), posteMat);
+      p.position.set(0, (totemY + totemH / 2 + 0.1) / 2, pz);
+      totemGroup.add(p);
+    }
+
+    this.fora.add(totemGroup);
+    this.addBox({ min: [tx - 0.2, 0, tz - totemW / 2 - 0.1], max: [tx + 0.2, totemY + totemH / 2, tz + totemW / 2 + 0.1] });
+
     // na saída: guarda o espaço para não nascer árvore na frente da porta
     this.reservas.push({ x: S.maxX + 18, z: zc, r: 26 });
   }

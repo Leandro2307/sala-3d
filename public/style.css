@@ -3158,6 +3158,29 @@ body.touch #topo-centro { top: calc(64px + env(safe-area-inset-top)); }
   animation: rise 360ms var(--ease) both;
 }
 .guia-inicio[hidden] { display: none; }
+/* bussola fluida em canvas (60 fps) */
+.hud-bussola {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(460px, calc(100vw - 320px));
+  height: 30px;
+  border-radius: 999px;
+  overflow: hidden;
+  pointer-events: auto;
+  cursor: pointer;
+  z-index: 5;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+}
+#bussola-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+@media (max-width: 680px) {
+  .hud-bussola { display: none; }
+}
 .guia-inicio-ic {
   display: grid;
   place-items: center;
