@@ -8,10 +8,12 @@
 // CONTRATO DE EVENTOS (tudo com o prefixo pk-)
 //   client -> server
 //     'pk-sentar'   { mesa, lugar? }        senta na mesa (lugar 0..5; sem lugar, o primeiro livre).
-//                                             ack({ ok, lugar } | { erro: 'cheia'|'ocupado'|'sem moedas'|'desligado' })
+//                                             ack({ ok, lugar } | { erro: 'cheia'|'ocupado'|'sem moedas'|'desligado', minimo? })
 //     'pk-comecar'  { mesa }                começa a partida (completa com robôs até ROBOS_ATE na mesa)
 //     'pk-apostar'  { mesa, tipo, valor? }  ação na vez: tipo 'fold'|'check'|'call'|'raise'|'allin';
 //                                             'raise' usa valor = aposta total desejada na rodada
+//     'pk-blind'    { mesa, nivel }         o dono da mesa escolhe o blind (nivel: índice de BLINDS
+//                                             em poker-regras.js); com a mão rolando, vale na próxima
 //     'pk-empilhar' { mesa, empilhado }     o pote da mesa em torres (ou espalhado): só o visual,
 //                                             repassado para a sala
 //     'pk-sair'     { mesa }                levanta da mesa
@@ -22,12 +24,15 @@
 //
 // publico(m): { mesa, fase: 'espera'|'pre-flop'|'flop'|'turn'|'river'|'showdown', comunitarias,
 //   pote (o que já foi recolhido das rodadas anteriores), apostaAtual, minimo (o raise mínimo),
-//   aviso, prazo, prazoTotal, resultado, mao (número da mão), empilhado, lugares: [{ id, nome, robo,
+//   small, big, nivel, nivelProximo (o blind que entra na próxima mão, ou null), dono (o id do dono
+//   da mesa: o primeiro que sentou), minimoMesa (moedas para sentar), aviso, prazo, prazoTotal, resultado, mao (número da mão), empilhado, lugares: [{ id, nome, robo,
 //   cor, saldo, aposta, total, fold, fora, allIn, dealer, vez, mao }] }. Carta: { n, s } (ver
 //   poker-regras.js). mao do lugar é [2 cartas] só no showdown (ou null); o dono vê a sua em 'pk-mao'.
 //
-// Regras da mesa: 6 lugares, Texas Hold'em sem limite. Small blind 1, big blind 2. Quem não tem o
-// valor entra all-in com o que tem; quem está com 0 não senta. A rodada de apostas fecha quando
+// Regras da mesa: 6 lugares, Texas Hold'em sem limite. Blinds 1/2, que o dono da mesa (quem sentou
+// primeiro; quando ele levanta, passa para o próximo) pode mudar. Quem não tem o valor entra all-in
+// com o que tem; para sentar é preciso ter BIGS_MINIMO big blinds em moedas (quem já está sentado
+// joga até zerar). A rodada de apostas fecha quando
 // todos os que ainda decidem já agiram e igualaram a maior aposta (o big blind tem a opção no
 // pré-flop); um aumento reabre a rodada para os outros. Com todo mundo all-in as cartas que faltam
 // abrem sozinhas. No showdown a melhor mão de 5 entre as 7 leva o pote (split pot e side pots).
@@ -47,8 +52,6 @@ Promise.all([import('./public/js/poker-regras.js'), DADOS.pronto])
 
 const ondeEsta = (user) => (user?.p ? { x: user.p[0], y: user.p[1], z: user.p[2] } : null);
 const LUGARES = 6;
-const SMALL = 1;
-const BIG = 2;
 const ROBOS_ATE = 4; // "Começar" completa a mesa com robôs até ter tantos jogadores
 const NOMES_ROBO = ['Robô Zé', 'Robô Lia', 'Robô Tião', 'Robô Bia', 'Robô Nico', 'Robô Sol'];
 const ESPERA_ROBO = 1400; // ms que o robô "pensa"
@@ -60,11 +63,20 @@ const ESPERA_FIM_MAO = 8000; // espera entre mãos
 
 const novaMesa = (i) => ({
   i, jogo: 'poker', lugares: Array(LUGARES).fill(null), fase: 'espera', mao: 0,
-  comunitarias: [], pote: 0, apostas: Array(LUGARES).fill(0), apostaAtual: 0, ultimoAumento: BIG,
+  comunitarias: [], pote: 0, apostas: Array(LUGARES).fill(0), apostaAtual: 0, ultimoAumento: 2,
+  nivel: 0, small: 1, big: 2, nivelProximo: null,
   dealerIndex: -1, vez: -1, ate: 0, vezDesde: 0, botAte: 0, corrida: 0, aviso: '', resultado: null,
   empilhado: false,
 });
 const mesasDa = (room) => (room.poker ||= { mesas: MESAS.MESAS_POKER.map((_, i) => novaMesa(i)) });
+const minimoMesa = (m) => m.big * R.BIGS_MINIMO;
+// o dono da mesa: a pessoa sentada há mais tempo
+const donoDa = (m) => m.lugares.filter((l) => l && !l.bot).sort((a, b) => a.sentouEm - b.sentouEm)[0] || null;
+function porBlind(m, nivel) {
+  [m.small, m.big] = R.BLINDS[nivel];
+  m.nivel = nivel;
+  m.nivelProximo = null;
+}
 const longeDemais = (l, longe) => {
   if (!longe) { l.longeDesde = 0; return false; }
   l.longeDesde ||= Date.now();
@@ -121,7 +133,9 @@ function ligarPoker(io, rooms, jogoLigado, darMoedas) {
     return {
       mesa: m.i, jogo: 'poker', fase: m.fase, mao: m.mao, comunitarias: m.comunitarias.map(carta),
       pote: m.fase === 'showdown' ? 0 : Math.max(0, totalApostado(m) + (m.fantasmas || 0) - naRodada),
-      apostaAtual: m.apostaAtual, minimo: m.apostaAtual + Math.max(BIG, m.ultimoAumento),
+      apostaAtual: m.apostaAtual, minimo: m.apostaAtual + Math.max(m.big, m.ultimoAumento),
+      small: m.small, big: m.big, nivel: m.nivel, nivelProximo: m.nivelProximo, dono: donoDa(m)?.id || null,
+      minimoMesa: minimoMesa(m),
       aviso: m.aviso, resultado: m.resultado, empilhado: m.empilhado,
       prazo: m.vez >= 0 || m.fase === 'showdown' ? Math.max(0, m.vezDesde + espera - Date.now()) : 0,
       prazoTotal: espera,
@@ -170,6 +184,7 @@ function ligarPoker(io, rooms, jogoLigado, darMoedas) {
     if (!humanos(m).length) {
       m.lugares = m.lugares.map(() => null);
       zerarMesa(m);
+      porBlind(m, 0);
       m.aviso = '';
     }
     avisar(room, m);
@@ -206,6 +221,7 @@ function ligarPoker(io, rooms, jogoLigado, darMoedas) {
       avisar(room, m);
       return;
     }
+    if (m.nivelProximo !== null) porBlind(m, m.nivelProximo);
     const monte = R.embaralhar(R.novoBaralho());
     m.fase = 'pre-flop';
     m.mao++;
@@ -216,11 +232,11 @@ function ligarPoker(io, rooms, jogoLigado, darMoedas) {
     m.dealerIndex = d;
     const sb = jogando.length === 2 ? d : proximoOcupado(m, d);
     const bb = proximoOcupado(m, sb);
-    pôrFichas(room, m, sb, SMALL);
-    pôrFichas(room, m, bb, BIG);
-    m.apostaAtual = BIG;
-    m.ultimoAumento = BIG;
-    m.aviso = `Small blind ${nomeDe(m, sb)} (${SMALL}) · big blind ${nomeDe(m, bb)} (${BIG})`;
+    pôrFichas(room, m, sb, m.small);
+    pôrFichas(room, m, bb, m.big);
+    m.apostaAtual = m.big;
+    m.ultimoAumento = m.big;
+    m.aviso = `Small blind ${nomeDe(m, sb)} (${m.small}) · big blind ${nomeDe(m, bb)} (${m.big})`;
     darCartas(room, m);
     // quem fala primeiro: depois do big blind (se todos já estão all-in pelos blinds, as cartas correm)
     if (decidindo(m).length < 2 && rodadaFechada(m)) correr(m);
@@ -275,7 +291,7 @@ function ligarPoker(io, rooms, jogoLigado, darMoedas) {
       m.aviso = `${nome} foi ALL-IN: ${m.apostas[k]}!`;
     } else if (tipo === 'raise') {
       valor = Math.floor(Number(valor) || 0);
-      const minimo = m.apostaAtual + Math.max(BIG, m.ultimoAumento);
+      const minimo = m.apostaAtual + Math.max(m.big, m.ultimoAumento);
       // menos que o mínimo só vale se for tudo o que tem (all-in curto)
       if (valor < minimo && valor < m.apostas[k] + saldoDe(room, m, k)) return false;
       pôrFichas(room, m, k, valor);
@@ -323,7 +339,7 @@ function ligarPoker(io, rooms, jogoLigado, darMoedas) {
   function proximaRua(room, m) {
     m.apostas = Array(LUGARES).fill(0);
     m.apostaAtual = 0;
-    m.ultimoAumento = BIG;
+    m.ultimoAumento = m.big;
     m.corrida = 0;
     if (m.fase === 'river') return showdown(room, m);
     m.monte.pop(); // a carta queimada
@@ -422,7 +438,7 @@ function ligarPoker(io, rooms, jogoLigado, darMoedas) {
     const forca = forcaDoRobo(m, l) + (Math.random() - 0.5) * 0.15;
     const precisa = m.apostaAtual - m.apostas[k];
     const pote = totalApostado(m);
-    const aumento = (fr) => m.apostaAtual + Math.max(BIG, m.ultimoAumento, Math.ceil(pote * fr));
+    const aumento = (fr) => m.apostaAtual + Math.max(m.big, m.ultimoAumento, Math.ceil(pote * fr));
     if (precisa <= 0) {
       // pode passar; com mão boa (ou blefando de vez em quando) aposta
       if (forca > 0.7 || Math.random() < 0.08) apostar(room, m, k, 'raise', aumento(forca > 0.9 ? 0.75 : 0.5));
@@ -430,8 +446,8 @@ function ligarPoker(io, rooms, jogoLigado, darMoedas) {
       return;
     }
     const custo = precisa / Math.max(1, pote + precisa);
-    if (forca > 0.85 && m.apostaAtual < 60 && Math.random() < 0.5) apostar(room, m, k, 'raise', aumento(0.6));
-    else if (forca > custo + 0.25 || (precisa <= BIG && Math.random() < 0.6)) apostar(room, m, k, 'call');
+    if (forca > 0.85 && m.apostaAtual < 30 * m.big && Math.random() < 0.5) apostar(room, m, k, 'raise', aumento(0.6));
+    else if (forca > custo + 0.25 || (precisa <= m.big && Math.random() < 0.6)) apostar(room, m, k, 'call');
     else apostar(room, m, k, 'fold');
   }
 
@@ -510,7 +526,7 @@ function ligarPoker(io, rooms, jogoLigado, darMoedas) {
       const m = mesas?.[msg?.mesa];
       if (!m || !jogoLigado(room, 'poker')) return responder({ erro: 'desligado' });
       if (meuLugar(m, user) >= 0) return responder({ ok: true, lugar: meuLugar(m, user) });
-      if ((user.moedas ?? 0) <= 0) return responder({ erro: 'sem moedas' }); // quem está com 0 não senta
+      if ((user.moedas ?? 0) < minimoMesa(m)) return responder({ erro: 'sem moedas', minimo: minimoMesa(m) });
       const quer = msg?.lugar;
       if (Number.isInteger(quer)) {
         if (quer < 0 || quer >= m.lugares.length) return responder({ erro: 'cheia' });
@@ -523,7 +539,7 @@ function ligarPoker(io, rooms, jogoLigado, darMoedas) {
       if (k < 0) k = m.lugares.findIndex((l) => l?.bot && !(emJogo(m) && l.mao?.length && !l.fold));
       if (k < 0) return responder({ erro: 'cheia' });
       // o robô que estava ali levanta (sem cartas na mão, não leva nada do pote)
-      m.lugares[k] = { id: user.id, nome: user.name, bot: false, mao: [], fold: false, allIn: false, agiu: false, apostadoTotal: m.lugares[k]?.apostadoTotal || 0 };
+      m.lugares[k] = { id: user.id, nome: user.name, bot: false, mao: [], fold: false, allIn: false, agiu: false, apostadoTotal: m.lugares[k]?.apostadoTotal || 0, sentouEm: Date.now() };
       const n = ocupados(m).length;
       if (m.fase === 'espera') m.aviso = n >= 2 ? `${user.name} sentou: ${n} na mesa` : `${user.name} sentou: clique em Começar (os robôs completam a mesa)`;
       else m.aviso = `${user.name} sentou: entra na próxima mão`;
@@ -548,6 +564,22 @@ function ligarPoker(io, rooms, jogoLigado, darMoedas) {
       if (k < 0 || !['fold', 'check', 'call', 'raise', 'allin'].includes(msg?.tipo)) return;
       if (Date.now() - (user.pkApostouEm || 0) < INTERVALO_APOSTA) return;
       if (apostar(room, m, k, msg.tipo, msg.valor)) user.pkApostouEm = Date.now();
+    });
+
+    socket.on('pk-blind', (msg) => {
+      const { room, user, mesas } = daSala();
+      const m = mesas?.[msg?.mesa];
+      const nivel = msg?.nivel;
+      if (!m || donoDa(m)?.id !== user.id || !Number.isInteger(nivel) || !R.BLINDS[nivel]) return;
+      const [small, big] = R.BLINDS[nivel];
+      if (emJogo(m)) {
+        m.nivelProximo = nivel === m.nivel ? null : nivel;
+        m.aviso = m.nivelProximo === null ? `Blinds continuam ${m.small}/${m.big}` : `${user.name}: blinds ${small}/${big} a partir da próxima mão`;
+      } else {
+        porBlind(m, nivel);
+        m.aviso = `${user.name} mudou os blinds para ${small}/${big}`;
+      }
+      avisar(room, m);
     });
 
     socket.on('pk-empilhar', (msg) => {

@@ -13,7 +13,7 @@
 // clicar de novo espalha. Isso vale para todo mundo que olha a mesa ('pk-empilhar').
 // O servidor (poker-servidor.js) conduz tudo; o nome das mãos vem de poker-regras.js.
 import * as THREE from 'three';
-import { avaliarMao, LETRA, SIMBOLO } from './poker-regras.js';
+import { avaliarMao, LETRA, SIMBOLO, BLINDS, BIGS_MINIMO } from './poker-regras.js';
 import { MESAS_POKER } from './parque-dados.js';
 import { hud, texturaViva } from './hud-jogos.js';
 import { Avatar } from './avatars.js';
@@ -29,8 +29,9 @@ const BORDA = B_MESA - 0.21;
 const FORA = 0.68; // da beira do pano até o meio do banco
 const ASSENTO_X = 0.9; // os dois lugares de cada lateral, a esta distância do meio
 const Y_MESA = 0.85;
-const SMALL = 1;
-const BIG = 2;
+// até o estado do servidor chegar: o blind padrão e o mínimo para sentar com ele
+const [SMALL, BIG] = BLINDS[0];
+const MINIMO_MESA = BIG * BIGS_MINIMO;
 const FONTE = "'Plus Jakarta Sans', 'Segoe UI', system-ui, sans-serif";
 const fonte = (p, peso = 800) => `${peso} ${p}px ${FONTE}`;
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -38,6 +39,7 @@ const lerp = (a, b, k) => a + (b - a) * k;
 const saida = (k) => 1 - (1 - k) ** 3;
 const COR_ROBO = ['#94a3b8', '#a3e635', '#f472b6', '#fbbf24', '#22d3ee', '#c084fc'];
 const FASE = { espera: 'Esperando', 'pre-flop': 'Pré-flop', flop: 'Flop', turn: 'Turn', river: 'River', showdown: 'Showdown' };
+const emJogoAgora = (e) => e.fase !== 'espera' && e.fase !== 'showdown';
 const OUVE_ATE = 18; // metros: de mais longe, as fichas caindo não se ouvem
 
 // as fichas, do maior valor para o menor (as cores de cassino: 1 branca, 5 vermelha, 25 verde,
@@ -381,6 +383,59 @@ export function construirPoker(world) {
 }
 
 // ------------------------------------------------------------------ o jogo no navegador
+// ------------------------------------------------------------------ tutorial e cola
+// cartas de exemplo: [valor, naipe] (p ♣, c ♥, o ♦, e ♠); usa: as posições que formam o jogo (as
+// outras ficam apagadas)
+const exemplo = (lista, usa) => `<div class="ex">${lista.map(([n, s], j) => `<img src="${urlCarta({ n, s })}" alt="${esc((LETRA[n] || n) + SIMBOLO[s])}"${usa && !usa.includes(j) ? ' class="fora"' : ''}>`).join('')}</div>`;
+// os passos do tutorial: [título, () => html] (montado só quando abre: as cartas viram textura)
+const PASSOS = [
+  ['O objetivo', () => `<p>Cada um recebe <b>2 cartas fechadas</b> (só você vê as suas). No meio da mesa abrem <b>5 cartas comunitárias</b>, que valem para todo mundo.</p>
+    <p>Você monta a <b>melhor mão de 5 cartas</b> misturando as suas 2 com as 5 da mesa. Ganha o <b>pote</b> quem tiver a melhor mão no fim, ou quem sobrar quando todos os outros desistirem.</p>
+    <p>As fichas são as suas <b>moedas de verdade</b>: o que você aposta sai do saldo e o pote vai para quem ganha.</p>`],
+  ['Blinds e o botão D', (e) => `<p>Antes das cartas, os dois jogadores à esquerda do botão <b>D</b> (o "dealer") pagam apostas obrigatórias: o <b>small blind</b> (${e?.small ?? SMALL}) e o <b>big blind</b> (${e?.big ?? BIG}). É isso que faz ter sempre algo em jogo no pote.</p>
+    <p>A cada mão o <b>D</b> anda um lugar, então todo mundo paga os blinds na sua vez.</p>
+    <p>O <b>dono da mesa</b> 👑 (quem sentou primeiro) escolhe o valor dos blinds no painel do pote. Para sentar você precisa ter pelo menos ${BIGS_MINIMO} big blinds em moedas (<b>${e?.minimoMesa ?? MINIMO_MESA} moedas</b> agora: o mínimo da mesa).</p>
+    <p>Clique em <b>Começar</b> para dar as cartas: os robôs completam a mesa se faltar gente.</p>`],
+  ['As rodadas', () => `<ul>
+      <li><b>Pré-flop</b>: você recebe as suas 2 cartas e todos apostam.</li>
+      <li><b>Flop</b>: abrem 3 cartas na mesa. Nova rodada de apostas.</li>
+      <li><b>Turn</b>: abre a 4ª carta. Apostas.</li>
+      <li><b>River</b>: abre a 5ª e última. A última rodada de apostas.</li>
+      <li><b>Showdown</b>: quem continua mostra as cartas e a melhor mão leva o pote.</li>
+    </ul>
+    <p>Exemplo: com A♠ K♠ na mão e esta mesa, você fecha um <b>flush</b> de espadas (5 cartas de ♠):</p>
+    ${exemplo([[14, 'e'], [13, 'e'], [9, 'e'], [4, 'e'], [2, 'c'], [7, 'e'], [12, 'o']], [0, 1, 2, 3, 5])}`],
+  ['Na sua vez', () => `<ul>
+      <li><b>Desistir</b> (fold): larga a mão e perde o que já apostou nela.</li>
+      <li><b>Passar</b> (check): quando ninguém apostou na rodada, segue sem pagar nada.</li>
+      <li><b>Pagar</b> (call): iguala a maior aposta da rodada para continuar.</li>
+      <li><b>Aumentar</b> (raise): coloca mais. Use a barra ou os atalhos <b>Mín</b>, <b>½ pote</b> e <b>Pote</b>.</li>
+      <li><b>All-in</b>: aposta todas as suas fichas de uma vez.</li>
+    </ul>
+    <p>A plaquinha de cada oponente mostra quanto ele <b>apostou</b> nesta rodada e quanto já pôs <b>na mão</b>.</p>
+    <p>A vez tem tempo: a barrinha amarela na plaquinha de quem joga mostra quanto resta.</p>`],
+  ['Dicas', () => `<ul>
+      <li>Embaixo das suas cartas aparece o <b>nome do jogo</b> que você está fazendo agora.</li>
+      <li>Na dúvida de qual mão ganha, abra a <b>🃏 Cola</b>: ela lista todas, da melhor para a pior, e marca a sua.</li>
+      <li>Mão fraca e aposta alta? Desistir cedo custa menos.</li>
+      <li>Clique nas fichas da mesa para empilhar ou espalhar o pote.</li>
+      <li><b>Esc</b> ou <b>Levantar</b> sai da mesa.</li>
+    </ul>`],
+];
+// as mãos, da melhor para a pior. forca: a de avaliarMao (9 = royal: o straight flush que vai até o Ás)
+const COLA = [
+  { forca: 9, nome: 'Royal flush', txt: 'A sequência mais alta (10 J Q K A), toda do mesmo naipe. Imbatível.', ex: [[14, 'c'], [13, 'c'], [12, 'c'], [11, 'c'], [10, 'c']] },
+  { forca: 8, nome: 'Straight flush', txt: '5 cartas em sequência, todas do mesmo naipe.', ex: [[9, 'e'], [8, 'e'], [7, 'e'], [6, 'e'], [5, 'e']] },
+  { forca: 7, nome: 'Quadra', txt: '4 cartas do mesmo valor.', ex: [[13, 'p'], [13, 'c'], [13, 'o'], [13, 'e'], [4, 'c']], usa: [0, 1, 2, 3] },
+  { forca: 6, nome: 'Full house', txt: 'Uma trinca e um par juntos.', ex: [[10, 'e'], [10, 'c'], [10, 'o'], [6, 'p'], [6, 'e']] },
+  { forca: 5, nome: 'Flush', txt: '5 cartas do mesmo naipe, em qualquer ordem.', ex: [[14, 'o'], [11, 'o'], [8, 'o'], [5, 'o'], [3, 'o']] },
+  { forca: 4, nome: 'Sequência', txt: '5 valores seguidos, de naipes misturados. O Ás vale alto (10 a A) ou baixo (A a 5).', ex: [[10, 'p'], [9, 'c'], [8, 'e'], [7, 'o'], [6, 'p']] },
+  { forca: 3, nome: 'Trinca', txt: '3 cartas do mesmo valor.', ex: [[7, 'p'], [7, 'c'], [7, 'e'], [13, 'o'], [2, 'p']], usa: [0, 1, 2] },
+  { forca: 2, nome: 'Dois pares', txt: 'Dois pares de valores diferentes.', ex: [[12, 'c'], [12, 'e'], [5, 'p'], [5, 'o'], [9, 'c']], usa: [0, 1, 2, 3] },
+  { forca: 1, nome: 'Par', txt: '2 cartas do mesmo valor.', ex: [[11, 'p'], [11, 'o'], [14, 'e'], [8, 'c'], [3, 'p']], usa: [0, 1] },
+  { forca: 0, nome: 'Carta alta', txt: 'Nada disso? Vale a sua carta mais alta.', ex: [[14, 'e'], [12, 'o'], [9, 'p'], [6, 'c'], [2, 'e']], usa: [0] },
+];
+
 export class Poker {
   // opts: world, player, sfx, ligado(), focar() (main.js: solta o mouse, sem andar), soltarFoco()
   constructor(opts) {
@@ -900,7 +955,7 @@ export class Poker {
     }
     this.socket?.emit('pk-sentar', { mesa: M.i, lugar: livres[0] }, (r) => {
       if (!r?.ok) {
-        const texto = { 'sem moedas': ['Sem moedas', 'Você precisa de moedas para jogar poker'], ocupado: ['Alguém sentou aí', 'Tente de novo'], 'robo jogando': ['O robô está no meio da mão', 'Espere a mão acabar'], cheia: ['Mesa cheia', ''], desligado: ['Poker desligado', 'O dono da sala desligou este jogo'] }[r?.erro] || ['Não deu para sentar', ''];
+        const texto = { 'sem moedas': ['Moedas insuficientes', `A mesa pede no mínimo ${r.minimo ?? MINIMO_MESA} moedas para sentar`], ocupado: ['Alguém sentou aí', 'Tente de novo'], 'robo jogando': ['O robô está no meio da mão', 'Espere a mão acabar'], cheia: ['Mesa cheia', ''], desligado: ['Poker desligado', 'O dono da sala desligou este jogo'] }[r?.erro] || ['Não deu para sentar', ''];
         hud.mensagem(texto[0], texto[1], 2000);
         this.soltarFoco?.();
         return;
@@ -914,6 +969,12 @@ export class Poker {
       this.raiz.hidden = false;
       this.$('.pk-dica').hidden = false;
       document.body.classList.add('pk-sentado');
+      let viu = true;
+      try {
+        viu = !!localStorage.getItem('pk-tutorial');
+        localStorage.setItem('pk-tutorial', '1');
+      } catch {}
+      if (!viu) this.abrirGuia('tutorial', 0);
       // as cartas e o pote passam a ficar virados para mim
       this.arrumarPote(M, true);
       this.mostrarCartas(M);
@@ -940,6 +1001,7 @@ export class Poker {
     const M = this.ativa;
     if (!M) return;
     this.ativa = null;
+    this.fecharGuia();
     this.raiz.hidden = true;
     document.body.classList.remove('pk-sentado');
     this.world.canvas.style.cursor = '';
@@ -971,7 +1033,11 @@ body.pk-sentado #controls-help, body.pk-sentado #sit-hint { display: none !impor
 .pk-b.azul { --cor: #2563eb; --sombra: #1e3a8a; } .pk-b.ouro { --cor: #f59e0b; --sombra: #92400e; color: #1c1206; }
 .pk-b small { display: block; font-size: 11px; opacity: .8; font-weight: 700; }
 .pk-painel { background: linear-gradient(#1f2937f2, #111827f2); border: 1px solid #ffffff1f; border-radius: 14px; box-shadow: 0 10px 30px rgba(0,0,0,.4); }
-.pk-info { position: absolute; left: 78px; top: 64px; width: 200px; padding: 12px; display: grid; gap: 8px; }
+.pk-esq { position: absolute; left: 78px; top: 64px; width: 200px; display: grid; gap: 8px; }
+.pk-info { padding: 12px; display: grid; gap: 8px; }
+.pk-ajuda { display: flex; gap: 6px; }
+.pk-ajuda button { flex: 1; padding: 6px 4px; border: 1px solid #334155; border-radius: 8px; background: #1e293b; color: #e2e8f0; font-size: 12px !important; }
+.pk-ajuda button:hover { background: #334155; }
 .pk-titulo { font: 900 22px ${FONTE}; letter-spacing: .04em; color: #4ade80; }
 .pk-titulo span { color: #f87171; }
 .pk-pote { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; background: #0b1f17; }
@@ -979,6 +1045,11 @@ body.pk-sentado #controls-help, body.pk-sentado #sit-hint { display: none !impor
 .pk-pote b { font-size: 24px; }
 .pk-pote small, .pk-linha small { display: block; font-size: 10px; letter-spacing: .1em; color: #94a3b8; }
 .pk-linha { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
+.pk-dono { display: grid; gap: 4px; padding: 6px 8px; border-radius: 10px; background: #0b1220; }
+.pk-dono small { display: block; margin-bottom: 4px; font-size: 10px; letter-spacing: .1em; color: #fbbf24; }
+.pk-dono select { width: 100%; padding: 5px 6px; border: 1px solid #334155; border-radius: 8px; background: #1e293b; color: #f8fafc; font: 700 12px ${FONTE}; pointer-events: auto; cursor: pointer; }
+.pk-v-proximo { font-size: 11px; color: #fde68a; }
+.pk-assentos .coroa { position: absolute; top: -12px; left: 50%; transform: translateX(-50%); font-size: 14px; }
 .pk-aviso { font-size: 13px; color: #fde68a; min-height: 18px; line-height: 1.3; }
 .pk-sair { position: absolute; right: 18px; top: 64px; }
 .pk-assentos > div { position: absolute; left: 0; top: 0; min-width: 118px; padding: 6px 10px 7px; text-align: center; pointer-events: none;
@@ -993,6 +1064,9 @@ body.pk-sentado #controls-help, body.pk-sentado #sit-hint { display: none !impor
 .pk-assentos .selo { position: absolute; top: -10px; right: -8px; padding: 1px 6px; border-radius: 8px; font-size: 11px; background: #f8fafc; color: #111827; }
 .pk-assentos .selo.allin { background: #dc2626; color: #fff; left: -8px; right: auto; }
 .pk-assentos .aposta { margin-top: 3px; font-size: 12px; color: #fde68a; }
+.pk-assentos .lance { display: inline-flex; align-items: center; gap: 5px; margin-top: 4px; padding: 2px 8px; border-radius: 999px; background: #422006; color: #fde68a; font-size: 13px; }
+.pk-assentos .lance i { width: 12px; height: 12px; border-radius: 50%; background: radial-gradient(circle, #dc2626 45%, #fff 46% 56%, #dc2626 57%); flex: none; }
+.pk-assentos .total { margin-top: 2px; font-size: 11px; color: #94a3b8; }
 .pk-assentos .jogo { margin-top: 3px; font-size: 11px; color: #fbbf24; }
 .pk-assentos .mini { display: flex; gap: 3px; justify-content: center; margin-top: 4px; }
 .pk-assentos .mini img { width: 30px; border-radius: 3px; }
@@ -1019,12 +1093,44 @@ body.pk-sentado #controls-help, body.pk-sentado #sit-hint { display: none !impor
 .pk-banner { position: absolute; left: 50%; bottom: 200px; transform: translateX(-50%); padding: 12px 22px; border-radius: 14px; text-align: center;
   background: linear-gradient(#78350ff2, #451a03f2); border: 2px solid #fbbf24; box-shadow: 0 12px 30px rgba(0,0,0,.45); font-size: 18px; animation: pk-chega .5s ease both; }
 .pk-banner small { display: block; font-size: 12px; color: #fde68a; margin-top: 2px; }
-.pk-dica { position: absolute; left: 78px; top: 270px; max-width: 200px; padding: 6px 12px; border-radius: 10px; background: #0f172acc; font-size: 12px; color: #cbd5e1; }
+.pk-dica { padding: 6px 12px; border-radius: 10px; background: #0f172acc; font-size: 12px; color: #cbd5e1; }
+.pk-fundo { position: absolute; inset: 0; display: grid; place-items: center; padding: 12px; background: #020617b3; pointer-events: auto; animation: pk-aparece .2s ease both; }
+.pk-guia { position: relative; width: min(600px, 100%); max-height: calc(100vh - 24px); overflow-y: auto; padding: 20px 22px; animation: pk-chega .3s cubic-bezier(.2,.8,.2,1) both; }
+.pk-guia h2 { margin: 0 34px 4px 0; font: 900 20px ${FONTE}; color: #4ade80; }
+.pk-guia h3 { margin: 0 0 8px; font-size: 17px; color: #fbbf24; }
+.pk-guia p, .pk-guia li { font-weight: 600; line-height: 1.5; color: #e2e8f0; }
+.pk-guia p { margin: 0 0 10px; }
+.pk-guia b { color: #fff; }
+.pk-fechar { position: absolute; right: 12px; top: 12px; width: 32px; height: 32px; border: 0; border-radius: 8px; background: #334155; color: #fff; font-size: 18px !important; }
+.pk-fechar:hover { background: #475569; }
+.pk-abas { display: flex; gap: 6px; margin: 10px 0 14px; }
+.pk-abas button { padding: 6px 12px; border: 1px solid #334155; border-radius: 8px; background: #0b1220; color: #94a3b8; }
+.pk-abas button[aria-selected="true"] { background: #16a34a; border-color: #16a34a; color: #fff; }
+.pk-passo ul { margin: 0 0 10px; padding-left: 18px; }
+.pk-passo .ex { display: flex; gap: 4px; margin: 4px 0 12px; }
+.pk-guia .ex img { width: 34px; border-radius: 4px; box-shadow: 0 2px 6px rgba(0,0,0,.4); }
+.pk-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 14px; }
+.pk-pontos { display: flex; gap: 6px; }
+.pk-pontos i { width: 8px; height: 8px; border-radius: 50%; background: #334155; }
+.pk-pontos i.on { background: #4ade80; }
+.pk-cola { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.pk-cola li { display: grid; grid-template-columns: 22px 1fr auto; align-items: center; gap: 4px 10px; padding: 8px 10px; border-radius: 10px; background: #0b1220; border: 2px solid transparent; }
+.pk-cola li.agora { border-color: #fbbf24; background: #422006; }
+.pk-cola .pos { font-size: 18px; font-weight: 900; color: #64748b; text-align: center; }
+.pk-cola .nm { color: #fbbf24; font-size: 15px; }
+.pk-cola .nm em { font-style: normal; font-size: 11px; color: #fde68a; margin-left: 6px; }
+.pk-cola .txt { display: block; font-size: 12px; color: #cbd5e1; font-weight: 600; line-height: 1.35; }
+.pk-cola .ex { display: flex; gap: 2px; }
+.pk-cola .ex img { width: 26px; }
+.pk-cola .ex img.fora { opacity: .3; }
+.pk-rodape { margin-top: 12px !important; font-size: 12px; color: #94a3b8 !important; }
+@keyframes pk-aparece { from { opacity: 0; } }
 @keyframes pk-chega { from { opacity: 0; transform: translateY(26px) scale(.85); } }
 @keyframes pk-pulo { 30% { transform: translateY(-8px); } }
 @keyframes pk-brilha { to { box-shadow: 0 0 22px #fbbf24aa; } }
 @media (max-width: 760px) {
-  .pk-info { left: 10px; top: 56px; width: 150px; padding: 8px; } .pk-pote b { font-size: 18px; }
+  .pk-esq { left: 10px; top: 56px; width: 150px; } .pk-info { padding: 8px; } .pk-pote b { font-size: 18px; }
+  .pk-guia { padding: 14px; } .pk-cola li { grid-template-columns: 22px 1fr; } .pk-cola .ex { grid-column: 2; }
   .pk-baixo { flex-direction: column; align-items: center; bottom: 8px; gap: 6px; }
   .pk-cartas img { width: 54px; } .pk-raise input { width: 120px; } .pk-b { padding: 8px 11px; }
 }
@@ -1035,14 +1141,24 @@ body.pk-sentado #controls-help, body.pk-sentado #sit-hint { display: none !impor
     raiz.id = 'pk-hud';
     raiz.hidden = true;
     raiz.innerHTML = `
+      <div class="pk-esq">
       <div class="pk-info pk-painel">
         <div class="pk-titulo">♠ POKER <span>♥</span></div>
         <div class="pk-pote"><i></i><div><small>POTE</small><b class="pk-v-pote">0</b></div></div>
-        <div class="pk-linha"><div><small>BLINDS</small>${SMALL}/${BIG}</div><div><small>FASE</small><span class="pk-v-fase">—</span></div><div><small>MÃO</small><span class="pk-v-mao">—</span></div></div>
+        <div class="pk-linha"><div><small>BLINDS</small><span class="pk-v-blinds">${SMALL}/${BIG}</span></div><div><small>FASE</small><span class="pk-v-fase">—</span></div><div><small>MÃO</small><span class="pk-v-mao">—</span></div></div>
+        <div class="pk-linha"><div><small>MÍNIMO DA MESA</small><span class="pk-v-min">${MINIMO_MESA}</span> moedas</div><div><small>APOSTA</small><span class="pk-v-aposta">—</span></div></div>
+        <div class="pk-dono" hidden>
+          <label><small>👑 VOCÊ É O DONO DA MESA</small>
+            <select aria-label="Blinds da mesa">${BLINDS.map(([s, b], i) => `<option value="${i}">Blinds ${s}/${b} · mín. ${b * BIGS_MINIMO}</option>`).join('')}</select>
+          </label>
+          <span class="pk-v-proximo" hidden></span>
+        </div>
         <div class="pk-aviso"></div>
+        <div class="pk-ajuda"><button type="button" data-guia="tutorial">❓ Como jogar</button><button type="button" data-guia="cola">🃏 Cola</button></div>
+      </div>
+      <div class="pk-dica">Clique nas fichas da mesa para empilhar o pote</div>
       </div>
       <button type="button" class="pk-b pk-sair" data-pk="sair">Levantar <small>Esc</small></button>
-      <div class="pk-dica">Clique nas fichas da mesa para empilhar o pote</div>
       <div class="pk-assentos"></div>
       <div class="pk-banner" hidden></div>
       <div class="pk-baixo">
@@ -1060,12 +1176,83 @@ body.pk-sentado #controls-help, body.pk-sentado #sit-hint { display: none !impor
           <button type="button" class="pk-b ouro" data-pk="allin">All-in<small class="pk-v-allin">0</small></button>
           <div class="pk-espera"></div>
         </div>
+      </div>
+      <div class="pk-fundo" hidden>
+        <div class="pk-guia pk-painel" role="dialog" aria-modal="true" aria-labelledby="pk-guia-titulo">
+          <button type="button" class="pk-fechar" data-guia="fechar" aria-label="Fechar">✕</button>
+          <h2 id="pk-guia-titulo">♠ Poker Texas Hold'em</h2>
+          <div class="pk-abas" role="tablist">
+            <button type="button" role="tab" data-guia="tutorial">Como jogar</button>
+            <button type="button" role="tab" data-guia="cola">Cola das mãos</button>
+          </div>
+          <div class="pk-conteudo"></div>
+        </div>
       </div>`;
     document.body.appendChild(raiz);
     this.raiz = raiz;
     this.barra = raiz.querySelector('.pk-raise input');
     this.barra.addEventListener('input', () => this.mostrarRaise());
+    this.$('.pk-dono select').addEventListener('change', (ev) => {
+      const M = this.ativa;
+      if (M) this.socket?.emit('pk-blind', { mesa: M.i, nivel: Number(ev.target.value) });
+      ev.target.blur();
+    });
     raiz.addEventListener('click', (ev) => this.clique(ev));
+  }
+
+  // ---------------------------------------------------------------- tutorial e cola
+  // o modal por cima da mesa: 'tutorial' (passo a passo) ou 'cola' (as mãos da melhor para a pior).
+  // Esc fecha só o modal (pego antes do main.js, que levantaria da mesa)
+  abrirGuia(aba, passo = this.passo || 0) {
+    const fundo = this.$('.pk-fundo');
+    this.passo = Math.max(0, Math.min(PASSOS.length - 1, passo));
+    for (const t of this.$('.pk-abas').children) t.setAttribute('aria-selected', String(t.dataset.guia === aba));
+    this.$('.pk-conteudo').innerHTML = aba === 'cola' ? this.htmlCola() : this.htmlPasso();
+    if (!fundo.hidden) return;
+    fundo.hidden = false;
+    this._escGuia = (ev) => {
+      if (ev.key !== 'Escape') return;
+      ev.stopPropagation();
+      ev.preventDefault();
+      this.fecharGuia();
+    };
+    document.addEventListener('keydown', this._escGuia, true);
+  }
+
+  fecharGuia() {
+    this.$('.pk-fundo').hidden = true;
+    if (this._escGuia) document.removeEventListener('keydown', this._escGuia, true);
+    this._escGuia = null;
+  }
+
+  htmlPasso() {
+    const k = this.passo;
+    const [titulo, corpo] = PASSOS[k];
+    const ultimo = k === PASSOS.length - 1;
+    return `<div class="pk-passo"><h3>${k + 1}. ${titulo}</h3>${corpo(this.ativa?.e)}</div>
+      <div class="pk-nav">
+        <button type="button" class="pk-b" data-passo="-1" ${k === 0 ? 'disabled' : ''}>← Voltar</button>
+        <div class="pk-pontos">${PASSOS.map((_, i) => `<i class="${i === k ? 'on' : ''}"></i>`).join('')}</div>
+        ${ultimo ? '<button type="button" class="pk-b verde" data-guia="fechar">Bora jogar!</button>' : '<button type="button" class="pk-b verde" data-passo="1">Próximo →</button>'}
+      </div>`;
+  }
+
+  htmlCola() {
+    // a mão que eu tenho agora fica marcada na lista
+    const M = this.ativa;
+    const sete = M ? [...M.mao, ...(M.e?.comunitarias || [])] : [];
+    let agora = -1;
+    if (sete.length >= 5 && !M.e?.lugares[M.lugar]?.fold) {
+      const a = avaliarMao(sete);
+      agora = a.forca === 8 && a.tie[0] === 14 ? 9 : a.forca;
+    }
+    return `<ol class="pk-cola">${COLA.map((h, i) => `
+      <li class="${h.forca === agora ? 'agora' : ''}">
+        <span class="pos">${i + 1}</span>
+        <div><span class="nm">${h.nome}${h.forca === agora ? '<em>← a sua mão agora</em>' : ''}</span><span class="txt">${h.txt}</span></div>
+        ${exemplo(h.ex, h.usa)}
+      </li>`).join('')}</ol>
+      <p class="pk-rodape">Mesma mão? Vence quem tem as cartas mais altas nela; se ainda empatar, a carta que sobra (o <b>kicker</b>) desempata. O naipe nunca desempata: empate de verdade divide o pote. Os valores, do maior para o menor: A K Q J 10 9 8 7 6 5 4 3 2.</p>`;
   }
 
   // os números da minha vez: quanto falta pagar, o mínimo e o máximo do aumento
@@ -1090,9 +1277,13 @@ body.pk-sentado #controls-help, body.pk-sentado #sit-hint { display: none !impor
   clique(ev) {
     const b = ev.target.closest('button');
     const M = this.ativa;
+    if (!b && ev.target.classList.contains('pk-fundo')) return this.fecharGuia();
     if (!b || !M) return;
     b.blur();
     const d = b.dataset;
+    if (d.guia === 'fechar') return this.fecharGuia();
+    if (d.guia) return this.abrirGuia(d.guia);
+    if (d.passo) return this.abrirGuia('tutorial', this.passo + Number(d.passo));
     if (d.pk === 'sair') return this.soltarFoco?.();
     if (d.pk === 'comecar') return this.socket?.emit('pk-comecar', { mesa: M.i });
     if (d.rap) {
@@ -1120,6 +1311,20 @@ body.pk-sentado #controls-help, body.pk-sentado #sit-hint { display: none !impor
     this.$('.pk-v-pote').textContent = String(e.fase === 'showdown' ? e.resultado?.pote ?? 0 : e.pote + naRodada);
     this.$('.pk-v-fase').textContent = FASE[e.fase] || e.fase;
     this.$('.pk-v-mao').textContent = e.mao ? `#${e.mao}` : '—';
+    this.$('.pk-v-min').textContent = String(e.minimoMesa ?? MINIMO_MESA);
+    this.$('.pk-v-blinds').textContent = `${e.small ?? SMALL}/${e.big ?? BIG}`;
+    // o dono da mesa escolhe o blind (com a mão rolando, o escolhido entra na próxima)
+    const dono = this.$('.pk-dono');
+    dono.hidden = !e.dono || e.dono !== e.lugares[M.lugar]?.id;
+    if (!dono.hidden) {
+      const nivel = e.nivelProximo ?? e.nivel ?? 0;
+      const sel = dono.querySelector('select');
+      if (document.activeElement !== sel) sel.value = String(nivel);
+      const prox = this.$('.pk-v-proximo');
+      prox.hidden = e.nivelProximo == null;
+      if (!prox.hidden) prox.textContent = `Vale a partir da próxima mão (agora ${e.small}/${e.big})`;
+    }
+    this.$('.pk-v-aposta').textContent = emJogoAgora(e) && e.apostaAtual ? String(e.apostaAtual) : '—';
     this.$('.pk-aviso').textContent = e.aviso || '';
     this.$('.pk-v-saldo').textContent = String(c?.saldo ?? 0);
     // as minhas cartas e o que elas fazem com a mesa
@@ -1194,17 +1399,21 @@ body.pk-sentado #controls-help, body.pk-sentado #sit-hint { display: none !impor
     const maos = new Map((e.fase === 'showdown' ? e.resultado?.maos || [] : []).map((x) => [x.lugar, x.mao]));
     this.$('.pk-assentos').innerHTML = e.lugares.map((l, k) => {
       if (!l) return `<div data-lugar="${k}"><span class="vazio">Lugar livre</span></div>`;
+      const coroa = e.dono && l.id === e.dono ? '<span class="coroa" title="Dono da mesa">👑</span>' : '';
       const classes = [l.vez && 'vez', k === M.lugar && 'eu', l.fold && 'fold', vencedores.has(k) && 'ganhou'].filter(Boolean).join(' ');
       const nome = k === M.lugar ? 'Você' : `${l.robo ? '🤖 ' : ''}${l.nome}`;
       const fichas = l.robo ? '∞ fichas' : `${l.saldo ?? 0} fichas`;
-      const estado = l.fora ? 'próxima mão' : l.fold ? 'desistiu' : l.aposta ? `aposta ${l.aposta}` : '';
+      const estado = l.fora ? 'próxima mão' : l.fold ? 'desistiu' : '';
+      // o que apostou nesta rodada (em destaque) e o total que já pôs nesta mão
+      const lance = l.aposta && !l.fora ? `<div class="lance"><i></i>apostou ${l.aposta}</div>` : '';
+      const total = l.total && !l.fora && e.fase !== 'espera' ? `<div class="total">${l.total} na mão</div>` : '';
       const mini = l.mao?.length ? `<div class="mini">${l.mao.map((x) => `<img src="${urlCarta(x)}" alt="">`).join('')}</div>` : '';
       const jogo = maos.has(k) ? `<div class="jogo">${esc(maos.get(k))}</div>` : '';
       return `<div data-lugar="${k}" class="${classes}">
-        ${l.dealer ? '<span class="selo">D</span>' : ''}${l.allIn ? '<span class="selo allin">ALL-IN</span>' : ''}
+        ${coroa}${l.dealer ? '<span class="selo">D</span>' : ''}${l.allIn ? '<span class="selo allin">ALL-IN</span>' : ''}
         <div class="nome" style="${l.cor && k !== M.lugar ? `color:${esc(l.cor)}` : ''}">${esc(nome)}</div>
         <div class="fichas">${fichas}</div>
-        ${estado ? `<div class="aposta">${esc(estado)}</div>` : ''}${mini}${jogo}
+        ${estado ? `<div class="aposta">${esc(estado)}</div>` : ''}${lance}${total}${mini}${jogo}
         ${l.vez ? '<div class="tempo"><i></i></div>' : ''}
       </div>`;
     }).join('');
@@ -1256,7 +1465,7 @@ body.pk-sentado #controls-help, body.pk-sentado #sit-hint { display: none !impor
       el.style.visibility = '';
       // a plaquinha fica pendurada acima do ponto: não sobe para fora da tela nem cobre o painel do pote
       const y = Math.min(h - 220, Math.max(el.offsetHeight + 60, ((1 - v.y) / 2) * h));
-      const x = Math.min(w - 80, Math.max(y < 260 ? 370 : 80, ((v.x + 1) / 2) * w));
+      const x = Math.min(w - 80, Math.max(y < 360 ? 370 : 80, ((v.x + 1) / 2) * w));
       el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, -100%)`;
     }
   }
@@ -1272,7 +1481,7 @@ body.pk-sentado #controls-help, body.pk-sentado #sit-hint { display: none !impor
     const M = this.mesaPerto();
     if (!M || !this.ligado()) return '';
     const gente = M.e?.lugares.filter((l) => l && !l.robo).length || 0;
-    return `<kbd>E</kbd>Sentar na mesa de poker${gente ? ` (${gente} ${gente === 1 ? 'pessoa' : 'pessoas'})` : ''}`;
+    return `<kbd>E</kbd>Sentar na mesa de poker${gente ? ` (${gente} ${gente === 1 ? 'pessoa' : 'pessoas'})` : ''} · mín. ${M.e?.minimoMesa ?? MINIMO_MESA} moedas`;
   }
 
   lugar() {

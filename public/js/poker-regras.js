@@ -8,6 +8,11 @@ export const LETRA = { 11: 'J', 12: 'Q', 13: 'K', 14: 'A' };
 export const rotulo = (c) => (LETRA[c.n] || c.n) + SIMBOLO[c.s];
 export const cartaId = (c) => (LETRA[c.n] || c.n) + c.s;
 
+// os níveis de blind que o dono da mesa pode escolher: [small, big]. O primeiro é o padrão
+export const BLINDS = [[1, 2], [2, 4], [5, 10], [10, 20], [25, 50], [50, 100]];
+// para sentar é preciso ter tantos big blinds em moedas
+export const BIGS_MINIMO = 10;
+
 export function novoBaralho() {
   const b = [];
   for (const s of NAIPES) for (let n = 2; n <= 14; n++) b.push({ n, s, id: cartaId({ n, s }) });
