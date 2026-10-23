@@ -168,6 +168,11 @@ export const sfx = {
   // de cada ponto contado (subindo também) e o fogo do truco
   cartaSel: (n = 0) => tone({ freq: 520 * 2 ** ((n * 2) / 12), dur: 0.06, type: 'square', gain: 0.022 }),
   cartaVoa: () => ruido({ dur: 0.14, gain: 0.05, type: 'bandpass', freq: 3200, toFreq: 1400, q: 1.4 }),
+  // ficha de poker caindo na mesa: o "tlec" de barro (estalo agudo e um tique)
+  ficha: (vol = 1) => {
+    ruido({ dur: 0.045, gain: 0.06 * vol, type: 'bandpass', freq: 4300 + Math.random() * 900, q: 2.5 });
+    tone({ freq: 2500 + Math.random() * 700, dur: 0.035, type: 'triangle', gain: 0.014 * vol, delay: 0.012 });
+  },
   ponto: (n = 0) => tone({ freq: 620 * 2 ** (Math.min(n, 24) / 12), dur: 0.07, type: 'triangle', gain: 0.04 }),
   fogo: () => {
     ruido({ dur: 0.5, gain: 0.07, type: 'bandpass', freq: 600, toFreq: 2400, q: 0.8 });

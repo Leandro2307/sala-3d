@@ -8,8 +8,8 @@ const MAPA = mapaDoModulo(import.meta.url);
 const P = parqueDe(MAPA);
 
 // Salão de jogos: um pavilhão aberto com telhado de vidro. Três colunas de mesas: pingue-pongue,
-// sinuca e cartas, duas de cada.
-export const { SALAO, MESAS_PINGUE, MESAS_SINUCA, MESAS_CARTAS } = P;
+// sinuca e cartas, duas de cada; as duas de poker no corredor do meio.
+export const { SALAO, MESAS_PINGUE, MESAS_SINUCA, MESAS_CARTAS, MESAS_POKER } = P;
 
 // Quadra de queimada: comp no eixo x (os dois campos, um de cada lado do meio), larg no z. O
 // "cemitério" de cada time fica atrás da linha de fundo do outro.

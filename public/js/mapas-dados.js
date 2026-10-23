@@ -77,7 +77,7 @@ export function mapaDoModulo(url) {
 }
 
 // ------------------------------------------------------------------ o parque
-// Salão de jogos (pingue-pongue, sinuca e cartas), queimada, pinta-território, minigolfe, gincana e
+// Salão de jogos (pingue-pongue, sinuca, cartas e poker), queimada, pinta-território, minigolfe, gincana e
 // kart, no lugar deste mapa. Só números: o servidor confere quem joga em cada mesa por aqui.
 export function parqueDe(mapa) {
   const M = MAPAS[mapa];
@@ -91,6 +91,8 @@ export function parqueDe(mapa) {
     MESAS_PINGUE: [{ x: 2 + s.dx, z: 638 + s.dz }, { x: 2 + s.dx, z: 660 + s.dz }],
     MESAS_SINUCA: [{ x: 22.5 + s.dx, z: 638 + s.dz }, { x: 22.5 + s.dx, z: 660 + s.dz }],
     MESAS_CARTAS: [{ x: 41.5 + s.dx, z: 638 + s.dz, jogo: 'truco' }, { x: 41.5 + s.dx, z: 660 + s.dz, jogo: 'uno' }, { x: 41.5 + s.dx, z: 649 + s.dz, jogo: 'vinteum' }],
+    // poker: no corredor do meio, entre o pingue-pongue e a sinuca e entre a sinuca e as cartas
+    MESAS_POKER: [{ x: 12 + s.dx, z: 649 + s.dz }, { x: 32 + s.dx, z: 649 + s.dz }],
     QUEIMADA: { cx: 75 + q.dx, cz: 616 + q.dz, comp: 30, larg: 15, cemiterio: 5 },
     PINTA_ARENA: { cx: 133 + p.dx, cz: 637 + p.dz, lado: 56 },
     GOLFE_AREA: { x0: -48 + g.dx, x1: -6 + g.dx, z0: 548 + g.dz, z1: 626 + g.dz },

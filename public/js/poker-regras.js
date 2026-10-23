@@ -58,18 +58,17 @@ export function avaliarMao(cartas) {
 
   // flush: tem 5+ do mesmo naipe? a mão é as 5 maiores dele
   let flush = null;
+  let doFlush = null; // todas as do naipe do flush (o straight flush pode usar as menores)
   for (const s of NAIPES) {
     const doNaipe = cartas.filter((c) => c.s === s).sort((a, b) => b.n - a.n);
-    if (doNaipe.length >= 5) { flush = doNaipe.slice(0, 5); break; }
+    if (doNaipe.length >= 5) { flush = doNaipe.slice(0, 5); doFlush = doNaipe; break; }
   }
   const sequencia = melhorSequencia(cartas.map((c) => c.n));
 
   let forca, tie;
-  if (flush && sequencia) {
-    // straight flush: as 5 da sequência têm que ser do naipe do flush
-    const sf = sequencia.map((n) => flush.find((c) => c.n === n || (n === 1 && c.n === 14)));
-    if (sf.every(Boolean)) { forca = 8; tie = sequencia; }
-  }
+  // straight flush: uma sequência só com as cartas do naipe do flush
+  const seqFlush = doFlush && melhorSequencia(doFlush.map((c) => c.n));
+  if (seqFlush) { forca = 8; tie = seqFlush; }
   if (forca === undefined && quadras.length) {
     forca = 7;
     const resto = cont.find(([n, q]) => n !== quadras[0] && q < 4);
@@ -80,8 +79,8 @@ export function avaliarMao(cartas) {
     const p = trincas.length > 1 ? trincas[1] : pares[0];
     tie = [trincas[0], p];
   }
-  if (forca === undefined && sequencia) { forca = 4; tie = sequencia; }
   if (forca === undefined && flush) { forca = 5; tie = flush.map((c) => c.n); }
+  if (forca === undefined && sequencia) { forca = 4; tie = sequencia; }
   if (forca === undefined && trincas.length) {
     forca = 3;
     const kickers = cont.filter(([n, q]) => n !== trincas[0]).map(([n]) => n).sort((a, b) => b - a);
@@ -105,7 +104,10 @@ export function avaliarMao(cartas) {
 
   // as 5 cartas da melhor mão, na ordem do desempate (o As-baixo entra como 14, vale 1)
   let escolhidas;
-  if (forca === 8 || forca === 4) escolhidas = tie.map((n) => cartas.find((c) => c.n === n) || cartas.find((c) => c.n === 14 && n === 1)).filter(Boolean);
+  if (forca === 8 || forca === 4) {
+    const de = forca === 8 ? doFlush : cartas;
+    escolhidas = tie.map((n) => de.find((c) => c.n === n || (n === 1 && c.n === 14))).filter(Boolean);
+  }
   else if (forca === 5) escolhidas = flush;
   else {
     const porValor = (n) => cartas.filter((c) => c.n === n).sort((a, b) => a.s < b.s ? -1 : 1);

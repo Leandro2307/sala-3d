@@ -66,5 +66,13 @@ const com3 = ['2c', '3e', '4p', '5o', 'Kc', 'Kd', '9e'].map(C);
 const v7 = vencedores([{ id: 'a', cartas: ['Ao', 'Qp'].map(C) }], com3); // 2-3-4-5-A
 testa('7 cartas: melhor é As-baixo', v7.length === 1 && avaliarMao([...v7[0].cartas, ...com3]).tie[0] === 5);
 
+// flush e sequência juntos (sem ser straight flush): o flush vale mais
+const fs7 = avaliarMao(['4c', '5c', '6e', '7c', '8p', 'Kc', '2c'].map(C));
+testa('flush com sequência junto: vale o flush', fs7.forca === 5);
+
+// straight flush com 6 do naipe: a sequência usa as menores (o flush são as 5 maiores)
+const sf6 = avaliarMao(['3c', '4c', '5c', '6c', '7c', 'Kc', 'Ae'].map(C));
+testa('straight flush com 6 do naipe', sf6.forca === 8 && sf6.tie[0] === 7 && sf6.cartas.every((c) => c.s === 'c'));
+
 console.log(falhas ? `\n${falhas} teste(s) falharam` : '\ntodos os testes passaram');
 process.exit(falhas ? 1 : 0);

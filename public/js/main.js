@@ -34,6 +34,7 @@ import { Queimada } from './queimada.js';
 import { Sinuca } from './sinuca.js';
 import { Golfe } from './golfe.js';
 import { Cartas, primarVoz } from './cartas.js';
+import { Poker } from './poker.js';
 import { Gincana } from './gincana.js';
 import { Fantasmas } from './fantasmas.js';
 import { Kart } from './kart.js';
@@ -234,6 +235,14 @@ const cartas = new Cartas({
   tiroFx: (de, ate) => desenharTiro(de, ate),
 });
 jogosDoParque.push(cartas);
+// poker nas mesas do meio do salão: sentado, como nas cartas (câmera atrás da cadeira, mouse solto
+// para os botões e para clicar nas fichas)
+const poker = new Poker({
+  world, player, sfx, ligado: () => jogoLigado('poker'),
+  focar: () => focarCartas('poker'),
+  soltarFoco: () => { if (state.focus?.kind === 'poker') sairDoFoco(); },
+});
+jogosDoParque.push(poker);
 // gincana: 10 fases e a final, bem longe do mapa (o portal fica na pracinha da aventura, com os do céu)
 const gincana = new Gincana({
   world, player, sfx, ligado: () => jogoLigado('gincana'),
@@ -1397,8 +1406,11 @@ function bindSocket() {
     u.moedas = moedas;
     if (u.isSelf) {
       mostrarMoedas(true);
-      sfx.moeda();
-      toast(`+${delta} moedas · ${motivo}`, 'success', 4500);
+      // as apostas (poker) tiram do saldo sem festa; o que entra toca a moeda
+      if (delta > 0) {
+        sfx.moeda();
+        toast(`+${delta} moedas · ${motivo}`, 'success', 4500);
+      }
     } else if (delta >= 50) {
       toast(`${u.name} ganhou ${delta} moedas (${motivo})`, 'info', 4000, u.color);
     }
@@ -2637,6 +2649,7 @@ const JOGOS_DA_SALA = [
   ['truco', 'Truco', 'Truco mineiro em duplas, com os gritos e robôs'],
   ['uno', 'Uno', 'Até 6 na mesa, com robôs'],
   ['vinteum', '21', 'Duelo de 21 com trunfos: conte as cartas, aposte dedos'],
+  ['poker', 'Poker', "Texas Hold'em apostando as moedas, com robôs"],
   ['gincana', 'Gincana', '10 fases estilo Fall Guys e a final dos hexágonos'],
   ['fantasmas', 'Caça-Fantasmas', '12 monstros em 5 casas assombradas, como o Phasmophobia'],
   ['kart', 'Kart', 'Kartódromo com itens, 3 voltas'],
@@ -2644,7 +2657,7 @@ const JOGOS_DA_SALA = [
   ['tapa', 'Tapa', 'Y dá um tapa em quem está na frente (não tira vida)'],
   ['tiro', 'Tiro na mesa de cartas', 'De brincadeira: derruba da cadeira, não tira vida'],
 ];
-const AREAS_DE_JOGO = ['parkour', 'ringue', 'corrida', 'futebol', 'volei', 'basquete', 'boliche', 'surf', 'matamata', 'batalha', 'xadrez', 'dama', 'velha', 'dados', 'pingue', 'queimada', 'sinuca', 'golfe', 'cartas', 'gincana', 'fantasmas', 'kart', 'pinta'];
+const AREAS_DE_JOGO = ['parkour', 'ringue', 'corrida', 'futebol', 'volei', 'basquete', 'boliche', 'surf', 'matamata', 'batalha', 'xadrez', 'dama', 'velha', 'dados', 'pingue', 'queimada', 'sinuca', 'golfe', 'cartas', 'poker', 'gincana', 'fantasmas', 'kart', 'pinta'];
 // parkour e ringue ficam dentro do cinema: no escritório não existem
 const SO_NO_CINEMA = ['parkour', 'ringue'];
 const modoEscritorio = () => state.sala?.modulo === 'escritorio' && state.sala.departamentos?.length > 0;
@@ -5294,14 +5307,14 @@ function focarSinuca() {
   return true;
 }
 
-// Sentou numa mesa de cartas (cartas.js): o mouse fica solto para o painel das cartas
-function focarCartas() {
-  if (state.focus?.kind === 'cartas') return true;
+// Sentou numa mesa de cartas (cartas.js) ou de poker (poker.js): o mouse fica solto para o painel
+function focarCartas(kind = 'cartas') {
+  if (state.focus?.kind === kind) return true;
   if (state.focus || state.panel || mesa.aberta || !state.joined) return false;
   fecharMesa(false);
   if (document.pointerLockElement) document.exitPointerLock();
   if (player.veiculo) toggleVeiculo();
-  state.focus = { kind: 'cartas' };
+  state.focus = { kind };
   $('#hover-hint').hidden = true;
   syncTouchVisibility();
   return true;
@@ -5418,6 +5431,8 @@ function exitFocus() {
     sinuca.sairDaMira();
   } else if (state.focus.kind === 'cartas') {
     cartas.sairDaMesa();
+  } else if (state.focus.kind === 'poker') {
+    poker.sairDaMesa();
   } else if (state.focus.kind === 'tv') {
     player.override = null;
     world.travarTelao(null);
@@ -6134,7 +6149,7 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   // comandando um tabuleiro: as teclas de andar/voar/socar ficam com o jogo
-  if (['jogo', 'dados', 'sinuca', 'cartas'].includes(state.focus?.kind) && !['KeyE', 'KeyM', 'KeyT', 'Enter'].includes(e.code)) return;
+  if (['jogo', 'dados', 'sinuca', 'cartas', 'poker'].includes(state.focus?.kind) && !['KeyE', 'KeyM', 'KeyT', 'Enter'].includes(e.code)) return;
   switch (e.code) {
     case 'KeyE':
       if (state.focus) sairDoFoco();
@@ -6354,7 +6369,7 @@ function marcarJogoAtual() {
 if (params.get('debug') === '1') {
   window.__sala3d = {
     state, player, combat, run, corrida, world, settings, punch, goToRing, respawn, mataMata, batalha, anuncios,
-    toggleVeiculo, irParaLargada, jogos, irParaMesa, exitFocus, dados, quadras, jogosDoParque, pingue, queimada, sinuca, golfe, cartas, gincana, fantasmas, kart, pinta,
+    toggleVeiculo, irParaLargada, jogos, irParaMesa, exitFocus, dados, quadras, jogosDoParque, pingue, queimada, sinuca, golfe, cartas, poker, gincana, fantasmas, kart, pinta,
     tocarTela, telasMudas, liberarSomDasTelas, makeVideo, mesa, controle, abrirMesa, fecharMesa, marcaDaAba,
     publishShare, stopShare, acharTela, telasNoAr, get rtc() { return rtc; }, clima, ligarLuneta, futebol, surf, run,
   };

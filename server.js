@@ -18,6 +18,7 @@ const { ligarQueimada } = require('./queimada-servidor.js');
 const { ligarSinuca } = require('./sinuca-servidor.js');
 const { ligarGolfe } = require('./golfe-servidor.js');
 const { ligarCartas } = require('./cartas-servidor.js');
+const { ligarPoker } = require('./poker-servidor.js');
 const { ligarGincana } = require('./gincana-servidor.js');
 const { ligarFantasmas } = require('./fantasmas-servidor.js');
 const { ligarKart } = require('./kart-servidor.js');
@@ -472,7 +473,7 @@ function mudarSaldo(nome, delta) {
 const MODULOS = ['lazer', 'escritorio'];
 const JOGOS_SALA = ['parkour', 'ringue', 'corrida', 'futebol', 'volei', 'basquete', 'boliche', 'surf', 'matamata', 'batalha', 'xadrez', 'dama', 'velha', 'dados', 'poderes', 'armas',
   // o parque (public/js/parque-dados.js)
-  'pingue', 'queimada', 'sinuca', 'golfe', 'truco', 'uno', 'vinteum', 'gincana', 'fantasmas', 'kart', 'pinta',
+  'pingue', 'queimada', 'sinuca', 'golfe', 'truco', 'uno', 'vinteum', 'poker', 'gincana', 'fantasmas', 'kart', 'pinta',
   'tapa', // tapa nos amigos, no mapa todo (e na mesa de cartas)
   'tiro']; // tiro de brincadeira na mesa de cartas
 const configPadrao = () => ({
@@ -1055,6 +1056,7 @@ function attachSockets(io) {
   const sinucaDoSocket = ligarSinuca(io, rooms, jogoLigado, moedasDoJogo); // sinuca (sinuca-servidor.js)
   const golfeDoSocket = ligarGolfe(io, rooms, jogoLigado, moedasDoJogo); // minigolfe (golfe-servidor.js)
   const cartasDoSocket = ligarCartas(io, rooms, jogoLigado, moedasDoJogo); // truco e uno (cartas-servidor.js)
+  const pokerDoSocket = ligarPoker(io, rooms, jogoLigado, moedasDoJogo); // poker valendo as moedas (poker-servidor.js)
   const gincanaDoSocket = ligarGincana(io, rooms, jogoLigado, moedasDoJogo); // gincana no céu (gincana-servidor.js)
   const fantasmasDoSocket = ligarFantasmas(io, rooms, jogoLigado, moedasDoJogo); // caça-fantasmas (fantasmas-servidor.js)
   const kartDoSocket = ligarKart(io, rooms, jogoLigado, moedasDoJogo); // kart (kart-servidor.js)
@@ -1114,6 +1116,7 @@ function attachSockets(io) {
     sinucaDoSocket(socket, () => ({ room, user }));
     golfeDoSocket(socket, () => ({ room, user }));
     cartasDoSocket(socket, () => ({ room, user }));
+    pokerDoSocket(socket, () => ({ room, user }));
     gincanaDoSocket(socket, () => ({ room, user }));
     fantasmasDoSocket(socket, () => ({ room, user }));
     kartDoSocket(socket, () => ({ room, user }));
@@ -1264,7 +1267,7 @@ function attachSockets(io) {
       r({ ok: true });
       // outro mapa: os jogos que dependem de onde as coisas ficam começam do zero (todo mundo recarrega)
       if (antes.mapa !== room.config.mapa) {
-        for (const k of ['pingue', 'quadras', 'queimada', 'sinuca', 'golfe', 'cartas', 'kart', 'pinta']) delete room[k];
+        for (const k of ['pingue', 'quadras', 'queimada', 'sinuca', 'golfe', 'cartas', 'poker', 'kart', 'pinta']) delete room[k];
       }
       io.to(room.id).emit('sala', { ...salaPublica(room), por: user.name });
       lobbyMudou();

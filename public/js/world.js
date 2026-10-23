@@ -24,6 +24,7 @@ import { construirQueimada } from './queimada.js';
 import { construirSinuca } from './sinuca.js';
 import { construirGolfe } from './golfe.js';
 import { construirCartas } from './cartas.js';
+import { construirPoker } from './poker.js';
 import { construirGincana } from './gincana.js';
 import { construirPortalFantasmas } from './fantasmas.js';
 import { construirKart } from './kart.js';
@@ -818,6 +819,8 @@ export class World {
     this.golfe3d = this.area('golfe', () => construirGolfe(this));
     // as duas mesas de cartas (truco e uno) são uma área só: some se o dono desligar os dois
     this.cartas3d = this.area('cartas', () => construirCartas(this));
+    // as duas mesas de poker, no corredor do meio do salão
+    this.poker3d = this.area('poker', () => construirPoker(this));
     // o portal da gincana, na pracinha da aventura (as fases ficam bem longe e só nascem quando alguém entra)
     this.gincana3d = this.area('gincana', () => construirGincana(this));
     // o portal do caça-fantasmas, no meio da pracinha da aventura (as casas ficam longe, ver fantasmas.js)

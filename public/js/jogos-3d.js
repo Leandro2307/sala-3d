@@ -754,6 +754,40 @@ const MAQUETES = {
 };
 MAQUETES.truco = (g) => MAQUETES.cartas(g, 'truco');
 MAQUETES.uno = (g) => MAQUETES.cartas(g, 'uno');
+// poker: a mesa verde com as torres de fichas e uma ficha voando em arco até a pilha
+MAQUETES.poker = (g) => {
+  // a mesa oval: os discos esticados no comprimento
+  cilindro(g, 1.25, 1.15, 0.1, 0x1c1917, 0, 0.5, 0, 48).scale.x = 1.55;
+  cilindro(g, 1.1, 1.1, 0.02, 0x0f5132, 0, 0.6, 0, 48).scale.x = 1.6;
+  cilindro(g, 0.1, 0.18, 0.5, 0x2a170c, -0.6);
+  cilindro(g, 0.1, 0.18, 0.5, 0x2a170c, 0.6);
+  const CORES = [0xf1f5f9, 0xdc2626, 0x15803d, 0x111827, 0x6d28d9];
+  const torres = [[-0.45, 0.1, 9], [-0.25, -0.15, 6], [0.05, 0.2, 11], [0.3, -0.05, 4]];
+  torres.forEach(([x, z, n], t) => {
+    for (let i = 0; i < n; i++) cilindro(g, 0.09, 0.09, 0.028, CORES[(t + Math.floor(i / 3)) % CORES.length], x, 0.62 + i * 0.027, z, 20);
+  });
+  const ficha = cilindro(g, 0.09, 0.09, 0.028, 0xdc2626, 0, 0, 0, 20);
+  const carta = (x, giro, cor) => {
+    const c = malha(new THREE.BoxGeometry(0.32, 0.008, 0.46), mat(0xfdfdfb));
+    c.position.set(x, 0.625, 0.75);
+    c.rotation.y = giro;
+    g.add(c);
+    const naipe = malha(new THREE.BoxGeometry(0.1, 0.01, 0.1), mat(cor));
+    naipe.position.set(x, 0.63, 0.75);
+    naipe.rotation.y = giro + Math.PI / 4;
+    g.add(naipe);
+  };
+  carta(-0.2, 0.15, 0x111827);
+  carta(0.18, -0.12, 0xd61f3a);
+  for (const [x, z, giro, cor] of [[-2.2, 0, Math.PI / 2, 0xf472b6], [2.2, 0, -Math.PI / 2, 0x60a5fa], [0, -1.5, 0, 0xfacc15]]) boneco(g, cor, x, z, giro, 1.4);
+  return (t) => {
+    // a cada 1,4 s uma ficha sai da frente do boneco da direita e cai na torre do meio
+    const k = (t % 1.4) / 1.4;
+    const topo = 0.62 + 11 * 0.027;
+    ficha.position.set(1.2 + (0.05 - 1.2) * k, 1.0 + (topo - 1.0) * k + Math.sin(Math.PI * k) * 0.6, 0.2 * k);
+    ficha.rotation.set(k * 9, 0, k * 4);
+  };
+};
 
 export class PalcoJogos {
   constructor(canvas) {

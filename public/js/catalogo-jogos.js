@@ -35,6 +35,7 @@ export const CATALOGO = [
   { id: 'dados', nome: 'Mesa de dados', desc: 'Apostas com moedas', genero: 'mesa', cor: '#fbbf24', painel: 'jogos' },
   { id: 'truco', nome: 'Truco', desc: 'Truco mineiro em duplas, com os gritos', genero: 'mesa', cor: '#16a34a', painel: 'parque' },
   { id: 'uno', nome: 'Uno', desc: 'Até 6 na mesa, com robôs', genero: 'mesa', cor: '#ef4444', painel: 'parque' },
+  { id: 'poker', nome: 'Poker', desc: "Texas Hold'em valendo as suas moedas", genero: 'mesa', cor: '#15803d', painel: 'parque' },
   { id: 'parkour', nome: 'Parkour', desc: 'Circuito até o camarote VIP', genero: 'aventura', cor: '#8b5cf6', painel: 'parkour' },
   { id: 'gincana', nome: 'Gincana', desc: '10 fases estilo Fall Guys e a final', genero: 'aventura', cor: '#f472b6', painel: 'parque' },
   { id: 'fantasmas', nome: 'Caça-Fantasmas', desc: '13 monstros em 5 casas assombradas', genero: 'terror', cor: '#a3e635' },
