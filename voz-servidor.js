@@ -2,8 +2,9 @@
 // neural da Microsoft (a mesma do "Ler em voz alta" do Edge — grátis, sem chave, via msedge-tts)
 // e serve o mp3 pronto; o cliente toca o arquivo em vez da voz de robô do navegador. As frases são
 // um conjunto fechado (GRITOS + ZOEIRA + nomes de trunfo), então o servidor gera tudo na subida e
-// emenda pelo cache as que aparecerem depois. Sem rede (ou com a síntese fora do ar), urlDaFrase
-// devolve null e o cliente volta para a voz do sistema dele (cartas.js, falarGrito).
+// emenda pelo cache as que aparecerem depois. A API limita rajada (429) e banimentos por IP são
+// temporários: a fila tenta de novo sozinha, com espera crescente, até conseguir — e devolve null
+// enquanto isso, para o cliente usar a voz do sistema dele (cartas.js, falarGrito) sem quebrar nada.
 const crypto = require('crypto');
 const { MsEdgeTTS, OUTPUT_FORMAT } = require('msedge-tts');
 
@@ -13,11 +14,12 @@ const VOZES = ['pt-BR-FranciscaNeural', 'pt-BR-AntonioNeural'];
 
 const conexoes = [null, null]; // um websocket por voz
 const porId = new Map(); // id (vai na URL) -> { buffer }
-const porChave = new Map(); // `${voz}:${frase}` -> id | null (null: falhou, não tenta de novo)
+const porChave = new Map(); // `${voz}:${frase}` -> id | null (null: áudio vazio)
 const fila = []; // sínteses pendentes, uma de cada vez (a API limita: 429 em rajada)
+const pendente = new Set(); // chaves já na fila (não repete)
 let processando = false;
-let foraDoAr = false; // desistiu desta sessão: a voz do sistema dos clientes assume
-let falhasSeguidas = 0; // para o backoff: espera cada vez mais entre as tentativas
+let espera = 1000; // backoff atual entre tentativas em erro (dobra até 5 min)
+let avisou = false; // loga a limitada só uma vez
 
 async function conexao(v) {
   if (!conexoes[v]) {
@@ -40,8 +42,9 @@ function sintetiza(v, frase) {
   });
 }
 
-// a fila: tira um pedido de cada vez, com respiro entre sínteses; em erro (a API vive limitando
-// rajada em 429) recoloca na frente e espera cada vez mais, até desistir da sessão
+// a fila: tira um pedido de cada vez, com respiro entre sínteses. Em erro (a API vive limitando
+// rajada em 429 e o banimento por IP é temporário) recoloca na frente e dobra a espera até 5 min,
+// tentando para sempre — a voz neural volta sozinha quando o bloqueio cair, sem reiniciar nada
 function processaFila() {
   const item = fila.shift();
   if (!item) {
@@ -49,9 +52,9 @@ function processaFila() {
     return;
   }
   processando = true;
+  pendente.delete(item.chave);
   sintetiza(item.voz, item.frase).then((buffer) => {
-    falhasSeguidas = 0;
-    foraDoAr = false;
+    espera = 1000;
     if (buffer.length) {
       const id = crypto.createHash('md5').update(item.chave).digest('hex').slice(0, 12);
       porId.set(id, { buffer });
@@ -59,30 +62,31 @@ function processaFila() {
     } else porChave.set(item.chave, null);
     setTimeout(processaFila, 1200); // respiro entre uma síntese e outra
   }).catch((err) => {
-    falhasSeguidas++;
-    if (falhasSeguidas >= 8) {
-      foraDoAr = true; // desiste da TTS nesta sessão: a voz do sistema dos clientes assume
-      fila.length = 0;
-      console.warn('  Voz neural fora do ar (sem rede, 429...):', err.message);
-      processando = false;
-      return;
+    if (!avisou) {
+      avisou = true;
+      console.warn('  Voz neural limitada pela API (429/rede). Tentando de novo em segundo plano; os gritos usam a voz do sistema até lá. (' + err.message + ')');
     }
+    espera = Math.min(300000, espera * 2); // 1s, 2s, 4s... no máximo 5 min entre as rodadas
+    pendente.add(item.chave);
     fila.unshift(item);
-    setTimeout(processaFila, Math.min(30000, 3000 * falhasSeguidas)); // backoff 3s, 6s, 9s...
+    setTimeout(processaFila, espera);
   });
 }
 
-// a URL do mp3 da frase na voz daquele lugar, se já estiver pronta; senão enfileira a síntese
-// (para a próxima vez) e devolve null — nesse grito o cliente usa a voz do sistema
+// a URL do mp3 da frase na voz daquele lugar, se já estiver pronta; senão põe na fila da síntese
+// (se ainda não estiver) e devolve null — nesse grito o cliente usa a voz do sistema
 function urlDaFrase(frase, lugar) {
-  if (foraDoAr || typeof frase !== 'string' || !frase.trim()) return null;
+  if (typeof frase !== 'string' || !frase.trim()) return null;
   const chave = `${lugar % VOZES.length}:${frase}`;
   if (porChave.has(chave)) {
     const id = porChave.get(chave);
     return id ? `/ct-voz/${id}.mp3` : null;
   }
-  fila.push({ chave, voz: lugar % VOZES.length, frase });
-  if (!processando) processaFila();
+  if (!pendente.has(chave) && fila.length < 500) {
+    pendente.add(chave);
+    fila.push({ chave, voz: lugar % VOZES.length, frase });
+    if (!processando) processaFila();
+  }
   return null;
 }
 
