@@ -88,7 +88,7 @@ function publico(m) {
   }
   if (m.u) {
     const u = m.u;
-    Object.assign(base, { topo: u.descarte.at(-1), cor: u.cor, vez: u.vez, sentido: u.sentido, monte: u.monte.length, comprou: u.comprou, disseUno: [...u.disseUno] });
+    Object.assign(base, { topo: u.descarte.at(-1), cor: u.cor, vez: u.vez, sentido: u.sentido, monte: u.monte.length, comprou: u.comprou, disseUno: [...u.disseUno], semUno: u.semUno ?? null });
   }
   if (m.v) {
     const v = m.v;
@@ -487,7 +487,7 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
     const k = monte.findIndex((c) => /^[rgby]\d$/.test(c));
     const topo = monte.splice(k, 1)[0];
     const vivos = m.lugares.map((l, i) => (l ? i : -1)).filter((i) => i >= 0);
-    m.u = { maos, monte, descarte: [topo], cor: R.corUno(topo), vez: vivos[Math.floor(Math.random() * vivos.length)], sentido: 1, comprou: false, disseUno: new Set(), unoAte: new Map() };
+    m.u = { maos, monte, descarte: [topo], cor: R.corUno(topo), vez: vivos[Math.floor(Math.random() * vivos.length)], sentido: 1, comprou: false, disseUno: new Set(), unoAte: new Map(), semUno: null };
     m.fase = 'jogando';
     m.vencedor = null;
     m.aviso = '';
@@ -524,6 +524,7 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
     if (u.maos[k].length > 1) {
       u.disseUno.delete(k);
       u.unoAte.delete(k);
+      if (u.semUno === k) u.semUno = null;
     }
   }
 
@@ -541,6 +542,8 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
     const i = mao.indexOf(carta);
     if (i < 0 || !R.podeJogarUno(carta, u.descarte.at(-1), u.cor)) return false;
     if (R.coringa(carta) && !R.CORES_UNO.includes(cor)) return false;
+    // a janela de pegar quem esqueceu o UNO fecha quando outra carta entra na mesa
+    if (u.semUno != null && u.semUno !== k) u.semUno = null;
     mao.splice(i, 1);
     u.descarte.push(carta);
     u.cor = R.coringa(carta) ? cor : R.corUno(carta);
@@ -561,10 +564,11 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
       avisar(room, m);
       return true;
     }
-    // uma carta só: tem uns segundos para dizer UNO (o robô sempre diz)
+    // uma carta só: tem uns segundos para dizer UNO (o robô sempre diz); fica pegável até lá
     if (mao.length === 1 && !u.disseUno.has(k)) {
       if (m.lugares[k].bot) u.disseUno.add(k);
       else u.unoAte.set(k, Date.now() + 3500);
+      u.semUno = k;
     }
     if (u.disseUno.has(k) && mao.length === 1) m.aviso = `${nome}: UNO!`;
     const dois = m.lugares.filter(Boolean).length === 2;
@@ -622,19 +626,22 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
       }
     }
     m.aviso = `${m.lugares[k].nome} comprou e passou`;
+    gritar(room, m, k, 'unocompra', { frase: 'Comprou e passou!' });
     passarVez(m);
     avisar(room, m);
   }
 
   function ticUno(room, m, agora) {
     const u = m.u;
-    // não disse UNO a tempo: compra duas
+    // não disse UNO a tempo: compra duas (e avisa a mesa, com a voz de quem esqueceu)
     for (const [k, ate] of [...u.unoAte]) {
       if (agora < ate) continue;
       u.unoAte.delete(k);
       if (u.maos[k]?.length === 1 && !u.disseUno.has(k)) {
+        if (u.semUno === k) u.semUno = null;
         comprarUno(m, k, 2);
         m.aviso = `${m.lugares[k]?.nome || ''} esqueceu o UNO: +2`;
+        gritar(room, m, k, 'unoesqueceu', { frase: 'Ah, esqueci o UNO!' });
         avisar(room, m);
       }
     }
@@ -1107,9 +1114,23 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
         if (u.maos[k].length <= 2) {
           u.disseUno.add(k);
           u.unoAte.delete(k);
+          if (u.semUno === k) u.semUno = null;
           m.aviso = `${m.lugares[k].nome}: UNO!`;
           avisar(room, m);
         }
+        return;
+      }
+      if (msg.acao === 'pegar') {
+        // pegar quem ficou com uma carta sem dizer UNO (enquanto a janela está aberta): compra duas
+        const alvo = msg.alvo;
+        if (!Number.isInteger(alvo) || alvo < 0 || alvo === k || alvo >= m.lugares.length || !m.lugares[alvo]) return;
+        if (u.semUno !== alvo || u.maos[alvo].length !== 1 || u.disseUno.has(alvo)) return;
+        u.semUno = null;
+        u.unoAte.delete(alvo);
+        comprarUno(m, alvo, 2);
+        m.aviso = `${m.lugares[alvo].nome} não falou UNO: +2 (${m.lugares[k].nome} pegou)`;
+        gritar(room, m, k, 'pegouno', { frase: `${m.lugares[alvo].nome}, não falou UNO!` });
+        avisar(room, m);
         return;
       }
       if (u.vez !== k) return;
@@ -1119,10 +1140,13 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
         // o que comprou não serve: passa sozinho
         if (!R.podeJogarUno(u.maos[k].at(-1), u.descarte.at(-1), u.cor)) {
           m.aviso = `${m.lugares[k].nome} comprou e passou`;
+          gritar(room, m, k, 'unocompra', { frase: 'Comprou e passou!' });
           passarVez(m);
         }
         avisar(room, m);
       } else if (msg.acao === 'passar' && u.comprou) {
+        m.aviso = `${m.lugares[k].nome} comprou e passou`;
+        gritar(room, m, k, 'unocompra', { frase: 'Comprou e passou!' });
         passarVez(m);
         avisar(room, m);
       }

@@ -1433,6 +1433,7 @@ body.touch .ct-conta { display: none; } body.touch #ct-trunfo img { width: 96px;
       const tipo = d.tapa ? 'tapa' : 'tiro';
       return this.socket?.emit('ct-acao', { mesa, tipo, alvo: Number(d.tapa || d.tiro) });
     }
+    if (d.pegouno) return this.socket?.emit('ct-uno', { mesa, acao: 'pegar', alvo: Number(d.pegouno) });
     if (d.zoar) {
       this.zoar.hidden = true;
       const i = Number(d.zoar);
@@ -1636,7 +1637,7 @@ ${espera ? comecar : ''}<button type="button" class="ct-b cinza" data-acao="sair
         p.dataset.html = placa;
         p.innerHTML = placa;
       }
-      const mini = `${tapa ? `<button type="button" data-tapa="${k}" title="Dar um tapa" aria-label="Dar um tapa em ${esc(l.nome)}">👋</button>` : ''}${tiro ? `<button type="button" data-tiro="${k}" title="Dar um tiro (de brincadeira)" aria-label="Dar um tiro em ${esc(l.nome)}">🔫</button>` : ''}<button type="button" data-arremesso="${k}" title="Jogar alguma coisa" aria-label="Jogar alguma coisa em ${esc(l.nome)}">🍅</button>`;
+      const mini = `${e.jogo === 'uno' && e.fase === 'jogando' && e.semUno === k ? `<button type="button" data-pegouno="${k}" title="Pegar: não falou UNO! (compra 2)" aria-label="Pegar ${esc(l.nome)} que não falou UNO">🫵</button>` : ''}${tapa ? `<button type="button" data-tapa="${k}" title="Dar um tapa" aria-label="Dar um tapa em ${esc(l.nome)}">👋</button>` : ''}${tiro ? `<button type="button" data-tiro="${k}" title="Dar um tiro (de brincadeira)" aria-label="Dar um tiro em ${esc(l.nome)}">🔫</button>` : ''}<button type="button" data-arremesso="${k}" title="Jogar alguma coisa" aria-label="Jogar alguma coisa em ${esc(l.nome)}">🍅</button>`;
       const b = el.querySelector('.ct-mini');
       if (b.dataset.html !== mini) {
         b.dataset.html = mini;
