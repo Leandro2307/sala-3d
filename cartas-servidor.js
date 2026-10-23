@@ -1019,14 +1019,22 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
       ack?.(mesas ? mesas.map(publico) : null);
     });
 
-    // sentar: no primeiro lugar livre (ou no de um robô, que sai e deixa as cartas)
+    // sentar: na cadeira escolhida (livre ou de um robô, que sai e deixa as cartas); sem escolha,
+    // no primeiro lugar livre. Cadeira com gente: avisa, para o seletor escolher outra.
     socket.on('ct-entrar', (msg, ack) => {
       const { room, user, mesas } = daSala();
       const m = mesas?.[msg?.mesa];
       if (!m || !jogoLigado(room, m.jogo)) return ack?.({ erro: 'desligado' });
       if (meuLugar(m, user) >= 0) return ack?.({ ok: true, lugar: meuLugar(m, user) });
       sair(room, user.id);
-      let k = m.lugares.findIndex((l) => !l);
+      const quer = msg?.lugar;
+      if (Number.isInteger(quer)) {
+        if (quer < 0 || quer >= m.lugares.length) return ack?.({ erro: 'cheia' });
+        if (m.lugares[quer] && !m.lugares[quer].bot) return ack?.({ erro: 'ocupado' });
+      }
+      let k = Number.isInteger(quer) && (!m.lugares[quer] || m.lugares[quer].bot)
+        ? quer
+        : m.lugares.findIndex((l) => !l);
       if (k < 0) k = m.lugares.findIndex((l) => l?.bot);
       if (k < 0) return ack?.({ erro: 'cheia' });
       m.lugares[k] = { id: user.id, nome: user.name, cor: user.color, bot: false };

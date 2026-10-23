@@ -1,6 +1,6 @@
 // Truco (mineiro) e Uno nas mesas redondas do salão de jogos do parque, com a cara do Balatro.
-// E perto da mesa senta (no primeiro lugar livre, ou no de um robô); a câmera fica atrás da sua
-// cadeira. Por cima do 3D, sem tampar a mesa:
+// E perto da mesa abre o seletor de cadeira: escolhe um lugar livre (ou o de um robô, que levanta);
+// no truco, a borda da cadeira mostra a dupla. A câmera fica atrás da sua cadeira. Por cima do 3D, sem tampar a mesa:
 //   - a coluna do placar à esquerda (pontos que pulam, o valor da mão pegando fogo, rodadas,
 //     manilhas; no uno o monte, o sentido e a cor);
 //   - a plaquinha de cada lugar flutuando em cima da cadeira (nome, cartas, a vez, o balão do grito,
@@ -608,6 +608,8 @@ export class Cartas {
     }
     this.sincronizarRobos(M);
     this.mostrar3d(M, antes);
+    // o seletor de cadeira aberto nesta mesa acompanha quem senta e levanta
+    if (!this.escolha.hidden && this.escolhendo === M) this.abrirEscolha(M);
     if (this.ativa !== M) return;
     this.desenhar();
     const meuTime = M.lugar % 2;
@@ -827,16 +829,49 @@ export class Cartas {
   usarE() {
     const M = this.mesaPerto();
     if (!M || !this.ligado(M.m.jogo)) return false;
-    this.socket?.emit('ct-entrar', { mesa: M.i }, (r) => {
-      if (r?.erro === 'cheia') return hud.mensagem('Mesa cheia', '', 1500);
+    // solta o mouse e abre o seletor de cadeira; sentar acontece no clique (sentarNa)
+    if (this.focar?.()) {
+      this.escolhendo = M;
+      this.abrirEscolha(M);
+    }
+    return true;
+  }
+
+  // o seletor: cada botão na posição da cadeira de verdade (lugar 0 ao sul, girando para leste).
+  // Cadeira com gente não dá para escolher; a do robô dá (ele levanta e deixa as cartas).
+  abrirEscolha(M) {
+    const e = M.e;
+    const n = LUGARES[M.m.jogo];
+    const truco = M.m.jogo === 'truco';
+    this.escolha.querySelector('h3').textContent = `Sentar na mesa de ${NOME_JOGO[M.m.jogo]}`;
+    this.escolha.querySelector('p').textContent = truco
+      ? 'No truco a dupla é você e quem senta do outro lado. A cor da borda mostra a dupla da cadeira.'
+      : 'Escolha a cadeira: nas de robô, ele levanta para você.';
+    this.escolha.querySelector('.ct-roda').innerHTML = [...Array(n)].map((_, k) => {
+      const l = e?.lugares[k];
+      const a = -Math.PI / 2 + (k * Math.PI * 2) / n;
+      const estilo = `left:${50 + Math.cos(a) * 42}%;top:${50 + Math.sin(a) * 42}%${truco ? `;--time:${k % 2 ? '#fe5f55' : '#009dff'}` : ''}`;
+      if (l && !l.bot) return `<button type="button" class="ct-cadeira" style="${estilo}" disabled title="${esc(l.nome)} já sentou aqui">${esc(l.nome)}</button>`;
+      if (l) return `<button type="button" class="ct-cadeira robo" data-sentar="${k}" style="${estilo}" title="Sentar no lugar de ${esc(l.nome)}">🤖<small>${esc(l.nome)}</small></button>`;
+      const time = truco ? `<small>${k % 2 ? 'Dupla vermelha' : 'Dupla azul'}</small>` : '';
+      return `<button type="button" class="ct-cadeira" data-sentar="${k}" style="${estilo}">Sentar${time}</button>`;
+    }).join('');
+    this.escolha.hidden = false;
+  }
+
+  // clicou numa cadeira do seletor: senta nela
+  sentarNa(M, k) {
+    this.socket?.emit('ct-entrar', { mesa: M.i, lugar: k }, (r) => {
+      if (r?.erro === 'cheia') {
+        this.escolha.hidden = true;
+        return hud.mensagem('Mesa cheia', '', 1500);
+      }
+      if (r?.erro === 'ocupado') return hud.mensagem('Alguém sentou aí', 'Escolha outra cadeira', 1500);
       if (!r?.ok) return;
+      this.escolha.hidden = true;
       M.lugar = r.lugar;
       this.ativa = M;
-      if (!this.focar?.()) {
-        this.ativa = null;
-        return;
-      }
-      // senta na cadeira, virado para a mesa
+      // senta na cadeira, virado para a mesa (o mouse já está solto: o seletor abriu focado)
       const c = cadeira(M.m, r.lugar);
       const yaw = Math.atan2(-(M.m.x - c.x), -(M.m.z - c.z));
       this.player.sentarEm({ x: c.x, y: 0.45, z: c.z, yaw });
@@ -849,7 +884,6 @@ export class Cartas {
       this.desenhar();
       this.sfx.teleport();
     });
-    return true;
   }
 
   // a câmera atrás da minha cadeira, olhando um pouco para cá do centro: a mesa sobe na tela e
@@ -867,6 +901,7 @@ export class Cartas {
 
   // o main.js tirou o foco (Esc, E, botão): levanta e sai da mesa
   sairDaMesa() {
+    this.escolha.hidden = true; // o seletor de cadeira aberto some junto
     if (!this.ativa) return;
     this.ativa = null;
     this.coberta = false;
@@ -1159,6 +1194,18 @@ body.ct-sentado #controls-help, body.ct-sentado #sit-hint { display: none !impor
 #ct-cores > div { display: flex; gap: 12px; padding: 14px; border-radius: 14px; background: #3a5055; box-shadow: 0 5px 0 #1e2b2d; }
 #ct-cores button { width: 64px; height: 64px; border-radius: 12px; border: 0; cursor: pointer; box-shadow: 0 4px 0 rgba(0,0,0,.4); transition: transform .1s; }
 #ct-cores button:hover { transform: translateY(-3px) scale(1.06); }
+/* o seletor de cadeira: a mesa vista de cima, cada botão na posição da cadeira de verdade */
+#ct-sentar { position: fixed; inset: 0; z-index: 34; display: grid; place-items: center; background: rgba(10,16,18,.45); color: #fff; font: 700 15px ${PIXEL}; }
+#ct-sentar[hidden] { display: none !important; }
+#ct-sentar > div { display: grid; justify-items: center; gap: 12px; padding: 18px 22px; }
+#ct-sentar h3 { margin: 0; font-size: 21px; color: #fff4e6; }
+#ct-sentar p { margin: 0; font-size: 13px; color: #a9bfc2; max-width: 330px; text-align: center; }
+.ct-roda { position: relative; width: 250px; height: 250px; border-radius: 50%; background: radial-gradient(circle, #7a5c3d 0 30%, #5b4230 31% 40%, transparent 41%); }
+.ct-cadeira { position: absolute; translate: -50% -50%; min-width: 76px; padding: 8px 10px; border: 2px solid var(--time, #5f7377); border-radius: 10px; background: #3a5055; color: #fff; box-shadow: 0 3px 0 #1e2b2d; cursor: pointer; font: inherit; font-size: 14px; transition: scale .12s; }
+.ct-cadeira:hover:not(:disabled) { scale: 1.12; }
+.ct-cadeira:disabled { opacity: .7; cursor: default; background: #2b3d40; }
+.ct-cadeira.robo { background: #2b3d40; }
+.ct-cadeira small { display: block; font-size: 11px; color: #a9bfc2; }
 @keyframes ct-onda { 0%, 100% { transform: translateY(0) rotate(0); } 50% { transform: translateY(-3px) rotate(-2deg); } }
 @keyframes ct-balanca { 0%, 100% { transform: translateY(0) rotate(-1.2deg); } 50% { transform: translateY(-5px) rotate(1.2deg); } }
 @keyframes ct-chega { from { transform: translate(-40vw, 40vh) rotate(-40deg); opacity: 0; } 60% { opacity: 1; } to { transform: none; } }
@@ -1288,7 +1335,21 @@ body.touch .ct-conta { display: none; } body.touch #ct-trunfo img { width: 96px;
     this.cores.id = 'ct-cores';
     this.cores.hidden = true;
     this.cores.innerHTML = `<div>${CORES_UNO.map((c) => `<button type="button" data-cor="${c}" style="background:${HEX_COR[c]}" aria-label="${NOME_COR[c]}"></button>`).join('')}</div>`;
-    document.body.append(this.raiz, this.cores);
+    // o seletor de cadeira (abre ao chegar na mesa, antes de sentar)
+    this.escolha = document.createElement('div');
+    this.escolha.id = 'ct-sentar';
+    this.escolha.hidden = true;
+    this.escolha.innerHTML = `<div class="ct-painel"><h3></h3><div class="ct-roda"></div><p></p><button type="button" class="ct-b cinza" data-fechar="">Agora não</button></div>`;
+    document.body.append(this.raiz, this.cores, this.escolha);
+    this.escolha.addEventListener('click', (ev) => {
+      const b = ev.target.closest('button');
+      if (!b) return;
+      if (b.hasAttribute('data-fechar')) {
+        this.escolha.hidden = true;
+        return;
+      }
+      if (b.dataset.sentar !== undefined && this.escolhendo) this.sentarNa(this.escolhendo, Number(b.dataset.sentar));
+    });
 
     this.raiz.addEventListener('click', (ev) => this.clique(ev));
     // a carta inclina para onde o mouse está (o "tilt" do Balatro)
