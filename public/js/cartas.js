@@ -43,6 +43,8 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&
 // elemento que já tocou dentro de um gesto do usuário; criar Audio novo a cada grito (que chega por
 // socket, sem gesto) volta a ser barrado. O primarVoz é chamado no primeiro toque/clique (main.js).
 const audioVoz = new Audio();
+audioVoz.setAttribute('playsinline','true'); // iOS: inline sem fullscreen
+audioVoz.muted = false; // garante nao mutado em mobile
 audioVoz.preload = 'auto';
 // chiado de 0,05s: um play() com src real é o que o celular aceita como "destrave" do elemento
 const SILENCIO = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=';

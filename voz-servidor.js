@@ -101,6 +101,7 @@ function servir(req, res) {
   if (!item) return res.status(404).end();
   res.setHeader('Content-Type', 'audio/mpeg');
   res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.setHeader('Access-Control-Allow-Origin', '*'); // CORS: mobile pode buscar de qualquer origem
   res.send(item.buffer);
 }
 
