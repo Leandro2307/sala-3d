@@ -1934,6 +1934,11 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
     if (quem !== M.lugar) this.sfx.cartaVoa?.();
     const s = simboloUno(carta);
     const efeito = { B: 'PULA!', I: 'VOLTA!', P2: '+2!' }[s] || (s === 'W4' ? '+4!' : s === 'W' ? 'CORINGA!' : '');
+    // a voz de quem jogou (o tom é por lugar, como nos gritos): o efeito em prosa, a carta em voz alta
+    const falado = { B: 'Pula!', I: 'Volta!', P2: 'Mais dois!', W: 'Coringa!' }[s]
+      || (s === 'W4' ? 'Mais quatro!' : `${rotuloUno(carta)}${cor ? ` ${cor}` : ''}`);
+    this.bonecoDe(M, quem)?.say(falado);
+    falarGrito(falado, quem, 1);
     if (!efeito) return;
     this.faixaGrito(efeito, `${nome} jogou ${cor ? `${cor} ` : ''}${rotuloUno(carta)}`, false);
   }
