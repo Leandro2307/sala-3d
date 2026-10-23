@@ -530,11 +530,11 @@ export class Cartas {
 
   // O cochicho do truco chegou: só o parceiro recebe ('ct-sinal' vai só para ele). Balão roxo em
   // cima de quem sinalizou — sem voz e sem a faixa, para o resto da mesa não perceber.
-  sinal({ mesa, lugar, frase }) {
+  sinal({ mesa, lugar, frase, carta }) {
     const M = this.mesas[mesa];
     if (!M || typeof frase !== 'string') return;
     this.sfx.dado?.(0.5);
-    if (this.ativa === M) this.balao(lugar, `🤫 ${frase}`, false, 'segredo');
+    if (this.ativa === M) this.balao(lugar, `🤫 ${frase}`, false, 'segredo', carta);
   }
 
   // Alguém jogou uma coisa (tomate, galinha...) em quem está na mesa: o objeto voa na tela de uma
@@ -1161,12 +1161,16 @@ body.ct-sentado #controls-help, body.ct-sentado #sit-hint { display: none !impor
 .ct-zoar button:hover { background: #a782d1; }
 .ct-zoar button.sorte { position: sticky; top: 0; z-index: 1; background: #5b3a8c; font-size: 13px; color: #f5e9ff; }
 .ct-sinais { right: 240px; }
+.ct-sinais button { display: flex; align-items: center; gap: 8px; }
 .ct-sinais button:hover { background: #4c7a3f; }
+.ct-sinais img { width: 24px; height: 32px; border-radius: 3px; box-shadow: 0 2px 0 rgba(0,0,0,.4); flex: none; }
 .ct-dir { position: relative; }
 /* o sinal: balão roxo, segredo */
 .ct-balao.segredo { background: #6d4fa1; color: #fff; }
 .ct-balao.segredo::after { border-top-color: #6d4fa1; }
 .ct-assento.topo .ct-balao.segredo::after { border-top-color: transparent; border-bottom-color: #6d4fa1; }
+/* a mini carta nos balões dos sinais */
+.ct-balaocarta { width: 26px; height: 35px; margin-left: 4px; vertical-align: middle; border-radius: 3px; box-shadow: 0 2px 0 rgba(0,0,0,.4); }
 /* o menu do que jogar e o objeto voando */
 .ct-arremesso { position: absolute; bottom: calc(100% + 8px); left: 50%; translate: -50% 0; z-index: 3; display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; padding: 8px; pointer-events: auto; animation: ct-balao .25s cubic-bezier(.2,1.6,.4,1) both; }
 .ct-assento.topo .ct-arremesso { bottom: auto; top: calc(100% + 8px); }
@@ -1325,7 +1329,7 @@ body.touch .ct-conta { display: none; } body.touch #ct-trunfo img { width: 96px;
     this.sinal = document.createElement('div');
     this.sinal.className = 'ct-zoar ct-sinais ct-painel';
     this.sinal.hidden = true;
-    this.sinal.innerHTML = SINAIS.map((s, i) => `<button type="button" data-sinal="${i}">${esc(s.f)}</button>`).join('');
+    this.sinal.innerHTML = SINAIS.map((s, i) => `<button type="button" data-sinal="${i}">${s.carta ? `<img src="${urlCarta(s.carta)}" alt="${esc(s.carta)}">` : ''}${esc(s.f)}</button>`).join('');
     // o menu do que jogar em alguém (abre dentro da plaquinha do alvo)
     this.menu = document.createElement('div');
     this.menu.className = 'ct-arremesso ct-painel';
@@ -1422,8 +1426,8 @@ body.touch .ct-conta { display: none; } body.touch #ct-trunfo img { width: 96px;
     if (d.sinal) {
       this.sinal.hidden = true;
       const i = Number(d.sinal);
-      // feedback: eu também vejo o balão que o parceiro vai ver
-      this.balao((M.lugar + 2) % 4, `🤫 ${SINAIS[i]?.f || ''}`, false, 'segredo');
+      // feedback: eu também vejo o balão que o parceiro vai ver (com a carta, se tiver)
+      this.balao((M.lugar + 2) % 4, `🤫 ${SINAIS[i]?.f || ''}`, false, 'segredo', SINAIS[i]?.carta);
       return this.socket?.emit('ct-sinal', { mesa, i });
     }
     if (d.arremesso) {
@@ -1626,14 +1630,16 @@ ${espera ? comecar : ''}<button type="button" class="ct-b cinza" data-acao="sair
     });
   }
 
-  // o balão em cima da plaquinha de quem gritou (some sozinho). classe: 'segredo' (o sinal, roxo)
-  balao(k, texto, forte = false, classe = '') {
+  // o balão em cima da plaquinha de quem gritou (some sozinho). classe: 'segredo' (o sinal, roxo).
+  // carta: a mini carta vai no balão (os sinais de "tenho o Zap" e afins).
+  balao(k, texto, forte = false, classe = '', carta = null) {
     const el = this.$(`.ct-assento[data-lugar="${k}"]`);
     if (!el) return;
     el.querySelector('.ct-balao')?.remove();
     const b = document.createElement('div');
     b.className = `ct-balao${forte ? ' forte' : ''}${classe ? ` ${classe}` : ''}`;
-    b.textContent = texto;
+    if (carta) b.innerHTML = `${esc(texto)} <img class="ct-balaocarta" src="${urlCarta(carta)}" alt="${esc(carta)}">`;
+    else b.textContent = texto;
     el.append(b);
     setTimeout(() => b.remove(), 2600);
   }

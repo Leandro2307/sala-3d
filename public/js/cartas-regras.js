@@ -71,11 +71,21 @@ export const ZOEIRA = [
 export const GRITO_DO_PEDIDO = { 4: 'truco', 8: 'seis', 10: 'nove', 12: 'doze' };
 
 // Os sinais do truco: o cochicho que só o parceiro ouve ('ct-sinal' vai só para o lugar (k+2)%4).
-// bom: a frase combina com mão boa (true) ou ruim (false) — o robô parceiro escolhe a que combina com a dele.
+// As primeiras frases mostram a carta que você tem (a mini carta vai no balão); o robô parceiro
+// avisa uma carta que realmente está na mão dele. bom: a frase combina com mão boa (true) ou ruim
+// (false) — o robô escolhe a que combina com a dele quando não avisa carta.
 export const SINAIS = [
-  { f: 'Tenho o Zap! ♣️', bom: true }, { f: 'Tenho manilha na mão!', bom: true },
-  { f: 'Tô carregado, sô!', bom: true }, { f: 'Pede truco!', bom: true },
-  { f: 'Aumenta que eu cubro!', bom: true }, { f: 'Cai dentro que eu seguro!', bom: true },
+  { f: 'Tenho o Zap!', carta: '4p', bom: true },
+  { f: 'Tenho a Copas!', carta: '7c', bom: true },
+  { f: 'Tenho a Espadilha!', carta: 'Ae', bom: true },
+  { f: 'Tenho o Pica-fumo!', carta: '7o', bom: true },
+  { f: 'Tenho o 3!', carta: '3p', bom: true },
+  { f: 'Tenho o 2!', carta: '2c', bom: true },
+  { f: 'Tenho o ás!', carta: 'Ap', bom: true },
+  { f: 'Tô carregado, sô!', bom: true },
+  { f: 'Pede truco!', bom: true },
+  { f: 'Aumenta que eu cubro!', bom: true },
+  { f: 'Cai dentro que eu seguro!', bom: true },
   { f: 'Tô fraquinho...', bom: false }, { f: 'Não truca não!', bom: false },
   { f: 'Se trucarem, a gente corre!', bom: false }, { f: 'Só vim com lixo', bom: false },
   { f: 'Cobre ela pra mim!', bom: null }, { f: 'Dribla essa rodada!', bom: null },

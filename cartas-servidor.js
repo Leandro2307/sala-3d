@@ -143,12 +143,13 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
     gritar(room, m, k, 'zoeira', { frase: R.ZOEIRA[Math.floor(Math.random() * R.ZOEIRA.length)] });
   }
 
-  // O cochicho do truco: o sinal vai só para o parceiro ((k+2)%4), e só se ele for gente.
-  function sinalar(room, m, k, frase) {
+  // O cochicho do truco: o sinal vai só para o parceiro ((k+2)%4), e só se ele for gente. A carta
+  // (quando tem) vai junto: a mini carta aparece no balão do parceiro.
+  function sinalar(room, m, k, frase, carta = null) {
     const p = (k + 2) % 4;
     const l = m.lugares[p];
     if (!l || l.bot) return false;
-    io.to(l.id).emit('ct-sinal', { mesa: m.i, lugar: k, nome: m.lugares[k]?.nome || '', frase });
+    io.to(l.id).emit('ct-sinal', { mesa: m.i, lugar: k, nome: m.lugares[k]?.nome || '', frase, carta });
     return true;
   }
   const humanos = (m) => m.lugares.filter((l) => l && !l.bot);
@@ -381,15 +382,25 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
   };
   const forcaDaMao = (t, k) => t.maos[k].reduce((s, c) => s + pesoTruco(c), 0) + t.rodadas.filter((r) => r === timeDe(k)).length * 1.5;
 
-  // o robô parceiro de vez em quando manda um sinal que combina com a mão dele
+  // o robô parceiro de vez em quando manda um sinal que combina com a mão dele: com sorte avisa
+  // uma carta que realmente está na mão dele (manilha ou 3/2/ás), senão uma frase pelo tamanho da mão
   function roboSinala(room, m, k) {
     if (Date.now() - (m.sinalEm || 0) < 15000 || Math.random() > 0.12) return;
     if (!vezDeGente(m, (k + 2) % 4)) return;
     m.sinalEm = Date.now();
+    const mao = m.t.maos[k] || [];
+    const manilha = mao.find((c) => R.MANILHAS.includes(c));
+    const forte = mao.find((c) => ['3', '2', 'A'].includes(R.valorDe(c)));
+    if ((manilha || forte) && Math.random() < 0.6) {
+      const carta = manilha || forte;
+      const s = R.SINAIS.find((x) => x.carta === carta)
+        || R.SINAIS.find((x) => x.carta && R.valorDe(x.carta) === R.valorDe(carta));
+      if (s) return sinalar(room, m, k, s.f, s.carta);
+    }
     const f = forcaDaMao(m.t, k);
     const quais = R.SINAIS.filter((s) => (f > 5.5 ? s.bom === true : f < 3.5 ? s.bom === false : s.bom === null));
     const s = quais[Math.floor(Math.random() * quais.length)];
-    if (s) sinalar(room, m, k, s.f);
+    if (s) sinalar(room, m, k, s.f, s.carta);
   }
 
   function botTruco(room, m, k) {
@@ -1183,7 +1194,7 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
       if (k < 0 || m.jogo !== 'truco' || !m.t || m.fase === 'espera') return;
       if (!Number.isInteger(i) || !R.SINAIS[i]) return;
       if (Date.now() - (user.sinalEm || 0) < INTERVALO_SINAL) return;
-      if (sinalar(room, m, k, R.SINAIS[i].f)) user.sinalEm = Date.now();
+      if (sinalar(room, m, k, R.SINAIS[i].f, R.SINAIS[i].carta)) user.sinalEm = Date.now();
     });
 
     socket.on('disconnect', () => {
