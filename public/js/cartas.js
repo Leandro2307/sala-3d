@@ -16,7 +16,7 @@
 import * as THREE from 'three';
 import {
   forcaTruco, valorDe, naipeDe, SIMBOLO, NOME_PEDIDO, PASSOS_TRUCO, MANILHAS, NOME_MANILHA, VALE_DEZ, ZOEIRA, SINAIS, ARREMESSOS,
-  podeJogarUno, coringa, corUno, rotuloUno, HEX_COR, NOME_COR, CORES_UNO,
+  podeJogarUno, coringa, corUno, simboloUno, rotuloUno, HEX_COR, NOME_COR, CORES_UNO,
   numero21, trunfo21, soma21, TRUNFOS_21, MAX_21, DEDOS_21,
 } from './cartas-regras.js';
 import { MESAS_CARTAS } from './parque-dados.js';
@@ -623,6 +623,7 @@ export class Cartas {
     const eraVez = antes?.vez === M.lugar && antes?.fase === 'jogando';
     if (vez && !eraVez && !e.pedido) this.sfx.message();
     if (e.jogo === 'uno' && e.aviso && e.aviso !== antes?.aviso && /UNO/.test(e.aviso)) this.sfx.punchHit();
+    if (e.jogo === 'uno' && e.topo && e.topo !== antes?.topo) this.fraseUno(M, e, antes);
     if (e.jogo === 'truco' && antes?.pontos && e.pontos) {
       // os pontos pulam e contam até o valor novo
       for (const [time, lado] of [[meuTime, 'nos'], [1 - meuTime, 'eles']]) {
@@ -769,7 +770,12 @@ export class Cartas {
         }
         if (e.monte) por(15, 'verso',{ x: M.m.x, y: Y_MESA + 0.006, z: M.m.z, ry: Math.PI / 2 + 0.15, esc: 0.78 }, { chave: 'monte' });
       } else if (e.topo) {
-        por(0, e.topo, { x: M.m.x, y: Y_MESA + 0.012, z: M.m.z, ry: 0.3 }, { chave: `topo:${e.topo}:${e.monte}` });
+        // quem pôs a carta no topo é a vez anterior (a vez já passou ao próximo). A minha carta já
+        // voou pela tela (ver voarCarta): no 3D ela só aparece no lugar dela.
+        const quem = e.topo !== antes?.topo ? antes?.vez : null;
+        const c = quem != null && quem >= 0 ? cadeira(M.m, quem) : null;
+        const de = c && !(this.ativa === M && quem === M.lugar) ? { x: c.x, y: 1.2, z: c.z } : null;
+        por(0, e.topo, { x: M.m.x, y: Y_MESA + 0.012, z: M.m.z, ry: 0.3 }, { de, chave: `topo:${e.topo}:${e.monte}` });
         por(1, 'verso', { x: M.m.x + 0.5, y: Y_MESA + 0.01, z: M.m.z, ry: -0.2 }, { chave: 'monte' });
       }
     }
@@ -1916,6 +1922,22 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
   }
 
   // ---------------------------------------------------------------- os efeitos
+  // no uno, quando alguém joga: o balão "jogou <carta>" na plaquinha da cadeira e a faixa grande
+  // do efeito (PULA!, VOLTA!, +2!...), como os gritos do truco
+  fraseUno(M, e, antes) {
+    const quem = antes?.vez;
+    if (quem == null || quem < 0 || !e.lugares?.[quem]) return;
+    const carta = e.topo;
+    const nome = e.lugares[quem].nome;
+    const cor = coringa(carta) ? (e.cor ? NOME_COR[e.cor] : null) : NOME_COR[corUno(carta)];
+    this.balao(quem, 'jogou', true, '', carta);
+    if (quem !== M.lugar) this.sfx.cartaVoa?.();
+    const s = simboloUno(carta);
+    const efeito = { B: 'PULA!', I: 'VOLTA!', P2: '+2!' }[s] || (s === 'W4' ? '+4!' : s === 'W' ? 'CORINGA!' : '');
+    if (!efeito) return;
+    this.faixaGrito(efeito, `${nome} jogou ${cor ? `${cor} ` : ''}${rotuloUno(carta)}`, false);
+  }
+
   faixaGrito(titulo, texto, nosso) {
     const f = this.$('#ct-grito');
     f.querySelector('b').innerHTML = `<span class="ondas">${ondas(titulo)}</span>`;
