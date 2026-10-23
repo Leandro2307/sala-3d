@@ -111,3 +111,12 @@ npm run publico
 
 Sobe o servidor e o túnel Cloudflare juntos e imprime o link público.
 Grátis e instantâneo, mas exige seu PC ligado e a URL muda a cada vez.
+
+## Voz natural dos gritos (opcional, automática)
+
+Os gritos da mesa de cartas (truco, zoeira...) saem com voz neural da Microsoft, sintetizados
+no servidor (pacote `msedge-tts`, grátis e sem chave). Precisa só de **rede de saída** para a
+API da Microsoft (o Render já permite; no PC local, internet normal). Sem rede ou com a API
+limitando (ela dá 429 em rajada), o jogo cai sozinho para a voz do sistema do navegador de cada
+jogador — nada quebra. A fila de síntese do servidor é paciente: uma de cada vez, com espera
+crescente em erro, e tudo o que já foi gerado fica em cache na memória do processo.

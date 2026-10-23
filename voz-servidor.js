@@ -14,9 +14,10 @@ const VOZES = ['pt-BR-FranciscaNeural', 'pt-BR-AntonioNeural'];
 const conexoes = [null, null]; // um websocket por voz
 const porId = new Map(); // id (vai na URL) -> { buffer }
 const porChave = new Map(); // `${voz}:${frase}` -> id | null (null: falhou, não tenta de novo)
-const fila = []; // sínteses pendentes, uma de cada vez (a rede agradece)
+const fila = []; // sínteses pendentes, uma de cada vez (a API limita: 429 em rajada)
 let processando = false;
-let foraDoAr = false; // uma falha de conexão: para de tentar, a voz do sistema assume
+let foraDoAr = false; // desistiu desta sessão: a voz do sistema dos clientes assume
+let falhasSeguidas = 0; // para o backoff: espera cada vez mais entre as tentativas
 
 async function conexao(v) {
   if (!conexoes[v]) {
@@ -39,29 +40,36 @@ function sintetiza(v, frase) {
   });
 }
 
-// a fila: tira um pedido de cada vez e grava no cache (a próxima vez a URL já sai na hora)
-async function processaFila() {
+// a fila: tira um pedido de cada vez, com respiro entre sínteses; em erro (a API vive limitando
+// rajada em 429) recoloca na frente e espera cada vez mais, até desistir da sessão
+function processaFila() {
   const item = fila.shift();
   if (!item) {
     processando = false;
     return;
   }
   processando = true;
-  try {
-    const buffer = await sintetiza(item.voz, item.frase);
+  sintetiza(item.voz, item.frase).then((buffer) => {
+    falhasSeguidas = 0;
+    foraDoAr = false;
     if (buffer.length) {
       const id = crypto.createHash('md5').update(item.chave).digest('hex').slice(0, 12);
       porId.set(id, { buffer });
       porChave.set(item.chave, id);
     } else porChave.set(item.chave, null);
-  } catch (err) {
-    if (!foraDoAr) {
+    setTimeout(processaFila, 1200); // respiro entre uma síntese e outra
+  }).catch((err) => {
+    falhasSeguidas++;
+    if (falhasSeguidas >= 8) {
       foraDoAr = true; // desiste da TTS nesta sessão: a voz do sistema dos clientes assume
-      console.warn('  Voz neural fora do ar (sem rede ou API mudou):', err.message);
+      fila.length = 0;
+      console.warn('  Voz neural fora do ar (sem rede, 429...):', err.message);
+      processando = false;
+      return;
     }
-    porChave.set(item.chave, null);
-  }
-  processaFila();
+    fila.unshift(item);
+    setTimeout(processaFila, Math.min(30000, 3000 * falhasSeguidas)); // backoff 3s, 6s, 9s...
+  });
 }
 
 // a URL do mp3 da frase na voz daquele lugar, se já estiver pronta; senão enfileira a síntese
