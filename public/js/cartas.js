@@ -70,8 +70,11 @@ function falarGrito(frase, lugar, volume) {
   try {
     if (!vozes) {
       const todas = speechSynthesis.getVoices().filter((v) => /^pt(-|_)BR/i.test(v.lang));
-      const naturais = todas.filter((v) => /natural|neural|online/i.test(v.name));
-      vozes = naturais.length ? naturais : todas;
+      // as melhores primeiro: vozes natural/neural/online (Francisca, Antônio, Google...); sem elas,
+      // qualquer uma que não seja "Desktop" (as de desktop antigas são robóticas e arrastadas)
+      const naturais = todas.filter((v) => /natural|neural|online/i.test(v.name) && !/desktop/i.test(v.name));
+      const naoDesktop = todas.filter((v) => !/desktop/i.test(v.name));
+      vozes = naturais.length ? naturais : (naoDesktop.length ? naoDesktop : todas);
     }
     const u = new SpeechSynthesisUtterance(frase);
     u.lang = 'pt-BR';
