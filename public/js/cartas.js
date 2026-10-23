@@ -1331,7 +1331,7 @@ body.touch .ct-placa { font-size: 12px; }
 .ct-conta i.minha { background: #009dff; box-shadow: 0 2px 0 #00609c; } .ct-conta i.rival { background: #fe5f55; box-shadow: 0 2px 0 #a8352e; }
 .ct-conta i.fora { background: transparent; color: #6b8285; text-decoration: line-through; }
 /* 21: o rival lá em cima, a soma da minha mão, os trunfos */
-.ct-rival { position: absolute; left: 50%; top: 62px; translate: -50% 0; display: flex; align-items: center; gap: 10px; padding: 8px 12px; pointer-events: auto; }
+.ct-rival { position: absolute; left: 50%; top: 93px; translate: -50% 0; display: flex; align-items: center; gap: 10px; padding: 8px 12px; pointer-events: auto; }
 .ct-rival .ct-cartas { display: flex; gap: 4px; } .ct-rival img { width: 46px; height: 61px; border-radius: 6px; box-shadow: 0 3px 0 rgba(0,0,0,.3); }
 .ct-rival img.raiox { outline: 3px solid #73ffcc; }
 .ct-rival .ct-somar { font: 800 26px ${NUMERO}; padding: 2px 10px; border-radius: 8px; background: #fe5f55; box-shadow: 0 3px 0 #a8352e; white-space: nowrap; }
