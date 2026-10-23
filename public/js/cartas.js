@@ -1173,7 +1173,7 @@ body.ct-sentado #controls-help, body.ct-sentado #sit-hint { display: none !impor
 .ct-lado .ct-b { width: 100%; }
 .ct-dica { font-size: 12px; color: #a9bfc2; text-align: center; line-height: 1.3; padding: 0 2px; }
 /* as plaquinhas em cima das cadeiras */
-.ct-assento { position: absolute; left: 0; top: 0; display: grid; justify-items: center; gap: 3px; will-change: transform; }
+.ct-assento { position: absolute; left: 0; top: 0; display: flex; justify-items: center; gap: 3px; will-change: transform; }
 .ct-placa { display: flex; align-items: center; gap: 6px; padding: 3px 8px 4px; border-radius: 9px; background: #3a5055; box-shadow: 0 3px 0 #1e2b2d;
   border: 2px solid var(--time, #5f7377); white-space: nowrap; font-size: 14px; }
 .ct-assento.vez .ct-placa { border-color: #f5b244; animation: ct-vez .8s ease-in-out infinite; }
