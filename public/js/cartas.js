@@ -1118,11 +1118,13 @@ body.ct-sentado #controls-help, body.ct-sentado #sit-hint { display: none !impor
 .ct-pergunta .ct-parceiro { display: flex; gap: 6px; justify-content: center; margin-bottom: 10px; }
 .ct-pergunta .ct-parceiro img { width: 58px; height: 78px; border-radius: 7px; box-shadow: 0 4px 0 rgba(0,0,0,.3); }
 .ct-pergunta .ct-tempo { margin: 12px auto 0; }
-/* o megafone e os sinais do truco */
-.ct-zoar { position: absolute; bottom: calc(100% + 10px); right: 0; padding: 8px; display: grid; gap: 6px; width: 230px; pointer-events: auto; animation: ct-balao .3s cubic-bezier(.2,1.6,.4,1) both; }
+/* o megafone e os sinais do truco (a lista ficou grande: rola dentro do painel) */
+.ct-zoar { position: absolute; bottom: calc(100% + 10px); right: 0; padding: 8px; display: grid; gap: 6px; width: 230px; max-height: min(48vh, 430px); overflow-y: auto; pointer-events: auto; animation: ct-balao .3s cubic-bezier(.2,1.6,.4,1) both; scrollbar-width: thin; scrollbar-color: #a782d1 transparent; }
+.ct-zoar::-webkit-scrollbar { width: 8px; }
+.ct-zoar::-webkit-scrollbar-thumb { background: #a782d1; border-radius: 4px; }
 .ct-zoar button { text-align: left; padding: 7px 10px; border: 0; border-radius: 8px; background: #1e2b2d; color: #fff; box-shadow: 0 2px 0 #11191a; }
 .ct-zoar button:hover { background: #a782d1; }
-.ct-zoar button.sorte { background: #5b3a8c; font-size: 13px; color: #f5e9ff; }
+.ct-zoar button.sorte { position: sticky; top: 0; z-index: 1; background: #5b3a8c; font-size: 13px; color: #f5e9ff; }
 .ct-sinais { right: 240px; }
 .ct-sinais button:hover { background: #4c7a3f; }
 .ct-dir { position: relative; }
