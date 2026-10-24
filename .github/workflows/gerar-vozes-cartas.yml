@@ -1,0 +1,31 @@
+name: Gerar vozes humanas das cartas
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/gerar-vozes-cartas.yml'
+      - 'scripts/gerar-vozes-cartas.js'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  gerar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: node scripts/gerar-vozes-cartas.js --forcar
+      - name: Salvar MP3 neural no repositorio
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add public/audio/cartas
+          git diff --cached --quiet || git commit -m 'Atualiza vozes neurais das cartas'
+          git push
