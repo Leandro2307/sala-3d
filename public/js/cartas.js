@@ -47,16 +47,40 @@ audioVoz.setAttribute('playsinline','true'); // iOS: inline sem fullscreen
 audioVoz.muted = false; // garante nao mutado em mobile
 audioVoz.preload = 'auto';
 // chiado de 0,05s: um play() com src real é o que o celular aceita como "destrave" do elemento
-const SILENCIO = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=';
+// A zero-sample WAV is not started by Safari/Chrome mobile, so it does not unlock this player.
+// Use a real 0.1-second silent PCM WAV instead.
+const SILENCIO = (() => {
+  const amostras = 800; // 0,1 s em 8 kHz, mono, 16-bit
+  const bytes = new ArrayBuffer(44 + amostras * 2);
+  const v = new DataView(bytes);
+  const texto = (i, s) => [...s].forEach((c, n) => v.setUint8(i + n, c.charCodeAt(0)));
+  texto(0, 'RIFF'); v.setUint32(4, 36 + amostras * 2, true); texto(8, 'WAVE');
+  texto(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, 8000, true); v.setUint32(28, 16000, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  texto(36, 'data'); v.setUint32(40, amostras * 2, true);
+  return URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }));
+})();
 let _vozDestravada = false;
 export function primarVoz() {
   // iOS/Safari: destrava o elemento de audio exatamente uma vez, de forma sincrona
   // dentro do event handler do usuario (sem await/Promise antes desta chamada)
   if (_vozDestravada) return;
   _vozDestravada = true;
+  const volumeAnterior = audioVoz.volume;
   audioVoz.src = SILENCIO;
+  audioVoz.volume = 0;
+  audioVoz.currentTime = 0;
   const p = audioVoz.play();
-  if (p && typeof p.then === 'function') p.then(() => audioVoz.pause()).catch(() => { _vozDestravada = false; });
+  if (p && typeof p.then === 'function') p.then(() => {
+    // Pausing in the same microtask can invalidate the user gesture on iOS.
+    setTimeout(() => {
+      if (audioVoz.src === SILENCIO) {
+        audioVoz.pause();
+        audioVoz.currentTime = 0;
+        audioVoz.volume = volumeAnterior;
+      }
+    }, 120);
+  }).catch(() => { _vozDestravada = false; audioVoz.volume = volumeAnterior; });
 }
 const PEDIDOS = ['truco', 'seis', 'nove', 'doze'];
 const OUVE_ATE = 22; // metros: de mais longe que isso, o grito da mesa não chega
@@ -519,7 +543,8 @@ export class Cartas {
         if (!this.socket) { falarGrito(frase, lugar, vol); return; }
         this.socket.emit('pedir-voz', { frase, lugar }, (url) => {
           if (url) this.tocarVoz(url, vol);
-          else if (tentativa < 3) setTimeout(() => tentarVoz(tentativa + 1), 1500);
+          // Neural TTS can still be warming up just after the server starts.
+          else if (tentativa < 8) setTimeout(() => tentarVoz(tentativa + 1), 1500);
           else falarGrito(frase, lugar, vol);
         });
       };
@@ -552,8 +577,8 @@ export class Cartas {
       audioVoz.pause();
       audioVoz.volume = Math.min(1, Math.max(0, volume));
       audioVoz.src = url;
-      audioVoz.load(); // iOS: sem load() o play() pode sair mudo ao trocar o src
-      audioVoz.currentTime = 0;
+      // Mobile Safari can lose the initial user-gesture authorization when load() resets media.
+      // Assigning src on the same player already selects the new media.
       this.vozAtual = audioVoz;
       audioVoz.play().catch(() => {});
     } catch { /* sem áudio: fica a faixa e o murro */ }
