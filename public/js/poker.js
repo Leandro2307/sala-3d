@@ -1155,7 +1155,28 @@ body.touch .pk-acoes { width: 100%; justify-content: center; }
   body.touch .pk-titulo { font-size: 17px; }
   body.touch .pk-ajuda { display: none; }
   body.touch .pk-dica { display: none; }
-  body.touch .pk-baixo { gap: 3px; }
+  /* iPhone em pé deitado: a mesa precisa ficar livre. Os comandos viram uma grade curta,
+     presa à direita, em vez de uma faixa larga cobrindo o centro da tela. */
+  body.touch .pk-baixo { left: auto; right: calc(8px + env(safe-area-inset-right)); transform: none; align-items: stretch; gap: 3px;
+    width: min(380px, calc(100vw - 168px - env(safe-area-inset-left) - env(safe-area-inset-right))); }
+  body.touch .pk-mao { position: absolute; right: 100%; bottom: 0; margin-right: 8px; }
+  body.touch .pk-cartas { gap: 3px; }
+  body.touch .pk-cartas img { width: 42px; }
+  body.touch .pk-jogo { font-size: 11px; padding: 2px 6px; }
+  body.touch .pk-acoes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 6px; gap: 5px; }
+  body.touch .pk-b { min-width: 0; padding: 6px 7px; font-size: 12px; white-space: normal; }
+  body.touch .pk-b small { font-size: 9px; }
+  body.touch .pk-saldo { grid-column: span 3; padding: 0; }
+  body.touch .pk-saldo b { display: inline; margin-left: 4px; font-size: 16px; }
+  body.touch .pk-raise { grid-column: span 2; padding: 4px 6px; gap: 3px; }
+  body.touch .pk-raise input { width: 100%; }
+  body.touch .pk-rapidos button { padding: 2px 4px; font-size: 10px !important; }
+  body.touch .pk-espera { grid-column: span 3; max-width: none; padding: 0; text-align: center; font-size: 11px; }
+  body.touch .pk-assentos > div { min-width: 86px; padding: 4px 6px 5px; border-radius: 9px; }
+  body.touch .pk-assentos .nome { max-width: 98px; font-size: 11px; }
+  body.touch .pk-assentos .fichas, body.touch .pk-assentos .aposta, body.touch .pk-assentos .lance { font-size: 10px; }
+  body.touch .pk-assentos .mini { margin-top: 2px; }
+  body.touch .pk-assentos .mini img { width: 22px; }
 }
 @media (prefers-reduced-motion: reduce) { #pk-hud * { animation: none !important; transition: none !important; } }
 `;

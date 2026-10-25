@@ -2747,6 +2747,8 @@ body.touch #sit-hint { display: none !important; }
 }
 body.touch[data-jogo] .touch-jogo-topo { display: flex; }
 body.touch[data-jogo]:not(.barra-aberta) #bar { display: none; }
+/* No PWA não há a barra do Safari para servir de navegação: mantenha a barra da sala acessível. */
+body.touch.pwa[data-jogo] #bar { display: grid; }
 body.touch[data-jogo]:not(.barra-aberta) .tb.corner { top: calc(8px + env(safe-area-inset-top)); }
 body.touch.barra-aberta .touch-jogo-topo { top: calc(60px + env(safe-area-inset-top)); }
 body.touch.barra-aberta #tb-menu { background: rgba(110, 231, 200, 0.22); border-color: rgba(110, 231, 200, 0.5); }

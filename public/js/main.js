@@ -547,6 +547,9 @@ if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname) && window.EventSource) 
 }
 const instalado = window.matchMedia('(display-mode: fullscreen), (display-mode: standalone)').matches || navigator.standalone;
 const ehIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+// No app instalado a barra superior continua sendo a navegação principal. A classe também
+// permite que o CSS não a esconda ao entrar em um jogo.
+document.body.classList.toggle('pwa', !!instalado);
 let pedidoDeInstalacao = null;
 window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
