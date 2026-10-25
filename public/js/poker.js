@@ -627,8 +627,19 @@ export class Poker {
     }
     if (mudouPote) this.arrumarPote(M, true, 0.25);
     this.arrumarApostas(M);
-    // fim da mão: depois de um respiro, o pote vai para quem ganhou (dividido no split)
+    // fim da mão: o servidor já zera as apostas ao mesmo tempo em que anuncia o
+    // vencedor. Antes de pagar visualmente, garante que todo o pote apareceu no pano;
+    // isso é especialmente importante quando a mão termina porque todos desistiram.
     if (e.fase === 'showdown' && antes?.fase !== 'showdown') {
+      const valorPote = e.resultado?.pote || 0;
+      const fichasNaMesa = M.fichas.filter((f) => !f.sai);
+      const valorNaMesa = fichasNaMesa.reduce((s, f) => s + f.v, 0);
+      if (valorPote > valorNaMesa) {
+        for (const v of fichasDe(valorPote - valorNaMesa)) {
+          Object.assign(this.novaFicha(M, v, -1), { grupo: 'pote' });
+        }
+        this.arrumarPote(M, true, 0.25);
+      }
       const vs = (e.resultado?.vencedores || []).map((v) => v.lugar);
       const fichas = M.fichas.filter((f) => !f.sai);
       fichas.forEach((f, i) => {
@@ -1020,7 +1031,7 @@ export class Poker {
   montarHud() {
     const css = document.createElement('style');
     css.textContent = `
-#pk-hud { position: fixed; inset: 0; z-index: 33; pointer-events: none; color: #f8fafc; font: 700 14px ${FONTE}; }
+#pk-hud { position: fixed; inset: 0; z-index: 33; pointer-events: none; color: #f8fafc; font: 700 14px ${FONTE}; touch-action: manipulation; }
 #pk-hud[hidden], #pk-hud [hidden] { display: none !important; }
 #pk-hud button { font: inherit; cursor: pointer; pointer-events: auto; }
 body.pk-sentado #controls-help, body.pk-sentado #sit-hint { display: none !important; }
@@ -1133,6 +1144,18 @@ body.pk-sentado #controls-help, body.pk-sentado #sit-hint { display: none !impor
   .pk-guia { padding: 14px; } .pk-cola li { grid-template-columns: 22px 1fr; } .pk-cola .ex { grid-column: 2; }
   .pk-baixo { flex-direction: column; align-items: center; bottom: 8px; gap: 6px; }
   .pk-cartas img { width: 54px; } .pk-raise input { width: 120px; } .pk-b { padding: 8px 11px; }
+}
+body.touch .pk-esq { left: calc(8px + env(safe-area-inset-left)); top: calc(52px + env(safe-area-inset-top)); max-height: calc(100dvh - 60px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+body.touch .pk-sair { right: calc(8px + env(safe-area-inset-right)); top: calc(52px + env(safe-area-inset-top)); }
+body.touch .pk-baixo { bottom: calc(8px + env(safe-area-inset-bottom)); width: min(520px, calc(100vw - 16px - env(safe-area-inset-left) - env(safe-area-inset-right))); }
+body.touch .pk-acoes { width: 100%; justify-content: center; }
+@media (max-height: 460px) {
+  body.touch .pk-esq { width: 138px; }
+  body.touch .pk-info { padding: 6px; gap: 5px; }
+  body.touch .pk-titulo { font-size: 17px; }
+  body.touch .pk-ajuda { display: none; }
+  body.touch .pk-dica { display: none; }
+  body.touch .pk-baixo { gap: 3px; }
 }
 @media (prefers-reduced-motion: reduce) { #pk-hud * { animation: none !important; transition: none !important; } }
 `;

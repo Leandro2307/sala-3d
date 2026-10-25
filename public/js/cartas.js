@@ -1327,9 +1327,11 @@ body.ct-sentado #controls-help, body.ct-sentado #sit-hint { display: none !impor
   .ondas > span, .ct-balanca, .ct-b.truco, .ct-vale[data-fogo]::before, .ct-sentido, .ct-assento.vez .ct-placa { animation: none; }
   #ct-hud.treme, #ct-grito.anda, .ct-carta.chega { animation: none; }
 }
-body.touch .ct-lado { left: calc(6px + env(safe-area-inset-left)); top: calc(54px + env(safe-area-inset-top)); width: 150px; padding: 6px; gap: 5px; }
+body.touch .ct-lado { left: calc(6px + env(safe-area-inset-left)); top: calc(54px + env(safe-area-inset-top)); width: 150px; padding: 6px; gap: 5px;
+  max-height: calc(100dvh - 60px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
 body.touch .ct-titulo { font-size: 18px; padding: 4px 4px 6px; } body.touch .ct-num { font-size: 24px; } body.touch .ct-vale { font-size: 20px; }
 body.touch .ct-manilhas { display: none; }
+body.touch .ct-mesa-acoes { position: sticky; bottom: 0; display: grid; gap: 5px; padding-top: 5px; background: #3a5055; }
 body.touch .ct-baixo { bottom: calc(6px + env(safe-area-inset-bottom)); gap: 4px; }
 body.touch .ct-carta { width: 64px; height: 86px; } body.touch .ct-mao { min-height: 86px; padding-top: 24px; }
 body.touch .ct-b { padding: 7px 10px; font-size: 13px; } body.touch .ct-b.grande { font-size: 17px; padding: 9px 12px; }
@@ -1612,7 +1614,7 @@ body.touch .ct-conta { display: none; } body.touch #ct-trunfo img { width: 96px;
 <div class="ct-linha2 ct-caixa" title="Quantos dedos o rival perde se perder a rodada"><small>APOSTA DO RIVAL</small><b class="ct-vale2">1</b></div>
 <div class="ct-mesa21 ct-caixa"><small>SEUS TRUNFOS NA MESA</small><span class="ct-namesa"></span></div>
 <div class="ct-conta ct-caixa"><small>CONTAGEM · NO MONTE <b class="ct-monte">–</b></small><span>${conta}</span></div>
-${espera ? comecar : ''}<button type="button" class="ct-b cinza" data-acao="sair">Sair da mesa</button>`
+${espera ? `<div class="ct-mesa-acoes">${comecar}<button type="button" class="ct-b cinza" data-acao="sair">Sair da mesa</button></div>` : '<div class="ct-mesa-acoes"><button type="button" class="ct-b cinza" data-acao="sair">Sair da mesa</button></div>'}`
         : truco
         ? `<div class="ct-titulo ondas">${ondas('TRUCO')}</div>
 <div class="ct-placar ct-caixa"><div><small>NÓS</small><b class="ct-num azul" data-p="nos">0</b></div><span class="ct-x">×</span><div><small>ELES</small><b class="ct-num vermelho" data-p="eles">0</b></div></div>
