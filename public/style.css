@@ -3403,3 +3403,7 @@ body.touch #topo-centro { top: calc(64px + env(safe-area-inset-top)); }
 .sp-envio { display: block; color: var(--accent); font-size: 10.5px; font-variant-numeric: tabular-nums; }
 .sp-envio:empty { display: none; }
 .focus-qualidade { margin-left: 8px; color: var(--muted); font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* H/esconder HUD: os painéis dos jogos de cartas (criados fora de #hud) também somem */
+body.sem-hud #ct-hud,
+body.sem-hud #pk-hud { display: none !important; }

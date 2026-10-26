@@ -1395,7 +1395,59 @@ body.touch .ct-placa { font-size: 12px; }
 body.touch .ct-rival { left: auto; right: calc(6px + env(safe-area-inset-right)); translate: none; top: calc(54px + env(safe-area-inset-top)); padding: 5px 8px; gap: 6px; }
 body.touch .ct-rival img { width: 30px; height: 40px; } body.touch .ct-rival .ct-somar { font-size: 18px; }
 body.touch .ct-trunfo { width: 44px; height: 59px; } body.touch .ct-soma { font-size: 26px; padding: 4px 8px; }
-body.touch .ct-conta { display: none; } body.touch #ct-trunfo img { width: 96px; height: 128px; }`;
+body.touch .ct-conta { display: none; } body.touch #ct-trunfo img { width: 96px; height: 128px; }
+/* iPhone 13 / telas estreitas (380x840): cartas e placar ainda menores, para não tapar a mesa */
+@media (max-width: 400px) {
+  body.touch .ct-lado { left: calc(4px + env(safe-area-inset-left)); top: calc(48px + env(safe-area-inset-top)); width: 116px; padding: 5px; gap: 4px; }
+  body.touch .ct-titulo { font-size: 15px; padding: 3px 2px 5px; }
+  body.touch .ct-num { font-size: 20px; }
+  body.touch .ct-vale, body.touch .ct-vale2, body.touch .ct-meta { font-size: 16px; min-width: 34px; }
+  body.touch .ct-rodadas i { width: 14px; height: 14px; }
+  body.touch .ct-baixo { bottom: calc(4px + env(safe-area-inset-bottom)); }
+  body.touch .ct-carta { width: 52px; height: 70px; }
+  body.touch .ct-mao { min-height: 70px; padding-top: 18px; }
+  body.touch .ct-b { padding: 6px 8px; font-size: 11px; }
+  body.touch .ct-b.grande { font-size: 14px; padding: 7px 10px; }
+  body.touch .ct-pergunta { top: 6%; width: min(96vw, 340px); padding: 8px 12px 12px; }
+  body.touch .ct-pergunta h2 { font-size: 32px; }
+  body.touch .ct-pergunta p { font-size: 14px; }
+  body.touch .ct-pergunta .ct-parceiro img { width: 46px; height: 62px; }
+  body.touch .ct-placa { font-size: 10px; padding: 2px 6px 3px; }
+  body.touch .ct-mini button { width: 24px; height: 22px; font-size: 12px; line-height: 22px; }
+  body.touch .ct-assento { gap: 2px; }
+  body.touch .ct-rival { right: calc(4px + env(safe-area-inset-right)); top: calc(48px + env(safe-area-inset-top)); padding: 4px 6px; gap: 5px; }
+  body.touch .ct-rival img { width: 26px; height: 35px; }
+  body.touch .ct-rival .ct-somar { font-size: 15px; }
+  body.touch .ct-trunfo { width: 38px; height: 51px; }
+  body.touch .ct-soma { font-size: 22px; padding: 3px 6px; }
+  body.touch .ct-zoar, body.touch .ct-sinais { width: 180px; }
+  body.touch #ct-trunfo img { width: 80px; height: 107px; }
+}
+/* iPhone 13 deitado (landscape, ~844×390): a altura é baixa, então tudo encolhe de altura */
+@media (orientation: landscape) and (max-height: 430px) {
+  body.touch .ct-lado { left: calc(6px + env(safe-area-inset-left)); top: calc(46px + env(safe-area-inset-top)); width: 130px; max-height: calc(100dvh - 52px - env(safe-area-inset-top)); padding: 5px; gap: 4px; overflow-y: auto; }
+  body.touch .ct-titulo { font-size: 16px; padding: 3px 2px 5px; }
+  body.touch .ct-num { font-size: 22px; }
+  body.touch .ct-vale, body.touch .ct-vale2, body.touch .ct-meta { font-size: 16px; min-width: 34px; }
+  body.touch .ct-baixo { bottom: calc(4px + env(safe-area-inset-bottom)); gap: 3px; }
+  body.touch .ct-carta { width: 48px; height: 64px; }
+  body.touch .ct-mao { min-height: 64px; padding-top: 14px; }
+  body.touch .ct-b { padding: 5px 8px; font-size: 11px; }
+  body.touch .ct-b.grande { font-size: 13px; padding: 6px 9px; }
+  body.touch .ct-pergunta { top: 4%; width: min(60vw, 320px); padding: 7px 12px 11px; }
+  body.touch .ct-pergunta h2 { font-size: 28px; }
+  body.touch .ct-pergunta p { font-size: 13px; }
+  body.touch .ct-pergunta .ct-parceiro img { width: 40px; height: 54px; }
+  body.touch .ct-placa { font-size: 11px; padding: 2px 6px 3px; }
+  body.touch .ct-mini button { width: 22px; height: 20px; font-size: 11px; line-height: 20px; }
+  body.touch .ct-rival { right: calc(6px + env(safe-area-inset-right)); top: calc(46px + env(safe-area-inset-top)); padding: 4px 6px; gap: 5px; }
+  body.touch .ct-rival img { width: 24px; height: 32px; }
+  body.touch .ct-rival .ct-somar { font-size: 14px; }
+  body.touch .ct-trunfo { width: 36px; height: 48px; }
+  body.touch .ct-soma { font-size: 20px; padding: 3px 6px; }
+  body.touch #ct-trunfo img { width: 76px; height: 102px; }
+  body.touch .ct-zoar, body.touch .ct-sinais { bottom: calc(100% + 6px); width: 170px; }
+}`;
     document.head.appendChild(css);
 
     this.raiz = document.createElement('div');

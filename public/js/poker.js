@@ -1178,6 +1178,59 @@ body.touch .pk-acoes { width: 100%; justify-content: center; }
   body.touch .pk-assentos .mini { margin-top: 2px; }
   body.touch .pk-assentos .mini img { width: 22px; }
 }
+/* iPhone 13 / telas estreitas (380x840): painel do pote e comandos de baixo mais compactos */
+@media (max-width: 400px) {
+  body.touch .pk-esq { left: calc(4px + env(safe-area-inset-left)); top: calc(48px + env(safe-area-inset-top)); width: 132px; padding: 6px; gap: 6px; }
+  body.touch .pk-info { padding: 6px; gap: 5px; }
+  body.touch .pk-titulo { font-size: 16px; }
+  body.touch .pk-pote b { font-size: 16px; }
+  body.touch .pk-pote i { width: 20px; height: 20px; }
+  body.touch .pk-linha { font-size: 10.5px; gap: 6px; }
+  body.touch .pk-ajuda { display: none; }
+  body.touch .pk-dica { display: none; }
+  body.touch .pk-sair { right: calc(4px + env(safe-area-inset-right)); top: calc(48px + env(safe-area-inset-top)); padding: 6px 8px; font-size: 11px; }
+  body.touch .pk-baixo { bottom: calc(4px + env(safe-area-inset-bottom)); width: min(520px, calc(100vw - 8px - env(safe-area-inset-left) - env(safe-area-inset-right))); gap: 5px; }
+  body.touch .pk-cartas img { width: 44px; }
+  body.touch .pk-jogo { font-size: 10px; padding: 2px 6px; }
+  body.touch .pk-acoes { padding: 6px; gap: 5px; }
+  body.touch .pk-b { padding: 6px 8px; font-size: 11px; }
+  body.touch .pk-b small { font-size: 9px; }
+  body.touch .pk-saldo { font-size: 10px; }
+  body.touch .pk-saldo b { font-size: 14px; }
+  body.touch .pk-raise { gap: 3px; padding: 4px 6px; }
+  body.touch .pk-raise input { width: 100px; }
+  body.touch .pk-rapidos button { padding: 2px 4px; font-size: 9px !important; }
+  body.touch .pk-espera { font-size: 10px; }
+  body.touch .pk-assentos > div { min-width: 78px; padding: 3px 5px 4px; border-radius: 8px; }
+  body.touch .pk-assentos .nome { max-width: 88px; font-size: 10px; }
+  body.touch .pk-assentos .fichas, body.touch .pk-assentos .aposta, body.touch .pk-assentos .lance { font-size: 9px; }
+  body.touch .pk-assentos .mini img { width: 18px; }
+}
+/* iPhone 13 deitado (landscape, ~844×390): a altura é baixa, então os comandos encolhem */
+@media (orientation: landscape) and (max-height: 430px) {
+  body.touch .pk-esq { left: calc(6px + env(safe-area-inset-left)); top: calc(44px + env(safe-area-inset-top)); width: 150px; max-height: calc(100dvh - 48px - env(safe-area-inset-top)); overflow-y: auto; padding: 6px; gap: 5px; }
+  body.touch .pk-info { padding: 6px; gap: 4px; }
+  body.touch .pk-titulo { font-size: 16px; }
+  body.touch .pk-pote b { font-size: 16px; }
+  body.touch .pk-pote i { width: 20px; height: 20px; }
+  body.touch .pk-ajuda, body.touch .pk-dica { display: none; }
+  body.touch .pk-sair { right: calc(6px + env(safe-area-inset-right)); top: calc(44px + env(safe-area-inset-top)); padding: 5px 7px; font-size: 10px; }
+  body.touch .pk-baixo { bottom: calc(4px + env(safe-area-inset-bottom)); flex-direction: row; align-items: flex-end; gap: 8px; }
+  body.touch .pk-cartas img { width: 42px; }
+  body.touch .pk-jogo { font-size: 10px; padding: 2px 6px; }
+  body.touch .pk-acoes { padding: 5px; gap: 4px; }
+  body.touch .pk-b { padding: 5px 7px; font-size: 10px; }
+  body.touch .pk-b small { font-size: 8px; }
+  body.touch .pk-saldo { font-size: 10px; }
+  body.touch .pk-saldo b { font-size: 14px; }
+  body.touch .pk-raise { gap: 3px; padding: 4px 6px; }
+  body.touch .pk-raise input { width: 90px; }
+  body.touch .pk-rapidos button { padding: 2px 4px; font-size: 9px !important; }
+  body.touch .pk-espera { font-size: 10px; }
+  body.touch .pk-assentos > div { min-width: 80px; padding: 3px 5px 4px; }
+  body.touch .pk-assentos .nome { max-width: 90px; font-size: 10px; }
+  body.touch .pk-assentos .mini img { width: 18px; }
+}
 @media (prefers-reduced-motion: reduce) { #pk-hud * { animation: none !important; transition: none !important; } }
 `;
     document.head.appendChild(css);
