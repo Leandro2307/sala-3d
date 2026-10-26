@@ -21,7 +21,7 @@ import {
   numero21, trunfo21, soma21, TRUNFOS_21, MAX_21, DEDOS_21,
 } from './cartas-regras.js';
 import { MESAS_CARTAS } from './parque-dados.js';
-import { hud, texturaViva, paraToque, arrumarPlacas } from './hud-jogos.js';
+import { hud, texturaViva, paraToque, arrumarPlacas, enfileirarPlacas, enquadrar, deslocarVista } from './hud-jogos.js';
 import { sfxLigado } from './sfx.js';
 import { Avatar } from './avatars.js';
 
@@ -31,6 +31,7 @@ const COR_PLACA = { truco: '#fe5f55', uno: '#f5b244', vinteum: '#4bc292' };
 const R_MESA = 1.15;
 const R_CADEIRA = 1.75;
 const Y_MESA = 0.85;
+const ALTURA_FILEIRA = 28; // px: a fileira das plaquinhas no celular deitado
 const PIXEL = "'Pixelify Sans', 'Plus Jakarta Sans', system-ui, sans-serif";
 const fontePx = (p, peso = 700) => `${peso} ${p}px ${PIXEL}`;
 // Os números e letras das cartas (e do placar) não vão na fonte pixelada: nela o 2 e o 3 quase não
@@ -465,6 +466,7 @@ export class Cartas {
     this.g3d = opts.world.cartas3d;
     this.mesas = MESAS_CARTAS.map((m, i) => ({ i, m, e: null, mao: [], lugar: -1, robos: [], pulo: 0, pausaDesde: 0 }));
     this.ativa = null; // a mesa em que estou sentado (com o painel aberto)
+    this.desloc = { x: 0, y: 0, alvoX: 0, alvoY: 0 }; // o meio da imagem no celular deitado (ver enquadrar)
     this.coberta = false; // COBERTA ligada: a próxima carta clicada vai virada
     this.esperandoCor = null; // coringa jogado, esperando a cor
     this.chaveMao = '';
@@ -972,6 +974,9 @@ export class Cartas {
       const yaw = Math.atan2(-(M.m.x - c.x), -(M.m.z - c.z));
       this.player.sentarEm({ x: c.x, y: 0.45, z: c.z, yaw });
       this.player.override = this.pose(M);
+      this.janela = null;
+      // no celular, as cartas deitadas na mesa pedem mais pixels (ver World.setNitidez)
+      if (document.body.classList.contains('touch')) this.world.setNitidez?.(2);
       this.raiz.hidden = false;
       document.body.classList.add('ct-sentado');
       this.chaveMao = '';
@@ -1000,6 +1005,8 @@ export class Cartas {
     this.escolha.hidden = true; // o seletor de cadeira aberto some junto
     if (!this.ativa) return;
     this.ativa = null;
+    this.world.setNitidez?.(0);
+    this.desloc.alvoX = this.desloc.alvoY = 0;
     this.coberta = false;
     this.esperandoCor = null;
     this.cores.hidden = true;
@@ -2301,15 +2308,26 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
       }
     }
     if (this.ativa) this.posicionarAssentos(this.ativa);
+    // o meio da imagem no celular deitado: vai até o alvo e, depois de levantar, volta ao meio
+    const d = this.desloc;
+    if (this.ativa || d.x || d.y) deslocarVista(this.world.camera, d, dt);
+  }
+
+  // celular deitado: plaquinhas numa fileira em cima e a mesa enquadrada embaixo (ver posicionarAssentos)
+  compacto() {
+    this._mq ||= matchMedia('(orientation: landscape) and (max-height: 500px)');
+    return document.body.classList.contains('touch') && this._mq.matches;
   }
 
   // as plaquinhas seguem as cadeiras na tela, sem tampar o placar, o rival do 21, a mão e a barra do
-  // topo, nem umas às outras (numa tela baixa elas se amontoavam)
+  // topo, nem umas às outras (numa tela baixa elas se amontoavam). No celular deitado ficam numa
+  // fileira em cima, e a mesa enquadrada no espaço que sobra (a mesa no meio da tela ficava pequena)
   posicionarAssentos(M) {
     const cam = this.world.camera;
     const v = this._v ||= new THREE.Vector3();
     const w = innerWidth;
     const h = innerHeight;
+    const deitado = this.compacto();
     // os tamanhos e os painéis mudam pouco: mede de tempos em tempos, não a cada quadro
     const agora = performance.now();
     const medir = !this._medidas || agora - this._medidas.em > 300 || this._medidas.w !== w || this._medidas.h !== h;
@@ -2317,32 +2335,88 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
       const ret = (el) => (el && !el.hidden && el.offsetHeight ? el.getBoundingClientRect() : null);
       const lado = ret(this.$('.ct-lado'));
       const bar = document.body.classList.contains('touch') ? ret(document.getElementById('bar')) : null;
+      const baixoDaBarra = bar && bar.top < h / 2 ? bar.bottom : null;
+      const borda = Math.max(6, lado?.left ?? 6);
+      const rival = ret(this.$('.ct-rival'));
       this._medidas = {
         em: agora, w, h,
-        area: { esquerda: Math.max(6, lado?.left ?? 6), direita: w - Math.max(6, lado?.left ?? 6), topo: bar && bar.top < h / 2 ? bar.bottom - 6 : 40, baixo: h - 8 },
-        evitar: [lado, ret(this.$('.ct-rival')), ...[...this.$('.ct-baixo').children].map(ret)].filter(Boolean),
+        area: { esquerda: borda, direita: w - borda, topo: baixoDaBarra != null ? baixoDaBarra - 6 : 40, baixo: h - 8 },
+        evitar: [lado, rival, ...[...this.$('.ct-baixo').children].map(ret)].filter(Boolean),
       };
+      if (deitado) {
+        // a fileira: logo abaixo da barra, entre o placar e o rival do 21 (que fica em cima, à direita)
+        const topo = (baixoDaBarra ?? 4) + 4;
+        const fileira = { esquerda: (lado?.right ?? 0) + 6, direita: rival && rival.top < topo + ALTURA_FILEIRA ? rival.left - 6 : w - borda, topo };
+        this._medidas.fileira = fileira;
+        // a mesa vai do pé da fileira até a linha da mão (o aviso e os trunfos do 21 podem tampar a
+        // beira de cá, que é a minha). Com o rival do 21: ou a mesa fica à esquerda dele, ou embaixo
+        // dele com a tela toda de largura; vale a que deixar a mesa maior
+        const linha = ret(this.$('.ct-linha'));
+        const livre = { left: fileira.esquerda + 2, right: w - borda, top: topo + ALTURA_FILEIRA + 4, bottom: (linha?.top ?? h) + 6 };
+        const opcoes = rival ? [{ ...livre, right: rival.left - 8 }, { ...livre, top: Math.max(livre.top, rival.bottom + 6) }] : [livre];
+        this.enquadrar(M, opcoes);
+      } else if (this.janela) {
+        // virou o celular (ou saiu da tela cheia): a pose de sempre
+        this.janela = null;
+        const p = this.pose(M);
+        this.player.override?.position.copy(p.position);
+        this.player.override?.target.copy(p.target);
+        this.desloc.alvoX = this.desloc.alvoY = 0;
+      }
     }
-    const { area, evitar } = this._medidas;
+    const { area, evitar, fileira } = this._medidas;
     const placas = [];
     for (const el of this.$('.ct-assentos').children) {
       if (el.hidden) continue;
       const c = cadeira(M.m, Number(el.dataset.lugar));
       v.set(c.x, 1.95, c.z).project(cam);
-      if (v.z > 1) {
+      if (v.z > 1 && !deitado) {
         el.style.visibility = 'hidden';
         continue;
       }
       el.style.visibility = '';
       if (medir || !el._tam) el._tam = { w: el.offsetWidth, h: el.offsetHeight };
-      placas.push({ el, x: ((v.x + 1) / 2) * w, y: ((1 - v.y) / 2) * h, ...el._tam });
+      // atrás da câmera a projeção sai espelhada: na fileira, vai para o lado certo
+      const x = v.z > 1 ? (v.x > 0 ? 0 : w) : ((v.x + 1) / 2) * w;
+      placas.push({ el, x, y: ((1 - v.y) / 2) * h, ...el._tam });
     }
-    arrumarPlacas(placas, area, evitar);
+    if (deitado && fileira) enfileirarPlacas(placas, fileira.esquerda, fileira.direita, fileira.topo);
+    else arrumarPlacas(placas, area, evitar);
     for (const p of placas) {
       p.el.style.transform = `translate(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px) translate(-50%, -100%)`;
       // sem lugar em cima para o balão: ele sai por baixo
       p.el.classList.toggle('topo', p.y - p.h - area.topo < 44);
     }
+  }
+
+  // celular deitado: a câmera põe a mesa no espaço que os painéis deixam (ver enquadrar no
+  // hud-jogos); entre as opções de espaço, a que deixa a mesa maior (a câmera mais perto). Só refaz
+  // a conta quando o espaço muda de verdade (o aviso e a mão mexem uns pixels)
+  enquadrar(M, opcoes) {
+    const antes = this.janela;
+    const igual = antes && antes.lugar === M.lugar && antes.opcoes.length === opcoes.length
+      && opcoes.every((o, i) => ['left', 'top', 'right', 'bottom'].every((k) => Math.abs(antes.opcoes[i][k] - o[k]) < 12));
+    if (igual || !this.player.override) return;
+    this.janela = { opcoes, lugar: M.lugar };
+    const base = this.pose(M);
+    const contorno = this.contorno(M);
+    const r = opcoes.map((o) => enquadrar(THREE, this.world.camera, base, contorno, o))
+      .reduce((a, b) => (a.position.distanceTo(base.target) <= b.position.distanceTo(base.target) ? a : b));
+    this.player.override.position.copy(r.position);
+    this.player.override.target.copy(r.target);
+    this.desloc.alvoX = r.dx;
+    this.desloc.alvoY = r.dy;
+  }
+
+  // a beira do tampo redondo
+  contorno(M) {
+    if (M.contorno) return M.contorno;
+    M.contorno = [];
+    for (let i = 0; i < 16; i++) {
+      const a = (i / 16) * Math.PI * 2;
+      M.contorno.push(new THREE.Vector3(M.m.x + Math.cos(a) * R_MESA, Y_MESA, M.m.z + Math.sin(a) * R_MESA));
+    }
+    return M.contorno;
   }
 
   // o painel do parque mostra "Truco, Uno e 21" se um dos três estiver ligado

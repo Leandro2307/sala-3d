@@ -200,6 +200,95 @@ export function arrumarPlacas(placas, area, evitar = []) {
   placas.forEach(prende);
 }
 
+// Celular deitado: as plaquinhas numa fileira só, logo abaixo da barra, cada uma o mais perto possível
+// de cima do seu lugar (x), sem uma tampar a outra; a mesa fica inteira para as cartas (ver
+// enquadrar). placas: como em arrumarPlacas; topo: onde começa a fileira.
+export function enfileirarPlacas(placas, esquerda, direita, topo) {
+  placas.sort((a, b) => a.x - b.x);
+  for (const p of placas) p.y = topo + p.h;
+  // empurra para a direita o que encosta, depois de volta para a esquerda o que passou da borda
+  let borda = esquerda;
+  for (const p of placas) {
+    p.x = Math.max(p.x, borda + p.w / 2);
+    borda = p.x + p.w / 2 + 6;
+  }
+  borda = direita;
+  for (let i = placas.length - 1; i >= 0; i--) {
+    const p = placas[i];
+    p.x = Math.min(p.x, borda - p.w / 2);
+    borda = p.x - p.w / 2 - 6;
+  }
+}
+
+// Celular deitado: a câmera da mesa de cartas enquadra a mesa no pedaço da tela que os painéis
+// deixam livre. base: a pose de sempre ({ position, target }); a câmera continua olhando da mesma
+// direção, só chega mais perto (ou se afasta) até os pontos (o contorno do pano) caberem na janela
+// ({ left, top, right, bottom }, em px da tela). O meio da janela não é o meio da tela: o
+// deslocamento (dx, dy, em px) vai para o setViewOffset da câmera, que move a imagem sem entortar
+// a perspectiva. Devolve { position, target, dx, dy }.
+const _enq = {};
+export function enquadrar(THREE, cam, base, pontos, janela) {
+  const c = (_enq.cam ||= new THREE.PerspectiveCamera());
+  const v = (_enq.v ||= new THREE.Vector3());
+  c.fov = cam.fov;
+  c.aspect = cam.aspect;
+  c.near = cam.near;
+  c.far = cam.far;
+  c.clearViewOffset(); // e já refaz a projeção
+  const w = innerWidth;
+  const h = innerHeight;
+  const dir = base.position.clone().sub(base.target);
+  const longe = dir.length();
+  dir.normalize();
+  const caixa = (d) => {
+    c.position.copy(base.target).addScaledVector(dir, d);
+    c.lookAt(base.target);
+    c.updateMatrixWorld();
+    const b = { x0: Infinity, x1: -Infinity, y0: Infinity, y1: -Infinity };
+    for (const p of pontos) {
+      v.copy(p).project(c);
+      if (v.z > 1) return null; // ponto atrás da câmera: perto demais
+      const x = ((v.x + 1) / 2) * w;
+      const y = ((1 - v.y) / 2) * h;
+      b.x0 = Math.min(b.x0, x);
+      b.x1 = Math.max(b.x1, x);
+      b.y0 = Math.min(b.y0, y);
+      b.y1 = Math.max(b.y1, y);
+    }
+    return b;
+  };
+  const cabe = (b) => b && b.x1 - b.x0 <= janela.right - janela.left && b.y1 - b.y0 <= janela.bottom - janela.top;
+  // a distância mais curta em que a mesa cabe (de 40% a 160% da de sempre)
+  let a = longe * 0.4;
+  let z = longe * 1.6;
+  for (let i = 0; i < 16; i++) {
+    const m = (a + z) / 2;
+    if (cabe(caixa(m))) z = m;
+    else a = m;
+  }
+  const b = caixa(z);
+  return {
+    position: c.position.clone(),
+    target: base.target.clone(),
+    dx: (janela.left + janela.right) / 2 - (b.x0 + b.x1) / 2,
+    dy: (janela.top + janela.bottom) / 2 - (b.y0 + b.y1) / 2,
+  };
+}
+
+// Leva o deslocamento da imagem da câmera (ver enquadrar) até o alvo aos poucos, junto com a câmera
+// que voa até a cadeira. d: { x, y, alvoX, alvoY }; sem deslocamento, desliga o setViewOffset.
+export function deslocarVista(cam, d, dt) {
+  const k = 1 - Math.exp(-dt * 6);
+  d.x += (d.alvoX - d.x) * k;
+  d.y += (d.alvoY - d.y) * k;
+  if (Math.abs(d.x) < 0.5 && Math.abs(d.y) < 0.5 && !d.alvoX && !d.alvoY) {
+    d.x = d.y = 0;
+    if (cam.view?.enabled) cam.clearViewOffset();
+    return;
+  }
+  cam.setViewOffset(innerWidth, innerHeight, -d.x, -d.y, innerWidth, innerHeight);
+}
+
 // textura de canvas que se redesenha com redesenhar(...args)
 export function texturaViva(THREE, w, h, desenhar) {
   const cv = document.createElement('canvas');

@@ -15,7 +15,7 @@
 import * as THREE from 'three';
 import { avaliarMao, LETRA, SIMBOLO, BLINDS, BIGS_MINIMO } from './poker-regras.js';
 import { MESAS_POKER } from './parque-dados.js';
-import { hud, texturaViva, arrumarPlacas } from './hud-jogos.js';
+import { hud, texturaViva, arrumarPlacas, enfileirarPlacas, enquadrar, deslocarVista } from './hud-jogos.js';
 import { Avatar } from './avatars.js';
 
 const LUGARES = 6;
@@ -41,6 +41,7 @@ const COR_ROBO = ['#94a3b8', '#a3e635', '#f472b6', '#fbbf24', '#22d3ee', '#c084f
 const FASE = { espera: 'Esperando', 'pre-flop': 'Pré-flop', flop: 'Flop', turn: 'Turn', river: 'River', showdown: 'Showdown' };
 const emJogoAgora = (e) => e.fase !== 'espera' && e.fase !== 'showdown';
 const OUVE_ATE = 18; // metros: de mais longe, as fichas caindo não se ouvem
+const ALTURA_FILEIRA = 36; // px: a fileira das plaquinhas no celular deitado (duas linhas)
 
 // as fichas, do maior valor para o menor (as cores de cassino: 1 branca, 5 vermelha, 25 verde,
 // 100 preta, 500 roxa)
@@ -448,6 +449,7 @@ export class Poker {
     this.mesas = MESAS_POKER.map((m, i) => ({ i, m, e: null, mao: [], lugar: -1, robos: [], fichas: [], empilhado: false, recebidoEm: 0 }));
     this.ativa = null; // a mesa em que estou sentado (com o painel aberto)
     this.somEm = 0;
+    this.desloc = { x: 0, y: 0, alvoX: 0, alvoY: 0 }; // o meio da imagem no celular deitado (ver enquadrar)
     this.ray = new THREE.Raycaster();
     this.montarHud();
     // clique no 3D: numa ficha da mesa, empilha (ou espalha) o pote
@@ -791,8 +793,8 @@ export class Poker {
       const doDealer = { x: cd.x, y: Y_MESA + 0.25, z: cd.z };
       // as comunitárias numa fileira no meio, viradas para quem olha
       e.comunitarias.forEach((c, i) => {
-        const lado = (i - 2) * 0.34;
-        por(i, c, { x: M.m.x - o.uz * lado - o.ux * 0.02, y: Y_MESA + 0.006, z: M.m.z + o.ux * lado - o.uz * 0.02, ry, esc: 1.3 }, `${e.mao}:c${i}`, doDealer);
+        const lado = (i - 2) * 0.39;
+        por(i, c, { x: M.m.x - o.uz * lado - o.ux * 0.02, y: Y_MESA + 0.006, z: M.m.z + o.ux * lado - o.uz * 0.02, ry, esc: 1.5 }, `${e.mao}:c${i}`, doDealer);
       });
       // as duas de cada um, na frente da cadeira: a minha aberta, as dos outros fechadas (abrem no showdown)
       e.lugares.forEach((l, k) => {
@@ -977,6 +979,9 @@ export class Poker {
       const yaw = Math.atan2(c.ux, c.uz);
       this.player.sentarEm({ x: c.x, y: 0.45, z: c.z, yaw });
       this.player.override = this.pose(M);
+      this.janela = null;
+      // no celular, as cartas deitadas na mesa pedem mais pixels (ver World.setNitidez)
+      if (document.body.classList.contains('touch')) this.world.setNitidez?.(2);
       this.raiz.hidden = false;
       this.$('.pk-dica').hidden = false;
       document.body.classList.add('pk-sentado');
@@ -1013,8 +1018,11 @@ export class Poker {
     if (!M) return;
     this.ativa = null;
     this.fecharGuia();
+    this.subindo(false);
     this.raiz.hidden = true;
     document.body.classList.remove('pk-sentado');
+    this.world.setNitidez?.(0);
+    this.desloc.alvoX = this.desloc.alvoY = 0;
     this.world.canvas.style.cursor = '';
     this.player.override = null;
     this.player.stand();
@@ -1096,9 +1104,16 @@ body.pk-sentado #controls-help, body.pk-sentado #sit-hint { display: none !impor
 .pk-acoes.pulo { animation: pk-pulo .5s ease; }
 .pk-saldo { padding: 0 6px; font-size: 12px; color: #94a3b8; text-align: center; }
 .pk-saldo b { display: block; font-size: 20px; color: #86efac; }
-.pk-raise { display: grid; gap: 5px; padding: 6px 8px; border-radius: 10px; background: #0b1220; }
-.pk-raise input { width: 160px; accent-color: #22c55e; pointer-events: auto; }
-.pk-rapidos { display: flex; gap: 4px; }
+.pk-raise { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 5px 6px; padding: 6px 8px; border-radius: 10px; background: #0b1220; }
+.pk-raise input[type="range"] { width: 160px; accent-color: #22c55e; pointer-events: auto; }
+.pk-valor { display: flex; align-items: center; gap: 4px; }
+.pk-valor input { width: 64px; padding: 4px 6px; border: 1px solid #334155; border-radius: 6px; background: #1e293b; color: #f8fafc; font: 800 13px ${FONTE};
+  text-align: center; pointer-events: auto; -moz-appearance: textfield; appearance: textfield; }
+.pk-valor input::-webkit-inner-spin-button, .pk-valor input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.pk-valor input:focus { outline: 2px solid #22c55e; outline-offset: 0; }
+.pk-valor button { display: none; padding: 0; border: 1px solid #334155; border-radius: 8px; background: #1e293b; color: #f8fafc; font-weight: 800; line-height: 1; }
+.pk-fecha-raise { display: none; }
+.pk-rapidos { grid-column: 1 / -1; display: flex; gap: 4px; }
 .pk-rapidos button { padding: 3px 7px; border: 1px solid #334155; border-radius: 6px; background: #1e293b; color: #cbd5e1; font-size: 11px !important; }
 .pk-rapidos button:hover { background: #334155; }
 .pk-espera { padding: 0 6px; color: #cbd5e1; font-size: 13px; max-width: 220px; }
@@ -1144,12 +1159,14 @@ body.pk-sentado #controls-help, body.pk-sentado #sit-hint { display: none !impor
   .pk-esq { left: 10px; top: 56px; width: 150px; } .pk-info { padding: 8px; } .pk-pote b { font-size: 18px; }
   .pk-guia { padding: 14px; } .pk-cola li { grid-template-columns: 22px 1fr; } .pk-cola .ex { grid-column: 2; }
   .pk-baixo { flex-direction: column; align-items: center; bottom: 8px; gap: 6px; }
-  .pk-cartas img { width: 54px; } .pk-raise input { width: 120px; } .pk-b { padding: 8px 11px; }
+  .pk-cartas img { width: 54px; } .pk-raise input[type="range"] { width: 120px; } .pk-b { padding: 8px 11px; }
 }
 body.touch .pk-esq { left: calc(8px + env(safe-area-inset-left)); top: calc(52px + env(safe-area-inset-top)); max-height: calc(100dvh - 60px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
 body.touch .pk-sair { right: calc(8px + env(safe-area-inset-right)); top: calc(52px + env(safe-area-inset-top)); }
 body.touch .pk-baixo { bottom: calc(8px + env(safe-area-inset-bottom)); width: min(520px, calc(100vw - 16px - env(safe-area-inset-left) - env(safe-area-inset-right))); }
 body.touch .pk-acoes { width: 100%; justify-content: center; }
+/* 16px: com menos, o Safari do iPhone dá zoom na página ao tocar no campo do valor */
+body.touch .pk-valor input { font-size: 16px; }
 /* Celular deitado, do pequeno (SE: 667×320 com a barra do Safari) ao grande (Pro Max: 932×430). Falta
    altura, então as medidas seguem a altura da tela (--pk-vh). À esquerda, de cima para baixo, o pote
    e a mesa e, no pé, o Levantar (como o "Sair da mesa" do truco); à direita dele, embaixo, as minhas
@@ -1190,27 +1207,54 @@ body.touch .pk-acoes { width: 100%; justify-content: center; }
   body.touch .pk-cartas { gap: 4px; }
   body.touch .pk-cartas img { width: var(--carta); border-radius: 6px; }
   body.touch .pk-jogo { font-size: 11px; padding: 2px 8px; }
-  body.touch .pk-acoes { flex: 0 1 440px; width: auto; min-width: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
-    grid-template-areas: "saldo raise raise raise" "fold call raise2 allin" "espera espera espera espera"; gap: 6px; padding: 7px; }
-  body.touch .pk-acoes:not(.decide) { grid-template-areas: "saldo espera espera espera" "comecar comecar comecar comecar"; }
-  body.touch .pk-saldo { grid-area: saldo; align-self: center; padding: 0; font-size: 10px; line-height: 1.1; }
+  /* os comandos numa linha só (a altura fica para a mesa); o Aumentar abre o painel do valor em cima */
+  body.touch .pk-acoes { position: relative; flex: 0 1 460px; width: auto; min-width: 0; display: grid; grid-template-columns: auto repeat(4, minmax(0, 1fr));
+    grid-template-areas: "saldo fold call raise2 allin"; gap: 6px; padding: 6px; }
+  body.touch .pk-acoes:not(.decide) { grid-template-areas: "saldo espera espera espera espera"; }
+  body.touch .pk-saldo { grid-area: saldo; align-self: center; padding: 0 2px; font-size: 10px; line-height: 1.1; }
   body.touch .pk-saldo b { font-size: 18px; }
-  body.touch [data-pk="comecar"] { grid-area: comecar; } body.touch [data-pk="fold"] { grid-area: fold; } body.touch [data-pk="call"] { grid-area: call; }
+  body.touch [data-pk="comecar"] { grid-area: espera; } body.touch [data-pk="fold"] { grid-area: fold; } body.touch [data-pk="call"] { grid-area: call; }
   body.touch [data-pk="raise"] { grid-area: raise2; } body.touch [data-pk="allin"] { grid-area: allin; }
-  body.touch .pk-raise { grid-area: raise; align-self: center; display: flex; align-items: center; gap: 6px; padding: 3px 4px 3px 8px; }
-  body.touch .pk-raise input { flex: 1; min-width: 50px; width: auto; height: 30px; margin: 0; }
-  body.touch .pk-rapidos { flex: none; gap: 4px; } body.touch .pk-rapidos button { min-width: 36px; min-height: 32px; padding: 2px 6px; font-size: 11px !important; }
+  body.touch .pk-acoes.subindo [data-pk="raise"] { box-shadow: 0 0 0 3px #bbf7d0, 0 4px 0 var(--sombra); }
   body.touch .pk-espera { grid-area: espera; align-self: center; max-width: none; padding: 0 4px; font-size: 12px; text-align: center; }
-  body.touch .pk-b { min-width: 0; min-height: 46px; padding: 6px 4px; font-size: 14px; border-radius: 10px; }
+  /* na vez dos outros, quem joga aparece num selo em cima dos botões */
+  body.touch .pk-acoes.decide .pk-espera { position: absolute; left: 50%; bottom: calc(100% + 5px); transform: translateX(-50%); max-width: 100%; padding: 3px 10px;
+    border-radius: 999px; background: #0f172ae6; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  body.touch .pk-raise { display: none; }
+  /* numa linha só, para não tampar as cartas da mesa; quem confirma é o próprio Aumentar (o 2º toque) */
+  body.touch .pk-acoes.subindo .pk-raise:not([hidden]) { position: absolute; right: 0; bottom: calc(100% + 6px); width: max-content; max-width: calc(100vw - 16px);
+    display: flex; align-items: center; gap: 6px; padding: 6px; border: 1px solid #ffffff1f; border-radius: 12px;
+    background: linear-gradient(#1f2937fa, #111827fa); box-shadow: 0 10px 30px rgba(0,0,0,.45); }
+  body.touch .pk-raise input[type="range"] { display: none; }
+  body.touch .pk-valor { gap: 4px; }
+  body.touch .pk-valor button { display: grid; place-items: center; width: 40px; height: 40px; font-size: 22px !important; }
+  body.touch .pk-valor input { width: 72px; height: 40px; padding: 0 4px; border-radius: 8px; }
+  body.touch .pk-rapidos { gap: 4px; }
+  body.touch .pk-rapidos button { min-width: 40px; min-height: 40px; padding: 2px 7px; border-radius: 8px; font-size: 12px !important; }
+  body.touch .pk-fecha-raise { display: grid; place-items: center; width: 34px; height: 40px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: #94a3b8; font-size: 16px !important; }
+  /* digitando o valor, o painel sobe para o topo da tela: o teclado do celular cobre a parte de baixo */
+  body.touch .pk-acoes.subindo .pk-raise:focus-within { position: fixed; top: calc(6px + env(safe-area-inset-top)); bottom: auto; right: calc(8px + env(safe-area-inset-right)); z-index: 2; }
+  body.touch .pk-b { min-width: 0; min-height: 46px; padding: 6px 3px; font-size: 13px; border-radius: 10px; }
   body.touch .pk-b small { font-size: 10px; }
   body.touch .pk-banner { left: var(--meio); bottom: calc(var(--base) + var(--carta) * 1.4 + 40px); max-width: 60vw; padding: 8px 16px; font-size: 15px; }
   body.touch .pk-banner small { font-size: 11px; }
   /* as plaquinhas: pequenas, mas legíveis (o tamanho é daqui; antes era um scale que encolhia a letra) */
-  body.touch .pk-assentos > div { min-width: 84px; padding: 3px 7px 4px; border-radius: 9px; }
-  body.touch .pk-assentos .nome { max-width: 104px; font-size: 11px; }
-  body.touch .pk-assentos .fichas, body.touch .pk-assentos .aposta, body.touch .pk-assentos .total, body.touch .pk-assentos .jogo, body.touch .pk-assentos .vazio { font-size: 10px; }
-  body.touch .pk-assentos .lance { margin-top: 2px; padding: 1px 6px; font-size: 11px; }
-  body.touch .pk-assentos .mini { margin-top: 2px; } body.touch .pk-assentos .mini img { width: 24px; }
+  /* as plaquinhas numa fileira em cima da mesa (ver posicionarAssentos), em duas linhas: o nome e,
+     embaixo, as fichas com a aposta da rodada do lado; no showdown, as cartas numa terceira */
+  body.touch .pk-assentos > div { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 1px 5px; min-width: 76px; max-width: 132px;
+    padding: 3px 7px 4px; border-radius: 9px; }
+  body.touch .pk-assentos .nome { flex-basis: 100%; max-width: 118px; font-size: 11px; line-height: 1.25; }
+  body.touch .pk-assentos .fichas, body.touch .pk-assentos .aposta, body.touch .pk-assentos .jogo, body.touch .pk-assentos .vazio { font-size: 10px; line-height: 1.3; }
+  body.touch .pk-assentos .aposta { margin: 0; }
+  body.touch .pk-assentos .total { display: none; }
+  body.touch .pk-assentos .fichas::before { content: ''; display: inline-block; width: 9px; height: 9px; margin-right: 3px; vertical-align: -1px; border-radius: 50%;
+    background: radial-gradient(circle, #15803d 45%, #fff 46% 56%, #15803d 57%); }
+  body.touch .pk-assentos .lance { margin: 0; padding: 0 6px; font-size: 10px; line-height: 1.4; gap: 3px; }
+  body.touch .pk-assentos .lance i { width: 9px; height: 9px; }
+  body.touch .pk-assentos .mini { flex-basis: 100%; justify-content: center; margin-top: 1px; } body.touch .pk-assentos .mini img { width: 24px; }
+  body.touch .pk-assentos .jogo { flex-basis: 100%; margin: 0; }
+  body.touch .pk-assentos .tempo { position: absolute; left: 8px; right: 8px; bottom: 1px; height: 3px; margin: 0; }
+  body.touch .pk-assentos .selo { top: -8px; font-size: 10px; }
   body.touch .pk-assentos .vazio { opacity: .8; }
   /* o tutorial e a cola: ocupam a altura toda */
   body.touch .pk-fundo { padding: 8px calc(8px + env(safe-area-inset-right)) 8px calc(8px + env(safe-area-inset-left)); }
@@ -1258,7 +1302,7 @@ body { --pk-vh: 1vh; }
   body.touch .pk-saldo { font-size: 10px; }
   body.touch .pk-saldo b { font-size: 14px; }
   body.touch .pk-raise { gap: 3px; padding: 4px 6px; }
-  body.touch .pk-raise input { width: 100px; }
+  body.touch .pk-raise input[type="range"] { width: 100px; }
   body.touch .pk-rapidos button { padding: 2px 4px; font-size: 9px !important; }
   body.touch .pk-espera { font-size: 10px; }
   body.touch .pk-assentos > div { min-width: 78px; padding: 3px 5px 4px; border-radius: 8px; }
@@ -1302,9 +1346,11 @@ body { --pk-vh: 1vh; }
           <button type="button" class="pk-b azul" data-pk="call">Passar</button>
           <div class="pk-raise">
             <input type="range" min="0" max="0" step="1" value="0" aria-label="Valor do aumento">
+            <div class="pk-valor"><button type="button" data-mais="-1" aria-label="Menos">−</button><input type="number" inputmode="numeric" min="0" step="1" value="0" aria-label="Aumentar para"><button type="button" data-mais="1" aria-label="Mais">+</button></div>
             <div class="pk-rapidos"><button type="button" data-rap="min">Mín</button><button type="button" data-rap="meio">½ pote</button><button type="button" data-rap="pote">Pote</button></div>
+            <button type="button" class="pk-fecha-raise" data-fecha-raise aria-label="Fechar">✕</button>
           </div>
-          <button type="button" class="pk-b verde" data-pk="raise">Aumentar<small class="pk-v-raise">para 0</small></button>
+          <button type="button" class="pk-b verde" data-pk="raise" aria-expanded="false">Aumentar<small class="pk-v-raise">para 0</small></button>
           <button type="button" class="pk-b ouro" data-pk="allin">All-in<small class="pk-v-allin">0</small></button>
           <div class="pk-espera"></div>
         </div>
@@ -1322,8 +1368,29 @@ body { --pk-vh: 1vh; }
       </div>`;
     document.body.appendChild(raiz);
     this.raiz = raiz;
-    this.barra = raiz.querySelector('.pk-raise input');
-    this.barra.addEventListener('input', () => this.mostrarRaise());
+    // o valor do aumento: na barra ou digitado no campo (os dois andam juntos)
+    this.barra = raiz.querySelector('.pk-raise input[type="range"]');
+    this.campo = raiz.querySelector('.pk-valor input');
+    this.barra.addEventListener('input', () => {
+      this.campo.value = this.barra.value;
+      this.mostrarRaise();
+    });
+    this.campo.addEventListener('input', () => {
+      this.barra.value = this.campo.value;
+      this.mostrarRaise();
+    });
+    // saiu do campo: o valor digitado volta para dentro do mínimo e do máximo; Enter já aumenta
+    this.campo.addEventListener('change', () => {
+      const c = this.ativa && this.contas(this.ativa);
+      if (c) this.porValor(this.valorRaise(c));
+    });
+    this.campo.addEventListener('keydown', (ev) => {
+      if (ev.key !== 'Enter') return;
+      ev.preventDefault();
+      ev.stopPropagation(); // o Enter do main.js abriria o chat
+      this.campo.blur();
+      this.apostar('raise');
+    });
     this.$('.pk-dono select').addEventListener('change', (ev) => {
       const M = this.ativa;
       if (M) this.socket?.emit('pk-blind', { mesa: M.i, nivel: Number(ev.target.value) });
@@ -1400,10 +1467,48 @@ body { --pk-vh: 1vh; }
     return { l, saldo, precisa, max, min, pote };
   }
 
+  // o aumento que vale: o que está no campo, dentro do mínimo e do máximo (o campo aceita qualquer
+  // coisa enquanto a pessoa digita)
+  valorRaise(c) {
+    const v = Math.round(Number(this.campo.value));
+    return Math.max(c.min, Math.min(c.max, v > 0 ? v : c.min));
+  }
+
+  porValor(v) {
+    this.barra.value = this.campo.value = String(v);
+    this.mostrarRaise();
+  }
+
   mostrarRaise() {
-    const v = Number(this.barra.value);
-    this.$('.pk-v-raise').textContent = `para ${v}`;
-    this.$('[data-pk="raise"]').firstChild.textContent = this.ativa?.e?.apostaAtual ? 'Aumentar' : 'Apostar';
+    const c = this.ativa && this.contas(this.ativa);
+    const v = c ? this.valorRaise(c) : Number(this.campo.value) || 0;
+    const txt = c && v >= c.max ? 'all-in' : `para ${v}`;
+    for (const el of this.raiz.querySelectorAll('.pk-v-raise')) el.textContent = txt;
+    const nome = this.ativa?.e?.apostaAtual ? 'Aumentar' : 'Apostar';
+    this.$('[data-pk="raise"]').firstChild.textContent = nome;
+  }
+
+  // celular deitado: o 1º toque no Aumentar abre o painel do valor por cima dos botões; o 2º aumenta
+  compacto() {
+    this._mq ||= matchMedia('(orientation: landscape) and (max-height: 500px)');
+    return document.body.classList.contains('touch') && this._mq.matches;
+  }
+
+  subindo(on) {
+    if (on) this.abriuEm = performance.now();
+    this.$('.pk-acoes').classList.toggle('subindo', on);
+    this.$('[data-pk="raise"]').setAttribute('aria-expanded', String(on));
+    if (!on && document.activeElement === this.campo) this.campo.blur();
+  }
+
+  apostar(tipo) {
+    const M = this.ativa;
+    const c = M && this.contas(M);
+    if (!c?.l.vez) return;
+    if (tipo === 'call' && c.precisa === 0) tipo = 'check';
+    this.socket?.emit('pk-apostar', { mesa: M.i, tipo, valor: this.valorRaise(c) });
+    this.sfx.cartaSel?.(tipo === 'fold' ? 0 : 4);
+    this.subindo(false);
   }
 
   clique(ev) {
@@ -1418,20 +1523,22 @@ body { --pk-vh: 1vh; }
     if (d.passo) return this.abrirGuia('tutorial', this.passo + Number(d.passo));
     if (d.pk === 'sair') return this.soltarFoco?.();
     if (d.pk === 'comecar') return this.socket?.emit('pk-comecar', { mesa: M.i });
-    if (d.rap) {
+    if (d.rap || d.mais) {
       const c = this.contas(M);
       if (!c) return;
-      const alvo = d.rap === 'min' ? c.min : M.e.apostaAtual + Math.ceil(c.pote * (d.rap === 'meio' ? 0.5 : 1));
-      this.barra.value = String(Math.max(c.min, Math.min(c.max, alvo)));
-      this.mostrarRaise();
+      // − e + andam de um big blind
+      const alvo = d.mais ? this.valorRaise(c) + Number(d.mais) * (M.e.big || BIG)
+        : d.rap === 'min' ? c.min : M.e.apostaAtual + Math.ceil(c.pote * (d.rap === 'meio' ? 0.5 : 1));
+      this.porValor(Math.max(c.min, Math.min(c.max, alvo)));
       return;
     }
-    if (!d.pk) return;
-    const c = this.contas(M);
-    if (!c?.l.vez) return;
-    const tipo = d.pk === 'call' && c.precisa === 0 ? 'check' : d.pk;
-    this.socket?.emit('pk-apostar', { mesa: M.i, tipo, valor: Number(this.barra.value) });
-    this.sfx.cartaSel?.(tipo === 'fold' ? 0 : 4);
+    if (d.fechaRaise !== undefined) return this.subindo(false);
+    if (d.pk === 'raise' && this.compacto()) {
+      // o toque duplo sem querer não aumenta: o 2º toque vale depois de um instante
+      if (!this.$('.pk-acoes').classList.contains('subindo')) return this.subindo(true);
+      if (performance.now() - this.abriuEm < 400) return;
+    }
+    if (d.pk) this.apostar(d.pk);
   }
 
   desenhar() {
@@ -1490,13 +1597,16 @@ body { --pk-vh: 1vh; }
       b('fold').hidden = !decide;
       const podeAumentar = c.max > e.apostaAtual && c.saldo > c.precisa;
       b('raise').disabled = !vez || !podeAumentar;
-      this.barra.disabled = !vez || !podeAumentar;
-      this.barra.min = String(c.min);
-      this.barra.max = String(c.max);
-      if (!vez || Number(this.barra.value) < c.min || Number(this.barra.value) > c.max) this.barra.value = String(c.min);
-      this.mostrarRaise();
+      for (const el of this.$('.pk-raise').querySelectorAll('input, button')) el.disabled = !vez || !podeAumentar;
+      this.barra.min = this.campo.min = String(c.min);
+      this.barra.max = this.campo.max = String(c.max);
+      // o que a pessoa está digitando fica; fora da vez, volta para o mínimo
+      const v = Number(this.campo.value);
+      if (document.activeElement !== this.campo && (!vez || !(v >= c.min && v <= c.max))) this.porValor(c.min);
+      else this.mostrarRaise();
+      if (!vez || !podeAumentar) this.subindo(false);
       this.$('.pk-v-allin').textContent = String(c.saldo);
-    }
+    } else this.subindo(false);
     const espera = this.$('.pk-espera');
     let txt = '';
     if (e.fase === 'espera') txt = '';
@@ -1535,7 +1645,8 @@ body { --pk-vh: 1vh; }
       const coroa = e.dono && l.id === e.dono ? '<span class="coroa" title="Dono da mesa">👑</span>' : '';
       const classes = [l.vez && 'vez', k === M.lugar && 'eu', l.fold && 'fold', vencedores.has(k) && 'ganhou'].filter(Boolean).join(' ');
       const nome = k === M.lugar ? 'Você' : `${l.robo ? '🤖 ' : ''}${l.nome}`;
-      const fichas = l.robo ? '∞ fichas' : `${l.saldo ?? 0} fichas`;
+      // no celular deitado, só o número (a palavra fica no pk-longo)
+      const fichas = `${l.robo ? '∞' : l.saldo ?? 0}<span class="pk-longo"> fichas</span>`;
       const estado = l.fora ? 'próxima mão' : l.fold ? 'desistiu' : '';
       // o que apostou nesta rodada (em destaque) e o total que já pôs nesta mão
       const lance = l.aposta && !l.fora ? `<div class="lance"><i></i>apostou ${l.aposta}</div>` : '';
@@ -1574,50 +1685,105 @@ body { --pk-vh: 1vh; }
         barra.style.width = `${(resta / M.e.prazoTotal) * 100}%`;
       }
     }
+    // o meio da imagem no celular deitado: vai até o alvo e, depois de levantar, volta ao meio
+    const d = this.desloc;
+    if (this.ativa || d.x || d.y) deslocarVista(this.world.camera, d, dt);
   }
 
   // as plaquinhas seguem as cadeiras na tela, sem tampar o painel do pote, o Levantar, as minhas
-  // cartas, os comandos e a barra do topo, nem umas às outras
+  // cartas, os comandos e a barra do topo, nem umas às outras. No celular deitado não sobra lugar para
+  // elas em volta da mesa: ficam numa fileira em cima, e a mesa enquadrada embaixo delas
   posicionarAssentos(M) {
     const cam = this.world.camera;
     const v = this._v ||= new THREE.Vector3();
     const w = innerWidth;
     const h = innerHeight;
+    const deitado = this.compacto();
     // os painéis mudam pouco: mede de tempos em tempos, não a cada quadro
     const agora = performance.now();
     const medir = !this._medidas || agora - this._medidas.em > 300 || this._medidas.w !== w || this._medidas.h !== h;
     if (medir) {
       const ret = (el) => (el && !el.hidden && el.offsetHeight ? el.getBoundingClientRect() : null);
+      const toque = document.body.classList.contains('touch');
       const esq = ret(this.$('.pk-esq'));
-      const bar = document.body.classList.contains('touch') ? ret(document.getElementById('bar')) : null;
+      const bar = toque ? ret(document.getElementById('bar')) : null;
+      const baixoDaBarra = bar && bar.top < h / 2 ? bar.bottom : null;
       const borda = Math.max(6, esq?.left ?? 6);
       this._medidas = {
         em: agora, w, h,
-        area: { esquerda: borda, direita: w - borda, topo: bar && bar.top < h / 2 ? bar.bottom - 6 : 60, baixo: h - 8 },
+        area: { esquerda: borda, direita: w - borda, topo: baixoDaBarra != null ? baixoDaBarra - 6 : toque ? 8 : 60, baixo: h - 8 },
         evitar: [esq, ret(this.$('.pk-sair')), ...[...this.$('.pk-baixo').children].map(ret)].filter(Boolean),
       };
+      if (deitado) {
+        // a fileira começa logo abaixo da barra, à direita do painel do pote; a mesa vai do pé da
+        // fileira até os comandos (as minhas cartas podem tampar a beira de cá, que é a minha)
+        const fileira = { esquerda: (esq?.right ?? 0) + 6, direita: w - borda, topo: (baixoDaBarra ?? 4) + 4 };
+        const acoes = ret(this.$('.pk-acoes'));
+        this._medidas.fileira = fileira;
+        this.enquadrar(M, { left: fileira.esquerda + 2, right: fileira.direita, top: fileira.topo + ALTURA_FILEIRA + 4, bottom: (acoes?.top ?? h) + 6 });
+      } else if (this.janela) {
+        // virou o celular (ou saiu da tela cheia): a pose de sempre
+        this.janela = null;
+        const p = this.pose(M);
+        this.player.override?.position.copy(p.position);
+        this.player.override?.target.copy(p.target);
+        this.desloc.alvoX = this.desloc.alvoY = 0;
+      }
     }
-    const { area, evitar } = this._medidas;
+    const { area, evitar, fileira } = this._medidas;
     const placas = [];
     for (const el of this.$('.pk-assentos').children) {
       const k = Number(el.dataset.lugar);
-      // a minha plaquinha fica de fora: as minhas fichas e cartas estão embaixo
-      if (k === M.lugar) {
+      // a minha plaquinha fica de fora: as minhas fichas e cartas estão embaixo. Na fileira, os
+      // lugares livres também (o banco vazio já diz)
+      if (k === M.lugar || (deitado && el.firstElementChild?.classList.contains('vazio'))) {
         el.style.visibility = 'hidden';
         continue;
       }
       const c = cadeira(M.m, k);
       v.set(c.x, 1.9, c.z).project(cam);
-      if (v.z > 1) {
+      if (v.z > 1 && !deitado) {
         el.style.visibility = 'hidden';
         continue;
       }
       el.style.visibility = '';
       if (medir || !el._tam) el._tam = { w: el.offsetWidth, h: el.offsetHeight };
-      placas.push({ el, x: ((v.x + 1) / 2) * w, y: ((1 - v.y) / 2) * h, ...el._tam });
+      // atrás da câmera a projeção sai espelhada: na fileira, vai para o lado certo
+      const x = v.z > 1 ? (v.x > 0 ? 0 : w) : ((v.x + 1) / 2) * w;
+      placas.push({ el, x, y: ((1 - v.y) / 2) * h, ...el._tam });
     }
-    arrumarPlacas(placas, area, evitar);
+    if (deitado && fileira) enfileirarPlacas(placas, fileira.esquerda, fileira.direita, fileira.topo);
+    else arrumarPlacas(placas, area, evitar);
     for (const p of placas) p.el.style.transform = `translate(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px) translate(-50%, -100%)`;
+  }
+
+  // celular deitado: a câmera põe a mesa no espaço que os painéis deixam (ver enquadrar no
+  // hud-jogos). Só refaz a conta quando esse espaço muda de verdade (o pulo dos botões na minha vez
+  // mexe uns pixels e não pode balançar a câmera)
+  enquadrar(M, livre) {
+    const antes = this.janela;
+    const igual = antes && antes.lugar === M.lugar && ['left', 'top', 'right', 'bottom'].every((k) => Math.abs(antes[k] - livre[k]) < 12);
+    if (igual || !this.player.override) return;
+    this.janela = { ...livre, lugar: M.lugar };
+    const r = enquadrar(THREE, this.world.camera, this.pose(M), this.contorno(M), livre);
+    this.player.override.position.copy(r.position);
+    this.player.override.target.copy(r.target);
+    this.desloc.alvoX = r.dx;
+    this.desloc.alvoY = r.dy;
+  }
+
+  // a beira do pano (o couro em volta pode ficar de fora da tela)
+  contorno(M) {
+    if (M.contorno) return M.contorno;
+    const a = A_MESA - 0.12;
+    const b = B_MESA - 0.12;
+    const pts = [];
+    for (let i = 0; i <= 8; i++) {
+      const t = -Math.PI / 2 + (Math.PI * i) / 8;
+      pts.push(new THREE.Vector3(M.m.x + a - b + Math.cos(t) * b, Y_MESA, M.m.z + Math.sin(t) * b));
+      pts.push(new THREE.Vector3(M.m.x - a + b - Math.cos(t) * b, Y_MESA, M.m.z + Math.sin(t) * b));
+    }
+    return (M.contorno = pts);
   }
 
   apertou() { return false; }

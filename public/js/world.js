@@ -700,6 +700,7 @@ export class World {
     // Telas de celular têm DPR 3: renderizar nisso tudo derruba o fps sem ganho visível (mas abaixo
     // de 1,5 a tela pequena e densa fica borrada).
     this.pixelMax = isTouch ? 1.5 : 1.75;
+    this.nitidez = 0; // ver setNitidez
     this.escala = 1;
     this.maxLuzes = 8;
     this.videoFps = 60;
@@ -3020,8 +3021,17 @@ export class World {
     this.aplicarResolucao();
   }
 
+  // Sentado num jogo de cartas no celular (cartas.js, poker.js): a câmera fica parada e as cartas
+  // deitadas na mesa, com números pequenos, borravam a 1,5 (ou menos, na Leve). Enquanto durar, o teto
+  // da densidade de pixels sobe para este valor (0 = o da qualidade); a escala automática continua
+  // valendo, e baixa sozinha se o aparelho não der conta.
+  setNitidez(teto) {
+    this.nitidez = teto || 0;
+    this.aplicarResolucao();
+  }
+
   aplicarResolucao() {
-    const pr = Math.min(window.devicePixelRatio, this.pixelMax) * this.escala;
+    const pr = Math.min(window.devicePixelRatio, Math.max(this.pixelMax, this.nitidez)) * this.escala;
     if (Math.abs(pr - this.renderer.getPixelRatio()) > 0.01) this.renderer.setPixelRatio(pr);
   }
 
