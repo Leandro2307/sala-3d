@@ -1149,39 +1149,43 @@ body.touch .pk-esq { left: calc(8px + env(safe-area-inset-left)); top: calc(52px
 body.touch .pk-sair { right: calc(8px + env(safe-area-inset-right)); top: calc(52px + env(safe-area-inset-top)); }
 body.touch .pk-baixo { bottom: calc(8px + env(safe-area-inset-bottom)); width: min(520px, calc(100vw - 16px - env(safe-area-inset-left) - env(safe-area-inset-right))); }
 body.touch .pk-acoes { width: 100%; justify-content: center; }
-/* celulares e tablets deitados (altura baixa): os comandos viram uma grade compacta
+/* celulares e tablets deitados: os comandos viram uma grade compacta
    à direita, as cartas ficam do lado de fora do grid, e o painel do pote fica fino */
-@media (max-height: 560px) {
-  body.touch .pk-esq { width: 120px; top: calc(46px + env(safe-area-inset-top)); max-height: calc(100dvh - 54px - env(safe-area-inset-top)); padding: 5px; gap: 4px; }
-  body.touch .pk-info { padding: 5px; gap: 4px; }
-  body.touch .pk-titulo { font-size: 15px; }
-  body.touch .pk-pote b { font-size: 16px; }
-  body.touch .pk-pote i { width: 20px; height: 20px; }
-  body.touch .pk-linha { font-size: 10px; gap: 4px; }
-  body.touch .pk-dono small { font-size: 9px; }
+@media (orientation: landscape) and (max-width: 900px) {
+  body.touch .pk-esq { left: calc(4px + env(safe-area-inset-left)); top: calc(42px + env(safe-area-inset-top)); width: 105px; max-height: calc(100dvh - 50px - env(safe-area-inset-top)); padding: 4px; gap: 3px; }
+  body.touch .pk-info { padding: 5px; gap: 3px; }
+  body.touch .pk-titulo { font-size: 13px; }
+  body.touch .pk-pote { gap: 6px; padding: 5px 6px; }
+  body.touch .pk-pote b { font-size: 14px; }
+  body.touch .pk-pote i { width: 16px; height: 16px; }
+  body.touch .pk-pote small { font-size: 8px; }
+  body.touch .pk-linha { font-size: 9px; gap: 3px; }
+  body.touch .pk-linha small { font-size: 7px; }
+  body.touch .pk-dono small { font-size: 8px; margin-bottom: 2px; }
+  body.touch .pk-dono select { padding: 3px 4px; font-size: 9px; }
   body.touch .pk-ajuda { display: none; }
   body.touch .pk-dica { display: none; }
-  body.touch .pk-sair { top: calc(46px + env(safe-area-inset-top)); padding: 5px 7px; font-size: 10px; }
-  body.touch .pk-baixo { left: auto; right: calc(6px + env(safe-area-inset-right)); transform: none; align-items: flex-end; gap: 6px;
-    width: min(360px, calc(100vw - 146px - env(safe-area-inset-left) - env(safe-area-inset-right))); }
-  body.touch .pk-mao { flex: none; display: grid; gap: 4px; }
+  body.touch .pk-sair { right: calc(4px + env(safe-area-inset-right)); top: calc(42px + env(safe-area-inset-top)); padding: 4px 6px; font-size: 9px; }
+  body.touch .pk-baixo { left: auto; right: calc(4px + env(safe-area-inset-right)); transform: none; align-items: flex-end; gap: 5px;
+    width: min(340px, calc(100vw - 122px - env(safe-area-inset-left) - env(safe-area-inset-right))); }
+  body.touch .pk-mao { flex: none; display: grid; gap: 3px; }
   body.touch .pk-cartas { gap: 3px; }
-  body.touch .pk-cartas img { width: 54px; }
-  body.touch .pk-jogo { font-size: 10px; padding: 2px 6px; }
-  body.touch .pk-acoes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 6px; gap: 5px; flex: 1; }
-  body.touch .pk-b { min-width: 0; padding: 7px 6px; font-size: 12px; white-space: nowrap; }
-  body.touch .pk-b small { font-size: 9px; }
-  body.touch .pk-saldo { grid-column: span 2; padding: 0; font-size: 10px; }
-  body.touch .pk-saldo b { display: inline; margin-left: 4px; font-size: 15px; }
-  body.touch .pk-raise { grid-column: span 2; padding: 5px 6px; gap: 3px; }
+  body.touch .pk-cartas img { width: 48px; }
+  body.touch .pk-jogo { font-size: 9px; padding: 2px 5px; }
+  body.touch .pk-acoes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 5px; gap: 4px; flex: 1; }
+  body.touch .pk-b { min-width: 0; padding: 6px 5px; font-size: 11px; white-space: nowrap; }
+  body.touch .pk-b small { font-size: 8px; }
+  body.touch .pk-saldo { grid-column: span 2; padding: 0; font-size: 9px; }
+  body.touch .pk-saldo b { display: inline; margin-left: 3px; font-size: 13px; }
+  body.touch .pk-raise { grid-column: span 2; padding: 4px 5px; gap: 2px; }
   body.touch .pk-raise input { width: 100%; }
-  body.touch .pk-rapidos button { padding: 2px 4px; font-size: 10px !important; }
-  body.touch .pk-espera { grid-column: span 2; max-width: none; padding: 0; text-align: center; font-size: 10px; }
-  body.touch .pk-assentos > div { min-width: 82px; padding: 3px 5px 4px; border-radius: 8px; }
-  body.touch .pk-assentos .nome { max-width: 94px; font-size: 10px; }
-  body.touch .pk-assentos .fichas, body.touch .pk-assentos .aposta, body.touch .pk-assentos .lance { font-size: 9px; }
+  body.touch .pk-rapidos button { padding: 2px 3px; font-size: 9px !important; }
+  body.touch .pk-espera { grid-column: span 2; max-width: none; padding: 0; text-align: center; font-size: 9px; }
+  body.touch .pk-assentos > div { min-width: 72px; padding: 2px 4px 3px; border-radius: 7px; }
+  body.touch .pk-assentos .nome { max-width: 82px; font-size: 9px; }
+  body.touch .pk-assentos .fichas, body.touch .pk-assentos .aposta, body.touch .pk-assentos .lance { font-size: 8px; }
   body.touch .pk-assentos .mini { margin-top: 2px; }
-  body.touch .pk-assentos .mini img { width: 20px; }
+  body.touch .pk-assentos .mini img { width: 18px; }
 }
 /* iPhone 13 / telas estreitas (380x840): painel do pote e comandos de baixo mais compactos */
 @media (max-width: 400px) {
@@ -1211,30 +1215,36 @@ body.touch .pk-acoes { width: 100%; justify-content: center; }
   body.touch .pk-assentos .fichas, body.touch .pk-assentos .aposta, body.touch .pk-assentos .lance { font-size: 9px; }
   body.touch .pk-assentos .mini img { width: 18px; }
 }
-/* iPhone 13 deitado (landscape, ~844×390): a altura é baixa, então os comandos encolhem */
-@media (orientation: landscape) and (max-height: 430px) {
-  body.touch .pk-esq { left: calc(6px + env(safe-area-inset-left)); top: calc(44px + env(safe-area-inset-top)); width: 150px; max-height: calc(100dvh - 48px - env(safe-area-inset-top)); overflow-y: auto; padding: 6px; gap: 5px; }
-  body.touch .pk-info { padding: 6px; gap: 4px; }
-  body.touch .pk-titulo { font-size: 16px; }
-  body.touch .pk-pote b { font-size: 16px; }
-  body.touch .pk-pote i { width: 20px; height: 20px; }
+/* iPhone 13 deitado e telas estreitas (landscape, ~844×390): ajuste fino por cima da regra geral */
+@media (orientation: landscape) and (max-width: 420px) {
+  body.touch .pk-esq { left: calc(3px + env(safe-area-inset-left)); top: calc(40px + env(safe-area-inset-top)); width: 96px; max-height: calc(100dvh - 46px - env(safe-area-inset-top)); padding: 4px; gap: 3px; }
+  body.touch .pk-info { padding: 4px; gap: 3px; }
+  body.touch .pk-titulo { font-size: 12px; }
+  body.touch .pk-pote { gap: 5px; padding: 4px 5px; }
+  body.touch .pk-pote b { font-size: 13px; }
+  body.touch .pk-pote i { width: 14px; height: 14px; }
+  body.touch .pk-pote small { font-size: 7px; }
+  body.touch .pk-linha { font-size: 8px; gap: 2px; }
+  body.touch .pk-linha small { font-size: 7px; }
   body.touch .pk-ajuda, body.touch .pk-dica { display: none; }
-  body.touch .pk-sair { right: calc(6px + env(safe-area-inset-right)); top: calc(44px + env(safe-area-inset-top)); padding: 5px 7px; font-size: 10px; }
-  body.touch .pk-baixo { bottom: calc(4px + env(safe-area-inset-bottom)); flex-direction: row; align-items: flex-end; gap: 8px; }
-  body.touch .pk-cartas img { width: 42px; }
-  body.touch .pk-jogo { font-size: 10px; padding: 2px 6px; }
-  body.touch .pk-acoes { padding: 5px; gap: 4px; }
-  body.touch .pk-b { padding: 5px 7px; font-size: 10px; }
-  body.touch .pk-b small { font-size: 8px; }
-  body.touch .pk-saldo { font-size: 10px; }
-  body.touch .pk-saldo b { font-size: 14px; }
-  body.touch .pk-raise { gap: 3px; padding: 4px 6px; }
-  body.touch .pk-raise input { width: 90px; }
-  body.touch .pk-rapidos button { padding: 2px 4px; font-size: 9px !important; }
-  body.touch .pk-espera { font-size: 10px; }
-  body.touch .pk-assentos > div { min-width: 80px; padding: 3px 5px 4px; }
-  body.touch .pk-assentos .nome { max-width: 90px; font-size: 10px; }
-  body.touch .pk-assentos .mini img { width: 18px; }
+  body.touch .pk-sair { right: calc(3px + env(safe-area-inset-right)); top: calc(40px + env(safe-area-inset-top)); padding: 3px 5px; font-size: 8px; }
+  body.touch .pk-baixo { right: calc(3px + env(safe-area-inset-right)); bottom: calc(3px + env(safe-area-inset-bottom)); gap: 4px;
+    width: min(310px, calc(100vw - 108px - env(safe-area-inset-left) - env(safe-area-inset-right))); }
+  body.touch .pk-cartas img { width: 40px; }
+  body.touch .pk-jogo { font-size: 8px; padding: 1px 4px; }
+  body.touch .pk-acoes { padding: 4px; gap: 3px; }
+  body.touch .pk-b { padding: 5px 4px; font-size: 10px; }
+  body.touch .pk-b small { font-size: 7px; }
+  body.touch .pk-saldo { font-size: 8px; }
+  body.touch .pk-saldo b { font-size: 11px; }
+  body.touch .pk-raise { gap: 2px; padding: 3px 4px; }
+  body.touch .pk-raise input { width: 100%; }
+  body.touch .pk-rapidos button { padding: 1px 3px; font-size: 8px !important; }
+  body.touch .pk-espera { font-size: 8px; }
+  body.touch .pk-assentos > div { min-width: 66px; padding: 2px 3px 3px; border-radius: 6px; }
+  body.touch .pk-assentos .nome { max-width: 74px; font-size: 8px; }
+  body.touch .pk-assentos .fichas, body.touch .pk-assentos .aposta, body.touch .pk-assentos .lance { font-size: 7px; }
+  body.touch .pk-assentos .mini img { width: 14px; }
 }
 @media (prefers-reduced-motion: reduce) { #pk-hud * { animation: none !important; transition: none !important; } }
 `;
@@ -1551,6 +1561,13 @@ body.touch .pk-acoes { width: 100%; justify-content: center; }
     const v = this._v ||= new THREE.Vector3();
     const w = innerWidth;
     const h = innerHeight;
+    const isMobileLandscape = window.matchMedia('(orientation: landscape) and (max-width: 900px)').matches && document.body.classList.contains('touch');
+    const escala = isMobileLandscape ? 0.78 : 1;
+    const margemEsq = isMobileLandscape ? 120 : (h < 560 ? 160 : 260);
+    const margemDir = isMobileLandscape ? 90 : 80;
+    const margemTopo = isMobileLandscape ? 52 : 60;
+    const margemBaixo = isMobileLandscape ? 120 : 220;
+    const posicoes = [];
     for (const el of this.$('.pk-assentos').children) {
       const k = Number(el.dataset.lugar);
       // a minha plaquinha fica de fora: as minhas fichas e cartas estão embaixo
@@ -1565,10 +1582,43 @@ body.touch .pk-acoes { width: 100%; justify-content: center; }
         continue;
       }
       el.style.visibility = '';
-      // a plaquinha fica pendurada acima do ponto: não sobe para fora da tela nem cobre o painel do pote
-      const y = Math.min(h - 220, Math.max(el.offsetHeight + 60, ((1 - v.y) / 2) * h));
-      const x = Math.min(w - 80, Math.max(y < 360 ? 370 : 80, ((v.x + 1) / 2) * w));
-      el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, -100%)`;
+      // mede o tamanho real antes de aplicar a escala
+      el.style.transform = 'translate(0,0) scale(1)';
+      const ew = el.offsetWidth * escala;
+      const eh = el.offsetHeight * escala;
+      // a plaquinha fica pendurada acima do ponto, respeitando painel esquerdo, botão Levantar e bordas
+      let y = Math.min(h - margemBaixo, Math.max(margemTopo + eh, ((1 - v.y) / 2) * h));
+      let x = Math.min(w - margemDir - ew / 2, Math.max(margemEsq + ew / 2, ((v.x + 1) / 2) * w));
+      posicoes.push({ el, x, y, ew, eh });
+    }
+    // no mobile deitado, afasta plaquinhas que colidirem para nomes não se sobreporem
+    if (isMobileLandscape && posicoes.length > 1) {
+      for (let it = 0; it < 6; it++) {
+        let mudou = false;
+        for (let i = 0; i < posicoes.length; i++) {
+          for (let j = i + 1; j < posicoes.length; j++) {
+            const a = posicoes[i], b = posicoes[j];
+            const dx = b.x - a.x, dy = b.y - a.y;
+            const dist = Math.hypot(dx, dy) || 1;
+            const min = (a.ew + b.ew) * 0.45 + 10;
+            if (dist < min) {
+              const nx = dx / dist, ny = dy / dist;
+              const forca = (min - dist) * 0.5;
+              a.x -= nx * forca; a.y -= ny * forca;
+              b.x += nx * forca; b.y += ny * forca;
+              mudou = true;
+            }
+          }
+        }
+        if (!mudou) break;
+      }
+      for (const p of posicoes) {
+        p.x = Math.min(w - margemDir - p.ew / 2, Math.max(margemEsq + p.ew / 2, p.x));
+        p.y = Math.min(h - margemBaixo, Math.max(margemTopo + p.eh, p.y));
+      }
+    }
+    for (const { el, x, y } of posicoes) {
+      el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, -100%) scale(${escala})`;
     }
   }
 
