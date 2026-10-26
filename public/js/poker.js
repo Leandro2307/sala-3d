@@ -1149,34 +1149,39 @@ body.touch .pk-esq { left: calc(8px + env(safe-area-inset-left)); top: calc(52px
 body.touch .pk-sair { right: calc(8px + env(safe-area-inset-right)); top: calc(52px + env(safe-area-inset-top)); }
 body.touch .pk-baixo { bottom: calc(8px + env(safe-area-inset-bottom)); width: min(520px, calc(100vw - 16px - env(safe-area-inset-left) - env(safe-area-inset-right))); }
 body.touch .pk-acoes { width: 100%; justify-content: center; }
-@media (max-height: 460px) {
-  body.touch .pk-esq { width: 138px; }
-  body.touch .pk-info { padding: 6px; gap: 5px; }
-  body.touch .pk-titulo { font-size: 17px; }
+/* celulares e tablets deitados (altura baixa): os comandos viram uma grade compacta
+   à direita, as cartas ficam do lado de fora do grid, e o painel do pote fica fino */
+@media (max-height: 560px) {
+  body.touch .pk-esq { width: 120px; top: calc(46px + env(safe-area-inset-top)); max-height: calc(100dvh - 54px - env(safe-area-inset-top)); padding: 5px; gap: 4px; }
+  body.touch .pk-info { padding: 5px; gap: 4px; }
+  body.touch .pk-titulo { font-size: 15px; }
+  body.touch .pk-pote b { font-size: 16px; }
+  body.touch .pk-pote i { width: 20px; height: 20px; }
+  body.touch .pk-linha { font-size: 10px; gap: 4px; }
+  body.touch .pk-dono small { font-size: 9px; }
   body.touch .pk-ajuda { display: none; }
   body.touch .pk-dica { display: none; }
-  /* iPhone em pé deitado: a mesa precisa ficar livre. Os comandos viram uma grade curta,
-     presa à direita, em vez de uma faixa larga cobrindo o centro da tela. */
-  body.touch .pk-baixo { left: auto; right: calc(8px + env(safe-area-inset-right)); transform: none; align-items: stretch; gap: 3px;
-    width: min(380px, calc(100vw - 168px - env(safe-area-inset-left) - env(safe-area-inset-right))); }
-  body.touch .pk-mao { position: absolute; right: 100%; bottom: 0; margin-right: 8px; }
+  body.touch .pk-sair { top: calc(46px + env(safe-area-inset-top)); padding: 5px 7px; font-size: 10px; }
+  body.touch .pk-baixo { left: auto; right: calc(6px + env(safe-area-inset-right)); transform: none; align-items: flex-end; gap: 6px;
+    width: min(360px, calc(100vw - 146px - env(safe-area-inset-left) - env(safe-area-inset-right))); }
+  body.touch .pk-mao { flex: none; display: grid; gap: 4px; }
   body.touch .pk-cartas { gap: 3px; }
-  body.touch .pk-cartas img { width: 42px; }
-  body.touch .pk-jogo { font-size: 11px; padding: 2px 6px; }
-  body.touch .pk-acoes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 6px; gap: 5px; }
-  body.touch .pk-b { min-width: 0; padding: 6px 7px; font-size: 12px; white-space: normal; }
+  body.touch .pk-cartas img { width: 54px; }
+  body.touch .pk-jogo { font-size: 10px; padding: 2px 6px; }
+  body.touch .pk-acoes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 6px; gap: 5px; flex: 1; }
+  body.touch .pk-b { min-width: 0; padding: 7px 6px; font-size: 12px; white-space: nowrap; }
   body.touch .pk-b small { font-size: 9px; }
-  body.touch .pk-saldo { grid-column: span 3; padding: 0; }
-  body.touch .pk-saldo b { display: inline; margin-left: 4px; font-size: 16px; }
-  body.touch .pk-raise { grid-column: span 2; padding: 4px 6px; gap: 3px; }
+  body.touch .pk-saldo { grid-column: span 2; padding: 0; font-size: 10px; }
+  body.touch .pk-saldo b { display: inline; margin-left: 4px; font-size: 15px; }
+  body.touch .pk-raise { grid-column: span 2; padding: 5px 6px; gap: 3px; }
   body.touch .pk-raise input { width: 100%; }
   body.touch .pk-rapidos button { padding: 2px 4px; font-size: 10px !important; }
-  body.touch .pk-espera { grid-column: span 3; max-width: none; padding: 0; text-align: center; font-size: 11px; }
-  body.touch .pk-assentos > div { min-width: 86px; padding: 4px 6px 5px; border-radius: 9px; }
-  body.touch .pk-assentos .nome { max-width: 98px; font-size: 11px; }
-  body.touch .pk-assentos .fichas, body.touch .pk-assentos .aposta, body.touch .pk-assentos .lance { font-size: 10px; }
+  body.touch .pk-espera { grid-column: span 2; max-width: none; padding: 0; text-align: center; font-size: 10px; }
+  body.touch .pk-assentos > div { min-width: 82px; padding: 3px 5px 4px; border-radius: 8px; }
+  body.touch .pk-assentos .nome { max-width: 94px; font-size: 10px; }
+  body.touch .pk-assentos .fichas, body.touch .pk-assentos .aposta, body.touch .pk-assentos .lance { font-size: 9px; }
   body.touch .pk-assentos .mini { margin-top: 2px; }
-  body.touch .pk-assentos .mini img { width: 22px; }
+  body.touch .pk-assentos .mini img { width: 20px; }
 }
 /* iPhone 13 / telas estreitas (380x840): painel do pote e comandos de baixo mais compactos */
 @media (max-width: 400px) {
