@@ -146,6 +146,60 @@ export function vaiEVolta(desde, periodo = 1100) {
   return s <= 1 ? s : 2 - s;
 }
 
+// As plaquinhas das mesas (cartas e poker) seguem as cadeiras na tela e, numa tela baixa, se
+// amontoam e tampam os painéis. placas: [{ x, y, w, h }] (x no meio, y na base da plaquinha);
+// area: { esquerda, direita, topo, baixo } onde elas podem ficar; evitar: retângulos dos painéis
+// e da mão (getBoundingClientRect). Mexe x e y no lugar: primeiro sai de cima dos painéis (pelo
+// lado mais perto que caiba: esquerda, direita ou para cima), depois uma empurra a outra (de lado,
+// quase sempre) e no fim tudo volta para dentro da área.
+export function arrumarPlacas(placas, area, evitar = []) {
+  const prende = (p) => {
+    p.x = Math.min(area.direita - p.w / 2, Math.max(area.esquerda + p.w / 2, p.x));
+    p.y = Math.min(area.baixo, Math.max(area.topo + p.h, p.y));
+  };
+  const cruza = (p, r) => p.x + p.w / 2 + 4 > r.left && p.x - p.w / 2 - 4 < r.right && p.y + 4 > r.top && p.y - p.h - 4 < r.bottom;
+  for (let volta = 0; volta < 8; volta++) {
+    let mexeu = false;
+    for (const p of placas) {
+      prende(p);
+      for (const r of evitar) {
+        if (!r || !cruza(p, r)) continue;
+        const saidas = [
+          r.left - area.esquerda >= p.w + 6 && { x: r.left - 6 - p.w / 2, y: p.y },
+          area.direita - r.right >= p.w + 6 && { x: r.right + 6 + p.w / 2, y: p.y },
+          r.top - area.topo >= p.h + 6 && { x: p.x, y: r.top - 6 },
+        ].filter(Boolean);
+        if (!saidas.length) continue;
+        const melhor = saidas.reduce((a, b) => (Math.hypot(a.x - p.x, a.y - p.y) <= Math.hypot(b.x - p.x, b.y - p.y) ? a : b));
+        p.x = melhor.x;
+        p.y = melhor.y;
+        mexeu = true;
+      }
+    }
+    for (let i = 0; i < placas.length; i++) {
+      for (let j = i + 1; j < placas.length; j++) {
+        const a = placas[i];
+        const b = placas[j];
+        const sx = (a.w + b.w) / 2 + 6 - Math.abs(b.x - a.x);
+        const sy = (a.h + b.h) / 2 + 4 - Math.abs(b.y - b.h / 2 - (a.y - a.h / 2));
+        if (sx <= 0 || sy <= 0) continue;
+        mexeu = true;
+        if (sx < sy * 1.5) {
+          const d = ((b.x >= a.x ? 1 : -1) * sx) / 2;
+          a.x -= d;
+          b.x += d;
+        } else {
+          const d = ((b.y >= a.y ? 1 : -1) * sy) / 2;
+          a.y -= d;
+          b.y += d;
+        }
+      }
+    }
+    if (!mexeu) break;
+  }
+  placas.forEach(prende);
+}
+
 // textura de canvas que se redesenha com redesenhar(...args)
 export function texturaViva(THREE, w, h, desenhar) {
   const cv = document.createElement('canvas');

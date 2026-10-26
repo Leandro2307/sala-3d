@@ -21,7 +21,7 @@ import {
   numero21, trunfo21, soma21, TRUNFOS_21, MAX_21, DEDOS_21,
 } from './cartas-regras.js';
 import { MESAS_CARTAS } from './parque-dados.js';
-import { hud, texturaViva, paraToque } from './hud-jogos.js';
+import { hud, texturaViva, paraToque, arrumarPlacas } from './hud-jogos.js';
 import { sfxLigado } from './sfx.js';
 import { Avatar } from './avatars.js';
 
@@ -476,6 +476,8 @@ export class Cartas {
     });
     // 1, 2, 3...: joga a carta; espaço: TRUCO!
     window.addEventListener('keydown', (ev) => this.tecla(ev));
+    // girou o celular: a mão volta a caber na largura nova
+    window.addEventListener('resize', () => this.ativa && this.ajustarMao());
   }
 
   // ---------------------------------------------------------------- rede
@@ -1003,11 +1005,12 @@ export class Cartas {
     this.cores.hidden = true;
     this.raiz.hidden = true;
     this.zoar.hidden = true;
-    this.sinal.hidden = true;
+    this.sinais.hidden = true;
     this.menu.hidden = true;
     this.$('.ct-fim').hidden = true;
     this.$('.ct-pergunta').hidden = true;
     this.$('#ct-trunfo').hidden = true;
+    this.raiz.querySelectorAll('.ct-assento.aberto').forEach((el) => el.classList.remove('aberto'));
     this.chavePergunta = '';
     this.armado = null;
     document.body.classList.remove('ct-sentado');
@@ -1154,6 +1157,8 @@ export class Cartas {
     const contorno = (c, p = 2) => `${p}px 0 0 ${c}, -${p}px 0 0 ${c}, 0 ${p}px 0 ${c}, 0 -${p}px 0 ${c}, ${p}px ${p}px 0 ${c}, -${p}px ${p}px 0 ${c}, ${p}px -${p}px 0 ${c}, -${p}px -${p}px 0 ${c}`;
     css.textContent = `
 #ct-hud { position: fixed; inset: 0; z-index: 33; pointer-events: none; color: #fff; font: 700 15px ${PIXEL}; letter-spacing: .02em; }
+/* dois toques rápidos (duas cartas, um botão) não viram zoom no celular */
+#ct-hud, #ct-cores, #ct-sentar { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
 #ct-hud[hidden], #ct-hud [hidden], #ct-cores[hidden] { display: none !important; }
 #ct-hud button { font: inherit; letter-spacing: inherit; cursor: pointer; pointer-events: auto; }
 #ct-hud.treme { animation: ct-treme .42s linear; }
@@ -1238,7 +1243,7 @@ body.ct-sentado #controls-help, body.ct-sentado #sit-hint { display: none !impor
 .ct-carta:not(.pode) .ct-face { filter: brightness(.74) saturate(.75); }
 .ct-carta:disabled { cursor: default; }
 /* a pergunta do truco e da mão de onze */
-.ct-pergunta { position: absolute; left: 50%; top: 13%; translate: -50% 0; padding: 10px 16px 14px; min-width: 300px; text-align: center; pointer-events: auto;
+.ct-pergunta { position: absolute; z-index: 2; left: 50%; top: 13%; translate: -50% 0; padding: 10px 16px 14px; min-width: 300px; text-align: center; pointer-events: auto;
   animation: ct-entra .42s cubic-bezier(.2,1.5,.4,1) both; }
 .ct-pergunta h2 { margin: 0; font-size: 56px; line-height: 1.1; font-weight: 700; color: #fe5f55; text-shadow: ${contorno('#1e2b2d', 3)}, 0 7px 0 #1e2b2d; }
 .ct-pergunta h2.dez { color: #f5b244; }
@@ -1272,7 +1277,7 @@ body.ct-sentado #controls-help, body.ct-sentado #sit-hint { display: none !impor
 .ct-arremesso button:hover { transform: scale(1.15) rotate(-8deg); }
 .ct-voo { position: absolute; z-index: 4; font-size: 34px; pointer-events: none; filter: drop-shadow(0 3px 2px rgba(0,0,0,.4)); }
 /* a faixa do grito, o clarão e o fim */
-#ct-grito { position: absolute; left: 50%; top: 30%; translate: -50% -50%; text-align: center; width: max-content; max-width: 96vw; pointer-events: none; }
+#ct-grito { position: absolute; z-index: 3; left: 50%; top: 30%; translate: -50% -50%; text-align: center; width: max-content; max-width: 96vw; pointer-events: none; }
 #ct-grito b { display: block; font-size: clamp(54px, 11vw, 128px); line-height: 1; color: #f5b244; text-shadow: ${contorno('#7f1d1d', 4)}, 0 10px 0 #7f1d1d; }
 #ct-grito.nosso b { color: #fff4e6; text-shadow: ${contorno('#00609c', 4)}, 0 10px 0 #00609c; }
 #ct-grito > span { display: inline-block; margin-top: 12px; padding: 6px 14px; border-radius: 10px; background: #1e2b2d; box-shadow: 0 3px 0 #11191a; font-size: 18px; }
@@ -1282,7 +1287,7 @@ body.ct-sentado #controls-help, body.ct-sentado #sit-hint { display: none !impor
 .ct-mais { position: absolute; z-index: 2; left: 50%; top: -6px; translate: -50% 0; font-size: 22px; color: #f5b244; text-shadow: ${contorno('#1e2b2d', 2)}; animation: ct-mais 1s ease-out forwards; pointer-events: none; }
 .pula { animation: ct-pula .45s cubic-bezier(.2,1.8,.4,1); }
 .carimbo { animation: ct-carimbo .4s cubic-bezier(.2,1.6,.4,1); }
-.ct-fim { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(10,16,18,.55); pointer-events: auto; overflow: hidden; }
+.ct-fim { position: absolute; z-index: 5; inset: 0; display: grid; place-items: center; background: rgba(10,16,18,.55); pointer-events: auto; overflow: hidden; }
 .ct-fim > div { text-align: center; padding: 18px 26px 22px; animation: ct-entra .5s cubic-bezier(.2,1.5,.4,1) both; }
 .ct-fim h2 { margin: 0; font-size: clamp(56px, 10vw, 110px); line-height: 1.05; color: #f5b244; text-shadow: ${contorno('#1e2b2d', 4)}, 0 9px 0 #1e2b2d; }
 .ct-fim.perdeu h2 { color: #a9bfc2; }
@@ -1340,6 +1345,7 @@ body.touch .ct-placa { font-size: 12px; }
 /* os números do placar na fonte cheia (na pixelada o 2 parece 3) */
 .ct-num, .ct-vale, .ct-vale2, .ct-monte, .ct-meta { font-family: ${NUMERO}; font-weight: 800; }
 .ct-vale2 { min-width: 44px; text-align: center; font-size: 22px; padding: 0 8px; border-radius: 8px; background: #5f7377; box-shadow: 0 3px 0 #3a4a4d; }
+.ct-apostas { display: grid; gap: 7px; }
 .ct-mesa21 { padding: 6px 8px 8px; } .ct-mesa21 small { display: block; font-size: 11px; color: #a9bfc2; text-align: center; letter-spacing: .08em; }
 .ct-namesa { display: flex; flex-wrap: wrap; justify-content: center; gap: 3px; margin-top: 4px; }
 .ct-namesa img { width: 30px; height: 40px; border-radius: 4px; box-shadow: 0 2px 0 rgba(0,0,0,.35); }
@@ -1384,7 +1390,7 @@ body.touch .ct-placa { font-size: 12px; }
 .ct-res b { font: 800 32px ${NUMERO}; } .ct-res b.passou { color: #fe5f55; text-decoration: line-through; }
 .ct-res small { color: #a9bfc2; font-size: 12px; }
 /* o trunfo que alguém usou: a carta grande no meio */
-#ct-trunfo { position: absolute; left: 50%; top: 36%; translate: -50% -50%; display: grid; justify-items: center; gap: 10px; pointer-events: none; }
+#ct-trunfo { position: absolute; z-index: 3; left: 50%; top: 36%; translate: -50% -50%; display: grid; justify-items: center; gap: 10px; pointer-events: none; }
 #ct-trunfo img { width: 130px; height: 174px; border-radius: 12px; box-shadow: 0 8px 0 rgba(0,0,0,.35), 0 0 46px var(--cor, #f5b244); }
 #ct-trunfo span { padding: 6px 14px; border-radius: 10px; background: #1e2b2d; box-shadow: 0 3px 0 #11191a; font-size: 17px; max-width: 86vw; text-align: center; }
 #ct-trunfo span small { display: block; font-size: 13px; color: #a9bfc2; margin-top: 2px; }
@@ -1423,30 +1429,107 @@ body.touch .ct-conta { display: none; } body.touch #ct-trunfo img { width: 96px;
   body.touch .ct-zoar, body.touch .ct-sinais { width: 180px; }
   body.touch #ct-trunfo img { width: 80px; height: 107px; }
 }
-/* iPhone 13 deitado (landscape, ~844×390): a altura é baixa, então tudo encolhe de altura */
-@media (orientation: landscape) and (max-height: 430px) {
-  body.touch .ct-lado { left: calc(6px + env(safe-area-inset-left)); top: calc(46px + env(safe-area-inset-top)); width: 130px; max-height: calc(100dvh - 52px - env(safe-area-inset-top)); padding: 5px; gap: 4px; overflow-y: auto; }
-  body.touch .ct-titulo { font-size: 16px; padding: 3px 2px 5px; }
-  body.touch .ct-num { font-size: 22px; }
-  body.touch .ct-vale, body.touch .ct-vale2, body.touch .ct-meta { font-size: 16px; min-width: 34px; }
-  body.touch .ct-baixo { bottom: calc(4px + env(safe-area-inset-bottom)); gap: 3px; }
-  body.touch .ct-carta { width: 48px; height: 64px; }
-  body.touch .ct-mao { min-height: 64px; padding-top: 14px; }
-  body.touch .ct-b { padding: 5px 8px; font-size: 11px; }
-  body.touch .ct-b.grande { font-size: 13px; padding: 6px 9px; }
-  body.touch .ct-pergunta { top: 4%; width: min(60vw, 320px); padding: 7px 12px 11px; }
-  body.touch .ct-pergunta h2 { font-size: 28px; }
-  body.touch .ct-pergunta p { font-size: 13px; }
-  body.touch .ct-pergunta .ct-parceiro img { width: 40px; height: 54px; }
-  body.touch .ct-placa { font-size: 11px; padding: 2px 6px 3px; }
-  body.touch .ct-mini button { width: 22px; height: 20px; font-size: 11px; line-height: 20px; }
-  body.touch .ct-rival { right: calc(6px + env(safe-area-inset-right)); top: calc(46px + env(safe-area-inset-top)); padding: 4px 6px; gap: 5px; }
-  body.touch .ct-rival img { width: 24px; height: 32px; }
-  body.touch .ct-rival .ct-somar { font-size: 14px; }
-  body.touch .ct-trunfo { width: 36px; height: 48px; }
-  body.touch .ct-soma { font-size: 20px; padding: 3px 6px; }
-  body.touch #ct-trunfo img { width: 76px; height: 102px; }
-  body.touch .ct-zoar, body.touch .ct-sinais { bottom: calc(100% + 6px); width: 170px; }
+/* No toque, o tapa, o tiro e o arremesso ficam atrás de um toque na plaquinha (eram três botõezinhos
+   de 22px em cada uma, que se encavalavam com a do lado). O 🫵 do uno fica sempre à mostra: tem pressa. */
+body.touch .ct-assento { flex-direction: column; align-items: center; }
+body.touch .ct-placa { pointer-events: auto; cursor: pointer; }
+body.touch .ct-placa::after { content: '⋯'; margin-left: -2px; color: #a9bfc2; }
+body.touch .ct-assento.aberto .ct-placa::after { content: '✕'; }
+body.touch .ct-mini button { width: 38px; height: 36px; font-size: 19px; line-height: 36px; border-radius: 10px; }
+body.touch .ct-assento:not(.aberto) .ct-mini button:not(.urgente) { display: none; }
+body.touch .ct-mini button.urgente { animation: ct-vez .8s ease-in-out infinite; background: #fe5f55; box-shadow: 0 2px 0 #a8352e; }
+body.touch .ct-arremesso button { width: 44px; height: 44px; font-size: 22px; }
+body.touch .ct-trunfo kbd { display: none; }
+/* os itens do placar encolhem junto com a coluna (antes o maior esticava todos e a coluna cortava) */
+body.touch .ct-lado > * { min-width: 0; }
+body { --ct-vh: 1vh; }
+@supports (height: 1dvh) { body { --ct-vh: 1dvh; } }
+/* Celular deitado, do pequeno (SE: 667×320 com a barra do Safari) ao grande (Pro Max: 932×430). Falta
+   altura, então as medidas seguem a altura da tela (--ct-vh): o placar fica inteiro à esquerda, sem
+   rolar; a mão e os botões ocupam o espaço à direita dele; cartas grandes, botões do tamanho de um
+   dedo (40px ou mais) e letra de 10px para cima. */
+@media (orientation: landscape) and (max-height: 500px) {
+  body.touch #ct-hud { --topo: calc(54px + env(safe-area-inset-top)); --esq: calc(6px + env(safe-area-inset-left)); --dir: calc(6px + env(safe-area-inset-right));
+    --base: max(6px, calc(env(safe-area-inset-bottom) - 8px)); --lado: clamp(130px, 18vw, 160px); --carta: clamp(76px, calc(var(--ct-vh) * 25), 112px);
+    --meio: calc((var(--esq) + var(--lado) + 8px + 100% - var(--dir)) / 2); }
+  body.touch .ct-lado { left: var(--esq); top: var(--topo); width: var(--lado); max-height: calc(100% - var(--topo) - var(--base)); padding: 5px; gap: 4px; }
+  body.touch .ct-titulo { font-size: 17px; padding: 2px 2px 4px; border-radius: 8px; box-shadow: 0 3px 0 #a8352e; }
+  body.touch .ct-titulo.uno { box-shadow: 0 3px 0 #a8741f; } body.touch .ct-titulo.v21 { font-size: 20px; padding: 0 2px 2px; box-shadow: 0 3px 0 #2b7a5b; }
+  body.touch .ct-placar { padding: 4px 5px 5px; gap: 3px; }
+  body.touch .ct-placar small, body.touch .ct-linha2 small, body.touch .ct-mesa21 small { font-size: 10px; letter-spacing: .04em; }
+  body.touch .ct-num { font-size: 24px; line-height: 1.15; }
+  body.touch .ct-x { font-size: 16px; padding-bottom: 4px; }
+  body.touch .ct-dedos { display: none; }
+  body.touch .ct-linha2 { min-height: 32px; padding: 3px 6px; gap: 4px; }
+  body.touch .ct-vale, body.touch .ct-vale2, body.touch .ct-meta { font-size: 18px; min-width: 32px; padding: 0 6px; }
+  body.touch .ct-rodadas { gap: 4px; } body.touch .ct-rodadas i { width: 15px; height: 15px; }
+  body.touch .ct-sentido { font-size: 20px; } body.touch .ct-uno-cor { width: 38px; height: 22px; }
+  /* 21: meta e as duas apostas lado a lado, cada uma com o nome em cima */
+  body.touch .ct-apostas { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
+  body.touch .ct-apostas .ct-linha2 { flex-direction: column; justify-content: flex-end; gap: 3px; padding: 4px 2px 5px; }
+  body.touch .ct-apostas small { font-size: 10px; letter-spacing: 0; line-height: 1.1; text-align: center; }
+  body.touch .ct-apostas .ct-longo { display: none; }
+  body.touch .ct-mesa21 { padding: 4px 5px 5px; } body.touch .ct-mesa21.vazio { display: none; } body.touch .ct-namesa img { width: 24px; height: 32px; }
+  body.touch .ct-dica { font-size: 10px; }
+  body.touch .ct-lado .ct-b { min-height: 40px; }
+  body.touch .ct-mesa-acoes { gap: 4px; padding-top: 4px; }
+  /* a mão e os botões: no espaço à direita do placar */
+  body.touch .ct-baixo { left: calc(var(--esq) + var(--lado) + 8px); right: var(--dir); bottom: var(--base); translate: none; width: auto; max-width: none; gap: 3px; }
+  body.touch .ct-aviso { font-size: 13px; padding: 4px 10px; max-width: 100%; }
+  /* 21: com os trunfos em cima da mão o aviso sobe até o rival (canto de cima à direita): vai para a esquerda */
+  body.touch .ct-rival:not([hidden]) ~ .ct-baixo .ct-aviso { justify-self: start; max-width: calc(100% - 270px); }
+  body.touch .ct-linha { gap: 10px; max-width: 100%; }
+  body.touch .ct-esq, body.touch .ct-dir { gap: 8px; padding-bottom: 2px; }
+  body.touch .ct-mao { min-height: var(--carta); padding-top: 10px; }
+  body.touch .ct-carta { height: var(--carta); width: calc(var(--carta) * .75); }
+  body.touch .ct-face { border-radius: 8px; }
+  body.touch .ct-tempo { width: min(320px, 60%); height: 6px; }
+  body.touch .ct-b { min-height: 40px; padding: 8px 12px; font-size: 13px; }
+  body.touch .ct-b.grande { min-height: 46px; padding: 9px 14px; font-size: 16px; }
+  body.touch .ct-soma { font-size: 26px; padding: 4px 10px; } body.touch .ct-soma small { font-size: 10px; }
+  body.touch .ct-fechada { bottom: 4px; font-size: 10px; }
+  body.touch .ct-vez21 { font-size: 13px; }
+  body.touch .ct-trunfos { gap: 6px; }
+  body.touch .ct-trunfo { width: calc(var(--carta) * .5); height: calc(var(--carta) * .667); border-radius: 6px; }
+  body.touch .ct-tip { width: min(250px, 70vw); font-size: 12px; }
+  body.touch .ct-zoar, body.touch .ct-sinais { right: 0; bottom: calc(100% + 8px); width: 220px; max-height: calc(var(--ct-vh) * 100 - var(--topo) - var(--carta) - 60px); }
+  body.touch .ct-zoar button { padding: 9px 10px; font-size: 13px; }
+  /* as plaquinhas, a pergunta, o rival do 21 e os avisos grandes */
+  body.touch .ct-placa { font-size: 12px; padding: 3px 8px 4px; }
+  body.touch .ct-balao { font-size: 13px; padding: 4px 9px; } body.touch .ct-balao.forte { font-size: 16px; }
+  /* a pergunta não desce até a mão (na mão de onze a gente decide olhando as próprias cartas): as
+     cartas do parceiro e os botões vão numa linha só */
+  body.touch .ct-pergunta { top: var(--topo); left: var(--meio); width: min(540px, calc(100% - var(--esq) - var(--lado) - var(--dir) - 24px)); max-height: calc(100% - var(--topo) - var(--base));
+    overflow-y: auto; padding: 6px 14px 10px; display: grid; grid-template-columns: auto auto; justify-content: center; align-items: center; column-gap: 14px;
+    grid-template-areas: "h2 h2" "p p" "res res" "cartas botoes" "tempo tempo"; }
+  body.touch .ct-pergunta h2 { grid-area: h2; font-size: clamp(28px, calc(var(--ct-vh) * 10), 42px); }
+  body.touch .ct-pergunta p { grid-area: p; margin: 2px 0 8px; font-size: 12px; }
+  body.touch .ct-pergunta .ct-res { grid-area: res; }
+  body.touch .ct-pergunta .ct-parceiro { grid-area: cartas; margin: 0; } body.touch .ct-pergunta .ct-parceiro img { width: 42px; height: 56px; }
+  body.touch .ct-pergunta .ct-botoes { grid-area: botoes; }
+  body.touch .ct-pergunta .ct-tempo { grid-area: tempo; justify-self: center; margin-top: 10px; }
+  body.touch .ct-res { margin: 4px 0; } body.touch .ct-res img { width: 32px; height: 43px; } body.touch .ct-res b { font-size: 24px; }
+  body.touch .ct-rival { top: var(--topo); right: var(--dir); padding: 4px 8px; gap: 6px; max-width: calc(100% - var(--esq) - var(--lado) - var(--dir) - 24px); }
+  body.touch .ct-rival img { width: 30px; height: 40px; } body.touch .ct-rival .ct-somar { font-size: 17px; padding: 1px 8px; }
+  body.touch .ct-rival .ct-quem { font-size: 12px; } body.touch .ct-rival .ct-quem small { font-size: 10px; }
+  body.touch .ct-rival .ct-namesa img { width: 22px; height: 29px; }
+  body.touch #ct-grito { top: 36%; left: var(--meio); } body.touch #ct-grito b { font-size: clamp(44px, calc(var(--ct-vh) * 17), 88px); }
+  body.touch #ct-grito > span { margin-top: 8px; font-size: 14px; }
+  body.touch #ct-trunfo { top: 44%; left: var(--meio); } body.touch #ct-trunfo img { width: calc(var(--carta) * .9); height: calc(var(--carta) * 1.2); }
+  body.touch #ct-trunfo span { font-size: 14px; }
+  body.touch .ct-fim > div { padding: 12px 20px 16px; max-height: calc(100% - 16px); overflow-y: auto; }
+  body.touch .ct-fim h2 { font-size: clamp(40px, calc(var(--ct-vh) * 16), 76px); }
+  body.touch .ct-fim p { margin: 6px 0 10px; font-size: 14px; }
+  /* o seletor de cadeira: a roda à esquerda, o texto e o "Agora não" à direita (em pé não cabia) */
+  #ct-sentar > div { grid-template-columns: auto minmax(0, 250px); grid-template-areas: "roda h3" "roda p" "roda b"; align-content: center; column-gap: 26px; row-gap: 12px; padding: 14px 22px; }
+  #ct-sentar h3 { grid-area: h3; align-self: end; text-align: center; } #ct-sentar p { grid-area: p; } #ct-sentar [data-fechar] { grid-area: b; align-self: start; min-height: 42px; }
+  .ct-roda { grid-area: roda; width: min(250px, calc(var(--ct-vh) * 100 - 64px)); height: min(250px, calc(var(--ct-vh) * 100 - 64px)); margin: 0 18px; }
+  .ct-cadeira { min-height: 42px; }
+}
+/* tela bem baixa (SE com a barra do Safari, Android com a barra do Chrome): o título do jogo sai do
+   placar (o nome já está na placa da mesa) para o resto caber sem rolar */
+@media (orientation: landscape) and (max-height: 359px) {
+  body.touch .ct-titulo, body.touch .ct-dica { display: none; }
 }`;
     document.head.appendChild(css);
 
@@ -1474,10 +1557,10 @@ body.touch .ct-conta { display: none; } body.touch #ct-trunfo img { width: 96px;
     this.zoar.innerHTML = `<button type="button" class="sorte" data-zoar="-1">🎲 Frase aleatória</button>`
       + ZOEIRA.map((f, i) => `<button type="button" data-zoar="${i}">${esc(f)}</button>`).join('');
     // o cochicho do truco (só o parceiro vê)
-    this.sinal = document.createElement('div');
-    this.sinal.className = 'ct-zoar ct-sinais ct-painel';
-    this.sinal.hidden = true;
-    this.sinal.innerHTML = SINAIS.map((s, i) => `<button type="button" data-sinal="${i}">${s.carta ? `<img src="${urlCarta(s.carta)}" alt="${esc(s.carta)}">` : ''}${esc(s.f)}</button>`).join('');
+    this.sinais = document.createElement('div');
+    this.sinais.className = 'ct-zoar ct-sinais ct-painel';
+    this.sinais.hidden = true;
+    this.sinais.innerHTML = SINAIS.map((s, i) => `<button type="button" data-sinal="${i}">${s.carta ? `<img src="${urlCarta(s.carta)}" alt="${esc(s.carta)}">` : ''}${esc(s.f)}</button>`).join('');
     // o menu do que jogar em alguém (abre dentro da plaquinha do alvo)
     this.menu = document.createElement('div');
     this.menu.className = 'ct-arremesso ct-painel';
@@ -1544,6 +1627,16 @@ body.touch .ct-conta { display: none; } body.touch #ct-trunfo img { width: 96px;
   clique(ev) {
     const b = ev.target.closest('button');
     const M = this.ativa;
+    // no celular, tocar na plaquinha abre (ou fecha) o tapa, o tiro e o arremesso dela
+    const placa = !b && document.body.classList.contains('touch') && ev.target.closest('.ct-placa');
+    if (placa && M) {
+      const assento = placa.closest('.ct-assento');
+      const abre = !assento.classList.contains('aberto');
+      this.raiz.querySelectorAll('.ct-assento.aberto').forEach((el) => el.classList.remove('aberto'));
+      assento.classList.toggle('aberto', abre);
+      if (this.menu.parentElement !== assento || !abre) this.menu.hidden = true;
+      return;
+    }
     if (!b || !M) return;
     b.blur();
     const mesa = M.i;
@@ -1573,7 +1666,7 @@ body.touch .ct-conta { display: none; } body.touch #ct-trunfo img { width: 96px;
       return this.socket?.emit('ct-zoar', { mesa, i: i >= 0 ? i : Math.floor(Math.random() * ZOEIRA.length) });
     }
     if (d.sinal) {
-      this.sinal.hidden = true;
+      this.sinais.hidden = true;
       const i = Number(d.sinal);
       // feedback: eu também vejo o balão que o parceiro vai ver (com a carta, se tiver)
       this.balao((M.lugar + 2) % 4, `🤫 ${SINAIS[i]?.f || ''}`, false, 'segredo', SINAIS[i]?.carta);
@@ -1613,12 +1706,12 @@ body.touch .ct-conta { display: none; } body.touch #ct-trunfo img { width: 96px;
     }
     if (acao === 'zoar') {
       this.zoar.hidden = !this.zoar.hidden;
-      if (!this.zoar.hidden) this.sinal.hidden = true;
+      if (!this.zoar.hidden) this.sinais.hidden = true;
       return;
     }
     if (acao === 'sinal') {
-      this.sinal.hidden = !this.sinal.hidden;
-      if (!this.sinal.hidden) this.zoar.hidden = true;
+      this.sinais.hidden = !this.sinais.hidden;
+      if (!this.sinais.hidden) this.zoar.hidden = true;
       return;
     }
     if (acao?.startsWith('truco:')) {
@@ -1642,6 +1735,23 @@ body.touch .ct-conta { display: none; } body.touch #ct-trunfo img { width: 96px;
     this.desenharMao(M, e);
     this.desenharBotoes();
     this.desenharTempo(M, e);
+    this.ajustarMao();
+  }
+
+  // A mão tem que caber entre os botões (no uno ela cresce, e no celular deitado as cartas são
+  // grandes): quando não cabe, as cartas se encavalam mais, até sobrar um pedaço de cada uma.
+  ajustarMao() {
+    const cartas = this.mao.children;
+    const n = cartas.length;
+    if (!n || this.juntaBase === undefined) return;
+    const w = cartas[0].offsetWidth;
+    const baixo = this.$('.ct-baixo');
+    // no celular deitado a .ct-baixo vai do placar até a borda; no resto ela cresce com a mão
+    const largura = getComputedStyle(baixo).right === 'auto' ? innerWidth * 0.96 : baixo.clientWidth;
+    const livre = largura - this.$('.ct-esq').offsetWidth - this.$('.ct-dir').offsetWidth - 40;
+    const cabe = (livre / n - w) / 2;
+    const junta = Math.max(-w * 0.36, Math.min(this.juntaBase, cabe));
+    this.mao.style.setProperty('--junta', `${junta.toFixed(1)}px`);
   }
 
   // a coluna do placar (montada uma vez por jogo; os números trocam sem refazer, para poderem pular)
@@ -1661,9 +1771,9 @@ body.touch .ct-conta { display: none; } body.touch #ct-trunfo img { width: 96px;
       lado.innerHTML = v21
         ? `<div class="ct-titulo v21 ondas">${ondas('21')}</div>
 <div class="ct-placar ct-caixa"><div><small>VOCÊ</small><b class="ct-num azul" data-p="nos">${DEDOS_21}</b><span class="ct-dedos" data-d="nos"></span></div><span class="ct-x">×</span><div><small>RIVAL</small><b class="ct-num vermelho" data-p="eles">${DEDOS_21}</b><span class="ct-dedos" data-d="eles"></span></div></div>
-<div class="ct-linha2 ct-caixa"><small>META</small><b class="ct-meta">21</b></div>
+<div class="ct-apostas"><div class="ct-linha2 ct-caixa"><small>META</small><b class="ct-meta">21</b></div>
 <div class="ct-linha2 ct-caixa" title="Quantos dedos você perde se perder a rodada"><small>SUA APOSTA</small><b class="ct-vale">1</b></div>
-<div class="ct-linha2 ct-caixa" title="Quantos dedos o rival perde se perder a rodada"><small>APOSTA DO RIVAL</small><b class="ct-vale2">1</b></div>
+<div class="ct-linha2 ct-caixa" title="Quantos dedos o rival perde se perder a rodada"><small>APOSTA <span class="ct-longo">DO </span>RIVAL</small><b class="ct-vale2">1</b></div></div>
 <div class="ct-mesa21 ct-caixa"><small>SEUS TRUNFOS NA MESA</small><span class="ct-namesa"></span></div>
 <div class="ct-conta ct-caixa"><small>CONTAGEM · NO MONTE <b class="ct-monte">–</b></small><span>${conta}</span></div>
 ${espera ? `<div class="ct-mesa-acoes">${comecar}<button type="button" class="ct-b cinza" data-acao="sair">Sair da mesa</button></div>` : '<div class="ct-mesa-acoes"><button type="button" class="ct-b cinza" data-acao="sair">Sair da mesa</button></div>'}`
@@ -1716,6 +1826,7 @@ ${espera ? comecar : ''}<button type="button" class="ct-b cinza" data-acao="sair
       // os meus trunfos na mesa
       const naMesa = e.mesa21?.[eu] || [];
       const caixa = lado.querySelector('.ct-namesa');
+      caixa.parentElement.classList.toggle('vazio', !naMesa.length); // (no celular deitado, a caixa vazia sai)
       const htmlMesa = naMesa.length ? naMesa.map((c) => `<img src="${urlCarta(`T:${c}`)}" alt="${esc(TRUNFOS_21[c]?.nome || c)}" title="${esc(`${TRUNFOS_21[c]?.nome}: ${TRUNFOS_21[c]?.desc}`)}">`).join('') : '<em>nenhum</em>';
       if (caixa.dataset.html !== htmlMesa) {
         caixa.dataset.html = htmlMesa;
@@ -1770,7 +1881,7 @@ ${espera ? comecar : ''}<button type="button" class="ct-b cinza" data-acao="sair
         p.dataset.html = placa;
         p.innerHTML = placa;
       }
-      const mini = `${e.jogo === 'uno' && e.fase === 'jogando' && e.semUno === k ? `<button type="button" data-pegouno="${k}" title="Pegar: não falou UNO! (compra 2)" aria-label="Pegar ${esc(l.nome)} que não falou UNO">🫵</button>` : ''}${tapa ? `<button type="button" data-tapa="${k}" title="Dar um tapa" aria-label="Dar um tapa em ${esc(l.nome)}">👋</button>` : ''}${tiro ? `<button type="button" data-tiro="${k}" title="Dar um tiro (de brincadeira)" aria-label="Dar um tiro em ${esc(l.nome)}">🔫</button>` : ''}<button type="button" data-arremesso="${k}" title="Jogar alguma coisa" aria-label="Jogar alguma coisa em ${esc(l.nome)}">🍅</button>`;
+      const mini = `${e.jogo === 'uno' && e.fase === 'jogando' && e.semUno === k ? `<button type="button" class="urgente" data-pegouno="${k}" title="Pegar: não falou UNO! (compra 2)" aria-label="Pegar ${esc(l.nome)} que não falou UNO">🫵</button>` : ''}${tapa ? `<button type="button" data-tapa="${k}" title="Dar um tapa" aria-label="Dar um tapa em ${esc(l.nome)}">👋</button>` : ''}${tiro ? `<button type="button" data-tiro="${k}" title="Dar um tiro (de brincadeira)" aria-label="Dar um tiro em ${esc(l.nome)}">🔫</button>` : ''}<button type="button" data-arremesso="${k}" title="Jogar alguma coisa" aria-label="Jogar alguma coisa em ${esc(l.nome)}">🍅</button>`;
       const b = el.querySelector('.ct-mini');
       if (b.dataset.html !== mini) {
         b.dataset.html = mini;
@@ -1947,7 +2058,8 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
     const n = mao.length;
     const meio = (n - 1) / 2;
     const passo = n > 4 ? 4 : 7;
-    this.mao.style.setProperty('--junta', `${(n > 4 ? -Math.min(40, 6 + (n - 4) * 5) : -6) / 2}px`);
+    this.juntaBase = (n > 4 ? -Math.min(40, 6 + (n - 4) * 5) : -6) / 2;
+    this.mao.style.setProperty('--junta', `${this.juntaBase}px`);
     this.mao.innerHTML = mao.map((c, i) => {
       const off = i - meio;
       const estilo = `--rot:${off * passo}deg;--desce:${off * off * 4}px;--atraso:${-i * 0.37}s;--chega:${Math.max(0, i - antes) * 0.12}s`;
@@ -1969,14 +2081,18 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
     this.chaveMao = chave;
     const n = mao.length;
     const meio = (n - 1) / 2;
-    const passo = n > 8 ? 2.5 : n > 4 ? 4 : 7;
+    // o leque: numa mão grande do uno as pontas não passam de 12° nem descem mais que 16px (senão
+    // saíam pela borda de baixo da tela)
+    const passo = Math.min(n > 8 ? 2.5 : n > 4 ? 4 : 7, 24 / Math.max(1, n - 1));
+    const desce = Math.min(16, meio * meio * (n > 6 ? 1 : 4));
     const junta = n > 4 ? -Math.min(40, 6 + (n - 4) * 5) : -6;
-    this.mao.style.setProperty('--junta', `${junta / 2}px`);
+    this.juntaBase = junta / 2;
+    this.mao.style.setProperty('--junta', `${this.juntaBase}px`);
     const distribuir = this.distribuir;
     this.distribuir = false;
     this.mao.innerHTML = mao.map((c, i) => {
       const off = i - meio;
-      const estilo = `--rot:${off * passo}deg;--desce:${off * off * (n > 6 ? 1 : 4)}px;--atraso:${-i * 0.37}s;--chega:${i * 0.09}s`;
+      const estilo = `--rot:${(off * passo).toFixed(2)}deg;--desce:${meio ? ((off / meio) ** 2 * desce).toFixed(1) : 0}px;--atraso:${-i * 0.37}s;--chega:${i * 0.09}s`;
       return `<button type="button" class="ct-carta${pode[i] ? ' pode' : ''}${distribuir ? ' chega' : ''}" data-carta="${esc(c)}" style="${estilo}" aria-label="${esc(c === 'verso' ? 'carta virada' : c)}">`
         + `<div class="ct-balanca"><div class="ct-face" style="background-image:url(${urlCarta(c)})"></div></div></button>`;
     }).join('');
@@ -2037,7 +2153,7 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
     if (elDir.dataset.html !== html(dir)) {
       elDir.dataset.html = html(dir);
       elDir.innerHTML = html(dir);
-      elDir.append(this.zoar, this.sinal);
+      elDir.append(this.zoar, this.sinais);
     }
     this.marcarCoberta();
   }
@@ -2187,12 +2303,28 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
     if (this.ativa) this.posicionarAssentos(this.ativa);
   }
 
-  // as plaquinhas seguem as cadeiras na tela
+  // as plaquinhas seguem as cadeiras na tela, sem tampar o placar, o rival do 21, a mão e a barra do
+  // topo, nem umas às outras (numa tela baixa elas se amontoavam)
   posicionarAssentos(M) {
     const cam = this.world.camera;
     const v = this._v ||= new THREE.Vector3();
     const w = innerWidth;
     const h = innerHeight;
+    // os tamanhos e os painéis mudam pouco: mede de tempos em tempos, não a cada quadro
+    const agora = performance.now();
+    const medir = !this._medidas || agora - this._medidas.em > 300 || this._medidas.w !== w || this._medidas.h !== h;
+    if (medir) {
+      const ret = (el) => (el && !el.hidden && el.offsetHeight ? el.getBoundingClientRect() : null);
+      const lado = ret(this.$('.ct-lado'));
+      const bar = document.body.classList.contains('touch') ? ret(document.getElementById('bar')) : null;
+      this._medidas = {
+        em: agora, w, h,
+        area: { esquerda: Math.max(6, lado?.left ?? 6), direita: w - Math.max(6, lado?.left ?? 6), topo: bar && bar.top < h / 2 ? bar.bottom - 6 : 40, baixo: h - 8 },
+        evitar: [lado, ret(this.$('.ct-rival')), ...[...this.$('.ct-baixo').children].map(ret)].filter(Boolean),
+      };
+    }
+    const { area, evitar } = this._medidas;
+    const placas = [];
     for (const el of this.$('.ct-assentos').children) {
       if (el.hidden) continue;
       const c = cadeira(M.m, Number(el.dataset.lugar));
@@ -2202,10 +2334,14 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
         continue;
       }
       el.style.visibility = '';
-      const x = Math.min(w - 90, Math.max(90, ((v.x + 1) / 2) * w));
-      const y = Math.min(h - 200, Math.max(70, ((1 - v.y) / 2) * h));
-      el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, -100%)`;
-      el.classList.toggle('topo', y < 140);
+      if (medir || !el._tam) el._tam = { w: el.offsetWidth, h: el.offsetHeight };
+      placas.push({ el, x: ((v.x + 1) / 2) * w, y: ((1 - v.y) / 2) * h, ...el._tam });
+    }
+    arrumarPlacas(placas, area, evitar);
+    for (const p of placas) {
+      p.el.style.transform = `translate(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px) translate(-50%, -100%)`;
+      // sem lugar em cima para o balão: ele sai por baixo
+      p.el.classList.toggle('topo', p.y - p.h - area.topo < 44);
     }
   }
 

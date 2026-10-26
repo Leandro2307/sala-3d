@@ -15,7 +15,7 @@
 import * as THREE from 'three';
 import { avaliarMao, LETRA, SIMBOLO, BLINDS, BIGS_MINIMO } from './poker-regras.js';
 import { MESAS_POKER } from './parque-dados.js';
-import { hud, texturaViva } from './hud-jogos.js';
+import { hud, texturaViva, arrumarPlacas } from './hud-jogos.js';
 import { Avatar } from './avatars.js';
 
 const LUGARES = 6;
@@ -1049,6 +1049,7 @@ body.pk-sentado #controls-help, body.pk-sentado #sit-hint { display: none !impor
 .pk-ajuda { display: flex; gap: 6px; }
 .pk-ajuda button { flex: 1; padding: 6px 4px; border: 1px solid #334155; border-radius: 8px; background: #1e293b; color: #e2e8f0; font-size: 12px !important; }
 .pk-ajuda button:hover { background: #334155; }
+.pk-curto { display: none; }
 .pk-titulo { font: 900 22px ${FONTE}; letter-spacing: .04em; color: #4ade80; }
 .pk-titulo span { color: #f87171; }
 .pk-pote { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; background: #0b1f17; }
@@ -1149,43 +1150,93 @@ body.touch .pk-esq { left: calc(8px + env(safe-area-inset-left)); top: calc(52px
 body.touch .pk-sair { right: calc(8px + env(safe-area-inset-right)); top: calc(52px + env(safe-area-inset-top)); }
 body.touch .pk-baixo { bottom: calc(8px + env(safe-area-inset-bottom)); width: min(520px, calc(100vw - 16px - env(safe-area-inset-left) - env(safe-area-inset-right))); }
 body.touch .pk-acoes { width: 100%; justify-content: center; }
-/* celulares e tablets deitados: os comandos viram uma grade compacta
-   à direita, as cartas ficam do lado de fora do grid, e o painel do pote fica fino */
-@media (orientation: landscape) and (max-width: 900px) {
-  body.touch .pk-esq { left: calc(4px + env(safe-area-inset-left)); top: calc(42px + env(safe-area-inset-top)); width: 105px; max-height: calc(100dvh - 50px - env(safe-area-inset-top)); padding: 4px; gap: 3px; }
-  body.touch .pk-info { padding: 5px; gap: 3px; }
-  body.touch .pk-titulo { font-size: 13px; }
-  body.touch .pk-pote { gap: 6px; padding: 5px 6px; }
-  body.touch .pk-pote b { font-size: 14px; }
-  body.touch .pk-pote i { width: 16px; height: 16px; }
-  body.touch .pk-pote small { font-size: 8px; }
-  body.touch .pk-linha { font-size: 9px; gap: 3px; }
-  body.touch .pk-linha small { font-size: 7px; }
-  body.touch .pk-dono small { font-size: 8px; margin-bottom: 2px; }
-  body.touch .pk-dono select { padding: 3px 4px; font-size: 9px; }
-  body.touch .pk-ajuda { display: none; }
+/* Celular deitado, do pequeno (SE: 667×320 com a barra do Safari) ao grande (Pro Max: 932×430). Falta
+   altura, então as medidas seguem a altura da tela (--pk-vh). À esquerda, de cima para baixo, o pote
+   e a mesa e, no pé, o Levantar (como o "Sair da mesa" do truco); à direita dele, embaixo, as minhas
+   cartas e os comandos em duas linhas (o valor do aumento em cima, os quatro botões embaixo), para
+   sobrar a mesa no meio. Botões do tamanho de um dedo e letra de 9px para cima. */
+@media (orientation: landscape) and (max-height: 500px) {
+  body.touch #pk-hud { --topo: calc(54px + env(safe-area-inset-top)); --esq: calc(6px + env(safe-area-inset-left)); --dir: calc(6px + env(safe-area-inset-right));
+    --base: max(6px, calc(env(safe-area-inset-bottom) - 8px)); --lado: clamp(130px, 18vw, 164px); --carta: clamp(50px, calc(var(--pk-vh) * 17), 76px);
+    --meio: calc((var(--esq) + var(--lado) + 10px + 100% - var(--dir)) / 2); }
+  body.touch .pk-esq { left: var(--esq); top: var(--topo); width: var(--lado); max-height: calc(100% - var(--topo) - var(--base) - 52px); gap: 4px; }
+  body.touch .pk-info { padding: 7px; gap: 5px; }
+  body.touch .pk-info > * { min-width: 0; }
+  body.touch .pk-titulo { font-size: 15px; }
+  body.touch .pk-pote { gap: 8px; padding: 4px 8px; }
+  body.touch .pk-pote b { font-size: 20px; line-height: 1.1; }
+  body.touch .pk-pote i { width: 20px; height: 20px; }
+  body.touch .pk-pote small, body.touch .pk-linha small { font-size: 10px; letter-spacing: .04em; }
+  /* blinds e fase lado a lado; a mão nº, o mínimo da mesa (que só importa para sentar) e a aposta da
+     rodada (o "Pagar 2" e as plaquinhas já dizem) ficam para o computador */
+  body.touch .pk-info { grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: 4px 6px; }
+  body.touch .pk-info > :not(.pk-linha) { grid-column: 1 / -1; }
+  body.touch .pk-linha { display: contents; font-size: 12px; line-height: 1.2; }
+  body.touch .pk-c-mao, body.touch .pk-c-min, body.touch .pk-c-aposta { display: none; }
+  body.touch .pk-dono { padding: 4px; } body.touch .pk-dono small { display: none; }
+  body.touch .pk-dono select { min-height: 32px; padding: 4px; font-size: 11px; }
+  body.touch .pk-v-proximo { font-size: 10px; }
+  body.touch .pk-aviso { min-height: 0; font-size: 11px; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  body.touch .pk-aviso:empty { display: none; }
+  body.touch .pk-ajuda { display: flex; gap: 4px; }
+  body.touch .pk-ajuda button { min-height: 34px; padding: 4px 2px; font-size: 11px !important; white-space: nowrap; }
+  body.touch .pk-longo { display: none; } body.touch .pk-curto { display: inline; }
   body.touch .pk-dica { display: none; }
-  body.touch .pk-sair { right: calc(4px + env(safe-area-inset-right)); top: calc(42px + env(safe-area-inset-top)); padding: 4px 6px; font-size: 9px; }
-  body.touch .pk-baixo { left: auto; right: calc(4px + env(safe-area-inset-right)); transform: none; align-items: flex-end; gap: 5px;
-    width: min(340px, calc(100vw - 122px - env(safe-area-inset-left) - env(safe-area-inset-right))); }
-  body.touch .pk-mao { flex: none; display: grid; gap: 3px; }
-  body.touch .pk-cartas { gap: 3px; }
-  body.touch .pk-cartas img { width: 48px; }
-  body.touch .pk-jogo { font-size: 9px; padding: 2px 5px; }
-  body.touch .pk-acoes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 5px; gap: 4px; flex: 1; }
-  body.touch .pk-b { min-width: 0; padding: 6px 5px; font-size: 11px; white-space: nowrap; }
-  body.touch .pk-b small { font-size: 8px; }
-  body.touch .pk-saldo { grid-column: span 2; padding: 0; font-size: 9px; }
-  body.touch .pk-saldo b { display: inline; margin-left: 3px; font-size: 13px; }
-  body.touch .pk-raise { grid-column: span 2; padding: 4px 5px; gap: 2px; }
-  body.touch .pk-raise input { width: 100%; }
-  body.touch .pk-rapidos button { padding: 2px 3px; font-size: 9px !important; }
-  body.touch .pk-espera { grid-column: span 2; max-width: none; padding: 0; text-align: center; font-size: 9px; }
-  body.touch .pk-assentos > div { min-width: 72px; padding: 2px 4px 3px; border-radius: 7px; }
-  body.touch .pk-assentos .nome { max-width: 82px; font-size: 9px; }
-  body.touch .pk-assentos .fichas, body.touch .pk-assentos .aposta, body.touch .pk-assentos .lance { font-size: 8px; }
-  body.touch .pk-assentos .mini { margin-top: 2px; }
-  body.touch .pk-assentos .mini img { width: 18px; }
+  body.touch .pk-sair { left: var(--esq); right: auto; top: auto; bottom: var(--base); width: var(--lado); min-height: 44px; padding: 8px; font-size: 14px; }
+  body.touch .pk-sair small { display: none; }
+  body.touch .pk-baixo { left: calc(var(--esq) + var(--lado) + 10px); right: var(--dir); bottom: var(--base); transform: none; width: auto; max-width: none;
+    flex-direction: row; align-items: flex-end; justify-content: center; gap: 10px; }
+  body.touch .pk-mao { flex: none; gap: 4px; }
+  body.touch .pk-cartas { gap: 4px; }
+  body.touch .pk-cartas img { width: var(--carta); border-radius: 6px; }
+  body.touch .pk-jogo { font-size: 11px; padding: 2px 8px; }
+  body.touch .pk-acoes { flex: 0 1 440px; width: auto; min-width: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-areas: "saldo raise raise raise" "fold call raise2 allin" "espera espera espera espera"; gap: 6px; padding: 7px; }
+  body.touch .pk-acoes:not(.decide) { grid-template-areas: "saldo espera espera espera" "comecar comecar comecar comecar"; }
+  body.touch .pk-saldo { grid-area: saldo; align-self: center; padding: 0; font-size: 10px; line-height: 1.1; }
+  body.touch .pk-saldo b { font-size: 18px; }
+  body.touch [data-pk="comecar"] { grid-area: comecar; } body.touch [data-pk="fold"] { grid-area: fold; } body.touch [data-pk="call"] { grid-area: call; }
+  body.touch [data-pk="raise"] { grid-area: raise2; } body.touch [data-pk="allin"] { grid-area: allin; }
+  body.touch .pk-raise { grid-area: raise; align-self: center; display: flex; align-items: center; gap: 6px; padding: 3px 4px 3px 8px; }
+  body.touch .pk-raise input { flex: 1; min-width: 50px; width: auto; height: 30px; margin: 0; }
+  body.touch .pk-rapidos { flex: none; gap: 4px; } body.touch .pk-rapidos button { min-width: 36px; min-height: 32px; padding: 2px 6px; font-size: 11px !important; }
+  body.touch .pk-espera { grid-area: espera; align-self: center; max-width: none; padding: 0 4px; font-size: 12px; text-align: center; }
+  body.touch .pk-b { min-width: 0; min-height: 46px; padding: 6px 4px; font-size: 14px; border-radius: 10px; }
+  body.touch .pk-b small { font-size: 10px; }
+  body.touch .pk-banner { left: var(--meio); bottom: calc(var(--base) + var(--carta) * 1.4 + 40px); max-width: 60vw; padding: 8px 16px; font-size: 15px; }
+  body.touch .pk-banner small { font-size: 11px; }
+  /* as plaquinhas: pequenas, mas legíveis (o tamanho é daqui; antes era um scale que encolhia a letra) */
+  body.touch .pk-assentos > div { min-width: 84px; padding: 3px 7px 4px; border-radius: 9px; }
+  body.touch .pk-assentos .nome { max-width: 104px; font-size: 11px; }
+  body.touch .pk-assentos .fichas, body.touch .pk-assentos .aposta, body.touch .pk-assentos .total, body.touch .pk-assentos .jogo, body.touch .pk-assentos .vazio { font-size: 10px; }
+  body.touch .pk-assentos .lance { margin-top: 2px; padding: 1px 6px; font-size: 11px; }
+  body.touch .pk-assentos .mini { margin-top: 2px; } body.touch .pk-assentos .mini img { width: 24px; }
+  body.touch .pk-assentos .vazio { opacity: .8; }
+  /* o tutorial e a cola: ocupam a altura toda */
+  body.touch .pk-fundo { padding: 8px calc(8px + env(safe-area-inset-right)) 8px calc(8px + env(safe-area-inset-left)); }
+  body.touch .pk-guia { width: min(640px, 100%); max-height: 100%; padding: 12px 16px; }
+  body.touch .pk-guia h2 { font-size: 17px; } body.touch .pk-abas { margin: 6px 0 8px; }
+  body.touch .pk-guia p, body.touch .pk-guia li { font-size: 13px; line-height: 1.4; }
+  /* o Voltar/Próximo fica sempre à vista, grudado no pé (o texto rola por baixo dele) */
+  body.touch .pk-nav { position: sticky; bottom: -12px; margin: 8px -16px -12px; padding: 8px 16px 10px; background: #111827; border-top: 1px solid #ffffff14; }
+  body.touch .pk-nav .pk-b { min-height: 42px; }
+}
+body { --pk-vh: 1vh; }
+@supports (height: 1dvh) { body { --pk-vh: 1dvh; } }
+/* tela bem baixa (SE com a barra do Safari, Android com a do Chrome): sem o título, e o pote numa
+   linha só, para o painel caber sem rolar */
+@media (orientation: landscape) and (max-height: 359px) {
+  body.touch .pk-titulo, body.touch .pk-pote i { display: none; }
+  body.touch .pk-info { gap: 4px 6px; padding: 6px; }
+  body.touch .pk-pote > div { display: flex; align-items: baseline; justify-content: space-between; width: 100%; }
+  body.touch .pk-pote { padding: 3px 8px; }
+}
+/* Android com a barra do Chrome e a de status (~280px): o aviso (quem pôs os blinds, quem ganhou:
+   as plaquinhas e a faixa já contam) fica numa linha, e some para o dono, que tem o seletor */
+@media (orientation: landscape) and (max-height: 300px) {
+  body.touch .pk-aviso { -webkit-line-clamp: 1; }
+  body.touch .pk-info:has(.pk-dono:not([hidden])) .pk-aviso { display: none; }
+  body.touch .pk-ajuda button, body.touch .pk-dono select { min-height: 30px; }
 }
 /* iPhone 13 / telas estreitas (380x840): painel do pote e comandos de baixo mais compactos */
 @media (max-width: 400px) {
@@ -1215,37 +1266,6 @@ body.touch .pk-acoes { width: 100%; justify-content: center; }
   body.touch .pk-assentos .fichas, body.touch .pk-assentos .aposta, body.touch .pk-assentos .lance { font-size: 9px; }
   body.touch .pk-assentos .mini img { width: 18px; }
 }
-/* iPhone 13 deitado e telas estreitas (landscape, ~844×390): ajuste fino por cima da regra geral */
-@media (orientation: landscape) and (max-width: 420px) {
-  body.touch .pk-esq { left: calc(3px + env(safe-area-inset-left)); top: calc(40px + env(safe-area-inset-top)); width: 96px; max-height: calc(100dvh - 46px - env(safe-area-inset-top)); padding: 4px; gap: 3px; }
-  body.touch .pk-info { padding: 4px; gap: 3px; }
-  body.touch .pk-titulo { font-size: 12px; }
-  body.touch .pk-pote { gap: 5px; padding: 4px 5px; }
-  body.touch .pk-pote b { font-size: 13px; }
-  body.touch .pk-pote i { width: 14px; height: 14px; }
-  body.touch .pk-pote small { font-size: 7px; }
-  body.touch .pk-linha { font-size: 8px; gap: 2px; }
-  body.touch .pk-linha small { font-size: 7px; }
-  body.touch .pk-ajuda, body.touch .pk-dica { display: none; }
-  body.touch .pk-sair { right: calc(3px + env(safe-area-inset-right)); top: calc(40px + env(safe-area-inset-top)); padding: 3px 5px; font-size: 8px; }
-  body.touch .pk-baixo { right: calc(3px + env(safe-area-inset-right)); bottom: calc(3px + env(safe-area-inset-bottom)); gap: 4px;
-    width: min(310px, calc(100vw - 108px - env(safe-area-inset-left) - env(safe-area-inset-right))); }
-  body.touch .pk-cartas img { width: 40px; }
-  body.touch .pk-jogo { font-size: 8px; padding: 1px 4px; }
-  body.touch .pk-acoes { padding: 4px; gap: 3px; }
-  body.touch .pk-b { padding: 5px 4px; font-size: 10px; }
-  body.touch .pk-b small { font-size: 7px; }
-  body.touch .pk-saldo { font-size: 8px; }
-  body.touch .pk-saldo b { font-size: 11px; }
-  body.touch .pk-raise { gap: 2px; padding: 3px 4px; }
-  body.touch .pk-raise input { width: 100%; }
-  body.touch .pk-rapidos button { padding: 1px 3px; font-size: 8px !important; }
-  body.touch .pk-espera { font-size: 8px; }
-  body.touch .pk-assentos > div { min-width: 66px; padding: 2px 3px 3px; border-radius: 6px; }
-  body.touch .pk-assentos .nome { max-width: 74px; font-size: 8px; }
-  body.touch .pk-assentos .fichas, body.touch .pk-assentos .aposta, body.touch .pk-assentos .lance { font-size: 7px; }
-  body.touch .pk-assentos .mini img { width: 14px; }
-}
 @media (prefers-reduced-motion: reduce) { #pk-hud * { animation: none !important; transition: none !important; } }
 `;
     document.head.appendChild(css);
@@ -1257,8 +1277,8 @@ body.touch .pk-acoes { width: 100%; justify-content: center; }
       <div class="pk-info pk-painel">
         <div class="pk-titulo">♠ POKER <span>♥</span></div>
         <div class="pk-pote"><i></i><div><small>POTE</small><b class="pk-v-pote">0</b></div></div>
-        <div class="pk-linha"><div><small>BLINDS</small><span class="pk-v-blinds">${SMALL}/${BIG}</span></div><div><small>FASE</small><span class="pk-v-fase">—</span></div><div><small>MÃO</small><span class="pk-v-mao">—</span></div></div>
-        <div class="pk-linha"><div><small>MÍNIMO DA MESA</small><span class="pk-v-min">${MINIMO_MESA}</span> moedas</div><div><small>APOSTA</small><span class="pk-v-aposta">—</span></div></div>
+        <div class="pk-linha"><div><small>BLINDS</small><span class="pk-v-blinds">${SMALL}/${BIG}</span></div><div><small>FASE</small><span class="pk-v-fase">—</span></div><div class="pk-c-mao"><small>MÃO</small><span class="pk-v-mao">—</span></div></div>
+        <div class="pk-linha"><div class="pk-c-min"><small>MÍNIMO DA MESA</small><span class="pk-v-min">${MINIMO_MESA}</span> moedas</div><div class="pk-c-aposta"><small>APOSTA</small><span class="pk-v-aposta">—</span></div></div>
         <div class="pk-dono" hidden>
           <label><small>👑 VOCÊ É O DONO DA MESA</small>
             <select aria-label="Blinds da mesa">${BLINDS.map(([s, b], i) => `<option value="${i}">Blinds ${s}/${b} · mín. ${b * BIGS_MINIMO}</option>`).join('')}</select>
@@ -1266,7 +1286,7 @@ body.touch .pk-acoes { width: 100%; justify-content: center; }
           <span class="pk-v-proximo" hidden></span>
         </div>
         <div class="pk-aviso"></div>
-        <div class="pk-ajuda"><button type="button" data-guia="tutorial">❓ Como jogar</button><button type="button" data-guia="cola">🃏 Cola</button></div>
+        <div class="pk-ajuda"><button type="button" data-guia="tutorial">❓ <span class="pk-longo">Como jogar</span><span class="pk-curto">Ajuda</span></button><button type="button" data-guia="cola">🃏 Cola</button></div>
       </div>
       <div class="pk-dica">Clique nas fichas da mesa para empilhar o pote</div>
       </div>
@@ -1459,6 +1479,7 @@ body.touch .pk-acoes { width: 100%; justify-content: center; }
     const decide = emJogo && c && !c.l.fold && !c.l.allIn && !c.l.fora;
     const b = (k) => this.$(`[data-pk="${k}"]`);
     b('comecar').hidden = e.fase !== 'espera';
+    this.$('.pk-acoes').classList.toggle('decide', !!decide); // o celular deitado arruma a grade por isso
     for (const k of ['fold', 'call', 'raise', 'allin']) {
       b(k).hidden = !decide;
       b(k).disabled = !vez;
@@ -1555,19 +1576,29 @@ body.touch .pk-acoes { width: 100%; justify-content: center; }
     }
   }
 
-  // as plaquinhas seguem as cadeiras na tela
+  // as plaquinhas seguem as cadeiras na tela, sem tampar o painel do pote, o Levantar, as minhas
+  // cartas, os comandos e a barra do topo, nem umas às outras
   posicionarAssentos(M) {
     const cam = this.world.camera;
     const v = this._v ||= new THREE.Vector3();
     const w = innerWidth;
     const h = innerHeight;
-    const isMobileLandscape = window.matchMedia('(orientation: landscape) and (max-width: 900px)').matches && document.body.classList.contains('touch');
-    const escala = isMobileLandscape ? 0.78 : 1;
-    const margemEsq = isMobileLandscape ? 120 : (h < 560 ? 160 : 260);
-    const margemDir = isMobileLandscape ? 90 : 80;
-    const margemTopo = isMobileLandscape ? 52 : 60;
-    const margemBaixo = isMobileLandscape ? 120 : 220;
-    const posicoes = [];
+    // os painéis mudam pouco: mede de tempos em tempos, não a cada quadro
+    const agora = performance.now();
+    const medir = !this._medidas || agora - this._medidas.em > 300 || this._medidas.w !== w || this._medidas.h !== h;
+    if (medir) {
+      const ret = (el) => (el && !el.hidden && el.offsetHeight ? el.getBoundingClientRect() : null);
+      const esq = ret(this.$('.pk-esq'));
+      const bar = document.body.classList.contains('touch') ? ret(document.getElementById('bar')) : null;
+      const borda = Math.max(6, esq?.left ?? 6);
+      this._medidas = {
+        em: agora, w, h,
+        area: { esquerda: borda, direita: w - borda, topo: bar && bar.top < h / 2 ? bar.bottom - 6 : 60, baixo: h - 8 },
+        evitar: [esq, ret(this.$('.pk-sair')), ...[...this.$('.pk-baixo').children].map(ret)].filter(Boolean),
+      };
+    }
+    const { area, evitar } = this._medidas;
+    const placas = [];
     for (const el of this.$('.pk-assentos').children) {
       const k = Number(el.dataset.lugar);
       // a minha plaquinha fica de fora: as minhas fichas e cartas estão embaixo
@@ -1582,44 +1613,11 @@ body.touch .pk-acoes { width: 100%; justify-content: center; }
         continue;
       }
       el.style.visibility = '';
-      // mede o tamanho real antes de aplicar a escala
-      el.style.transform = 'translate(0,0) scale(1)';
-      const ew = el.offsetWidth * escala;
-      const eh = el.offsetHeight * escala;
-      // a plaquinha fica pendurada acima do ponto, respeitando painel esquerdo, botão Levantar e bordas
-      let y = Math.min(h - margemBaixo, Math.max(margemTopo + eh, ((1 - v.y) / 2) * h));
-      let x = Math.min(w - margemDir - ew / 2, Math.max(margemEsq + ew / 2, ((v.x + 1) / 2) * w));
-      posicoes.push({ el, x, y, ew, eh });
+      if (medir || !el._tam) el._tam = { w: el.offsetWidth, h: el.offsetHeight };
+      placas.push({ el, x: ((v.x + 1) / 2) * w, y: ((1 - v.y) / 2) * h, ...el._tam });
     }
-    // no mobile deitado, afasta plaquinhas que colidirem para nomes não se sobreporem
-    if (isMobileLandscape && posicoes.length > 1) {
-      for (let it = 0; it < 6; it++) {
-        let mudou = false;
-        for (let i = 0; i < posicoes.length; i++) {
-          for (let j = i + 1; j < posicoes.length; j++) {
-            const a = posicoes[i], b = posicoes[j];
-            const dx = b.x - a.x, dy = b.y - a.y;
-            const dist = Math.hypot(dx, dy) || 1;
-            const min = (a.ew + b.ew) * 0.45 + 10;
-            if (dist < min) {
-              const nx = dx / dist, ny = dy / dist;
-              const forca = (min - dist) * 0.5;
-              a.x -= nx * forca; a.y -= ny * forca;
-              b.x += nx * forca; b.y += ny * forca;
-              mudou = true;
-            }
-          }
-        }
-        if (!mudou) break;
-      }
-      for (const p of posicoes) {
-        p.x = Math.min(w - margemDir - p.ew / 2, Math.max(margemEsq + p.ew / 2, p.x));
-        p.y = Math.min(h - margemBaixo, Math.max(margemTopo + p.eh, p.y));
-      }
-    }
-    for (const { el, x, y } of posicoes) {
-      el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, -100%) scale(${escala})`;
-    }
+    arrumarPlacas(placas, area, evitar);
+    for (const p of placas) p.el.style.transform = `translate(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px) translate(-50%, -100%)`;
   }
 
   apertou() { return false; }
