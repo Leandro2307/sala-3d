@@ -1,6 +1,6 @@
 // Tabuleiros gigantes do lado de fora do cinema: xadrez de bruxo (como em Harry Potter, as peças
-// andam sozinhas e a que é tomada se despedaça), um jogo de damas no mesmo tamanho e um jogo
-// da velha em que o X e o O caem do céu.
+// andam sozinhas e a que é tomada se despedaça), um jogo de damas no mesmo tamanho e o jogo
+// da velha 2 (nove velhinhas numa velha grande), em que o X e o O caem do céu.
 // Aqui fica só a parte 3D: tabuleiro, peças, animações e estilhaços. As regras ficam em
 // xadrez.js/dama.js e a partida (rede, comandos, HUD) em jogos.js.
 import * as THREE from 'three';
@@ -19,7 +19,7 @@ const ONDE = MESAS_NOVO;
 export const MESAS = {
   xadrez: { ...ONDE.xadrez, n: 8, q: 2.6, nome: 'Xadrez de bruxo', lados: ['Brancas', 'Pretas'] },
   dama: { ...ONDE.dama, n: 8, q: 2.6, nome: 'Dama gigante', lados: ['Claras', 'Escuras'] },
-  velha: { ...ONDE.velha, n: 3, q: 4.2, nome: 'Jogo da velha', lados: ['X', 'O'] },
+  velha: { ...ONDE.velha, n: 9, q: 2.4, nome: 'Jogo da velha 2', lados: ['X', 'O'] },
 };
 // para a natureza não plantar árvore em cima
 const J = PRACA_JOGOS;
@@ -45,11 +45,11 @@ function* esperar(s) {
 
 function texturaTabuleiro(tipo, n, Q, LADO) {
   // Desenhado num quadro de T px e reduzido conforme o aparelho. No celular, 1024 px ainda deixam o
-  // tabuleiro nítido no zoom normal; o da velha (casas lisas e um #) fica com a metade disso. Cada
-  // tabuleiro de 1280 px custava ~15 MB entre o canvas, a textura e os mipmaps.
+  // tabuleiro nítido no zoom normal. Cada tabuleiro de 1280 px custava ~15 MB entre o canvas, a
+  // textura e os mipmaps.
   const T = 1280;
   const velha = tipo === 'velha';
-  const px = isTouch ? (velha ? 512 : 1024) : (velha ? 1024 : 1280);
+  const px = isTouch ? 1024 : 1280;
   const cv = document.createElement('canvas');
   cv.width = cv.height = px;
   const ctx = cv.getContext('2d');
@@ -60,7 +60,7 @@ function texturaTabuleiro(tipo, n, Q, LADO) {
   const [claro, escuro, moldura, letra] = {
     xadrez: ['#ddd6c6', '#26252d', '#17161c', '#c9b98f'],
     dama: ['#e8d6ae', '#2f5d45', '#3a2417', '#f3dfb5'],
-    velha: ['#1d2340', '#1d2340', '#0e1122', '#a5b4fc'],
+    velha: ['#1d2340', '#262e55', '#0e1122', '#a5b4fc'],
   }[tipo];
   ctx.fillStyle = moldura;
   ctx.fillRect(0, 0, T, T);
@@ -68,14 +68,16 @@ function texturaTabuleiro(tipo, n, Q, LADO) {
     for (let c = 0; c < n; c++) {
       const x = b + c * q;
       const y = b + (n - 1 - l) * q;
-      ctx.fillStyle = (c + l) % 2 === 0 ? escuro : claro;
+      // na velha, o xadrezado é das velhinhas (3x3 casas), não das casas
+      const par = velha ? (Math.floor(c / 3) + Math.floor(l / 3)) % 2 === 0 : (c + l) % 2 === 0;
+      ctx.fillStyle = par ? escuro : claro;
       ctx.fillRect(x, y, q, q);
       // veios de mármore: riscos finos e tortos, cada casa com os seus
       ctx.save();
       ctx.beginPath();
       ctx.rect(x, y, q, q);
       ctx.clip();
-      ctx.strokeStyle = (c + l) % 2 === 0 ? 'rgba(255,255,255,0.06)' : 'rgba(80,60,40,0.10)';
+      ctx.strokeStyle = par ? 'rgba(255,255,255,0.06)' : 'rgba(80,60,40,0.10)';
       ctx.lineWidth = 1.4;
       for (let v = 0; v < 4; v++) {
         ctx.beginPath();
@@ -96,20 +98,24 @@ function texturaTabuleiro(tipo, n, Q, LADO) {
   ctx.lineWidth = 4;
   ctx.strokeRect(b - 3, b - 3, q * n + 6, q * n + 6);
   if (velha) {
-    // o "#" do jogo da velha, em neon
-    ctx.strokeStyle = '#c4b5fd';
-    ctx.lineWidth = 16;
+    // os "#" em neon: um fino em cada velhinha e o grande, grosso, separando as nove
     ctx.lineCap = 'round';
-    ctx.shadowColor = '#a78bfa';
-    ctx.shadowBlur = 28 * (px / T); // o desfoque da sombra não segue a escala do contexto
-    for (const i of [1, 2]) {
-      ctx.beginPath();
-      ctx.moveTo(b + i * q, b + 18);
-      ctx.lineTo(b + i * q, b + q * n - 18);
-      ctx.moveTo(b + 18, b + i * q);
-      ctx.lineTo(b + q * n - 18, b + i * q);
-      ctx.stroke();
-    }
+    const hashtag = (x0, y0, lado, larg, folga, cor, sombra) => {
+      ctx.strokeStyle = cor;
+      ctx.lineWidth = larg;
+      ctx.shadowColor = sombra;
+      ctx.shadowBlur = larg * 1.8 * (px / T); // o desfoque da sombra não segue a escala do contexto
+      for (const i of [1, 2]) {
+        ctx.beginPath();
+        ctx.moveTo(x0 + (i * lado) / 3, y0 + folga);
+        ctx.lineTo(x0 + (i * lado) / 3, y0 + lado - folga);
+        ctx.moveTo(x0 + folga, y0 + (i * lado) / 3);
+        ctx.lineTo(x0 + lado - folga, y0 + (i * lado) / 3);
+        ctx.stroke();
+      }
+    };
+    for (let v = 0; v < 9; v++) hashtag(b + (v % 3) * q * 3, b + Math.floor(v / 3) * q * 3, q * 3, 5, 14, '#8b9cf0', '#6366f1');
+    hashtag(b, b, q * n, 15, 10, '#c4b5fd', '#a78bfa');
     ctx.shadowBlur = 0;
   }
   ctx.fillStyle = letra;
@@ -117,7 +123,7 @@ function texturaTabuleiro(tipo, n, Q, LADO) {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   for (let i = 0; i < n; i++) {
-    const L = 'abcdefgh'[i];
+    const L = 'abcdefghi'[i];
     ctx.fillText(L, b + i * q + q / 2, T - b / 2);
     ctx.save();
     ctx.translate(b + i * q + q / 2, b / 2);
@@ -239,6 +245,10 @@ function geometrias() {
   g.cacos = [new THREE.TetrahedronGeometry(0.3), new THREE.BoxGeometry(0.34, 0.24, 0.26), new THREE.DodecahedronGeometry(0.2)];
   g.alvo = new THREE.CircleGeometry(0.42, 24);
   g.anel = new THREE.RingGeometry(1.0, 1.2, 36);
+  // X e O da velha (até 81 de cada no tabuleiro, todos com o mesmo desenho)
+  g.xis = juntar([Math.PI / 4, -Math.PI / 4].map((a) => new THREE.BoxGeometry(3.6, 0.7, 0.75).rotateY(a).translate(0, 0.35, 0)));
+  g.bola = new THREE.TorusGeometry(1.25, 0.36, 14, 40).rotateX(Math.PI / 2).translate(0, 0.36, 0);
+  g.velhinha = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
   geoCache = g;
   return g;
 }
@@ -251,7 +261,14 @@ const MATERIAIS = {
   ouro: new THREE.MeshStandardMaterial({ color: 0xf5c451, roughness: 0.25, metalness: 0.8, emissive: 0x3a2600 }),
   x: new THREE.MeshStandardMaterial({ color: 0xff5d73, roughness: 0.3, emissive: 0x7a1020 }),
   o: new THREE.MeshStandardMaterial({ color: 0x6ee7c8, roughness: 0.3, emissive: 0x0b5a48 }),
+  // o X/O grande que fecha uma velhinha: mais aceso, para se ver de longe por cima das peças
+  X: new THREE.MeshStandardMaterial({ color: 0xff6b80, roughness: 0.25, emissive: 0xc0182f, emissiveIntensity: 0.9 }),
+  O: new THREE.MeshStandardMaterial({ color: 0x7ff0d2, roughness: 0.25, emissive: 0x10917a, emissiveIntensity: 0.9 }),
 };
+// a tinta no chão das velhinhas: fechada por X, por O, deu velha, e a que está acesa para a vez
+const TINTA = { x: 0xff5d73, o: 0x6ee7c8, '=': 0x64748b };
+const ACESA = 0xfde68a;
+const ALTURA_SELO = 0.5; // o selo paira logo acima das peças pequenas
 
 function pecaXadrez(p) {
   const t = p.toLowerCase();
@@ -275,24 +292,15 @@ function pecaDama(p) {
   return corpo;
 }
 
-// jogo da velha: X de duas barras cruzadas, O de um anel grosso — deitados no tabuleiro
-function pecaVelha(p) {
+// jogo da velha: X de duas barras cruzadas, O de um anel grosso — deitados no tabuleiro. O desenho
+// é para uma casa de 4,2 m; escala acerta para a casa da mesa ('X'/'O' grandes: o selo da velhinha).
+function pecaVelha(p, escala) {
+  const g = geometrias();
   const corpo = new THREE.Group();
-  if (p === 'x') {
-    for (const a of [Math.PI / 4, -Math.PI / 4]) {
-      const barra = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.7, 0.75), MATERIAIS.x);
-      barra.rotation.y = a;
-      barra.position.y = 0.35;
-      barra.castShadow = true;
-      corpo.add(barra);
-    }
-  } else {
-    const anel = new THREE.Mesh(new THREE.TorusGeometry(1.25, 0.36, 14, 40), MATERIAIS.o);
-    anel.rotation.x = Math.PI / 2;
-    anel.position.y = 0.36;
-    anel.castShadow = true;
-    corpo.add(anel);
-  }
+  const m = new THREE.Mesh(p.toLowerCase() === 'x' ? g.xis : g.bola, MATERIAIS[p]);
+  m.castShadow = true;
+  corpo.add(m);
+  corpo.scale.setScalar(escala);
   return corpo;
 }
 
@@ -316,11 +324,12 @@ export class Mesa {
     this.n = this.def.n;
     this.q = this.def.q;
     this.lado = this.q * this.n + BORDA * 2;
-    this.linha = null; // casas da linha vencedora (jogo da velha), que ficam pulsando
+    this.linha = null; // velhinhas da linha vencedora (jogo da velha), cujos selos ficam pulsando
     this.grupo = new THREE.Group();
     this.grupo.position.set(this.def.x, 0, this.def.z);
     world.fora.add(this.grupo);
     this.pecas = new Array(this.n * this.n).fill(null);
+    this.selos = new Array(9).fill(null); // velha: o X/O grande de cada velhinha ganha
     this.fila = [];
     this.atual = null;
     this.cacos = [];
@@ -422,6 +431,30 @@ export class Mesa {
     mira.visible = false;
     this.grupo.add(mira);
     this.mira = mira;
+
+    if (this.tipo === 'velha') {
+      // uma tinta no chão de cada velhinha (a cor de quem a fechou) e o brilho das que a vez pode
+      // jogar, que pulsa
+      const lado = Q * 3 * 0.97;
+      const plano = (mat) => {
+        const m = new THREE.Mesh(g.velhinha, mat);
+        m.scale.set(lado, 1, lado);
+        m.visible = false;
+        this.grupo.add(m);
+        return m;
+      };
+      this.tintas = [];
+      this.acesas = [];
+      this.matAcesa = new THREE.MeshBasicMaterial({ color: ACESA, transparent: true, opacity: 0.16, depthWrite: false });
+      for (let v = 0; v < 9; v++) {
+        const t = plano(new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.3, depthWrite: false }));
+        this.centroVelhinha(v, t.position).y = Y + 0.012;
+        this.tintas.push(t);
+        const a = plano(this.matAcesa);
+        a.position.copy(t.position);
+        this.acesas.push(a);
+      }
+    }
   }
 
   // centro da casa, em coordenadas do grupo (coluna a = -x, fileira 1 = +z)
@@ -431,6 +464,10 @@ export class Mesa {
   }
   mundo(i, out = new THREE.Vector3()) {
     return this.local(i, out).add(this.grupo.position);
+  }
+  // velha: centro da velhinha v (0 = a1–c3, 8 = g7–i9), a casa do meio dela
+  centroVelhinha(v, out = new THREE.Vector3()) {
+    return this.local((Math.floor(v / 3) * 3 + 1) * 9 + (v % 3) * 3 + 1, out);
   }
   get centro() { return this.grupo.position; }
   // a pessoa está na praça?
@@ -465,7 +502,9 @@ export class Mesa {
 
   // ---------------------------------------------------------------- estado
   novaPeca(p) {
-    const corpo = this.tipo === 'xadrez' ? pecaXadrez(p) : this.tipo === 'dama' ? pecaDama(p) : pecaVelha(p);
+    // na velha, 'X'/'O' maiúsculos são o selo, do tamanho da velhinha
+    const velha = () => pecaVelha(p, (this.q / 4.2) * (p === p.toUpperCase() ? 2.7 : 1));
+    const corpo = this.tipo === 'xadrez' ? pecaXadrez(p) : this.tipo === 'dama' ? pecaDama(p) : velha();
     const peca = new THREE.Group();
     peca.add(corpo);
     peca.userData = { p, corpo };
@@ -474,7 +513,8 @@ export class Mesa {
   }
 
   // Põe as peças do jeito que estão no tabuleiro, sem animação (entrar na sala, partida nova).
-  reconstruir(b, ultimo = null) {
+  // velha: { g, acesas } — como ficou cada velhinha e as que a vez pode jogar.
+  reconstruir(b, ultimo = null, velha = null) {
     this.fila = [];
     this.atual?.return(); // a animação largada no meio ainda fecha o que abriu (a luz do brilho)
     this.atual = null;
@@ -486,8 +526,33 @@ export class Mesa {
       this.local(i, m.position);
       return m;
     });
+    if (velha) {
+      for (let v = 0; v < 9; v++) {
+        if (this.selos[v]) this.grupo.remove(this.selos[v]);
+        const dono = velha.g[v];
+        this.selos[v] = dono === 'x' || dono === 'o' ? this.novoSelo(v, dono) : null;
+        this.tingir(v, dono);
+      }
+      this.acender(velha.acesas);
+    }
     this.marcarUltimo(ultimo);
     this.marcarSombra();
+  }
+
+  // velha: o X/O grande que fica pairando sobre a velhinha ganha
+  novoSelo(v, p) {
+    const s = this.novaPeca(p.toUpperCase());
+    this.centroVelhinha(v, s.position).y = Y + ALTURA_SELO;
+    s.userData.y0 = s.position.y;
+    return s;
+  }
+  tingir(v, dono) {
+    const t = this.tintas[v];
+    t.visible = !!dono;
+    if (dono) t.material.color.setHex(TINTA[dono]);
+  }
+  acender(velhinhas) {
+    this.acesas.forEach((a, v) => { a.visible = velhinhas.includes(v); });
   }
 
   // Peça que anda, aparece ou some muda a sombra do sol: pede um mapa novo ao World, se a mesa
@@ -524,33 +589,55 @@ export class Mesa {
   // ---------------------------------------------------------------- animação
   animarXadrez(v) { this.fila.push(() => this.lanceXadrez(v)); }
   animarDama(v) { this.fila.push(() => this.lanceDama(v)); }
-  animarVelha(v) { this.fila.push(() => this.lanceVelha(v)); }
+  // depois: { g, acesas } da velha logo depois do lance (ver reconstruir)
+  animarVelha(v, depois) { this.fila.push(() => this.lanceVelha(v, depois)); }
 
-  // o X ou o O despenca do céu na casa e quica
-  *lanceVelha({ casa, p }) {
+  // o X ou o O despenca do céu na casa e quica; se fechou a velhinha, o selo dela cai em seguida
+  *lanceVelha({ casa, p }, depois) {
+    this.acender([]);
     const peca = this.novaPeca(p);
     this.pecas[casa] = peca;
-    const alvo = this.local(casa);
-    peca.position.set(alvo.x, Y + 16, alvo.z);
-    peca.rotation.y = Math.random() * 0.6 - 0.3;
     this.marcarUltimo([casa]);
-    yield* tween(0.7, (t) => {
-      peca.position.y = Y + 16 * (1 - t * t);
+    yield* this.cair(peca, this.local(casa), Y, 0.7);
+    const v = Math.floor(casa / 27) * 3 + Math.floor((casa % 9) / 3);
+    const dono = depois.g[v];
+    if (dono && !this.tintas[v].visible) {
+      yield* esperar(0.15);
+      if (dono === '=') this.tingir(v, dono);
+      else {
+        const selo = this.novaPeca(dono.toUpperCase());
+        selo.userData.y0 = Y + ALTURA_SELO;
+        this.selos[v] = selo;
+        const centro = this.centroVelhinha(v);
+        yield* this.cair(selo, centro, selo.userData.y0, 0.8);
+        this.tingir(v, dono);
+        if (this.volume(centro) > 0.3) sfx.checkpoint?.();
+      }
+    }
+    this.acender(depois.acesas);
+  }
+
+  // despenca de 16 m até a altura y0 e quica
+  *cair(peca, alvo, y0, dur) {
+    peca.position.set(alvo.x, y0 + 16, alvo.z);
+    peca.rotation.y = Math.random() * 0.6 - 0.3;
+    yield* tween(dur, (t) => {
+      peca.position.y = y0 + 16 * (1 - t * t);
       peca.userData.corpo.rotation.y = (1 - t) * 3;
     });
     sfx.pedraPasso?.(this.volume(alvo) * 1.4);
     yield* tween(0.35, (t) => {
       const amassa = Math.sin(Math.PI * t) * 0.35;
       peca.scale.set(1 + amassa, 1 - amassa, 1 + amassa);
-      peca.position.y = Y + Math.sin(Math.PI * t) * 0.6;
+      peca.position.y = y0 + Math.sin(Math.PI * t) * 0.6;
     });
     peca.scale.set(1, 1, 1);
-    peca.position.y = Y;
+    peca.position.y = y0;
   }
 
-  // linha vencedora da velha: as três peças pulsam
-  destacar(casas) {
-    this.linha = casas;
+  // linha vencedora da velha: os três selos pulsam
+  destacar(velhinhas) {
+    this.linha = velhinhas;
   }
 
   volume(pos) {
@@ -750,11 +837,14 @@ export class Mesa {
     const pulando = this.linha && !this.ocupada;
     if (this.ocupada || this.cacos.length || pulando) this.marcarSombra();
     if (pulando) {
+      const pecas = this.tipo === 'velha' ? this.selos : this.pecas;
       for (const i of this.linha) {
-        const p = this.pecas[i];
-        if (p) p.position.y = Y + Math.abs(Math.sin(t * 4)) * 1.2;
+        const p = pecas[i];
+        if (p) p.position.y = (p.userData.y0 ?? Y) + Math.abs(Math.sin(t * 4)) * 1.2;
       }
     }
+    // as velhinhas em que a vez pode jogar pulsam (só a tinta: não mexe na sombra)
+    if (this.matAcesa) this.matAcesa.opacity = 0.1 + (Math.sin(t * 3.2) + 1) * 0.06;
     // animações: uma de cada vez, na ordem dos lances
     let resto = dt;
     while (resto > 0) {

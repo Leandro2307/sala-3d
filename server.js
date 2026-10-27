@@ -606,7 +606,7 @@ const PREMIOS = {
 const PREMIO_JOGO = {
   xadrez: { gente: 100, bot: [20, 50, 100] },
   dama: { gente: 60, bot: [15, 40, 80] },
-  velha: { gente: 15, bot: [2, 5, 10] },
+  velha: { gente: 40, bot: [5, 15, 40] },
 };
 const ultimoPremio = new Map(); // "nome:tipo" -> quando
 
@@ -641,11 +641,11 @@ function getRoom(id) {
   return room;
 }
 
-// Xadrez de bruxo e dama gigante. O servidor guarda só os lances e quem senta em cada lado
+// Xadrez de bruxo, dama gigante e jogo da velha 2. O servidor guarda só os lances e quem senta em cada lado
 // (0 = brancas/claras, que começam). Quem confere as regras é o cliente — aqui só se garante que
 // cada um joga na sua vez e no lado em que está sentado. 'bot' = computador, jogado pelo botDono.
 const JOGOS = ['xadrez', 'dama', 'velha'];
-const LANCE_RE = { xadrez: /^[a-h][1-8][a-h][1-8][qrbn]?$/, dama: /^[a-h][1-8]([-x][a-h][1-8]){1,12}$/, velha: /^[a-c][1-3]$/ };
+const LANCE_RE = { xadrez: /^[a-h][1-8][a-h][1-8][qrbn]?$/, dama: /^[a-h][1-8]([-x][a-h][1-8]){1,12}$/, velha: /^[a-i][1-9]$/ };
 const COR = ['w', 'b'];
 // As mesmas regras do cliente (módulos ES em public/js): com elas o servidor recusa lance
 // ilegal e sabe quem ganhou, para pagar as moedas. Carrega em segundo plano.
@@ -837,7 +837,7 @@ function premiarJogo(io, room, mesa, j) {
   if (j.desde[0] > 1 || j.desde[1] > 1) return;
   const tabela = PREMIO_JOGO[mesa];
   const qtd = perdedor === 'bot' ? tabela.bot[j.nivelMin] : tabela.gente;
-  darMoedas(io, room, ganhador, qtd, `vitória ${mesa === 'velha' ? 'no jogo da velha' : mesa === 'dama' ? 'na dama' : 'no xadrez'}${perdedor === 'bot' ? ' contra o computador' : ''}`);
+  darMoedas(io, room, ganhador, qtd, `vitória ${mesa === 'velha' ? 'no jogo da velha 2' : mesa === 'dama' ? 'na dama' : 'no xadrez'}${perdedor === 'bot' ? ' contra o computador' : ''}`);
 }
 
 function publicUser(u) {

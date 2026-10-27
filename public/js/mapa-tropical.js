@@ -60,7 +60,7 @@ export const TROPICAL = {
       predio: { nome: 'Prédio', sub: 'Cinema, telão, parkour e ringue', cor: '#e2e8f0', ir: { pos: [0, 0, -2], yaw: 0 } },
       praca: { nome: 'Praça do Farol', sub: 'O ponto de encontro: daqui sai o Calçadão', cor: '#fde68a', ir: { pos: [100, 0, 14], yaw: Math.PI } },
       kart: { nome: 'Kartódromo', sub: 'Corrida de kart com itens', cor: '#facc15', ir: { pos: [180, 0, 39], yaw: -Math.PI / 2 } },
-      jogos: { nome: 'Praça dos jogos', sub: 'Xadrez, dama, jogo da velha e dados', cor: '#a78bfa', ir: { pos: [108, 0, 175], yaw: -Math.PI / 2 } },
+      jogos: { nome: 'Praça dos jogos', sub: 'Xadrez, dama, jogo da velha 2 e dados', cor: '#a78bfa', ir: { pos: [108, 0, 175], yaw: -Math.PI / 2 } },
       estadio: { nome: 'Estádio', sub: 'Futebol de carro', cor: '#22d3ee', ir: { pos: [83, 0, 214], yaw: Math.PI / 2 } },
       quadras: { nome: 'Praia das quadras', sub: 'Vôlei de praia, basquete e boliche', cor: '#facc15', ir: { pos: [10, 0, 318], yaw: Math.PI } },
       aventura: { nome: 'Aventura', sub: 'Portais: surf, mata-mata, gincana e caça-fantasmas', cor: '#f472b6', ir: { pos: [46, 0, 385], yaw: Math.PI / 2 } },
@@ -119,7 +119,7 @@ export const TROPICAL = {
       },
       {
         area: 'jogos', x: 108, z: 160, giro: -Math.PI / 2,
-        linhas: ['Xadrez de bruxo, dama, jogo da velha e dados', 'Chegue perto de uma mesa e aperte E', 'Contra outra pessoa ou contra o computador', 'No xadrez dá até para falar o lance'],
+        linhas: ['Xadrez de bruxo, dama, jogo da velha 2 e dados', 'Chegue perto de uma mesa e aperte E', 'Contra outra pessoa ou contra o computador', 'No xadrez dá até para falar o lance'],
       },
       {
         area: 'aventura', x: 70, z: 376, giro: Math.PI / 2,

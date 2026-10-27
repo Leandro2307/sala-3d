@@ -2645,7 +2645,7 @@ const JOGOS_DA_SALA = [
   ['batalha', 'Mata-mata em times', 'Autobots × Decepticons, rodadas; quem cai assiste'],
   ['xadrez', 'Xadrez de bruxo', ''],
   ['dama', 'Dama gigante', ''],
-  ['velha', 'Jogo da velha', ''],
+  ['velha', 'Jogo da velha 2', 'Nove velhinhas numa velha só'],
   ['dados', 'Mesa de dados', 'Apostas com moedas'],
   ['poderes', 'Poderes', 'Voar e pulo alto'],
   ['armas', 'Arma da camiseta 22', ''],

@@ -468,42 +468,61 @@ const MAQUETES = {
     };
   },
   velha(g) {
+    // a super velha: nove velhinhas, duas já fechadas com o selo grande, e a acesa onde o O cai
     caixa(g, 2.4, 0.1, 2.4, 0x0f172a);
-    const linha = brilho(0x94a3b8, 0.4);
+    const grossa = brilho(0xc4b5fd, 0.8);
+    const fina = brilho(0x6366f1, 0.5);
     for (const d of [-0.4, 0.4]) {
-      caixa(g, 0.05, 0.05, 2.2, linha, d, 0.1);
-      caixa(g, 2.2, 0.05, 0.05, linha, 0, 0.1, d);
+      caixa(g, 0.045, 0.05, 2.3, grossa, d, 0.1);
+      caixa(g, 2.3, 0.05, 0.045, grossa, 0, 0.1, d);
     }
-    const xMat = brilho(0x38bdf8, 1.2);
-    const oMat = brilho(0xf472b6, 1.2);
-    const pecas = [];
-    const xis = (i, j) => {
-      const x = new THREE.Group();
-      for (const r of [Math.PI / 4, -Math.PI / 4]) {
-        const b = caixa(x, 0.55, 0.08, 0.1, xMat, 0, -0.04);
-        b.rotation.y = r;
+    const q = 0.8 / 3; // a casa pequena
+    for (const cx of [-0.8, 0, 0.8]) {
+      for (const cz of [-0.8, 0, 0.8]) {
+        for (const d of [-q / 2, q / 2]) {
+          caixa(g, 0.016, 0.03, 0.68, fina, cx + d, 0.1, cz);
+          caixa(g, 0.68, 0.03, 0.016, fina, cx, 0.1, cz + d);
+        }
       }
-      x.position.set(i * 0.8, 0.2, j * 0.8);
-      g.add(x);
-      pecas.push(x);
+    }
+    const xMat = brilho(0xff5d73, 1.1);
+    const oMat = brilho(0x6ee7c8, 1.1);
+    const aro = new THREE.TorusGeometry(1, 0.3, 10, 28);
+    const xis = (x, z, tam, y = 0.13) => {
+      const p = new THREE.Group();
+      for (const r of [Math.PI / 4, -Math.PI / 4]) caixa(p, tam, tam * 0.22, tam * 0.24, xMat).rotation.y = r;
+      p.position.set(x, y, z);
+      g.add(p);
+      return p;
     };
-    const o = (i, j) => {
-      const b = malha(new THREE.TorusGeometry(0.22, 0.05, 10, 32), oMat);
-      b.rotation.x = Math.PI / 2;
-      b.position.set(i * 0.8, 0.2, j * 0.8);
-      g.add(b);
-      pecas.push(b);
+    const o = (x, z, tam, y = 0.13) => {
+      const p = malha(aro, oMat);
+      p.rotation.x = Math.PI / 2;
+      p.scale.setScalar(tam * 0.33);
+      p.position.set(x, y + tam * 0.1, z);
+      g.add(p);
+      return p;
     };
-    xis(-1, -1); o(0, -1); xis(1, 0); o(-1, 1); xis(0, 0); o(1, -1);
-    const ultimo = malha(new THREE.TorusGeometry(0.22, 0.05, 10, 32), oMat);
-    ultimo.rotation.x = Math.PI / 2;
-    ultimo.position.set(1, 0.2, 1);
-    g.add(ultimo);
+    const casa = (c, l) => [(c - 4) * q, (l - 4) * q];
+    for (const [c, l, p] of [[0, 0, 'x'], [1, 1, 'x'], [2, 2, 'x'], [1, 0, 'o'], [4, 4, 'x'], [3, 5, 'o'], [7, 1, 'x'], [6, 4, 'o'], [7, 4, 'o'], [8, 4, 'o'], [8, 3, 'x'], [2, 7, 'x'], [5, 8, 'o']]) {
+      const [x, z] = casa(c, l);
+      if (p === 'x') xis(x, z, 0.2);
+      else o(x, z, 0.2);
+    }
+    // os selos das duas velhinhas fechadas, pairando por cima das peças pequenas
+    const selos = [xis(-0.8, -0.8, 0.62, 0.24), o(0.8, 0, 0.62, 0.22)];
+    // a velhinha acesa (a de baixo no meio) e o O que cai nela
+    const acesa = new THREE.Mesh(new THREE.PlaneGeometry(0.76, 0.76).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xfde68a, transparent: true, opacity: 0.2, depthWrite: false }));
+    acesa.position.set(0, 0.106, 0.8);
+    g.add(acesa);
+    const [ux, uz] = casa(3, 6);
+    const ultimo = o(ux, uz, 0.2);
     return (t) => {
       const s = (t / 2.4) % 1;
-      ultimo.position.y = 0.2 + Math.max(0, 1 - s * 3) * 0.8;
-      ultimo.scale.setScalar(Math.min(1, s * 3 + 0.2));
-      pecas.forEach((p, i) => { p.position.y = 0.2 + Math.sin(t * 2 + i) * 0.03; });
+      ultimo.position.y = 0.15 + Math.max(0, 1 - s * 3) * 0.8;
+      ultimo.visible = s > 0.05;
+      acesa.material.opacity = 0.12 + (Math.sin(t * 3.2) + 1) * 0.07;
+      selos.forEach((p, i) => { p.position.y = 0.23 + Math.sin(t * 2 + i * 2) * 0.03; });
     };
   },
   dados(g) {

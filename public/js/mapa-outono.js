@@ -55,7 +55,7 @@ export const OUTONO = {
       predio: { nome: 'Prédio', sub: 'Cinema, telão, parkour e ringue', cor: '#e2e8f0', ir: { pos: [0, 0, -2], yaw: 0 } },
       praca: { nome: 'Praça do Pagode', sub: 'O ponto de encontro do jardim', cor: '#fca5a5', ir: { pos: [100, 0, 14], yaw: Math.PI } },
       kart: { nome: 'Kartódromo', sub: 'Corrida de kart com itens', cor: '#facc15', ir: { pos: [186, 0, 80], yaw: -Math.PI / 2 } },
-      jogos: { nome: 'Jardim dos jogos', sub: 'Xadrez, dama, jogo da velha e dados', cor: '#a78bfa', ir: { pos: [82, 0, 165], yaw: Math.PI / 2 } },
+      jogos: { nome: 'Jardim dos jogos', sub: 'Xadrez, dama, jogo da velha 2 e dados', cor: '#a78bfa', ir: { pos: [82, 0, 165], yaw: Math.PI / 2 } },
       estadio: { nome: 'Estádio', sub: 'Futebol de carro', cor: '#22d3ee', ir: { pos: [189, 0, 207], yaw: 0 } },
       quadras: { nome: 'Quadras', sub: 'Vôlei, basquete e boliche', cor: '#facc15', ir: { pos: [10, 0, 280], yaw: Math.PI } },
       lago: { nome: 'Lago das carpas', sub: 'Peixes coloridos e a ponte vermelha', cor: '#fb7185', ir: { pos: [100, 0, 320], yaw: -Math.PI / 2 } },
@@ -93,7 +93,7 @@ export const OUTONO = {
       },
       {
         area: 'jogos', x: 84, z: 110, giro: Math.PI / 2,
-        linhas: ['Xadrez de bruxo, dama, jogo da velha e dados', 'Chegue perto de uma mesa e aperte E', 'Contra outra pessoa ou contra o computador', 'No xadrez dá até para falar o lance'],
+        linhas: ['Xadrez de bruxo, dama, jogo da velha 2 e dados', 'Chegue perto de uma mesa e aperte E', 'Contra outra pessoa ou contra o computador', 'No xadrez dá até para falar o lance'],
       },
       {
         area: 'estadio', x: 200, z: 228, giro: 0,

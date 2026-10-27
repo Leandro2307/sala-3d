@@ -1,4 +1,4 @@
-// Partidas de xadrez de bruxo, dama e jogo da velha: quem senta em cada lado, lances pela rede, adversário de
+// Partidas de xadrez de bruxo, dama e jogo da velha 2: quem senta em cada lado, lances pela rede, adversário de
 // computador, e o comando das peças — clicando nas casas, digitando ou falando ("cavalo f3"),
 // como o Rony no fim do primeiro Harry Potter.
 //
@@ -21,6 +21,8 @@ const PONTAS = {
   dama: (m) => [m.caminho[0], m.caminho[m.caminho.length - 1]],
   velha: (m) => [m.casa],
 };
+// o que a mesa da velha desenha além das peças: como ficou cada velhinha e onde a vez joga
+const pinturaDaVelha = (mesa, st) => (mesa === 'velha' ? { g: st.g, acesas: V.situacao(st).fim ? [] : V.velhinhasDaVez(st) } : null);
 const Reconhecimento = window.SpeechRecognition || window.webkitSpeechRecognition;
 
 // ------------------------------------------------------------------ computador
@@ -107,7 +109,7 @@ export class Jogos {
       // cada mesa é uma área do mundo: o dono da sala pode desligar o jogo (World.ligarArea)
       this.mesas[tipo] = world.area(tipo, () => new Mesa(tipo, world));
       this.partidas[tipo] = { lances: [], lugares: [null, null], botDono: null, st: REGRAS[tipo].novo(), sit: { fim: false } };
-      this.mesas[tipo].reconstruir(this.partidas[tipo].st.b);
+      this.mesas[tipo].reconstruir(this.partidas[tipo].st.b, null, pinturaDaVelha(tipo, this.partidas[tipo].st));
     }
     this.ativa = null; // mesa em que a pessoa está comandando/assistindo
     this.sel = -1;
@@ -150,7 +152,7 @@ export class Jogos {
     part.sit = R.situacao(part.st);
     if (part.sit.fim && !antes.fim && part.lances.length && continua) this.anunciarFim(mesa);
     if (part.sit.linha) {
-      // espera o último X/O cair antes de a linha começar a pular
+      // espera o último selo cair antes de a linha começar a pular
       m3d.destacar(part.sit.linha);
     }
     if (mesa === this.ativa) {
@@ -176,14 +178,14 @@ export class Jogos {
     }
     part.st = st;
     part.lances = ok;
-    this.mesas[mesa].reconstruir(st.b, ultimo);
+    this.mesas[mesa].reconstruir(st.b, ultimo, pinturaDaVelha(mesa, st));
   }
 
   animar(mesa, st, m) {
     const m3d = this.mesas[mesa];
     const R = REGRAS[mesa];
     if (mesa === 'xadrez') m3d.animarXadrez(m);
-    else if (mesa === 'velha') m3d.animarVelha(m);
+    else if (mesa === 'velha') m3d.animarVelha(m, pinturaDaVelha(mesa, V.aplicar(st, m)));
     else m3d.animarDama({ ...m, promove: D.promoveu(st, m) });
     // anuncia só para quem está perto ou comandando
     if (this.ativa === mesa || m3d.perto(this.player.pos, 20)) {
@@ -300,7 +302,7 @@ export class Jogos {
     }
     if (mesa === 'velha') {
       const m = V.legais(part.st).find((x) => x.casa === i);
-      return m ? this.jogar(mesa, m) : this.mensagem('Essa casa já está ocupada.', true);
+      return m ? this.jogar(mesa, m) : this.mensagem(V.porQue(part.st, i) || 'Essa casa não vale agora.', true);
     }
     const p = part.st.b[i];
     const minha = p && (mesa === 'xadrez' ? (p === p.toUpperCase() ? 'w' : 'b') : p.toLowerCase()) === part.st.vez;
@@ -331,8 +333,8 @@ export class Jogos {
     if (part.sit.fim) return this.mensagem('A partida acabou. Comece um jogo novo.', true);
     if (this.meuLadoDaVez(mesa) < 0) return this.mensagem(this.meuLado(mesa) < 0 ? 'Sente num dos lados para comandar.' : 'Espere a sua vez.', true);
     if (mesa === 'velha') {
-      // "meio"/"centro" = b2; os cantos e lados vão pelas coordenadas
-      const r = V.interpretar(part.st, X.casasNoTexto(/\b(meio|centro)\b/.test(t) ? 'b2' : t));
+      // a casa de a1 a i9, ou "meio" (o meio da velhinha acesa)
+      const r = V.interpretar(part.st, t);
       return r.erro ? this.mensagem(r.erro, true) : this.jogar(mesa, r.lance);
     }
     let casas = X.casasNoTexto(t);
@@ -387,12 +389,12 @@ export class Jogos {
     $('#jh-cmd').placeholder = {
       xadrez: 'Comande: "cavalo f3", "e2 e4", "roque"',
       dama: 'Comande: "c3 d4", "d4 f6 d8"',
-      velha: 'Comande: "b2", "meio", "a1"',
+      velha: 'Comande: "e5", "meio", "g7"',
     }[mesa];
     this.mensagem({
       xadrez: 'Clique numa peça e depois na casa — ou fale/digite: "cavalo f3", "e2 e4", "roque".',
       dama: 'Clique numa pedra e depois na casa — ou fale/digite: "c3 d4". Comer é obrigatório.',
-      velha: 'Clique na casa — ou fale/digite: "b2", "meio", "a1". Três em linha ganha.',
+      velha: 'Jogue na velhinha acesa: a casa em que você joga manda o outro para a velhinha do mesmo lugar. Três em linha fecha a velhinha; três velhinhas em linha ganha.',
     }[mesa]);
   }
 
@@ -476,7 +478,7 @@ export class Jogos {
     if (!mesa) return false;
     const st = this.partidas[mesa].st;
     if (mesa === 'xadrez') return !!X.interpretar(st, txt).lance;
-    if (mesa === 'velha') return !!V.interpretar(st, X.casasNoTexto(txt)).lance;
+    if (mesa === 'velha') return !!V.interpretar(st, txt).lance;
     return !!D.interpretar(st, X.casasNoTexto(txt)).lance;
   }
 
@@ -526,6 +528,10 @@ export class Jogos {
       const vez = COR.indexOf(part.st.vez);
       status = this.meuLadoDaVez(mesa) >= 0 ? 'Sua vez de comandar' : `Vez ${mesa === 'velha' ? 'do' : 'das'} ${def.lados[vez]}${this.nomeLugar(part.lugares[vez], ' · ')}`;
       if (mesa === 'xadrez' && part.sit.xeque) status += ' — XEQUE!';
+      if (mesa === 'velha') {
+        const vs = V.velhinhasDaVez(part.st);
+        status += vs.length === 1 ? ` — na velhinha ${V.nomeVelhinha(vs[0])}` : ' — em qualquer velhinha';
+      }
     }
     $('#jh-status').textContent = status;
     $('#jh-novo').hidden = !(meu >= 0 || !part.lugares.some((l) => l && l !== 'bot'));

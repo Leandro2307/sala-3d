@@ -31,7 +31,7 @@ export const CATALOGO = [
   { id: 'ringue', nome: 'Ringue', desc: 'Luta e socos até o nocaute', genero: 'acao', cor: '#dc2626', painel: 'ringue' },
   { id: 'xadrez', nome: 'Xadrez de bruxo', desc: 'As peças andam sozinhas e viram pó', genero: 'mesa', cor: '#c4b5fd', painel: 'jogos' },
   { id: 'dama', nome: 'Dama gigante', desc: 'Contra alguém ou contra o computador', genero: 'mesa', cor: '#fbbf24', painel: 'jogos' },
-  { id: 'velha', nome: 'Jogo da velha', desc: 'O tabuleiro gigante da praça', genero: 'mesa', cor: '#f472b6', painel: 'jogos' },
+  { id: 'velha', nome: 'Jogo da velha 2', desc: 'Nove velhinhas numa velha gigante', genero: 'mesa', cor: '#f472b6', painel: 'jogos' },
   { id: 'dados', nome: 'Mesa de dados', desc: 'Apostas com moedas', genero: 'mesa', cor: '#fbbf24', painel: 'jogos' },
   { id: 'truco', nome: 'Truco', desc: 'Truco mineiro em duplas, com os gritos', genero: 'mesa', cor: '#16a34a', painel: 'parque' },
   { id: 'uno', nome: 'Uno', desc: 'Até 6 na mesa, com robôs', genero: 'mesa', cor: '#ef4444', painel: 'parque' },

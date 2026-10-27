@@ -71,7 +71,7 @@ export const NEVE = {
       autodromo: { nome: 'Autódromo', sub: 'Corrida de carro contra o relógio', cor: '#6ee7c8', ir: { pos: [200, 0, 107], yaw: -Math.PI / 2 } },
       lago: { nome: 'Lago congelado', sub: 'Pista de patinação no gelo', cor: '#93c5fd', ir: { pos: [114, 0, 300], yaw: Math.PI / 2 } },
       quadras: { nome: 'Quadras', sub: 'Vôlei, basquete e boliche', cor: '#facc15', ir: { pos: [14, 0, 392], yaw: Math.PI } },
-      jogos: { nome: 'Praça dos jogos', sub: 'Xadrez, dama, jogo da velha e dados', cor: '#a78bfa', ir: { pos: [22, 0, 490], yaw: -Math.PI / 2 } },
+      jogos: { nome: 'Praça dos jogos', sub: 'Xadrez, dama, jogo da velha 2 e dados', cor: '#a78bfa', ir: { pos: [22, 0, 490], yaw: -Math.PI / 2 } },
       aventura: { nome: 'Aventura', sub: 'Portais: surf, mata-mata, gincana e caça-fantasmas', cor: '#f472b6', ir: { pos: [-4, 0, 470], yaw: Math.PI / 2 } },
       kart: { nome: 'Kartódromo', sub: 'Corrida de kart com itens', cor: '#facc15', ir: { pos: [-37, 0, 596], yaw: Math.PI } },
       parque: { nome: 'Vale do parque', sub: 'Salão de jogos, queimada, pinta e golfe', cor: '#4ade80', ir: { pos: [350, 0, 690], yaw: Math.PI } },
@@ -127,7 +127,7 @@ export const NEVE = {
       },
       {
         area: 'jogos', x: 22, z: 540, giro: -Math.PI / 2,
-        linhas: ['Xadrez de bruxo, dama, jogo da velha e dados', 'Chegue perto de uma mesa e aperte E', 'Contra outra pessoa ou contra o computador', 'No xadrez dá até para falar o lance'],
+        linhas: ['Xadrez de bruxo, dama, jogo da velha 2 e dados', 'Chegue perto de uma mesa e aperte E', 'Contra outra pessoa ou contra o computador', 'No xadrez dá até para falar o lance'],
       },
       {
         area: 'aventura', x: 2, z: 461, giro: Math.PI / 2,
