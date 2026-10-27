@@ -775,6 +775,12 @@ function irParaJogo(id) {
   if (id === 'ringue') return goToRing();
   if (id === 'corrida') return irParaLargada();
   if (['xadrez', 'dama', 'velha'].includes(id)) return irParaMesa(id);
+  if (id === 'cacheta') {
+    // a mesa da cacheta fica do outro lado do salão, longe das outras de cartas
+    const l = cartas.lugar('cacheta');
+    player.teleport([l.pos[0], l.pos[1], l.pos[2]], l.yaw);
+    return sfx.teleport();
+  }
   if (id === 'dados') return $('#jogos-dados').click();
   irParaArea(AREA_DO_JOGO[id] || id);
 }
@@ -2656,6 +2662,7 @@ const JOGOS_DA_SALA = [
   ['truco', 'Truco', 'Truco mineiro em duplas, com os gritos e robôs'],
   ['uno', 'Uno', 'Até 6 na mesa, com robôs'],
   ['vinteum', '21', 'Duelo de 21 com trunfos: conte as cartas, aposte dedos'],
+  ['cacheta', 'Cacheta', '2 baralhos, 9 cartas e o curinga do vira, com robôs'],
   ['poker', 'Poker', "Texas Hold'em apostando as moedas, com robôs"],
   ['gincana', 'Gincana', '10 fases estilo Fall Guys e a final dos hexágonos'],
   ['fantasmas', 'Caça-Fantasmas', '12 monstros em 5 casas assombradas, como o Phasmophobia'],
@@ -2733,8 +2740,8 @@ function aplicarSala(cfg) {
   aplicarLogo(cfg.logo || '');
   if (state.room) salas.visitar(state.room, { empresa: cfg.empresa, temSenha: cfg.temSenha });
   let mudou = false;
-  // as mesas de cartas são uma área só, ligada se o truco, o uno ou o 21 estiver
-  for (const j of AREAS_DE_JOGO) mudou = world.ligarArea(j, j === 'cartas' ? jogoLigado('truco') || jogoLigado('uno') || jogoLigado('vinteum') : jogoLigado(j)) || mudou;
+  // as mesas de cartas são uma área só, ligada se o truco, o uno, o 21 ou a cacheta estiver
+  for (const j of AREAS_DE_JOGO) mudou = world.ligarArea(j, j === 'cartas' ? jogoLigado('truco') || jogoLigado('uno') || jogoLigado('vinteum') || jogoLigado('cacheta') : jogoLigado(j)) || mudou;
   if (mudou) world.aquecerShaders(); // o número de luzes pode ter mudado
   // o cinema (Lazer) ou o prédio do escritório com os departamentos escolhidos
   if (world.setModo(cfg)) {

@@ -1354,7 +1354,7 @@ export class Cartas {
 
   // A mão arrumada: os jogos primeiro (cada um junto, com um respiro antes) e as soltas depois; ou
   // por naipe; ou por valor (o curinga no fim). ini: as cartas que abrem um jogo; naJogo: as que
-  // estão em algum jogo (a faixinha verde embaixo).
+  // estão em algum jogo (a faixinha verde em cima: embaixo, no celular, ficava fora da tela).
   arrumadaC(M) {
     const e = M.e;
     this.ordemC ||= 'jogos';
@@ -1696,7 +1696,7 @@ body.touch .ct-titulo.cacheta { box-shadow: 0 3px 0 #00609c; }
 .ct-vira small b { color: #fff; font: 800 13px ${NUMERO}; }
 .ct-regrasc { text-align: left; }
 .ct-carta.ini:not(:first-child) { margin-left: calc(var(--junta, -6px) + 12px); }
-.ct-carta.jogo::after { content: ''; position: absolute; left: 14%; right: 14%; bottom: -7px; height: 4px; border-radius: 3px; background: #4bc292; box-shadow: 0 1px 0 #2b7a5b; }
+.ct-carta.jogo::after { content: ''; position: absolute; left: 14%; right: 14%; top: -8px; height: 4px; border-radius: 3px; background: #4bc292; box-shadow: 0 1px 0 #2b7a5b; }
 .ct-mao.cacheta:not(.escolhe) .ct-carta .ct-face { filter: none; }
 .ct-mao.batendo .ct-carta.pode .ct-face { box-shadow: 0 6px 0 rgba(0,0,0,.28), 0 0 0 3px #f5b244, 0 0 16px #f5b244; }
 .ct-b.ouro.liga { box-shadow: 0 4px 0 var(--sombra), 0 0 0 3px #fff, 0 0 18px #f5b244; }
@@ -1704,6 +1704,16 @@ body.touch .ct-titulo.cacheta { box-shadow: 0 3px 0 #00609c; }
 .ct-res.ct-jogosc { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
 body.touch .ct-viraimg img { width: 26px; height: 35px; }
 body.touch .ct-quemc p { font-size: 11px; } body.touch .ct-quemc p b { font-size: 14px; }
+/* celular deitado: o vira e o curinga numa linha só, para o botão de arrumar a mão caber sem rolar */
+@media (orientation: landscape) and (max-height: 500px) {
+  body.touch .ct-pontosc { padding: 4px 5px 5px; } body.touch .ct-quemc { gap: 2px; margin-top: 2px; } body.touch .ct-quemc p { padding: 1px 5px; }
+  body.touch .ct-pontosc small, body.touch .ct-vira small { font-size: 10px; letter-spacing: .04em; }
+  body.touch .ct-vira { grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "t t" "img cur" "img monte"; column-gap: 6px; row-gap: 1px; justify-items: start; padding: 4px 6px 5px; }
+  body.touch .ct-vira > small:first-child { grid-area: t; justify-self: center; }
+  body.touch .ct-viraimg { grid-area: img; gap: 3px; } body.touch .ct-viraimg img { width: 22px; height: 29px; }
+  body.touch .ct-curinga { grid-area: cur; align-self: end; font-size: 10px; line-height: 1.1; text-align: left; }
+  body.touch .ct-vira > small:last-child { grid-area: monte; align-self: start; text-align: left; }
+}
 body { --ct-vh: 1vh; }
 @supports (height: 1dvh) { body { --ct-vh: 1dvh; } }
 /* Celular deitado, do pequeno (SE: 667×320 com a barra do Safari) ao grande (Pro Max: 932×430). Falta
@@ -2433,7 +2443,7 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
   }
 
   // cacheta: a mão arrumada (ver arrumadaC), com um respiro antes de cada jogo e a faixinha verde
-  // embaixo das cartas que já estão em jogo. A carta que veio do lixo leva a etiqueta (não pode voltar).
+  // em cima das cartas que já estão em jogo. A carta que veio do lixo leva a etiqueta (não pode voltar).
   desenharMaoCacheta(M, e) {
     const { cartas: mao, ini, naJogo } = this.arrumadaC(M);
     const pode = mao.map((c) => this.podeJogar(M, c));
@@ -2447,7 +2457,7 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
     const n = mao.length;
     const meio = (n - 1) / 2;
     const passo = Math.min(n > 8 ? 2.5 : 4, 24 / Math.max(1, n - 1));
-    const desce = Math.min(16, meio * meio);
+    const desce = Math.min(10, meio * meio * 0.5); // (as pontas de uma mão de 10 não descem até a barra do tempo)
     this.juntaBase = (n > 4 ? -Math.min(40, 6 + (n - 4) * 5) : -6) / 2;
     this.mao.style.setProperty('--junta', `${this.juntaBase}px`);
     const distribuir = this.distribuir;

@@ -476,7 +476,7 @@ const fmtMoedas = (n) => n.toLocaleString('pt-BR');
 const MODULOS = ['lazer', 'escritorio'];
 const JOGOS_SALA = ['parkour', 'ringue', 'corrida', 'futebol', 'volei', 'basquete', 'boliche', 'surf', 'matamata', 'batalha', 'xadrez', 'dama', 'velha', 'dados', 'poderes', 'armas',
   // o parque (public/js/parque-dados.js)
-  'pingue', 'queimada', 'sinuca', 'golfe', 'truco', 'uno', 'vinteum', 'poker', 'gincana', 'fantasmas', 'kart', 'pinta',
+  'pingue', 'queimada', 'sinuca', 'golfe', 'truco', 'uno', 'vinteum', 'cacheta', 'poker', 'gincana', 'fantasmas', 'kart', 'pinta',
   'tapa', // tapa nos amigos, no mapa todo (e na mesa de cartas)
   'tiro']; // tiro de brincadeira na mesa de cartas
 const configPadrao = () => ({

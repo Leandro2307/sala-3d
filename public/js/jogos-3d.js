@@ -773,6 +773,7 @@ const MAQUETES = {
 };
 MAQUETES.truco = (g) => MAQUETES.cartas(g, 'truco');
 MAQUETES.uno = (g) => MAQUETES.cartas(g, 'uno');
+MAQUETES.cacheta = (g) => MAQUETES.cartas(g, 'cacheta');
 // poker: a mesa verde com as torres de fichas e uma ficha voando em arco até a pilha
 MAQUETES.poker = (g) => {
   // a mesa oval: os discos esticados no comprimento
