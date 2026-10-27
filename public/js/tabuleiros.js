@@ -249,6 +249,10 @@ function geometrias() {
   g.xis = juntar([Math.PI / 4, -Math.PI / 4].map((a) => new THREE.BoxGeometry(3.6, 0.7, 0.75).rotateY(a).translate(0, 0.35, 0)));
   g.bola = new THREE.TorusGeometry(1.25, 0.36, 14, 40).rotateX(Math.PI / 2).translate(0, 0.36, 0);
   g.velhinha = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
+  // a moldura da velhinha acesa: um quadrado vazado, da largura de 3% do lado
+  const quadro = new THREE.Shape([[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]].map(([x, y]) => new THREE.Vector2(x, y)));
+  quadro.holes.push(new THREE.Path([[-0.47, -0.47], [-0.47, 0.47], [0.47, 0.47], [0.47, -0.47]].map(([x, y]) => new THREE.Vector2(x, y))));
+  g.moldura = new THREE.ShapeGeometry(quadro).rotateX(-Math.PI / 2);
   geoCache = g;
   return g;
 }
@@ -434,10 +438,10 @@ export class Mesa {
 
     if (this.tipo === 'velha') {
       // uma tinta no chão de cada velhinha (a cor de quem a fechou) e o brilho das que a vez pode
-      // jogar, que pulsa
+      // jogar — fundo e moldura —, que pulsa
       const lado = Q * 3 * 0.97;
-      const plano = (mat) => {
-        const m = new THREE.Mesh(g.velhinha, mat);
+      const plano = (mat, geo = g.velhinha) => {
+        const m = new THREE.Mesh(geo, mat);
         m.scale.set(lado, 1, lado);
         m.visible = false;
         this.grupo.add(m);
@@ -445,14 +449,18 @@ export class Mesa {
       };
       this.tintas = [];
       this.acesas = [];
-      this.matAcesa = new THREE.MeshBasicMaterial({ color: ACESA, transparent: true, opacity: 0.16, depthWrite: false });
+      const brilho = () => new THREE.MeshBasicMaterial({ color: ACESA, transparent: true, depthWrite: false, toneMapped: false });
+      this.matAcesa = brilho();
+      this.matMoldura = brilho();
       for (let v = 0; v < 9; v++) {
         const t = plano(new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.3, depthWrite: false }));
         this.centroVelhinha(v, t.position).y = Y + 0.012;
         this.tintas.push(t);
-        const a = plano(this.matAcesa);
-        a.position.copy(t.position);
-        this.acesas.push(a);
+        const fundo = plano(this.matAcesa);
+        const moldura = plano(this.matMoldura, g.moldura);
+        fundo.position.copy(t.position);
+        moldura.position.copy(t.position);
+        this.acesas.push([fundo, moldura]);
       }
     }
   }
@@ -552,7 +560,10 @@ export class Mesa {
     if (dono) t.material.color.setHex(TINTA[dono]);
   }
   acender(velhinhas) {
-    this.acesas.forEach((a, v) => { a.visible = velhinhas.includes(v); });
+    this.acesas.forEach((ms, v) => {
+      const acesa = velhinhas.includes(v);
+      for (const m of ms) m.visible = acesa;
+    });
   }
 
   // Peça que anda, aparece ou some muda a sombra do sol: pede um mapa novo ao World, se a mesa
@@ -844,7 +855,11 @@ export class Mesa {
       }
     }
     // as velhinhas em que a vez pode jogar pulsam (só a tinta: não mexe na sombra)
-    if (this.matAcesa) this.matAcesa.opacity = 0.1 + (Math.sin(t * 3.2) + 1) * 0.06;
+    if (this.matAcesa) {
+      const s = (Math.sin(t * 3.2) + 1) / 2;
+      this.matAcesa.opacity = 0.16 + s * 0.14;
+      this.matMoldura.opacity = 0.55 + s * 0.4;
+    }
     // animações: uma de cada vez, na ordem dos lances
     let resto = dt;
     while (resto > 0) {
