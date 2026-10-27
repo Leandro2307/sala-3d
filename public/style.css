@@ -77,9 +77,10 @@ body.pagina-focus #gl { pointer-events: none; }
 body.pagina-focus #css3d { pointer-events: auto; }
 body.pagina-focus .room-chip, body.pagina-focus #controls-help, body.pagina-focus #fps { display: none; }
 
-/* H: a sala limpa — só o 3D (as barras de sair dos focos e os avisos ficam) */
-body.sem-hud #hud > :not(#pagina-hud):not(#tv-focus-hud):not(#toasts):not(#luneta),
-body.sem-hud #bar, body.sem-hud #cam-preview, body.sem-hud #touch { display: none !important; }
+/* H: a sala limpa — só o 3D (as barras de sair dos focos, os painéis dos jogos e os avisos ficam).
+   Sentado numa mesa ele liga sozinho; no celular a barra fica, que lá não tem H para trazê-la */
+body.sem-hud #hud > :not(#pagina-hud):not(#tv-focus-hud):not(#toasts):not(#luneta):not(#jogo-hud):not(#dados-hud):not(#tv-unblock),
+body.sem-hud:not(.touch) #bar, body.sem-hud #cam-preview, body.sem-hud #touch { display: none !important; }
 
 #gl {
   position: fixed;

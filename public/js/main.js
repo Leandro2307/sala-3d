@@ -3843,9 +3843,34 @@ $('#tela-mais').addEventListener('click', (e) => {
 });
 
 // H: some com tudo por cima do 3D (barra, botões, chat...). As barras de sair dos focos ficam.
+let hudDaMesa = false; // quem escondeu foi o sentar numa mesa (e não o H): levantando, volta
 function alternarHud() {
+  hudDaMesa = false;
   const sem = document.body.classList.toggle('sem-hud');
   if (sem) toast('Interface escondida. Aperte H para mostrar de novo.', 'info', 2500);
+}
+
+// Sentado numa mesa (cartas, poker, tabuleiros, dados), a interface da sala some sozinha, como no H;
+// o painel do jogo fica. Levantando, ela volta — a não ser que o H já a tivesse escondido antes.
+// No celular a barra de cima fica (o CSS do sem-hud): lá não há H para trazer o microfone de volta.
+const FOCOS_DE_MESA = ['cartas', 'poker', 'jogo', 'dados'];
+let sentadoNaMesa = false;
+let avisouHudDaMesa = false;
+function hudAoSentar() {
+  const sentado = FOCOS_DE_MESA.includes(state.focus?.kind);
+  if (sentado === sentadoNaMesa) return;
+  sentadoNaMesa = sentado;
+  if (sentado && !document.body.classList.contains('sem-hud')) {
+    document.body.classList.add('sem-hud');
+    hudDaMesa = true;
+    if (!isTouch && !avisouHudDaMesa) {
+      avisouHudDaMesa = true;
+      toast('Interface escondida enquanto joga. Aperte H para mostrar.', 'info', 3000);
+    }
+  } else if (!sentado && hudDaMesa) {
+    document.body.classList.remove('sem-hud');
+    hudDaMesa = false;
+  }
 }
 
 // a página fixa que o dono pôs na tela i (ou null)
@@ -6767,6 +6792,7 @@ function slowUpdate() {
     });
   }
   marcarJogoAtual();
+  hudAoSentar();
   // a arma do mata-mata chega pela rede e pode trocar depois do aviso ao boneco: o botão de
   // atirar do celular confere aqui
   if (temArma() !== armadoNaTela) {
