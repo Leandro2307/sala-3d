@@ -1367,6 +1367,7 @@ function bindSocket() {
   });
 
   socket.on('chat', (m) => addChat(m, m.id !== state.selfId));
+  socket.on('chat-aviso', addAviso);
 
   socket.on('browser-opened', ({ site, by }) => {
     toast(by === settings.name ? `Abrindo ${site} no telão` : `${by} abriu ${site} no navegador do telão`, 'info', 3500, '#38bdf8');
@@ -1403,16 +1404,19 @@ function bindSocket() {
     world.escritorio?.tocarSino();
     toast(`${nome === settings.name ? 'Você' : nome} fechou uma venda!`, 'success', 5000, cor);
   });
-  socket.on('moedas', ({ id, moedas, delta, motivo }) => {
+  socket.on('moedas', ({ id, moedas, delta, motivo, pix }) => {
     const u = state.users.get(id);
     if (!u) return;
     u.moedas = moedas;
     if (u.isSelf) {
       mostrarMoedas(true);
-      // as apostas (poker) tiram do saldo sem festa; o que entra toca a moeda
+      // as apostas (poker) tiram do saldo sem festa; o que entra toca a moeda. O pix do dono que
+      // tira também avisa: senão o saldo some sem explicação
       if (delta > 0) {
         sfx.moeda();
         toast(`+${delta} moedas · ${motivo}`, 'success', 4500);
+      } else if (pix) {
+        toast(`−${-delta} moedas · ${motivo} (agora ${moedas})`, 'info', 5000);
       }
     } else if (delta >= 50) {
       toast(`${u.name} ganhou ${delta} moedas (${motivo})`, 'info', 4000, u.color);
@@ -2784,6 +2788,7 @@ function renderSala() {
   $('#sala-criar').hidden = cfg.temDono || state.donoDaSala;
   $('#sala-entrar').hidden = !cfg.temDono || state.donoDaSala;
   $('#sala-config').hidden = !state.donoDaSala;
+  $('#chat-input').placeholder = state.donoDaSala ? 'Mensagem, ou /pix para dar moedas' : 'Mensagem para todos';
   $('#entrada-status').textContent = cfg.temSenha
     ? 'Ligada: quem chega pelo link precisa digitar a senha.'
     : 'Sala aberta: qualquer um com o link entra.';
@@ -4238,13 +4243,129 @@ function addChat(msg, notify) {
   }
 }
 
+// resposta do servidor só para mim (o /pix): uma linha no chat, sem nome nem bolha no boneco
+function addAviso(msg) {
+  const list = $('#chat-list');
+  list.querySelector('.empty')?.remove();
+  const li = document.createElement('li');
+  li.className = 'aviso';
+  li.innerHTML = `<div class="meta"><b style="--c:var(--accent)">Sala</b><time>${hhmm(msg.t)}</time></div><div class="text"></div>`;
+  li.querySelector('.text').textContent = msg.text;
+  list.appendChild(li);
+  while (list.children.length > 200) list.firstElementChild.remove();
+  if (state.panel === 'chat') list.scrollTop = list.scrollHeight;
+  else toast(msg.text, 'info', 6000);
+}
+
 $('#chat-form').addEventListener('submit', (e) => {
   e.preventDefault();
   const input = $('#chat-input');
   const text = input.value.trim();
   if (text) socket.emit('chat', text);
   input.value = '';
+  fecharSugestoes();
   input.blur();
+});
+
+// /pix do dono: completa o comando, a ação e o nome de quem está na sala. Setas escolhem, Tab ou
+// Enter põem no campo (o Enter só manda quando a lista está fechada), Esc fecha.
+const PIX_ACOES = [
+  ['adicionar', 'soma ao saldo'],
+  ['remover', 'tira do saldo'],
+  ['ajustar', 'deixa o saldo com o valor'],
+];
+let sugestoes = []; // { texto: o campo inteiro depois de escolher, rotulo, extra, cor }
+let sugestaoAtiva = 0;
+
+function sugestoesDoPix(v) {
+  if (!state.donoDaSala || !v.startsWith('/')) return [];
+  if ('/pix'.startsWith(v.toLowerCase())) {
+    return [{ texto: '/pix ', rotulo: '/pix', extra: 'adicionar, remover ou ajustar moedas' }];
+  }
+  let m = /^\/pix\s+(\S*)$/i.exec(v);
+  if (m) {
+    const parte = m[1].toLowerCase();
+    return PIX_ACOES.filter(([a]) => a.startsWith(parte) && a !== parte)
+      .map(([a, extra]) => ({ texto: `/pix ${a} `, rotulo: a, extra }));
+  }
+  m = /^(\/pix\s+(?:adicionar|remover|ajustar)\s+\d[\d.]*\s+)(.*)$/i.exec(v);
+  if (!m) return [];
+  // quem começa com o que foi digitado vem primeiro; depois quem só tem isso no meio do nome
+  const parte = m[2].trim().toLowerCase();
+  const vistos = new Set();
+  const pessoas = [...state.users.values()].filter((u) => {
+    const k = u.name.toLowerCase();
+    if (vistos.has(k) || !k.includes(parte)) return false;
+    vistos.add(k);
+    return true;
+  });
+  pessoas.sort((a, b) => (b.name.toLowerCase().startsWith(parte) - a.name.toLowerCase().startsWith(parte)) || a.name.localeCompare(b.name, 'pt-BR'));
+  // nome já completo: some a lista, e o Enter manda
+  if (pessoas.length === 1 && pessoas[0].name === m[2].trim()) return [];
+  return pessoas.map((u) => ({
+    texto: m[1] + u.name,
+    rotulo: u.isSelf ? `${u.name} (você)` : u.name,
+    extra: `${u.moedas ?? 0} moedas`,
+    cor: u.color,
+  }));
+}
+
+function mostrarSugestoes() {
+  const input = $('#chat-input');
+  sugestoes = input.selectionStart === input.value.length ? sugestoesDoPix(input.value) : [];
+  sugestaoAtiva = Math.min(sugestaoAtiva, Math.max(0, sugestoes.length - 1));
+  const ul = $('#chat-sugestoes');
+  ul.hidden = !sugestoes.length;
+  ul.innerHTML = sugestoes.map((s, i) => `<li role="option" data-i="${i}" class="${i === sugestaoAtiva ? 'ativa' : ''}" aria-selected="${i === sugestaoAtiva}">
+    <b${s.cor ? ` style="--c:${esc(s.cor)}"` : ''}>${esc(s.rotulo)}</b><small>${esc(s.extra)}</small></li>`).join('');
+  // a escolhida fica à mostra dentro da lista (scrollIntoView rolaria o painel junto)
+  const li = ul.querySelector('.ativa');
+  if (li) ul.scrollTop = Math.min(li.offsetTop, Math.max(ul.scrollTop, li.offsetTop + li.offsetHeight - ul.clientHeight));
+}
+
+function fecharSugestoes() {
+  sugestoes = [];
+  sugestaoAtiva = 0;
+  $('#chat-sugestoes').hidden = true;
+}
+
+function usarSugestao(i) {
+  const s = sugestoes[i];
+  if (!s) return;
+  const input = $('#chat-input');
+  input.value = s.texto;
+  input.focus();
+  input.setSelectionRange(s.texto.length, s.texto.length);
+  sugestaoAtiva = 0;
+  mostrarSugestoes();
+}
+
+$('#chat-input').addEventListener('input', () => {
+  sugestaoAtiva = 0;
+  mostrarSugestoes();
+});
+$('#chat-input').addEventListener('keydown', (e) => {
+  if (!sugestoes.length) return;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    sugestaoAtiva = (sugestaoAtiva + (e.key === 'ArrowDown' ? 1 : -1) + sugestoes.length) % sugestoes.length;
+    mostrarSugestoes();
+  } else if (e.key === 'Tab' || e.key === 'Enter') {
+    e.preventDefault();
+    usarSugestao(sugestaoAtiva);
+  } else if (e.key === 'Escape') {
+    e.stopPropagation(); // o Esc do teclado geral tiraria o foco do campo
+    fecharSugestoes();
+  }
+});
+$('#chat-input').addEventListener('blur', () => setTimeout(() => {
+  if (document.activeElement !== $('#chat-input')) fecharSugestoes();
+}, 150));
+// mousedown sem padrão: o campo não perde o foco (nem o teclado do celular fecha) ao tocar no nome
+$('#chat-sugestoes').addEventListener('mousedown', (e) => e.preventDefault());
+$('#chat-sugestoes').addEventListener('click', (e) => {
+  const li = e.target.closest('li[data-i]');
+  if (li) usarSugestao(Number(li.dataset.i));
 });
 
 // ------------------------------------------------------------------ parkour

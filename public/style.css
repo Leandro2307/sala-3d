@@ -1891,7 +1891,24 @@ body.touch #cam-preview { right: auto; left: 12px; bottom: auto; top: calc(108px
 .chat .meta b { color: var(--c); font-weight: 700; }
 .chat .meta time { color: var(--muted); }
 .chat .text { line-height: 1.45; word-wrap: break-word; color: #dfe3ec; }
-.chat-form { display: flex; gap: 8px; margin-top: 12px; }
+.chat .aviso { padding: 8px 10px; border-radius: 10px; background: rgba(110, 231, 200, 0.08); border: 1px solid rgba(110, 231, 200, 0.18); }
+.chat .aviso .text { color: #cfeee5; font-size: 13px; }
+.chat-form { position: relative; display: flex; gap: 8px; margin-top: 12px; }
+/* /pix do dono: completa o comando e o nome de quem está na sala, por cima do fim do chat */
+.chat-sugestoes {
+  position: absolute; left: 0; right: 50px; bottom: calc(100% + 6px); z-index: 2;
+  list-style: none; margin: 0; padding: 4px; max-height: min(220px, 40dvh); overflow-y: auto;
+  background: var(--glass-strong); border: 1px solid var(--line-strong); border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+.chat-sugestoes li {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+  padding: 8px 10px; border-radius: 8px; cursor: pointer; font-size: 13px;
+}
+.chat-sugestoes li b { font-weight: 600; color: var(--c, var(--text)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-sugestoes li small { color: var(--muted); font-size: 12px; flex: none; }
+.chat-sugestoes li.ativa { background: rgba(110, 231, 200, 0.14); }
+@media (hover: hover) { .chat-sugestoes li:hover { background: rgba(255, 255, 255, 0.06); } .chat-sugestoes li.ativa:hover { background: rgba(110, 231, 200, 0.18); } }
 .chat-form input { height: 42px; }
 .chat-form .icon-btn { width: 42px; height: 42px; flex: none; }
 

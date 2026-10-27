@@ -392,7 +392,8 @@
     <section data-section="chat">
       <ol class="chat" id="chat-list"></ol>
       <form class="chat-form" id="chat-form" autocomplete="off">
-        <input id="chat-input" maxlength="400" placeholder="Mensagem para todos">
+        <ul class="chat-sugestoes" id="chat-sugestoes" role="listbox" aria-label="Sugestões" hidden></ul>
+        <input id="chat-input" maxlength="400" placeholder="Mensagem para todos" aria-controls="chat-sugestoes">
         <button type="submit" class="icon-btn accent" aria-label="Enviar"><i data-icon="send" data-size="18"></i></button>
       </form>
     </section>

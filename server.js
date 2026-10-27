@@ -465,6 +465,9 @@ function mudarSaldo(nome, delta) {
   banco.guardarSaldo(chaveNome(nome), novo);
   return novo;
 }
+// o /pix do dono (ver o 'chat') não passa disto: cabe no INT do sala3d_moedas
+const PIX_MAX = 1_000_000_000;
+const fmtMoedas = (n) => n.toLocaleString('pt-BR');
 
 // ------------------------------------------------------------------ salas das empresas
 // Cada sala pode ter um dono (senha) que escolhe o modo — Lazer (o cinema) ou Escritório, com os
@@ -1579,10 +1582,47 @@ function attachSockets(io) {
       io.to(room.id).emit('media', { ...mediaSnapshot(room), action: msg.action });
     });
 
+    // /pix: o dono da sala põe, tira ou acerta as moedas de quem está na sala. Não vai para o chat:
+    // a resposta (ou o erro) chega só para quem mandou, num 'chat-aviso'.
+    //   /pix adicionar 10000 lokao1600 · /pix remover 500 kazu · /pix ajustar 10000 lokao1600
+    function pix(texto) {
+      const aviso = (t) => socket.emit('chat-aviso', { text: t, t: Date.now() });
+      if (!dono) return aviso('Só o dono da sala pode usar o /pix.');
+      const m = /^\/pix\s+(\S+)\s+(\d[\d.]*)\s+(.+)$/i.exec(texto);
+      const acao = m?.[1].toLowerCase();
+      if (!['adicionar', 'remover', 'ajustar'].includes(acao)) {
+        return aviso('Use: /pix adicionar|remover|ajustar valor nome — ex.: /pix ajustar 10000 lokao1600');
+      }
+      const valor = Number(m[2].replace(/\./g, '')); // 10.000 = 10000
+      if (!Number.isSafeInteger(valor) || valor > PIX_MAX) return aviso(`Valor demais: o máximo é ${fmtMoedas(PIX_MAX)}.`);
+      if (!valor && acao !== 'ajustar') return aviso('O valor precisa ser maior que zero.');
+      const nome = m[3].trim();
+      const pessoas = [...room.users.values()];
+      // a carteira é do nome: quem estiver com ele em duas abas recebe nas duas
+      const alvos = pessoas.filter((u) => chaveNome(u.name) === chaveNome(nome));
+      if (!alvos.length) {
+        const parecidos = [...new Set(pessoas.map((u) => u.name).filter((n) => chaveNome(n).includes(chaveNome(nome))))];
+        return aviso(`Ninguém chamado "${nome}" na sala.${parecidos.length ? ` Quis dizer ${parecidos.slice(0, 3).join(', ')}?` : ''}`);
+      }
+      const quem = alvos[0].name;
+      const antes = saldoDe(quem);
+      const alvo = acao === 'ajustar' ? valor : Math.min(PIX_MAX, antes + (acao === 'adicionar' ? valor : -valor));
+      const depois = mudarSaldo(quem, alvo - antes);
+      const delta = depois - antes;
+      for (const u of alvos) {
+        u.moedas = depois;
+        if (delta) io.to(room.id).emit('moedas', { id: u.id, moedas: depois, delta, motivo: 'pix do dono da sala', pix: true });
+      }
+      aviso(acao === 'ajustar'
+        ? `Pix: ${quem} agora tem ${fmtMoedas(depois)} moedas (tinha ${fmtMoedas(antes)}).`
+        : `Pix: ${delta >= 0 ? '+' : '−'}${fmtMoedas(Math.abs(delta))} moedas ${delta >= 0 ? 'para' : 'de'} ${quem} (agora tem ${fmtMoedas(depois)}).`);
+    }
+
     socket.on('chat', (text) => {
       if (!user) return;
       const clean = cleanText(text, 400);
       if (!clean) return;
+      if (/^\/pix(\s|$)/i.test(clean)) return pix(clean);
       const msg = { id: user.id, name: user.name, color: user.color, text: clean, t: Date.now() };
       room.chat.push(msg);
       if (room.chat.length > MAX_CHAT) room.chat.shift();
