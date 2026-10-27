@@ -6452,7 +6452,7 @@ window.addEventListener('keydown', (e) => {
       darTapa();
       break;
     case 'KeyZ':
-      if (temSniper()) ligarLuneta(!luneta);
+      if (temSniper() && !cartas.ativa) ligarLuneta(!luneta); // sentado nas cartas, o Z zoa a mesa (cartas.js)
       break;
     case 'KeyG':
       toggleVeiculo();

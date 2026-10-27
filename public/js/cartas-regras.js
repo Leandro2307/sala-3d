@@ -57,6 +57,11 @@ export const GRITOS = {
   pede21: ['Manda carta!', 'Mais uma!', 'Vem, carta!', 'Bora, mais uma!'],
   para21: ['Parei.', 'Tô bem assim.', 'Fico aqui.', 'Chega pra mim.'],
   ganhou21: ['Passa os dedos!', 'Contei as cartas, sô!', 'Essa foi fácil!', 'Mais um dedo pra coleção!'],
+  // o uno: quem disse UNO, quem comprou e passou, quem esqueceu e quem pegou alguém que esqueceu
+  uno: ['Uno!'],
+  unocompra: ['Comprou e passou!'],
+  unoesqueceu: ['Ah, esqueci o UNO!'],
+  pegouno: ['Não falou UNO!'],
 };
 // A zoeira: o que dá para gritar na mesa a qualquer hora (o botão de megafone), no truco e no uno.
 // Os robôs também zoam quando fazem uma rodada, e de vez em quando soltam uma do nada no meio do jogo.
@@ -140,6 +145,9 @@ export function rotuloUno(c) {
   const s = simboloUno(c);
   return { B: '⊘', I: '⇄', P2: '+2', W: '★', W4: '+4' }[s] ?? s;
 }
+// o que quem jogou fala em voz alta: o efeito em prosa, o número com a cor ('7 azul')
+const FALA_UNO = { B: 'Pula!', I: 'Volta!', P2: 'Mais dois!', W: 'Coringa!', W4: 'Mais quatro!' };
+export const falaUno = (c) => FALA_UNO[simboloUno(c)] ?? `${simboloUno(c)} ${NOME_COR[corUno(c)]}`;
 
 // embaralha (o servidor passa o sorteio dele)
 export function embaralhar(lista, aleatorio = Math.random) {
@@ -228,4 +236,35 @@ export function sortearTrunfo21(aleatorio = Math.random) {
     if (r < 0) return k;
   }
   return lista[0][0];
+}
+
+// ------------------------------------------------------------------ as vozes
+// Tudo o que a mesa fala em voz alta sai de um mp3 gravado (ElevenLabs, scripts/gerar-vozes-cartas.js),
+// não da voz do navegador: no celular (iOS/Android) o mp3 toca fora do toque e igual em todo aparelho.
+// Cada lugar tem a sua voz, como os robôs: 0 e 2 homens (Zé, Tião), 1 e 3 mulheres (Lia, Bia); no uno
+// de 6 o Nico (4) fala com a voz do Zé e a Rita (5) com a da Lia.
+export const VOZES_CARTAS = 4;
+
+// as mulheres da mesa falam no feminino ("Tô armada!", "Fui atingida!"): na voz e no balão
+export const vozFeminina = (lugar) => Math.abs(Number(lugar) || 0) % 2 === 1;
+const NO_FEMININO = [[/\barmado\b/g, 'armada'], [/\batingido\b/g, 'atingida'], [/\btodo melado\b/g, 'toda melada'], [/\btem dono\b/g, 'tem dona']];
+export const naVozDe = (frase, lugar) => (vozFeminina(lugar) ? NO_FEMININO.reduce((f, [de, para]) => f.replace(de, para), frase) : frase);
+
+// o arquivo da frase na voz do lugar; o mesmo nome no servidor, no navegador e no gerador
+export function arquivoVoz(frase, lugar) {
+  const voz = Math.abs(Number(lugar) || 0) % VOZES_CARTAS;
+  let h = 0x811c9dc5; // FNV-1a: síncrono e igual em qualquer lugar (o crypto.subtle não existe em http)
+  for (const ch of `${voz}:${frase}`) h = Math.imul(h ^ ch.codePointAt(0), 0x01000193) >>> 0;
+  return `/audio/cartas/${voz}-${h.toString(16).padStart(8, '0')}.mp3`;
+}
+
+// todas as frases que a voz do lugar fala: os gritos, a zoeira, os trunfos do 21 e as cartas do uno
+export function frasesFaladas(lugar) {
+  // o 21 só tem os lugares 0 e 1: as outras vozes não falam os gritos (pede21...) nem os trunfos dele
+  const do21 = Math.abs(Number(lugar) || 0) % VOZES_CARTAS < 2;
+  const gritos = Object.entries(GRITOS).filter(([tipo]) => do21 || !tipo.endsWith('21')).flatMap(([, f]) => f);
+  const frases = new Set([...gritos, ...ZOEIRA]);
+  if (do21) for (const t of Object.values(TRUNFOS_21)) frases.add(`${t.nome}!`);
+  for (const c of baralhoUno()) frases.add(falaUno(c));
+  return [...new Set([...frases].map((f) => naVozDe(f, lugar)))];
 }

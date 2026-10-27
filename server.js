@@ -26,7 +26,7 @@ const { ligarPinta } = require('./pinta-servidor.js');
 const { ligarCeu } = require('./ceu-servidor.js');
 const { ligarBatalha } = require('./batalha-servidor.js');
 const { MAPAS_SALA, MAPA_PADRAO } = require('./mapa-servidor.js');
-const Voz = require('./voz-servidor.js'); // a voz neural dos gritos da mesa de cartas
+const Voz = require('./voz-servidor.js'); // a rota antiga da voz dos gritos (hoje são mp3 gravados)
 // a planta do escritório é a mesma do navegador (public/js/escritorio.js); carrega em main()
 let ESCRITORIO = null;
 
@@ -312,7 +312,7 @@ app.get('/sala3d-extensao.zip', (_req, res) => {
   res.send(extensaoZip);
 });
 
-// os mp3 dos gritos da mesa de cartas, sintetizados no servidor com a voz neural (voz-servidor.js)
+// cliente antigo pedindo o mp3 dos gritos que o servidor sintetizava (hoje: public/audio/cartas)
 app.get('/ct-voz/:id.mp3', (req, res) => Voz.servir(req, res));
 
 // Antes de entrar: a sala tem senha? Com a senha certa (ou um passe ainda válido) devolve o passe

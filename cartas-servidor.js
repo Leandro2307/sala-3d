@@ -20,7 +20,6 @@
 // 21: dois lugares, um contra o outro (o do jogo 21 original): 11 cartas de 1 a 11, a primeira de
 // cada um fechada, trunfos (TRUNFOS_21) e a aposta em dedos; 5 dedos cada, quem fica sem perde.
 const { carregarPorMapa, comMapa } = require('./mapa-servidor.js');
-const Voz = require('./voz-servidor.js'); // os gritos saem com voz neural (mp3 do servidor), não a do navegador
 
 let R = null;
 let MESAS = null;
@@ -29,17 +28,13 @@ Promise.all([import('./public/js/cartas-regras.js'), DADOS.pronto])
   .then(([regras, dados]) => {
     R = regras;
     MESAS = dados; // a ponte: as mesas do mapa em uso (MESAS.MESAS_CARTAS)
-    // a voz neural de todas as frases faladas da mesa (gritos, zoeira, trunfos), já na subida
-    const faladas = new Set(Object.values(R.GRITOS).flat());
-    for (const f of R.ZOEIRA) faladas.add(f);
-    for (const t of Object.values(R.TRUNFOS_21)) faladas.add(`${t.nome}!`);
-    Voz.esquentar([...faladas]);
   })
   .catch((err) => console.warn('  Regras das cartas não carregaram:', err.message));
 
 const ondeEsta = (user) => (user?.p ? { x: user.p[0], y: user.p[1], z: user.p[2] } : null);
 const LUGARES = { truco: 4, uno: 6, vinteum: 2 };
-const NOMES_ROBO = ['Robô Zé', 'Robô Lia', 'Robô Tião', 'Robô Bia', 'Robô Nico'];
+// homem, mulher, homem...: a voz de cada lugar é de homem nos pares e de mulher nos ímpares (cartas-regras.js)
+const NOMES_ROBO = ['Robô Zé', 'Robô Lia', 'Robô Tião', 'Robô Bia', 'Robô Nico', 'Robô Rita'];
 const ESPERA_ROBO = 1300; // ms que o robô "pensa"
 const ESPERA_GENTE = 45_000; // parado na vez: o robô joga por ele
 const ESPERA_RESPOSTA = 25_000; // sem responder o truco (ou decidir a mão de dez): aceita por ele
@@ -135,11 +130,12 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
   // O grito vai para a sala toda: quem está perto da mesa ouve (cartas.js decide pela distância).
   // frase: uma escolhida (a zoeira); senão sorteia a do tipo. alvo: o lugar de quem foi trucado.
   // trunfo: o do 21 que foi usado (a carta aparece grande para quem está na mesa).
-  function gritar(room, m, k, tipo, { frase = null, alvo = null, trunfo = null } = {}) {
+  // falada: o que a voz fala, quando a frase escrita tem nome de gente (o mp3 é gravado antes).
+  function gritar(room, m, k, tipo, { frase = null, falada = null, alvo = null, trunfo = null } = {}) {
     const frases = R.GRITOS[tipo];
     if (!frase && !frases) return;
-    frase ||= frases[Math.floor(Math.random() * frases.length)];
-    io.to(room.id).emit('ct-grito', { mesa: m.i, lugar: k, tipo, nome: m.lugares[k]?.nome || '', frase, alvo, trunfo, voz: Voz.urlDaFrase(frase, k) });
+    frase = R.naVozDe(frase || frases[Math.floor(Math.random() * frases.length)], k); // Lia e Bia no feminino
+    io.to(room.id).emit('ct-grito', { mesa: m.i, lugar: k, tipo, nome: m.lugares[k]?.nome || '', frase, alvo, trunfo, voz: R.arquivoVoz(falada ? R.naVozDe(falada, k) : frase, k) });
   }
 
   // o robô que fez a rodada zoa de vez em quando (no máximo uma vez a cada 8 s na mesa)
@@ -572,8 +568,10 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
     }
     // uma carta só: tem uns segundos para dizer UNO (o robô sempre diz); fica pegável até lá
     if (mao.length === 1 && !u.disseUno.has(k)) {
-      if (m.lugares[k].bot) u.disseUno.add(k);
-      else u.unoAte.set(k, Date.now() + 3500);
+      if (m.lugares[k].bot) {
+        u.disseUno.add(k);
+        setTimeout(() => gritar(room, m, k, 'uno'), 900); // depois da voz da carta, que cortaria o grito
+      } else u.unoAte.set(k, Date.now() + 3500);
       u.semUno = k;
     }
     if (u.disseUno.has(k) && mao.length === 1) m.aviso = `${nome}: UNO!`;
@@ -632,7 +630,7 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
       }
     }
     m.aviso = `${m.lugares[k].nome} comprou e passou`;
-    gritar(room, m, k, 'unocompra', { frase: 'Comprou e passou!' });
+    gritar(room, m, k, 'unocompra');
     passarVez(m);
     avisar(room, m);
   }
@@ -647,7 +645,7 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
         if (u.semUno === k) u.semUno = null;
         comprarUno(m, k, 2);
         m.aviso = `${m.lugares[k]?.nome || ''} esqueceu o UNO: +2`;
-        gritar(room, m, k, 'unoesqueceu', { frase: 'Ah, esqueci o UNO!' });
+        gritar(room, m, k, 'unoesqueceu');
         avisar(room, m);
       }
     }
@@ -1122,6 +1120,7 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
           u.unoAte.delete(k);
           if (u.semUno === k) u.semUno = null;
           m.aviso = `${m.lugares[k].nome}: UNO!`;
+          gritar(room, m, k, 'uno');
           avisar(room, m);
         }
         return;
@@ -1135,7 +1134,7 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
         u.unoAte.delete(alvo);
         comprarUno(m, alvo, 2);
         m.aviso = `${m.lugares[alvo].nome} não falou UNO: +2 (${m.lugares[k].nome} pegou)`;
-        gritar(room, m, k, 'pegouno', { frase: `${m.lugares[alvo].nome}, não falou UNO!` });
+        gritar(room, m, k, 'pegouno', { frase: `${m.lugares[alvo].nome}, não falou UNO!`, falada: R.GRITOS.pegouno[0] });
         avisar(room, m);
         return;
       }
@@ -1146,13 +1145,13 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
         // o que comprou não serve: passa sozinho
         if (!R.podeJogarUno(u.maos[k].at(-1), u.descarte.at(-1), u.cor)) {
           m.aviso = `${m.lugares[k].nome} comprou e passou`;
-          gritar(room, m, k, 'unocompra', { frase: 'Comprou e passou!' });
+          gritar(room, m, k, 'unocompra');
           passarVez(m);
         }
         avisar(room, m);
       } else if (msg.acao === 'passar' && u.comprou) {
         m.aviso = `${m.lugares[k].nome} comprou e passou`;
-        gritar(room, m, k, 'unocompra', { frase: 'Comprou e passou!' });
+        gritar(room, m, k, 'unocompra');
         passarVez(m);
         avisar(room, m);
       }
@@ -1227,11 +1226,11 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
       if (sinalar(room, m, k, R.SINAIS[i].f, R.SINAIS[i].carta)) user.sinalEm = Date.now();
     });
 
-    // Celular (iOS): o cliente pede o MP3 da voz quando o grito chegou sem ele (ainda gerando)
+    // cliente antigo (de antes do mp3 vir sempre no grito) pedindo a voz da frase
     socket.on('pedir-voz', ({ frase, lugar } = {}, ack) => {
       if (typeof ack !== 'function') return;
-      if (typeof frase !== 'string' || typeof lugar !== 'number') return ack(null);
-      ack(Voz.urlDaFrase(frase, lugar));
+      if (!R || typeof frase !== 'string' || typeof lugar !== 'number') return ack(null);
+      ack(R.arquivoVoz(frase, lugar));
     });
 
     socket.on('disconnect', () => {

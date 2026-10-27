@@ -6,19 +6,20 @@
 //   - a plaquinha de cada lugar flutuando em cima da cadeira (nome, cartas, a vez, o balão do grito,
 //     e o tapa, o tiro e o arremesso (tomate, galinha...) de brincadeira);
 //   - a mão embaixo: as cartas balançam e inclinam com o mouse; um clique joga a carta; COBERTA
-//     liga e a próxima carta vai virada; TRUCO! grita; o megafone zoa (com frase aleatória também);
+//     liga e a próxima carta vai virada; TRUCO! grita; o megafone zoa (com frase aleatória também,
+//     que a tecla Z manda direto);
 //     no truco, o 🤫 Sinal cochicha uma frase que só o parceiro vê;
 //   - a pergunta do truco (ou da mão de onze) no meio, com o tempo correndo.
 // Os robôs aparecem sentados nas cadeiras deles. Cada truco, seis, nove e doze (e cada resposta) é
-// um grito: murro na mesa, as cartas pulam, a voz neural (mp3 sintetizado no servidor, a mesma
-// para todo mundo) e a faixa grande. "Começar"
+// um grito: murro na mesa, as cartas pulam, a voz do lugar (mp3 gravado, o mesmo para todo mundo:
+// arquivoVoz em cartas-regras.js) e a faixa grande. "Começar"
 // completa a mesa com robôs; Esc (ou "Sair") levanta e um robô assume as suas cartas. O servidor
 // (cartas-servidor.js) conduz tudo; as regras são as de cartas-regras.js.
 import * as THREE from 'three';
 import {
   forcaTruco, valorDe, naipeDe, SIMBOLO, NOME_PEDIDO, PASSOS_TRUCO, MANILHAS, NOME_MANILHA, VALE_DEZ, ZOEIRA, SINAIS, ARREMESSOS,
-  podeJogarUno, coringa, corUno, simboloUno, rotuloUno, HEX_COR, NOME_COR, CORES_UNO,
-  numero21, trunfo21, soma21, TRUNFOS_21, MAX_21, DEDOS_21,
+  podeJogarUno, coringa, corUno, simboloUno, rotuloUno, falaUno, HEX_COR, NOME_COR, CORES_UNO,
+  numero21, trunfo21, soma21, TRUNFOS_21, MAX_21, DEDOS_21, arquivoVoz,
 } from './cartas-regras.js';
 import { MESAS_CARTAS } from './parque-dados.js';
 import { hud, texturaViva, paraToque, arrumarPlacas, enfileirarPlacas, enquadrar, deslocarVista } from './hud-jogos.js';
@@ -104,7 +105,7 @@ function comDuplas(texto, meuTime) {
 const ondas = (texto) => [...String(texto)].map((c, i) => `<span style="--i:${i}">${c === ' ' ? '&nbsp;' : esc(c)}</span>`).join('');
 
 // ------------------------------------------------------------------ a voz dos gritos
-// A voz do sistema em português (speechSynthesis). Cada lugar da mesa grita com uma voz e um tom
+// Quando o mp3 da frase não toca: a voz do sistema em português (speechSynthesis). Cada lugar da mesa grita com uma voz e um tom
 // diferentes, para dar para saber quem gritou sem olhar. As vozes "natural"/"neural" (Microsoft
 // Online, Google...) são muito mais lisas que as vozes de desktop antigas: se tiver, usa só essas
 // (as de desktop deixam o grito da pessoa robótico e arrastado).
@@ -476,7 +477,7 @@ export class Cartas {
       this.chaveMao = '';
       if (this.ativa) this.desenhar();
     });
-    // 1, 2, 3...: joga a carta; espaço: TRUCO!
+    // 1, 2, 3...: joga a carta; espaço: TRUCO!; Z: zoa com uma frase aleatória
     window.addEventListener('keydown', (ev) => this.tecla(ev));
     // girou o celular: a mão volta a caber na largura nova
     window.addEventListener('resize', () => this.ativa && this.ajustarMao());
@@ -520,7 +521,8 @@ export class Cartas {
   // Alguém gritou na mesa (truco, seis..., desce, corro, a zoeira, o robô reclamando): a voz para quem
   // está perto, o balão em cima de quem gritou e, nos pedidos, o murro na mesa (as cartas pulam);
   // para quem está sentado nela, a faixa grande e a tela tremendo quando o grito é contra a gente.
-  // A voz é o mp3 neural do servidor ('voz'); sem ele, a voz do sistema do navegador (falarGrito).
+  // A voz é o mp3 gravado da frase ('voz', o arquivo que o servidor mandou); se ele não tocar, a voz
+  // do sistema do navegador (falarGrito).
   grito({ mesa, lugar, tipo, nome, frase, alvo, trunfo, voz }) {
     const M = this.mesas[mesa];
     if (!M || !this.ligado(M.m.jogo) || typeof frase !== 'string') return;
@@ -537,23 +539,7 @@ export class Cartas {
       boneco?.punch();
     }
     boneco?.say(frase);
-    if (voz) {
-      this.tocarVoz(voz, vol);
-    } else {
-      // iOS: speechSynthesis falha fora de gesto do usuario. Tentamos buscar o MP3
-      // gerado pelo servidor em background (pode demorar alguns segundos).
-      // Se chegar, toca via audioVoz (ja destravado); se nao, usa a voz do sistema.
-      const tentarVoz = (tentativa) => {
-        if (!this.socket) { falarGrito(frase, lugar, vol); return; }
-        this.socket.emit('pedir-voz', { frase, lugar }, (url) => {
-          if (url) this.tocarVoz(url, vol);
-          // Neural TTS can still be warming up just after the server starts.
-          else if (tentativa < 8) setTimeout(() => tentarVoz(tentativa + 1), 1500);
-          else falarGrito(frase, lugar, vol);
-        });
-      };
-      tentarVoz(1);
-    }
+    this.tocarVoz(voz || arquivoVoz(frase, lugar), vol, frase, lugar);
     if (!sentado) return;
     if (lugar !== M.lugar) this.balao(lugar, frase, pedido);
     if (tipo === 'trunfo' && TRUNFOS_21[trunfo]) return this.mostrarTrunfo(trunfo, lugar === M.lugar ? 'Você' : nome, lugar === M.lugar);
@@ -571,15 +557,17 @@ export class Cartas {
     }
   }
 
-  // o mp3 da voz neural do servidor (mesma voz para todo mundo, humano ou robô). O grito novo corta
-  // o anterior, como no falarGrito. volume pela distância, como os gritos.
+  // o mp3 gravado da frase na voz do lugar (a mesma para todo mundo, humano ou robô). O grito novo
+  // corta o anterior, como no falarGrito. volume pela distância, como os gritos (o iOS ignora).
   // Usa UM elemento de áudio só (audioVoz, no topo do módulo): no celular cada elemento novo
   // volta a ser barrado pelo autoplay; o desbloqueio vem do primarVoz, chamado no primeiro gesto.
-  tocarVoz(url, volume) {
+  // Sem o arquivo (frase que não foi gravada), a frase sai na voz do navegador.
+  tocarVoz(url, volume, frase, lugar) {
     if (!sfxLigado()) return;
     try {
       audioVoz.pause();
       audioVoz.volume = Math.min(1, Math.max(0, volume));
+      audioVoz.onerror = frase ? () => { if (audioVoz.src.endsWith(url)) falarGrito(frase, lugar, volume); } : null;
       audioVoz.src = url;
       // Mobile Safari can lose the initial user-gesture authorization when load() resets media.
       // Assigning src on the same player already selects the new media.
@@ -1094,6 +1082,11 @@ export class Cartas {
     const M = this.ativa;
     if (!M || ev.repeat || ev.ctrlKey || ev.metaKey || ev.altKey) return;
     if (ev.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
+    // Z, em qualquer jogo: a frase aleatória do megafone (só com a partida andando, como o botão)
+    if (ev.code === 'KeyZ') {
+      if (M.e && M.e.fase !== 'espera') this.socket?.emit('ct-zoar', { mesa: M.i, i: Math.floor(Math.random() * ZOEIRA.length) });
+      return;
+    }
     const n = Number(ev.key);
     if (M.e?.jogo === 'vinteum') {
       // 1, 2, 3...: usa o trunfo; espaço: pede carta; S: para
@@ -1384,6 +1377,7 @@ body.touch .ct-placa { font-size: 12px; }
 .ct-trunfo { position: relative; width: 62px; height: 83px; padding: 0; border: 0; border-radius: 8px; background: center / 100% 100% no-repeat; box-shadow: 0 4px 0 rgba(0,0,0,.3); transition: transform .12s, filter .12s; }
 .ct-trunfo:hover, .ct-trunfo.armado { transform: translateY(-8px) scale(1.08) rotate(-2deg); }
 .ct-trunfo kbd { position: absolute; top: -8px; left: -6px; font: 800 11px ${NUMERO}; background: #1e2b2d; color: #fff; border-radius: 5px; padding: 1px 5px; }
+.ct-b kbd { margin-left: 7px; font: 800 11px ${NUMERO}; background: #0005; border-radius: 5px; padding: 1px 5px; vertical-align: 1px; }
 .ct-trunfos.longe .ct-trunfo { filter: brightness(.72) saturate(.7); }
 .ct-trunfo.nao { animation: ct-nao .3s linear; }
 .ct-tip { position: absolute; bottom: calc(100% + 12px); left: 50%; translate: -50% 0; width: 250px; padding: 8px 10px; font-size: 13px; line-height: 1.3; text-align: center; pointer-events: none; }
@@ -1446,7 +1440,7 @@ body.touch .ct-mini button { width: 38px; height: 36px; font-size: 19px; line-he
 body.touch .ct-assento:not(.aberto) .ct-mini button:not(.urgente) { display: none; }
 body.touch .ct-mini button.urgente { animation: ct-vez .8s ease-in-out infinite; background: #fe5f55; box-shadow: 0 2px 0 #a8352e; }
 body.touch .ct-arremesso button { width: 44px; height: 44px; font-size: 22px; }
-body.touch .ct-trunfo kbd { display: none; }
+body.touch .ct-trunfo kbd, body.touch .ct-b kbd { display: none; }
 /* os itens do placar encolhem junto com a coluna (antes o maior esticava todos e a coluna cortava) */
 body.touch .ct-lado > * { min-width: 0; }
 body { --ct-vh: 1vh; }
@@ -2146,7 +2140,7 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
       if (vez) dir.push('<div class="ct-vez21">SUA VEZ!</div>');
       dir.push(`<button type="button" class="ct-b vermelho grande" data-acao="v21:parar" title="S"${vez ? '' : ' disabled'}>Parar</button>`);
     }
-    if (e.fase !== 'espera') dir.push('<button type="button" class="ct-b roxo" data-acao="zoar" title="Zoar a mesa">📣 Zoar</button>');
+    if (e.fase !== 'espera') dir.push('<button type="button" class="ct-b roxo" data-acao="zoar" title="Zoar a mesa (Z: frase aleatória)">📣 Zoar<kbd>Z</kbd></button>');
     // o sinal do truco: só aparece com um parceiro de gente na mesa (robô não lê cochicho)
     const parceiro = truco && e.lugares[(M.lugar + 2) % 4];
     if (truco && e.fase !== 'espera' && parceiro && !parceiro.bot) dir.push('<button type="button" class="ct-b roxo" data-acao="sinal" title="Cochichar um sinal que só o parceiro vê">🤫 Sinal</button>');
@@ -2194,11 +2188,10 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
     if (quem !== M.lugar) this.sfx.cartaVoa?.();
     const s = simboloUno(carta);
     const efeito = { B: 'PULA!', I: 'VOLTA!', P2: '+2!' }[s] || (s === 'W4' ? '+4!' : s === 'W' ? 'CORINGA!' : '');
-    // a voz de quem jogou (o tom é por lugar, como nos gritos): o efeito em prosa, a carta em voz alta
-    const falado = { B: 'Pula!', I: 'Volta!', P2: 'Mais dois!', W: 'Coringa!' }[s]
-      || (s === 'W4' ? 'Mais quatro!' : `${rotuloUno(carta)}${cor ? ` ${cor}` : ''}`);
+    // a voz de quem jogou (a voz do lugar, como nos gritos): o efeito em prosa, a carta em voz alta
+    const falado = falaUno(carta);
     this.bonecoDe(M, quem)?.say(falado);
-    falarGrito(falado, quem, 1);
+    this.tocarVoz(arquivoVoz(falado, quem), 1, falado, quem);
     if (!efeito) return;
     this.faixaGrito(efeito, `${nome} jogou ${cor ? `${cor} ` : ''}${rotuloUno(carta)}`, false);
   }

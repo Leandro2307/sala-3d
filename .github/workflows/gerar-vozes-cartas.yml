@@ -1,31 +1,29 @@
-name: Gerar vozes humanas das cartas
+# Grava as vozes que faltam da mesa de cartas (ElevenLabs) e salva os mp3 no repositório.
+# Só na mão (Actions > Run workflow): cada gravação gasta créditos da conta. Precisa do segredo
+# ELEVENLABS_API_KEY no repositório. Só grava o que falta (frase nova ou mudada).
+name: Gravar vozes das cartas
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/gerar-vozes-cartas.yml'
-      - 'scripts/gerar-vozes-cartas.js'
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  gerar:
+  gravar:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: node scripts/gerar-vozes-cartas.js --forcar
-      - name: Salvar MP3 neural no repositorio
+      - run: node scripts/gerar-vozes-cartas.js
+        env:
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+      - name: Salvar os mp3 no repositorio
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add public/audio/cartas
-          git diff --cached --quiet || git commit -m 'Atualiza vozes neurais das cartas'
+          git add -A public/audio/cartas
+          git diff --cached --quiet || git commit -m 'Atualiza as vozes das cartas'
           git push
