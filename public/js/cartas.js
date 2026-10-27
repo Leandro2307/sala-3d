@@ -1,4 +1,4 @@
-// Truco (mineiro) e Uno nas mesas redondas do salão de jogos do parque, com a cara do Balatro.
+// Truco (mineiro), Uno, 21 e Cacheta nas mesas redondas do salão de jogos do parque, com a cara do Balatro.
 // E perto da mesa abre o seletor de cadeira: escolhe um lugar livre (ou o de um robô, que levanta);
 // no truco, a borda da cadeira mostra a dupla. A câmera fica atrás da sua cadeira. Por cima do 3D, sem tampar a mesa:
 //   - a coluna do placar à esquerda (pontos que pulam, o valor da mão pegando fogo, rodadas,
@@ -20,15 +20,16 @@ import {
   forcaTruco, valorDe, naipeDe, SIMBOLO, NOME_PEDIDO, PASSOS_TRUCO, MANILHAS, NOME_MANILHA, VALE_DEZ, ZOEIRA, SINAIS, ARREMESSOS,
   podeJogarUno, coringa, corUno, simboloUno, rotuloUno, falaUno, HEX_COR, NOME_COR, CORES_UNO,
   numero21, trunfo21, soma21, TRUNFOS_21, MAX_21, DEDOS_21, arquivoVoz,
+  NAIPES, VALORES_CACHETA, CARTAS_CACHETA, lerCacheta, faceCacheta, ehCuringa, nomeCuringa, nomeCartaCacheta, arranjoCacheta, comoBaterCacheta,
 } from './cartas-regras.js';
 import { MESAS_CARTAS } from './parque-dados.js';
 import { hud, texturaViva, paraToque, arrumarPlacas, enfileirarPlacas, enquadrar, deslocarVista } from './hud-jogos.js';
 import { sfxLigado } from './sfx.js';
 import { Avatar } from './avatars.js';
 
-const LUGARES = { truco: 4, uno: 6, vinteum: 2 };
-const NOME_JOGO = { truco: 'TRUCO', uno: 'UNO', vinteum: '21' };
-const COR_PLACA = { truco: '#fe5f55', uno: '#f5b244', vinteum: '#4bc292' };
+const LUGARES = { truco: 4, uno: 6, vinteum: 2, cacheta: 4 };
+const NOME_JOGO = { truco: 'TRUCO', uno: 'UNO', vinteum: '21', cacheta: 'CACHETA' };
+const COR_PLACA = { truco: '#fe5f55', uno: '#f5b244', vinteum: '#4bc292', cacheta: '#009dff' };
 const R_MESA = 1.15;
 const R_CADEIRA = 1.75;
 const Y_MESA = 0.85;
@@ -190,6 +191,11 @@ function texturaCarta(c) {
   return t;
 }
 
+// cacheta: a chave do desenho da carta (as duas cópias são o mesmo desenho; o curinga da mão sai
+// dourado) e uma carta de exemplo do curinga, para o placar
+const faceC = (c, cur) => `c:${faceCacheta(c)}${ehCuringa(c, cur) ? '*' : ''}`;
+const exemploCuringa = (cur) => `c:${VALORES_CACHETA[cur.v - 1]}${cur.vermelho ? 'c' : 'e'}*`;
+
 function desenharCarta(ctx, w, h, c) {
   const corpo = (fundo, borda) => {
     ctx.beginPath();
@@ -222,6 +228,7 @@ function desenharCarta(ctx, w, h, c) {
     ctx.fillText('♦', w / 2, h / 2 + 2);
     return;
   }
+  if (c.startsWith('c:')) return desenharCartaCacheta(ctx, w, h, c.slice(2), corpo);
   if (numero21(c) || trunfo21(c)) return desenharCarta21(ctx, w, h, c, corpo);
   if (/^[4-7QJKA23][oecp]$/.test(c)) {
     const v = valorDe(c);
@@ -323,6 +330,87 @@ function desenharCarta(ctx, w, h, c) {
   ctx.fillText(rotuloUno(c), 24, 26);
 }
 
+// cacheta: o baralho inteiro (do A ao K), com os naipes no meio como no baralho de verdade; o curinga
+// da mão é a carta de ouro com a faixa, como as manilhas do truco. f: '7o', '10e', 'Kp*' (curinga)
+const PIPS = {
+  2: [[0.5, 0.26], [0.5, 0.74]],
+  3: [[0.5, 0.26], [0.5, 0.5], [0.5, 0.74]],
+  4: [[0.35, 0.26], [0.65, 0.26], [0.35, 0.74], [0.65, 0.74]],
+  5: [[0.35, 0.26], [0.65, 0.26], [0.5, 0.5], [0.35, 0.74], [0.65, 0.74]],
+  6: [[0.35, 0.26], [0.65, 0.26], [0.35, 0.5], [0.65, 0.5], [0.35, 0.74], [0.65, 0.74]],
+  7: [[0.35, 0.26], [0.65, 0.26], [0.5, 0.38], [0.35, 0.5], [0.65, 0.5], [0.35, 0.74], [0.65, 0.74]],
+  8: [[0.35, 0.26], [0.65, 0.26], [0.5, 0.38], [0.35, 0.5], [0.65, 0.5], [0.5, 0.62], [0.35, 0.74], [0.65, 0.74]],
+  9: [[0.35, 0.24], [0.65, 0.24], [0.35, 0.413], [0.65, 0.413], [0.5, 0.5], [0.35, 0.587], [0.65, 0.587], [0.35, 0.76], [0.65, 0.76]],
+  10: [[0.35, 0.24], [0.65, 0.24], [0.5, 0.327], [0.35, 0.413], [0.65, 0.413], [0.35, 0.587], [0.65, 0.587], [0.5, 0.673], [0.35, 0.76], [0.65, 0.76]],
+};
+function desenharCartaCacheta(ctx, w, h, f, corpo) {
+  const curinga = f.endsWith('*');
+  const face = curinga ? f.slice(0, -1) : f;
+  const v = face.slice(0, -1);
+  const n = face.slice(-1);
+  const cor = COR_NAIPE[n];
+  if (curinga) {
+    const g = ctx.createLinearGradient(0, 0, w, h);
+    g.addColorStop(0, '#fbe08a');
+    g.addColorStop(1, '#e3a92b');
+    corpo(g, '#a8741f');
+  } else corpo('#f6f1e6', '#cfc6b4');
+  // os cantos: valor e naipe (o de baixo, de ponta-cabeça)
+  const canto = () => {
+    ctx.fillStyle = cor;
+    ctx.font = fonteNum(v === '10' ? 27 : 34);
+    ctx.fillText(v, 22, 27);
+    ctx.font = fontePx(24, 400);
+    ctx.fillText(SIMBOLO[n], 22, 52);
+  };
+  canto();
+  ctx.save();
+  ctx.translate(w, h);
+  ctx.rotate(Math.PI);
+  canto();
+  ctx.restore();
+  if (curinga) {
+    ctx.fillStyle = cor;
+    ctx.font = fontePx(64, 400);
+    ctx.fillText(SIMBOLO[n], w / 2, h * 0.42);
+    // o selo e a faixa
+    ctx.fillStyle = '#d64541';
+    ctx.beginPath();
+    ctx.arc(w - 26, 30, 11, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#fff4e6';
+    ctx.font = fontePx(14);
+    ctx.fillText('★', w - 26, 31);
+    ctx.fillStyle = '#1e2b2d';
+    ctx.beginPath();
+    ctx.roundRect(18, h * 0.66, w - 36, 32, 6);
+    ctx.fill();
+    ctx.fillStyle = '#f5b244';
+    ctx.font = fontePx(19);
+    ctx.fillText('CURINGA', w / 2, h * 0.66 + 17);
+    return;
+  }
+  ctx.fillStyle = cor;
+  if (ROSTO[v]) {
+    ctx.fillStyle = `${cor}22`;
+    ctx.fillRect(38, 36, w - 76, h - 72);
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = cor;
+    ctx.strokeRect(38, 36, w - 76, h - 72);
+    ctx.fillStyle = cor;
+    ctx.font = `64px ${PIXEL}`;
+    ctx.fillText(ROSTO[v], w / 2, h / 2 - 6);
+    ctx.font = fontePx(22);
+    ctx.fillText(SIMBOLO[n], w / 2, h / 2 + 38);
+  } else if (v === 'A') {
+    ctx.font = fontePx(78, 400);
+    ctx.fillText(SIMBOLO[n], w / 2, h / 2);
+  } else {
+    ctx.font = fontePx(Number(v) >= 9 ? 24 : 28, 400);
+    for (const [x, y] of PIPS[v] || []) ctx.fillText(SIMBOLO[n], w * x, h * y);
+  }
+}
+
 // 21: a carta de número (cada número com a sua cor, o número grande no meio) e o trunfo (escuro,
 // com a borda na cor dele, o desenho grande e o nome embaixo)
 const COR_21 = ['#4bc292', '#009dff', '#a782d1', '#e8642c', '#e2304c', '#1f6b5f', '#3c4368', '#d97706', '#0e7490', '#be185d', '#7c2d12'];
@@ -413,7 +501,7 @@ export function construirCartas(world) {
     world.addBox({ min: [m.x - R_MESA * 0.8, 0, m.z - R_MESA * 0.8], max: [m.x + R_MESA * 0.8, Y_MESA, m.z + R_MESA * 0.8] });
     for (let k = 0; k < LUGARES[m.jogo]; k++) {
       const c = cadeira(m, k);
-      const banco = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.24, 0.45, 16), new THREE.MeshStandardMaterial({ color: m.jogo === 'truco' ? (k % 2 ? 0xb91c1c : 0x1d4ed8) : m.jogo === 'vinteum' ? 0x15803d : 0x7c3aed, roughness: 0.7 }));
+      const banco = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.24, 0.45, 16), new THREE.MeshStandardMaterial({ color: m.jogo === 'truco' ? (k % 2 ? 0xb91c1c : 0x1d4ed8) : m.jogo === 'vinteum' ? 0x15803d : m.jogo === 'cacheta' ? 0x0369a1 : 0x7c3aed, roughness: 0.7 }));
       banco.position.set(c.x, 0.225, c.z);
       banco.castShadow = true;
       g.add(banco);
@@ -433,9 +521,9 @@ export function construirCartas(world) {
     placa.position.set(m.x, 3.1, m.z);
     g.add(placa);
     // as cartas do centro (as da rodada e o monte no truco; o topo do descarte e o monte no uno; as
-    // duas mãos e o monte no 21)
+    // duas mãos e o monte no 21; o vira, o monte, o lixo e os jogos de quem bateu na cacheta)
     const cartas = [];
-    for (let k = 0; k < (m.jogo === 'vinteum' ? 28 : 6); k++) {
+    for (let k = 0; k < (m.jogo === 'vinteum' ? 28 : m.jogo === 'cacheta' ? 16 : 6); k++) {
       const c = new THREE.Mesh(geoCarta, new THREE.MeshBasicMaterial({ map: texturaCarta('verso'), toneMapped: false }));
       c.visible = false;
       c.userData = { chave: '', alvo: { x: m.x, y: Y_MESA, z: m.z, ry: 0 }, voo: null, sai: null };
@@ -498,6 +586,11 @@ export class Cartas {
       M.rivalOculta = rivalOculta || null; // 21, com o raio-x: a carta fechada do rival
       // mão nova (três cartas chegando, ou as sete do uno): as cartas entram distribuídas
       if (mao.length > (antes?.length || 0) + 1) this.distribuir = true;
+      // cacheta: mão nova (o ct-estado com o número dela chega antes) também entra distribuída
+      if (M.e?.jogo === 'cacheta' && M.e.maoN !== M.maoN) {
+        M.maoN = M.e.maoN;
+        if (mao.length) this.distribuir = true;
+      }
       if (M.e?.jogo === 'vinteum') this.mostrar3d(M); // a minha carta fechada (e a do raio-x) no 3D
       if (this.ativa === M) this.desenhar();
     });
@@ -533,7 +626,7 @@ export class Cartas {
     const vol = sentado ? 1 : Math.max(0.15, 1 - d / OUVE_ATE);
     const pedido = PEDIDOS.includes(tipo);
     const boneco = this.bonecoDe(M, lugar);
-    if (pedido) {
+    if (pedido || tipo === 'bateu' || tipo === 'bateu10') {
       this.sfx.murroMesa?.(vol);
       M.pulo = 1;
       boneco?.punch();
@@ -738,6 +831,7 @@ export class Cartas {
       if (e.meta !== antes.meta) this.pular(this.$('.ct-meta'));
       if (e.fase === 'fimDaRodada' && antes.fase !== 'fimDaRodada') this.sfx.rodada?.();
     }
+    if (e.jogo === 'cacheta' && antes) this.lancesCacheta(M, e, antes);
     if (e.fase === 'fim' && antes?.fase !== 'fim') {
       const ganhei = e.jogo === 'truco' ? e.vencedor === meuTime : e.vencedor === M.lugar;
       this.fim(ganhei, comDuplas(e.aviso, meuTime), e);
@@ -843,6 +937,36 @@ export class Cartas {
           });
         }
         if (e.monte) por(15, 'verso',{ x: M.m.x, y: Y_MESA + 0.006, z: M.m.z, ry: Math.PI / 2 + 0.15, esc: 0.78 }, { chave: 'monte' });
+      } else if (e.jogo === 'cacheta') {
+        const cur = e.curinga;
+        const mx = M.m.x;
+        const mz = M.m.z;
+        // o vira atravessado embaixo do monte, e o lixo do lado
+        if (e.vira) por(0, faceC(e.vira, null), { x: mx - 0.3, y: Y_MESA + 0.004, z: mz, ry: Math.PI / 2, esc: 0.75 }, { chave: `vira:${e.vira}` });
+        if (e.monte) por(1, 'verso', { x: mx - 0.3, y: Y_MESA + 0.012, z: mz + 0.06, ry: 0.1, esc: 0.75 }, { chave: 'monte' });
+        if (e.topoLixo) {
+          // o descarte novo voa da cadeira de quem descartou (o meu já voou pela tela: ver voarCarta)
+          const novo = e.topoLixo !== antes?.topoLixo && e.ultimo?.carta === e.topoLixo;
+          const c = novo ? cadeira(M.m, e.ultimo.lugar) : null;
+          const de = c && !(this.ativa === M && e.ultimo.lugar === M.lugar) ? { x: c.x, y: 1.2, z: c.z } : null;
+          por(2, faceC(e.topoLixo, cur), { x: mx + 0.3, y: Y_MESA + 0.014, z: mz, ry: -0.25, esc: 0.75 }, { de, chave: `lixo:${e.topoLixo}:${e.lixoN}` });
+        }
+        // a batida: os jogos de quem bateu, abertos na frente da cadeira dele (um respiro entre os jogos)
+        const b = e.batida;
+        if (b) {
+          const c = cadeira(M.m, b.lugar);
+          const dx = (c.x - mx) / R_CADEIRA;
+          const dz = (c.z - mz) / R_CADEIRA;
+          const fila = b.grupos.flatMap((g) => g.map((carta, j) => ({ carta, j })));
+          const passo = 0.13;
+          let off = -((fila.length - 1) * passo + (b.grupos.length - 1) * 0.08) / 2;
+          fila.forEach((x, i) => {
+            if (i && !x.j) off += 0.08;
+            const alvo = { x: mx + dx * 0.62 - dz * off, y: Y_MESA + 0.016 + i * 0.002, z: mz + dz * 0.62 + dx * off, ry: -c.a + Math.PI / 2, esc: 0.5 };
+            if (3 + i < cartas.length) por(3 + i, faceC(x.carta, cur), alvo, { de: { x: c.x, y: 1.2, z: c.z }, chave: `bat:${e.maoN}:${x.carta}` });
+            off += passo;
+          });
+        }
       } else if (e.topo) {
         // quem pôs a carta no topo é a vez anterior (a vez já passou ao próximo). A minha carta já
         // voou pela tela (ver voarCarta): no 3D ela só aparece no lugar dela.
@@ -932,7 +1056,8 @@ export class Cartas {
     this.escolha.querySelector('h3').textContent = `Sentar na mesa de ${NOME_JOGO[M.m.jogo]}`;
     this.escolha.querySelector('p').textContent = truco
       ? 'No truco a dupla é você e quem senta do outro lado. A cor da borda mostra a dupla da cadeira.'
-      : 'Escolha a cadeira: nas de robô, ele levanta para você.';
+      : M.m.jogo === 'cacheta' ? 'Cada um por si: 9 cartas, dois baralhos e o curinga do vira. Nas cadeiras de robô, ele levanta para você.'
+        : 'Escolha a cadeira: nas de robô, ele levanta para você.';
     this.escolha.querySelector('.ct-roda').innerHTML = [...Array(n)].map((_, k) => {
       const l = e?.lugares[k];
       const a = -Math.PI / 2 + (k * Math.PI * 2) / n;
@@ -996,6 +1121,7 @@ export class Cartas {
     this.world.setNitidez?.(0);
     this.desloc.alvoX = this.desloc.alvoY = 0;
     this.coberta = false;
+    this.baterC = false;
     this.esperandoCor = null;
     this.cores.hidden = true;
     this.raiz.hidden = true;
@@ -1019,6 +1145,7 @@ export class Cartas {
     const e = M.e;
     if (!e || e.fase !== 'jogando' || e.vez !== M.lugar) return false;
     if (e.jogo === 'vinteum') return false; // no 21 não se joga carta: pede, para ou usa trunfo
+    if (e.jogo === 'cacheta') return this.podeDescartar(M, c);
     if (e.jogo === 'truco') return !e.pedido && !this.emPausa(M);
     return podeJogarUno(c, e.topo, e.cor);
   }
@@ -1044,6 +1171,18 @@ export class Cartas {
       this.cores.hidden = false;
       return;
     }
+    if (M.e?.jogo === 'cacheta') {
+      // o descarte (ou, batendo, a carta que vai para o lixo)
+      const bater = this.baterC;
+      this.baterC = false;
+      this.voarCarta(carta, false);
+      this.socket?.emit('ct-cacheta', { mesa: M.i, acao: bater ? 'bater' : 'descartar', carta }, (r) => {
+        if (bater && !r?.ok) hud.mensagem('Não deu para bater', 'A mão toda tem que fechar em jogos', 1600);
+      });
+      this.sfx.dado(0.8);
+      this.sfx.cartaVoa?.();
+      return;
+    }
     this.voarCarta(carta, coberta);
     this.socket?.emit('ct-jogar', { mesa: M.i, carta, coberta: M.e?.jogo === 'truco' && coberta });
     this.coberta = false;
@@ -1058,7 +1197,7 @@ export class Cartas {
     const el = this.mao.querySelector(`[data-carta="${CSS.escape(carta)}"] .ct-face`);
     if (!el || !M) return;
     const r = el.getBoundingClientRect();
-    const p = M.e?.jogo === 'truco' ? naMesa(M.m, M.lugar, 0.45) : { x: M.m.x, z: M.m.z };
+    const p = M.e?.jogo === 'truco' ? naMesa(M.m, M.lugar, 0.45) : M.e?.jogo === 'cacheta' ? { x: M.m.x + 0.3, z: M.m.z } : { x: M.m.x, z: M.m.z };
     const v = new THREE.Vector3(p.x, Y_MESA, p.z).project(this.world.camera);
     const x = ((v.x + 1) / 2) * innerWidth;
     const y = ((1 - v.y) / 2) * innerHeight;
@@ -1095,6 +1234,19 @@ export class Cartas {
         ev.preventDefault();
         this.emit21(ev.code === 'Space' ? 'pedir' : 'parar');
       }
+      return;
+    }
+    if (M.e?.jogo === 'cacheta') {
+      // 1 a 9 e 0 (a 10ª): descarta a carta; espaço: compra do monte; L: pega o lixo; B: bate
+      const i = ev.key === '0' ? 9 : n - 1;
+      if (i >= 0 && i <= 9) {
+        const c = this.maoOrdenada(M)[i];
+        if (c) this.clicarCarta(c, this.mao.querySelector(`[data-carta="${CSS.escape(c)}"]`));
+      } else if (ev.code === 'Space') {
+        ev.preventDefault();
+        this.emitCacheta('monte');
+      } else if (ev.code === 'KeyL') this.emitCacheta('lixo');
+      else if (ev.code === 'KeyB') this.baterCacheta();
       return;
     }
     if (n >= 1 && n <= 9) {
@@ -1142,11 +1294,93 @@ export class Cartas {
 
   maoOrdenada(M) {
     const e = M.e;
+    if (e?.jogo === 'cacheta') return this.arrumadaC(M).cartas;
     return e?.jogo === 'truco' && !e.ferro ? [...M.mao].sort((a, b) => forcaTruco(a) - forcaTruco(b)) : M.mao;
   }
 
   emPausa(M) {
     return performance.now() < (M.pausaAte || 0);
+  }
+
+  // ---------------------------------------------------------------- cacheta
+  minhaVezC(M = this.ativa) {
+    const e = M?.e;
+    return !!e && e.jogo === 'cacheta' && e.fase === 'jogando' && e.vez === M.lugar;
+  }
+
+  // comprar do monte ou pegar o lixo (o servidor confere de novo)
+  emitCacheta(acao) {
+    const M = this.ativa;
+    if (!this.minhaVezC(M) || M.e.etapa !== 'comprar') return;
+    if (acao === 'lixo' && !M.e.topoLixo) return hud.mensagem('O lixo está vazio', 'Compre do monte', 1400);
+    this.socket?.emit('ct-cacheta', { mesa: M.i, acao });
+    this.sfx.cartaVoa?.();
+  }
+
+  // Bater: com as 10 vai direto; com 9, liga o modo de bater e o próximo clique escolhe a carta que
+  // vai para o lixo (se só uma serve, bate com ela). Apertar de novo desliga.
+  baterCacheta() {
+    const M = this.ativa;
+    if (!this.minhaVezC(M) || M.e.etapa !== 'descartar') return;
+    const b = this.bateC(M);
+    if (b.dez) {
+      this.socket?.emit('ct-cacheta', { mesa: M.i, acao: 'bater' });
+      this.sfx.cartaVoa?.();
+      return;
+    }
+    if (!b.descartes.length) return hud.mensagem('Ainda não dá para bater', 'A mão toda tem que fechar em jogos', 1600);
+    this.baterC = !this.baterC;
+    if (this.baterC && new Set(b.descartes.map(faceCacheta)).size === 1) return this.jogar(b.descartes[0]);
+    this.desenhar();
+  }
+
+  // cacheta, depois de comprar: qualquer carta menos a que veio do lixo; batendo, só as que deixam a
+  // mão fechada
+  podeDescartar(M, c) {
+    if (M.e.etapa !== 'descartar') return false;
+    if (this.baterC) return this.bateC(M).descartes.includes(c);
+    return c !== M.e.doLixo;
+  }
+
+  // dá para bater com a mão que tenho? (as contas de comoBaterCacheta, guardadas até a mão mudar)
+  bateC(M) {
+    const e = M.e;
+    const chave = `${M.mao.join()}|${e?.vira}`;
+    if (this._bateC?.chave !== chave) {
+      this._bateC = { chave, ...(M.mao.length > CARTAS_CACHETA ? comoBaterCacheta(M.mao, e?.curinga) : { dez: null, descartes: [] }) };
+    }
+    return this._bateC;
+  }
+
+  // A mão arrumada: os jogos primeiro (cada um junto, com um respiro antes) e as soltas depois; ou
+  // por naipe; ou por valor (o curinga no fim). ini: as cartas que abrem um jogo; naJogo: as que
+  // estão em algum jogo (a faixinha verde embaixo).
+  arrumadaC(M) {
+    const e = M.e;
+    this.ordemC ||= 'jogos';
+    const chave = `${M.mao.join()}|${e?.vira}|${this.ordemC}`;
+    if (this._arrumadaC?.chave === chave) return this._arrumadaC;
+    const cur = e?.curinga;
+    const a = arranjoCacheta(M.mao, cur);
+    const peso = (x, porValor) => {
+      const l = lerCacheta(x);
+      if (!l) return 999;
+      return (ehCuringa(x, cur) ? 500 : 0) + (porValor ? l.v * 10 + NAIPES.indexOf(l.n) : NAIPES.indexOf(l.n) * 20 + l.v);
+    };
+    const ini = new Set();
+    let cartas;
+    if (this.ordemC === 'jogos') {
+      cartas = [];
+      for (const g of a.grupos) {
+        ini.add(g[0]);
+        cartas.push(...g);
+      }
+      const soltas = [...a.soltas].sort((x, y) => peso(x) - peso(y));
+      if (soltas.length) ini.add(soltas[0]);
+      cartas.push(...soltas);
+    } else cartas = [...M.mao].sort((x, y) => peso(x, this.ordemC === 'valor') - peso(y, this.ordemC === 'valor'));
+    this._arrumadaC = { chave, cartas, ini, naJogo: new Set(a.grupos.flat()) };
+    return this._arrumadaC;
   }
 
   // ---------------------------------------------------------------- o painel (Balatro)
@@ -1443,6 +1677,33 @@ body.touch .ct-arremesso button { width: 44px; height: 44px; font-size: 22px; }
 body.touch .ct-trunfo kbd, body.touch .ct-b kbd { display: none; }
 /* os itens do placar encolhem junto com a coluna (antes o maior esticava todos e a coluna cortava) */
 body.touch .ct-lado > * { min-width: 0; }
+/* cacheta: os pontos de cada um, o vira e o curinga, a mão arrumada em jogos */
+.ct-titulo.cacheta { background: #009dff; box-shadow: 0 4px 0 #00609c; }
+body.touch .ct-titulo.cacheta { box-shadow: 0 3px 0 #00609c; }
+.ct-pontosc, .ct-vira { padding: 6px 8px 8px; }
+.ct-pontosc small, .ct-vira small { display: block; font-size: 11px; color: #a9bfc2; text-align: center; letter-spacing: .08em; }
+.ct-quemc { display: grid; gap: 3px; margin-top: 4px; }
+.ct-quemc p { display: flex; justify-content: space-between; align-items: center; gap: 6px; margin: 0; padding: 2px 6px; border-radius: 6px; background: #2b3d40; font-size: 13px; }
+.ct-quemc p span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ct-quemc p b { font: 800 16px ${NUMERO}; }
+.ct-quemc p.eu { background: #009dff; box-shadow: 0 2px 0 #00609c; }
+.ct-quemc p.quebrou { opacity: .55; text-decoration: line-through; }
+.ct-quemc p.espera { opacity: .7; }
+.ct-vira { display: grid; justify-items: center; gap: 4px; }
+.ct-viraimg { display: flex; gap: 6px; }
+.ct-viraimg img { width: 34px; height: 45px; border-radius: 4px; box-shadow: 0 2px 0 rgba(0,0,0,.35); }
+.ct-curinga { font-style: normal; font-size: 12px; color: #f5b244; text-align: center; }
+.ct-vira small b { color: #fff; font: 800 13px ${NUMERO}; }
+.ct-regrasc { text-align: left; }
+.ct-carta.ini:not(:first-child) { margin-left: calc(var(--junta, -6px) + 12px); }
+.ct-carta.jogo::after { content: ''; position: absolute; left: 14%; right: 14%; bottom: -7px; height: 4px; border-radius: 3px; background: #4bc292; box-shadow: 0 1px 0 #2b7a5b; }
+.ct-mao.cacheta:not(.escolhe) .ct-carta .ct-face { filter: none; }
+.ct-mao.batendo .ct-carta.pode .ct-face { box-shadow: 0 6px 0 rgba(0,0,0,.28), 0 0 0 3px #f5b244, 0 0 16px #f5b244; }
+.ct-b.ouro.liga { box-shadow: 0 4px 0 var(--sombra), 0 0 0 3px #fff, 0 0 18px #f5b244; }
+.ct-lixob img { width: 20px; height: 27px; margin: -4px 7px -4px 0; vertical-align: middle; border-radius: 3px; box-shadow: 0 2px 0 rgba(0,0,0,.35); }
+.ct-res.ct-jogosc { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+body.touch .ct-viraimg img { width: 26px; height: 35px; }
+body.touch .ct-quemc p { font-size: 11px; } body.touch .ct-quemc p b { font-size: 14px; }
 body { --ct-vh: 1vh; }
 @supports (height: 1dvh) { body { --ct-vh: 1dvh; } }
 /* Celular deitado, do pequeno (SE: 667×320 com a barra do Safari) ao grande (Pro Max: 932×430). Falta
@@ -1721,6 +1982,16 @@ body { --ct-vh: 1vh; }
       return this.emitTruco(acao.slice(6));
     }
     if (acao?.startsWith('uno:')) return this.socket?.emit('ct-uno', { mesa, acao: acao.slice(4) });
+    if (acao?.startsWith('cacheta:')) {
+      const a = acao.slice(8);
+      if (a === 'ordem') {
+        // arrumar a mão: jogos → naipe → valor
+        this.ordemC = { jogos: 'naipe', naipe: 'valor', valor: 'jogos' }[this.ordemC] || 'jogos';
+        return this.desenhar();
+      }
+      if (a === 'bater') return this.baterCacheta();
+      return this.emitCacheta(a);
+    }
   }
 
   desenhar() {
@@ -1749,7 +2020,8 @@ body { --ct-vh: 1vh; }
     const baixo = this.$('.ct-baixo');
     // no celular deitado a .ct-baixo vai do placar até a borda; no resto ela cresce com a mão
     const largura = getComputedStyle(baixo).right === 'auto' ? innerWidth * 0.96 : baixo.clientWidth;
-    const livre = largura - this.$('.ct-esq').offsetWidth - this.$('.ct-dir').offsetWidth - 40;
+    // (o respiro antes de cada jogo da cacheta também ocupa a largura)
+    const livre = largura - this.$('.ct-esq').offsetWidth - this.$('.ct-dir').offsetWidth - 40 - this.mao.querySelectorAll('.ini:not(:first-child)').length * 12;
     const cabe = (livre / n - w) / 2;
     const junta = Math.max(-w * 0.36, Math.min(this.juntaBase, cabe));
     this.mao.style.setProperty('--junta', `${junta.toFixed(1)}px`);
@@ -1760,6 +2032,7 @@ body { --ct-vh: 1vh; }
     const lado = this.$('.ct-lado');
     const truco = e.jogo === 'truco';
     const v21 = e.jogo === 'vinteum';
+    const cacheta = e.jogo === 'cacheta';
     const meuTime = M.lugar % 2;
     const espera = e.fase === 'espera' || e.fase === 'fim';
     const chave = `${e.jogo}:${espera}`;
@@ -1769,7 +2042,9 @@ body { --ct-vh: 1vh; }
 <div class="ct-dica">${paraToque('Sente quem quiser e clique em Começar: a mesa completa com robôs')}</div>`;
       const manilhas = [...MANILHAS].reverse().map((c) => `<img src="${urlCarta(c)}" alt="${NOME_MANILHA[c]}" title="${NOME_MANILHA[c]}">`).join('');
       const conta = Array.from({ length: MAX_21 }, (_, i) => `<i data-n="${i + 1}">${i + 1}</i>`).join('');
-      lado.innerHTML = v21
+      lado.innerHTML = cacheta
+        ? this.ladoCacheta(espera, comecar)
+        : v21
         ? `<div class="ct-titulo v21 ondas">${ondas('21')}</div>
 <div class="ct-placar ct-caixa"><div><small>VOCÊ</small><b class="ct-num azul" data-p="nos">${DEDOS_21}</b><span class="ct-dedos" data-d="nos"></span></div><span class="ct-x">×</span><div><small>RIVAL</small><b class="ct-num vermelho" data-p="eles">${DEDOS_21}</b><span class="ct-dedos" data-d="eles"></span></div></div>
 <div class="ct-apostas"><div class="ct-linha2 ct-caixa"><small>META</small><b class="ct-meta">21</b></div>
@@ -1843,6 +2118,8 @@ ${espera ? comecar : ''}<button type="button" class="ct-b cinza" data-acao="sair
         const n = Number(el.dataset.n);
         el.className = minhas.has(n) ? 'minha' : dele.has(n) ? 'rival' : fora.has(n) ? 'fora' : '';
       });
+    } else if (cacheta) {
+      this.atualizarLadoC(M, e, lado);
     } else {
       lado.querySelector('.ct-monte').textContent = e.monte ?? '–';
       const s = lado.querySelector('.ct-sentido');
@@ -1851,6 +2128,75 @@ ${espera ? comecar : ''}<button type="button" class="ct-b cinza" data-acao="sair
       const cor = lado.querySelector('.ct-uno-cor');
       cor.style.background = HEX_COR[e.cor] || '#5f7377';
       cor.title = NOME_COR[e.cor] || '';
+    }
+  }
+
+  // cacheta: os pontos de cada um, o vira e o curinga, o monte e o botão de arrumar a mão (antes de
+  // começar, as regras em duas linhas)
+  ladoCacheta(espera, comecar) {
+    return `<div class="ct-titulo cacheta ondas">${ondas('CACHETA')}</div>
+<div class="ct-pontosc ct-caixa" hidden><small>PONTOS</small><div class="ct-quemc"></div></div>
+<div class="ct-vira ct-caixa" hidden><small>VIRA · CURINGA</small><span class="ct-viraimg"></span><em class="ct-curinga"></em><small>MONTE <b class="ct-monte">–</b></small></div>
+${espera ? '<div class="ct-dica ct-regrasc">Feche as 9 cartas em jogos: trinca (o mesmo valor, naipes diferentes) ou sequência (o mesmo naipe). Bater com 9 tira 1 ponto de cada um; com 10, tira 2.</div>'
+    : '<button type="button" class="ct-b cinza" data-acao="cacheta:ordem" title="Arrumar a mão">↕ <span class="ct-ordem"></span></button>'}
+<div class="ct-mesa-acoes">${espera ? comecar : ''}<button type="button" class="ct-b cinza" data-acao="sair">Sair da mesa</button></div>`;
+  }
+
+  atualizarLadoC(M, e, lado) {
+    const cur = e.curinga;
+    // os pontos: eu primeiro, depois a mesa na ordem das cadeiras (quem senta no meio da partida espera)
+    const quem = e.lugares.map((l, k) => ({ l, k })).filter(({ l, k }) => l && (e.joga?.[k] || k === M.lugar))
+      .sort((a, b) => (a.k === M.lugar ? -1 : b.k === M.lugar ? 1 : a.k - b.k));
+    const pontos = quem.map(({ l, k }) => {
+      const p = e.pontos?.[k] ?? 0;
+      const fora = !e.joga?.[k] ? 'espera' : p <= 0 ? 'quebrou' : '';
+      const eu = k === M.lugar;
+      return `<p class="${eu ? 'eu' : ''} ${fora}"><span>${eu ? 'Você' : `${l.bot ? '🤖 ' : ''}${esc(l.nome)}`}</span><b${eu ? ' data-p="nos"' : ''}>${fora === 'espera' ? '⏳' : fora ? '💀' : p}</b></p>`;
+    }).join('');
+    const caixa = lado.querySelector('.ct-quemc');
+    caixa.parentElement.hidden = !e.joga;
+    if (caixa.dataset.html !== pontos) {
+      caixa.dataset.html = pontos;
+      caixa.innerHTML = pontos;
+    }
+    lado.querySelector('.ct-vira').hidden = !e.vira;
+    const vira = e.vira ? `<img src="${urlCarta(faceC(e.vira, null))}" alt="Vira ${esc(nomeCartaCacheta(e.vira))}" title="O vira">`
+      + (cur ? `<img src="${urlCarta(exemploCuringa(cur))}" alt="Curinga" title="${esc(`Curinga: ${nomeCuringa(cur)}`)}">` : '') : '';
+    const img = lado.querySelector('.ct-viraimg');
+    if (img.dataset.html !== vira) {
+      img.dataset.html = vira;
+      img.innerHTML = vira;
+    }
+    lado.querySelector('.ct-curinga').textContent = cur ? nomeCuringa(cur) : '';
+    lado.querySelector('.ct-monte').textContent = e.monte ?? '–';
+    const ordem = lado.querySelector('.ct-ordem');
+    if (ordem) ordem.textContent = { jogos: 'Jogos', naipe: 'Naipe', valor: 'Valor' }[this.ordemC || 'jogos'];
+  }
+
+  // cacheta: o que mudou na mesa — o descarte de alguém (o balão com a carta), quem pegou o lixo, a
+  // batida (a faixa grande) e os meus pontos caindo
+  lancesCacheta(M, e, antes) {
+    const cur = e.curinga;
+    const u = e.ultimo;
+    if (u && e.lixoN > (antes.lixoN ?? 0) && e.maoN === antes.maoN && u.lugar !== M.lugar) {
+      this.balao(u.lugar, 'descartou', false, '', faceC(u.carta, cur));
+      this.sfx.cartaVoa?.();
+    }
+    if (e.doLixo && e.doLixo !== antes.doLixo && e.vez !== M.lugar) this.balao(e.vez, 'pegou do lixo', true, '', faceC(e.doLixo, cur));
+    if (e.batida && !antes.batida) {
+      const b = e.batida;
+      const eu = b.lugar === M.lugar;
+      const perde = b.com10 ? 2 : 1;
+      const quem = eu ? 'os outros perdem' : e.joga?.[M.lugar] && (antes.pontos?.[M.lugar] ?? 0) > 0 ? 'você perde' : 'cada um perde';
+      this.faixaGrito(b.com10 ? 'BATEU DE 10!' : 'BATEU!', `${eu ? 'Você' : e.lugares[b.lugar]?.nome || ''} bateu: ${quem} ${perde} ponto${perde > 1 ? 's' : ''}`, eu);
+      this.flash(eu ? '#009dff' : '#fe5f55');
+      if (eu) this.sfx.finish?.();
+      else this.sfx.punchTaken?.();
+    }
+    if ((e.pontos?.[M.lugar] ?? 0) < (antes.pontos?.[M.lugar] ?? 0)) {
+      this.pular(this.$('[data-p="nos"]'));
+      this.tremerHud();
+      this.player.addShake?.(0.5);
     }
   }
 
@@ -1876,6 +2222,8 @@ ${espera ? comecar : ''}<button type="button" class="ct-b cinza" data-acao="sair
       const dorso = '<i></i>'.repeat(Math.min(7, l.cartas));
       const placa = e.jogo === 'vinteum'
         ? `${l.bot ? '🤖 ' : ''}${esc(l.nome)} · ✋${e.vidas?.[k] ?? DEDOS_21} · 🃏${e.trunfosN?.[k] ?? 0}`
+        : e.jogo === 'cacheta' && e.joga
+        ? `${l.bot ? '🤖 ' : ''}${esc(l.nome)}<span class="ct-dorso">${dorso}</span> ${!e.joga[k] ? '⏳' : (e.pontos?.[k] ?? 0) > 0 ? `❤️${e.pontos[k]}` : '💀'}`
         : `${l.bot ? '🤖 ' : ''}${esc(l.nome)}<span class="ct-dorso">${dorso}</span>${l.cartas > 7 ? `+${l.cartas - 7}` : ''}`;
       const p = el.querySelector('.ct-placa');
       if (p.dataset.html !== placa) {
@@ -1909,6 +2257,10 @@ ${espera ? comecar : ''}<button type="button" class="ct-b cinza" data-acao="sair
     const el = this.$('.ct-aviso');
     const minhaVez = e.vez === M.lugar && e.fase === 'jogando';
     let aviso = comDuplas(e.aviso, M.lugar % 2);
+    if (e.jogo === 'cacheta' && e.fase === 'jogando') {
+      if (minhaVez) aviso = e.etapa === 'comprar' ? 'Sua vez: compre do monte ou pegue o lixo' : this.baterC ? 'Escolha a carta que vai para o lixo' : 'Descarte uma carta';
+      else if (!aviso && !e.joga?.[M.lugar]) aviso = 'Você entra na próxima partida';
+    }
     if (e.fase === 'jogando' && !aviso) aviso = minhaVez ? (e.ferro ? 'Sua vez! (mão de ferro: sai a de cima)' : 'Sua vez!') : `Vez de ${e.lugares[e.vez]?.nome || '…'}`;
     if (e.fase === 'espera') aviso = 'Esperando começar';
     if (el.textContent === aviso) return;
@@ -1959,6 +2311,16 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
           : ganhei ? `${nome} perde ${dedos(r.dano)}` : `Você perde ${dedos(r.dano)}`;
       html = `<h2 class="ondas ${empate ? 'empate' : ganhei ? 'ganhou' : ''}">${ondas(empate ? 'EMPATE' : ganhei ? 'GANHOU!' : 'PERDEU!')}</h2>
 <div class="ct-res">${mao(eu, 'VOCÊ')}<span class="ct-x">×</span>${mao(ele, nome)}</div><p>${sub} · meta ${r.meta}</p>`;
+    }
+    if (!chave && e.jogo === 'cacheta' && (e.fase === 'fimDaMao' || e.fase === 'fim') && e.batida) {
+      // cacheta: quem bateu e os jogos dele
+      const b = e.batida;
+      const eu = b.lugar === M.lugar;
+      const perde = b.com10 ? 2 : 1;
+      chave = `bat:${e.maoN}`;
+      html = `<h2 class="ondas ${eu ? 'ganhou' : ''}">${ondas(b.com10 ? 'BATEU DE 10!' : 'BATEU!')}</h2>
+<p>${eu ? 'Você' : esc(e.lugares[b.lugar]?.nome || '')} bateu${b.com10 ? ' com as 10' : ''}: ${eu ? 'os outros perdem' : 'cada um perde'} ${perde} ponto${perde > 1 ? 's' : ''}</p>
+<div class="ct-res ct-jogosc">${b.grupos.map((g) => `<span class="ct-cartas">${g.map((c) => `<img src="${urlCarta(faceC(c, e.curinga))}" alt="${esc(nomeCartaCacheta(c))}">`).join('')}</span>`).join('')}</div>`;
     }
     if (chave === this.chavePergunta) return;
     this.chavePergunta = chave;
@@ -2070,9 +2432,42 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
     for (let i = antes; i < n; i++) setTimeout(() => this.sfx.cartaSel?.(i), (i - antes) * 120);
   }
 
+  // cacheta: a mão arrumada (ver arrumadaC), com um respiro antes de cada jogo e a faixinha verde
+  // embaixo das cartas que já estão em jogo. A carta que veio do lixo leva a etiqueta (não pode voltar).
+  desenharMaoCacheta(M, e) {
+    const { cartas: mao, ini, naJogo } = this.arrumadaC(M);
+    const pode = mao.map((c) => this.podeJogar(M, c));
+    const vez = this.minhaVezC(M);
+    this.mao.classList.toggle('vez', vez);
+    this.mao.classList.toggle('escolhe', vez && e.etapa === 'descartar');
+    this.mao.classList.toggle('batendo', !!this.baterC);
+    const chave = `${M.i}:c:${mao.join(',')}:${pode.join(',')}:${e.doLixo}:${e.curinga?.v}`;
+    if (chave === this.chaveMao) return;
+    this.chaveMao = chave;
+    const n = mao.length;
+    const meio = (n - 1) / 2;
+    const passo = Math.min(n > 8 ? 2.5 : 4, 24 / Math.max(1, n - 1));
+    const desce = Math.min(16, meio * meio);
+    this.juntaBase = (n > 4 ? -Math.min(40, 6 + (n - 4) * 5) : -6) / 2;
+    this.mao.style.setProperty('--junta', `${this.juntaBase}px`);
+    const distribuir = this.distribuir;
+    this.distribuir = false;
+    const cur = e.curinga;
+    this.mao.innerHTML = mao.map((c, i) => {
+      const off = i - meio;
+      const estilo = `--rot:${(off * passo).toFixed(2)}deg;--desce:${meio ? ((off / meio) ** 2 * desce).toFixed(1) : 0}px;--atraso:${-i * 0.37}s;--chega:${i * 0.07}s`;
+      const classe = `ct-carta${pode[i] ? ' pode' : ''}${distribuir ? ' chega' : ''}${ini.has(c) ? ' ini' : ''}${naJogo.has(c) ? ' jogo' : ''}`;
+      return `<button type="button" class="${classe}" data-carta="${esc(c)}" style="${estilo}" aria-label="${esc(nomeCartaCacheta(c))}${ehCuringa(c, cur) ? ' (curinga)' : ''}">`
+        + `<div class="ct-balanca"><div class="ct-face" style="background-image:url(${urlCarta(faceC(c, cur))})"></div></div>${c === e.doLixo ? '<span class="ct-fechada">do lixo</span>' : ''}</button>`;
+    }).join('');
+    if (distribuir && n) mao.forEach((_, i) => setTimeout(() => this.sfx.cartaSel?.(i), i * 70));
+  }
+
   // a mão: refeita só quando muda o que tem nela (senão as cartas pulavam a cada aviso)
   desenharMao(M, e) {
+    this.mao.classList.toggle('cacheta', e.jogo === 'cacheta');
     if (e.jogo === 'vinteum') return this.desenharMao21(M, e);
+    if (e.jogo === 'cacheta') return this.desenharMaoCacheta(M, e);
     this.mao.classList.remove('v21');
     const mao = this.maoOrdenada(M);
     const pode = mao.map((c) => this.podeJogar(M, c));
@@ -2139,6 +2534,20 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
       esq.push(`<button type="button" class="ct-b verde grande" data-acao="v21:pedir" title="${calado ? 'O rival pôs Silêncio na mesa' : 'Espaço'}"${vez && e.monte && !calado ? '' : ' disabled'}>${calado ? '🤐 Calado' : 'Pedir carta'}</button>`);
       if (vez) dir.push('<div class="ct-vez21">SUA VEZ!</div>');
       dir.push(`<button type="button" class="ct-b vermelho grande" data-acao="v21:parar" title="S"${vez ? '' : ' disabled'}>Parar</button>`);
+    }
+    if (e.jogo === 'cacheta') {
+      // comprar (do monte ou o lixo) e, depois de comprar, bater quando a mão fecha
+      if (!(minhaVez && e.etapa === 'descartar')) this.baterC = false;
+      if (minhaVez && e.etapa === 'comprar') {
+        const topo = e.topoLixo;
+        esq.push('<button type="button" class="ct-b verde grande" data-acao="cacheta:monte" title="Espaço">Comprar<kbd>␣</kbd></button>');
+        esq.push(`<button type="button" class="ct-b laranja ct-lixob" data-acao="cacheta:lixo" title="L"${topo ? '' : ' disabled'}>${topo ? `<img src="${urlCarta(faceC(topo, e.curinga))}" alt="">` : ''}Pegar o lixo<kbd>L</kbd></button>`);
+      } else if (minhaVez && e.etapa === 'descartar') {
+        const b = this.bateC(M);
+        if (b.dez) dir.push('<button type="button" class="ct-b ouro grande truco" data-acao="cacheta:bater" title="B">Bater de 10!<kbd>B</kbd></button>');
+        else if (b.descartes.length) dir.push(`<button type="button" class="ct-b ouro grande truco${this.baterC ? ' liga' : ''}" data-acao="cacheta:bater" title="B">${this.baterC ? 'Qual vai pro lixo?' : 'Bater!'}<kbd>B</kbd></button>`);
+        else this.baterC = false;
+      }
     }
     if (e.fase !== 'espera') dir.push('<button type="button" class="ct-b roxo" data-acao="zoar" title="Zoar a mesa (Z: frase aleatória)">📣 Zoar<kbd>Z</kbd></button>');
     // o sinal do truco: só aparece com um parceiro de gente na mesa (robô não lê cochicho)
@@ -2414,7 +2823,7 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
 
   // o painel do parque mostra "Truco, Uno e 21" se um dos três estiver ligado
   algumLigado() {
-    return this.ligado('truco') || this.ligado('uno') || this.ligado('vinteum');
+    return this.ligado('truco') || this.ligado('uno') || this.ligado('vinteum') || this.ligado('cacheta');
   }
 
   apertou() { return false; }
@@ -2428,12 +2837,13 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
     const M = this.mesaPerto();
     if (!M || !this.ligado(M.m.jogo)) return '';
     const gente = M.e?.lugares.filter((l) => l && !l.bot).length || 0;
-    const nome = { truco: 'truco', uno: 'uno', vinteum: '21' }[M.m.jogo];
+    const nome = { truco: 'truco', uno: 'uno', vinteum: '21', cacheta: 'cacheta' }[M.m.jogo];
     return `<kbd>E</kbd>Sentar na mesa de ${nome}${gente ? ` (${gente} ${gente === 1 ? 'pessoa' : 'pessoas'})` : ''}`;
   }
 
-  lugar() {
-    const m = MESAS_CARTAS[0];
-    return { nome: 'Truco, Uno e 21', desc: 'Mesas de cartas do salão · com robôs', cor: '#f87171', pos: [m.x, 0, m.z - R_CADEIRA - 0.7], yaw: Math.PI };
+  // jogo: a mesa de um jogo só (o catálogo leva direto à da cacheta); sem ele, a primeira
+  lugar(jogo) {
+    const m = MESAS_CARTAS.find((x) => x.jogo === jogo) || MESAS_CARTAS[0];
+    return { nome: 'Truco, Uno, 21 e Cacheta', desc: 'Mesas de cartas do salão · com robôs', cor: '#f87171', pos: [m.x, 0, m.z - R_CADEIRA - 0.7], yaw: Math.PI };
   }
 }

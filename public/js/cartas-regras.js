@@ -62,6 +62,12 @@ export const GRITOS = {
   unocompra: ['Comprou e passou!'],
   unoesqueceu: ['Ah, esqueci o UNO!'],
   pegouno: ['Não falou UNO!'],
+  // a cacheta: bater (com 9 e com 10), pegar do lixo, ficar a uma carta de bater e quebrar (sair)
+  bateu: ['Bati!', 'Batida!', 'Bati, cambada!', 'Acabou, bati!', 'Cacheta, uai!'],
+  bateu10: ['Bati de dez!', 'De dez, sô! Perde dois!', 'Batida de dez!'],
+  lixo: ['Essa eu quero!', 'Vem pro papai!', 'Brigado pelo presente!', 'Esse lixo é meu!'],
+  naboa: ['Tô na boa!', 'Tô pifado!', 'Tô de boa, hein!'],
+  quebrou: ['Quebrei!', 'Tô fora dessa, sô.', 'Fui de arrasta!'],
 };
 // A zoeira: o que dá para gritar na mesa a qualquer hora (o botão de megafone), no truco e no uno.
 // Os robôs também zoam quando fazem uma rodada, e de vez em quando soltam uma do nada no meio do jogo.
@@ -238,6 +244,153 @@ export function sortearTrunfo21(aleatorio = Math.random) {
   return lista[0][0];
 }
 
+// ------------------------------------------------------------------ cacheta
+// Dois baralhos de 52, sem os coringas de verdade (104 cartas). Cada um recebe 9; depois vira-se
+// uma carta (o vira) e o curinga da mão é o valor seguinte ao dele, na mesma cor (vira 8♣: os 9
+// pretos; depois do K vem o A). Na vez: compra do monte ou pega a de cima do lixo e descarta. Bate
+// quem fecha a mão em jogos: trinca (o mesmo valor, de 3 naipes diferentes; a 4ª e a 5ª podem
+// repetir naipe, são dois baralhos) ou sequência (o mesmo naipe, A-2-3 até Q-K-A, sem dar a volta).
+// No máximo um curinga fazendo papel de outra carta em cada jogo. Bater com 9 (descarta a 10ª):
+// cada um dos outros perde 1 ponto; com as 10 (sem descartar): perdem 2. Sem pontos, sai da partida;
+// o último que sobra ganha. Carta: valor + naipe + o baralho dela ('7o0', '10e1', 'Kp0').
+export const VALORES_CACHETA = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+export const CARTAS_CACHETA = 9;
+export const PONTOS_CACHETA = 5; // a de boteco começa com 7 ou 10; com 5 a partida não passa de meia hora
+const RE_CACHETA = /^(10|[A2-9JQK])([oecp])([01])$/;
+export const ehCartaCacheta = (c) => typeof c === 'string' && RE_CACHETA.test(c);
+// v: 1 (ás) a 13 (rei); n: o naipe
+export function lerCacheta(c) {
+  const m = RE_CACHETA.exec(c);
+  return m ? { v: VALORES_CACHETA.indexOf(m[1]) + 1, n: m[2] } : null;
+}
+// a carta sem o baralho: as duas cópias são a mesma carta ('7o0' e '7o1' são o 7♦)
+export const faceCacheta = (c) => c.slice(0, -1);
+
+export function baralhoCacheta() {
+  const b = [];
+  for (const d of [0, 1]) for (const v of VALORES_CACHETA) for (const n of NAIPES) b.push(`${v}${n}${d}`);
+  return b;
+}
+
+export function curingaDe(vira) {
+  const l = lerCacheta(vira);
+  return l ? { v: (l.v % 13) + 1, vermelho: naipeVermelho(l.n) } : null;
+}
+export function ehCuringa(c, cur) {
+  const l = cur && lerCacheta(c);
+  return !!l && l.v === cur.v && naipeVermelho(l.n) === cur.vermelho;
+}
+// "os 9 pretos", "as damas vermelhas"
+const PLURAL_CACHETA = { 1: ['ases', 'os'], 11: ['valetes', 'os'], 12: ['damas', 'as'], 13: ['reis', 'os'] };
+export function nomeCuringa(cur) {
+  if (!cur) return '';
+  const [nome, art] = PLURAL_CACHETA[cur.v] || [VALORES_CACHETA[cur.v - 1], 'os'];
+  const cor = cur.vermelho ? 'vermelho' : 'preto';
+  return `${art} ${nome} ${art === 'as' ? `${cor.slice(0, -1)}as` : `${cor}s`}`;
+}
+// '7♦', '10♠'
+export const nomeCartaCacheta = (c) => {
+  const l = lerCacheta(c);
+  return l ? `${VALORES_CACHETA[l.v - 1]}${SIMBOLO[l.n]}` : '';
+};
+
+// Todos os jogos que dá para montar com estas cartas, por máscara (bit i = a carta i). ordem: as
+// cartas na ordem de mostrar (a sequência na ordem dela, com o curinga no buraco que ele tapa).
+function jogosPossiveis(cartas, cur) {
+  const info = cartas.map((c) => ({ ...lerCacheta(c), curinga: ehCuringa(c, cur) }));
+  const jogos = new Map();
+  const por = (ordem) => {
+    const mask = ordem.reduce((a, i) => a | (1 << i), 0);
+    if (!jogos.has(mask)) jogos.set(mask, { mask, ordem });
+  };
+  const curingas = info.map((x, i) => (x.curinga ? i : -1)).filter((i) => i >= 0);
+  // trincas: o mesmo valor, de pelo menos 3 naipes (o curinga conta como um naipe que falta)
+  for (let v = 1; v <= 13; v++) {
+    const nat = info.map((x, i) => (x.v === v ? i : -1)).filter((i) => i >= 0);
+    if (nat.length < 2) continue;
+    for (let s = 1; s < 1 << nat.length; s++) {
+      const idx = nat.filter((_, j) => s & (1 << j)).sort((a, b) => NAIPES.indexOf(info[a].n) - NAIPES.indexOf(info[b].n));
+      const naipes = new Set(idx.map((i) => info[i].n)).size;
+      if (idx.length >= 3 && naipes >= 3) por(idx);
+      if (idx.length >= 2 && naipes >= 2) for (const w of curingas) if (!idx.includes(w)) por([...idx, w]);
+    }
+  }
+  // sequências: o mesmo naipe, do A (1) ao A de cima (14); cada posição com uma carta daquele valor
+  // e naipe, ou com o curinga (um só)
+  for (const n of NAIPES) {
+    if (!info.some((x) => x.n === n)) continue;
+    const de = (p) => info.map((x, i) => (x.n === n && x.v === (p === 14 ? 1 : p) ? i : -1)).filter((i) => i >= 0);
+    for (let ini = 1; ini <= 12; ini++) {
+      const passo = (p, usadas, curingaUsado) => {
+        if (usadas.length >= 3) por([...usadas]);
+        if (p > 14 || usadas.length >= cartas.length) return;
+        for (const i of de(p)) if (!usadas.includes(i)) passo(p + 1, [...usadas, i], curingaUsado);
+        if (!curingaUsado) for (const w of curingas) if (!usadas.includes(w)) passo(p + 1, [...usadas, w], true);
+      };
+      passo(ini, [], false);
+    }
+  }
+  return [...jogos.values()];
+}
+
+const bits = (m) => {
+  let n = 0;
+  for (; m; m &= m - 1) n++;
+  return n;
+};
+
+// A melhor arrumação da mão: o máximo de cartas em jogos. grupos: as cartas de cada jogo, na ordem
+// de mostrar; soltas: as que sobram.
+export function arranjoCacheta(cartas, cur) {
+  const n = cartas.length;
+  if (!n) return { grupos: [], soltas: [] };
+  const jogos = jogosPossiveis(cartas, cur);
+  const memo = new Map();
+  const melhor = (mask) => {
+    if (!mask) return { cob: 0, g: [] };
+    if (memo.has(mask)) return memo.get(mask);
+    const bit = mask & -mask;
+    let r = melhor(mask & ~bit); // a carta mais baixa fica de fora
+    for (const j of jogos) {
+      if (!(j.mask & bit) || (j.mask & mask) !== j.mask) continue;
+      const resto = melhor(mask & ~j.mask);
+      const cob = resto.cob + bits(j.mask);
+      if (cob > r.cob) r = { cob, g: [j, ...resto.g] };
+    }
+    memo.set(mask, r);
+    return r;
+  };
+  const r = melhor((1 << n) - 1);
+  const usadas = r.g.reduce((a, j) => a | j.mask, 0);
+  return { grupos: r.g.map((j) => j.ordem.map((i) => cartas[i])), soltas: cartas.filter((_, i) => !(usadas & (1 << i))) };
+}
+
+// a mão fecha toda em jogos? devolve os jogos, ou null
+export function bateCacheta(cartas, cur) {
+  if (cartas.length < 3) return null;
+  const a = arranjoCacheta(cartas, cur);
+  return a.soltas.length ? null : a.grupos;
+}
+
+// Com as 10 cartas na mão (depois de comprar): dez: os jogos de bater com as 10, ou null;
+// descartes: as cartas que, descartadas, deixam as outras 9 fechadas (bater com 9)
+export function comoBaterCacheta(mao, cur) {
+  const dez = mao.length === CARTAS_CACHETA + 1 ? bateCacheta(mao, cur) : null;
+  const descartes = [];
+  const vistas = new Set();
+  for (const c of mao) {
+    if (vistas.has(faceCacheta(c))) {
+      if (descartes.some((d) => faceCacheta(d) === faceCacheta(c))) descartes.push(c);
+      continue;
+    }
+    vistas.add(faceCacheta(c));
+    const resto = [...mao];
+    resto.splice(resto.indexOf(c), 1);
+    if (bateCacheta(resto, cur)) descartes.push(c);
+  }
+  return { dez, descartes };
+}
+
 // ------------------------------------------------------------------ as vozes
 // Tudo o que a mesa fala em voz alta sai de um mp3 gravado (ElevenLabs, scripts/gerar-vozes-cartas.js),
 // não da voz do navegador: no celular (iOS/Android) o mp3 toca fora do toque e igual em todo aparelho.
@@ -247,7 +400,8 @@ export const VOZES_CARTAS = 4;
 
 // as mulheres da mesa falam no feminino ("Tô armada!", "Fui atingida!"): na voz e no balão
 export const vozFeminina = (lugar) => Math.abs(Number(lugar) || 0) % 2 === 1;
-const NO_FEMININO = [[/\barmado\b/g, 'armada'], [/\batingido\b/g, 'atingida'], [/\btodo melado\b/g, 'toda melada'], [/\btem dono\b/g, 'tem dona']];
+const NO_FEMININO = [[/\barmado\b/g, 'armada'], [/\batingido\b/g, 'atingida'], [/\btodo melado\b/g, 'toda melada'], [/\btem dono\b/g, 'tem dona'],
+  [/\bpro papai\b/g, 'pra mamãe'], [/\bpifado\b/g, 'pifada'], [/\bBrigado\b/g, 'Brigada']];
 export const naVozDe = (frase, lugar) => (vozFeminina(lugar) ? NO_FEMININO.reduce((f, [de, para]) => f.replace(de, para), frase) : frase);
 
 // o arquivo da frase na voz do lugar; o mesmo nome no servidor, no navegador e no gerador

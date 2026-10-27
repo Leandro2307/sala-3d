@@ -19,6 +19,9 @@
 // passa. Quem fica com uma carta tem uns segundos para dizer "UNO!", senão compra duas.
 // 21: dois lugares, um contra o outro (o do jogo 21 original): 11 cartas de 1 a 11, a primeira de
 // cada um fechada, trunfos (TRUNFOS_21) e a aposta em dedos; 5 dedos cada, quem fica sem perde.
+// Cacheta: até 4, cada um por si; 2 baralhos, 9 cartas, o vira e o curinga; compra, descarta e bate
+// quem fecha a mão em jogos. Bater com 9 tira 1 ponto de cada um, com 10 tira 2; o último com
+// pontos ganha.
 const { carregarPorMapa, comMapa } = require('./mapa-servidor.js');
 
 let R = null;
@@ -32,7 +35,7 @@ Promise.all([import('./public/js/cartas-regras.js'), DADOS.pronto])
   .catch((err) => console.warn('  Regras das cartas não carregaram:', err.message));
 
 const ondeEsta = (user) => (user?.p ? { x: user.p[0], y: user.p[1], z: user.p[2] } : null);
-const LUGARES = { truco: 4, uno: 6, vinteum: 2 };
+const LUGARES = { truco: 4, uno: 6, vinteum: 2, cacheta: 4 };
 // homem, mulher, homem...: a voz de cada lugar é de homem nos pares e de mulher nos ímpares (cartas-regras.js)
 const NOMES_ROBO = ['Robô Zé', 'Robô Lia', 'Robô Tião', 'Robô Bia', 'Robô Nico', 'Robô Rita'];
 const ESPERA_ROBO = 1300; // ms que o robô "pensa"
@@ -44,7 +47,7 @@ const INTERVALO_SINAL = 1500; // ms entre dois sinais da mesma pessoa (só o par
 const INTERVALO_ARREMESSO = 1200; // ms entre dois arremessos da mesma pessoa
 const RESENHA_INTERVALO = 20000; // no mínimo isso entre duas zoeiras aleatórias na mesma mesa
 
-const novaMesa = (i) => ({ i, jogo: MESAS.MESAS_CARTAS[i].jogo, lugares: Array(LUGARES[MESAS.MESAS_CARTAS[i].jogo]).fill(null), fase: 'espera', aviso: '', vencedor: null, ate: 0, botAte: 0, vezDesde: 0, t: null, u: null, v: null });
+const novaMesa = (i) => ({ i, jogo: MESAS.MESAS_CARTAS[i].jogo, lugares: Array(LUGARES[MESAS.MESAS_CARTAS[i].jogo]).fill(null), fase: 'espera', aviso: '', vencedor: null, ate: 0, botAte: 0, vezDesde: 0, t: null, u: null, v: null, c: null });
 const mesasDa = (room) => (room.cartas ||= MESAS.MESAS_CARTAS.map((_, i) => novaMesa(i)));
 const timeDe = (lugar) => lugar % 2;
 const dupla = (time) => `«${time}»`;
@@ -59,7 +62,7 @@ const podeSubir = (t) => !!t.pedido && t.pedido.valor < 12 && t.pontos[1 - t.ped
 const forcaNaMesa = (j) => (j.coberta ? -1 : R.forcaTruco(j.carta));
 const tapada = (j) => (j.coberta ? { lugar: j.lugar, carta: 'verso', coberta: true } : j);
 // as cartas do lugar k, no jogo que for (no 21 são números)
-const maoDe = (m, k) => m.t?.maos[k] || m.u?.maos[k] || m.v?.maos[k] || [];
+const maoDe = (m, k) => m.t?.maos[k] || m.u?.maos[k] || m.v?.maos[k] || m.c?.maos[k] || [];
 // longe da mesa há mais de 3 s (a posição que o servidor tem chega um tiquinho depois de um teleporte)
 const longeDemais = (l, longe) => {
   if (!longe) {
@@ -102,6 +105,15 @@ function publico(m) {
       monte: v.monte.length, passes: v.passes, trunfosN: v.trunfos.map((t) => t.length),
       maos21: v.maos.map((mao) => mao.map((n, i) => (i === 0 && !abre ? 'verso' : R.carta21(n)))),
       resultado: abre ? v.resultado : null,
+    });
+  }
+  if (m.c) {
+    const c = m.c;
+    // a batida (os jogos de quem bateu) só aparece quando a mão acaba
+    Object.assign(base, {
+      vez: c.vez, etapa: c.etapa, vira: c.vira, curinga: c.curinga, topoLixo: c.lixo.at(-1) || null, lixoN: c.lixo.length,
+      monte: c.monte.length, pontos: c.pontos, joga: c.joga, dador: c.dador, doLixo: c.doLixo, ultimo: c.ultimo, maoN: c.n,
+      batida: m.fase === 'fimDaMao' || m.fase === 'fim' ? c.batida : null,
     });
   }
   return base;
@@ -163,7 +175,7 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
     if (!humanos(m).length) {
       m.lugares = m.lugares.map(() => null);
       m.fase = 'espera';
-      m.t = m.u = m.v = null;
+      m.t = m.u = m.v = m.c = null;
       m.aviso = '';
       m.vencedor = null;
     }
@@ -189,6 +201,16 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
     } else if (m.jogo === 'vinteum') {
       for (const k of [0, 1]) if (!m.lugares[k]) m.lugares[k] = robo(m, k);
       novaPartida21(room, m);
+    } else if (m.jogo === 'cacheta') {
+      // cacheta: no mínimo 3 na mesa (completa com robôs)
+      let falta = 3 - m.lugares.filter(Boolean).length;
+      for (let k = 0; k < m.lugares.length && falta > 0; k++) {
+        if (!m.lugares[k]) {
+          m.lugares[k] = robo(m, k);
+          falta--;
+        }
+      }
+      novaPartidaCacheta(room, m);
     } else {
       // uno: no mínimo 3 na mesa (completa com robôs)
       let falta = 3 - m.lugares.filter(Boolean).length;
@@ -983,6 +1005,236 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
     } else if (agora - m.vezDesde > ESPERA_GENTE) parar21(room, m, k); // parado na vez: para por ele
   }
 
+  // ------------------------------------------------------------------ cacheta
+  // Cada um por si (cartas-regras.js): na vez, compra (do monte ou a de cima do lixo) e descarta;
+  // bate quem fecha a mão. Quem fica sem pontos quebra: sai da partida e fica sentado, assistindo; o
+  // último com pontos ganha. c.joga: quem começou a partida (quem senta no meio dela espera a próxima).
+  const nomeC = (m, k) => m.lugares[k]?.nome || '…';
+  const vivoC = (m, k) => !!m.lugares[k] && m.c.pontos[k] > 0;
+  function proximoC(m, de) {
+    const n = m.lugares.length;
+    for (let s = 1; s <= n; s++) if (vivoC(m, (de + s) % n)) return (de + s) % n;
+    return de;
+  }
+  // a distância de dois valores numa sequência (o ás vale 1 e 14)
+  const distC = (a, b) => Math.min(Math.abs(a - b), Math.abs((a === 1 ? 14 : a) - (b === 1 ? 14 : b)));
+  // duas cartas soltas que já pedem uma terceira (par de valor, ou quase sequência)
+  const parC = (x, y) => (x.v === y.v && x.n !== y.n) || (x.n === y.n && distC(x.v, y.v) > 0 && distC(x.v, y.v) <= 2);
+
+  function novaPartidaCacheta(room, m) {
+    const sentados = m.lugares.map((l, k) => (l ? k : -1)).filter((k) => k >= 0);
+    m.c = { pontos: m.lugares.map((l) => (l ? R.PONTOS_CACHETA : 0)), joga: m.lugares.map(Boolean), dador: sentados[Math.floor(Math.random() * sentados.length)], n: 0 };
+    novaMaoCacheta(room, m);
+  }
+
+  function novaMaoCacheta(room, m) {
+    const c = m.c;
+    const monte = R.embaralhar(R.baralhoCacheta());
+    c.maos = m.lugares.map((_, k) => (vivoC(m, k) ? monte.splice(-R.CARTAS_CACHETA) : []));
+    c.vira = monte.pop();
+    c.curinga = R.curingaDe(c.vira);
+    c.monte = monte;
+    c.lixo = [];
+    c.doLixo = null; // a carta que quem está na vez pegou do lixo (não pode voltar para lá)
+    c.ultimo = null; // o último descarte: { lugar, carta }
+    c.batida = null;
+    c.naBoa = [];
+    c.n += 1;
+    c.vez = proximoC(m, c.dador);
+    c.etapa = 'comprar';
+    m.fase = 'jogando';
+    m.vencedor = null;
+    m.aviso = `Vira ${R.nomeCartaCacheta(c.vira)}: os curingas são ${R.nomeCuringa(c.curinga)}`;
+    m.vezDesde = Date.now();
+    m.botAte = Date.now() + ESPERA_ROBO + 900;
+    avisar(room, m);
+  }
+
+  function comprarCacheta(room, m, k, doLixo) {
+    const c = m.c;
+    if (m.fase !== 'jogando' || c.vez !== k || c.etapa !== 'comprar') return false;
+    let carta;
+    if (doLixo) {
+      if (!c.lixo.length) return false;
+      carta = c.lixo.pop();
+      c.doLixo = carta;
+      m.aviso = `${nomeC(m, k)} pegou o ${R.nomeCartaCacheta(carta)} do lixo`;
+      if (m.lugares[k].bot && Math.random() < 0.3) gritar(room, m, k, 'lixo');
+    } else {
+      if (!c.monte.length) {
+        // o monte acabou: o lixo (menos o de cima) é embaralhado e vira monte
+        const topo = c.lixo.pop();
+        c.monte = R.embaralhar(c.lixo);
+        c.lixo = topo ? [topo] : [];
+      }
+      if (!c.monte.length) {
+        fimMaoCacheta(room, m, null);
+        return true;
+      }
+      carta = c.monte.pop();
+      c.doLixo = null;
+      m.aviso = '';
+    }
+    c.maos[k].push(carta);
+    c.etapa = 'descartar';
+    m.vezDesde = Date.now();
+    m.botAte = Date.now() + ESPERA_ROBO;
+    avisar(room, m);
+    return true;
+  }
+
+  function descartarCacheta(room, m, k, carta) {
+    const c = m.c;
+    const mao = c.maos[k];
+    const i = mao.indexOf(carta);
+    if (m.fase !== 'jogando' || c.vez !== k || c.etapa !== 'descartar' || i < 0 || carta === c.doLixo) return false;
+    mao.splice(i, 1);
+    c.lixo.push(carta);
+    c.ultimo = { lugar: k, carta };
+    c.doLixo = null;
+    c.vez = proximoC(m, k);
+    c.etapa = 'comprar';
+    m.aviso = '';
+    if (m.lugares[k].bot) roboNaBoa(room, m, k);
+    m.vezDesde = Date.now();
+    m.botAte = Date.now() + ESPERA_ROBO;
+    avisar(room, m);
+    return true;
+  }
+
+  // carta: a que vai para o lixo (bater com 9); sem carta, bate com as 10. A mão tem que fechar toda.
+  function baterCacheta(room, m, k, carta) {
+    const c = m.c;
+    const mao = c.maos[k];
+    if (m.fase !== 'jogando' || c.vez !== k || c.etapa !== 'descartar') return false;
+    let resto = mao;
+    if (carta != null) {
+      const i = mao.indexOf(carta);
+      if (i < 0) return false;
+      resto = mao.filter((_, j) => j !== i);
+    }
+    const grupos = R.bateCacheta(resto, c.curinga);
+    if (!grupos) return false;
+    if (carta != null) {
+      c.lixo.push(carta);
+      c.ultimo = { lugar: k, carta };
+    }
+    c.maos[k] = resto;
+    c.batida = { lugar: k, grupos, com10: carta == null, descarte: carta ?? null };
+    fimMaoCacheta(room, m, k);
+    return true;
+  }
+
+  // a mão acabou: k bateu (null: o monte acabou e ninguém bateu)
+  function fimMaoCacheta(room, m, k) {
+    const c = m.c;
+    c.etapa = null;
+    if (k !== null) {
+      const perde = c.batida.com10 ? 2 : 1;
+      const quebraram = [];
+      m.lugares.forEach((_, j) => {
+        if (j === k || !vivoC(m, j)) return;
+        c.pontos[j] = Math.max(0, c.pontos[j] - perde);
+        if (!c.pontos[j]) quebraram.push(j);
+      });
+      gritar(room, m, k, c.batida.com10 ? 'bateu10' : 'bateu');
+      m.aviso = `${nomeC(m, k)} bateu${c.batida.com10 ? ' com 10' : ''}: cada um perde ${perde} ponto${perde > 1 ? 's' : ''}`
+        + (quebraram.length ? ` · ${quebraram.map((j) => nomeC(m, j)).join(', ')} ${quebraram.length > 1 ? 'quebraram' : 'quebrou'}` : '');
+      // o robô que quebrou reclama, depois do grito de quem bateu
+      const robo = quebraram.find((j) => m.lugares[j]?.bot);
+      if (robo !== undefined) setTimeout(() => gritar(room, m, robo, 'quebrou'), 1800);
+    } else m.aviso = 'O monte acabou e ninguém bateu: ninguém perde ponto';
+    const vivos = m.lugares.map((_, j) => j).filter((j) => vivoC(m, j));
+    if (vivos.length <= 1) {
+      const v = vivos[0] ?? k;
+      m.fase = 'fim';
+      m.vencedor = v;
+      m.aviso = `${nomeC(m, v)} ganhou a cacheta!`;
+      m.ate = Date.now() + 10000;
+      const l = m.lugares[v];
+      if (l && !l.bot) {
+        const u = room.users.get(l.id);
+        const contraGente = m.lugares.some((o, j) => o && !o.bot && j !== v && c.joga[j]);
+        if (u) darMoedas?.(room, u, contraGente ? 30 : 12, 'vitória na cacheta');
+      }
+    } else {
+      m.fase = 'fimDaMao';
+      m.ate = Date.now() + 7000;
+      c.dador = proximoC(m, c.dador);
+    }
+    avisar(room, m);
+  }
+
+  // --- o robô da cacheta: quanto vale a mão (cartas em jogos; das soltas, o curinga e as que já
+  // pedem uma terceira)
+  function valorCacheta(mao, cur) {
+    const a = R.arranjoCacheta(mao, cur);
+    const soltas = a.soltas.map((x) => ({ x, ...R.lerCacheta(x), cur: R.ehCuringa(x, cur) }));
+    let v = (mao.length - soltas.length) * 10;
+    for (const s of soltas) {
+      if (s.cur) v += 6;
+      else if (soltas.some((o) => o !== s && !o.cur && parC(o, s))) v += 3;
+    }
+    return v;
+  }
+
+  // a carta que menos faz falta (o curinga só sai se for o jeito; a que veio do lixo não volta)
+  function descarteRobo(mao, cur, proibida) {
+    let melhor = null;
+    let nota = -Infinity;
+    for (const x of mao) {
+      if (x === proibida) continue;
+      const v = valorCacheta(mao.filter((y) => y !== x), cur) - (R.ehCuringa(x, cur) ? 50 : 0) + Math.random();
+      if (v > nota) {
+        nota = v;
+        melhor = x;
+      }
+    }
+    return { carta: melhor, nota };
+  }
+
+  function botCacheta(room, m, k) {
+    const c = m.c;
+    const mao = c.maos[k];
+    if (c.etapa === 'comprar') {
+      // o lixo, se a carta de cima faz bater, é curinga ou junta num jogo; senão o monte
+      const topo = c.lixo.at(-1);
+      let lixo = false;
+      if (topo) {
+        const com = [...mao, topo];
+        const bate = R.comoBaterCacheta(com, c.curinga);
+        lixo = !!bate.dez || bate.descartes.length > 0 || R.ehCuringa(topo, c.curinga)
+          || descarteRobo(com, c.curinga, topo).nota >= valorCacheta(mao, c.curinga) + 8;
+      }
+      comprarCacheta(room, m, k, lixo);
+      return;
+    }
+    const bate = R.comoBaterCacheta(mao, c.curinga);
+    if (bate.dez) baterCacheta(room, m, k, null);
+    else if (bate.descartes.length) baterCacheta(room, m, k, bate.descartes[0]);
+    else descartarCacheta(room, m, k, descarteRobo(mao, c.curinga, c.doLixo).carta);
+  }
+
+  // o robô que ficou a uma carta de bater às vezes avisa (uma vez por mão): "Tô na boa!"
+  function roboNaBoa(room, m, k) {
+    const c = m.c;
+    if (c.naBoa.includes(k) || Math.random() > 0.6) return;
+    const soltas = R.arranjoCacheta(c.maos[k], c.curinga).soltas.map(R.lerCacheta);
+    if (soltas.length > 2 || (soltas.length === 2 && !parC(soltas[0], soltas[1]))) return;
+    c.naBoa.push(k);
+    setTimeout(() => gritar(room, m, k, 'naboa'), 700);
+  }
+
+  function ticCacheta(room, m, agora) {
+    if (m.fase === 'fimDaMao') {
+      if (agora >= m.ate) novaMaoCacheta(room, m);
+      return;
+    }
+    if (m.fase !== 'jogando') return;
+    const k = m.c.vez;
+    if (!vezDeGente(m, k) ? agora >= m.botAte : agora - m.vezDesde > ESPERA_GENTE) botCacheta(room, m, k);
+  }
+
   // ------------------------------------------------------------------ relógio
   // Resenha da mesa: com o jogo rolando, um robô solta uma zoeira do nada (no máximo uma a cada
   // RESENHA_INTERVALO por mesa, e com sorte a cada batida do relógio).
@@ -1014,12 +1266,14 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
               m.t.pontos = [0, 0];
               novaMaoTruco(room, m);
             } else if (m.jogo === 'vinteum') novaPartida21(room, m);
+            else if (m.jogo === 'cacheta') novaPartidaCacheta(room, m);
             else novaRodadaUno(room, m);
           }
           continue;
         }
         if (m.jogo === 'truco') ticTruco(room, m, agora);
         else if (m.jogo === 'vinteum') ticVinte(room, m, agora);
+        else if (m.jogo === 'cacheta') ticCacheta(room, m, agora);
         else ticUno(room, m, agora);
         resenha(room, m, agora);
       }
@@ -1060,7 +1314,7 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
       if (k < 0) k = m.lugares.findIndex((l) => l?.bot);
       if (k < 0) return ack?.({ erro: 'cheia' });
       m.lugares[k] = { id: user.id, nome: user.name, cor: user.color, bot: false };
-      if (m.fase !== 'espera') m.aviso = `${user.name} sentou`;
+      if (m.fase !== 'espera') m.aviso = m.c && !m.c.pontos[k] ? `${user.name} sentou: entra na próxima partida` : `${user.name} sentou`;
       // no uno, chegou com a rodada valendo num lugar vazio: recebe as 7 cartas do monte
       if (m.u && m.fase === 'jogando' && !m.u.maos[k]?.length) {
         m.u.maos[k] = [];
@@ -1166,6 +1420,21 @@ function ligarCartas(io, rooms, jogoLigado, darMoedas) {
       if (msg.acao === 'pedir') pedir21(room, m, k);
       else if (msg.acao === 'parar') parar21(room, m, k);
       else if (msg.acao === 'trunfo' && typeof msg.trunfo === 'string') usar21(room, m, k, msg.trunfo);
+    });
+
+    // cacheta: comprar do monte, pegar o lixo, descartar e bater (com a carta do descarte, ou sem
+    // carta para bater com as 10). ack: deu certo (o bater que não fecha a mão volta false)
+    socket.on('ct-cacheta', (msg, ack) => {
+      const { room, user, mesas } = daSala();
+      const m = mesas?.[msg?.mesa];
+      const k = m ? meuLugar(m, user) : -1;
+      let ok = false;
+      if (k >= 0 && m.jogo === 'cacheta' && m.c && m.fase === 'jogando') {
+        if (msg.acao === 'monte' || msg.acao === 'lixo') ok = comprarCacheta(room, m, k, msg.acao === 'lixo');
+        else if (msg.acao === 'descartar' && typeof msg.carta === 'string') ok = descartarCacheta(room, m, k, msg.carta);
+        else if (msg.acao === 'bater') ok = baterCacheta(room, m, k, typeof msg.carta === 'string' ? msg.carta : null);
+      }
+      if (typeof ack === 'function') ack({ ok });
     });
 
     // zoeira: uma das frases de ZOEIRA, gritada para a mesa (a qualquer hora, sentado nela)
