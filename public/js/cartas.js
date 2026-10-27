@@ -2836,6 +2836,12 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
     return this.ligado('truco') || this.ligado('uno') || this.ligado('vinteum') || this.ligado('cacheta');
   }
 
+  // a mesa em que essa pessoa está sentada, para a voz separada por jogo (main.js)
+  partida(id) {
+    const M = this.mesas.find((M) => M.e?.lugares.some((l) => l?.id === id));
+    return M ? `cartas${M.i}` : null;
+  }
+
   apertou() { return false; }
 
   soltou() {}

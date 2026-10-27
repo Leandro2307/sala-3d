@@ -171,6 +171,11 @@ export class Pinta {
     return this.e?.jogadores.find((j) => j.id === this.eu) || null;
   }
 
+  // para a voz separada por jogo (main.js): os dois times são uma partida só
+  partida(id) {
+    return this.e?.jogadores.some((j) => j.id === id) ? 'pinta' : null;
+  }
+
   estado(e) {
     const antes = this.e;
     this.e = e;

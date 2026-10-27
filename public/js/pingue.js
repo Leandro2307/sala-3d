@@ -167,6 +167,12 @@ export class Pingue {
     return null;
   }
 
+  // a mesa em que essa pessoa joga, para a voz separada por jogo (main.js)
+  partida(id) {
+    const M = this.mesas.find((M) => M.e?.lados.some((l) => l?.id === id));
+    return M ? `pingue${M.i}` : null;
+  }
+
   estado(e) {
     const M = this.mesas[e.mesa];
     if (!M) return;

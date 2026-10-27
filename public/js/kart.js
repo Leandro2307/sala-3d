@@ -270,6 +270,11 @@ export class Kart {
     return this.e?.pilotos.find((p) => p.id === this.eu) || null;
   }
 
+  // para a voz separada por jogo (main.js): quem corre (ou espera a próxima) está no kart
+  partida(id) {
+    return this.e?.pilotos.some((p) => p.id === id) ? 'kart' : null;
+  }
+
   estado(e) {
     const antes = this.e;
     this.e = e;

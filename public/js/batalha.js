@@ -247,6 +247,11 @@ export class Batalha {
     return !!this.estado?.jogadores.some((j) => j.id === id);
   }
 
+  // para a voz separada por jogo (main.js): os dois times são uma partida só
+  partida(id) {
+    return this.temJogador(id) ? 'batalha' : null;
+  }
+
   // o meu tiro (ou soco) pode pegar nele? Em times, só em adversário de pé; e quem está dentro não
   // acerta quem está fora, nem o contrário (o servidor confere de novo)
   podeAcertar(id) {

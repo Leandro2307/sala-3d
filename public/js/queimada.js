@@ -180,6 +180,11 @@ export class Queimada {
     return this.e?.jogadores.find((j) => j.id === this.eu) || null;
   }
 
+  // para a voz separada por jogo (main.js): os dois times são uma partida só
+  partida(id) {
+    return this.e?.jogadores.some((j) => j.id === id) ? 'queimada' : null;
+  }
+
   perto(raio) {
     const p = this.player.pos;
     return Math.hypot(p.x - Q.cx, p.z - Q.cz) < raio;

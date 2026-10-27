@@ -571,6 +571,9 @@ export class Futebol {
 
   joga(id) { return !!this.estado?.jogadores.some((j) => j.id === id); }
 
+  // para a voz separada por jogo (main.js)
+  partida(id) { return this.joga(id) ? 'futebol' : null; }
+
   recebeuEstado(e) {
     const antes = this.estado;
     this.estado = e;

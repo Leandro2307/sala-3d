@@ -822,6 +822,16 @@ export class Quadras {
     return this.bol.findIndex((P) => P.e?.jogadores.some((j) => j.id === this.eu));
   }
 
+  // para a voz separada por jogo (main.js): no boliche, a fila da pista; vôlei e basquete não têm
+  // fila, então joga quem está na quadra (a mesma área do ativo())
+  partida(id, p) {
+    const pista = this.bol.findIndex((P) => P.e?.jogadores.some((j) => j.id === id));
+    if (pista >= 0) return `boliche${pista}`;
+    if (this.ligado('volei') && Math.hypot(p.x - VOLEI.cx, p.z - VOLEI.cz) < 16) return 'volei';
+    if (this.ligado('basquete') && Math.hypot(p.x - BASQUETE.cx, p.z - BASQUETE.cz) < 18) return 'basquete';
+    return null;
+  }
+
   jogarBoliche(i, carga) {
     const P = this.bol[i];
     const olhar = this.player.lookDirection(_b);

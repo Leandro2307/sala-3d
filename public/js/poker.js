@@ -1792,6 +1792,12 @@ body { --pk-vh: 1vh; }
 
   ativo() { return false; }
 
+  // a mesa em que essa pessoa está sentada, para a voz separada por jogo (main.js)
+  partida(id) {
+    const M = this.mesas.find((M) => M.e?.lugares.some((l) => l?.id === id));
+    return M ? `poker${M.i}` : null;
+  }
+
   dica(livre) {
     if (!livre) return '';
     const M = this.mesaPerto();

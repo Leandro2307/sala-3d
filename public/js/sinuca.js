@@ -218,6 +218,12 @@ export class Sinuca {
     return this.mesas.find((P) => P.e?.jogadores.some((j) => j.id === this.eu)) || null;
   }
 
+  // a mesa em que essa pessoa joga, para a voz separada por jogo (main.js)
+  partida(id) {
+    const P = this.mesas.find((P) => P.e?.jogadores.some((j) => j.id === id));
+    return P ? `sinuca${P.i}` : null;
+  }
+
   minhaVez(P) {
     return !!P?.e && P.e.fase === 'jogando' && !P.filme && P.e.jogadores[P.e.vez]?.id === this.eu;
   }

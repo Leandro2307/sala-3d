@@ -65,7 +65,7 @@ const PANEL_TITLES = { people: 'Pessoas', chat: 'Chat da sala', telao: 'Telão',
 
 // ------------------------------------------------------------------ ajustes salvos
 const DEFAULTS = {
-  name: '', color: COLORS[0], mic: true, voice: 100, screen: 90, tv: 80, spatial: false,
+  name: '', color: COLORS[0], mic: true, voice: 100, screen: 90, tv: 80, spatial: false, porJogo: true,
   shareMode: 'max', sens: 100, balancoVisao: true, sfx: true, micDevice: '', camDevice: '', helpCollapsed: false, photo: null, shirt: 'none', char: 'padrao', arma: ARMA_PADRAO,
   // qualidade gráfica: 'auto' ou um nível fixo; nivelAuto: onde o automático parou da última vez;
   // falhasAuto: quantas vezes cada nível caiu logo depois de subir (o automático espera mais para tentar)
@@ -1195,7 +1195,7 @@ function bindSocket() {
     if (!u || u.isSelf) return;
     u.avatar.setNetworkState(p, r, a);
     u.speaking = !!s;
-    u.avatar.speaking = u.speaking && mesmoAmbiente(u); // aro só em quem dá para ouvir
+    u.avatar.speaking = u.speaking && ouco(u); // aro só em quem dá para ouvir
   });
   // servidor novo: quem se mexeu na sala vem num lote só, [n, x, y, z, r, a, s, n, x, ...] a cada ~30 ms
   socket.on('states', (a) => {
@@ -1208,8 +1208,8 @@ function bindSocket() {
       _pRede[2] = a[i + 3];
       u.avatar.setNetworkState(_pRede, a[i + 4], a[i + 5]);
       u.speaking = !!a[i + 6];
-      // aro verde só em quem dá para ouvir (outra sala à prova de som fala e não se ouve)
-      u.avatar.speaking = u.speaking && mesmoAmbiente(u);
+      // aro verde só em quem dá para ouvir (outra sala à prova de som, ou outro jogo, fala e não se ouve)
+      u.avatar.speaking = u.speaking && ouco(u);
     }
   });
 
@@ -3947,14 +3947,40 @@ function refreshScreens() {
   mesa.atualizar();
 }
 
+// ------------------------------------------------------------------ voz separada por jogo
+// Com o ajuste ligado, cada partida conversa à parte: quem está na mesa 2 do truco só ouve quem
+// está nela, e quem não está em jogo nenhum só ouve quem também não está. Cada jogo diz em que
+// partida a pessoa está (partida(id, posição)) pelo que já chega do servidor. Como a voz por
+// proximidade, vale para o que eu ouço: a minha voz continua saindo para todos.
+const partidas = new Map(); // id -> partida ('cartas1', 'kart'...); quem está fora de jogo não entra
+function atualizarPartidas() {
+  partidas.clear();
+  if (!settings.porJogo) return;
+  const comVoz = [...jogosDoParque, futebol, quadras, mataMata, batalha, jogos];
+  for (const u of state.users.values()) {
+    const p = posDe(u);
+    for (const j of comVoz) {
+      const partida = j.partida(u.id, p);
+      if (partida) {
+        partidas.set(u.id, partida);
+        break;
+      }
+    }
+  }
+}
+// ouço a voz dessa pessoa: mesma sala (escritório) e, com a voz separada por jogo, mesma partida
+const ouco = (u) => mesmoAmbiente(u) && partidas.get(u.id) === partidas.get(state.selfId);
+
 function updateVolumes() {
   const me = self();
+  atualizarPartidas();
   for (const u of state.users.values()) {
     if (u.isSelf) continue;
     if (u.audioEl) {
       let v = settings.voice / 100;
-      // escritório com salas à prova de som: de um departamento para fora (ou para outro), ninguém ouve
-      if (!mesmoAmbiente(u)) v = 0;
+      // escritório com salas à prova de som (de um departamento para fora, ou para outro) e voz
+      // separada por jogo (de uma partida para fora, ou para outra): ninguém ouve
+      if (!ouco(u)) v = 0;
       if (settings.spatial && me) {
         const d = u.avatar.group.position.distanceTo(localAvatar.group.position);
         v *= THREE.MathUtils.clamp(1 - (d - 6) / 34, 0.1, 1);
@@ -4017,7 +4043,7 @@ async function vigiarVozes() {
   for (const u of state.users.values()) {
     if (u.isSelf) continue;
     if (u.audioEl && !u.audioEl.muted) tocarVoz(u); // pausado por fora (celular, fone trocado)
-    if (!u.mic || !mesmoAmbiente(u) || settings.voice <= 0 || vozesBarradas.has(u.id)) {
+    if (!u.mic || !ouco(u) || settings.voice <= 0 || vozesBarradas.has(u.id)) {
       u.semVoz = 0;
       continue;
     }
@@ -6165,6 +6191,7 @@ const bindToggle = (sel, key, apply) => {
   });
 };
 bindToggle('#set-spatial', 'spatial', updateVolumes);
+bindToggle('#set-por-jogo', 'porJogo', updateVolumes);
 bindToggle('#set-sfx', 'sfx', (on) => setSfxEnabled(on));
 bindToggle('#set-balanco', 'balancoVisao', (on) => { player.balancoVisao = on; });
 // ?perf=1: o chip de FPS aparece sempre, com mais duas linhas — desenhos, sombra, memória da placa

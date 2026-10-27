@@ -229,6 +229,10 @@ export class Jogos {
     if (l[1] === eu) return 1;
     return -1;
   }
+  // o tabuleiro em que essa pessoa está sentada, para a voz separada por jogo (main.js)
+  partida(id) {
+    return Object.keys(this.partidas).find((mesa) => this.partidas[mesa].lugares.includes(id)) || null;
+  }
 
   // ---------------------------------------------------------------- computador
   vezDoComputador(mesa) {

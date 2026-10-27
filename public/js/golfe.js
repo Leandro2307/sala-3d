@@ -281,6 +281,11 @@ export class Golfe {
     return this.e?.jogadores.find((j) => j.id === this.eu) || null;
   }
 
+  // para a voz separada por jogo (main.js): quem está no minigolfe joga a mesma partida
+  partida(id) {
+    return this.e?.jogadores.some((j) => j.id === id) ? 'golfe' : null;
+  }
+
   estado(e) {
     this.e = e;
     this.g3d.placar.userData.redesenhar(e);

@@ -10,7 +10,7 @@
 // sons (fantasmas-som.js).
 import * as THREE from 'three';
 import {
-  CASAS_RESUMO, ITENS, ITEM, PROVAS, IDS_PROVAS, MONSTROS, MONSTRO, JOGO, casa as dadosDaCasa, salaEm, paraCasa, possiveis,
+  CASAS_RESUMO, ITENS, ITEM, PROVAS, IDS_PROVAS, MONSTROS, MONSTRO, JOGO, casa as dadosDaCasa, salaEm, paraCasa, possiveis, casaDoPonto,
 } from './fantasmas-dados.js';
 import { PORTAL_FANTASMAS } from './parque-dados.js';
 import { hud, texturaViva, FONTE } from './hud-jogos.js';
@@ -911,6 +911,12 @@ export class Fantasmas {
 
   ativo() {
     return this.dentro; // no celular o botão de ação usa o aparelho
+  }
+
+  // para a voz separada por jogo (main.js). O estado só chega para quem está na investigação (e
+  // fica velho quando saio dela): de fora, quem joga é quem está no terreno de uma das casas
+  partida(id, p) {
+    return (this.dentro && this.e?.jogadores.some((j) => j.id === id)) || casaDoPonto(p.x, p.y, p.z) ? 'fantasmas' : null;
   }
 
   porNoChao(t) {

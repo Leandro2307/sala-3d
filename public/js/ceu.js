@@ -593,6 +593,11 @@ export class MataMata {
     this.socket()?.emit('mm-ver', (e) => this.recebeu(e));
   }
 
+  // para a voz separada por jogo (main.js)
+  partida(id) {
+    return this.estado?.jogadores.some((j) => j.id === id) ? 'matamata' : null;
+  }
+
   pertoDoPortal() {
     const p = this.player.pos;
     return !this.ativo && this.ligado() && p.y < 5 && Math.hypot(p.x - PORTAIS.matamata.x, p.z - PORTAIS.matamata.z) < 2.6;

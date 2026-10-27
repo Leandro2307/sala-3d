@@ -134,6 +134,11 @@ export class Gincana {
     return this.e?.jogadores.find((j) => j.id === this.eu) || null;
   }
 
+  // para a voz separada por jogo (main.js)
+  partida(id) {
+    return this.e?.jogadores.some((j) => j.id === id) ? 'gincana' : null;
+  }
+
   estado(e) {
     this.e = e;
     this.estadoEm = performance.now();
