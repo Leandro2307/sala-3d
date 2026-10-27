@@ -317,8 +317,9 @@ function ligarPoker(io, rooms, jogoLigado, darMoedas) {
   }
 
   function depoisDaAcao(room, m, k) {
-    if (ativos(m).length <= 1) return levaSemShowdown(room, m);
-    if (rodadaFechada(m)) proximaRua(room, m);
+    // todos desistiram menos um: ele leva, e a mesa precisa saber (senão fica parada na vez de alguém)
+    if (ativos(m).length <= 1) levaSemShowdown(room, m);
+    else if (rodadaFechada(m)) proximaRua(room, m);
     else darVez(m, proximoQueDecide(m, k));
     avisar(room, m);
   }
