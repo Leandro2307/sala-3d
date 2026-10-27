@@ -42,7 +42,7 @@ import { Pinta } from './pinta.js';
 import { hud as hudJogos } from './hud-jogos.js';
 import { MapaTela } from './mapa.js';
 import { MAPAS, MAPA_DA_PAGINA, lembrarMapa } from './mapas-dados.js';
-import { AREAS } from './cidade-dados.js';
+import { AREAS, MAPA_INFO } from './cidade-dados.js';
 import { Surf, MataMata, dicaDoPortal } from './ceu.js';
 import { Batalha } from './batalha.js';
 import { TIMES } from './batalha-dados.js';
@@ -5663,128 +5663,264 @@ $('#hud-btn-galera')?.addEventListener('click', () => {
     toast('Escolha um amigo na lista para ir até ele!', 'info');
   }
 });
+
+// ------------------------------------------------------------------ bússola
+// A faixa no topo: para onde fica cada área do mapa desta sala (AREAS, as mesmas do mapa da tela) e
+// cada amigo. As etiquetas nunca se encavalam: as que se encostam se afastam em bloco
+// (espalharNaFaixa) e só uma abre com o nome e a distância (a do meio, ou a que está sob o mouse).
+// Clicar numa leva até lá; no celular o primeiro toque abre o nome e o segundo leva. Clicar no resto
+// da faixa abre o mapa.
 const bussolaCanvas = $('#bussola-canvas');
 const bussolaCtx = bussolaCanvas?.getContext('2d');
+const TEMA_ID = MAPA_INFO.tema.id;
+const ICONE_AREA = {
+  predio: '🎬', praca: '⛲', kart: '🏎️', jogos: '🎲', estadio: '⚽', quadras: '🏀', autodromo: '🏁', aventura: '🌀',
+  lago: { neve: '⛸️', outono: '🎏' }[TEMA_ID] || '🌊',
+  parque: TEMA_ID === 'outono' ? '⛩️' : '🎡',
+};
+const BUS_FOV = Math.PI * 0.72;
+const BUS_ALT = 22; // altura de cada etiqueta
+const BUS_FECHADA = 26; // largura só com o ícone
+const BUS_FOLGA = 4; // espaço mínimo entre duas etiquetas
+const BUS_BORDA = 6;
+const FONTE_BUS = '700 11.5px "Plus Jakarta Sans", sans-serif';
+const FONTE_ICONE = '13px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif';
 let alvosBussola = [];
-const PONTOS_BUSSOLA = [
-  { id: 'cinema', nome: 'Cinema', icone: '🎬', x: 0, z: -2, cor: '#38bdf8' },
-  { id: 'praca', nome: 'Praça', icone: '🌟', x: 100, z: 30, cor: '#facc15' },
-  { id: 'futebol', nome: 'Futebol', icone: '⚽', x: 20, z: 230, cor: '#4ade80' },
-  { id: 'volei', nome: 'Quadras', icone: '🏀', x: 160, z: 220, cor: '#60a5fa' },
-  { id: 'corrida', nome: 'Corrida', icone: '🏎️', x: 260, z: 50, cor: '#f97316' },
-  { id: 'kart', nome: 'Kart', icone: '🏎️', x: 160, z: 40, cor: '#fbbf24' },
-  { id: 'pingue', nome: 'Parque', icone: '🎯', x: 240, z: 580, cor: '#c084fc' },
-  { id: 'gincana', nome: 'Gincana', icone: '✨', x: 80, z: 500, cor: '#f472b6' },
-];
+let focoBussola = null; // a chave da etiqueta aberta
+let fixoBussola = null; // { chave, ate }: a que o toque abriu (celular)
+let mouseBussola = null; // x do mouse sobre a faixa
+let tempoBussola = 0;
+const largBussola = new Map(); // chave -> largura de agora (anima ao abrir e fechar)
+let tamBussola = { w: 0, h: 0 };
+if (bussolaCanvas) new ResizeObserver(([e]) => { tamBussola = { w: e.contentRect.width, h: e.contentRect.height }; }).observe(bussolaCanvas);
+
+// Põe cada etiqueta o mais perto possível do seu x ideal sem encostar nas vizinhas: as que se
+// encostam viram um bloco, centrado na média dos ideais, que não passa de [min, max].
+// itens: [{ x (o centro ideal), w }] em ordem de x; grava em cada um o centro final (cx).
+function espalharNaFaixa(itens, min, max) {
+  const blocos = [];
+  const inicio = (b) => Math.min(Math.max(b.soma / b.itens.length, min), max - b.larg);
+  for (const it of itens) {
+    it.off = it.w / 2;
+    blocos.push({ itens: [it], larg: it.w, soma: it.x - it.off });
+    while (blocos.length > 1) {
+      const b = blocos[blocos.length - 1];
+      const a = blocos[blocos.length - 2];
+      if (inicio(a) + a.larg + BUS_FOLGA <= inicio(b)) break;
+      const desloca = a.larg + BUS_FOLGA;
+      for (const m of b.itens) m.off += desloca;
+      a.soma += b.soma - b.itens.length * desloca;
+      a.larg += BUS_FOLGA + b.larg;
+      a.itens.push(...b.itens);
+      blocos.pop();
+    }
+  }
+  for (const b of blocos) {
+    const x0 = inicio(b);
+    for (const m of b.itens) m.cx = x0 + m.off;
+  }
+}
+
 function renderBussola() {
-  if (!bussolaCtx || !state.joined) return;
-  const w = bussolaCanvas.width;
-  const h = bussolaCanvas.height;
+  const { w, h } = tamBussola;
+  if (!bussolaCtx || !state.joined || !w) return;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  if (bussolaCanvas.width !== Math.round(w * dpr) || bussolaCanvas.height !== Math.round(h * dpr)) {
+    bussolaCanvas.width = Math.round(w * dpr);
+    bussolaCanvas.height = Math.round(h * dpr);
+  }
+  const agora = performance.now();
+  const dt = Math.min(0.1, (agora - tempoBussola) / 1000);
+  tempoBussola = agora;
   const ctx = bussolaCtx;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
   ctx.fillStyle = 'rgba(11, 15, 23, 0.88)';
   ctx.beginPath();
   ctx.roundRect ? ctx.roundRect(0, 0, w, h, h / 2) : ctx.rect(0, 0, w, h);
   ctx.fill();
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
-  ctx.lineWidth = 1;
-  ctx.stroke();
+
   const cx = w / 2;
-  ctx.fillStyle = '#34d399';
-  ctx.fillRect(cx - 1, 0, 2, h);
-  const fov = Math.PI * 0.72;
+  const meia = w / 2 - 16;
   const px = player.pos.x;
   const pz = player.pos.z;
-  const pyaw = player.yaw;
-  alvosBussola = [];
-  const cardeais = [
-    { label: 'N', ang: Math.PI },
-    { label: 'L', ang: -Math.PI / 2 },
-    { label: 'S', ang: 0 },
-    { label: 'O', ang: Math.PI / 2 },
-  ];
-  ctx.font = '700 10px "Plus Jakarta Sans", sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillStyle = '#94a3b8';
-  for (const c of cardeais) {
-    let diff = c.ang - pyaw;
-    diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-    if (Math.abs(diff) < fov / 2) {
-      const x = cx + (diff / (fov / 2)) * (w * 0.44);
-      ctx.fillText(c.label, x, h / 2);
-    }
-  }
-  for (const p of PONTOS_BUSSOLA) {
-    const dx = p.x - px;
-    const dz = p.z - pz;
+  const sy = Math.sin(player.yaw);
+  const cy = Math.cos(player.yaw);
+  // o ângulo de uma direção em relação a para onde se olha: positivo é à direita da câmera
+  const angulo = (dx, dz) => Math.atan2(dx * cy - dz * sy, -dx * sy - dz * cy);
+  const xDe = (a) => cx + (a / (BUS_FOV / 2)) * meia;
+  const visivel = (a) => Math.abs(a) < BUS_FOV / 2;
+  // perto da beira do campo de visão a etiqueta some aos poucos, em vez de pular para fora
+  const alfaDe = (a) => Math.min(1, (BUS_FOV / 2 - Math.abs(a)) / 0.14);
+
+  let itens = [];
+  for (const [id, a] of Object.entries(AREAS)) {
+    const dx = a.ir.pos[0] - px;
+    const dz = a.ir.pos[2] - pz;
     const dist = Math.hypot(dx, dz);
-    if (dist < 12) continue;
-    const ang = Math.atan2(-dx, -dz);
-    let diff = ang - pyaw;
-    diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-    if (Math.abs(diff) < fov / 2) {
-      const x = cx + (diff / (fov / 2)) * (w * 0.44);
-      const txt = `${p.icone} ${p.nome}`;
-      ctx.font = '700 10.5px "Plus Jakarta Sans", sans-serif';
-      const tw = ctx.measureText(txt).width;
-      const pad = 6;
-      const bx = x - tw / 2 - pad;
-      const bw = tw + pad * 2;
-      ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
-      ctx.beginPath();
-      ctx.roundRect ? ctx.roundRect(bx, 4, bw, h - 8, 6) : ctx.rect(bx, 4, bw, h - 8);
-      ctx.fill();
-      ctx.strokeStyle = p.cor;
-      ctx.lineWidth = 1;
-      ctx.stroke();
-      ctx.fillStyle = '#f8fafc';
-      ctx.fillText(txt, x, h / 2);
-      alvosBussola.push({ xMin: bx, xMax: bx + bw, id: p.id, tipo: 'area', nome: p.nome });
-    }
+    const ang = angulo(dx, dz);
+    if (dist < 15 || !visivel(ang)) continue;
+    itens.push({ chave: `a:${id}`, tipo: 'area', id, icone: ICONE_AREA[id] || '📍', nome: a.nome, cor: a.cor, dist, x: xDe(ang), alfa: alfaDe(ang) });
   }
   for (const u of state.users.values()) {
-    if (!u.avatar?.group?.position) continue;
-    const pos = u.avatar.group.position;
+    const pos = u.avatar?.group?.position;
+    if (u.isSelf || !pos) continue;
     const dx = pos.x - px;
     const dz = pos.z - pz;
     const dist = Math.hypot(dx, dz);
-    if (dist < 2.5) continue;
-    const ang = Math.atan2(-dx, -dz);
-    let diff = ang - pyaw;
-    diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-    if (Math.abs(diff) < fov / 2) {
-      const x = cx + (diff / (fov / 2)) * (w * 0.44);
-      const txt = `👤 ${u.name} ${Math.round(dist)}m`;
-      ctx.font = '700 10.5px "Plus Jakarta Sans", sans-serif';
-      const tw = ctx.measureText(txt).width;
-      const pad = 7;
-      const bx = x - tw / 2 - pad;
-      const bw = tw + pad * 2;
-      ctx.fillStyle = 'rgba(29, 78, 216, 0.92)';
-      ctx.beginPath();
-      ctx.roundRect ? ctx.roundRect(bx, 3, bw, h - 6, 6) : ctx.rect(bx, 3, bw, h - 6);
-      ctx.fill();
-      ctx.strokeStyle = '#93c5fd';
-      ctx.lineWidth = 1.2;
-      ctx.stroke();
-      ctx.fillStyle = '#eff6ff';
-      ctx.fillText(txt, x, h / 2);
-      alvosBussola.push({ xMin: bx, xMax: bx + bw, id: u.id, tipo: 'user', user: u });
+    const ang = angulo(dx, dz);
+    if (dist < 2.5 || !visivel(ang)) continue;
+    const inicial = (u.name || '?').trim().charAt(0).toUpperCase() || '?';
+    itens.push({ chave: `u:${u.id}`, tipo: 'user', user: u, icone: inicial, nome: u.name, cor: u.color || '#93c5fd', dist, x: xDe(ang), alfa: alfaDe(ang) });
+  }
+
+  // a etiqueta aberta: a que o toque abriu; senão a que está sob o mouse; senão a que está embaixo
+  // da setinha; senão a mais perto do meio (com uma folga para a de agora, para não ficar trocando
+  // entre duas quase empatadas)
+  if (fixoBussola && agora > fixoBussola.ate) fixoBussola = null;
+  const existe = (chave) => chave && itens.some((it) => it.chave === chave);
+  const sobMouse = (a) => mouseBussola != null && mouseBussola >= a.xMin && mouseBussola <= a.xMax;
+  let foco = existe(fixoBussola?.chave) ? fixoBussola.chave : null;
+  if (!foco && mouseBussola != null) {
+    const atual = alvosBussola.find((a) => a.chave === focoBussola);
+    foco = atual && sobMouse(atual) ? atual.chave : alvosBussola.find(sobMouse)?.chave ?? null;
+    if (!existe(foco)) foco = null;
+  }
+  // a que está embaixo da setinha do meio (a de agora fica enquanto continuar embaixo dela)
+  const noMeio = (a) => a.xMin <= cx && a.xMax >= cx;
+  if (!foco) {
+    const atual = alvosBussola.find((a) => a.chave === focoBussola);
+    foco = atual && noMeio(atual) ? atual.chave : alvosBussola.find(noMeio)?.chave ?? null;
+    if (!existe(foco)) foco = null;
+  }
+  if (!foco) {
+    let melhor = 34;
+    for (const it of itens) {
+      const d = Math.abs(it.x - cx) - (it.chave === focoBussola ? 10 : 0);
+      if (d < melhor) {
+        melhor = d;
+        foco = it.chave;
+      }
     }
   }
+  focoBussola = foco;
+
+  // larguras: a aberta cresce até caber o nome; as outras fecham no ícone
+  const k = 1 - Math.exp(-dt * 16);
+  ctx.textBaseline = 'middle';
+  for (const it of itens) {
+    it.rotulo = `${it.nome} · ${Math.round(it.dist)} m`;
+    ctx.font = FONTE_BUS;
+    const alvo = it.chave === foco ? BUS_FECHADA + ctx.measureText(it.rotulo).width + 10 : BUS_FECHADA;
+    const antes = largBussola.get(it.chave) ?? BUS_FECHADA;
+    it.w = Math.abs(alvo - antes) < 0.5 ? alvo : antes + (alvo - antes) * k;
+    it.aberta = it.chave === foco;
+  }
+  largBussola.clear();
+  for (const it of itens) largBussola.set(it.chave, it.w);
+  // se não cabem todas, saem as mais longe (nunca a aberta)
+  const cabe = w - BUS_BORDA * 2;
+  const ocupa = () => itens.reduce((s, it) => s + it.w, 0) + BUS_FOLGA * Math.max(0, itens.length - 1);
+  if (ocupa() > cabe) {
+    const porDist = itens.filter((it) => !it.aberta).sort((a, b) => b.dist - a.dist);
+    const sai = new Set();
+    let total = ocupa();
+    for (const it of porDist) {
+      if (total <= cabe) break;
+      sai.add(it);
+      total -= it.w + BUS_FOLGA;
+    }
+    itens = itens.filter((it) => !sai.has(it));
+  }
+  itens.sort((a, b) => a.x - b.x);
+  espalharNaFaixa(itens, BUS_BORDA, w - BUS_BORDA);
+
+  // a régua: um risquinho a cada 15° e as letras N, L, S, O onde nenhuma etiqueta está por cima
+  const y0 = (h - BUS_ALT) / 2;
+  const livre = (x) => itens.every((it) => x < it.cx - it.w / 2 - 6 || x > it.cx + it.w / 2 + 6);
+  ctx.textAlign = 'center';
+  for (let i = 0; i < 24; i++) {
+    const t = (i / 24) * Math.PI * 2;
+    const ang = angulo(Math.sin(t), Math.cos(t));
+    if (!visivel(ang)) continue;
+    const x = xDe(ang);
+    ctx.globalAlpha = alfaDe(ang);
+    if (i % 6 === 0) {
+      if (!livre(x)) continue;
+      ctx.font = '800 10px "Plus Jakarta Sans", sans-serif';
+      ctx.fillStyle = i === 0 ? '#f87171' : '#94a3b8';
+      ctx.fillText('NLSO'[i / 6], x, h / 2 + 0.5);
+    } else {
+      ctx.fillStyle = 'rgba(148, 163, 184, 0.55)';
+      ctx.fillRect(x - 0.5, h - (i % 3 === 0 ? 6 : 4), 1, i % 3 === 0 ? 4 : 2);
+    }
+  }
+
+  alvosBussola = [];
+  for (const it of itens) {
+    const bx = it.cx - it.w / 2;
+    ctx.globalAlpha = it.alfa;
+    ctx.beginPath();
+    ctx.roundRect ? ctx.roundRect(bx, y0, it.w, BUS_ALT, BUS_ALT / 2) : ctx.rect(bx, y0, it.w, BUS_ALT);
+    ctx.fillStyle = it.tipo === 'user' ? 'rgba(29, 78, 216, 0.95)' : 'rgba(15, 23, 42, 0.96)';
+    ctx.fill();
+    ctx.strokeStyle = it.cor;
+    ctx.lineWidth = it.aberta ? 2 : 1.25;
+    ctx.stroke();
+    ctx.save();
+    ctx.clip();
+    ctx.textAlign = 'center';
+    if (it.tipo === 'user') {
+      ctx.font = '800 11px "Plus Jakarta Sans", sans-serif';
+      ctx.fillStyle = '#eff6ff';
+    } else {
+      ctx.font = FONTE_ICONE;
+    }
+    ctx.fillText(it.icone, bx + BUS_FECHADA / 2, h / 2 + 0.5);
+    if (it.w > BUS_FECHADA + 4) {
+      ctx.font = FONTE_BUS;
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#f8fafc';
+      ctx.fillText(it.rotulo, bx + BUS_FECHADA - 3, h / 2 + 0.5);
+    }
+    ctx.restore();
+    alvosBussola.push({ xMin: bx, xMax: bx + it.w, chave: it.chave, tipo: it.tipo, id: it.id, user: it.user, nome: it.nome });
+  }
+  ctx.globalAlpha = 1;
+  // o meio: para onde você está olhando
+  ctx.fillStyle = '#34d399';
+  ctx.beginPath();
+  ctx.moveTo(cx - 4, 0);
+  ctx.lineTo(cx + 4, 0);
+  ctx.lineTo(cx, 4.5);
+  ctx.closePath();
+  ctx.fill();
 }
+bussolaCanvas?.addEventListener('pointermove', (e) => {
+  if (e.pointerType === 'mouse') mouseBussola = e.clientX - bussolaCanvas.getBoundingClientRect().left;
+});
+bussolaCanvas?.addEventListener('pointerleave', () => { mouseBussola = null; });
 bussolaCanvas?.addEventListener('click', (e) => {
-  const r = bussolaCanvas.getBoundingClientRect();
-  const clickX = ((e.clientX - r.left) / r.width) * bussolaCanvas.width;
-  const alvo = alvosBussola.find((a) => clickX >= a.xMin && clickX <= a.xMax);
-  if (!alvo) return;
+  const x = e.clientX - bussolaCanvas.getBoundingClientRect().left;
+  // a etiqueta tocada, com uma folga para o dedo (a mais perto, se duas estão dentro da folga)
+  let alvo = alvosBussola.find((a) => x >= a.xMin && x <= a.xMax);
+  if (!alvo) {
+    const perto = alvosBussola.map((a) => ({ a, d: Math.max(a.xMin - x, x - a.xMax) })).filter((p) => p.d <= 6).sort((p, q) => p.d - q.d);
+    alvo = perto[0]?.a;
+  }
+  if (!alvo) return abrirMapa();
+  // no celular não tem mouse por cima: o primeiro toque abre o nome, o segundo leva
+  if (isTouch && alvo.chave !== focoBussola) {
+    fixoBussola = { chave: alvo.chave, ate: performance.now() + 5000 };
+    return;
+  }
+  fixoBussola = null;
   if (alvo.tipo === 'user') {
     irAte(alvo.user);
     toast(`Teleportado para ${alvo.user.name}!`, 'info');
   } else {
     irParaArea(alvo.id);
-    toast(`Indo para ${alvo.nome}...`, 'info');
+    toast(`Teleportado para ${alvo.nome}!`, 'info');
   }
 });
 

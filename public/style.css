@@ -912,7 +912,7 @@ body.touch .jh-dica, body.touch #jh-sair kbd, body.touch #dh-sair kbd { display:
   body.touch #jogo-hud, body.touch #dados-hud { left: 8px; right: 8px; width: auto; max-height: 52dvh; }
 }
 
-#tv-unblock { position: absolute; top: 72px; left: 50%; transform: translateX(-50%); pointer-events: auto; }
+#tv-unblock { position: absolute; top: 108px; left: 50%; transform: translateX(-50%); pointer-events: auto; }
 
 /* hub de controles — fica sempre na tela (só recolhe se o usuário pedir) */
 #controls-help {
@@ -3121,7 +3121,7 @@ body.com-luneta #controls-help, body.com-luneta #salas, body.com-luneta .room-ch
 /* comunicado e chamado, no topo do meio */
 #topo-centro {
   position: absolute;
-  top: 66px;
+  top: 108px; /* embaixo da bússola */
   left: 50%;
   transform: translateX(-50%);
   display: grid;
@@ -3150,7 +3150,7 @@ body.com-luneta #controls-help, body.com-luneta #salas, body.com-luneta .room-ch
 .chamado .avatar-dot { width: 32px; height: 32px; flex: none; }
 .chamado-txt { display: grid; gap: 1px; min-width: 0; font-size: 13px; }
 .chamado-txt small { color: var(--muted); }
-body.touch #topo-centro { top: calc(64px + env(safe-area-inset-top)); }
+body.touch #topo-centro { top: calc(100px + env(safe-area-inset-top)); }
 .guia-inicio {
   display: flex;
   align-items: center;
@@ -3165,14 +3165,15 @@ body.touch #topo-centro { top: calc(64px + env(safe-area-inset-top)); }
   animation: rise 360ms var(--ease) both;
 }
 .guia-inicio[hidden] { display: none; }
-/* bussola fluida em canvas (60 fps) */
+/* bussola fluida em canvas (60 fps): numa linha só dela, embaixo da barra da sala (no celular, da
+   barra de cima), para não ficar por cima dos botões; o comunicado (#topo-centro) desce junto */
 .hud-bussola {
   position: absolute;
-  top: 14px;
+  top: 66px;
   left: 50%;
   transform: translateX(-50%);
-  width: min(460px, calc(100vw - 320px));
-  height: 30px;
+  width: min(460px, calc(100vw - 200px));
+  height: 32px;
   border-radius: 999px;
   overflow: hidden;
   pointer-events: auto;
@@ -3185,8 +3186,14 @@ body.touch #topo-centro { top: calc(64px + env(safe-area-inset-top)); }
   width: 100%;
   height: 100%;
 }
+body.touch .hud-bussola { top: calc(58px + env(safe-area-inset-top)); }
+/* nos jogos, na corrida, no parkour e com a tela em foco o topo do meio é do placar deles */
+body[data-jogo] .hud-bussola,
+#hud:has(#race-hud:not([hidden]), #parkour-hud:not([hidden]), #tv-focus-hud:not([hidden])) .hud-bussola { display: none; }
 @media (max-width: 680px) {
   .hud-bussola { display: none; }
+  #topo-centro { top: 66px; }
+  body.touch #topo-centro { top: calc(64px + env(safe-area-inset-top)); }
 }
 .guia-inicio-ic {
   display: grid;
