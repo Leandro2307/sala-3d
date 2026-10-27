@@ -188,44 +188,58 @@ export function baralho21() {
 export const apostaBase21 = (rodada) => 1 + Math.floor((Math.max(1, rodada) - 1) / RODADAS_POR_APOSTA);
 
 // Os trunfos. mesa: fica na mesa (vale enquanto estiver lá, até o fim da rodada ou até o rival
-// destruir); os outros fazem efeito na hora. peso: a chance no sorteio.
+// destruir); os outros fazem efeito na hora. peso: a chance no sorteio. unico: ninguém tem dois (o
+// segundo não faria nada): o sorteio pula o que a pessoa já tem na mão ou na mesa. Os outros somam.
 export const TRUNFOS_21 = {
-  c2: { nome: 'Carta 2', desc: 'Compra o 2, se ele ainda estiver no baralho.', icone: '2', cor: '#9ae6b4', peso: 4 },
-  c3: { nome: 'Carta 3', desc: 'Compra o 3, se ele ainda estiver no baralho.', icone: '3', cor: '#9ae6b4', peso: 4 },
-  c4: { nome: 'Carta 4', desc: 'Compra o 4, se ele ainda estiver no baralho.', icone: '4', cor: '#9ae6b4', peso: 4 },
-  c5: { nome: 'Carta 5', desc: 'Compra o 5, se ele ainda estiver no baralho.', icone: '5', cor: '#9ae6b4', peso: 4 },
-  c6: { nome: 'Carta 6', desc: 'Compra o 6, se ele ainda estiver no baralho.', icone: '6', cor: '#9ae6b4', peso: 4 },
-  c7: { nome: 'Carta 7', desc: 'Compra o 7, se ele ainda estiver no baralho.', icone: '7', cor: '#9ae6b4', peso: 4 },
+  c2: { nome: 'Carta 2', desc: 'Compra o 2, se ele ainda estiver no baralho.', icone: '2', cor: '#9ae6b4', peso: 4, unico: true },
+  c3: { nome: 'Carta 3', desc: 'Compra o 3, se ele ainda estiver no baralho.', icone: '3', cor: '#9ae6b4', peso: 4, unico: true },
+  c4: { nome: 'Carta 4', desc: 'Compra o 4, se ele ainda estiver no baralho.', icone: '4', cor: '#9ae6b4', peso: 4, unico: true },
+  c5: { nome: 'Carta 5', desc: 'Compra o 5, se ele ainda estiver no baralho.', icone: '5', cor: '#9ae6b4', peso: 4, unico: true },
+  c6: { nome: 'Carta 6', desc: 'Compra o 6, se ele ainda estiver no baralho.', icone: '6', cor: '#9ae6b4', peso: 4, unico: true },
+  c7: { nome: 'Carta 7', desc: 'Compra o 7, se ele ainda estiver no baralho.', icone: '7', cor: '#9ae6b4', peso: 4, unico: true },
+  baixa: { nome: 'Carta Baixa', desc: 'Compra a menor carta do baralho.', icone: '🪶', cor: '#5eead4', peso: 3 },
   devolver: { nome: 'Devolver', desc: 'Sua última carta aberta volta para o baralho.', icone: '↩️', cor: '#ff9966', peso: 6 },
   remover: { nome: 'Remover', desc: 'A última carta aberta do rival volta para o baralho.', icone: '🫳', cor: '#ff7a59', peso: 5 },
   troca: { nome: 'Troca', desc: 'Troca a sua última carta aberta com a do rival.', icone: '🔁', cor: '#ff6600', peso: 4 },
   perfeita: { nome: 'Compra Perfeita', desc: 'Compra a maior carta do baralho que não passa da meta.', icone: '✨', cor: '#cc66ff', peso: 2 },
   presente: { nome: 'Presente de Grego', desc: 'O rival compra a maior carta que ainda está no baralho.', icone: '🎁', cor: '#ff4da6', peso: 3 },
-  raiox: { nome: 'Raio-X', desc: 'Você vê a carta fechada do rival nesta rodada.', icone: '👁️', cor: '#73ffcc', peso: 3 },
+  espiar: { nome: 'Espiar', desc: 'Você vê a próxima carta do baralho (só você), até ela sair de cima.', icone: '👀', cor: '#38bdf8', peso: 4 },
+  queimar: { nome: 'Queimar', desc: 'A carta de cima do baralho vira para todos e sai da rodada.', icone: '🔥', cor: '#f97316', peso: 3 },
+  raiox: { nome: 'Raio-X', desc: 'Você vê a carta fechada do rival nesta rodada.', icone: '👁️', cor: '#73ffcc', peso: 3, unico: true },
   trocaTrunfos: { nome: 'Troca de Trunfos', desc: 'Descarta 2 trunfos seus (sorteados) e ganha 3 novos.', icone: '🔀', cor: '#facc15', peso: 3 },
   feliz: { nome: 'Felicidade', desc: 'Você e o rival ganham um trunfo cada.', icone: '😊', cor: '#fde68a', peso: 2 },
+  furto: { nome: 'Furto', desc: 'Pega um trunfo sorteado da mão do rival.', icone: '🥷', cor: '#fb7185', peso: 3 },
+  curativo: { nome: 'Curativo', desc: `Recupera 1 dedo (até ${DEDOS_21}).`, icone: '🩹', cor: '#fca5a5', peso: 1 },
   destruir: { nome: 'Destruir', desc: 'Tira da mesa o último trunfo que o rival pôs lá.', icone: '💥', cor: '#ff3333', peso: 5 },
   destruirTudo: { nome: 'Destruir+', desc: 'Tira da mesa todos os trunfos do rival.', icone: '☢️', cor: '#cc0000', peso: 2 },
+  roubar: { nome: 'Roubar', desc: 'O último trunfo da mesa do rival passa para a sua mesa.', icone: '🧲', cor: '#e879f9', peso: 3 },
   mais1: { nome: 'Aposta +1', desc: 'Na mesa: a aposta do rival sobe 1. E você ganha um trunfo.', icone: '☝️', cor: '#e6b800', peso: 7, mesa: true },
   mais2: { nome: 'Aposta +2', desc: 'Na mesa: a aposta do rival sobe 2. E você ganha um trunfo.', icone: '✌️', cor: '#f59e0b', peso: 3, mesa: true },
+  tudo: { nome: 'Tudo ou Nada', desc: 'Na mesa: a aposta dos dois dobra nesta rodada.', icone: '🎲', cor: '#fbbf24', peso: 2, mesa: true, unico: true },
   escudo: { nome: 'Escudo', desc: 'Na mesa: a sua aposta desce 1.', icone: '🛡️', cor: '#4da6ff', peso: 6, mesa: true },
   escudo2: { nome: 'Escudo+', desc: 'Na mesa: a sua aposta desce 2.', icone: '🔰', cor: '#0066cc', peso: 2, mesa: true },
-  meta17: { nome: 'Meta 17', desc: 'Na mesa: a meta vira 17 (vale a última meta posta).', icone: '17', cor: '#86efac', peso: 2, mesa: true },
-  meta24: { nome: 'Meta 24', desc: 'Na mesa: a meta vira 24 (vale a última meta posta).', icone: '24', cor: '#aaaaff', peso: 2, mesa: true },
-  meta27: { nome: 'Meta 27', desc: 'Na mesa: a meta vira 27 (vale a última meta posta).', icone: '27', cor: '#8f8fff', peso: 2, mesa: true },
-  silencio: { nome: 'Silêncio', desc: 'Na mesa: o rival não pode pedir carta.', icone: '🤐', cor: '#94a3b8', peso: 2, mesa: true },
-  colheita: { nome: 'Colheita', desc: 'Na mesa: cada trunfo que você usar depois te dá outro.', icone: '🌾', cor: '#84cc16', peso: 2, mesa: true },
+  meta17: { nome: 'Meta 17', desc: 'Na mesa: a meta vira 17 (vale a última meta posta).', icone: '17', cor: '#86efac', peso: 2, mesa: true, unico: true },
+  meta21: { nome: 'Meta 21', desc: 'Na mesa: a meta volta a ser 21 (vale a última meta posta).', icone: '21', cor: '#c4b5fd', peso: 2, mesa: true, unico: true },
+  meta24: { nome: 'Meta 24', desc: 'Na mesa: a meta vira 24 (vale a última meta posta).', icone: '24', cor: '#aaaaff', peso: 2, mesa: true, unico: true },
+  meta27: { nome: 'Meta 27', desc: 'Na mesa: a meta vira 27 (vale a última meta posta).', icone: '27', cor: '#8f8fff', peso: 2, mesa: true, unico: true },
+  silencio: { nome: 'Silêncio', desc: 'Na mesa: o rival não pode pedir carta.', icone: '🤐', cor: '#94a3b8', peso: 2, mesa: true, unico: true },
+  cadeado: { nome: 'Cadeado', desc: 'Na mesa: o rival só pode usar Destruir.', icone: '🔒', cor: '#a3a3a3', peso: 1, mesa: true, unico: true },
+  neblina: { nome: 'Neblina', desc: 'Na mesa: o rival não vê as suas cartas abertas, só quantas são.', icone: '🌁', cor: '#cbd5e1', peso: 2, mesa: true, unico: true },
+  colheita: { nome: 'Colheita', desc: 'Na mesa: cada trunfo que você usar depois te dá outro.', icone: '🌾', cor: '#84cc16', peso: 2, mesa: true, unico: true },
 };
 export const trunfo21 = (c) => (typeof c === 'string' && c.startsWith('T:') ? c.slice(2) : null);
 const DE_APOSTA = { mais1: 1, mais2: 2 };
 const DE_ESCUDO = { escudo: 1, escudo2: 2 };
+// com o Cadeado do rival na mesa, só estes passam
+export const LIVRES_CADEADO_21 = ['destruir', 'destruirTudo'];
 
 // O que está na mesa decide a rodada. mesa[k]: os trunfos que k pôs lá, cada um { c, n } (n: a ordem
 // em que entrou, para saber qual meta vale).
+export const dobrado21 = (mesa) => [...mesa[0], ...mesa[1]].some((t) => t.c === 'tudo');
 export function aposta21(mesa, k, rodada) {
   const sobe = mesa[1 - k].reduce((s, t) => s + (DE_APOSTA[t.c] || 0), 0);
   const desce = mesa[k].reduce((s, t) => s + (DE_ESCUDO[t.c] || 0), 0);
-  return Math.max(0, apostaBase21(rodada) + sobe - desce);
+  return Math.max(0, apostaBase21(rodada) + sobe - desce) * (dobrado21(mesa) ? 2 : 1);
 }
 export function meta21(mesa) {
   let ultima = null;
@@ -233,9 +247,13 @@ export function meta21(mesa) {
   return ultima ? Number(ultima.c.slice(4)) : META_21;
 }
 export const silenciado21 = (mesa, k) => mesa[1 - k].some((t) => t.c === 'silencio');
+export const trancado21 = (mesa, k) => mesa[1 - k].some((t) => t.c === 'cadeado');
+// a Neblina na mesa de k: as cartas abertas de k só ele vê
+export const nublado21 = (mesa, k) => mesa[k].some((t) => t.c === 'neblina');
 
-export function sortearTrunfo21(aleatorio = Math.random) {
-  const lista = Object.entries(TRUNFOS_21);
+// tenho: os trunfos que a pessoa já tem (na mão e na mesa); um único que já está lá não vem de novo
+export function sortearTrunfo21(aleatorio = Math.random, tenho = []) {
+  const lista = Object.entries(TRUNFOS_21).filter(([k, t]) => !(t.unico && tenho.includes(k)));
   let r = aleatorio() * lista.reduce((s, [, t]) => s + t.peso, 0);
   for (const [k, t] of lista) {
     r -= t.peso;

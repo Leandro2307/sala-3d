@@ -19,7 +19,7 @@ import * as THREE from 'three';
 import {
   forcaTruco, valorDe, naipeDe, SIMBOLO, NOME_PEDIDO, PASSOS_TRUCO, MANILHAS, NOME_MANILHA, VALE_DEZ, ZOEIRA, SINAIS, ARREMESSOS,
   podeJogarUno, coringa, corUno, simboloUno, rotuloUno, falaUno, HEX_COR, NOME_COR, CORES_UNO,
-  numero21, trunfo21, soma21, TRUNFOS_21, MAX_21, DEDOS_21, arquivoVoz,
+  numero21, trunfo21, soma21, TRUNFOS_21, MAX_21, DEDOS_21, LIVRES_CADEADO_21, arquivoVoz,
   NAIPES, VALORES_CACHETA, CARTAS_CACHETA, lerCacheta, faceCacheta, ehCuringa, nomeCuringa, nomeCartaCacheta, arranjoCacheta, comoBaterCacheta,
 } from './cartas-regras.js';
 import { MESAS_CARTAS } from './parque-dados.js';
@@ -575,7 +575,7 @@ export class Cartas {
   ligar(socket) {
     this.socket = socket;
     socket.on('ct-estado', (e) => this.estado(e));
-    socket.on('ct-mao', ({ mesa, lugar, mao, parceiro, trunfos, rivalOculta }) => {
+    socket.on('ct-mao', ({ mesa, lugar, mao, parceiro, trunfos, rivalOculta, proxima, chegou, perdidos, saiu }) => {
       const M = this.mesas[mesa];
       if (!M) return;
       const antes = M.mao;
@@ -584,6 +584,8 @@ export class Cartas {
       M.parceiro = parceiro || null; // mão de onze: as cartas do parceiro, para decidir
       M.trunfos = trunfos || []; // 21: os meus trunfos
       M.rivalOculta = rivalOculta || null; // 21, com o raio-x: a carta fechada do rival
+      M.proxima = proxima || null; // 21, com o Espiar: a próxima carta do monte
+      this.trunfosMudaram(M, chegou, perdidos, saiu);
       // mão nova (três cartas chegando, ou as sete do uno): as cartas entram distribuídas
       if (mao.length > (antes?.length || 0) + 1) this.distribuir = true;
       // cacheta: mão nova (o ct-estado com o número dela chega antes) também entra distribuída
@@ -828,6 +830,8 @@ export class Cartas {
       }
       if ((e.aposta?.[1 - eu] ?? 0) > (antes.aposta?.[1 - eu] ?? 0)) this.pular(this.$('.ct-vale2'));
       if (e.silencio?.[eu] && !antes.silencio?.[eu]) this.faixaGrito('SILÊNCIO!', 'O rival te calou: você não pode pedir carta', false);
+      if (e.trancado?.[eu] && !antes.trancado?.[eu]) this.faixaGrito('CADEADO!', 'O rival trancou seus trunfos: só o Destruir passa', false);
+      if (e.nublado?.[1 - eu] && !antes.nublado?.[1 - eu]) this.faixaGrito('NEBLINA!', 'As cartas abertas do rival sumiram na neblina', false);
       if (e.meta !== antes.meta) this.pular(this.$('.ct-meta'));
       if (e.fase === 'fimDaRodada' && antes.fase !== 'fimDaRodada') this.sfx.rodada?.();
     }
@@ -907,7 +911,8 @@ export class Cartas {
         por(5, 'verso', { x: pm.x, y: Y_MESA + 0.006, z: pm.z, ry: pm.ry + 0.3 }, { chave: 'monte' });
       } else if (e.jogo === 'vinteum') {
         // as duas mãos, cada uma numa fileira na frente do dono; o monte no meio. A minha carta
-        // fechada eu vejo (e a do rival também, com o raio-x)
+        // fechada eu vejo (e a do rival também, com o raio-x). Com a Neblina, as abertas de quem pôs
+        // chegam viradas: o dono vê as dele pela própria mão
         let i = 0;
         for (const k of [0, 1]) {
           const lista = e.maos21?.[k] || [];
@@ -917,7 +922,7 @@ export class Cartas {
           const sentado = this.ativa === M;
           lista.forEach((carta, j) => {
             let face = carta;
-            if (sentado && carta === 'verso') face = (k === M.lugar ? M.mao[j] : M.rivalOculta) || 'verso';
+            if (sentado && carta === 'verso') face = (k === M.lugar ? M.mao[j] : j === 0 && M.rivalOculta) || 'verso';
             const off = (j - (lista.length - 1) / 2) * 0.25;
             const alvo = { x: M.m.x + dx * 0.47 - dz * off, y: Y_MESA + 0.01 + j * 0.002, z: M.m.z + dz * 0.47 + dx * off, ry: -c.a + Math.PI / 2, esc: 0.78 };
             if (i < 15) por(i++, face, alvo, { de: { x: M.m.x, y: Y_MESA + 0.2, z: M.m.z }, chave: `${k}:${j}:${face}` });
@@ -1275,21 +1280,96 @@ export class Cartas {
     if (!this.minhaVez21(M)) return;
     if (acao === 'pedir' && !M.e.monte) return hud.mensagem('O baralho acabou', 'Agora é parar', 1400);
     if (acao === 'pedir' && M.e.silencio?.[M.lugar]) return hud.mensagem('Silêncio!', 'Você não pode pedir carta: destrua o Silêncio do rival', 1800);
+    if (acao === 'pedir' && this.estourei21(M)) return hud.mensagem('Estourou!', 'Passou da meta: só volta a pedir se a meta subir ou se devolver a carta', 2000);
     this.socket?.emit('ct-21', { mesa: M.i, acao, trunfo });
     if (acao === 'pedir') this.sfx.cartaVoa?.();
     else if (acao === 'parar') this.sfx.bip?.();
   }
 
+  estourei21(M) {
+    return soma21(M.mao) > (M.e?.meta ?? 21);
+  }
+
   usarTrunfo(chave, el) {
     const M = this.ativa;
-    if (!this.minhaVez21(M)) {
+    const motivo = this.motivoTrunfo(M, chave);
+    if (!this.minhaVez21(M) || motivo) {
       el?.classList.remove('nao');
       void el?.offsetWidth;
       el?.classList.add('nao');
+      if (motivo && this.minhaVez21(M)) hud.mensagem(TRUNFOS_21[chave]?.nome || '', motivo, 1800);
       return;
     }
     this.emit21('trunfo', chave);
     this.sfx.dado?.(0.8);
+  }
+
+  // 21: por que este trunfo não dá para usar agora ('' = dá). As mesmas contas do servidor
+  // (efeito21, em cartas-servidor.js), mas só com o que eu sei: a minha mão, as abertas do rival, as
+  // mesas e quantas cartas tem o monte. Nunca o que está no monte (senão entrega a fechada do rival).
+  motivoTrunfo(M, chave) {
+    const e = M?.e;
+    const T = TRUNFOS_21[chave];
+    if (!e || !T) return '';
+    const eu = Math.max(0, M.lugar);
+    const ele = 1 - eu;
+    const minha = M.mao.map(numero21);
+    const meta = e.meta ?? 21;
+    const folga = meta - soma21(minha);
+    const maoDele = e.maos21?.[ele] || [];
+    const mesaMinha = e.mesa21?.[eu] || [];
+    const mesaDele = e.mesa21?.[ele] || [];
+    const estourou = 'Você estourou: não dá para comprar carta';
+    // os números que eu sei que não estão no monte (os do rival que eu vejo e os queimados)
+    const foraDoMonte = new Set([...maoDele, M.rivalOculta, ...(e.fora || [])].map(numero21));
+    if (e.trancado?.[eu] && !LIVRES_CADEADO_21.includes(chave)) return 'O Cadeado do rival tranca os seus trunfos: só o Destruir passa';
+    if (/^c\d$/.test(chave)) {
+      const n = Number(chave.slice(1));
+      if (folga < 0) return estourou;
+      if (minha.includes(n)) return `O ${n} já está na sua mão`;
+      if (foraDoMonte.has(n)) return `O ${n} já saiu: está com o rival ou foi queimado`;
+      return '';
+    }
+    if (T.mesa) {
+      if (/^meta/.test(chave)) return Number(chave.slice(4)) === meta ? `A meta já é ${meta}` : '';
+      if (T.unico && mesaMinha.includes(chave)) return `${T.nome} já está na sua mesa`;
+      if (chave === 'tudo' && mesaDele.includes('tudo')) return 'A aposta já está dobrada';
+      return '';
+    }
+    const semMonte = !e.monte && 'O baralho acabou';
+    const motivos = {
+      baixa: folga < 0 ? estourou : semMonte,
+      // nenhuma que cabe pode estar no monte: todas as de 1 até a folga eu já vi
+      perfeita: folga < 0 ? estourou : folga === 0 ? 'Você já está na meta' : semMonte
+        || (Array.from({ length: Math.min(folga, MAX_21) }, (_, i) => i + 1).every((n) => minha.includes(n) || foraDoMonte.has(n)) && 'Nenhuma carta que cabe ainda está no baralho'),
+      presente: semMonte,
+      queimar: semMonte,
+      espiar: semMonte || (M.proxima && 'Você já está vendo a próxima carta'),
+      devolver: minha.length < 2 && 'Você não tem carta aberta para devolver',
+      remover: maoDele.length < 2 && 'O rival não tem carta aberta',
+      troca: (minha.length < 2 || maoDele.length < 2) && 'Precisa de uma carta aberta de cada lado',
+      raiox: e.raiox?.[eu] && 'Você já está vendo a fechada do rival',
+      furto: !e.trunfosN?.[ele] && 'O rival está sem trunfo na mão',
+      curativo: (e.vidas?.[eu] ?? DEDOS_21) >= DEDOS_21 && 'Você está com todos os dedos',
+      destruir: !mesaDele.length && 'O rival não tem trunfo na mesa',
+      destruirTudo: !mesaDele.length && 'O rival não tem trunfo na mesa',
+      roubar: !mesaDele.length && 'O rival não tem trunfo na mesa',
+    };
+    return motivos[chave] || '';
+  }
+
+  // 21: os trunfos que chegaram (ficam marcados de NOVO na fileira por uns segundos), os que se
+  // perderam com a mão cheia e os que saíram (o Furto do rival, a Troca de Trunfos)
+  trunfosMudaram(M, chegou, perdidos, saiu) {
+    if (chegou?.length) M.novos = { n: chegou.length, ate: performance.now() + 4000, lista: M.trunfos.join() };
+    else if (M.novos && M.novos.lista !== M.trunfos.join()) M.novos = null; // a fileira mudou: as marcas saem
+    if (this.ativa !== M) return;
+    const nomes = (l) => l.map((x) => TRUNFOS_21[x.c || x]?.nome).filter(Boolean).join(', ');
+    if (perdidos?.length) hud.mensagem('Mão cheia!', `${nomes(perdidos)} se perdeu: o máximo é 7 trunfos`, 2400, '#fe5f55');
+    const furtados = saiu?.filter((x) => x.por === 'furto') || [];
+    const trocados = saiu?.filter((x) => x.por === 'troca') || [];
+    if (furtados.length) hud.mensagem('Furto!', `O rival levou: ${nomes(furtados)}`, 2400, '#fe5f55');
+    else if (trocados.length) hud.mensagem('Troca de Trunfos', `Saíram: ${nomes(trocados)}`, 2200);
   }
 
   maoOrdenada(M) {
@@ -1613,6 +1693,14 @@ body.touch .ct-placa { font-size: 12px; }
 .ct-trunfo kbd { position: absolute; top: -8px; left: -6px; font: 800 11px ${NUMERO}; background: #1e2b2d; color: #fff; border-radius: 5px; padding: 1px 5px; }
 .ct-b kbd { margin-left: 7px; font: 800 11px ${NUMERO}; background: #0005; border-radius: 5px; padding: 1px 5px; vertical-align: 1px; }
 .ct-trunfos.longe .ct-trunfo { filter: brightness(.72) saturate(.7); }
+/* o que não dá para usar agora fica apagado; o que acabou de chegar cai na fileira e leva o NOVO */
+.ct-trunfos .ct-trunfo.apagado { filter: grayscale(.85) brightness(.55); }
+.ct-trunfo.novo { animation: ct-novo .5s cubic-bezier(.2,1.5,.4,1) backwards; box-shadow: 0 4px 0 rgba(0,0,0,.3), 0 0 14px #f5b244; }
+.ct-trunfo em { position: absolute; top: -9px; right: -6px; font: normal 800 10px ${NUMERO}; padding: 1px 5px; border-radius: 5px; background: #f5b244; color: #1e2b2d; pointer-events: none; animation: ct-sai 4s linear forwards; }
+@keyframes ct-novo { 0% { transform: translateY(-26px) scale(.4) rotate(-12deg); opacity: 0; } 100% { transform: none; opacity: 1; } }
+@keyframes ct-sai { 0%, 85% { opacity: 1; } 100% { opacity: 0; } }
+.ct-tip small.nao { color: #fe8b83; }
+.ct-soma .ct-prox { font-style: normal; color: #38bdf8; }
 .ct-trunfo.nao { animation: ct-nao .3s linear; }
 .ct-tip { position: absolute; bottom: calc(100% + 12px); left: 50%; translate: -50% 0; width: 250px; padding: 8px 10px; font-size: 13px; line-height: 1.3; text-align: center; pointer-events: none; }
 .ct-tip b { display: block; font-size: 16px; margin-bottom: 3px; }
@@ -1632,7 +1720,7 @@ body.touch .ct-placa { font-size: 12px; }
 #ct-trunfo.anda { animation: ct-trunfo 2s cubic-bezier(.2,1.4,.4,1) both; }
 @keyframes ct-trunfo { 0% { transform: scale(.2) rotate(-25deg); opacity: 0; } 16% { transform: scale(1.12) rotate(4deg); opacity: 1; } 26% { transform: none; }
   82% { transform: none; opacity: 1; } 100% { transform: translateY(-30px) scale(.9); opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { #ct-trunfo.anda, .ct-vez21 { animation: none; } }
+@media (prefers-reduced-motion: reduce) { #ct-trunfo.anda, .ct-vez21, .ct-trunfo.novo { animation: none; } }
 body.touch .ct-rival { left: auto; right: calc(6px + env(safe-area-inset-right)); translate: none; top: calc(54px + env(safe-area-inset-top)); padding: 5px 8px; gap: 6px; }
 body.touch .ct-rival img { width: 30px; height: 40px; } body.touch .ct-rival .ct-somar { font-size: 18px; }
 body.touch .ct-trunfo { width: 44px; height: 59px; } body.touch .ct-soma { font-size: 26px; padding: 4px 8px; }
@@ -2351,17 +2439,20 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
     if (!mostra) return;
     const ele = 1 - Math.max(0, M.lugar);
     const l = e.lugares[ele];
-    const cartas = (e.maos21?.[ele] || []).map((c) => (c === 'verso' && M.rivalOculta ? { c: M.rivalOculta, raiox: true } : { c }));
+    // (com a Neblina dele, as abertas também chegam viradas; o raio-x só abre a primeira)
+    const cartas = (e.maos21?.[ele] || []).map((c, i) => (c === 'verso' && i === 0 && M.rivalOculta ? { c: M.rivalOculta, raiox: true } : { c }));
     const fechada = cartas.some((x) => x.c === 'verso');
     const vista = soma21(cartas.map((x) => x.c).filter((c) => c !== 'verso'));
     const extras = [`🃏 ${e.trunfosN?.[ele] ?? 0} trunfo${e.trunfosN?.[ele] === 1 ? '' : 's'}`];
     if (e.raiox?.[ele]) extras.push('👁️ vê a sua fechada');
     if (e.silencio?.[ele]) extras.push('🤐 calado');
+    if (e.nublado?.[ele]) extras.push('🌁 na neblina');
+    if (e.trancado?.[ele]) extras.push('🔒 trancado');
     // os trunfos que ele pôs na mesa (o Destruir tira o último)
     const mesa = (e.mesa21?.[ele] || []).map((c) => `<img src="${urlCarta(`T:${c}`)}" alt="${esc(TRUNFOS_21[c]?.nome || c)}" title="${esc(`${TRUNFOS_21[c]?.nome}: ${TRUNFOS_21[c]?.desc}`)}">`).join('');
     const html = `<div class="ct-quem">${l?.bot ? '🤖 ' : ''}${esc(l?.nome || 'Rival')}<small>${extras.join(' · ')}</small></div>
 <span class="ct-cartas">${cartas.map((x) => `<img src="${urlCarta(x.c)}" alt="${x.c === 'verso' ? 'carta fechada' : numero21(x.c)}"${x.raiox ? ' class="raiox" title="Raio-X"' : ''}>`).join('')}</span>
-<b class="ct-somar" title="O que dá para ver da soma dele">${fechada ? `? + ${vista}` : vista}</b>${mesa ? `<span class="ct-namesa" title="Trunfos dele na mesa">${mesa}</span>` : ''}`;
+<b class="ct-somar" title="O que dá para ver da soma dele">${fechada ? (vista ? `? + ${vista}` : '?') : vista}</b>${mesa ? `<span class="ct-namesa" title="Trunfos dele na mesa">${mesa}</span>` : ''}`;
     if (el.dataset.html === html) return;
     el.dataset.html = html;
     el.innerHTML = html;
@@ -2373,8 +2464,14 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
     const lista = e.jogo === 'vinteum' && (e.fase === 'jogando' || e.fase === 'fimDaRodada') ? M.trunfos || [] : [];
     el.hidden = !lista.length;
     el.classList.toggle('longe', !this.minhaVez21(M));
-    const html = lista.map((k, i) => `<button type="button" class="ct-trunfo" data-trunfo="${esc(k)}" style="background-image:url(${urlCarta(`T:${k}`)})" aria-label="${esc(`${TRUNFOS_21[k]?.nome}: ${TRUNFOS_21[k]?.desc}`)}">`
-      + `${i < 9 ? `<kbd>${i + 1}</kbd>` : ''}</button>`).join('');
+    // os que acabaram de chegar ficam no fim da fileira; o que não dá para usar agora fica apagado
+    const novos = M.novos && performance.now() < M.novos.ate ? M.novos.n : 0;
+    const html = lista.map((k, i) => {
+      const motivo = this.motivoTrunfo(M, k);
+      const classe = `${motivo ? ' apagado' : ''}${i >= lista.length - novos ? ' novo' : ''}`;
+      return `<button type="button" class="ct-trunfo${classe}" data-trunfo="${esc(k)}" style="background-image:url(${urlCarta(`T:${k}`)})" aria-label="${esc(`${TRUNFOS_21[k]?.nome}: ${TRUNFOS_21[k]?.desc}${motivo ? ` (${motivo})` : ''}`)}">`
+        + `${i < 9 ? `<kbd>${i + 1}</kbd>` : ''}${i >= lista.length - novos ? '<em>NOVO</em>' : ''}</button>`;
+    }).join('');
     if (el.dataset.html === html) return;
     el.dataset.html = html;
     el.innerHTML = html;
@@ -2395,7 +2492,9 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
       this.trunfosEl.append(tip);
     }
     const vez = this.minhaVez21();
-    tip.innerHTML = `<b style="color:${T.cor}">${esc(T.nome)}</b>${esc(T.desc)}${vez ? '' : '<br><small>(na sua vez)</small>'}`;
+    const motivo = this.motivoTrunfo(this.ativa, chave);
+    tip.innerHTML = `<b style="color:${T.cor}">${esc(T.nome)}</b>${esc(T.desc)}`
+      + `${motivo ? `<br><small class="nao">${esc(motivo)}</small>` : vez ? '' : '<br><small>(na sua vez)</small>'}`;
   }
 
   // alguém usou um trunfo: a carta aparece grande no meio da tela
@@ -2539,9 +2638,14 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
       const vez = this.minhaVez21(M);
       const s = soma21(M.mao);
       const meta = e.meta ?? 21;
-      esq.push(`<div class="ct-soma ct-caixa${s > meta ? ' passou' : s === meta ? ' cravou' : ''}"><small>SUA MÃO</small><b>${s}</b><small>META ${meta}</small></div>`);
+      // com o Espiar, a próxima do monte aparece na linha da meta (só para mim; na mesma linha para a
+      // caixa não crescer no celular deitado)
+      const prox = M.proxima ? ` · <i class="ct-prox" title="A próxima carta do monte (Espiar)">👀 ${numero21(M.proxima)}</i>` : '';
+      esq.push(`<div class="ct-soma ct-caixa${s > meta ? ' passou' : s === meta ? ' cravou' : ''}"><small>SUA MÃO</small><b>${s}</b><small>META ${meta}${prox}</small></div>`);
       const calado = !!e.silencio?.[M.lugar];
-      esq.push(`<button type="button" class="ct-b verde grande" data-acao="v21:pedir" title="${calado ? 'O rival pôs Silêncio na mesa' : 'Espaço'}"${vez && e.monte && !calado ? '' : ' disabled'}>${calado ? '🤐 Calado' : 'Pedir carta'}</button>`);
+      const estourou = s > meta; // passou da meta: só volta a pedir se a meta subir ou se devolver a carta
+      const dica = calado ? 'O rival pôs Silêncio na mesa' : estourou ? 'Passou da meta: use uma Meta ou o Devolver' : 'Espaço';
+      esq.push(`<button type="button" class="ct-b verde grande" data-acao="v21:pedir" title="${dica}"${vez && e.monte && !calado && !estourou ? '' : ' disabled'}>${calado ? '🤐 Calado' : estourou ? '💥 Estourou' : 'Pedir carta'}</button>`);
       if (vez) dir.push('<div class="ct-vez21">SUA VEZ!</div>');
       dir.push(`<button type="button" class="ct-b vermelho grande" data-acao="v21:parar" title="S"${vez ? '' : ' disabled'}>Parar</button>`);
     }

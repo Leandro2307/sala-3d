@@ -3,7 +3,7 @@
 // arquivoVoz (o mesmo que o servidor e o navegador usam). Só grava o que falta e, no fim, apaga os
 // mp3 que nenhuma frase usa mais. Antes de gastar, confere os créditos que sobram na conta.
 // A chave da API vem de ELEVENLABS_API_KEY ou do arquivo ~/.elevenlabs-key (fora do repositório).
-// Run: node scripts/gerar-vozes-cartas.js [--simular] [--forcar] [--vozes=0,1,2] [--modelo=eleven_multilingual_v2]
+// Run: node scripts/gerar-vozes-cartas.js [--simular] [--forcar] [--vozes=0,1,2] [--frases="A!|B!"] [--modelo=eleven_multilingual_v2]
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -21,6 +21,8 @@ const VOZES = [
 ];
 // --vozes=0,1,2: grava só essas (as outras ficam como estão)
 const SO = process.argv.find((a) => a.startsWith('--vozes='))?.slice(8).split(',').map(Number);
+// --frases="Neblina!|Furto!": grava só essas frases (as outras que faltam ficam para outra vez)
+const FRASES = process.argv.find((a) => a.startsWith('--frases='))?.slice(9).split('|');
 // o multilingual v2 é o que fala frase curta ("Uno!", "Bora!") sem inventar. Os ajustes ficam os da
 // voz: com menos estabilidade e algum estilo, frase de 1 s virava 8 s de voz inventando.
 const MODELO = process.argv.find((a) => a.startsWith('--modelo='))?.slice(9) || 'eleven_multilingual_v2';
@@ -78,7 +80,8 @@ async function main() {
   }
   const nomes = new Set(todos.map((i) => path.basename(i.arquivo)));
   if (nomes.size !== todos.length) throw new Error('Dois arquivos com o mesmo nome: mude o hash de arquivoVoz');
-  const falta = todos.filter((i) => (!SO || SO.includes(i.voz)) && (forcar || !fs.existsSync(i.arquivo) || fs.statSync(i.arquivo).size === 0));
+  const falta = todos.filter((i) => (!SO || SO.includes(i.voz)) && (!FRASES || FRASES.includes(i.frase))
+    && (forcar || !fs.existsSync(i.arquivo) || fs.statSync(i.arquivo).size === 0));
   const semId = [...new Set(falta.filter((i) => !VOZES[i.voz].id).map((i) => VOZES[i.voz].nome))];
   if (semId.length) throw new Error(`Sem id de voz: ${semId.join(', ')} (ou use --vozes=)`);
   const caracteres = falta.reduce((s, i) => s + i.texto.length, 0);
