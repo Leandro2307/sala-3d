@@ -28,6 +28,7 @@ namespace Sala3d
     {
         // ------------------------------------------------------------ Win32
         [StructLayout(LayoutKind.Sequential)] struct RECT { public int Left, Top, Right, Bottom; }
+        [StructLayout(LayoutKind.Sequential)] struct PONTO { public int X, Y; }
         [StructLayout(LayoutKind.Sequential)] struct MOUSEINPUT { public int dx, dy; public uint mouseData, dwFlags, time; public IntPtr dwExtraInfo; }
         [StructLayout(LayoutKind.Sequential)] struct KEYBDINPUT { public ushort wVk, wScan; public uint dwFlags, time; public IntPtr dwExtraInfo; }
         [StructLayout(LayoutKind.Explicit)] struct UNIAO { [FieldOffset(0)] public MOUSEINPUT mi; [FieldOffset(0)] public KEYBDINPUT ki; }
@@ -53,6 +54,7 @@ namespace Sala3d
 
         [DllImport("user32.dll")] static extern bool SetProcessDpiAwarenessContext(IntPtr v);
         [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
+        [DllImport("user32.dll")] static extern bool GetCursorPos(out PONTO p);
         [DllImport("user32.dll")] static extern uint SendInput(uint n, INPUT[] i, int size);
         [DllImport("user32.dll")] static extern bool IsWindow(IntPtr h);
         [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
@@ -124,7 +126,7 @@ namespace Sala3d
             saida = Console.OpenStandardOutput();
             var entrada = Console.OpenStandardInput();
             new Thread(VigiarAtalho) { IsBackground = true }.Start();
-            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.3.0" } });
+            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.4.1" } });
             var json = new JavaScriptSerializer();
             string txt;
             while ((txt = Ler(entrada)) != null)
@@ -170,6 +172,9 @@ namespace Sala3d
             if (ev == null) return;
             string t = S(ev, "t");
             if (t == "modo") { jogo = B(ev, "jogo"); if (!jogo) SoltarTudo(); return; }
+            // o site (1.4+) marca cada evento do modo jogo; o "modo" sozinho se perde se o ajudante
+            // reabrir no meio. Movimento só com delta (sem x) também é de jogo.
+            if (B(ev, "jogo") || (t == "mouse" && S(ev, "a") == "move" && !ev.ContainsKey("x") && ev.ContainsKey("dx"))) jogo = true;
             if (t == "mouse") { if (jogo) MouseJogo(S(ev, "a"), S(ev, "b"), D(ev, "dx"), D(ev, "dy")); else Mouse(S(ev, "a"), D(ev, "x"), D(ev, "y"), S(ev, "b")); }
             else if (t == "wheel") { if (jogo) RodaJogo(D(ev, "dx"), D(ev, "dy")); else Roda(D(ev, "x"), D(ev, "y"), D(ev, "dx"), D(ev, "dy")); }
             else if (t == "tecla") { if (jogo) TeclaJogo(S(ev, "a"), S(ev, "code")); else Tecla(S(ev, "a"), S(ev, "key"), (int)D(ev, "kc"), (int)D(ev, "mod"), B(ev, "ag")); }
@@ -320,7 +325,16 @@ namespace Sala3d
         // o cursor preso lê o quanto o mouse ANDOU, não onde o cursor está.
         static void MouseJogo(string a, string b, double dx, double dy)
         {
-            if (a == "down") Focar();
+            if (a == "down")
+            {
+                // o clique cai onde o cursor está: fora da janela/tela compartilhada (no Chrome, na
+                // área de trabalho) ele tirava o foco do jogo e o WASD e a câmera iam para lá. Dentro
+                // dela o cursor fica onde está (num menu do jogo é ele que aponta o botão).
+                RECT r; PONTO c;
+                if (Retangulo(out r) && GetCursorPos(out c) && (c.X < r.Left || c.X >= r.Right || c.Y < r.Top || c.Y >= r.Bottom))
+                    SetCursorPos((r.Left + r.Right) / 2, (r.Top + r.Bottom) / 2);
+                Focar();
+            }
             if (a == "move")
             {
                 int ix = (int)Math.Round(Math.Max(-4000, Math.Min(4000, dx)));

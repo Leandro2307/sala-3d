@@ -678,7 +678,14 @@ function levantarDeTudo(room, id) {
 // Evento de mouse/teclado vindo de quem controla: só os campos esperados, com limites.
 function eventoDeControle(raw) {
   const e = obj(raw);
-  const n = (v, a, b) => Math.min(b, Math.max(a, Number(v) || 0));
+  const ev = eventoSemMarca(e);
+  // modo jogo: cada evento vem marcado (o ajudante 1.4+ manda como jogo mesmo sem o "modo")
+  if (ev && e.jogo === true && ['mouse', 'wheel', 'tecla'].includes(ev.t)) ev.jogo = true;
+  return ev;
+}
+
+function eventoSemMarca(e) {
+  const n =(v, a, b) => Math.min(b, Math.max(a, Number(v) || 0));
   const mod = n(e.mod, 0, 15) | 0;
   if (e.t === 'mouse' && ['down', 'up', 'move'].includes(e.a)) {
     const ev = { t: 'mouse', a: e.a, x: e.x === undefined && e.dx !== undefined ? 0.5 : n(e.x, 0, 1), y: e.y === undefined && e.dy !== undefined ? 0.5 : n(e.y, 0, 1), b: ['left', 'right', 'middle'].includes(e.b) ? e.b : 'left', n: n(e.n, 1, 3) | 0, arrastando: !!e.arrastando, mod };

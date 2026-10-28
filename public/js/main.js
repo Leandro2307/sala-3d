@@ -18,8 +18,9 @@ import { sfx, audioContext, setSfxEnabled } from './sfx.js';
 import { Clima } from './clima.js';
 import { ARMAS, IDS_ARMAS, ARMA_PADRAO, defArma, VisaoArma, iniciarCapsulas, atualizarCapsulas, preCarregarArma } from './armas.js';
 import { Jogos } from './jogos.js';
-import { Controle, versaoNum } from './controle.js';
+import { Controle, versaoNum, eventoDeControle } from './controle.js';
 import { AvisoDoSite } from './aviso-site.js';
+import { ToqueJogo } from './toque-jogo.js';
 import { Mesa } from './mesa.js';
 import { Qualidade, NIVEIS, nivelInicial } from './qualidade.js';
 import * as moduloQualidade from './qualidade.js';
@@ -1006,6 +1007,7 @@ async function join() {
     },
   });
   rtc.onMicCaiu = religarMic;
+  rtc.onControle = receberDireto;
   // a credencial do TURN vence (48 h na Cloudflare): renova com a página aberta
   setInterval(() => {
     fetch('/config').then((r) => r.json()).then((c) => rtc.trocarIce(c.iceServers)).catch(() => {});
@@ -1413,17 +1415,9 @@ function bindSocket() {
   socket.on('emote', ({ id, kind }) => state.users.get(id)?.avatar.emote(kind));
   socket.on('jogo', (msg) => jogos.receber(msg));
   // mexendo na própria aba: sem o aviso de "fulano está mexendo na sua aba"
-  socket.on('controle', (msg) => {
-    const sh = self()?.shares.get(msg.key);
-    if (sh?.controle) turboDaTela(msg.key);
-    controle.receber(sh, msg.deId === state.selfId ? { ...msg, deId: null } : msg);
-  });
+  socket.on('controle', receberControle);
   // a volta de uma tela que controlo: o texto do Ctrl+C, ou um aviso do site (ver aviso-site.js)
-  socket.on('controle-volta', ({ key, ev, de } = {}) => {
-    if (typeof key !== 'string' || !ev) return;
-    if (ev.t === 'copia' && typeof ev.s === 'string' && controle.pediuCopia(key)) copiarDaTela(ev.s, de);
-    else if (ev.t === 'dialogo' && (ev.fechou || controle.mexeuEm(key))) avisoSite.receber(key, ev, `Na tela de ${de || 'alguém'}`);
-  });
+  socket.on('controle-volta', receberVolta);
   // o dono pôs, trocou ou tirou a senha: quem está dentro recebe o passe novo
   socket.on('passe', (passe) => {
     state.passe = passe;
@@ -2331,7 +2325,14 @@ $('#share-pop').addEventListener('click', (e) => {
 // ------------------------------------------------------------------ controle remoto das abas
 // Precisa da extensão (pasta extensao/) no Chrome de quem compartilha. Ver controle.js.
 const controle = new Controle({
-  emitir: (ev, data, volatil) => (volatil ? socket?.volatile.emit(ev, data) : socket?.emit(ev, data)),
+  // Mouse e teclado vão direto para o dono da tela pelo canal da conexão (ver rtc.canalControle):
+  // o servidor no meio somava a distância até ele a cada tecla. Canal ainda fechando: pelo servidor.
+  emitir: (ev, data, volatil) => {
+    if (ev === 'controle' && rtc?.mandarControle(String(data.key).split('~')[0], { c: data })) return;
+    if (ev === 'controle-volta' && rtc?.mandarControle(data.para, { v: { key: data.key, ev: data.ev } })) return;
+    return volatil ? socket?.volatile.emit(ev, data) : socket?.emit(ev, data);
+  },
+  semPonteiro: isTouch,
   // as minhas telas: o evento vai direto para a extensão, sem ida e volta pelo servidor
   minha: (key) => self()?.shares.get(key) ?? null,
   toast,
@@ -2343,8 +2344,44 @@ const controle = new Controle({
     avisarExtensaoVelha();
   },
 });
+// Chegou um clique/tecla para uma tela minha (pelo servidor ou direto, ver receberDireto).
+// Mexendo na própria aba: sem o aviso de "fulano está mexendo na sua aba".
+function receberControle(msg) {
+  const sh = self()?.shares.get(msg.key);
+  if (sh?.controle) turboDaTela(msg.key);
+  controle.receber(sh, msg.deId === state.selfId ? { ...msg, deId: null } : msg);
+}
+
+function receberVolta({ key, ev, de } = {}) {
+  if (typeof key !== 'string' || !ev) return;
+  if (ev.t === 'copia' && typeof ev.s === 'string' && controle.pediuCopia(key)) copiarDaTela(ev.s, de);
+  else if (ev.t === 'dialogo' && (ev.fechou || controle.mexeuEm(key))) avisoSite.receber(key, ev, `Na tela de ${de || 'alguém'}`);
+}
+
+// O que chega pelo canal direto não passou pelo servidor: aqui se confere o que ele conferiria —
+// a tela é minha e está liberada, o evento é bem formado e ninguém manda mais de 240 por segundo.
+const contasDiretas = new Map(); // id -> { janela, conta }
+function receberDireto(id, m) {
+  const u = state.users.get(id);
+  if (!u || !m || typeof m !== 'object') return;
+  if (m.v && typeof m.v === 'object') {
+    // a volta só vale de quem é dono da tela
+    if (typeof m.v.key === 'string' && m.v.key.split('~')[0] === id) receberVolta({ ...m.v, de: u.name });
+    return;
+  }
+  const c = m.c;
+  if (!c || typeof c.key !== 'string' || !self()?.shares.get(c.key)?.controle) return;
+  const agora = Date.now();
+  const n = contasDiretas.get(id) || { janela: 0, conta: 0 };
+  if (agora - n.janela > 1000) Object.assign(n, { janela: agora, conta: 0 });
+  contasDiretas.set(id, n);
+  if (++n.conta > 240) return;
+  const ev = eventoDeControle(c.ev);
+  if (ev) receberControle({ key: c.key, ev, de: u.name, deId: id });
+}
+
 // Alt+Shift+S (ou o ícone da extensão) numa aba: a resposta vai para o ícone dela
-controle.onCapturarAba = async (p) => controle.responderPedido(p.pedido, await capturarAbaDaExtensao(p));
+controle.onCapturarAba =async (p) => controle.responderPedido(p.pedido, await capturarAbaDaExtensao(p));
 // o mesmo atalho na aba que já está na sala: tira ela de lá
 controle.onPararAba = ({ aba, pedido }) => {
   const sh = [...(self()?.shares.values() || [])].find((s) => s.aba === aba);
@@ -2397,7 +2434,7 @@ controle.onDialogo = (aba, dialogo, site) => {
     const quem = controle.ultimo.get(sh.key);
     if (!quem) continue;
     const ev = dialogo ? { t: 'dialogo', ...dialogo, site } : { t: 'dialogo', fechou: true };
-    if (quem.deId) socket?.emit('controle-volta', { key: sh.key, para: quem.deId, ev });
+    if (quem.deId) controle.emitir('controle-volta', { key: sh.key, para: quem.deId, ev });
     else avisoSite.receber(sh.key, ev, 'Na sua aba');
   }
 };
@@ -2624,14 +2661,14 @@ function updateFocusCtrl() {
   btn.title = on ? 'Parar de mexer nesta tela (continua vendo)' : '';
   // Modo jogo: só em janela/tela inteira dos outros (o ajudante nativo é quem manda delta/scancode)
   const jb = $('#focus-jogo');
-  const janela = !!t && !t.user.isSelf && !isTouch
+  const janela = !!t && !t.user.isSelf
     && ['window', 'monitor'].includes(t.share.video?.srcObject?.getVideoTracks?.()[0]?.getSettings?.().displaySurface);
   if ((!on || !janela) && controle.jogoNo === fv) controle.desligarJogo();
   jb.hidden = !on || !janela;
   const emJogo = controle.jogoNo === fv;
   jb.classList.toggle('on', emJogo);
   jb.innerHTML = `${icon('gamepad', 16)}${emJogo ? 'Desligar modo jogo' : 'Modo jogo'}`;
-  jb.title = 'Mouse gira a câmera e WASD anda (Minecraft e cia.). F8 liga e desliga.';
+  jb.title = isTouch ? 'Analógico e botões na tela (Minecraft e cia.)' : 'Mouse gira a câmera e WASD anda (Minecraft e cia.). F8 liga e desliga.';
 }
 $('#focus-ctrl').addEventListener('click', async () => {
   const btn = $('#focus-ctrl');
@@ -2655,8 +2692,26 @@ $('#focus-jogo').addEventListener('click', () => {
   const ligar = controle.jogoNo !== fv;
   controle.modoJogo(fv, ligar);
   updateFocusCtrl();
-  if (ligar) toast('Modo jogo ligado: o mouse gira a câmera e o teclado anda com o personagem. Esc pausa o jogo e solta o mouse; clique na tela para voltar. F8 liga e desliga.', 'info', 9000);
+  if (ligar && isTouch) {
+    // celular: tela cheia deitada, e o controle de toque por cima (ver toque-jogo.js)
+    if (!document.fullscreenElement) $('#focus').requestFullscreen?.().then(() => screen.orientation?.lock?.('landscape')).catch(() => {});
+    toast('Modo jogo: analógico anda, arraste o dedo para olhar. Bater segurando quebra o bloco.', 'info', 6000);
+  } else if (ligar) toast('Modo jogo ligado: o mouse gira a câmera e o teclado anda com o personagem. Esc pausa o jogo e solta o mouse; clique na tela para voltar. F8 liga e desliga.', 'info', 9000);
 });
+// o controle de toque aparece e some junto com o modo jogo (inclusive quando ele desliga sozinho)
+const toqueJogo = new ToqueJogo({
+  raiz: $('#toque-jogo'),
+  controle,
+  onSair: () => {
+    controle.desligarJogo();
+    updateFocusCtrl();
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  },
+});
+controle.onJogo = (video, key) => {
+  if (video && isTouch) toqueJogo.mostrar(key);
+  else toqueJogo.esconder();
+};
 controle.onJogoSoltou = () => {
   if (controle.jogoNo) toast('Esc soltou o mouse (o jogo recebeu o Esc). Clique na tela para voltar a jogar, ou F8 para desligar o modo jogo.', 'info', 6000);
 };

@@ -39,12 +39,44 @@ const RODA_MINHA_MS = 8;
 const CLIQUE_MS = 500;
 const CLIQUE_PX = 5;
 
+// Evento de controle que chegou direto de outra pessoa (canal da conexão, sem o servidor no meio):
+// a mesma conferência que o servidor faz no eventoDeControle do server.js.
+export function eventoDeControle(e) {
+  if (!e || typeof e !== 'object') return null;
+  const n = (v, a, b) => Math.min(b, Math.max(a, Number(v) || 0));
+  const txt = (v, max) => String(v ?? '').replace(/[\u0000-\u001f]/g, '').slice(0, max);
+  const mod = n(e.mod, 0, 15) | 0;
+  let ev = null;
+  if (e.t === 'mouse' && ['down', 'up', 'move'].includes(e.a)) {
+    ev = { t: 'mouse', a: e.a, x: e.x === undefined && e.dx !== undefined ? 0.5 : n(e.x, 0, 1), y: e.y === undefined && e.dy !== undefined ? 0.5 : n(e.y, 0, 1), b: BOTAO.includes(e.b) ? e.b : 'left', n: n(e.n, 1, 3) | 0, arrastando: !!e.arrastando, mod };
+    if (e.a === 'move' && (e.dx !== undefined || e.dy !== undefined)) Object.assign(ev, { dx: n(e.dx, -4000, 4000), dy: n(e.dy, -4000, 4000) });
+  } else if (e.t === 'modo') return { t: 'modo', jogo: !!e.jogo };
+  else if (e.t === 'wheel') ev = { t: 'wheel', x: n(e.x, 0, 1), y: n(e.y, 0, 1), dx: n(e.dx, -3000, 3000), dy: n(e.dy, -3000, 3000), mod };
+  else if (e.t === 'tecla' && (e.a === 'down' || e.a === 'up')) {
+    ev = { t: 'tecla', a: e.a, key: txt(e.key, 24), code: txt(e.code, 24).trim(), kc: n(e.kc, 0, 255) | 0, mod };
+    if (e.ag === true) ev.ag = true;
+  } else if (e.t === 'texto') return { t: 'texto', s: String(e.s ?? '').slice(0, 2000) };
+  else if (e.t === 'dialogo') return { t: 'dialogo', aceitar: !!e.aceitar, texto: String(e.texto ?? '').slice(0, 2000) };
+  else if (e.t === 'nav') {
+    if (['voltar', 'avancar', 'recarregar'].includes(e.a)) return { t: 'nav', a: e.a };
+    try {
+      const u = new URL(String(e.url ?? '').slice(0, 2000));
+      return e.a === 'abrir' && ['http:', 'https:'].includes(u.protocol) ? { t: 'nav', a: 'abrir', url: u.href } : null;
+    } catch {
+      return null;
+    }
+  }
+  if (ev && e.jogo === true) ev.jogo = true;
+  return ev;
+}
+
 // "1.10.2" -> um número que dá para comparar com outra versão
 export const versaoNum = (v) => String(v || '0').split('.').map(Number).reduce((s, n, i) => s + (n || 0) * [1e6, 1e3, 1][i], 0);
 
 export class Controle {
-  constructor({ emitir, toast, onExtensao, minha }) {
+  constructor({ emitir, toast, onExtensao, minha, semPonteiro = false }) {
     this.emitir = emitir;
+    this.semPonteiro = semPonteiro; // celular: sem ponteiro preso no modo jogo (ver toque-jogo.js)
     this.toast = toast;
     this.onExtensao = onExtensao;
     this.minha = minha || (() => null); // chave -> a minha tela com essa chave (ou null)
@@ -80,7 +112,9 @@ export class Controle {
       const j = this.jogo;
       if (!j || document.pointerLockElement === j.video) return;
       // Esc soltou o ponteiro: o jogo lá recebe um Esc (abre o menu dele) e o modo jogo continua
-      // armado — clicar na tela prende o mouse de novo
+      // armado — clicar na tela prende o mouse de novo. No celular não há ponteiro preso: lá o
+      // controle de toque (toque-jogo.js) cuida do jogo.
+      if (this.semPonteiro) return;
       this.soltarTeclas();
       this.soltarMouse();
       this.mandar(j.key, { t: 'tecla', a: 'down', key: 'Escape', code: 'Escape', kc: 27, mod: 0 });
@@ -195,11 +229,13 @@ export class Controle {
     this.focar(video);
     this.travarPonteiro();
     this.mandar(key, { t: 'modo', jogo: true });
+    this.onJogo?.(video, key);
   }
 
   desligarJogo() {
     const j = this.jogo;
     if (!j) return;
+    this.onJogo?.(null); // antes de desligar: o que o controle de toque segurava sobe como jogo
     this.jogo = null;
     if (document.pointerLockElement === j.video) document.exitPointerLock();
     this.mandar(j.key, { t: 'modo', jogo: false });
@@ -207,7 +243,7 @@ export class Controle {
 
   travarPonteiro() {
     const v = this.jogo?.video;
-    if (!v || document.pointerLockElement === v) return;
+    if (!v || this.semPonteiro || document.pointerLockElement === v) return;
     try {
       // movimento cru (sem a aceleração do Windows de quem controla), onde o navegador deixa
       const p = v.requestPointerLock({ unadjustedMovement: true });
@@ -311,6 +347,9 @@ export class Controle {
   }
 
   mandar(key, ev, volatil = false) {
+    // no modo jogo cada evento diz que é de jogo: o "modo" sozinho se perdia quando o ajudante
+    // reabria (ou ainda compilava) e o WASD e a câmera paravam, mas o clique continuava
+    if (this.jogo?.key === key && ['mouse', 'wheel', 'tecla'].includes(ev.t)) ev = { ...ev, jogo: true };
     const minha = this.minha(key);
     if (minha) return void this.receber(minha, { ev });
     this.envios.set(key, Date.now());

@@ -3698,3 +3698,86 @@ body.touch .mu-estilos button { flex: none; }
   .l-mic { align-self: center; }
   .ao-vivo { position: sticky; top: 0; flex: none; width: min(280px, 34vw); max-height: calc(100dvh - 24px - env(safe-area-inset-top)); margin: 0; }
 }
+
+/* ------------------------------------------------------------ modo jogo no celular (toque-jogo.js) */
+#toque-jogo {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+#toque-jogo[hidden] { display: none; }
+body.toque-jogo #focus .focus-bar { display: none; }
+body.toque-jogo #focus video { padding: 0; }
+.tj-olhar { position: absolute; inset: 0; }
+#toque-jogo button {
+  position: relative;
+  border: 1.5px solid rgba(255, 255, 255, 0.28);
+  background: rgba(10, 12, 18, 0.42);
+  color: #fff;
+  font: 700 13px/1 system-ui, sans-serif;
+  border-radius: 14px;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+#toque-jogo button.apertado, #toque-jogo button.on { background: rgba(56, 189, 248, 0.45); border-color: rgba(125, 211, 252, 0.9); }
+.tj-topo {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  right: max(12px, env(safe-area-inset-right));
+  display: flex;
+  gap: 8px;
+}
+.tj-topo button { padding: 10px 12px; }
+.tj-topo .tj-sair { background: rgba(127, 29, 29, 0.55); }
+.tj-stick {
+  position: absolute;
+  left: max(28px, env(safe-area-inset-left));
+  bottom: max(28px, env(safe-area-inset-bottom));
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  background: rgba(10, 12, 18, 0.3);
+  border: 1.5px solid rgba(255, 255, 255, 0.22);
+}
+.tj-ring { position: absolute; inset: 22px; border-radius: 50%; border: 1px dashed rgba(255, 255, 255, 0.18); }
+.tj-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 60px;
+  height: 60px;
+  margin: -30px 0 0 -30px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.28);
+  border: 1.5px solid rgba(255, 255, 255, 0.45);
+  will-change: transform;
+}
+.tj-stick.correndo .tj-knob { background: rgba(251, 191, 36, 0.55); }
+.tj-acoes {
+  position: absolute;
+  right: max(20px, env(safe-area-inset-right));
+  bottom: max(20px, env(safe-area-inset-bottom));
+  display: grid;
+  grid-template-columns: repeat(3, 64px);
+  grid-template-rows: 44px 64px 64px;
+  gap: 10px;
+  grid-template-areas:
+    "ant . prox"
+    "agachar usar bater"
+    "agachar pular pular";
+}
+.tj-acoes [data-roda="-1"] { grid-area: ant; }
+.tj-acoes [data-roda="1"] { grid-area: prox; }
+.tj-agachar { grid-area: agachar; }
+.tj-usar { grid-area: usar; }
+.tj-bater { grid-area: bater; background: rgba(127, 29, 29, 0.45) !important; }
+.tj-bater.apertado { background: rgba(239, 68, 68, 0.6) !important; }
+.tj-pular { grid-area: pular; border-radius: 999px !important; }
+@media (max-height: 380px) {
+  .tj-stick { width: 120px; height: 120px; }
+  .tj-acoes { grid-template-columns: repeat(3, 56px); grid-template-rows: 38px 56px 56px; gap: 8px; }
+}
