@@ -12,7 +12,8 @@
 // no canto de cima, abre a escolha à mão e a sensibilidade.
 //
 // Menu do jogo (inventário, pausa, mapa): o PC mostra o cursor. Os botões que abrem um menu trocam
-// os da direita pelos de menu: arrastar o dedo move o cursor de lá e um toque rápido clica.
+// os da direita pelos de menu, e a tela vira tela de toque: o cursor de lá vai para baixo do dedo
+// e tocar (sem arrastar) clica ali mesmo.
 //
 // Tudo vai por controle.mandar/mover: o modo jogo marca cada evento e o ajudante nativo do PC
 // manda como scancode e movimento relativo, igual ao mouse e ao teclado de verdade.
@@ -21,8 +22,7 @@ const DEAD = 0.25; // zona morta do analógico
 const CORRE = 0.95; // empurrar até a borda (para a frente) corre
 const OLHAR = 2.2; // pixels do dedo -> pixels de mouse (vezes a sensibilidade)
 const MOVE_MS = 16;
-const TOQUE_MS = 250; // no menu, toque mais curto que isso (e sem arrastar) é clique
-const TOQUE_PX = 10;
+const TOQUE_PX = 12; // no menu, o dedo que andou menos que isso até soltar clicou (mais é arrastar)
 const CHAVE_SENS = 'sala3d-toque-sens';
 
 const ESPECIAIS = {
@@ -215,7 +215,7 @@ export class ToqueJogo {
         <button type="button" class="tj-ok">Pronto</button>
       </div>
       <div class="tj-topo"></div>
-      <p class="tj-dica" hidden>Menu do jogo: arraste para mover o cursor, toque para clicar</p>
+      <p class="tj-dica" hidden>Menu do jogo: toque onde quer clicar · arraste para levar o cursor</p>
       <div class="tj-stick"><div class="tj-ring"></div><div class="tj-knob"></div></div>
       <div class="tj-hotbar" hidden></div>
       <div class="tj-acoes"></div>
@@ -490,11 +490,15 @@ export class ToqueJogo {
     el.addEventListener('pointercancel', solta);
   }
 
-  // Arrastar = mexer o mouse (câmera no jogo, cursor nos menus). Só o primeiro dedo vale: o
-  // segundo dedo está apertando um botão. No menu, um toque rápido sem arrastar clica.
+  // No jogo, arrastar = mexer o mouse (a câmera). Só o primeiro dedo vale: o segundo dedo está
+  // apertando um botão.
+  // No menu é tela de toque: o cursor de lá vai para baixo do dedo (e segue o dedo que arrasta), e
+  // soltar sem ter arrastado clica onde o dedo encostou — sem levar o cursor até lá aos poucos.
   ligarOlhar(el) {
     let id = null;
-    let ux = 0, uy = 0, x0 = 0, y0 = 0, t0 = 0;
+    let ux = 0, uy = 0, x0 = 0, y0 = 0;
+    let noMenu = false; // este dedo encostou com os botões de menu na tela
+    let arrastou = false;
     el.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       this.fecharPainel();
@@ -502,11 +506,18 @@ export class ToqueJogo {
       id = e.pointerId;
       ux = x0 = e.clientX;
       uy = y0 = e.clientY;
-      t0 = performance.now();
+      noMenu = this.menu;
+      arrastou = false;
       try { el.setPointerCapture(id); } catch { /* ponteiro já solto */ }
+      if (noMenu) this.cursorNoDedo(e, 'move');
     });
     el.addEventListener('pointermove', (e) => {
       if (e.pointerId !== id || !this.key) return;
+      if (noMenu) {
+        if (Math.hypot(e.clientX - x0, e.clientY - y0) >= TOQUE_PX) arrastou = true;
+        this.cursorNoDedo(e, 'move');
+        return;
+      }
       // os pontos intermediários deixam o giro liso mesmo com o celular mandando poucos eventos
       const juntos = e.getCoalescedEvents?.();
       const pts = juntos?.length ? juntos : [e];
@@ -524,10 +535,27 @@ export class ToqueJogo {
     el.addEventListener('pointerup', (e) => {
       if (e.pointerId !== id) return;
       id = null;
-      const rapido = performance.now() - t0 < TOQUE_MS && Math.hypot(e.clientX - x0, e.clientY - y0) < TOQUE_PX;
-      if (this.menu && rapido) this.tocar('mouse:left');
+      if (!noMenu || arrastou) return;
+      // o movimento que esperava a vez sai antes do clique (senão chegaria depois e tiraria o
+      // cursor do lugar); o tremido do dedo não muda onde o clique cai
+      this.controle.enviarMove();
+      const ponto = { clientX: x0, clientY: y0 };
+      this.cursorNoDedo(ponto, 'down');
+      this.cursorNoDedo(ponto, 'up');
     });
     el.addEventListener('pointercancel', (e) => { if (e.pointerId === id) id = null; });
+  }
+
+  // Leva o cursor do PC ao ponto da imagem embaixo do dedo (x, y de 0 a 1, descontadas as faixas
+  // pretas em volta) e, com 'down'/'up', clica ali. Nas faixas pretas não faz nada.
+  cursorNoDedo(e, a) {
+    const video = this.controle.jogo?.video;
+    if (!this.key || !video) return;
+    const p = this.controle.ponto(video, e);
+    if (!p.dentro) return;
+    const ev = { t: 'mouse', a, x: p.x, y: p.y, b: 'left', n: 1, mod: 0, abs: true };
+    if (a === 'move') this.controle.mover(this.key, ev, MOVE_MS);
+    else this.controle.mandar(this.key, ev);
   }
 
   // ---------------------------------------------------------------- envio

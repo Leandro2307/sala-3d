@@ -141,6 +141,10 @@ Atreus, rúnico, fúria) ou **genérico** para os outros. Só o nome do jogo rec
 sala, nunca o título da janela. Com a extensão antiga, ou num jogo que ela não reconhece, toque no
 nome do layout, no canto de cima, para escolher à mão (ali também fica a sensibilidade).
 
+Nos menus do jogo (inventário, pausa, mapa), a tela do celular vira **tela de toque** (extensão
+1.14, ajudante 1.7): tocar num lugar leva o cursor do PC até ali e clica, e arrastar leva o cursor
+junto sem clicar. Com o ajudante antigo, o toque clica onde o cursor já está.
+
 ## Navegador nas telas da sala
 
 Mirando numa tela livre (ou num monitor do seu posto) e clicando no **+**, dá para abrir um

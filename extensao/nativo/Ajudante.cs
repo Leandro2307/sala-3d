@@ -14,6 +14,8 @@
 // Minecraft leem a câmera pelo movimento RELATIVO do mouse (SetCursorPos não gera isso) e as
 // teclas pelo código físico (scancode) — letra mandada como texto Unicode não anda com o
 // personagem nem fica pressionada. No modo jogo o mouse vai como delta e as teclas como scancode.
+// No menu do jogo, o celular aponta o lugar com o dedo (ev.abs, com x e y): o cursor vai até lá
+// antes do clique, como numa tela de toque.
 //
 // Programa aberto como administrador: o Windows não deixa um programa comum (este, aberto pelo
 // Chrome) mandar mouse e teclado para ele. O SendInput "dá certo" e o evento some, sem erro
@@ -94,7 +96,8 @@ namespace Sala3d
         const uint INPUT_MOUSE = 0, INPUT_KEYBOARD = 1;
         const uint MOUSEEVENTF_MOVE = 1, KEYEVENTF_EXTENDEDKEY = 1, KEYEVENTF_KEYUP = 2, KEYEVENTF_UNICODE = 4, KEYEVENTF_SCANCODE = 8;
         const uint MOUSEEVENTF_LEFTDOWN = 2, MOUSEEVENTF_LEFTUP = 4, MOUSEEVENTF_RIGHTDOWN = 8, MOUSEEVENTF_RIGHTUP = 16,
-                   MOUSEEVENTF_MIDDLEDOWN = 32, MOUSEEVENTF_MIDDLEUP = 64, MOUSEEVENTF_WHEEL = 0x800, MOUSEEVENTF_HWHEEL = 0x1000;
+                   MOUSEEVENTF_MIDDLEDOWN = 32, MOUSEEVENTF_MIDDLEUP = 64, MOUSEEVENTF_WHEEL = 0x800, MOUSEEVENTF_HWHEEL = 0x1000,
+                   MOUSEEVENTF_VIRTUALDESK = 0x4000, MOUSEEVENTF_ABSOLUTE = 0x8000;
         const int VK_CONTROL = 0x11, VK_MENU = 0x12, VK_END = 0x23, VK_LWIN = 0x5B, VK_RWIN = 0x5C;
 
         // ------------------------------------------------------------ estado
@@ -151,7 +154,7 @@ namespace Sala3d
             saida = Console.OpenStandardOutput();
             var entrada = Console.OpenStandardInput();
             new Thread(VigiarAtalho) { IsBackground = true }.Start();
-            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.6.0" } });
+            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.7.0" } });
             var json = new JavaScriptSerializer();
             string txt;
             while ((txt = Ler(entrada)) != null)
@@ -210,7 +213,12 @@ namespace Sala3d
             // o site (1.4+) marca cada evento do modo jogo; o "modo" sozinho se perde se o ajudante
             // reabrir no meio. Movimento só com delta (sem x) também é de jogo.
             if (B(ev, "jogo") || (t == "mouse" && S(ev, "a") == "move" && !ev.ContainsKey("x") && ev.ContainsKey("dx"))) jogo = true;
-            if (t == "mouse") { if (jogo) MouseJogo(S(ev, "a"), S(ev, "b"), D(ev, "dx"), D(ev, "dy")); else Mouse(S(ev, "a"), D(ev, "x"), D(ev, "y"), S(ev, "b")); }
+            if (t == "mouse")
+            {
+                if (!jogo) Mouse(S(ev, "a"), D(ev, "x"), D(ev, "y"), S(ev, "b"));
+                else if (B(ev, "abs")) MouseNoPonto(S(ev, "a"), S(ev, "b"), D(ev, "x"), D(ev, "y"));
+                else MouseJogo(S(ev, "a"), S(ev, "b"), D(ev, "dx"), D(ev, "dy"));
+            }
             else if (t == "wheel") { if (jogo) RodaJogo(D(ev, "dx"), D(ev, "dy")); else Roda(D(ev, "x"), D(ev, "y"), D(ev, "dx"), D(ev, "dy")); }
             else if (t == "tecla") { if (jogo) TeclaJogo(S(ev, "a"), S(ev, "code")); else Tecla(S(ev, "a"), S(ev, "key"), (int)D(ev, "kc"), (int)D(ev, "mod"), B(ev, "ag")); }
             else if (t == "texto") Texto(S(ev, "s"));
@@ -463,6 +471,38 @@ namespace Sala3d
             uint sobe = b == "right" ? MOUSEEVENTF_RIGHTUP : b == "middle" ? MOUSEEVENTF_MIDDLEUP : MOUSEEVENTF_LEFTUP;
             if (a == "down") { MouseFlag(desce); botoesApertados.Add(b); }
             else if (a == "up") { MouseFlag(sobe); botoesApertados.Remove(b); }
+        }
+
+        // Menu do jogo pelo celular: o dedo aponta o lugar (x, y de 0 a 1 na janela/tela, como no
+        // controle comum) e o cursor vai para lá antes do clique. O movimento vai pela fila de
+        // entrada (SendInput absoluto), na mesma ordem do clique que vem logo atrás.
+        static void MouseNoPonto(string a, string b, double fx, double fy)
+        {
+            int x, y;
+            if (!Ponto(fx, fy, out x, out y)) return;
+            if (a == "down") Focar();
+            MoverPara(x, y);
+            if (a == "move") return;
+            if (a == "down" && !ehJanela) ConferirAdmin(GetAncestor(WindowFromPoint(new PONTO { X = x, Y = y }), 2 /* GA_ROOT */));
+            uint desce = b == "right" ? MOUSEEVENTF_RIGHTDOWN : b == "middle" ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_LEFTDOWN;
+            uint sobe = b == "right" ? MOUSEEVENTF_RIGHTUP : b == "middle" ? MOUSEEVENTF_MIDDLEUP : MOUSEEVENTF_LEFTUP;
+            if (a == "down") { MouseFlag(desce); botoesApertados.Add(b); }
+            else if (a == "up") { MouseFlag(sobe); botoesApertados.Remove(b); }
+        }
+
+        // pixel da área de trabalho -> 0..65535 da tela virtual (todos os monitores juntos)
+        static void MoverPara(int x, int y)
+        {
+            RECT v = TelaVirtual();
+            double w = Math.Max(1, v.Right - v.Left - 1), h = Math.Max(1, v.Bottom - v.Top - 1);
+            var i = new INPUT { type = INPUT_MOUSE };
+            i.u.mi = new MOUSEINPUT
+            {
+                dx = (int)Math.Round((x - v.Left) * 65535 / w),
+                dy = (int)Math.Round((y - v.Top) * 65535 / h),
+                dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK,
+            };
+            Enviar(i);
         }
 
         // roda sem tocar no cursor (no jogo ela troca de item/arma)

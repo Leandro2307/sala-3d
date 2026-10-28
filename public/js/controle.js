@@ -72,6 +72,8 @@ export function eventoDeControle(e) {
     }
   }
   if (ev && e.jogo === true) ev.jogo = true;
+  // menu do jogo pelo celular: o mouse vai ao ponto x, y (o dedo) em vez de andar pelo delta
+  if (ev?.t === 'mouse' && e.abs === true) ev.abs = true;
   return ev;
 }
 

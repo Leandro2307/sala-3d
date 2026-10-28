@@ -681,6 +681,8 @@ function eventoDeControle(raw) {
   const ev = eventoSemMarca(e);
   // modo jogo: cada evento vem marcado (o ajudante 1.4+ manda como jogo mesmo sem o "modo")
   if (ev && e.jogo === true && ['mouse', 'wheel', 'tecla'].includes(ev.t)) ev.jogo = true;
+  // menu do jogo pelo celular: o mouse vai ao ponto x, y (o dedo) em vez de andar pelo delta
+  if (ev?.t === 'mouse' && e.abs === true) ev.abs = true;
   return ev;
 }
 
