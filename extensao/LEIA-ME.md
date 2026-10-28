@@ -132,6 +132,15 @@ uma rede que bloqueia UDP, e o atraso sobe). No PC de quem compartilha, limite o
 (60 no Minecraft, em Vídeo → Taxa de quadros máxima): com a placa de vídeo a 100% a captura da
 janela fica esperando, e a imagem chega atrasada.
 
+No **celular**, o modo jogo põe um controle de toque por cima da tela: analógico à esquerda,
+arrastar o dedo para olhar e os botões do jogo. Desde a extensão 1.13 (ajudante 1.6) o ajudante
+conta à sala que programa está na janela (na tela inteira, o da frente), e o celular troca sozinho
+para os botões do jogo: **Minecraft** (barra de itens, chat, agachar e correr que ficam ligados),
+**God of War** (os comandos de fábrica do PC: leve, pesado, esquiva, defender, mirar, machado,
+Atreus, rúnico, fúria) ou **genérico** para os outros. Só o nome do jogo reconhecido vai para a
+sala, nunca o título da janela. Com a extensão antiga, ou num jogo que ela não reconhece, toque no
+nome do layout, no canto de cima, para escolher à mão (ali também fica a sensibilidade).
+
 ## Navegador nas telas da sala
 
 Mirando numa tela livre (ou num monitor do seu posto) e clicando no **+**, dá para abrir um

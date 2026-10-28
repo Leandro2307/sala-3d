@@ -459,7 +459,7 @@ function avisoNoIcone(aba, texto, cor, titulo, ms) {
 // ajudante nativo (pasta nativo/, instalado pelo instalar.bat), que mexe no mouse e no teclado
 // de verdade, sempre dentro da janela/tela compartilhada.
 const NATIVO = 'com.sala3d.controle';
-let nativo = null; // { porta, ok: null|true|false, chegou, alvo, definindo, semAlvo, respostaAlvo, sala, admin }
+let nativo = null; // { porta, ok: null|true|false, chegou, alvo, definindo, semAlvo, respostaAlvo, sala, admin, qual }
 
 // o que se sabe do ajudante, da última vez que ele abriu (ou não): { ok, versao, erro, quando }
 let nativoInfo; // undefined: ainda não leu do storage; null: nunca tentou abrir
@@ -484,7 +484,7 @@ function conectarNativo() {
     return null;
   }
   let chegou;
-  const n = { porta, ok: null, alvo: null, definindo: null, semAlvo: null, respostaAlvo: null, sala: null, admin: null, chegou: new Promise((r) => { chegou = r; }) };
+  const n = { porta, ok: null, alvo: null, definindo: null, semAlvo: null, respostaAlvo: null, sala: null, admin: null, qual: null, chegou: new Promise((r) => { chegou = r; }) };
   porta.onMessage.addListener((m) => {
     if (m?.tipo === 'oi') {
       n.ok = true;
@@ -495,6 +495,9 @@ function conectarNativo() {
     // a janela que recebe a entrada está como administrador (ajudante 1.5+): o Windows não deixa o
     // ajudante mexer nela. Vai na resposta de cada evento (ver janela()), e a sala avisa.
     if (m?.tipo === 'admin') n.admin = m.admin ? { titulo: String(m.titulo || '').slice(0, 120) } : null;
+    // que programa está na janela (na tela inteira, o da frente) — ajudante 1.6+. A sala reconhece
+    // o jogo por ele e o celular de quem controla troca para os botões desse jogo.
+    if (m?.tipo === 'qual') n.qual = { titulo: String(m.titulo || '').slice(0, 200), programa: String(m.programa || '').slice(0, 80) };
     // Ctrl+Alt+End no teclado de quem compartilha: avisa a sala para desligar a permissão
     if (m?.tipo === 'parado' && n.sala != null) avisarSala(n.sala, { tipo: 'desligou', janela: true });
   });
@@ -562,7 +565,10 @@ function janela(alvo, ev, sala) {
     n.sala = sala;
     if (!(await definirAlvo(n, rotulo, alvo.superficie === 'monitor' ? 'monitor' : 'window'))) return { erro: 'alvo-nao-achado' };
     if (ev) n.porta.postMessage({ tipo: 'entrada', ev });
-    return n.admin ? { ok: true, admin: n.admin } : { ok: true };
+    const r = { ok: true };
+    if (n.admin) r.admin = n.admin;
+    if (n.qual) r.qual = n.qual;
+    return r;
   });
   filaNativo = vez.catch(() => {});
   return vez;
@@ -577,6 +583,7 @@ function soltarJanela(cortar = false) {
   nativo.definindo = null;
   nativo.semAlvo = null;
   nativo.admin = null;
+  nativo.qual = null;
 }
 
 async function tratar(m, sender) {

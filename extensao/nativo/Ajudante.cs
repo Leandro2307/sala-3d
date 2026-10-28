@@ -19,6 +19,11 @@
 // Chrome) mandar mouse e teclado para ele. O SendInput "dá certo" e o evento some, sem erro
 // nenhum. Por isso o ajudante confere a janela que recebe a entrada e avisa a extensão
 // ({ tipo: "admin" }): a sala diz a quem compartilha e a quem controla o que está acontecendo.
+//
+// Que programa está lá ({ tipo: "qual", titulo, programa }): o da janela compartilhada, ou o da
+// frente na tela inteira. A sala reconhece o jogo (Minecraft, God of War...) e o celular de quem
+// controla troca para os botões dele. Vai ao achar o alvo, ao ligar o modo jogo e, na tela
+// inteira, quando a janela que recebe a entrada muda.
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -82,6 +87,7 @@ namespace Sala3d
         [DllImport("kernel32.dll")] static extern IntPtr OpenProcess(uint acesso, bool herdar, uint pid);
         [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
         [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern bool QueryFullProcessImageName(IntPtr p, int flags, StringBuilder nome, ref int tam);
         [DllImport("advapi32.dll")] static extern bool OpenProcessToken(IntPtr p, uint acesso, out IntPtr token);
         [DllImport("advapi32.dll")] static extern bool GetTokenInformation(IntPtr token, int classe, out int valor, int tam, out int devolvido);
 
@@ -109,6 +115,7 @@ namespace Sala3d
         static bool? euAdmin;
         static IntPtr conferida = IntPtr.Zero;
         static bool avisouAdmin;
+        static string qualEnviado; // título + programa do último "qual" mandado
 
         // ------------------------------------------------------------ protocolo
         static string Ler(Stream e)
@@ -144,7 +151,7 @@ namespace Sala3d
             saida = Console.OpenStandardOutput();
             var entrada = Console.OpenStandardInput();
             new Thread(VigiarAtalho) { IsBackground = true }.Start();
-            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.5.0" } });
+            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.6.0" } });
             var json = new JavaScriptSerializer();
             string txt;
             while ((txt = Ler(entrada)) != null)
@@ -178,6 +185,7 @@ namespace Sala3d
                 // janela: já diz se ela está como administrador (antes da resposta, para a extensão
                 // saber junto). Tela inteira: quem conta é a janela que recebe cada clique e tecla.
                 if (ok) ConferirAdmin(ehJanela ? janela : IntPtr.Zero, true);
+                if (ok) EscreverQual(ehJanela ? janela : GetForegroundWindow(), true);
                 RECT r; Retangulo(out r);
                 Escrever(new Dictionary<string, object> { { "tipo", "alvo" }, { "ok", ok }, { "rotulo", rotulo },
                     { "x", r.Left }, { "y", r.Top }, { "w", r.Right - r.Left }, { "h", r.Bottom - r.Top } });
@@ -187,12 +195,18 @@ namespace Sala3d
             // "parar"), só volta quando quem compartilha liberar de novo na sala
             if (tipo == "retomar") { parado = false; return; }
             if (tipo == "parar") { lock (travaEntrada) { parado = true; SoltarTudo(); } return; }
-            if (tipo == "soltar") { jogo = false; SoltarTudo(); temAlvo = false; rotuloAtual = null; return; }
+            if (tipo == "soltar") { jogo = false; SoltarTudo(); temAlvo = false; rotuloAtual = null; qualEnviado = null; return; }
             if (tipo != "entrada" || !temAlvo || parado) return;
             var ev = m["ev"] as Dictionary<string, object>;
             if (ev == null) return;
             string t = S(ev, "t");
-            if (t == "modo") { jogo = B(ev, "jogo"); if (!jogo) SoltarTudo(); return; }
+            if (t == "modo")
+            {
+                jogo = B(ev, "jogo");
+                if (!jogo) SoltarTudo();
+                else EscreverQual(ehJanela ? janela : GetForegroundWindow()); // na tela inteira, o jogo já está na frente
+                return;
+            }
             // o site (1.4+) marca cada evento do modo jogo; o "modo" sozinho se perde se o ajudante
             // reabrir no meio. Movimento só com delta (sem x) também é de jogo.
             if (B(ev, "jogo") || (t == "mouse" && S(ev, "a") == "move" && !ev.ContainsKey("x") && ev.ContainsKey("dx"))) jogo = true;
@@ -326,12 +340,44 @@ namespace Sala3d
         {
             if (!sempre && h == conferida) return;
             conferida = h;
+            if (!ehJanela) EscreverQual(h);
             bool admin = JanelaDeAdmin(h);
             if (!sempre && admin == avisouAdmin) return;
             avisouAdmin = admin;
             var titulo = new StringBuilder(256);
             if (admin) GetWindowText(h, titulo, 256);
             Escrever(new Dictionary<string, object> { { "tipo", "admin" }, { "admin", admin }, { "titulo", titulo.ToString() } });
+        }
+
+        // ------------------------------------------------------------ que programa
+        // Conta à extensão o título e o programa (o .exe, sem a extensão) da janela — só quando mudam.
+        static void EscreverQual(IntPtr h, bool sempre = false)
+        {
+            if (h == IntPtr.Zero) return;
+            var sb = new StringBuilder(256);
+            GetWindowText(h, sb, 256);
+            string titulo = sb.ToString(), programa = Programa(h);
+            string chave = titulo + "|" + programa;
+            if (!sempre && chave == qualEnviado) return;
+            qualEnviado = chave;
+            Escrever(new Dictionary<string, object> { { "tipo", "qual" }, { "titulo", titulo }, { "programa", programa } });
+        }
+
+        static string Programa(IntPtr h)
+        {
+            uint pid;
+            GetWindowThreadProcessId(h, out pid);
+            if (pid == 0) return "";
+            IntPtr p = OpenProcess(0x1000 /* PROCESS_QUERY_LIMITED_INFORMATION */, false, pid);
+            if (p == IntPtr.Zero) return "";
+            try
+            {
+                var nome = new StringBuilder(1024);
+                int tam = nome.Capacity;
+                return QueryFullProcessImageName(p, 0, nome, ref tam) ? Path.GetFileNameWithoutExtension(nome.ToString()) : "";
+            }
+            catch { return ""; }
+            finally { CloseHandle(p); }
         }
 
         // tela inteira: o clique cai na janela embaixo do cursor, e as teclas na da frente

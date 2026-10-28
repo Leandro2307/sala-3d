@@ -300,6 +300,8 @@ export class Controle {
     }
     // o programa está como administrador: o evento foi, mas o Windows não deixou chegar nele
     if (r?.admin) this.onAdmin?.(sh, String(r.admin.titulo || ''), deId || null);
+    // que programa está na janela (ajudante 1.6+): a sala reconhece o jogo por ele
+    if (r?.qual) this.onQual?.(sh, r.qual);
     // Ctrl+C de quem controla de longe: o texto vai para a área de transferência dela (mexendo na
     // minha própria aba, o Chrome já copiou para a minha)
     if (deId && typeof r?.copia === 'string' && r.copia) this.emitir('controle-volta', { key: sh.key, para: deId, ev: { t: 'copia', s: r.copia } });

@@ -20,7 +20,7 @@ import { ARMAS, IDS_ARMAS, ARMA_PADRAO, defArma, VisaoArma, iniciarCapsulas, atu
 import { Jogos } from './jogos.js';
 import { Controle, versaoNum, eventoDeControle } from './controle.js';
 import { AvisoDoSite } from './aviso-site.js';
-import { ToqueJogo } from './toque-jogo.js';
+import { ToqueJogo, jogoDaJanela } from './toque-jogo.js';
 import { Mesa } from './mesa.js';
 import { Qualidade, NIVEIS, nivelInicial } from './qualidade.js';
 import * as moduloQualidade from './qualidade.js';
@@ -1381,6 +1381,8 @@ function bindSocket() {
       tinha.titulo = titulo ?? null;
       tinha.superficie = superficie ?? tinha.superficie ?? null;
       updateFocusCtrl();
+      // reconheceu o jogo da janela agora: o controle de toque passa para os botões dele
+      toqueJogo.jogoDaTela(key, tinha.titulo);
     } else if (u.isSelf) {
       return;
     } else if (gone) {
@@ -2405,11 +2407,26 @@ controle.onAdmin = (sh, titulo, deId) => {
 
 // Na hora de liberar uma janela: se ela está como administrador, avisa já (sem esperar alguém
 // tentar mexer e nada acontecer). Tela inteira é conferida a cada clique, na janela embaixo dele.
+// A resposta também diz que programa está lá (ver onQual).
 async function conferirAdmin(sh) {
-  if (sh?.alvo?.superficie !== 'window') return;
+  if (!sh?.alvo) return;
   const r = await controle.conferirJanela(sh.alvo);
-  if (r?.admin) controle.onAdmin(sh, String(r.admin.titulo || ''), null);
+  if (r?.qual) controle.onQual(sh, r.qual);
+  if (sh.alvo.superficie === 'window' && r?.admin) controle.onAdmin(sh, String(r.admin.titulo || ''), null);
 }
+
+// Que programa está na janela (na tela inteira, o da frente): o ajudante 1.6+ diz em cada
+// resposta. Sendo um jogo com botões próprios no celular (toque-jogo.js), a sala fica sabendo pelo
+// título da tela — só o nome do jogo, nunca o título da janela (na tela inteira ele pode ser uma
+// conversa). Tela inteira não volta para "nenhum" quando outra janela vem para a frente: os botões
+// de quem está jogando não trocam no meio da partida.
+controle.onQual = (sh, q) => {
+  if (sh.aba != null) return;
+  const nome = jogoDaJanela(q);
+  if (nome === (sh.titulo ?? null) || (!nome && sh.alvo?.superficie === 'monitor')) return;
+  sh.titulo = nome;
+  socket.emit('share-info', { key: sh.key, site: null, titulo: nome });
+};
 
 // O que chega pelo canal direto não passou pelo servidor: aqui se confere o que ele conferiria —
 // a tela é minha e está liberada, o evento é bem formado e ninguém manda mais de 240 por segundo.
@@ -2702,7 +2719,9 @@ function updateFocusCtrl() {
   }
   if (t) {
     const dono = t.user.isSelf ? 'Sua tela' : `Tela de ${t.user.name}`;
-    $('#focus-name').textContent = `${dono} · ${ondeEsta(t.share)}${!nav && t.share.site ? ` · ${t.share.site}` : ''}`;
+    // janela ou tela inteira: o título é o jogo que o ajudante reconheceu nela (ver onQual)
+    const jogo = ['window', 'monitor'].includes(superficieDe(t.share)) && t.share.titulo ? ` · ${t.share.titulo}` : '';
+    $('#focus-name').textContent = `${dono} · ${ondeEsta(t.share)}${!nav && t.share.site ? ` · ${t.share.site}` : ''}${jogo}`;
   }
   if (!pode) controle.remover(fv);
   // Liberada, já entra controlando — igual à mesa, sem botão no meio do caminho. "Só assistir"
@@ -2727,7 +2746,7 @@ function updateFocusCtrl() {
   const emJogo = controle.jogoNo === fv;
   jb.classList.toggle('on', emJogo);
   jb.innerHTML = `${icon('gamepad', 16)}${emJogo ? 'Desligar modo jogo' : 'Modo jogo'}`;
-  jb.title = isTouch ? 'Analógico e botões na tela (Minecraft e cia.)' : 'Mouse gira a câmera e WASD anda (Minecraft e cia.). F8 liga e desliga.';
+  jb.title = isTouch ? 'Analógico e botões na tela, com os do Minecraft e do God of War' : 'Mouse gira a câmera e WASD anda (Minecraft e cia.). F8 liga e desliga.';
 }
 $('#focus-ctrl').addEventListener('click', async () => {
   const btn = $('#focus-ctrl');
@@ -2752,23 +2771,25 @@ $('#focus-jogo').addEventListener('click', () => {
   controle.modoJogo(fv, ligar);
   updateFocusCtrl();
   if (ligar && isTouch) {
-    // celular: tela cheia deitada, e o controle de toque por cima (ver toque-jogo.js)
+    // celular: tela cheia deitada, e o controle de toque por cima (ver toque-jogo.js, que avisa
+    // com que botões entrou)
     if (!document.fullscreenElement) $('#focus').requestFullscreen?.().then(() => screen.orientation?.lock?.('landscape')).catch(() => {});
-    toast('Modo jogo: analógico anda, arraste o dedo para olhar. Bater segurando quebra o bloco.', 'info', 6000);
   } else if (ligar) toast('Modo jogo ligado: o mouse gira a câmera e o teclado anda com o personagem. Esc pausa o jogo e solta o mouse; clique na tela para voltar. F8 liga e desliga.', 'info', 9000);
 });
 // o controle de toque aparece e some junto com o modo jogo (inclusive quando ele desliga sozinho)
 const toqueJogo = new ToqueJogo({
   raiz: $('#toque-jogo'),
   controle,
+  toast,
   onSair: () => {
     controle.desligarJogo();
     updateFocusCtrl();
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   },
 });
+// o título da tela traz o nome do jogo que está nela (ver onQual): os botões são os dele
 controle.onJogo = (video, key) => {
-  if (video && isTouch) toqueJogo.mostrar(key);
+  if (video && isTouch) toqueJogo.mostrar(key, acharTela(key)?.share.titulo);
   else toqueJogo.esconder();
 };
 controle.onJogoSoltou = () => {
