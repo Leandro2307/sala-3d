@@ -515,9 +515,12 @@ export class Player {
 
   update(dt) {
     if (this.enabled && this.sitting) {
-      if (this.querSeMexer()) this.stand();
+      // com a câmera presa numa mesa (cartas, poker, foco) andar não levanta: o boneco em pé atrás
+      // da cadeira tampava o jogo. Sai pela mesa (Esc, E, botão)
+      if (this.querSeMexer() && !this.override) this.stand();
       else {
         this.vel.set(0, 0, 0);
+        this.jumpBuffer = 0; // o espaço apertado na mesa não vira pulo ao levantar
         this.anim = 4;
       }
     }

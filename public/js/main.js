@@ -7251,6 +7251,39 @@ function andarBots() {
 // sala do escritório), o corpo some e a animação espera. A distância é a aparente: a luneta
 // (~6×) aproxima.
 const TAN_FOV = Math.tan(THREE.MathUtils.degToRad(34)); // metade da abertura da câmera normal (68°)
+// Sentado nas cartas ou no poker: quem está entre a câmera e a mesa (passando atrás da cadeira, em
+// pé em cima dela) some para mim, como atrás da parede. Quem está sentado nesta mesa sempre aparece.
+function tampaAMesa(u) {
+  const M = cartas.ativa || poker.ativa;
+  const o = player.override;
+  if (!M || !o || M.e?.lugares?.some((l) => l?.id === u.id)) return false;
+  const p = u.avatar.group.position;
+  const a = o.position;
+  const dx = o.target.x - a.x;
+  const dz = o.target.z - a.z;
+  const k = ((p.x - a.x) * dx + (p.z - a.z) * dz) / (dx * dx + dz * dz || 1);
+  if (k < -0.2 || k > 1) return false;
+  return Math.hypot(a.x + dx * k - p.x, a.z + dz * k - p.z) < 0.9;
+}
+// Na mesma mesa, um personagem grande (o Optimus "senta" de pé, com quase 3 m) fica do tamanho de
+// um boneco sentado, só para mim: senão tampa a mesa. A altura é a da pose de agora, medida uma vez
+// por segundo; levantou (ou eu saí), volta ao tamanho dele.
+const ALTO_SENTADO = 1.5; // do assento ao topo da cabeça do boneco padrão sentado
+const _caixaMesa = new THREE.Box3();
+function caberNaMesa(u, t) {
+  const a = u.avatar;
+  const M = cartas.ativa || poker.ativa;
+  if (!M || !player.override || !a.personagem || !M.e?.lugares?.some((l) => l?.id === u.id)) {
+    if (a.inner.scale.x !== 1) a.inner.scale.setScalar(1);
+    u.medidoNaMesa = null;
+    return;
+  }
+  if (u.medidoNaMesa != null && t - u.medidoNaMesa < 1) return;
+  u.medidoNaMesa = t;
+  _caixaMesa.setFromObject(a.personagem.grupo, true);
+  const alto = (_caixaMesa.max.y - a.group.position.y) / a.inner.scale.x;
+  a.inner.scale.setScalar(alto > ALTO_SENTADO ? ALTO_SENTADO / alto : 1);
+}
 const zoomDaCamera = () => TAN_FOV / Math.tan(THREE.MathUtils.degToRad(world.camera.fov / 2));
 function atualizarAvatares(dt, t, desenhando) {
   const cam = world.camera.position;
@@ -7263,12 +7296,14 @@ function atualizarAvatares(dt, t, desenhando) {
     const noCampo = futebol.joga(u.id) || fantasmas.oculto(u.id);
     if (a.group.visible === noCampo) a.group.visible = !noCampo;
     if (noCampo) continue;
+    caberNaMesa(u, t);
     if (!a.animarCom) {
       a.update(dt, t);
       continue;
     }
     a.mover(dt, t);
-    a.setOculto(world.escondido?.(a.group.position) ?? false);
+    u.tampa = tampaAMesa(u); // o nome some junto (lodDosBonecos): perto da câmera ficaria enorme
+    a.setOculto((world.escondido?.(a.group.position) ?? false) || u.tampa);
     if (a.oculto) {
       a.animarCom(dt, t, Infinity);
       continue;
@@ -7308,7 +7343,7 @@ function lodDosBonecos() {
     const sombra = comMapa && b.sombras > 0 && !a.oculto && n < b.sombras + (tinha ? 2 : 0) && u.distLod < b.raioSombra + (tinha ? 4 : 0);
     if (!a.oculto) n++;
     // o nome vai pela distância aparente: pela luneta dá para ver quem é
-    const nome = u.distLod / zoom < b.nomes + (a.lod.nome ? 5 : 0) || u.speaking || u.shares.size > 0;
+    const nome = !u.tampa && (u.distLod / zoom < b.nomes + (a.lod.nome ? 5 : 0) || u.speaking || u.shares.size > 0);
     if (a.setLod({ sombra, detalhe: b.bracos, nome })) world.marcarSombra?.();
   }
   if (localAvatar.setLod?.({ sombra: true, detalhe: b.bracos, nome: false })) world.marcarSombra?.();
