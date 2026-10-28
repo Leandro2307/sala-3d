@@ -69,7 +69,7 @@ const PANEL_TITLES = { people: 'Pessoas', chat: 'Chat da sala', telao: 'Telão',
 
 // ------------------------------------------------------------------ ajustes salvos
 const DEFAULTS = {
-  name: '', color: COLORS[0], mic: true, voice: 100, screen: 90, tv: 80, musica: 60, spatial: false, porJogo: true,
+  name: '', color: COLORS[0], mic: true, voice: 100, screen: 90, tv: 80, musica: 20, spatial: false, porJogo: true,
   shareMode: 'max', sens: 100, balancoVisao: true, sfx: true, micDevice: '', camDevice: '', helpCollapsed: false, photo: null, shirt: 'none', char: 'padrao', arma: ARMA_PADRAO,
   // qualidade gráfica: 'auto' ou um nível fixo; nivelAuto: onde o automático parou da última vez;
   // falhasAuto: quantas vezes cada nível caiu logo depois de subir (o automático espera mais para tentar)
@@ -93,6 +93,12 @@ if (stored.tv === undefined && stored.yt !== undefined) settings.tv = stored.yt;
 delete settings.yt;
 // a chave "shadows" (liga/desliga sombra) virou a qualidade gráfica
 delete settings.shadows;
+// a música da sala virou som de fundo (baixinha): quem estava no volume de fábrica antigo (60)
+// passa para o novo; quem mexeu no volume fica com o que escolheu
+if (!stored.musicaFundo) {
+  if (stored.musica === undefined || stored.musica === 60) settings.musica = DEFAULTS.musica;
+  settings.musicaFundo = true;
+}
 // celular: a ajuda começa recolhida (a tela é pequena), mas continua a um toque
 if (isTouch && stored.helpCollapsed === undefined) settings.helpCollapsed = true;
 function saveSettings() {
@@ -4190,6 +4196,14 @@ function updateVolumes() {
   }
 }
 
+// alguém que eu ouço está falando agora (a música da sala abaixa para a voz passar)
+function alguemFalando() {
+  for (const u of state.users.values()) {
+    if (!u.isSelf && u.avatar.speaking && u.audioEl && !u.audioEl.muted) return true;
+  }
+  return false;
+}
+
 // ------------------------------------------------------------------ voz: garantir que toca
 // O aro verde vem pelo servidor; a voz, pelo WebRTC. Quando um dos dois falha, aparecia o aro e
 // não vinha som. Três causas, três remédios:
@@ -7389,6 +7403,7 @@ function frame(ts = performance.now()) {
     if (jogoLigado('corrida')) corrida.update(dt, player.pos.x, player.pos.z, player.veiculo);
     if (corrida.ativa) $('#rh-time').textContent = formatarVolta(corrida.tempo);
     detectSpeaking(dt);
+    musica.abafar(alguemFalando(), dt);
     sendState(dt);
     updateHover();
     updateSitHint();

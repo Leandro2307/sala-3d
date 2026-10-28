@@ -12,6 +12,10 @@ const mmss = (t) => {
 };
 // mais que isso fora do ponto da sala, o player pula para o lugar certo
 const DESVIO = 2.5;
+// alguém falando: a música cai para essa fração do volume (a voz passa limpa por cima) e só volta
+// depois de um tempo calado, para não ficar subindo e descendo entre uma palavra e outra
+const ABAFADA = 0.3;
+const SEGURA_FALA = 1200;
 
 export class Musica {
   constructor({ socket, toast, volume, aoMudarVolume, painelAberto, noTelao }) {
@@ -32,6 +36,9 @@ export class Musica {
     this.ocupado = false;
     this.conta = 0;
     this.escolha = null; // texto de um link com vídeo e playlist: a pessoa escolhe o que entra
+    this.fator = 1; // 1 = volume escolhido; ABAFADA = alguém está falando
+    this.ultimaFala = -Infinity;
+    this.volAplicado = null; // o último volume mandado ao player (só manda de novo se mudar)
 
     $('#mu-form').addEventListener('submit', (e) => {
       e.preventDefault();
@@ -73,7 +80,7 @@ export class Musica {
     vol.value = volume();
     vol.addEventListener('input', () => {
       aoMudarVolume(Number(vol.value));
-      try { this.player?.setVolume(Number(vol.value)); } catch { /* ainda não pronto */ }
+      this.aplicarVolume();
     });
 
     $('#mu-todas').addEventListener('change', (e) => {
@@ -236,8 +243,9 @@ export class Musica {
         events: {
           onReady: () => {
             p.getIframe().setAttribute('allow', 'autoplay; encrypted-media');
-            p.setVolume(this.volume());
             this.player = p;
+            this.volAplicado = null;
+            this.aplicarVolume();
             resolve();
           },
           onStateChange: (e) => {
@@ -253,7 +261,28 @@ export class Musica {
     });
   }
 
+  // A música é som de fundo: com alguém falando (que eu ouço), ela desce rápido (a primeira sílaba
+  // já sai limpa) e, depois que a pessoa cala, sobe devagar. Chamado a cada quadro (main.js).
+  abafar(falando, dt) {
+    const agora = performance.now();
+    this.abafouEm = agora;
+    if (falando) this.ultimaFala = agora;
+    const fala = agora - this.ultimaFala < SEGURA_FALA;
+    this.fator += ((fala ? ABAFADA : 1) - this.fator) * Math.min(1, dt * (fala ? 8 : 1.2));
+    this.aplicarVolume();
+  }
+
+  aplicarVolume() {
+    if (!this.player) return;
+    const v = Math.round(this.volume() * this.fator);
+    if (v === this.volAplicado) return;
+    this.volAplicado = v;
+    try { this.player.setVolume(v); } catch { /* ainda não pronto */ }
+  }
+
   tique() {
+    // aba em segundo plano: o navegador para os quadros (e o abafar); a música volta sozinha
+    if (performance.now() - (this.abafouEm || 0) > 1000) this.abafar(false, 0.5);
     // conferência de vez em quando: player que travou no buffering ou ficou para trás volta ao ponto
     if (this.tocando && ++this.conta % 6 === 0) this.acompanhar();
     if (this.painelAberto()) this.desenharTempo();
