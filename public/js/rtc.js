@@ -8,10 +8,12 @@ import { isTouch } from './touch.js';
 // tamanho do preset (o navegador reduz na placa de vídeo, antes de codificar — sai mais barato).
 // contentHint 'motion' e não 'detail': o modo "tela" do codificador segura quadros em conteúdo
 // parado e derruba a fluidez quando algo se mexe.
+// jogoBitrate: a banda de quem joga na tela (modo jogo, ver modoJogo). Jogo de ação mexe a imagem
+// toda a cada quadro: com os 12 Mbps o codificador passava do alvo e descartava quadros.
 export const SHARE_PRESETS = {
-  leve: { label: 'Leve', fps: 60, width: 1280, height: 720, maxBitrate: 5_000_000 },
-  max: { label: 'Máxima', fps: 60, width: 1920, height: 1080, maxBitrate: 12_000_000 },
-  ultra: { label: 'Ultra', fps: 60, width: 2560, height: 1440, maxBitrate: 20_000_000 },
+  leve: { label: 'Leve', fps: 60, width: 1280, height: 720, maxBitrate: 5_000_000, jogoBitrate: 9_000_000 },
+  max: { label: 'Máxima', fps: 60, width: 1920, height: 1080, maxBitrate: 12_000_000, jogoBitrate: 20_000_000 },
+  ultra: { label: 'Ultra', fps: 60, width: 2560, height: 1440, maxBitrate: 20_000_000, jogoBitrate: 30_000_000 },
 };
 // os nomes antigos (texto nítido, vídeo, jogo) viram a Máxima
 export const presetDe = (modo) => (SHARE_PRESETS[modo] ? modo : 'max');
@@ -174,6 +176,7 @@ export class RTC {
     // Telas no ar, por chave (a mesma do servidor). Uma pessoa pode mandar várias abas/janelas
     // ao mesmo tempo. extraScale reduz vídeo de arquivo maior que o preset antes de codificar.
     this.screens = new Map(); // key -> { stream, extraScale }
+    this.jogoTelas = new Set(); // telas minhas em que alguém está jogando (modoJogo)
     this.shareMode = 'max'; // preset das telas: leve, max ou ultra
     this.medidas = new WeakMap(); // receptor de vídeo -> os totais da medida anterior (ver recebendo)
     escolherCodec();
@@ -406,6 +409,15 @@ export class RTC {
   // já é tudo 60 quadros: o "turbo" de quando alguém controla a tela não muda mais nada
   turbo() {}
 
+  // Alguém ligou (ou desligou) o modo jogo numa tela minha: quem olha de perto leva a banda de jogo
+  modoJogo(key, ligar) {
+    if (ligar === this.jogoTelas.has(key)) return;
+    if (ligar) this.jogoTelas.add(key);
+    else this.jogoTelas.delete(key);
+    console.info('[modo-jogo] banda de jogo', ligar ? 'ligada' : 'desligada', key, this.preset());
+    this.retuneAll();
+  }
+
   // O envio de UMA tela para UMA pessoa: do quanto ela precisa (NIVEIS) e da banda do preset,
   // dividida pelo peso das telas que ela vê (a que olha de perto leva quase tudo), entre o piso e
   // o teto do nível. Uma tela pequena sozinha não fica com o preset inteiro (soma < 1).
@@ -421,9 +433,10 @@ export class RTC {
     const extra = scr?.extraScale || 1;
     const altura = (scr?.stream?.getVideoTracks()[0]?.getSettings?.().height || preset.height * extra) / extra;
     const escala = nivel.linhas ? Math.max(1, altura / nivel.linhas) : nivel.escala;
+    const banda = nivel === NIVEIS.max && this.jogoTelas.has(key) ? preset.jogoBitrate : preset.maxBitrate;
     return {
       active: nivel !== NIVEIS.off,
-      maxBitrate: Math.round(Math.min(preset.maxBitrate * nivel.teto, Math.max(nivel.piso, preset.maxBitrate * parte))),
+      maxBitrate: Math.round(Math.min(banda * nivel.teto, Math.max(nivel.piso, banda * parte))),
       maxFramerate: nivel.fps,
       scaleResolutionDownBy: Math.max(1, escala * extra),
     };
@@ -575,6 +588,7 @@ export class RTC {
       if (!scr) continue;
       for (const t of scr.stream.getTracks()) t.stop();
       this.screens.delete(k);
+      this.jogoTelas.delete(k);
       for (const peer of this.peers.values()) {
         for (const tr of peer.screenTransceivers.get(k) || []) {
           try {
@@ -906,4 +920,129 @@ export class RTC {
       turn: local?.candidateType === 'relay' ? local.relayProtocol || 'udp' : remoto?.candidateType === 'relay' ? 'udp' : null,
     };
   }
+
+  // -------------------------------------------------------------- modo jogo
+  // Quem joga na tela de outra pessoa: o menor buffer possível no vídeo e no som dela. Cada quadro
+  // vai para a tela assim que fica pronto; um tranco da rede vira um quadro repetido, não atraso.
+  // Devolve o que mudou (para o relatório).
+  baixaLatencia(stream, ligar) {
+    const trilhas = new Set(stream?.getTracks() || []);
+    const feitos = [];
+    for (const peer of this.peers.values()) {
+      for (const t of peer.pc.getTransceivers()) {
+        const r = t.receiver;
+        if (!r.track || !trilhas.has(r.track)) continue;
+        try {
+          if ('jitterBufferTarget' in r) r.jitterBufferTarget = ligar ? 0 : null;
+          // o antigo do Chrome: 0 no vídeo liga o caminho de "quadro direto para a tela"
+          if (r.track.kind === 'video' && 'playoutDelayHint' in r) r.playoutDelayHint = ligar ? 0 : null;
+          feitos.push({ tipo: r.track.kind, jitterBufferTarget: r.jitterBufferTarget ?? null, playoutDelayHint: r.playoutDelayHint ?? null });
+        } catch (err) {
+          console.warn('[modo-jogo] buffer de quem joga', err);
+          feitos.push({ tipo: r.track.kind, erro: String(err?.message || err) });
+        }
+      }
+    }
+    return feitos;
+  }
+
+  // Relatório do modo jogo (jogo-diag.js): os números crus do envio de uma tela minha, por pessoa
+  // que recebe. São somas desde o começo: quem lê faz as diferenças entre duas leituras.
+  async diagEnvio(key) {
+    const lista = [];
+    const trilha = this.screens.get(key)?.stream?.getVideoTracks()[0];
+    for (const [id, peer] of this.peers) {
+      const tr = (peer.screenTransceivers.get(key) || []).find((t) => t.sender.track?.kind === 'video');
+      if (!tr) continue;
+      let report;
+      try {
+        report = await tr.sender.getStats();
+      } catch {
+        continue;
+      }
+      const d = { id, nivel: peer.interesse.get(key) || null, conexao: peer.pc.connectionState };
+      try {
+        const p = tr.sender.getParameters();
+        d.params = { degradacao: p.degradationPreference ?? null, ...(p.encodings?.[0] || {}) };
+      } catch { /* conexão fechando */ }
+      const codecs = new Map();
+      let par = null;
+      report.forEach((s) => {
+        if (s.type === 'codec') codecs.set(s.id, `${s.mimeType} ${s.sdpFmtpLine || ''}`.trim());
+        else if (s.type === 'outbound-rtp' && s.kind === 'video') d.saida = pegar(s, CAMPOS_SAIDA);
+        else if (s.type === 'media-source' && s.kind === 'video') d.captura = pegar(s, ['width', 'height', 'framesPerSecond', 'frames']);
+        else if (s.type === 'remote-inbound-rtp' && s.kind === 'video') d.laLonge = pegar(s, ['packetsLost', 'fractionLost', 'jitter', 'roundTripTime']);
+        else if (s.type === 'transport' && s.selectedCandidatePairId) par = report.get(s.selectedCandidatePairId) || par;
+        else if (s.type === 'candidate-pair' && s.nominated && s.state === 'succeeded' && !par) par = s;
+      });
+      if (d.saida?.codecId) d.codec = codecs.get(d.saida.codecId) || null;
+      if (par) d.rede = caminhoDe(report, par);
+      lista.push(d);
+    }
+    return {
+      trilha: trilha ? { rotulo: trilha.label, estado: trilha.readyState, mudo: trilha.muted, dica: trilha.contentHint, config: trilha.getSettings?.() || null } : null,
+      jogo: this.jogoTelas.has(key),
+      preset: this.preset(),
+      envios: lista,
+    };
+  }
+
+  // Os números crus da chegada de uma tela de outra pessoa (a trilha de vídeo que está no <video>)
+  async diagRecebe(trilha) {
+    for (const peer of this.peers.values()) {
+      const tr = peer.pc.getTransceivers().find((t) => t.receiver.track === trilha);
+      if (!tr) continue;
+      let report;
+      try {
+        report = await tr.receiver.getStats();
+      } catch {
+        return null;
+      }
+      const d = { conexao: peer.pc.connectionState, jitterBufferTarget: tr.receiver.jitterBufferTarget ?? null, playoutDelayHint: tr.receiver.playoutDelayHint ?? null };
+      const codecs = new Map();
+      let par = null;
+      report.forEach((s) => {
+        if (s.type === 'codec') codecs.set(s.id, `${s.mimeType} ${s.sdpFmtpLine || ''}`.trim());
+        else if (s.type === 'inbound-rtp' && s.kind === 'video') d.entrada = pegar(s, CAMPOS_ENTRADA);
+        else if (s.type === 'transport' && s.selectedCandidatePairId) par = report.get(s.selectedCandidatePairId) || par;
+        else if (s.type === 'candidate-pair' && s.nominated && s.state === 'succeeded' && !par) par = s;
+      });
+      if (d.entrada?.codecId) d.codec = codecs.get(d.entrada.codecId) || null;
+      if (par) d.rede = caminhoDe(report, par);
+      return d;
+    }
+    return null;
+  }
+}
+
+const CAMPOS_SAIDA = ['frameWidth', 'frameHeight', 'framesPerSecond', 'framesEncoded', 'framesSent', 'hugeFramesSent',
+  'keyFramesEncoded', 'bytesSent', 'headerBytesSent', 'packetsSent', 'retransmittedBytesSent', 'retransmittedPacketsSent',
+  'targetBitrate', 'totalEncodeTime', 'totalEncodedBytesTarget', 'totalPacketSendDelay', 'nackCount', 'pliCount', 'firCount',
+  'qpSum', 'qualityLimitationReason', 'qualityLimitationDurations', 'qualityLimitationResolutionChanges',
+  'encoderImplementation', 'powerEfficientEncoder', 'scalabilityMode', 'codecId', 'active'];
+const CAMPOS_ENTRADA = ['frameWidth', 'frameHeight', 'framesPerSecond', 'framesReceived', 'framesDecoded', 'framesDropped',
+  'framesRendered', 'keyFramesDecoded', 'freezeCount', 'totalFreezesDuration', 'pauseCount', 'totalPausesDuration',
+  'jitterBufferDelay', 'jitterBufferTargetDelay', 'jitterBufferMinimumDelay', 'jitterBufferEmittedCount',
+  'totalDecodeTime', 'totalProcessingDelay', 'totalAssemblyTime', 'totalInterFrameDelay', 'totalSquaredInterFrameDelay',
+  'bytesReceived', 'headerBytesReceived', 'packetsReceived', 'packetsLost', 'packetsDiscarded', 'jitter', 'nackCount',
+  'pliCount', 'firCount', 'qpSum', 'decoderImplementation', 'powerEfficientDecoder', 'codecId'];
+
+// só os campos que vieram (cada versão do Chrome manda um pedaço)
+function pegar(s, campos) {
+  const d = {};
+  for (const c of campos) if (s[c] !== undefined) d[c] = s[c];
+  return d;
+}
+
+// o caminho da conexão: ida e volta, banda estimada e se é direto ou pelo TURN
+function caminhoDe(report, par) {
+  const local = report.get(par.localCandidateId);
+  const remoto = report.get(par.remoteCandidateId);
+  return {
+    rtt: par.currentRoundTripTime ?? null,
+    saidaEstimada: par.availableOutgoingBitrate ?? null,
+    entradaEstimada: par.availableIncomingBitrate ?? null,
+    local: local ? `${local.candidateType}/${local.protocol}${local.relayProtocol ? `/${local.relayProtocol}` : ''}${local.networkType ? ` ${local.networkType}` : ''}` : null,
+    remoto: remoto ? `${remoto.candidateType}/${remoto.protocol}` : null,
+  };
 }

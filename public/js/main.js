@@ -53,6 +53,7 @@ import { acertarAvatar, tamanhoDo } from './hitbox.js';
 import { icon, hydrateIcons } from './icons.js';
 import { photoFromFile } from './foto.js';
 import { Musica } from './musica.js';
+import { DiagJogo } from './jogo-diag.js';
 import { isTouch, setupTouchControls, toggleFullscreen, isFullscreen, temTelaCheia } from './touch.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1519,6 +1520,7 @@ function addUser(data) {
 function removeUser(id, quiet = false) {
   const u = state.users.get(id);
   if (!u || u.isSelf) return;
+  for (const key of [...jogandoAqui.keys()]) jogoAqui(key, id, false);
   for (const key of u.shares.keys()) avisoSite.esquecer(key);
   if (porNumero.get(u.n) === u) porNumero.delete(u.n);
   interesseEnviado.delete(id);
@@ -1820,7 +1822,7 @@ function nivelDesejado(sh) {
 }
 
 function nivelDaTela(sh) {
-  if (document.hidden) return 'off';
+  if (document.hidden || jogoNoMeuPc()) return 'off';
   if (state.focus?.kind === 'share') return state.focus.key === sh.key ? 'max' : 'off';
   // na mesa, pelo tamanho de cada monitor (o que está atrás da ampliada não precisa de vídeo)
   if (mesa.aberta) return mesa.nivelDe ? mesa.nivelDe(sh.key) : 'max';
@@ -1967,6 +1969,9 @@ async function medirFoco() {
   if (r?.atraso != null) texto += ` · ~${r.atraso} ms`;
   // TURN por TCP: um pacote perdido segura todos os de trás (rede que bloqueia UDP)
   if (r?.turn) texto += ` · via TURN${r.turn === 'udp' ? '' : ' (TCP)'}`;
+  // modo jogo: quantos quadros a captura pega lá no PC de quem compartilha
+  const la = jogandoLa && diagJogo.sessao?.outroLado;
+  if (la && Date.now() - la.recebido < 6000 && la.captura != null) texto += ` · lá: captura ${Math.round(la.captura)} qps`;
   el.textContent = texto;
   el.title = r?.atraso != null
     ? 'Atraso medido aqui: a rede (metade da ida e volta) mais a espera de cada quadro até ficar pronto. A captura e a codificação no PC de quem compartilha somam mais um pouco.'
@@ -2388,7 +2393,9 @@ function receberVolta({ key, ev, de } = {}) {
   if (typeof key !== 'string' || !ev) return;
   if (ev.t === 'copia' && typeof ev.s === 'string' && controle.pediuCopia(key)) copiarDaTela(ev.s, de);
   else if (ev.t === 'dialogo' && (ev.fechou || controle.mexeuEm(key))) avisoSite.receber(key, ev, `Na tela de ${de || 'alguém'}`);
-  else if (ev.t === 'admin' && controle.mexeuEm(key) && Date.now() - (avisosAdmin.get(`de:${key}`) || 0) > 30_000) {
+  else if (ev.t === 'jogo-envio') {
+    if (jogandoLa?.key === key) diagJogo.doOutroLado(ev);
+  } else if (ev.t === 'admin' && controle.mexeuEm(key) && Date.now() - (avisosAdmin.get(`de:${key}`) || 0) > 30_000) {
     avisosAdmin.set(`de:${key}`, Date.now());
     const quem = de || 'quem compartilha';
     toast(`O seu controle não chega na tela de ${quem}: ${ev.titulo ? `“${String(ev.titulo).slice(0, 40)}”` : 'o programa'} está aberto como administrador lá, e o Windows bloqueia. Peça para abrir sem administrador.`, 'warn', 12000);
@@ -2433,6 +2440,106 @@ controle.onQual = (sh, q) => {
   sh.titulo = nome;
   socket.emit('share-info', { key: sh.key, site: null, titulo: nome });
 };
+
+// ------------------------------------------------------------------ modo jogo
+// Alguém joga numa tela minha (ligou o modo jogo nela): a sala deste PC fica leve — o 3D para de
+// ser desenhado, e as telas e webcams dos outros param de chegar —, a placa de vídeo fica para o
+// jogo e o codificador, e quem joga leva a banda de jogo (rtc.modoJogo). tela → Map(quem → desde)
+const jogandoAqui = new Map();
+let desenharMesmoAssim = false; // quem compartilha pediu a sala de volta (botão do aviso)
+const jogoNoMeuPc = () => jogandoAqui.size > 0 && !desenharMesmoAssim;
+// Eu jogo na tela de outra pessoa: { key, video }
+let jogandoLa = null;
+const diagJogo = new DiagJogo({ toast });
+
+function jogoAqui(key, deId, ligar) {
+  const antes = jogandoAqui.size > 0;
+  let quem = jogandoAqui.get(key);
+  if (ligar) {
+    if (!quem) jogandoAqui.set(key, (quem = new Map()));
+    if (!quem.has(deId)) quem.set(deId, Date.now());
+  } else {
+    if (!quem?.delete(deId)) return;
+    if (!quem.size) jogandoAqui.delete(key);
+  }
+  rtc?.modoJogo(key, jogandoAqui.has(key));
+  const nome = state.users.get(deId)?.name || 'Alguém';
+  diagJogo.evento(ligar ? 'modo jogo ligado por quem controla' : 'modo jogo desligado', { key, deId, nome });
+  const agora = jogandoAqui.size > 0;
+  if (antes === agora) return;
+  if (agora) {
+    desenharMesmoAssim = false;
+    diagJogo.comecar('compartilha', {
+      gl: world.renderer.getContext(),
+      extra: { extensao: controle.ext?.versao ?? null, preset: rtc?.shareMode ?? null, superficie: superficieDe(self()?.shares.get(key)) },
+    });
+    toast(`${nome} está jogando no seu PC. A sala ficou em pausa aqui, para o jogo e a transmissão terem a placa de vídeo toda.`, 'info', 12000, null, {
+      rotulo: 'Desenhar a sala',
+      fazer: () => {
+        desenharMesmoAssim = true;
+        diagJogo.evento('quem compartilha voltou a desenhar a sala');
+      },
+    });
+  } else {
+    desenharMesmoAssim = false;
+    diagJogo.parar();
+  }
+  atualizarInteresse();
+}
+controle.onModo = (sh, jogo, deId) => jogoAqui(sh.key, deId, jogo);
+
+// eu liguei (ou desliguei) o modo jogo numa tela de outra pessoa
+function jogoLa(video, key) {
+  if (jogandoLa) {
+    const feitos = rtc?.baixaLatencia(jogandoLa.video.srcObject, false);
+    diagJogo.evento('buffer normal de volta', feitos);
+    jogandoLa = null;
+    diagJogo.parar();
+  }
+  if (!video) return;
+  jogandoLa = { key, video };
+  diagJogo.comecar('joga', {
+    gl: world.renderer.getContext(),
+    video,
+    extra: { tela: acharTela(key)?.share.titulo ?? null, toque: isTouch },
+  });
+  diagJogo.evento('buffer mínimo', rtc?.baixaLatencia(video.srcObject, true));
+}
+
+// A cada 2 s, com o modo jogo ligado de algum lado: uma amostra para o relatório. Quem compartilha
+// manda o resumo para quem joga (a mesma volta do controle).
+let quadrosDaSala = 0;
+function salaAgora() {
+  const q = quadrosDaSala;
+  quadrosDaSala = 0;
+  return { desenha: mundoVisivel(), teto: tetoDeQuadros(), quadros2s: q, escondida: document.hidden, foco: state.focus?.kind ?? null, pessoas: state.users.size };
+}
+async function amostrarJogo() {
+  if (!rtc || !diagJogo.ativo) return;
+  try {
+    const sala = salaAgora();
+    for (const [key, quem] of [...jogandoAqui]) {
+      if (!self()?.shares.has(key)) {
+        for (const id of [...quem.keys()]) jogoAqui(key, id, false);
+        continue;
+      }
+      const cru = await rtc.diagEnvio(key);
+      for (const id of quem.keys()) {
+        const resumo = diagJogo.amostraEnvio(key, cru, id, sala);
+        if (!resumo) continue;
+        const { t, captura, enviado, codificado, altura, kbps, limite, motivo, codificador, placa } = resumo;
+        controle.emitir('controle-volta', { key, para: id, ev: { t: 'jogo-envio', quando: t, captura, enviado, codificado, altura, kbps, limite, motivo, codificador, placa } });
+      }
+    }
+    if (jogandoLa) {
+      const trilha = jogandoLa.video.srcObject?.getVideoTracks()[0];
+      if (trilha) diagJogo.amostraRecebe(await rtc.diagRecebe(trilha), sala);
+    }
+  } catch (err) {
+    console.warn('[modo-jogo] amostra', err);
+  }
+}
+setInterval(amostrarJogo, 2000);
 
 // O que chega pelo canal direto não passou pelo servidor: aqui se confere o que ele conferiria —
 // a tela é minha e está liberada, o evento é bem formado e ninguém manda mais de 240 por segundo.
@@ -2797,6 +2904,7 @@ const toqueJogo = new ToqueJogo({
 controle.onJogo = (video, key) => {
   if (video && isTouch) toqueJogo.mostrar(key, acharTela(key)?.share.titulo);
   else toqueJogo.esconder();
+  jogoLa(video, key);
 };
 controle.onJogoSoltou = () => {
   if (controle.jogoNo) toast('Esc soltou o mouse (o jogo recebeu o Esc). Clique na tela para voltar a jogar, ou F8 para desligar o modo jogo.', 'info', 6000);
@@ -6896,7 +7004,7 @@ if (params.get('debug') === '1') {
     state, player, combat, run, corrida, world, settings, punch, goToRing, respawn, mataMata, batalha, anuncios,
     toggleVeiculo, irParaLargada, jogos, irParaMesa, exitFocus, dados, quadras, jogosDoParque, pingue, queimada, sinuca, golfe, cartas, poker, gincana, fantasmas, kart, pinta,
     tocarTela, telasMudas, liberarSomDasTelas, makeVideo, mesa, controle, abrirMesa, fecharMesa, marcaDaAba,
-    publishShare, stopShare, acharTela, telasNoAr, get rtc() { return rtc; }, clima, ligarLuneta, futebol, surf, run,
+    publishShare, stopShare, acharTela, telasNoAr, get rtc() { return rtc; }, diagJogo, clima, ligarLuneta, futebol, surf, run,
   };
 }
 
@@ -7034,7 +7142,7 @@ function slowUpdate() {
 }
 
 // a mesa e a tela em foco cobrem tudo: o 3D nem é desenhado (sobra placa de vídeo para as telas)
-const mundoVisivel = () => !mesa.aberta && state.focus?.kind !== 'share';
+const mundoVisivel = () => !mesa.aberta && state.focus?.kind !== 'share' && !jogoNoMeuPc();
 
 // Site (navegador da tela) ou vídeo do telão em foco, com a câmera já parada na frente dele. Ele
 // cobre quase a tela inteira e é desenhado pelo navegador, fora do 3D.
@@ -7069,6 +7177,7 @@ function tetoDeQuadros() {
 
 // o porquê do teto, para o chip de FPS (null: os quadros medidos dizem tudo)
 function motivoDoTeto(teto) {
+  if (jogoNoMeuPc()) return 'jogo no seu PC';
   if (!mundoVisivel()) return 'tela coberta';
   if (navegadorEmUso()) return state.focus.kind === 'pagina' ? 'navegador em uso' : 'vídeo em foco';
   if (teto === 20) return 'janela aberta';
@@ -7401,6 +7510,7 @@ function frame(ts = performance.now()) {
   elapsed += dt;
   const t = elapsed;
   const desenhando = mundoVisivel();
+  quadrosDaSala++;
   world.update(t); // plataformas móveis e escritório andam mesmo sem desenhar (quem está em cima)
   clima.update(dt, t);
   balancarLuneta(t);
@@ -7483,6 +7593,9 @@ function frame(ts = performance.now()) {
 window.sala = {
   state, world, player, run, settings, get tv() { return tv; }, get rtc() { return rtc; }, get socket() { return socket; },
   perf: { gravar: gravarPerf },
+  // modo jogo: copia o relatório (o da sessão ligada ou o da última) para mandar
+  relatorioJogo: () => diagJogo.copiar(),
+  baixarRelatorioJogo: () => diagJogo.baixar(),
 };
 if (PERF || params.get('debug') === '1') window.sala.bots = criarBots;
 

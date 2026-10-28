@@ -736,6 +736,16 @@ function voltaDoControle(raw) {
   }
   // o programa compartilhado está como administrador: o controle de quem mexeu não chega nele
   if (e.t === 'admin') return { t: 'admin', titulo: String(e.titulo ?? '').replace(/[\u0000-\u001f]/g, '').slice(0, 120) };
+  // modo jogo: como a tela está saindo do PC de quem compartilha (o relatório de quem joga)
+  if (e.t === 'jogo-envio') {
+    const num = (v) => (Number.isFinite(v) ? Math.round(v * 10) / 10 : null);
+    const txt = (v) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f]/g, '').slice(0, 60) : null);
+    return {
+      t: 'jogo-envio', quando: num(e.quando), captura: num(e.captura), enviado: num(e.enviado), codificado: num(e.codificado),
+      altura: num(e.altura), kbps: num(e.kbps), limite: txt(e.limite), motivo: txt(e.motivo), codificador: txt(e.codificador),
+      placa: typeof e.placa === 'boolean' ? e.placa : null,
+    };
+  }
   return null;
 }
 

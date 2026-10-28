@@ -286,6 +286,8 @@ export class Controle {
   // Chegou um clique/tecla de alguém para uma das minhas telas.
   async receber(sh, { ev, de, deId }) {
     if (!sh?.controle || (sh.aba == null && !sh.alvo)) return;
+    // modo jogo de quem controla: a sala deste PC fica leve enquanto durar (onModo, no main.js)
+    if (ev?.t === 'modo' && deId) this.onModo?.(sh, ev.jogo, deId);
     // aba trocando de página (sem marca por um instante): ignora até a página nova aparecer
     if (sh.semMarca) return;
     // voltar/endereço e os avisos do site só existem em aba; numa janela quem clica é o ajudante
