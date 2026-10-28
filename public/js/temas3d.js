@@ -57,9 +57,28 @@ export function textura(w, h, desenhar, { repetir = false } = {}) {
 }
 // As fotos de textura do chão (public/img/texturas, ver scripts/texturas.js). cor: a imagem é cor
 // (sRGB); o relevo (-n) não. A imagem chega depois: até lá o material fica sem ela.
-const carregador = new THREE.TextureLoader();
+// Vem como ImageBitmap, decodificada fora da thread principal: com <img> o navegador decodificava
+// cada WebP de 2048 px na hora de mandar para a placa, no meio de um quadro — na primeira visita
+// (as fotos chegam depois do mapa montado) eram ~0,8 s de página parada. A mesma foto é baixada e
+// decodificada uma vez só, mesmo usada em várias texturas.
+const fotos = new Map(); // nome -> Promise<ImageBitmap | HTMLImageElement>
+function carregarFoto(nome) {
+  if (!fotos.has(nome)) {
+    const url = `/img/texturas/${nome}.webp`;
+    fotos.set(nome, typeof createImageBitmap === 'function'
+      ? new THREE.ImageBitmapLoader().setOptions({ imageOrientation: 'flipY', premultiplyAlpha: 'none', colorSpaceConversion: 'none' }).loadAsync(url)
+      : new THREE.ImageLoader().loadAsync(url));
+  }
+  return fotos.get(nome);
+}
 export function texturaFoto(nome, { cor = true } = {}) {
-  const t = carregador.load(`/img/texturas/${nome}.webp`);
+  const t = new THREE.Texture();
+  carregarFoto(nome).then((img) => {
+    // o ImageBitmap já vem virado (imageOrientation): a placa não vira de novo
+    t.flipY = !(typeof ImageBitmap !== 'undefined' && img instanceof ImageBitmap);
+    t.image = img;
+    t.needsUpdate = true;
+  }).catch(() => {});
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.anisotropy = 8;
   if (cor) t.colorSpace = THREE.SRGBColorSpace;

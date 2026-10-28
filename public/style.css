@@ -337,6 +337,15 @@ input[type='range']::-webkit-slider-thumb {
 .lobby-sub { color: #b6bdcc; line-height: 1.55; margin: 0 0 28px; max-width: 38ch; }
 .lobby-note { color: var(--muted); font-size: 12px; line-height: 1.5; margin: 16px 0 0; }
 .lobby-note.warn { color: var(--warn); }
+/* a sala baixando e montando por trás (entrada.js): some quando fica pronta */
+.lobby-carga { display: grid; gap: 6px; margin-top: 12px; transition: opacity 400ms var(--ease) 600ms; }
+.lc-trilho { display: block; height: 4px; border-radius: 999px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.lc-trilho i { display: block; height: 100%; background: var(--accent); transform: scaleX(0); transform-origin: left; transition: transform 300ms var(--ease); }
+.lobby-carga small { color: var(--muted); font-size: 12px; }
+.lobby-carga.esperando small { color: var(--text); }
+.lobby-carga.erro small { color: var(--warn); }
+.lobby-carga.erro .lc-trilho i { background: var(--warn); }
+.lobby-carga.ok { opacity: 0; pointer-events: none; }
 
 .swatches { display: flex; flex-wrap: wrap; gap: 8px; }
 .swatches button {
@@ -3570,3 +3579,91 @@ body[data-jogo] .hud-bussola,
 .mu-fila .mu-tirar:hover { color: #ff8a8e; }
 .mu-fila .empty { padding: 20px 0; color: var(--muted); font-size: 13px; text-align: center; }
 .np-controls .icon-btn:disabled { opacity: 0.4; pointer-events: none; }
+
+/* ------------------------------------------------------------ entrada no celular */
+/* No computador o formulário segue como sempre. No celular (em pé ou deitado) ele vira uma grade
+   compacta: o personagem primeiro, camiseta e foto recolhidas atrás de um botão e o "Entrar na
+   sala" preso embaixo da tela, sempre à mão. As classes l-* (index.html) dão a ordem. */
+.lobby-mais { display: none; }
+@media (max-width: 600px), (max-height: 500px) and (orientation: landscape) {
+  #lobby {
+    gap: 20px;
+    padding: calc(16px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) 0 calc(16px + env(safe-area-inset-left));
+  }
+  .lobby-card { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px 12px; }
+  .lobby-card > * { margin: 0; }
+  .brand { order: 0; }
+  .lobby-card h1 { order: 1; font-size: 28px; line-height: 1.1; }
+  .lobby-card h1 br { display: none; }
+  .lobby-sub, .l-dica { display: none; }
+  .l-char { order: 2; }
+  .l-cor { order: 3; }
+  .l-nome { order: 4; }
+  .l-sala { order: 5; }
+  #campo-senha-sala { order: 6; }
+  .l-mic { order: 7; padding: 2px 0; }
+  .lobby-mais { order: 8; }
+  #campo-camiseta { order: 9; }
+  #campo-foto { order: 10; }
+  .lobby-acao { order: 11; }
+  #btn-instalar { order: 12; }
+  .lobby-note { order: 13; }
+  .field { gap: 6px; }
+
+  /* o personagem é o destaque: miniatura maior */
+  .char-card { padding: 8px 14px 8px 8px; }
+  .char-card img { width: 60px; height: 76px; }
+  .char-txt b { font-size: 16px; }
+
+  /* as dez cores numa linha só, do tamanho que couber */
+  .lobby-card .swatches { flex-wrap: nowrap; justify-content: space-between; gap: 6px; }
+  .lobby-card .swatches button { width: auto; height: auto; flex: 0 1 32px; aspect-ratio: 1; min-width: 0; }
+
+  .lobby-mais {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    min-height: 46px;
+    padding: 0 14px;
+    border: 1px dashed var(--line-strong);
+    border-radius: 12px;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .lobby-mais i { display: inline-flex; color: var(--muted); transition: transform 200ms var(--ease); }
+  .lobby-card.mais-aberto .lobby-mais { border-style: solid; }
+  .lobby-card.mais-aberto .lobby-mais i { transform: rotate(180deg); }
+  .lobby-card:not(.mais-aberto) :is(#campo-camiseta, #campo-foto) { display: none; }
+  /* personagem com corpo próprio não tem camiseta nem foto: o botão some junto */
+  .lobby-card:not(:has(#campo-camiseta:not([hidden]))) .lobby-mais { display: none; }
+
+  /* o botão de entrar fica preso embaixo enquanto a pessoa rola o formulário */
+  .lobby-acao {
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+    margin: 0 calc(-16px - env(safe-area-inset-right)) 0 calc(-16px - env(safe-area-inset-left));
+    padding: 18px calc(16px + env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left));
+    background: linear-gradient(to bottom, rgba(8, 9, 13, 0), rgba(8, 9, 13, 0.97) 18px);
+  }
+  #btn-join { height: 50px; font-size: 15px; }
+  .lobby-carga { margin-top: 8px; }
+  .ao-vivo { margin-bottom: calc(16px + env(safe-area-inset-bottom)); }
+}
+
+/* celular deitado: pouca altura. Sem o título, campos lado a lado e as salas ao vivo à direita */
+@media (max-height: 500px) and (orientation: landscape) {
+  #lobby { flex-direction: row; align-items: flex-start; padding-top: calc(12px + env(safe-area-inset-top)); }
+  .lobby-card { flex: 1; width: auto; max-width: 600px; margin: 0; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+  .lobby-card h1 { display: none; }
+  .lobby-card > :is(.brand, #campo-senha-sala, #campo-camiseta, #campo-foto, .lobby-acao, #btn-instalar, .lobby-note) { grid-column: 1 / -1; }
+  /* meia largura: as cores em duas linhas de cinco */
+  .lobby-card .swatches { flex-wrap: wrap; justify-content: flex-start; }
+  .lobby-card .swatches button { flex: none; width: 30px; height: 30px; }
+  .l-mic { align-self: center; }
+  .ao-vivo { position: sticky; top: 0; flex: none; width: min(280px, 34vw); max-height: calc(100dvh - 24px - env(safe-area-inset-top)); margin: 0; }
+}

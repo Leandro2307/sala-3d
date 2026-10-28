@@ -1024,20 +1024,21 @@
         <span class="brand-mark"><i data-icon="share" data-size="20"></i></span>
         <span>Sala 3D</span>
       </div>
-      <h1>Assista junto.<br>Fale junto.<br><em>Pule junto.</em></h1>
+      <h1>Assista junto. <br>Fale junto. <br><em>Pule junto.</em></h1>
       <p class="lobby-sub">Compartilhe a tela com som, ponha YouTube, Twitch, Kick ou um filme do seu PC no telão e ande pela sala — tem parkour até o camarote.</p>
 
-      <label class="field">
+      <!-- as classes l-* dão a ordem e o lugar de cada campo no celular (style.css, "entrada no celular") -->
+      <label class="field l-nome">
         <span>Seu nome</span>
         <input id="in-name" maxlength="20" placeholder="Como te chamam?" required>
       </label>
 
-      <div class="field">
+      <div class="field l-cor">
         <span>Cor do boneco</span>
         <div class="swatches" id="swatches" role="radiogroup" aria-label="Cor do boneco"></div>
       </div>
 
-      <div class="field">
+      <div class="field l-char">
         <span>Personagem</span>
         <button type="button" class="char-card" id="in-char" aria-haspopup="dialog">
           <img id="char-mini" alt="" width="48" height="60">
@@ -1047,6 +1048,11 @@
         <small class="hint" id="char-credito"></small>
       </div>
 
+      <!-- só no celular: camiseta e foto ficam recolhidas atrás deste botão (ver entrada.js) -->
+      <button type="button" class="lobby-mais" id="lobby-mais" aria-expanded="false" aria-controls="campo-camiseta campo-foto">
+        <span>Camiseta e foto <small class="opt">(opcional)</small></span><i data-icon="chevron" data-size="16"></i>
+      </button>
+
       <div class="field" id="campo-camiseta">
         <span>Camiseta <small class="opt">(opcional)</small></span>
         <div class="segmented shirts" id="in-shirt">
@@ -1054,7 +1060,7 @@
           <button type="button" data-shirt="lula">PT · 13</button>
           <button type="button" data-shirt="bolsonaro">22</button>
         </div>
-        <small class="hint">Quem veste a 22 entra armado (<kbd>X</kbd> atira).</small>
+        <small class="hint l-dica">Quem veste a 22 entra armado (<kbd>X</kbd> atira).</small>
       </div>
 
       <div class="field" id="campo-foto">
@@ -1067,10 +1073,10 @@
           </div>
           <input type="file" id="photo-file" accept="image/*" hidden>
         </div>
-        <small class="hint">Fica no rosto do seu boneco. Ela é reduzida para 128px e só vai para quem está na sala.</small>
+        <small class="hint l-dica">Fica no rosto do seu boneco. Ela é reduzida para 128px e só vai para quem está na sala.</small>
       </div>
 
-      <label class="field">
+      <label class="field l-sala">
         <span>Sala</span>
         <div class="input-prefix"><b>#</b><input id="in-room" maxlength="40" placeholder="principal"></div>
       </label>
@@ -1082,12 +1088,16 @@
         <small class="hint erro" id="senha-sala-erro" hidden></small>
       </label>
 
-      <label class="toggle-row compact">
+      <label class="toggle-row compact l-mic">
         <span><b>Entrar com microfone ligado</b></span>
         <input type="checkbox" id="in-mic" class="switch" checked>
       </label>
 
-      <button type="submit" class="primary block" id="btn-join">Entrar na sala</button>
+      <div class="lobby-acao">
+        <button type="submit" class="primary block" id="btn-join">Entrar na sala</button>
+        <!-- a sala baixa e monta por trás enquanto a pessoa preenche (ver entrada.js) -->
+        <div class="lobby-carga" id="lobby-carga" role="status" aria-live="polite"><span class="lc-trilho"><i id="lc-barra"></i></span><small id="lc-texto">Preparando a sala…</small></div>
+      </div>
       <!-- aparece quando o navegador deixa instalar (Chrome/Edge/Android); ver "app" no main.js -->
       <button type="button" class="secondary block" id="btn-instalar" hidden><i data-icon="instalar" data-size="18"></i>Instalar o app</button>
       <p class="lobby-note" id="lobby-note">Para mandar o som da tela, marque <b>“Compartilhar áudio”</b> quando o navegador perguntar.</p>
@@ -1149,6 +1159,6 @@
   <div id="reconnecting" hidden><div class="spinner"></div>Reconectando…</div>
 
   <script src="/socket.io/socket.io.js" defer></script>
-  <script type="module" src="/js/main.js"></script>
+  <script type="module" src="/js/entrada.js"></script>
 </body>
 </html>

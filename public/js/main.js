@@ -49,6 +49,7 @@ import { TIMES } from './batalha-dados.js';
 import { Anuncios } from './anuncios.js';
 import { acertarAvatar, tamanhoDo } from './hitbox.js';
 import { icon, hydrateIcons } from './icons.js';
+import { photoFromFile } from './foto.js';
 import { Musica } from './musica.js';
 import { isTouch, setupTouchControls, toggleFullscreen, isFullscreen, temTelaCheia } from './touch.js';
 
@@ -145,6 +146,18 @@ const nivelDePartida = settings.qualidade !== 'auto' ? settings.qualidade
 // MSAA pelo nível e pela densidade da tela (qualidade.js); sem essa função lá, vale o do nível
 const querAntialias = (n) => moduloQualidade.querAntialias?.(n) ?? n.antialias;
 const world = new World($('#gl'), $('#css3d'), { antialias: querAntialias(NIVEIS[nivelDePartida]), qualidade: NIVEIS[nivelDePartida] });
+// o mapa sobe em etapas; enquanto isso o formulário de entrada responde (entrada.js)
+const entrada = window.sala3dEntrada;
+await world.construir((f) => entrada?.mapa(f));
+// Daqui até o fim do módulo não há mais espera: o formulário passa a ser deste arquivo. O que a
+// pessoa mudou nele enquanto o mapa subia está no localStorage (o entrada.js grava a cada mudança).
+const pedidoDaEntrada = entrada?.soltar() || {};
+if (entrada) {
+  const agora = (() => {
+    try { return JSON.parse(localStorage.getItem('sala3d') || '{}'); } catch { return {}; }
+  })();
+  for (const k of ['name', 'color', 'char', 'shirt', 'photo', 'mic']) if (agora[k] !== undefined) settings[k] = agora[k];
+}
 // lido uma vez: com o contexto do WebGL perdido, getContextAttributes() devolve null
 const bordasLisas = !!world.renderer.getContextAttributes()?.antialias;
 // navegador dentro das telas: páginas fixas do dono e o navegador que cada um abre no (+)
@@ -489,7 +502,8 @@ const nameInput = $('#in-name');
 const roomInput = $('#in-room');
 const params = new URLSearchParams(window.location.search);
 nameInput.value = settings.name;
-roomInput.value = params.get('sala') || '';
+// o entrada.js já preencheu (e a pessoa pode ter digitado outra sala enquanto o mapa subia)
+if (!entrada) roomInput.value = params.get('sala') || '';
 $('#in-mic').checked = settings.mic;
 
 // ------------------------------------------------------------------ app (PWA)
@@ -551,7 +565,9 @@ const ehIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platfo
 // No app instalado a barra superior continua sendo a navegação principal. A classe também
 // permite que o CSS não a esconda ao entrar em um jogo.
 document.body.classList.toggle('pwa', !!instalado);
-let pedidoDeInstalacao = null;
+// o aviso pode ter chegado antes deste arquivo: o entrada.js guardou
+let pedidoDeInstalacao = entrada?.pedidoDeInstalacao || null;
+if (pedidoDeInstalacao) $('#btn-instalar').hidden = false;
 window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
   pedidoDeInstalacao = e;
@@ -619,8 +635,8 @@ roomInput.addEventListener('input', () => {
   $('#campo-senha-sala').hidden = true;
   $('#in-senha-sala').value = '';
 });
-// veio por um convite de sala com senha: já mostra o campo (sem gastar tentativa)
-if (params.get('sala')) {
+// veio por um convite de sala com senha: já mostra o campo (sem gastar tentativa; o entrada.js já conferiu)
+if (params.get('sala') && !entrada) {
   fetch('/sala-acesso', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -666,30 +682,7 @@ for (const sel of ['#swatches', '#ep-cores']) {
 nameInput.addEventListener('input', () => localAvatar.setName(nameInput.value.trim() || 'Você'));
 if (settings.name) localAvatar.setName(settings.name);
 
-// ---------------------------------------------------------------- foto do rosto
-// Reduz para 128x128 recortando o centro: o que trafega é um JPEG de ~10 kB, não o
-// arquivo original de vários MB que a câmera do celular produz.
-const PHOTO_SIZE = 128;
-function photoFromFile(file) {
-  return new Promise((resolve, reject) => {
-    if (!file.type.startsWith('image/')) return reject(new Error('Isso não é uma imagem.'));
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      const lado = Math.min(img.width, img.height);
-      const cv = document.createElement('canvas');
-      cv.width = cv.height = PHOTO_SIZE;
-      const ctx = cv.getContext('2d');
-      ctx.imageSmoothingQuality = 'high';
-      ctx.drawImage(img, (img.width - lado) / 2, (img.height - lado) / 2, lado, lado, 0, 0, PHOTO_SIZE, PHOTO_SIZE);
-      resolve(cv.toDataURL('image/jpeg', 0.78));
-    };
-    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Não consegui abrir essa imagem.')); };
-    img.src = url;
-  });
-}
-
+// ---------------------------------------------------------------- foto do rosto (reduzida em foto.js)
 function renderPhotoPreview() {
   const box = $('#photo-prev');
   if (settings.photo) {
@@ -739,7 +732,9 @@ aplicarPersonagem({ carregar: false });
 
 // Modal com as miniaturas e a prévia ao vivo (escolher-personagem.js): no formulário de entrada
 // e no botão da barra, dentro da sala.
-const escolha = new EscolherPersonagem({
+// O entrada.js já criou o modal (pode até estar aberto, com a prévia girando): fica com ele e só
+// troca as funções.
+const opcoesDaEscolha = {
   raiz: $('#escolher-personagem'),
   aparencia: () => ({ cor: settings.color, camiseta: settings.shirt, foto: settings.photo }),
   aoEscolher: async (id) => {
@@ -761,7 +756,10 @@ const escolha = new EscolherPersonagem({
     $('#ep-linha-camiseta').hidden = !!def.url;
     renderArmas();
   },
-});
+};
+const escolha = entrada?.escolha
+  ? Object.assign(entrada.escolha, opcoesDaEscolha)
+  : new EscolherPersonagem(opcoesDaEscolha);
 $('#in-char').addEventListener('click', () => escolha.abrir(settings.char));
 // o modelo 3D do personagem só baixa depois que o mundo ficou pronto: não disputa a abertura
 world.pronto.then(() => aplicarPersonagem());
@@ -900,7 +898,7 @@ const salas = new SalasLaterais({
   aoTrocar: (id) => recarregarNaSala(id),
 });
 // salas ao vivo (aovivo.js): o cartão do saguão e as salas com gente na coluna lateral
-const aoVivo = new AoVivo();
+const aoVivo = entrada?.aoVivo || new AoVivo();
 aoVivo.ouvir((dados) => salas.aoVivo(dados));
 const redesenharSaguao = cartaoDoSaguao(aoVivo, {
   lista: $('#ao-vivo-lista'),
@@ -920,6 +918,9 @@ if (params.get('entrar') === '1') {
   window.history.replaceState(null, '', url);
   // depois do resto do módulo: o join usa coisas declaradas mais abaixo
   if (nameInput.value.trim()) setTimeout(join, 0);
+} else if (pedidoDaEntrada.entrar && nameInput.value.trim()) {
+  // apertou Entrar enquanto a sala carregava
+  setTimeout(join, 0);
 }
 document.body.classList.toggle('sem-salas', !isTouch && !!settings.salasOcultas);
 function abrirSalas(abrir) {
@@ -7295,3 +7296,5 @@ document.fonts?.ready.then(() => {
 });
 refreshScreens();
 requestAnimationFrame(frame);
+// a sala está ligada: a barra de carregamento do formulário de entrada some
+entrada?.pronto();
