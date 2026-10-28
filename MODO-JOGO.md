@@ -87,6 +87,12 @@ Conclusões:
 - **Relatório**: `imagemBaixa` (resolução enviada < 60% da captura para quem está no nível
   máximo) vem antes da captura no motivo e também gera aviso; `filaMs` (espera na fila de
   envio); `bandaJogo`. O resumo para quem joga leva `imagemBaixa` (servidor: `voltaDoControle`).
+- **Os dois lados num arquivo só** (relatório `versao: 2`): quem joga manda cada amostra dela
+  pelo canal direto do controle (`rtc.mandarControle(dono, { j: { key, r, amb } })` em
+  `amostrarJogo`); quem compartilha recebe em `receberDireto` (só de quem joga naquela tela) →
+  `diagJogo.doQuemJoga`, e o relatório baixado no PC traz `quemJoga: [{ nome, resumo, ambiente,
+  amostras }]`. Do celular não precisa baixar nada. Sem o canal direto aberto a amostra não vai
+  (não passa pelo servidor).
 
 ## Próximos passos sugeridos
 
