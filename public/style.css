@@ -3579,6 +3579,33 @@ body[data-jogo] .hud-bussola,
 .mu-fila .mu-tirar:hover { color: #ff8a8e; }
 .mu-fila .empty { padding: 20px 0; color: var(--muted); font-size: 13px; text-align: center; }
 .np-controls .icon-btn:disabled { opacity: 0.4; pointer-events: none; }
+.mu-telao { margin-top: 12px; }
+.mu-telao:disabled { opacity: 0.4; pointer-events: none; }
+
+/* celular: a capa vira miniatura ao lado do título (inteira, ela tomava a tela toda) e, deitado,
+   a fila vai para uma segunda coluna */
+body.touch .mu-agora { display: grid; grid-template-columns: 112px 1fr; column-gap: 12px; align-items: start; padding: 12px; margin-top: 8px; }
+body.touch .mu-capa { grid-row: span 3; margin: 0; aspect-ratio: 16 / 9; border-radius: 8px; }
+body.touch .mu-capa .ic { width: 24px; height: 24px; }
+body.touch .mu-agora .np-head { margin-bottom: 4px; }
+body.touch .mu-agora .np-title { font-size: 13px; }
+body.touch .mu-agora .np-by { font-size: 11px; margin-top: 2px; }
+body.touch .mu-agora > :is(#mu-linha, .np-controls, .mu-telao) { grid-column: 1 / -1; }
+body.touch .mu-agora .np-progress { margin-top: 10px; }
+body.touch .mu-agora .np-controls { margin-top: 4px; }
+body.touch .mu-agora .mu-telao { margin-top: 8px; height: 36px; }
+body.touch section[data-section='musica'] .slider-row { padding: 8px 0; }
+body.touch section[data-section='musica'] .sub-block { margin-top: 14px; }
+body.touch .tip.mu-dica { display: none; }
+/* estilos numa linha só, arrastando para o lado */
+body.touch .mu-estilos { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-right: -12px; padding-bottom: 2px; }
+body.touch .mu-estilos::-webkit-scrollbar { display: none; }
+body.touch .mu-estilos button { flex: none; }
+@media (orientation: landscape) and (min-width: 600px) {
+  body.touch #panel section[data-section='musica'].active { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto auto 1fr; column-gap: 18px; align-content: start; }
+  body.touch #panel section[data-section='musica'] > * { grid-column: 1; }
+  body.touch #panel section[data-section='musica'] > .sub-block:last-child { grid-column: 2; grid-row: 1 / 4; margin-top: 8px; min-height: 0; }
+}
 
 /* ------------------------------------------------------------ entrada no celular */
 /* No computador o formulário segue como sempre. No celular (em pé ou deitado) ele vira uma grade

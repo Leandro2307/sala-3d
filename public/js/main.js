@@ -889,6 +889,13 @@ const musica = new Musica({
     saveSettings();
   },
   painelAberto: () => state.panel === 'musica',
+  // o clipe da música no telão, no mesmo segundo (o 'load' do telão vale para a sala toda)
+  noTelao: (id, time) => {
+    if (!tv) return false;
+    tv.send('load', { provider: 'youtube', id, time: Math.floor(time) });
+    tv.unblock();
+    return true;
+  },
 });
 
 const salas = new SalasLaterais({

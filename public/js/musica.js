@@ -14,7 +14,7 @@ const mmss = (t) => {
 const DESVIO = 2.5;
 
 export class Musica {
-  constructor({ socket, toast, volume, aoMudarVolume, painelAberto }) {
+  constructor({ socket, toast, volume, aoMudarVolume, painelAberto, noTelao }) {
     this.socket = socket;
     this.toast = toast;
     this.volume = volume;
@@ -46,6 +46,15 @@ export class Musica {
     $('#mu-play').addEventListener('click', () => {
       if (!this.fila.length) return;
       this.socket()?.emit('mu-play', { tocando: !this.tocando, tempo: this.agora() });
+    });
+    // o clipe vai para o telão no mesmo segundo, e a música da sala pausa (senão tocariam as duas)
+    $('#mu-telao').addEventListener('click', () => {
+      const a = this.atual();
+      if (!a) return;
+      const t = this.agora();
+      if (!noTelao(a.v, t)) return;
+      if (this.tocando) this.socket()?.emit('mu-play', { tocando: false, tempo: t });
+      this.toast('Clipe no telão. A música da sala pausou.', 'info', 3500, '#f472b6');
     });
     $('#mu-ant').addEventListener('click', () => this.socket()?.emit('mu-pular', { dir: -1 }));
     $('#mu-prox').addEventListener('click', () => this.socket()?.emit('mu-pular', { dir: 1 }));
@@ -312,7 +321,7 @@ export class Musica {
     $('#mu-quando').classList.toggle('pausado', !this.tocando);
     $('#mu-por').textContent = a ? `Pedida por ${a.por}${this.por && this.por !== a.por ? ` · última ação: ${this.por}` : ''}` : 'Cole um link ou digite um artista abaixo.';
     $('#mu-play').innerHTML = icon(this.tocando ? 'pause' : 'play', 22);
-    for (const id of ['#mu-play', '#mu-ant', '#mu-prox']) $(id).disabled = !a;
+    for (const id of ['#mu-play', '#mu-ant', '#mu-prox', '#mu-telao']) $(id).disabled = !a;
     $('#mu-linha').hidden = !a;
     this.desenharTempo();
   }
