@@ -48,6 +48,7 @@ export class DiagJogo {
       ruins: 0,
       ultimoAviso: 0,
       outroLado: null,
+      quemJoga: new Map(), // quem compartilha: o que cada pessoa que joga mediu do lado dela (doQuemJoga)
     };
     this.evento('começou', { lado, ...info.extra });
     if (info.video) this.contarQuadros(info.video);
@@ -63,7 +64,8 @@ export class DiagJogo {
     this.sessao = null;
     if (oferecer && s.amostras.length >= 2) {
       const m = mediaDe(s.amostras.map((a) => a.fpsFinal));
-      this.toast(`Modo jogo encerrado${m != null ? ` — média de ${Math.round(m)} qps` : ''}. O relatório ficou guardado.`, 'info', 15000, null, { rotulo: 'Baixar relatório', fazer: () => this.baixar() });
+      const juntos = s.quemJoga.size ? ' (com o que o aparelho de quem jogou mediu)' : '';
+      this.toast(`Modo jogo encerrado${m != null ? ` — média de ${Math.round(m)} qps` : ''}. O relatório ficou guardado${juntos}.`, 'info', 15000, null, { rotulo: 'Baixar relatório', fazer: () => this.baixar() });
     }
     return this.ultimo;
   }
@@ -211,6 +213,19 @@ export class DiagJogo {
     this.sessao.outroLado = { ...resumo, recebido: Date.now() };
   }
 
+  // Quem compartilha: a amostra que quem joga mediu do lado dela (chegada, decodificação, tela),
+  // pelo canal direto a cada 2 s. Vai junto no relatório deste PC: o do celular não precisa ser
+  // baixado no celular. amb: o ambiente dela (de vez em quando).
+  doQuemJoga(id, nome, { r, amb } = {}) {
+    const s = this.sessao;
+    if (s?.lado !== 'compartilha' || !r || typeof r !== 'object') return;
+    let q = s.quemJoga.get(id);
+    if (!q) s.quemJoga.set(id, (q = { nome, ambiente: null, amostras: [] }));
+    if (amb && typeof amb === 'object') q.ambiente = amb;
+    q.amostras.push({ ...r, chegou: Date.now() });
+    if (q.amostras.length > GUARDA) q.amostras.shift();
+  }
+
   // várias amostras ruins em seguida (poucos quadros ou a imagem em migalhas): avisa (com o
   // porquê) de vez em quando
   julgar(r, lado) {
@@ -235,24 +250,17 @@ export class DiagJogo {
   relatorio() {
     const s = this.sessao;
     if (!s) return this.ultimo || null;
-    const fps = s.amostras.map((a) => a.fpsFinal).filter((v) => v != null);
-    const motivos = {};
-    for (const a of s.amostras) if (a.motivo) motivos[a.motivo] = (motivos[a.motivo] || 0) + 1;
     return {
-      versao: 1,
+      versao: 2,
       lado: s.lado,
       inicio: s.inicio,
       fim: new Date().toISOString(),
-      resumo: {
-        amostras: fps.length,
-        mediaQps: r1(mediaDe(fps)),
-        piorQps: fps.length ? Math.min(...fps) : null,
-        abaixoDe50: fps.filter((v) => v < BOM).length,
-        motivos,
-      },
+      resumo: resumoDe(s.amostras),
       ambiente: s.ambiente,
       eventos: s.eventos,
       amostras: s.amostras,
+      // o lado de quem joga, medido lá (só no relatório de quem compartilha)
+      quemJoga: [...s.quemJoga].map(([id, q]) => ({ id, nome: q.nome, resumo: resumoDe(q.amostras), ambiente: q.ambiente, amostras: q.amostras })),
     };
   }
 
@@ -311,6 +319,20 @@ function motivoRecebe(r, la) {
   if (r.decodificado != null && r.decodificado < BOM && (r.recebido ?? 0) >= BOM) return 'decod';
   if (r.naTela != null && r.naTela < BOM && (r.decodificado ?? 0) >= BOM) return 'tela';
   return la ? 'perdas' : null;
+}
+
+function resumoDe(amostras) {
+  const fps = amostras.map((a) => a.fpsFinal).filter((v) => v != null);
+  const motivos = {};
+  for (const a of amostras) if (a.motivo) motivos[a.motivo] = (motivos[a.motivo] || 0) + 1;
+  return {
+    amostras: fps.length,
+    mediaQps: r1(mediaDe(fps)),
+    piorQps: fps.length ? Math.min(...fps) : null,
+    abaixoDe50: fps.filter((v) => v < BOM).length,
+    imagemBaixa: amostras.filter((a) => a.imagemBaixa).length,
+    motivos,
+  };
 }
 
 function mediaDe(v) {

@@ -2535,7 +2535,16 @@ async function amostrarJogo() {
     }
     if (jogandoLa) {
       const trilha = jogandoLa.video.srcObject?.getVideoTracks()[0];
-      if (trilha) diagJogo.amostraRecebe(await rtc.diagRecebe(trilha), sala);
+      const resumo = trilha && diagJogo.amostraRecebe(await rtc.diagRecebe(trilha), sala);
+      // a mesma amostra vai para quem compartilha, que baixa o relatório dos dois lados de uma vez
+      // (do celular não dá para tirar o arquivo fácil). Só pelo canal direto: sem ele, fica aqui.
+      if (resumo) {
+        const { la, ...r } = resumo;
+        // o ambiente nas primeiras (o canal pode ainda estar abrindo) e depois de vez em quando
+        const n = diagJogo.sessao.amostras.length;
+        const amb = n <= 4 || n % 15 === 1 ? diagJogo.sessao.ambiente : undefined;
+        rtc.mandarControle(jogandoLa.key.split('~')[0], { j: { key: jogandoLa.key, r, amb } });
+      }
     }
   } catch (err) {
     console.warn('[modo-jogo] amostra', err);
@@ -2575,6 +2584,11 @@ function receberDireto(id, m) {
   if (m.v && typeof m.v === 'object') {
     // a volta só vale de quem é dono da tela
     if (typeof m.v.key === 'string' && m.v.key.split('~')[0] === id) receberVolta({ ...m.v, de: u.name });
+    return;
+  }
+  // modo jogo: o que quem joga numa tela minha mediu do lado dela (só dela, e pequeno)
+  if (m.j && typeof m.j === 'object') {
+    if (typeof m.j.key === 'string' && jogandoAqui.get(m.j.key)?.has(id) && JSON.stringify(m.j).length < 20_000) diagJogo.doQuemJoga(id, u.name, m.j);
     return;
   }
   const c = m.c;
