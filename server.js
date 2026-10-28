@@ -25,6 +25,7 @@ const { ligarKart } = require('./kart-servidor.js');
 const { ligarPinta } = require('./pinta-servidor.js');
 const { ligarCeu } = require('./ceu-servidor.js');
 const { ligarBatalha } = require('./batalha-servidor.js');
+const { ligarMusica } = require('./musica-servidor.js');
 const { MAPAS_SALA, MAPA_PADRAO } = require('./mapa-servidor.js');
 const Voz = require('./voz-servidor.js'); // a rota antiga da voz dos gritos (hoje são mp3 gravados)
 // a planta do escritório é a mesma do navegador (public/js/escritorio.js); carrega em main()
@@ -1064,6 +1065,7 @@ function attachSockets(io) {
   const fantasmasDoSocket = ligarFantasmas(io, rooms, jogoLigado, moedasDoJogo); // caça-fantasmas (fantasmas-servidor.js)
   const kartDoSocket = ligarKart(io, rooms, jogoLigado, moedasDoJogo); // kart (kart-servidor.js)
   const pintaDoSocket = ligarPinta(io, rooms, jogoLigado, moedasDoJogo); // pinta-território (pinta-servidor.js)
+  const musicaDoSocket = ligarMusica(io); // a fila de música da sala (musica-servidor.js)
   // alerta para os gestores que estão na sala (menos a própria pessoa)
   function avisarGestores(room, user, tipo, texto) {
     for (const u of room.users.values()) {
@@ -1124,6 +1126,7 @@ function attachSockets(io) {
     fantasmasDoSocket(socket, () => ({ room, user }));
     kartDoSocket(socket, () => ({ room, user }));
     pintaDoSocket(socket, () => ({ room, user }));
+    musicaDoSocket(socket, () => ({ room, user }));
 
     let entrando = false;
     let dono = false; // esta conexão provou ser o dono da sala (senha)

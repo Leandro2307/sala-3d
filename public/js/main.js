@@ -49,6 +49,7 @@ import { TIMES } from './batalha-dados.js';
 import { Anuncios } from './anuncios.js';
 import { acertarAvatar, tamanhoDo } from './hitbox.js';
 import { icon, hydrateIcons } from './icons.js';
+import { Musica } from './musica.js';
 import { isTouch, setupTouchControls, toggleFullscreen, isFullscreen, temTelaCheia } from './touch.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -61,11 +62,11 @@ const typing = () => {
 
 const COLORS = ['#7c9cff', '#6ee7c8', '#f472b6', '#fbbf24', '#a78bfa', '#fb7185', '#38bdf8', '#a3e635', '#f97316', '#e2e8f0'];
 const EMOTE_KEYS = ['wave', 'party', 'laugh', 'heart', 'clap', 'fire'];
-const PANEL_TITLES = { people: 'Pessoas', chat: 'Chat da sala', telao: 'Telão', parkour: 'Parkour', ringue: 'Ringue de luta', corrida: 'Pista de corrida', jogos: 'Jogos, dados e moedas', parque: 'Parque', sala: 'Sala da empresa', settings: 'Ajustes' };
+const PANEL_TITLES = { people: 'Pessoas', chat: 'Chat da sala', telao: 'Telão', musica: 'Música da sala', parkour: 'Parkour', ringue: 'Ringue de luta', corrida: 'Pista de corrida', jogos: 'Jogos, dados e moedas', parque: 'Parque', sala: 'Sala da empresa', settings: 'Ajustes' };
 
 // ------------------------------------------------------------------ ajustes salvos
 const DEFAULTS = {
-  name: '', color: COLORS[0], mic: true, voice: 100, screen: 90, tv: 80, spatial: false, porJogo: true,
+  name: '', color: COLORS[0], mic: true, voice: 100, screen: 90, tv: 80, musica: 60, spatial: false, porJogo: true,
   shareMode: 'max', sens: 100, balancoVisao: true, sfx: true, micDevice: '', camDevice: '', helpCollapsed: false, photo: null, shirt: 'none', char: 'padrao', arma: ARMA_PADRAO,
   // qualidade gráfica: 'auto' ou um nível fixo; nivelAuto: onde o automático parou da última vez;
   // falhasAuto: quantas vezes cada nível caiu logo depois de subir (o automático espera mais para tentar)
@@ -880,6 +881,18 @@ function recarregarNaSala(id = state.room, mapa = null) {
   else if (id !== state.room) url.searchParams.delete('mapa');
   window.location.href = url;
 }
+// música da sala (musica.js): a fila do YouTube que todo mundo ouve junto, longe do telão
+const musica = new Musica({
+  socket: () => socket,
+  toast: (...a) => toast(...a),
+  volume: () => settings.musica,
+  aoMudarVolume: (v) => {
+    settings.musica = v;
+    saveSettings();
+  },
+  painelAberto: () => state.panel === 'musica',
+});
+
 const salas = new SalasLaterais({
   raiz: $('#salas'),
   atual: () => state.room,
@@ -1138,6 +1151,7 @@ function applyJoined(data) {
   setFightBoard(data.fights);
   setRaceBoard(data.voltas);
   jogos.sincronizar(data.jogos);
+  musica.iniciar();
   self().moedas = data.moedas ?? 0;
   mostrarMoedas();
   aplicarSala(data.sala);
@@ -1363,6 +1377,9 @@ function bindSocket() {
     renderPeople();
     setTimeout(atualizarInteresse, 0);
   });
+
+  socket.on('mu-estado', (s) => musica.estado(s));
+  socket.on('mu-aviso', (a) => musica.aviso(a));
 
   socket.on('main', ({ source, by }) => {
     state.main = source;

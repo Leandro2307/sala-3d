@@ -28,6 +28,7 @@
   <div id="css3d"></div>
   <canvas id="gl"></canvas>
   <div id="media-sink" aria-hidden="true"></div>
+  <div id="musica-sink" aria-hidden="true"></div>
 
   <!-- ============================================================ HUD -->
   <!-- celular em pé dentro da sala: a sala é só deitada (style.css mostra isto na vertical) -->
@@ -365,6 +366,7 @@
       <button type="button" class="ghost" id="btn-mesa" data-tip="Mesa: todas as telas lado a lado (Tab)"><i data-icon="monitores"></i></button>
       <button type="button" class="ghost" data-panel="sala" data-tip="Sala da empresa: ambiente e jogos"><i data-icon="predio"></i></button>
       <button type="button" class="ghost" data-panel="telao" data-tip="Telão: vídeos e lives"><i data-icon="tv"></i></button>
+      <button type="button" class="ghost" data-panel="musica" data-tip="Música da sala (YouTube)"><i data-icon="musica"></i></button>
       <button type="button" class="ghost" data-panel="people" data-tip="Pessoas"><i data-icon="users"></i><span class="badge" id="people-badge">1</span></button>
       <button type="button" class="ghost" data-panel="chat" data-tip="Chat (T)"><i data-icon="chat"></i><span class="dot" id="chat-dot" hidden></span></button>
       <!-- todos os jogos num modal só, por gênero (catalogo-jogos.js); as regras e os recordes de cada
@@ -486,6 +488,75 @@
       </div>
       <p class="tip">Dica: olhe para o telão e aperte <kbd>E</kbd> para dar zoom e usar os controles do próprio player. No YouTube, Twitch, Vimeo e links diretos, tudo que você fizer sincroniza para todos.</p>
       <p class="tip">Netflix, Prime Video, Disney+, Max e Globoplay têm proteção contra cópia (DRM) e não funcionam no telão.</p>
+    </section>
+
+    <section data-section="musica">
+      <div class="now-playing mu-agora">
+        <div class="mu-capa">
+          <img id="mu-capa" alt="" hidden>
+          <span id="mu-capa-vazia" data-icon="musica" data-size="34"></span>
+        </div>
+        <div class="np-head"><span class="np-badge mu-quando" id="mu-quando">Fila vazia</span></div>
+        <div class="np-title" id="mu-titulo">Nenhuma música na fila</div>
+        <div class="np-by" id="mu-por"></div>
+        <div id="mu-linha" hidden>
+          <div class="np-progress" id="mu-barra"><div class="np-fill" id="mu-fill"></div></div>
+          <div class="np-times"><span id="mu-cur">0:00</span><span id="mu-dur">--:--</span></div>
+        </div>
+        <div class="np-controls">
+          <button type="button" class="icon-btn" id="mu-ant" aria-label="Música anterior" disabled><i data-icon="anterior"></i></button>
+          <button type="button" class="icon-btn big accent" id="mu-play" aria-label="Tocar/pausar" disabled><i data-icon="play"></i></button>
+          <button type="button" class="icon-btn" id="mu-prox" aria-label="Próxima música" disabled><i data-icon="proxima"></i></button>
+        </div>
+      </div>
+
+      <label class="slider-row">
+        <span><i data-icon="volume" data-size="16"></i>Volume da música (só para você)</span>
+        <input type="range" id="mu-volume" min="0" max="100" value="60">
+      </label>
+
+      <div class="sub-block">
+        <h3>Adicionar do YouTube</h3>
+        <form class="tv-form" id="mu-form" autocomplete="off">
+          <input id="mu-texto" maxlength="300" placeholder="Link, playlist ou um artista/estilo">
+          <button type="submit" class="primary small" id="mu-add"><i data-icon="mais" data-size="16"></i>Pôr</button>
+        </form>
+        <p class="field-error" id="mu-erro" hidden></p>
+        <p class="mu-buscando" id="mu-status-busca" role="status" hidden></p>
+        <div class="mu-escolha" id="mu-escolha" hidden>
+          <p>Esse link tem um vídeo dentro de uma playlist. O que entra na fila?</p>
+          <div>
+            <button type="button" class="secondary small" id="mu-so-video"><i data-icon="musica" data-size="15"></i>Só o vídeo</button>
+            <button type="button" class="primary small" id="mu-lista-toda"><i data-icon="menu" data-size="15"></i>Playlist inteira</button>
+          </div>
+        </div>
+        <p class="tip mu-dica">Link de playlist põe todas de uma vez (até 100). Um artista ou estilo põe 10 e já começa a tocar.</p>
+        <div class="mu-estilos" id="mu-estilos" aria-label="Estilos">
+          <button type="button" data-estilo="pagode">Pagode</button>
+          <button type="button" data-estilo="sertanejo">Sertanejo</button>
+          <button type="button" data-estilo="funk">Funk</button>
+          <button type="button" data-estilo="forró">Forró</button>
+          <button type="button" data-estilo="MPB">MPB</button>
+          <button type="button" data-estilo="rock nacional">Rock nacional</button>
+          <button type="button" data-estilo="pop internacional">Pop</button>
+          <button type="button" data-estilo="eletrônica">Eletrônica</button>
+          <button type="button" data-estilo="flashback anos 90">Flashback</button>
+          <button type="button" data-estilo="lofi para trabalhar">Lofi</button>
+        </div>
+      </div>
+
+      <div class="sub-block">
+        <div class="mu-fila-topo">
+          <h3 id="mu-fila-titulo">Fila (0)</h3>
+          <small id="mu-volta" hidden>Quando a última está acabando, o rádio põe uma parecida.</small>
+        </div>
+        <div class="mu-acoes" id="mu-acoes" hidden>
+          <label><input type="checkbox" id="mu-todas"><span id="mu-sel-rotulo">Selecionar todas</span></label>
+          <button type="button" class="secondary small perigo" id="mu-apagar-sel" hidden><i data-icon="lixo" data-size="14"></i>Apagar selecionadas</button>
+          <button type="button" class="secondary small perigo" id="mu-apagar-tudo"><i data-icon="lixo" data-size="14"></i>Apagar tudo</button>
+        </div>
+        <ul class="mu-fila" id="mu-fila"><li class="empty">Fila vazia. Ponha a primeira música aí em cima.</li></ul>
+      </div>
     </section>
 
     <section data-section="parkour">
