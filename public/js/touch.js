@@ -196,6 +196,7 @@ export function setupTouchControls(player, actions = {}) {
     '#tb-respawn': actions.respawn,
     '#tb-sair-jogo': actions.sairJogo,
     '#tb-menu': actions.menu,
+    '#tb-hud': actions.hud,
     '#tb-punch': actions.punch,
     '#tb-tapa': actions.tapa,
     '#tb-sit': actions.sit,

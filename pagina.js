@@ -1,8 +1,9 @@
 // A página inicial (public/index.html), servida com duas coisas a mais que aceleram a abertura:
 //
-// 1. Um <link rel="modulepreload"> para cada módulo que o main.js usa, direta ou indiretamente
-//    (os nossos e os do three.js). Sem isso o navegador só descobre um import depois de baixar
-//    o arquivo que o pede: eram 8 levas seguidas, e o último script chegava aos 3 s.
+// 1. Um <link rel="modulepreload"> para cada módulo do formulário de entrada (entrada.js), e a
+//    lista dos módulos da sala (main.js, os nossos e os do three.js), que o entrada.js pede todos
+//    de uma vez assim que o formulário aparece. Sem a lista o navegador só descobre um import
+//    depois de baixar o arquivo que o pede: eram 8 levas seguidas, e o último chegava aos 3 s.
 // 2. O three.js e o cliente do socket.io num endereço com a versão (/vendor/three@0.186.1/...,
 //    /vendor/socket.io@4.8.4/...), que pode ficar no cache do navegador por um ano: quando a
 //    versão mudar, o endereço muda junto.
@@ -116,10 +117,15 @@ function montar() {
     const m = moduloVersionado(u);
     return m ? `${u}?v=${m.hash}` : u;
   };
-  html = html.replace('src="/js/main.js"', `src="${comVersao('/js/main.js')}"`);
-  const links = grafo('/js/main.js').map((u) => `  <link rel="modulepreload" href="${comVersao(u)}">`).join('\n');
+  html = html.replace('src="/js/entrada.js"', `src="${comVersao('/js/entrada.js')}"`);
+  // Na abertura só o formulário de entrada (entrada.js e os poucos módulos dele, sem o three.js).
+  // A sala vai numa lista que o entrada.js pede depois que o formulário aparece.
+  const daEntrada = grafo('/js/entrada.js');
+  const links = daEntrada.map((u) => `  <link rel="modulepreload" href="${comVersao(u)}">`).join('\n');
+  const sala = grafo('/js/main.js').filter((u) => !daEntrada.includes(u)).map(comVersao);
+  const lista = `  <script type="application/json" id="sala3d-modulos">${JSON.stringify(sala)}</script>`;
   // depois do mapa de imports: módulo pedido antes dele faria o navegador ignorar o mapa
-  return html.replace('</head>', `${links}\n</head>`);
+  return html.replace('</head>', `${links}\n${lista}\n</head>`);
 }
 
 let pronta = null;

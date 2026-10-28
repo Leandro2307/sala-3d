@@ -186,7 +186,8 @@ function loadScript(src, label) {
 }
 
 let ytApi = null;
-function loadYouTubeApi() {
+// também usado pela música da sala (musica.js), que toca num player do YouTube escondido
+export function loadYouTubeApi() {
   if (ytApi) return ytApi;
   ytApi = new Promise((resolve, reject) => {
     if (window.YT?.Player) return resolve(window.YT);
@@ -720,6 +721,8 @@ export class MediaSync {
       onError: mine((msg) => {
         this.failed = true;
         this.onError?.(msg);
+        // música no telão: o servidor pula para a próxima faixa (fora dela, ignora)
+        this.send('erro');
       }),
       onNotice: mine((msg) => this.onNotice?.(msg)),
       onBlocked: mine(() => this.block()),

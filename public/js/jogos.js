@@ -556,10 +556,44 @@ export class Jogos {
       this.mesas[this.ativa].apontar(i);
       canvas.style.cursor = i >= 0 ? 'pointer' : '';
     });
+    // No toque, a casa é escolhida ao soltar o dedo (e só se ele quase não andou): com a pinça, o
+    // primeiro dedo a encostar não pode já pegar uma peça. Dois dedos: pinça aproxima e afasta,
+    // e arrastar os dois para o lado gira a mesa (como o A/D).
+    const dedos = new Map();
+    let toque = null; // o dedo que pode virar um toque numa casa
+    let pinca = null;
+    const medir = () => {
+      const [a, b] = [...dedos.values()];
+      return { dist: Math.hypot(a.x - b.x, a.y - b.y), meioX: (a.x + b.x) / 2 };
+    };
     canvas.addEventListener('pointerdown', (e) => {
       if (!this.ativa || document.pointerLockElement || e.button !== 0) return;
-      this.clicarCasa(raio(e));
+      if (e.pointerType !== 'touch') return this.clicarCasa(raio(e));
+      dedos.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (dedos.size === 1) toque = { id: e.pointerId, x: e.clientX, y: e.clientY };
+      else {
+        toque = null;
+        if (dedos.size === 2) pinca = { ...medir(), zoom: this.zoom, giro: this.giro };
+      }
     });
+    canvas.addEventListener('pointermove', (e) => {
+      if (!this.ativa || !dedos.has(e.pointerId)) return;
+      dedos.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (toque?.id === e.pointerId && Math.hypot(e.clientX - toque.x, e.clientY - toque.y) > 14) toque = null;
+      if (!pinca || dedos.size !== 2) return;
+      const m = medir();
+      if (m.dist > 0) this.zoom = THREE.MathUtils.clamp(pinca.zoom * (pinca.dist / m.dist), 0.45, 1.6);
+      this.giro = pinca.giro + ((m.meioX - pinca.meioX) / innerWidth) * 2.5;
+      this.atualizarCamera();
+    }, { passive: true });
+    const soltar = (e) => {
+      if (!dedos.delete(e.pointerId)) return;
+      if (dedos.size < 2) pinca = null;
+      if (e.type === 'pointerup' && toque?.id === e.pointerId && this.ativa) this.clicarCasa(raio(e));
+      if (toque?.id === e.pointerId) toque = null;
+    };
+    window.addEventListener('pointerup', soltar);
+    window.addEventListener('pointercancel', soltar);
     canvas.addEventListener('wheel', (e) => {
       if (!this.ativa) return;
       this.zoom = THREE.MathUtils.clamp(this.zoom * (e.deltaY > 0 ? 1.08 : 0.92), 0.45, 1.6);

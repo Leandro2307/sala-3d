@@ -79,8 +79,18 @@ body.pagina-focus .room-chip, body.pagina-focus #controls-help, body.pagina-focu
 
 /* H: a sala limpa — só o 3D (as barras de sair dos focos, os painéis dos jogos e os avisos ficam).
    Sentado numa mesa ele liga sozinho; no celular a barra fica, que lá não tem H para trazê-la */
-body.sem-hud #hud > :not(#pagina-hud):not(#tv-focus-hud):not(#toasts):not(#luneta):not(#jogo-hud):not(#dados-hud):not(#tv-unblock),
-body.sem-hud:not(.touch) #bar, body.sem-hud #cam-preview, body.sem-hud #touch { display: none !important; }
+body.sem-hud #hud > :not(#pagina-hud):not(#tv-focus-hud):not(#toasts):not(#luneta):not(#jogo-hud):not(#dados-hud):not(#hud-fundo):not(#tv-unblock),
+body.sem-hud:not(.touch) #bar, body.sem-hud #cam-preview, body.sem-hud:not(.touch) #touch { display: none !important; }
+/* No celular o olho (#tb-hud) faz o papel do H: a barra some junto, e o analógico e os botões
+   ficam (o olho está entre eles). Sentado numa mesa a barra fica só com o microfone (mesa-limpa) */
+body.touch.sem-hud:not(.mesa-limpa) #bar { display: none !important; }
+#tb-hud .so-sem-hud, body.sem-hud #tb-hud .so-com-hud { display: none; }
+body.sem-hud #tb-hud .so-sem-hud { display: contents; }
+/* telão em foco: a tela fica só com o vídeo, a barra de sair do foco e os avisos */
+body.tv-focus #hud > :not(#tv-focus-hud):not(#toasts):not(#tv-unblock),
+body.tv-focus #bar, body.tv-focus #cam-preview, body.tv-focus #touch { display: none !important; }
+/* correr a pé não serve no toque (o analógico na borda já corre): o botão só fica como turbo do carro */
+body:not([data-jogo="futebol"]) #touch:not(.carro) #tb-run { display: none !important; }
 
 #gl {
   position: fixed;
@@ -330,6 +340,15 @@ input[type='range']::-webkit-slider-thumb {
 .lobby-sub { color: #b6bdcc; line-height: 1.55; margin: 0 0 28px; max-width: 38ch; }
 .lobby-note { color: var(--muted); font-size: 12px; line-height: 1.5; margin: 16px 0 0; }
 .lobby-note.warn { color: var(--warn); }
+/* a sala baixando e montando por trás (entrada.js): some quando fica pronta */
+.lobby-carga { display: grid; gap: 6px; margin-top: 12px; transition: opacity 400ms var(--ease) 600ms; }
+.lc-trilho { display: block; height: 4px; border-radius: 999px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.lc-trilho i { display: block; height: 100%; background: var(--accent); transform: scaleX(0); transform-origin: left; transition: transform 300ms var(--ease); }
+.lobby-carga small { color: var(--muted); font-size: 12px; }
+.lobby-carga.esperando small { color: var(--text); }
+.lobby-carga.erro small { color: var(--warn); }
+.lobby-carga.erro .lc-trilho i { background: var(--warn); }
+.lobby-carga.ok { opacity: 0; pointer-events: none; }
 
 .swatches { display: flex; flex-wrap: wrap; gap: 8px; }
 .swatches button {
@@ -349,6 +368,10 @@ input[type='range']::-webkit-slider-thumb {
 /* ------------------------------------------------------------ HUD */
 #hud { position: fixed; inset: 0; z-index: 3; pointer-events: none; }
 body.touch #hud, body.touch #bar, body.touch #touch { -webkit-user-select: none; user-select: none; }
+/* segurar o dedo (a tacada da sinuca, o soco carregado) não pode selecionar a página nem abrir a
+   lupa e o menu do iPhone: só os campos de texto continuam selecionáveis */
+body.touch { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+body.touch :is(input, textarea, [contenteditable="true"]) { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
 
 .room-chip {
   position: absolute;
@@ -897,21 +920,49 @@ video.controlavel { cursor: default; }
 #jogo-hud.min > :not(.jh-head, .jh-status, .jh-msg) { display: none; }
 #dados-hud.min > :not(.jh-head, .dh-saldo, .jh-acoes, .jh-msg) { display: none; }
 #jogo-hud.min .jh-msg:empty, #dados-hud.min .jh-msg:empty { display: none; }
+/* No celular o painel é um modal no meio da tela (abre assim ao sentar); escolhido o que fazer, ele
+   vira um menuzinho no canto de cima, com o nome do jogo, a vez e o ☰ que abre o modal de novo */
 body.touch #jogo-hud, body.touch #dados-hud {
-  top: calc(58px + env(safe-area-inset-top));
+  z-index: 6;
+  top: 50%;
+  left: 50%;
+  right: auto;
   bottom: auto;
-  right: max(8px, env(safe-area-inset-right));
-  width: min(300px, 42vw);
-  max-height: calc(100dvh - 66px - env(safe-area-inset-top));
+  transform: translate(-50%, -50%);
+  width: min(380px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
   overflow: auto;
-  padding: 10px 12px;
+  padding: 12px 14px;
   gap: 8px;
-  font-size: 12.5px;
+  font-size: 13px;
+  background: rgba(14, 16, 23, 0.97);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
 }
+body.touch #jogo-hud.min, body.touch #dados-hud.min {
+  top: calc(8px + env(safe-area-inset-top));
+  left: max(8px, env(safe-area-inset-left));
+  transform: none;
+  width: min(300px, calc(100vw - 80px));
+  padding: 6px 6px 6px 12px;
+  gap: 2px;
+  font-size: 12px;
+  box-shadow: none;
+}
+body.touch .min .jh-head b { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body.touch .min .hud-min .ic { transform: none; }
+body.touch #dados-hud.min .jh-acoes { padding: 4px 0 2px; }
 body.touch .jh-dica, body.touch #jh-sair kbd, body.touch #dh-sair kbd { display: none; }
-@media (max-width: 640px) {
-  body.touch #jogo-hud, body.touch #dados-hud { left: 8px; right: 8px; width: auto; max-height: 52dvh; }
-}
+/* o fundo escurecido do modal: tocar fora fecha (e não mexe peça sem querer) */
+#hud-fundo { display: none; position: absolute; inset: 0; z-index: 5; background: rgba(4, 5, 8, 0.55); pointer-events: auto; }
+body.touch:has(#jogo-hud:not([hidden]):not(.min), #dados-hud:not([hidden]):not(.min)) #hud-fundo { display: block; }
+/* sentado numa mesa (tabuleiros, dados, cartas, poker, sinuca), a barra de cima fica só com o
+   microfone. Andando entre as tacadas da sinuca vale o modo de jogo (o ☰ traz a barra inteira) */
+body.touch.mesa-limpa:not([data-jogo]) #bar { grid-template-columns: 1fr; background: none; }
+/* a faixa da barra é a largura toda: só o microfone recebe o toque, o resto passa para o menuzinho
+   do jogo e os botões das mesas que ficam embaixo dela */
+body.touch.mesa-limpa:not([data-jogo]) #bar .bar-center { pointer-events: none; }
+body.touch.mesa-limpa:not([data-jogo]) #btn-mic { pointer-events: auto; }
+body.touch.mesa-limpa:not([data-jogo]) :is(.bar-left, .bar-right, .bar-center > :not(#btn-mic)) { display: none !important; }
 
 #tv-unblock { position: absolute; top: 108px; left: 50%; transform: translateX(-50%); pointer-events: auto; }
 
@@ -1142,6 +1193,9 @@ body.touch .help-grid[data-input="touch"] { display: grid; }
   padding: 10px 14px;
   background: linear-gradient(0deg, rgba(8, 9, 13, 0.7), rgba(8, 9, 13, 0));
   pointer-events: none;
+  /* camada própria: no app instalado do iPhone o canvas 3D, ao começar a desenhar, passava por
+     cima da barra (ela continuava lá e respondia ao toque, mas não aparecia) */
+  transform: translateZ(0);
 }
 #bar > * { pointer-events: auto; }
 .bar-left { display: flex; gap: 8px; align-items: center; font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; }
@@ -2598,6 +2652,39 @@ body.touch #pk-quit kbd, body.touch #tv-focus-exit kbd { display: none; }
   .room-chip .chip-btn { display: none; }
 }
 
+/* celular em pé dentro da sala: cobre tudo e pede para girar (a sala é só deitada; no Android a
+   tela cheia ainda trava a orientação, no iPhone não há trava) */
+#gire-celular { display: none; }
+@media (orientation: portrait) {
+  body.touch.na-sala #gire-celular {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 24px;
+    text-align: center;
+    background: #0b0d12;
+    color: var(--text);
+    touch-action: none;
+  }
+}
+#gire-celular b { font-size: 20px; }
+#gire-celular span { color: var(--text); font-size: 14px; }
+#gire-celular small { max-width: 280px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.gc-celular {
+  width: 46px;
+  height: 80px;
+  margin-bottom: 12px;
+  border: 3px solid var(--accent);
+  border-radius: 10px;
+  animation: gc-gira 1.8s ease-in-out infinite;
+}
+@keyframes gc-gira { 0%, 25% { transform: rotate(0); } 60%, 100% { transform: rotate(-90deg); } }
+
 /* ------------------------------------------------------------ aparelho de toque */
 body.touch #gl, body.touch #css3d { touch-action: none; }
 
@@ -2767,6 +2854,9 @@ body.touch[data-jogo] .touch-jogo-topo { display: flex; }
 body.touch[data-jogo]:not(.barra-aberta) #bar { display: none; }
 /* No PWA não há a barra do Safari para servir de navegação: mantenha a barra da sala acessível. */
 body.touch.pwa[data-jogo] #bar { display: grid; }
+/* lá a barra não some: o ☰ não tem o que trazer, e o X desce para baixo dela (ficava por cima) */
+body.touch.pwa #tb-menu { display: none; }
+body.touch.pwa[data-jogo] .touch-jogo-topo { top: calc(60px + env(safe-area-inset-top)); }
 body.touch[data-jogo]:not(.barra-aberta) .tb.corner { top: calc(8px + env(safe-area-inset-top)); }
 body.touch.barra-aberta .touch-jogo-topo { top: calc(60px + env(safe-area-inset-top)); }
 body.touch.barra-aberta #tb-menu { background: rgba(110, 231, 200, 0.22); border-color: rgba(110, 231, 200, 0.5); }
@@ -3428,3 +3518,266 @@ body[data-jogo] .hud-bussola,
 .sp-envio { display: block; color: var(--accent); font-size: 10.5px; font-variant-numeric: tabular-nums; }
 .sp-envio:empty { display: none; }
 .focus-qualidade { margin-left: 8px; color: var(--muted); font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* ------------------------------------------------------------ música da sala (musica.js) */
+#musica-sink { position: fixed; left: -10px; top: -10px; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
+.mu-agora { --fill: #f472b6; }
+.mu-capa {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 9;
+  margin: -14px -14px 12px;
+  border-radius: 14px 14px 0 0;
+  overflow: hidden;
+  background: rgba(244, 114, 182, 0.08);
+  color: rgba(244, 114, 182, 0.55);
+}
+.mu-capa img { width: 100%; height: 100%; object-fit: cover; }
+.mu-quando { --c: #f472b6; }
+.mu-quando.pausado { --c: var(--muted); }
+.mu-buscando { color: var(--muted); font-size: 12px; font-family: var(--mono); margin: 8px 0 0; }
+.mu-escolha { margin-top: 10px; padding: 12px; border-radius: 12px; border: 1px solid var(--line); background: rgba(255, 255, 255, 0.03); }
+.mu-escolha p { margin: 0 0 10px; color: var(--muted); font-size: 12px; }
+.mu-escolha div { display: flex; flex-wrap: wrap; gap: 8px; }
+.tip.mu-dica { margin-top: 10px; }
+.mu-estilos { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.mu-estilos button {
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  transition: background-color 140ms, border-color 140ms;
+}
+.mu-estilos button:hover { background: rgba(244, 114, 182, 0.1); border-color: rgba(244, 114, 182, 0.45); }
+.mu-fila-topo { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.mu-fila-topo small { color: var(--muted); font-size: 11px; text-align: right; }
+.mu-acoes { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-bottom: 10px; margin-bottom: 8px; border-bottom: 1px solid var(--line); }
+.mu-acoes label { display: flex; align-items: center; gap: 8px; margin-right: auto; color: var(--muted); font-size: 12px; cursor: pointer; }
+.mu-acoes .perigo { height: 30px; color: #ff8a8e; font-size: 12px; }
+.mu-acoes .perigo[data-confirmar] { background: rgba(242, 85, 90, 0.18); border-color: rgba(242, 85, 90, 0.5); }
+.mu-fila { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.mu-fila li[data-id] {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 6px 6px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  cursor: pointer;
+  transition: background-color 140ms, border-color 140ms;
+}
+.mu-fila li[data-id]:hover { background: rgba(255, 255, 255, 0.04); }
+.mu-fila li.atual { border-color: rgba(244, 114, 182, 0.5); background: rgba(244, 114, 182, 0.07); }
+.mu-fila input[type='checkbox'], .mu-acoes input[type='checkbox'] { width: 16px; height: 16px; flex: none; accent-color: #f472b6; cursor: pointer; }
+.mu-fila img { width: 64px; height: 36px; flex: none; border-radius: 6px; object-fit: cover; background: rgba(255, 255, 255, 0.06); }
+.mu-item { display: grid; gap: 2px; min-width: 0; flex: 1; }
+.mu-item b { font-size: 12px; font-weight: 600; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.mu-item small { color: var(--muted); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mu-fila li.atual small { color: #f472b6; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; }
+.mu-fila .mu-tirar { width: 32px; height: 32px; flex: none; color: var(--muted); }
+.mu-fila .mu-tirar:hover { color: #ff8a8e; }
+.mu-fila .empty { padding: 20px 0; color: var(--muted); font-size: 13px; text-align: center; }
+.np-controls .icon-btn:disabled { opacity: 0.4; pointer-events: none; }
+.mu-telao { margin-top: 12px; }
+.mu-telao:disabled { opacity: 0.4; pointer-events: none; }
+.mu-telao.on { border-color: rgba(244, 114, 182, 0.6); background: rgba(244, 114, 182, 0.12); color: #f9a8d4; }
+
+/* celular: a capa vira miniatura ao lado do título (inteira, ela tomava a tela toda) e, deitado,
+   a fila vai para uma segunda coluna */
+body.touch .mu-agora { display: grid; grid-template-columns: 112px 1fr; column-gap: 12px; align-items: start; padding: 12px; margin-top: 8px; }
+body.touch .mu-capa { grid-row: span 3; margin: 0; aspect-ratio: 16 / 9; border-radius: 8px; }
+body.touch .mu-capa .ic { width: 24px; height: 24px; }
+body.touch .mu-agora .np-head { margin-bottom: 4px; }
+body.touch .mu-agora .np-title { font-size: 13px; }
+body.touch .mu-agora .np-by { font-size: 11px; margin-top: 2px; }
+body.touch .mu-agora > :is(#mu-linha, .np-controls, .mu-telao) { grid-column: 1 / -1; }
+body.touch .mu-agora .np-progress { margin-top: 10px; }
+body.touch .mu-agora .np-controls { margin-top: 4px; }
+body.touch .mu-agora .mu-telao { margin-top: 8px; height: 36px; }
+body.touch section[data-section='musica'] .slider-row { padding: 8px 0; }
+body.touch section[data-section='musica'] .sub-block { margin-top: 14px; }
+body.touch .tip.mu-dica { display: none; }
+/* estilos numa linha só, arrastando para o lado */
+body.touch .mu-estilos { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-right: -12px; padding-bottom: 2px; }
+body.touch .mu-estilos::-webkit-scrollbar { display: none; }
+body.touch .mu-estilos button { flex: none; }
+@media (orientation: landscape) and (min-width: 600px) {
+  body.touch #panel section[data-section='musica'].active { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto auto 1fr; column-gap: 18px; align-content: start; }
+  body.touch #panel section[data-section='musica'] > * { grid-column: 1; }
+  body.touch #panel section[data-section='musica'] > .sub-block:last-child { grid-column: 2; grid-row: 1 / 4; margin-top: 8px; min-height: 0; }
+}
+
+/* ------------------------------------------------------------ entrada no celular */
+/* No computador o formulário segue como sempre. No celular (em pé ou deitado) ele vira uma grade
+   compacta: o personagem primeiro, camiseta e foto recolhidas atrás de um botão e o "Entrar na
+   sala" preso embaixo da tela, sempre à mão. As classes l-* (index.html) dão a ordem. */
+.lobby-mais { display: none; }
+@media (max-width: 600px), (max-height: 500px) and (orientation: landscape) {
+  #lobby {
+    gap: 20px;
+    padding: calc(16px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) 0 calc(16px + env(safe-area-inset-left));
+  }
+  .lobby-card { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px 12px; }
+  .lobby-card > * { margin: 0; }
+  .brand { order: 0; }
+  .lobby-card h1 { order: 1; font-size: 28px; line-height: 1.1; }
+  .lobby-card h1 br { display: none; }
+  .lobby-sub, .l-dica { display: none; }
+  .l-char { order: 2; }
+  .l-cor { order: 3; }
+  .l-nome { order: 4; }
+  .l-sala { order: 5; }
+  #campo-senha-sala { order: 6; }
+  .l-mic { order: 7; padding: 2px 0; }
+  .lobby-mais { order: 8; }
+  #campo-camiseta { order: 9; }
+  #campo-foto { order: 10; }
+  .lobby-acao { order: 11; }
+  #btn-instalar { order: 12; }
+  .lobby-note { order: 13; }
+  .field { gap: 6px; }
+
+  /* o personagem é o destaque: miniatura maior */
+  .char-card { padding: 8px 14px 8px 8px; }
+  .char-card img { width: 60px; height: 76px; }
+  .char-txt b { font-size: 16px; }
+
+  /* as dez cores numa linha só, do tamanho que couber */
+  .lobby-card .swatches { flex-wrap: nowrap; justify-content: space-between; gap: 6px; }
+  .lobby-card .swatches button { width: auto; height: auto; flex: 0 1 32px; aspect-ratio: 1; min-width: 0; }
+
+  .lobby-mais {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    min-height: 46px;
+    padding: 0 14px;
+    border: 1px dashed var(--line-strong);
+    border-radius: 12px;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .lobby-mais i { display: inline-flex; color: var(--muted); transition: transform 200ms var(--ease); }
+  .lobby-card.mais-aberto .lobby-mais { border-style: solid; }
+  .lobby-card.mais-aberto .lobby-mais i { transform: rotate(180deg); }
+  .lobby-card:not(.mais-aberto) :is(#campo-camiseta, #campo-foto) { display: none; }
+  /* personagem com corpo próprio não tem camiseta nem foto: o botão some junto */
+  .lobby-card:not(:has(#campo-camiseta:not([hidden]))) .lobby-mais { display: none; }
+
+  /* o botão de entrar fica preso embaixo enquanto a pessoa rola o formulário */
+  .lobby-acao {
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+    margin: 0 calc(-16px - env(safe-area-inset-right)) 0 calc(-16px - env(safe-area-inset-left));
+    padding: 18px calc(16px + env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left));
+    background: linear-gradient(to bottom, rgba(8, 9, 13, 0), rgba(8, 9, 13, 0.97) 18px);
+  }
+  #btn-join { height: 50px; font-size: 15px; }
+  .lobby-carga { margin-top: 8px; }
+  .ao-vivo { margin-bottom: calc(16px + env(safe-area-inset-bottom)); }
+}
+
+/* celular deitado: pouca altura. Sem o título, campos lado a lado e as salas ao vivo à direita */
+@media (max-height: 500px) and (orientation: landscape) {
+  #lobby { flex-direction: row; align-items: flex-start; padding-top: calc(12px + env(safe-area-inset-top)); }
+  .lobby-card { flex: 1; width: auto; max-width: 600px; margin: 0; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+  .lobby-card h1 { display: none; }
+  .lobby-card > :is(.brand, #campo-senha-sala, #campo-camiseta, #campo-foto, .lobby-acao, #btn-instalar, .lobby-note) { grid-column: 1 / -1; }
+  /* meia largura: as cores em duas linhas de cinco */
+  .lobby-card .swatches { flex-wrap: wrap; justify-content: flex-start; }
+  .lobby-card .swatches button { flex: none; width: 30px; height: 30px; }
+  .l-mic { align-self: center; }
+  .ao-vivo { position: sticky; top: 0; flex: none; width: min(280px, 34vw); max-height: calc(100dvh - 24px - env(safe-area-inset-top)); margin: 0; }
+}
+
+/* ------------------------------------------------------------ modo jogo no celular (toque-jogo.js) */
+#toque-jogo {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+#toque-jogo[hidden] { display: none; }
+body.toque-jogo #focus .focus-bar { display: none; }
+body.toque-jogo #focus video { padding: 0; }
+.tj-olhar { position: absolute; inset: 0; }
+#toque-jogo button {
+  position: relative;
+  border: 1.5px solid rgba(255, 255, 255, 0.28);
+  background: rgba(10, 12, 18, 0.42);
+  color: #fff;
+  font: 700 13px/1 system-ui, sans-serif;
+  border-radius: 14px;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+#toque-jogo button.apertado, #toque-jogo button.on { background: rgba(56, 189, 248, 0.45); border-color: rgba(125, 211, 252, 0.9); }
+.tj-topo {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  right: max(12px, env(safe-area-inset-right));
+  display: flex;
+  gap: 8px;
+}
+.tj-topo button { padding: 10px 12px; }
+.tj-topo .tj-sair { background: rgba(127, 29, 29, 0.55); }
+.tj-stick {
+  position: absolute;
+  left: max(28px, env(safe-area-inset-left));
+  bottom: max(28px, env(safe-area-inset-bottom));
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  background: rgba(10, 12, 18, 0.3);
+  border: 1.5px solid rgba(255, 255, 255, 0.22);
+}
+.tj-ring { position: absolute; inset: 22px; border-radius: 50%; border: 1px dashed rgba(255, 255, 255, 0.18); }
+.tj-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 60px;
+  height: 60px;
+  margin: -30px 0 0 -30px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.28);
+  border: 1.5px solid rgba(255, 255, 255, 0.45);
+  will-change: transform;
+}
+.tj-stick.correndo .tj-knob { background: rgba(251, 191, 36, 0.55); }
+.tj-acoes {
+  position: absolute;
+  right: max(20px, env(safe-area-inset-right));
+  bottom: max(20px, env(safe-area-inset-bottom));
+  display: grid;
+  grid-template-columns: repeat(3, 64px);
+  grid-template-rows: 44px 64px 64px;
+  gap: 10px;
+  grid-template-areas:
+    "ant . prox"
+    "agachar usar bater"
+    "agachar pular pular";
+}
+.tj-acoes [data-roda="-1"] { grid-area: ant; }
+.tj-acoes [data-roda="1"] { grid-area: prox; }
+.tj-agachar { grid-area: agachar; }
+.tj-usar { grid-area: usar; }
+.tj-bater { grid-area: bater; background: rgba(127, 29, 29, 0.45) !important; }
+.tj-bater.apertado { background: rgba(239, 68, 68, 0.6) !important; }
+.tj-pular { grid-area: pular; border-radius: 999px !important; }
+@media (max-height: 380px) {
+  .tj-stick { width: 120px; height: 120px; }
+  .tj-acoes { grid-template-columns: repeat(3, 56px); grid-template-rows: 38px 56px 56px; gap: 8px; }
+}

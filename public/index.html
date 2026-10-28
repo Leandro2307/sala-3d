@@ -28,8 +28,17 @@
   <div id="css3d"></div>
   <canvas id="gl"></canvas>
   <div id="media-sink" aria-hidden="true"></div>
+  <div id="musica-sink" aria-hidden="true"></div>
 
   <!-- ============================================================ HUD -->
+  <!-- celular em pé dentro da sala: a sala é só deitada (style.css mostra isto na vertical) -->
+  <div id="gire-celular" role="alert">
+    <div class="gc-celular"></div>
+    <b>Gire o celular</b>
+    <span>A sala funciona só com o celular deitado.</span>
+    <small>Se a tela não girar, desligue o Bloqueio de Rotação na Central de Controle.</small>
+  </div>
+
   <div id="hud" hidden>
     <!-- salas já visitadas, no jeito do Discord (ver salas.js) -->
     <nav id="salas" aria-label="Suas salas">
@@ -139,6 +148,7 @@
     <button type="button" class="pg-lado esq" id="pg-esq" hidden title="Tela da esquerda (Alt+←)" aria-label="Tela da esquerda">‹</button>
     <button type="button" class="pg-lado dir" id="pg-dir" hidden title="Tela da direita (Alt+→)" aria-label="Tela da direita">›</button>
 
+    <div id="hud-fundo"></div>
     <div id="jogo-hud" hidden>
       <div class="jh-head">
         <b id="jh-titulo">Xadrez de bruxo</b>
@@ -280,6 +290,9 @@
       <button type="button" class="tb small" id="tb-sit" hidden aria-label="Sentar"><i data-icon="chair" data-size="18"></i></button>
       <button type="button" class="tb small" id="tb-respawn" aria-label="Voltar ao checkpoint"><i data-icon="undo" data-size="18"></i></button>
       <button type="button" class="tb small" id="tb-view" aria-label="Alternar câmera"><i data-icon="view" data-size="18"></i></button>
+      <!-- limpar a tela (o H do computador): o olho riscado esconde a interface, o olho a traz de volta -->
+      <button type="button" class="tb small" id="tb-hud" aria-label="Esconder ou mostrar a interface"><i class="so-com-hud" data-icon="eyeOff" data-size="18"></i><i class="so-sem-hud" data-icon="eye" data-size="18"></i></button>
+      <!-- de carro é o turbo; a pé não aparece (o analógico na borda já corre) -->
       <button type="button" class="tb small" id="tb-run" aria-pressed="false" aria-label="Correr"><i data-icon="run" data-size="18"></i></button>
       <button type="button" class="tb small" id="tb-car" data-jogo="corrida" aria-pressed="false" aria-label="Virar carro"><i data-icon="car" data-size="18"></i></button>
       <button type="button" class="tb punch" id="tb-punch" data-jogo="ringue" aria-label="Socar"><i data-icon="fist" data-size="22"></i></button>
@@ -353,6 +366,7 @@
       <button type="button" class="ghost" id="btn-mesa" data-tip="Mesa: todas as telas lado a lado (Tab)"><i data-icon="monitores"></i></button>
       <button type="button" class="ghost" data-panel="sala" data-tip="Sala da empresa: ambiente e jogos"><i data-icon="predio"></i></button>
       <button type="button" class="ghost" data-panel="telao" data-tip="Telão: vídeos e lives"><i data-icon="tv"></i></button>
+      <button type="button" class="ghost" data-panel="musica" data-tip="Música da sala (YouTube)"><i data-icon="musica"></i></button>
       <button type="button" class="ghost" data-panel="people" data-tip="Pessoas"><i data-icon="users"></i><span class="badge" id="people-badge">1</span></button>
       <button type="button" class="ghost" data-panel="chat" data-tip="Chat (T)"><i data-icon="chat"></i><span class="dot" id="chat-dot" hidden></span></button>
       <!-- todos os jogos num modal só, por gênero (catalogo-jogos.js); as regras e os recordes de cada
@@ -474,6 +488,77 @@
       </div>
       <p class="tip">Dica: olhe para o telão e aperte <kbd>E</kbd> para dar zoom e usar os controles do próprio player. No YouTube, Twitch, Vimeo e links diretos, tudo que você fizer sincroniza para todos.</p>
       <p class="tip">Netflix, Prime Video, Disney+, Max e Globoplay têm proteção contra cópia (DRM) e não funcionam no telão.</p>
+    </section>
+
+    <section data-section="musica">
+      <div class="now-playing mu-agora">
+        <div class="mu-capa">
+          <img id="mu-capa" alt="" hidden>
+          <span id="mu-capa-vazia" data-icon="musica" data-size="34"></span>
+        </div>
+        <div class="np-head"><span class="np-badge mu-quando" id="mu-quando">Fila vazia</span></div>
+        <div class="np-title" id="mu-titulo">Nenhuma música na fila</div>
+        <div class="np-by" id="mu-por"></div>
+        <div id="mu-linha" hidden>
+          <div class="np-progress" id="mu-barra"><div class="np-fill" id="mu-fill"></div></div>
+          <div class="np-times"><span id="mu-cur">0:00</span><span id="mu-dur">--:--</span></div>
+        </div>
+        <div class="np-controls">
+          <button type="button" class="icon-btn" id="mu-ant" aria-label="Música anterior" disabled><i data-icon="anterior"></i></button>
+          <button type="button" class="icon-btn big accent" id="mu-play" aria-label="Tocar/pausar" disabled><i data-icon="play"></i></button>
+          <button type="button" class="icon-btn" id="mu-prox" aria-label="Próxima música" disabled><i data-icon="proxima"></i></button>
+        </div>
+        <!-- o clipe da música que está tocando vai para o telão (e a música da sala pausa) -->
+        <button type="button" class="secondary small block mu-telao" id="mu-telao" disabled><i data-icon="tv" data-size="16"></i>Tocar no telão</button>
+      </div>
+
+      <label class="slider-row">
+        <span><i data-icon="volume" data-size="16"></i>Volume da música (só para você)</span>
+        <input type="range" id="mu-volume" min="0" max="100" value="60">
+      </label>
+
+      <div class="sub-block">
+        <h3>Adicionar do YouTube</h3>
+        <form class="tv-form" id="mu-form" autocomplete="off">
+          <input id="mu-texto" maxlength="300" placeholder="Link, playlist ou um artista/estilo">
+          <button type="submit" class="primary small" id="mu-add"><i data-icon="mais" data-size="16"></i>Pôr</button>
+        </form>
+        <p class="field-error" id="mu-erro" hidden></p>
+        <p class="mu-buscando" id="mu-status-busca" role="status" hidden></p>
+        <div class="mu-escolha" id="mu-escolha" hidden>
+          <p>Esse link tem um vídeo dentro de uma playlist. O que entra na fila?</p>
+          <div>
+            <button type="button" class="secondary small" id="mu-so-video"><i data-icon="musica" data-size="15"></i>Só o vídeo</button>
+            <button type="button" class="primary small" id="mu-lista-toda"><i data-icon="menu" data-size="15"></i>Playlist inteira</button>
+          </div>
+        </div>
+        <p class="tip mu-dica">Link de playlist põe todas de uma vez (até 100). Um artista ou estilo põe 10 e já começa a tocar.</p>
+        <div class="mu-estilos" id="mu-estilos" aria-label="Estilos">
+          <button type="button" data-estilo="pagode">Pagode</button>
+          <button type="button" data-estilo="sertanejo">Sertanejo</button>
+          <button type="button" data-estilo="funk">Funk</button>
+          <button type="button" data-estilo="forró">Forró</button>
+          <button type="button" data-estilo="MPB">MPB</button>
+          <button type="button" data-estilo="rock nacional">Rock nacional</button>
+          <button type="button" data-estilo="pop internacional">Pop</button>
+          <button type="button" data-estilo="eletrônica">Eletrônica</button>
+          <button type="button" data-estilo="flashback anos 90">Flashback</button>
+          <button type="button" data-estilo="lofi para trabalhar">Lofi</button>
+        </div>
+      </div>
+
+      <div class="sub-block">
+        <div class="mu-fila-topo">
+          <h3 id="mu-fila-titulo">Fila (0)</h3>
+          <small id="mu-volta" hidden>Quando a última está acabando, o rádio põe uma parecida.</small>
+        </div>
+        <div class="mu-acoes" id="mu-acoes" hidden>
+          <label><input type="checkbox" id="mu-todas"><span id="mu-sel-rotulo">Selecionar todas</span></label>
+          <button type="button" class="secondary small perigo" id="mu-apagar-sel" hidden><i data-icon="lixo" data-size="14"></i>Apagar selecionadas</button>
+          <button type="button" class="secondary small perigo" id="mu-apagar-tudo"><i data-icon="lixo" data-size="14"></i>Apagar tudo</button>
+        </div>
+        <ul class="mu-fila" id="mu-fila"><li class="empty">Fila vazia. Ponha a primeira música aí em cima.</li></ul>
+      </div>
     </section>
 
     <section data-section="parkour">
@@ -776,6 +861,8 @@
   <!-- ============================================================ foco 2D numa tela compartilhada -->
   <div id="focus" hidden>
     <video id="focus-video" playsinline autoplay muted></video>
+    <!-- modo jogo no celular: analógico e botões por cima da tela (ver toque-jogo.js) -->
+    <div id="toque-jogo" hidden></div>
     <div class="focus-bar">
       <div class="focus-name"><span class="live-dot"></span><span id="focus-name">Tela</span><small class="focus-qualidade" id="focus-qualidade"></small></div>
       <!-- navegação da aba controlada (a mesa tem uma igual em cada monitor) -->
@@ -941,20 +1028,21 @@
         <span class="brand-mark"><i data-icon="share" data-size="20"></i></span>
         <span>Sala 3D</span>
       </div>
-      <h1>Assista junto.<br>Fale junto.<br><em>Pule junto.</em></h1>
+      <h1>Assista junto. <br>Fale junto. <br><em>Pule junto.</em></h1>
       <p class="lobby-sub">Compartilhe a tela com som, ponha YouTube, Twitch, Kick ou um filme do seu PC no telão e ande pela sala — tem parkour até o camarote.</p>
 
-      <label class="field">
+      <!-- as classes l-* dão a ordem e o lugar de cada campo no celular (style.css, "entrada no celular") -->
+      <label class="field l-nome">
         <span>Seu nome</span>
         <input id="in-name" maxlength="20" placeholder="Como te chamam?" required>
       </label>
 
-      <div class="field">
+      <div class="field l-cor">
         <span>Cor do boneco</span>
         <div class="swatches" id="swatches" role="radiogroup" aria-label="Cor do boneco"></div>
       </div>
 
-      <div class="field">
+      <div class="field l-char">
         <span>Personagem</span>
         <button type="button" class="char-card" id="in-char" aria-haspopup="dialog">
           <img id="char-mini" alt="" width="48" height="60">
@@ -964,6 +1052,11 @@
         <small class="hint" id="char-credito"></small>
       </div>
 
+      <!-- só no celular: camiseta e foto ficam recolhidas atrás deste botão (ver entrada.js) -->
+      <button type="button" class="lobby-mais" id="lobby-mais" aria-expanded="false" aria-controls="campo-camiseta campo-foto">
+        <span>Camiseta e foto <small class="opt">(opcional)</small></span><i data-icon="chevron" data-size="16"></i>
+      </button>
+
       <div class="field" id="campo-camiseta">
         <span>Camiseta <small class="opt">(opcional)</small></span>
         <div class="segmented shirts" id="in-shirt">
@@ -971,7 +1064,7 @@
           <button type="button" data-shirt="lula">PT · 13</button>
           <button type="button" data-shirt="bolsonaro">22</button>
         </div>
-        <small class="hint">Quem veste a 22 entra armado (<kbd>X</kbd> atira).</small>
+        <small class="hint l-dica">Quem veste a 22 entra armado (<kbd>X</kbd> atira).</small>
       </div>
 
       <div class="field" id="campo-foto">
@@ -984,10 +1077,10 @@
           </div>
           <input type="file" id="photo-file" accept="image/*" hidden>
         </div>
-        <small class="hint">Fica no rosto do seu boneco. Ela é reduzida para 128px e só vai para quem está na sala.</small>
+        <small class="hint l-dica">Fica no rosto do seu boneco. Ela é reduzida para 128px e só vai para quem está na sala.</small>
       </div>
 
-      <label class="field">
+      <label class="field l-sala">
         <span>Sala</span>
         <div class="input-prefix"><b>#</b><input id="in-room" maxlength="40" placeholder="principal"></div>
       </label>
@@ -999,12 +1092,16 @@
         <small class="hint erro" id="senha-sala-erro" hidden></small>
       </label>
 
-      <label class="toggle-row compact">
+      <label class="toggle-row compact l-mic">
         <span><b>Entrar com microfone ligado</b></span>
         <input type="checkbox" id="in-mic" class="switch" checked>
       </label>
 
-      <button type="submit" class="primary block" id="btn-join">Entrar na sala</button>
+      <div class="lobby-acao">
+        <button type="submit" class="primary block" id="btn-join">Entrar na sala</button>
+        <!-- a sala baixa e monta por trás enquanto a pessoa preenche (ver entrada.js) -->
+        <div class="lobby-carga" id="lobby-carga" role="status" aria-live="polite"><span class="lc-trilho"><i id="lc-barra"></i></span><small id="lc-texto">Preparando a sala…</small></div>
+      </div>
       <!-- aparece quando o navegador deixa instalar (Chrome/Edge/Android); ver "app" no main.js -->
       <button type="button" class="secondary block" id="btn-instalar" hidden><i data-icon="instalar" data-size="18"></i>Instalar o app</button>
       <p class="lobby-note" id="lobby-note">Para mandar o som da tela, marque <b>“Compartilhar áudio”</b> quando o navegador perguntar.</p>
@@ -1066,6 +1163,6 @@
   <div id="reconnecting" hidden><div class="spinner"></div>Reconectando…</div>
 
   <script src="/socket.io/socket.io.js" defer></script>
-  <script type="module" src="/js/main.js"></script>
+  <script type="module" src="/js/entrada.js"></script>
 </body>
 </html>

@@ -43,11 +43,12 @@ export class AoVivo {
 
 // O cartão do saguão. aoEscolher(id): a pessoa clicou numa sala. ativo(): o cartão está à mostra
 // (dentro da sala ele fica escondido, e quem entra e sai das outras salas não o remonta à toa).
-export function cartaoDoSaguao(aoVivo, { lista, resumo, selecionada, aoEscolher, ativo = () => true }) {
+// sinal (AbortSignal): quando aborta, o cartão para de ouvir (o entrada.js passa o saguão ao main.js).
+export function cartaoDoSaguao(aoVivo, { lista, resumo, selecionada, aoEscolher, ativo = () => true, sinal }) {
   lista.addEventListener('click', (e) => {
     const b = e.target.closest('[data-sala]');
     if (b) aoEscolher(b.dataset.sala);
-  });
+  }, { signal: sinal });
   const render = (dados, conectado) => {
     if (!ativo()) return;
     const { salas = [], pessoas = 0 } = dados;
@@ -74,5 +75,6 @@ export function cartaoDoSaguao(aoVivo, { lista, resumo, selecionada, aoEscolher,
     }).join('');
   };
   aoVivo.ouvir(render);
+  sinal?.addEventListener('abort', () => aoVivo.ouvintes.delete(render));
   return () => aoVivo.avisar(); // redesenha (a sala escolhida mudou)
 }

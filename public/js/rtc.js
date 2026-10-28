@@ -642,6 +642,7 @@ export class RTC {
       caiuDesde: 0, // desde quando o ICE está desconectado
       reinicioIce: 0,
       banda: null, // banda inicial da conexão, em kbps (ver banda)
+      ctrl: null, // canal do controle remoto (ver canalControle)
       micSender: null,
       micVai: null, // a trilha que está no micSender agora (null: a voz não vai para essa pessoa)
       ouveMic: true, // essa pessoa pode ouvir a minha voz (vozPara)
@@ -678,6 +679,10 @@ export class RTC {
     pc.onconnectionstatechange = () => {
       if (pc.connectionState === 'failed') this.onFalha?.(id, this.temTurn);
     };
+    // canal do controle remoto: quem controla abre (ver canalControle); aqui chega o de quem me controla
+    pc.ondatachannel = ({ channel }) => {
+      if (channel.label === 'controle') this.ligarCanal(peer, channel);
+    };
     pc.ontrack = (ev) => {
       const stream = ev.streams[0] || new MediaStream([ev.track]);
       this.onTrack(id, stream, ev.track);
@@ -692,6 +697,48 @@ export class RTC {
     this.addCamTo(peer);
     this.addScreenTo(peer);
     return peer;
+  }
+
+  // -------------------------------------------------------------- controle remoto direto
+  // Mouse e teclado de quem controla vão direto para quem compartilha, pela mesma conexão do
+  // vídeo — sem a ida e volta pelo servidor, que somava a distância até o Render a cada tecla.
+  // O canal só abre quando alguém controla (uma renegociação). Enquanto não abre, o evento vai
+  // pelo servidor como antes: mandarControle devolve false.
+  canalControle(id) {
+    const peer = this.peers.get(id);
+    if (!peer || ['failed', 'closed'].includes(peer.pc.connectionState)) return null;
+    if (!peer.ctrl || peer.ctrl.readyState === 'closed') {
+      try {
+        this.ligarCanal(peer, peer.pc.createDataChannel('controle', { ordered: true }));
+      } catch {
+        return null;
+      }
+    }
+    return peer.ctrl.readyState === 'open' ? peer.ctrl : null;
+  }
+
+  ligarCanal(peer, canal) {
+    peer.ctrl = canal;
+    canal.onmessage = (e) => {
+      let m;
+      try {
+        m = JSON.parse(e.data);
+      } catch {
+        return;
+      }
+      this.onControle?.(peer.id, m);
+    };
+  }
+
+  mandarControle(id, m) {
+    const canal = this.canalControle(id);
+    if (!canal) return false;
+    try {
+      canal.send(JSON.stringify(m));
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   // Banda inicial desta conexão (kbps): decidida na 1ª negociação e fixa depois. Um valor novo

@@ -18,8 +18,9 @@ import { sfx, audioContext, setSfxEnabled } from './sfx.js';
 import { Clima } from './clima.js';
 import { ARMAS, IDS_ARMAS, ARMA_PADRAO, defArma, VisaoArma, iniciarCapsulas, atualizarCapsulas, preCarregarArma } from './armas.js';
 import { Jogos } from './jogos.js';
-import { Controle, versaoNum } from './controle.js';
+import { Controle, versaoNum, eventoDeControle } from './controle.js';
 import { AvisoDoSite } from './aviso-site.js';
+import { ToqueJogo } from './toque-jogo.js';
 import { Mesa } from './mesa.js';
 import { Qualidade, NIVEIS, nivelInicial } from './qualidade.js';
 import * as moduloQualidade from './qualidade.js';
@@ -49,6 +50,8 @@ import { TIMES } from './batalha-dados.js';
 import { Anuncios } from './anuncios.js';
 import { acertarAvatar, tamanhoDo } from './hitbox.js';
 import { icon, hydrateIcons } from './icons.js';
+import { photoFromFile } from './foto.js';
+import { Musica } from './musica.js';
 import { isTouch, setupTouchControls, toggleFullscreen, isFullscreen, temTelaCheia } from './touch.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -61,11 +64,11 @@ const typing = () => {
 
 const COLORS = ['#7c9cff', '#6ee7c8', '#f472b6', '#fbbf24', '#a78bfa', '#fb7185', '#38bdf8', '#a3e635', '#f97316', '#e2e8f0'];
 const EMOTE_KEYS = ['wave', 'party', 'laugh', 'heart', 'clap', 'fire'];
-const PANEL_TITLES = { people: 'Pessoas', chat: 'Chat da sala', telao: 'Telão', parkour: 'Parkour', ringue: 'Ringue de luta', corrida: 'Pista de corrida', jogos: 'Jogos, dados e moedas', parque: 'Parque', sala: 'Sala da empresa', settings: 'Ajustes' };
+const PANEL_TITLES = { people: 'Pessoas', chat: 'Chat da sala', telao: 'Telão', musica: 'Música da sala', parkour: 'Parkour', ringue: 'Ringue de luta', corrida: 'Pista de corrida', jogos: 'Jogos, dados e moedas', parque: 'Parque', sala: 'Sala da empresa', settings: 'Ajustes' };
 
 // ------------------------------------------------------------------ ajustes salvos
 const DEFAULTS = {
-  name: '', color: COLORS[0], mic: true, voice: 100, screen: 90, tv: 80, spatial: false, porJogo: true,
+  name: '', color: COLORS[0], mic: true, voice: 100, screen: 90, tv: 80, musica: 60, spatial: false, porJogo: true,
   shareMode: 'max', sens: 100, balancoVisao: true, sfx: true, micDevice: '', camDevice: '', helpCollapsed: false, photo: null, shirt: 'none', char: 'padrao', arma: ARMA_PADRAO,
   // qualidade gráfica: 'auto' ou um nível fixo; nivelAuto: onde o automático parou da última vez;
   // falhasAuto: quantas vezes cada nível caiu logo depois de subir (o automático espera mais para tentar)
@@ -144,6 +147,18 @@ const nivelDePartida = settings.qualidade !== 'auto' ? settings.qualidade
 // MSAA pelo nível e pela densidade da tela (qualidade.js); sem essa função lá, vale o do nível
 const querAntialias = (n) => moduloQualidade.querAntialias?.(n) ?? n.antialias;
 const world = new World($('#gl'), $('#css3d'), { antialias: querAntialias(NIVEIS[nivelDePartida]), qualidade: NIVEIS[nivelDePartida] });
+// o mapa sobe em etapas; enquanto isso o formulário de entrada responde (entrada.js)
+const entrada = window.sala3dEntrada;
+await world.construir((f) => entrada?.mapa(f));
+// Daqui até o fim do módulo não há mais espera: o formulário passa a ser deste arquivo. O que a
+// pessoa mudou nele enquanto o mapa subia está no localStorage (o entrada.js grava a cada mudança).
+const pedidoDaEntrada = entrada?.soltar() || {};
+if (entrada) {
+  const agora = (() => {
+    try { return JSON.parse(localStorage.getItem('sala3d') || '{}'); } catch { return {}; }
+  })();
+  for (const k of ['name', 'color', 'char', 'shirt', 'photo', 'mic']) if (agora[k] !== undefined) settings[k] = agora[k];
+}
 // lido uma vez: com o contexto do WebGL perdido, getContextAttributes() devolve null
 const bordasLisas = !!world.renderer.getContextAttributes()?.antialias;
 // navegador dentro das telas: páginas fixas do dono e o navegador que cada um abre no (+)
@@ -488,7 +503,8 @@ const nameInput = $('#in-name');
 const roomInput = $('#in-room');
 const params = new URLSearchParams(window.location.search);
 nameInput.value = settings.name;
-roomInput.value = params.get('sala') || '';
+// o entrada.js já preencheu (e a pessoa pode ter digitado outra sala enquanto o mapa subia)
+if (!entrada) roomInput.value = params.get('sala') || '';
 $('#in-mic').checked = settings.mic;
 
 // ------------------------------------------------------------------ app (PWA)
@@ -550,7 +566,9 @@ const ehIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platfo
 // No app instalado a barra superior continua sendo a navegação principal. A classe também
 // permite que o CSS não a esconda ao entrar em um jogo.
 document.body.classList.toggle('pwa', !!instalado);
-let pedidoDeInstalacao = null;
+// o aviso pode ter chegado antes deste arquivo: o entrada.js guardou
+let pedidoDeInstalacao = entrada?.pedidoDeInstalacao || null;
+if (pedidoDeInstalacao) $('#btn-instalar').hidden = false;
 window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
   pedidoDeInstalacao = e;
@@ -618,8 +636,8 @@ roomInput.addEventListener('input', () => {
   $('#campo-senha-sala').hidden = true;
   $('#in-senha-sala').value = '';
 });
-// veio por um convite de sala com senha: já mostra o campo (sem gastar tentativa)
-if (params.get('sala')) {
+// veio por um convite de sala com senha: já mostra o campo (sem gastar tentativa; o entrada.js já conferiu)
+if (params.get('sala') && !entrada) {
   fetch('/sala-acesso', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -665,30 +683,7 @@ for (const sel of ['#swatches', '#ep-cores']) {
 nameInput.addEventListener('input', () => localAvatar.setName(nameInput.value.trim() || 'Você'));
 if (settings.name) localAvatar.setName(settings.name);
 
-// ---------------------------------------------------------------- foto do rosto
-// Reduz para 128x128 recortando o centro: o que trafega é um JPEG de ~10 kB, não o
-// arquivo original de vários MB que a câmera do celular produz.
-const PHOTO_SIZE = 128;
-function photoFromFile(file) {
-  return new Promise((resolve, reject) => {
-    if (!file.type.startsWith('image/')) return reject(new Error('Isso não é uma imagem.'));
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      const lado = Math.min(img.width, img.height);
-      const cv = document.createElement('canvas');
-      cv.width = cv.height = PHOTO_SIZE;
-      const ctx = cv.getContext('2d');
-      ctx.imageSmoothingQuality = 'high';
-      ctx.drawImage(img, (img.width - lado) / 2, (img.height - lado) / 2, lado, lado, 0, 0, PHOTO_SIZE, PHOTO_SIZE);
-      resolve(cv.toDataURL('image/jpeg', 0.78));
-    };
-    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Não consegui abrir essa imagem.')); };
-    img.src = url;
-  });
-}
-
+// ---------------------------------------------------------------- foto do rosto (reduzida em foto.js)
 function renderPhotoPreview() {
   const box = $('#photo-prev');
   if (settings.photo) {
@@ -738,7 +733,9 @@ aplicarPersonagem({ carregar: false });
 
 // Modal com as miniaturas e a prévia ao vivo (escolher-personagem.js): no formulário de entrada
 // e no botão da barra, dentro da sala.
-const escolha = new EscolherPersonagem({
+// O entrada.js já criou o modal (pode até estar aberto, com a prévia girando): fica com ele e só
+// troca as funções.
+const opcoesDaEscolha = {
   raiz: $('#escolher-personagem'),
   aparencia: () => ({ cor: settings.color, camiseta: settings.shirt, foto: settings.photo }),
   aoEscolher: async (id) => {
@@ -760,7 +757,10 @@ const escolha = new EscolherPersonagem({
     $('#ep-linha-camiseta').hidden = !!def.url;
     renderArmas();
   },
-});
+};
+const escolha = entrada?.escolha
+  ? Object.assign(entrada.escolha, opcoesDaEscolha)
+  : new EscolherPersonagem(opcoesDaEscolha);
 $('#in-char').addEventListener('click', () => escolha.abrir(settings.char));
 // o modelo 3D do personagem só baixa depois que o mundo ficou pronto: não disputa a abertura
 world.pronto.then(() => aplicarPersonagem());
@@ -859,6 +859,9 @@ setTimeout(() => localAvatar.emote('wave'), 900);
 
 $('#lobby-form').addEventListener('submit', (e) => {
   e.preventDefault();
+  // Celular: a sala é sempre deitada. No Android a trava de orientação só vale em tela cheia, que
+  // precisa deste toque; no iPhone não há trava (nem tela cheia) e, em pé, um aviso cobre a sala
+  if (isTouch && temTelaCheia && !isFullscreen()) toggleFullscreen().then(updateFullscreenButton);
   join();
 });
 
@@ -877,6 +880,29 @@ function recarregarNaSala(id = state.room, mapa = null) {
   else if (id !== state.room) url.searchParams.delete('mapa');
   window.location.href = url;
 }
+// música da sala (musica.js): a fila do YouTube que todo mundo ouve junto, longe do telão
+const musica = new Musica({
+  socket: () => socket,
+  toast: (...a) => toast(...a),
+  volume: () => settings.musica,
+  aoMudarVolume: (v) => {
+    settings.musica = v;
+    saveSettings();
+  },
+  painelAberto: () => state.panel === 'musica',
+  // música no telão: quem carrega cada faixa no telão é o servidor; daqui só destrava o som do
+  // telão (o toque no botão vale como gesto) e lê o segundo e a duração do player dele
+  noTelao: {
+    liberar: () => {
+      if (!tv) return false;
+      tv.unblock();
+      return true;
+    },
+    tempo: () => (tv?.ready && tv.state.provider === 'youtube' ? tv.adapter.time() : null),
+    duracao: () => (tv?.ready && tv.state.provider === 'youtube' ? tv.adapter.duration() : 0),
+  },
+});
+
 const salas = new SalasLaterais({
   raiz: $('#salas'),
   atual: () => state.room,
@@ -884,7 +910,7 @@ const salas = new SalasLaterais({
   aoTrocar: (id) => recarregarNaSala(id),
 });
 // salas ao vivo (aovivo.js): o cartão do saguão e as salas com gente na coluna lateral
-const aoVivo = new AoVivo();
+const aoVivo = entrada?.aoVivo || new AoVivo();
 aoVivo.ouvir((dados) => salas.aoVivo(dados));
 const redesenharSaguao = cartaoDoSaguao(aoVivo, {
   lista: $('#ao-vivo-lista'),
@@ -904,6 +930,9 @@ if (params.get('entrar') === '1') {
   window.history.replaceState(null, '', url);
   // depois do resto do módulo: o join usa coisas declaradas mais abaixo
   if (nameInput.value.trim()) setTimeout(join, 0);
+} else if (pedidoDaEntrada.entrar && nameInput.value.trim()) {
+  // apertou Entrar enquanto a sala carregava
+  setTimeout(join, 0);
 }
 document.body.classList.toggle('sem-salas', !isTouch && !!settings.salasOcultas);
 function abrirSalas(abrir) {
@@ -978,6 +1007,7 @@ async function join() {
     },
   });
   rtc.onMicCaiu = religarMic;
+  rtc.onControle = receberDireto;
   // a credencial do TURN vence (48 h na Cloudflare): renova com a página aberta
   setInterval(() => {
     fetch('/config').then((r) => r.json()).then((c) => rtc.trocarIce(c.iceServers)).catch(() => {});
@@ -1017,6 +1047,7 @@ async function join() {
   }
 
   state.joined = true;
+  document.body.classList.add('na-sala'); // celular em pé: o aviso de girar (style.css)
   $('#lobby').hidden = true;
   iniciarGuiaBoasVindas();
   $('#hud').hidden = false;
@@ -1041,6 +1072,7 @@ async function join() {
       sairJogo: () => sairDoJogo(),
       // em jogo a barra do topo some; o ☰ traz ela de volta
       menu: () => document.body.classList.toggle('barra-aberta'),
+      hud: () => alternarHud(),
       punch: () => punch(),
       tapa: () => darTapa(),
       sit: () => toggleSit(),
@@ -1072,9 +1104,6 @@ async function join() {
     syncTouchVisibility();
     poderesMudaram();
     if (!temTelaCheia) $('#tb-full').hidden = true; // iOS não tem tela cheia de página
-    if (window.matchMedia('(orientation: portrait)').matches) {
-      toast('Vire o celular na horizontal para jogar melhor.', 'warn', 7000);
-    }
   }
 }
 
@@ -1136,6 +1165,7 @@ function applyJoined(data) {
   setFightBoard(data.fights);
   setRaceBoard(data.voltas);
   jogos.sincronizar(data.jogos);
+  musica.iniciar();
   self().moedas = data.moedas ?? 0;
   mostrarMoedas();
   aplicarSala(data.sala);
@@ -1331,7 +1361,7 @@ function bindSocket() {
     refreshScreens();
   });
 
-  socket.on('share-update', ({ id, key, slot, streamId, gone, controle: podeControlar, site, titulo }) => {
+  socket.on('share-update', ({ id, key, slot, streamId, gone, controle: podeControlar, site, titulo, superficie }) => {
     const u = state.users.get(id);
     if (!u || typeof key !== 'string') return;
     const tinha = u.shares.get(key);
@@ -1342,6 +1372,7 @@ function bindSocket() {
       tinha.controle = !!podeControlar;
       tinha.site = site ?? null;
       tinha.titulo = titulo ?? null;
+      tinha.superficie = superficie ?? tinha.superficie ?? null;
       updateFocusCtrl();
     } else if (u.isSelf) {
       return;
@@ -1351,7 +1382,7 @@ function bindSocket() {
       soltarVideo(tinha);
       u.shares.delete(key);
     } else {
-      const sh = { key, slot: slot ?? null, streamId, video: null, controle: !!podeControlar, site: site ?? null, titulo: titulo ?? null };
+      const sh = { key, slot: slot ?? null, streamId, video: null, controle: !!podeControlar, site: site ?? null, titulo: titulo ?? null, superficie: superficie ?? null };
       u.shares.set(key, sh);
       toast(`${u.name} começou a compartilhar (${ondeEsta(sh)})`, 'info', 4500, u.color);
     }
@@ -1361,6 +1392,9 @@ function bindSocket() {
     renderPeople();
     setTimeout(atualizarInteresse, 0);
   });
+
+  socket.on('mu-estado', (s) => musica.estado(s));
+  socket.on('mu-aviso', (a) => musica.aviso(a));
 
   socket.on('main', ({ source, by }) => {
     state.main = source;
@@ -1382,17 +1416,9 @@ function bindSocket() {
   socket.on('emote', ({ id, kind }) => state.users.get(id)?.avatar.emote(kind));
   socket.on('jogo', (msg) => jogos.receber(msg));
   // mexendo na própria aba: sem o aviso de "fulano está mexendo na sua aba"
-  socket.on('controle', (msg) => {
-    const sh = self()?.shares.get(msg.key);
-    if (sh?.controle) turboDaTela(msg.key);
-    controle.receber(sh, msg.deId === state.selfId ? { ...msg, deId: null } : msg);
-  });
+  socket.on('controle', receberControle);
   // a volta de uma tela que controlo: o texto do Ctrl+C, ou um aviso do site (ver aviso-site.js)
-  socket.on('controle-volta', ({ key, ev, de } = {}) => {
-    if (typeof key !== 'string' || !ev) return;
-    if (ev.t === 'copia' && typeof ev.s === 'string' && controle.pediuCopia(key)) copiarDaTela(ev.s, de);
-    else if (ev.t === 'dialogo' && (ev.fechou || controle.mexeuEm(key))) avisoSite.receber(key, ev, `Na tela de ${de || 'alguém'}`);
-  });
+  socket.on('controle-volta', receberVolta);
   // o dono pôs, trocou ou tirou a senha: quem está dentro recebe o passe novo
   socket.on('passe', (passe) => {
     state.passe = passe;
@@ -2078,7 +2104,8 @@ async function capturarAbaDaExtensao({ streamId, aba, site, titulo }) {
 async function publishShare(stream, { file = false, height = 0, aba: abaConhecida = null, tela } = {}) {
   // no escritório, numa tela da sala onde a pessoa está
   const sala = world.salaEm(player.pos.x, player.pos.z);
-  const res = await new Promise((resolve) => socket.emit('share-start', { streamId: stream.id, sala, tela }, resolve));
+  const superficie = file ? null : stream.getVideoTracks()[0]?.getSettings?.().displaySurface ?? null;
+  const res = await new Promise((resolve) => socket.emit('share-start', { streamId: stream.id, sala, tela, superficie }, resolve));
   if (!res?.ok) {
     if (!file) for (const t of stream.getTracks()) t.stop();
     toast(res?.error || 'Não foi possível compartilhar.', 'error');
@@ -2203,10 +2230,16 @@ function updateShareButton() {
   if (!n) $('#share-pop').hidden = true;
 }
 
+// aba, janela ou tela inteira: o vídeo capturado aqui diz; o que chega de outra pessoa não
+// (getSettings do vídeo recebido vem sem displaySurface) — aí vale o que ela avisou à sala
+function superficieDe(sh) {
+  return sh.video?.srcObject?.getVideoTracks()[0]?.getSettings?.().displaySurface || sh.superficie || null;
+}
+
 // o que a pessoa escolheu no seletor do navegador
 function tipoDaTela(sh) {
   if (sh.file) return 'Vídeo do computador';
-  const surf = sh.video?.srcObject?.getVideoTracks()[0]?.getSettings?.().displaySurface;
+  const surf = superficieDe(sh);
   return surf === 'browser' ? 'Aba' : surf === 'window' ? 'Janela' : surf === 'monitor' ? 'Tela inteira' : 'Tela';
 }
 
@@ -2300,7 +2333,14 @@ $('#share-pop').addEventListener('click', (e) => {
 // ------------------------------------------------------------------ controle remoto das abas
 // Precisa da extensão (pasta extensao/) no Chrome de quem compartilha. Ver controle.js.
 const controle = new Controle({
-  emitir: (ev, data, volatil) => (volatil ? socket?.volatile.emit(ev, data) : socket?.emit(ev, data)),
+  // Mouse e teclado vão direto para o dono da tela pelo canal da conexão (ver rtc.canalControle):
+  // o servidor no meio somava a distância até ele a cada tecla. Canal ainda fechando: pelo servidor.
+  emitir: (ev, data, volatil) => {
+    if (ev === 'controle' && rtc?.mandarControle(String(data.key).split('~')[0], { c: data })) return;
+    if (ev === 'controle-volta' && rtc?.mandarControle(data.para, { v: { key: data.key, ev: data.ev } })) return;
+    return volatil ? socket?.volatile.emit(ev, data) : socket?.emit(ev, data);
+  },
+  semPonteiro: isTouch,
   // as minhas telas: o evento vai direto para a extensão, sem ida e volta pelo servidor
   minha: (key) => self()?.shares.get(key) ?? null,
   toast,
@@ -2312,8 +2352,44 @@ const controle = new Controle({
     avisarExtensaoVelha();
   },
 });
+// Chegou um clique/tecla para uma tela minha (pelo servidor ou direto, ver receberDireto).
+// Mexendo na própria aba: sem o aviso de "fulano está mexendo na sua aba".
+function receberControle(msg) {
+  const sh = self()?.shares.get(msg.key);
+  if (sh?.controle) turboDaTela(msg.key);
+  controle.receber(sh, msg.deId === state.selfId ? { ...msg, deId: null } : msg);
+}
+
+function receberVolta({ key, ev, de } = {}) {
+  if (typeof key !== 'string' || !ev) return;
+  if (ev.t === 'copia' && typeof ev.s === 'string' && controle.pediuCopia(key)) copiarDaTela(ev.s, de);
+  else if (ev.t === 'dialogo' && (ev.fechou || controle.mexeuEm(key))) avisoSite.receber(key, ev, `Na tela de ${de || 'alguém'}`);
+}
+
+// O que chega pelo canal direto não passou pelo servidor: aqui se confere o que ele conferiria —
+// a tela é minha e está liberada, o evento é bem formado e ninguém manda mais de 240 por segundo.
+const contasDiretas = new Map(); // id -> { janela, conta }
+function receberDireto(id, m) {
+  const u = state.users.get(id);
+  if (!u || !m || typeof m !== 'object') return;
+  if (m.v && typeof m.v === 'object') {
+    // a volta só vale de quem é dono da tela
+    if (typeof m.v.key === 'string' && m.v.key.split('~')[0] === id) receberVolta({ ...m.v, de: u.name });
+    return;
+  }
+  const c = m.c;
+  if (!c || typeof c.key !== 'string' || !self()?.shares.get(c.key)?.controle) return;
+  const agora = Date.now();
+  const n = contasDiretas.get(id) || { janela: 0, conta: 0 };
+  if (agora - n.janela > 1000) Object.assign(n, { janela: agora, conta: 0 });
+  contasDiretas.set(id, n);
+  if (++n.conta > 240) return;
+  const ev = eventoDeControle(c.ev);
+  if (ev) receberControle({ key: c.key, ev, de: u.name, deId: id });
+}
+
 // Alt+Shift+S (ou o ícone da extensão) numa aba: a resposta vai para o ícone dela
-controle.onCapturarAba = async (p) => controle.responderPedido(p.pedido, await capturarAbaDaExtensao(p));
+controle.onCapturarAba =async (p) => controle.responderPedido(p.pedido, await capturarAbaDaExtensao(p));
 // o mesmo atalho na aba que já está na sala: tira ela de lá
 controle.onPararAba = ({ aba, pedido }) => {
   const sh = [...(self()?.shares.values() || [])].find((s) => s.aba === aba);
@@ -2366,7 +2442,7 @@ controle.onDialogo = (aba, dialogo, site) => {
     const quem = controle.ultimo.get(sh.key);
     if (!quem) continue;
     const ev = dialogo ? { t: 'dialogo', ...dialogo, site } : { t: 'dialogo', fechou: true };
-    if (quem.deId) socket?.emit('controle-volta', { key: sh.key, para: quem.deId, ev });
+    if (quem.deId) controle.emitir('controle-volta', { key: sh.key, para: quem.deId, ev });
     else avisoSite.receber(sh.key, ev, 'Na sua aba');
   }
 };
@@ -2593,14 +2669,14 @@ function updateFocusCtrl() {
   btn.title = on ? 'Parar de mexer nesta tela (continua vendo)' : '';
   // Modo jogo: só em janela/tela inteira dos outros (o ajudante nativo é quem manda delta/scancode)
   const jb = $('#focus-jogo');
-  const janela = !!t && !t.user.isSelf && !isTouch
-    && ['window', 'monitor'].includes(t.share.video?.srcObject?.getVideoTracks?.()[0]?.getSettings?.().displaySurface);
+  const janela = !!t && !t.user.isSelf
+    && ['window', 'monitor'].includes(superficieDe(t.share));
   if ((!on || !janela) && controle.jogoNo === fv) controle.desligarJogo();
   jb.hidden = !on || !janela;
   const emJogo = controle.jogoNo === fv;
   jb.classList.toggle('on', emJogo);
   jb.innerHTML = `${icon('gamepad', 16)}${emJogo ? 'Desligar modo jogo' : 'Modo jogo'}`;
-  jb.title = 'Mouse gira a câmera e WASD anda (Minecraft e cia.). F8 liga e desliga.';
+  jb.title = isTouch ? 'Analógico e botões na tela (Minecraft e cia.)' : 'Mouse gira a câmera e WASD anda (Minecraft e cia.). F8 liga e desliga.';
 }
 $('#focus-ctrl').addEventListener('click', async () => {
   const btn = $('#focus-ctrl');
@@ -2624,8 +2700,26 @@ $('#focus-jogo').addEventListener('click', () => {
   const ligar = controle.jogoNo !== fv;
   controle.modoJogo(fv, ligar);
   updateFocusCtrl();
-  if (ligar) toast('Modo jogo ligado: o mouse gira a câmera e o teclado anda com o personagem. Esc pausa o jogo e solta o mouse; clique na tela para voltar. F8 liga e desliga.', 'info', 9000);
+  if (ligar && isTouch) {
+    // celular: tela cheia deitada, e o controle de toque por cima (ver toque-jogo.js)
+    if (!document.fullscreenElement) $('#focus').requestFullscreen?.().then(() => screen.orientation?.lock?.('landscape')).catch(() => {});
+    toast('Modo jogo: analógico anda, arraste o dedo para olhar. Bater segurando quebra o bloco.', 'info', 6000);
+  } else if (ligar) toast('Modo jogo ligado: o mouse gira a câmera e o teclado anda com o personagem. Esc pausa o jogo e solta o mouse; clique na tela para voltar. F8 liga e desliga.', 'info', 9000);
 });
+// o controle de toque aparece e some junto com o modo jogo (inclusive quando ele desliga sozinho)
+const toqueJogo = new ToqueJogo({
+  raiz: $('#toque-jogo'),
+  controle,
+  onSair: () => {
+    controle.desligarJogo();
+    updateFocusCtrl();
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  },
+});
+controle.onJogo = (video, key) => {
+  if (video && isTouch) toqueJogo.mostrar(key);
+  else toqueJogo.esconder();
+};
 controle.onJogoSoltou = () => {
   if (controle.jogoNo) toast('Esc soltou o mouse (o jogo recebeu o Esc). Clique na tela para voltar a jogar, ou F8 para desligar o modo jogo.', 'info', 6000);
 };
@@ -3847,19 +3941,21 @@ let hudDaMesa = false; // quem escondeu foi o sentar numa mesa (e não o H): lev
 function alternarHud() {
   hudDaMesa = false;
   const sem = document.body.classList.toggle('sem-hud');
-  if (sem) toast('Interface escondida. Aperte H para mostrar de novo.', 'info', 2500);
+  if (sem) toast(isTouch ? 'Interface escondida. Toque no olho para mostrar de novo.' : 'Interface escondida. Aperte H para mostrar de novo.', 'info', 2500);
 }
 
-// Sentado numa mesa (cartas, poker, tabuleiros, dados), a interface da sala some sozinha, como no H;
-// o painel do jogo fica. Levantando, ela volta — a não ser que o H já a tivesse escondido antes.
-// No celular a barra de cima fica (o CSS do sem-hud): lá não há H para trazer o microfone de volta.
-const FOCOS_DE_MESA = ['cartas', 'poker', 'jogo', 'dados'];
+// Sentado numa mesa (cartas, poker, tabuleiros, dados, sinuca), a interface da sala some sozinha,
+// como no H; o painel do jogo fica. Levantando, ela volta — a não ser que o H já a tivesse escondido
+// antes. No celular a barra de cima fica só com o microfone (body.mesa-limpa): lá não há H.
+const FOCOS_DE_MESA = ['cartas', 'poker', 'jogo', 'dados', 'sinuca'];
 let sentadoNaMesa = false;
 let avisouHudDaMesa = false;
 function hudAoSentar() {
-  const sentado = FOCOS_DE_MESA.includes(state.focus?.kind);
+  // na sinuca a vez vai e volta (a mira entra e sai do foco): conta enquanto estiver na mesa
+  const sentado = FOCOS_DE_MESA.includes(state.focus?.kind) || sinuca.ativo();
   if (sentado === sentadoNaMesa) return;
   sentadoNaMesa = sentado;
+  document.body.classList.toggle('mesa-limpa', sentado);
   if (sentado && !document.body.classList.contains('sem-hud')) {
     document.body.classList.add('sem-hud');
     hudDaMesa = true;
@@ -4947,7 +5043,8 @@ document.addEventListener('mousedown', (e) => {
   if (e.button === 2 && document.pointerLockElement === world.canvas && temSniper()) ligarLuneta(true);
 });
 document.addEventListener('mouseup', (e) => { if (e.button === 2) ligarLuneta(false); });
-world.canvas.addEventListener('contextmenu', (e) => { if (temSniper()) e.preventDefault(); });
+// no celular, segurar o dedo no 3D (a tacada da sinuca) abria o menu do toque longo
+world.canvas.addEventListener('contextmenu', (e) => { if (temSniper() || isTouch) e.preventDefault(); });
 
 $('#ep-arma').addEventListener('click', (e) => {
   const b = e.target.closest('[data-arma]');
@@ -5516,7 +5613,7 @@ function enterFocus(info) {
     if (player.sitting) toggleSit();
     if (player.veiculo) toggleVeiculo();
     dados.entrar();
-    recolherPainel('#dados-hud', isTouch);
+    recolherPainel('#dados-hud', false);
     $('#hover-hint').hidden = true;
     syncTouchVisibility();
     return;
@@ -5526,7 +5623,7 @@ function enterFocus(info) {
     if (player.sitting) toggleSit();
     if (player.veiculo) toggleVeiculo();
     jogos.entrar(info.mesa);
-    recolherPainel('#jogo-hud', isTouch);
+    recolherPainel('#jogo-hud', false);
     $('#hover-hint').hidden = true;
     syncTouchVisibility();
     return;
@@ -5565,6 +5662,11 @@ function enterFocus(info) {
     $('#tv-focus-hud').hidden = false;
     $('#crosshair').hidden = true;
     $('#hover-hint').hidden = true;
+    // celular: analógico e botões somem (e soltam o que estava apertado), como nos outros focos —
+    // por cima do telão eles andavam, sentavam e viravam carro com a câmera presa no vídeo
+    syncTouchVisibility();
+    // tela limpa: só o vídeo e a barra de sair do foco (ver body.tv-focus no style.css)
+    if (state.panel) closePanel();
     setTimeout(atualizarInteresse, 0); // o vídeo cobre o 3D: as telas e webcams de trás param já
     return;
   }
@@ -5583,17 +5685,32 @@ function enterFocus(info) {
 }
 
 // Painel do jogo recolhido: só título, vez e mensagem — o resto do tabuleiro fica livre para tocar.
-// No celular ele abre recolhido; o botão ao lado do Sair (ou tocar no título) abre e fecha.
+// O botão ao lado do Sair (ou tocar no título) abre e fecha. No celular o painel aberto é um modal no
+// meio da tela (abre assim ao sentar) e o recolhido, um menuzinho no canto com o ☰ para reabrir.
 function recolherPainel(sel, recolher) {
   const hud = $(sel);
   hud.classList.toggle('min', recolher);
   const b = hud.querySelector('.hud-min');
   b.setAttribute('aria-expanded', String(!recolher));
   b.title = recolher ? 'Abrir o painel' : 'Recolher o painel';
+  if (isTouch) b.innerHTML = icon(recolher ? 'menu' : 'minimizar', 16);
 }
 for (const sel of ['#jogo-hud', '#dados-hud']) {
   $(sel).addEventListener('click', (e) => {
     if (e.target.closest('.hud-min, .jh-head > b')) recolherPainel(sel, !$(sel).classList.contains('min'));
+  });
+}
+// no celular, escolhido o que fazer (sentar, contra o computador, novo jogo, rolar), o modal fecha e o
+// tabuleiro fica livre; tocar no fundo escuro também fecha
+if (isTouch) {
+  $('#jogo-hud').addEventListener('click', (e) => {
+    if (e.target.closest('.jh-lado button, #jh-bot, #jh-novo')) recolherPainel('#jogo-hud', true);
+  });
+  $('#dados-hud').addEventListener('click', (e) => {
+    if (e.target.closest('#dh-rolar, #dh-so')) recolherPainel('#dados-hud', true);
+  });
+  $('#hud-fundo').addEventListener('click', () => {
+    for (const sel of ['#jogo-hud', '#dados-hud']) if (!$(sel).hidden) recolherPainel(sel, true);
   });
 }
 
@@ -6641,7 +6758,8 @@ function sairDoJogo() {
   else if (kart.inscrito) {
     kart.sairDaCorrida(); // esperando a largada
     hudJogos.mensagem('Saiu do kart', '', 1200);
-  } else if (run.state !== 'idle') run.abandon();
+  } else if (sinuca.sair()) { /* andando entre as tacadas, longe da mesa */ }
+  else if (run.state !== 'idle') run.abandon();
   else return false;
   return true;
 }
@@ -6667,7 +6785,7 @@ function jogoAtual() {
   if (run.state !== 'idle') return 'parkour';
   return '';
 }
-const SAI_COM_X = ['futebol', 'surf', 'matamata', 'batalha', 'gincana', 'fantasmas', 'kart', 'pinta', 'parkour'];
+const SAI_COM_X = ['futebol', 'surf', 'matamata', 'batalha', 'gincana', 'fantasmas', 'kart', 'pinta', 'parkour', 'sinuca'];
 let jogoNaTela = '';
 let armadoNaTela = false;
 function marcarJogoAtual() {
@@ -6880,6 +6998,9 @@ function atualizarChipFps() {
   const motivo = motivoDoTeto(teto);
   const res = qualidade.escala < 0.999 ? ` ${Math.round(qualidade.escala * 100)}%` : '';
   let texto = motivo ? `3D a ${teto} qps · ${motivo} · ${nivel}` : `${Math.round(qualidade.fps)} FPS · ${nivel}${res}`;
+  // quem segura é o aparelho (no iPhone: Pouca Energia ou aquecido), não a sala: baixar gráfico
+  // não muda nada, e o chip diz isso
+  if (!motivo && qualidade.presoNoSistema) texto += ' · limite do aparelho';
   if (PERF) {
     const info = world.renderer.info;
     const uq = world.ultimoQuadro;
@@ -7254,3 +7375,5 @@ document.fonts?.ready.then(() => {
 });
 refreshScreens();
 requestAnimationFrame(frame);
+// a sala está ligada: a barra de carregamento do formulário de entrada some
+entrada?.pronto();

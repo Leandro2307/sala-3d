@@ -781,72 +781,106 @@ export class World {
     this.cssAntes = false;
     // resolve quando os shaders da abertura estiverem compilados (ver aquecerShaders)
     this.pronto = new Promise((r) => { this.avisarPronto = r; });
-
-    this.buildLights();
-    this.criarSombrasRedondas();
-    // O cinema (casca, plateia e parede de telas) é do modo Lazer. No modo escritório ele some e o
-    // prédio do escritório aparece no mesmo terreno (ver setModo).
-    this.area('cinema', () => this.buildRoom());
-    const cinema = this.areas.get('cinema');
-    cinema.objetos.push(...this.luzesCinema);
-    // o chão de física e a cerca da área jogável (começam em y = -4) são do mundo todo: ficam sempre
-    cinema.colisoes = cinema.colisoes.filter((c) => c.min.y >= 0);
-    this.area('plateia', () => this.buildAudience());
+    this.qualidadeInicial = qualidade;
     this.modo = 'lazer';
     this.escritorio = null;
     this.slotsEscritorio = [];
     this.telaoesEscritorio = [];
-    this.buildScreens();
-    // A praça na porta do prédio e as ruas até cada área (cidade.js). Antes do autódromo (o
-    // guard-rail abre passagem onde a rua chega) e da natureza (não planta em cima das ruas).
-    this.cidade = construirCidade(this);
-    // cada jogo é uma área: o dono da sala pode desligar (ver ligarArea)
-    this.area('parkour', () => this.buildCourse());
-    this.area('ringue', () => this.buildRing());
-    this.area('corrida', () => this.buildTrack());
-    // estádio do futebol de carro, ao norte do cinema (a partida em si é do futebol.js)
-    this.estadio = this.area('futebol', () => construirEstadio(this));
-    // vôlei, basquete e boliche, ao norte do estádio (o jogo em si é do quadras.js)
-    this.quadras3d = {
-      volei: this.area('volei', () => construirVolei(this)),
-      basquete: this.area('basquete', () => construirBasquete(this)),
-      boliche: this.area('boliche', () => construirBoliche(this)),
-    };
-    // o parque, no norte: praça, ruas e o salão de jogos (os jogos de lá vêm a seguir, cada um uma área)
-    this.parque = construirParque(this);
-    this.pingue3d = this.area('pingue', () => construirPingue(this));
-    this.queimada3d = this.area('queimada', () => construirQueimada(this));
-    this.sinuca3d = this.area('sinuca', () => construirSinuca(this));
-    this.golfe3d = this.area('golfe', () => construirGolfe(this));
-    // as duas mesas de cartas (truco e uno) são uma área só: some se o dono desligar os dois
-    this.cartas3d = this.area('cartas', () => construirCartas(this));
-    // as duas mesas de poker, no corredor do meio do salão
-    this.poker3d = this.area('poker', () => construirPoker(this));
-    // o portal da gincana, na pracinha da aventura (as fases ficam bem longe e só nascem quando alguém entra)
-    this.gincana3d = this.area('gincana', () => construirGincana(this));
-    // o portal do caça-fantasmas, no meio da pracinha da aventura (as casas ficam longe, ver fantasmas.js)
-    this.fantasmas3d = this.area('fantasmas', () => construirPortalFantasmas(this));
-    this.kart3d = this.area('kart', () => construirKart(this));
-    this.pinta3d = this.area('pinta', () => construirPinta(this));
-    // surf e mata-mata, no céu; os portais ficam perto da porta (o jogo é do ceu.js)
-    this.ceu = {
-      surf: this.area('surf', () => (construirPortal(this, 'surf'), construirSurf(this))),
-      arena: this.area('matamata', () => (construirPortal(this, 'matamata'), construirArena(this))),
-      // o mata-mata em times tem arena própria (batalha.js), com o portal junto dos outros
-      times: this.area('batalha', () => (construirPortal(this, 'times'), construirArenaTimes(this))),
-    };
-    // praça do xadrez de bruxo e da dama (as peças em si ficam em jogos.js)
-    this.reservas.push(...RESERVAS_JOGOS);
-    this.natureza = criarNatureza(this.scene, this.renderer, {
-      area: ROOM, sala: SALA, reservas: this.reservas, estradas: this.estradas, addBox: (o) => this.addBox(o), grupo: this.fora,
-      ...this.cidade.natureza,
-    });
-    const P = SALA.porta;
-    this.portaBox = new THREE.Box3(new THREE.Vector3(SALA.maxX - 1, 0, P.z0), new THREE.Vector3(SALA.maxX + 1, P.altura, P.z1));
-    this.ambiente = this.natureza.gerarAmbiente();
-    // qualidade antes do aquecimento: quantas luzes e se tem sombra fazem parte do shader
-    if (qualidade) this.setQualidade(qualidade, { aquecer: false });
-    this.aquecerShaders();
+  }
+
+  // Monta o mapa em etapas, devolvendo a vez ao navegador entre uma e outra. Antes era tudo de uma
+  // vez no construtor: 0,8 s de página parada num PC bom (vários segundos no celular), com o
+  // formulário de entrada sem responder. aoProgresso(fração) a cada etapa (a barra da entrada).
+  // Quem usa o mundo espera isto terminar (await no main.js) antes de mexer nele.
+  async construir(aoProgresso) {
+    const etapas = [
+      () => {
+        this.buildLights();
+        this.criarSombrasRedondas();
+        // O cinema (casca, plateia e parede de telas) é do modo Lazer. No modo escritório ele some e o
+        // prédio do escritório aparece no mesmo terreno (ver setModo).
+        this.area('cinema', () => this.buildRoom());
+        const cinema = this.areas.get('cinema');
+        cinema.objetos.push(...this.luzesCinema);
+        // o chão de física e a cerca da área jogável (começam em y = -4) são do mundo todo: ficam sempre
+        cinema.colisoes = cinema.colisoes.filter((c) => c.min.y >= 0);
+      },
+      () => {
+        this.area('plateia', () => this.buildAudience());
+        this.buildScreens();
+      },
+      // A praça na porta do prédio e as ruas até cada área (cidade.js). Antes do autódromo (o
+      // guard-rail abre passagem onde a rua chega) e da natureza (não planta em cima das ruas).
+      () => { this.cidade = construirCidade(this); },
+      // cada jogo é uma área: o dono da sala pode desligar (ver ligarArea)
+      () => this.area('parkour', () => this.buildCourse()),
+      () => this.area('ringue', () => this.buildRing()),
+      () => this.area('corrida', () => this.buildTrack()),
+      // estádio do futebol de carro, ao norte do cinema (a partida em si é do futebol.js)
+      () => { this.estadio = this.area('futebol', () => construirEstadio(this)); },
+      // vôlei, basquete e boliche, ao norte do estádio (o jogo em si é do quadras.js)
+      () => {
+        this.quadras3d = {
+          volei: this.area('volei', () => construirVolei(this)),
+          basquete: this.area('basquete', () => construirBasquete(this)),
+          boliche: this.area('boliche', () => construirBoliche(this)),
+        };
+      },
+      // o parque, no norte: praça, ruas e o salão de jogos (os jogos de lá vêm a seguir, cada um uma área)
+      () => { this.parque = construirParque(this); },
+      () => {
+        this.pingue3d = this.area('pingue', () => construirPingue(this));
+        this.queimada3d = this.area('queimada', () => construirQueimada(this));
+      },
+      () => {
+        this.sinuca3d = this.area('sinuca', () => construirSinuca(this));
+        this.golfe3d = this.area('golfe', () => construirGolfe(this));
+      },
+      // as duas mesas de cartas (truco e uno) são uma área só: some se o dono desligar os dois
+      () => { this.cartas3d = this.area('cartas', () => construirCartas(this)); },
+      // as duas mesas de poker, no corredor do meio do salão
+      () => { this.poker3d = this.area('poker', () => construirPoker(this)); },
+      () => {
+        // o portal da gincana, na pracinha da aventura (as fases ficam bem longe e só nascem quando alguém entra)
+        this.gincana3d = this.area('gincana', () => construirGincana(this));
+        // o portal do caça-fantasmas, no meio da pracinha da aventura (as casas ficam longe, ver fantasmas.js)
+        this.fantasmas3d = this.area('fantasmas', () => construirPortalFantasmas(this));
+      },
+      () => {
+        this.kart3d = this.area('kart', () => construirKart(this));
+        this.pinta3d = this.area('pinta', () => construirPinta(this));
+      },
+      // surf e mata-mata, no céu; os portais ficam perto da porta (o jogo é do ceu.js)
+      () => {
+        this.ceu = {
+          surf: this.area('surf', () => (construirPortal(this, 'surf'), construirSurf(this))),
+          arena: this.area('matamata', () => (construirPortal(this, 'matamata'), construirArena(this))),
+          // o mata-mata em times tem arena própria (batalha.js), com o portal junto dos outros
+          times: this.area('batalha', () => (construirPortal(this, 'times'), construirArenaTimes(this))),
+        };
+      },
+      () => {
+        // praça do xadrez de bruxo e da dama (as peças em si ficam em jogos.js)
+        this.reservas.push(...RESERVAS_JOGOS);
+        this.natureza = criarNatureza(this.scene, this.renderer, {
+          area: ROOM, sala: SALA, reservas: this.reservas, estradas: this.estradas, addBox: (o) => this.addBox(o), grupo: this.fora,
+          ...this.cidade.natureza,
+        });
+      },
+      () => {
+        const P = SALA.porta;
+        this.portaBox = new THREE.Box3(new THREE.Vector3(SALA.maxX - 1, 0, P.z0), new THREE.Vector3(SALA.maxX + 1, P.altura, P.z1));
+        this.ambiente = this.natureza.gerarAmbiente();
+        // qualidade antes do aquecimento: quantas luzes e se tem sombra fazem parte do shader
+        if (this.qualidadeInicial) this.setQualidade(this.qualidadeInicial, { aquecer: false });
+        this.aquecerShaders();
+      },
+    ];
+    for (let i = 0; i < etapas.length; i++) {
+      etapas[i]();
+      aoProgresso?.((i + 1) / etapas.length);
+      await ceder();
+    }
 
     window.addEventListener('resize', () => this.resize());
     // densidade de pixels que muda sem mudar o tamanho da janela (arrastada para outro monitor, zoom):
@@ -909,6 +943,7 @@ export class World {
     if (malhas) {
       corrente = corrente
         .then(() => this.subirTexturas(this.scene, desistir))
+        .then(() => this.esperarPlaca())
         .then(() => this.subirMalhas(desistir, liberar))
         .then(() => { if (!desistir()) this.malhasPendentes = false; });
     } else corrente = corrente.then(liberar);
@@ -1140,6 +1175,29 @@ export class World {
   // manda as texturas (visíveis) de um objeto para a placa de vídeo, devolvendo a vez ao
   // navegador a cada ~12 ms; desistir(): parar no meio (veio outro pedido). Na cena, inclui o que
   // está escondido agora (lado de fora, outras salas).
+  // Resolve quando a placa de vídeo terminar o que já foi pedido (um fence do WebGL2), sem segurar
+  // a página. As texturas do mapa acabaram de ir para ela: o próximo desenho, mesmo de 4x4 px,
+  // esperava esse envio terminar parado — 0,9 s numa RTX 3060 na abertura, com o formulário de
+  // entrada congelado. Esperando aqui, o envio acontece enquanto a página continua respondendo.
+  esperarPlaca(limiteMs = 5000) {
+    const gl = this.renderer.getContext();
+    if (!gl.fenceSync || this.perdido) return Promise.resolve();
+    const fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+    if (!fence) return Promise.resolve();
+    gl.flush();
+    const inicio = performance.now();
+    return new Promise((resolve) => {
+      const conferir = () => {
+        // a situação do fence só muda entre uma tarefa e outra: por isso o setTimeout
+        if (this.perdido || gl.getSyncParameter(fence, gl.SYNC_STATUS) === gl.SIGNALED || performance.now() - inicio > limiteMs) {
+          gl.deleteSync(fence);
+          resolve();
+        } else setTimeout(conferir, 16);
+      };
+      setTimeout(conferir, 16);
+    });
+  }
+
   async subirTexturas(raiz, desistir = () => false) {
     const texturas = new Set();
     this.comTudoVisivel(() => raiz.traverseVisible((o) => {

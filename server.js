@@ -25,6 +25,7 @@ const { ligarKart } = require('./kart-servidor.js');
 const { ligarPinta } = require('./pinta-servidor.js');
 const { ligarCeu } = require('./ceu-servidor.js');
 const { ligarBatalha } = require('./batalha-servidor.js');
+const { ligarMusica } = require('./musica-servidor.js');
 const { MAPAS_SALA, MAPA_PADRAO } = require('./mapa-servidor.js');
 const Voz = require('./voz-servidor.js'); // a rota antiga da voz dos gritos (hoje são mp3 gravados)
 // a planta do escritório é a mesma do navegador (public/js/escritorio.js); carrega em main()
@@ -677,7 +678,14 @@ function levantarDeTudo(room, id) {
 // Evento de mouse/teclado vindo de quem controla: só os campos esperados, com limites.
 function eventoDeControle(raw) {
   const e = obj(raw);
-  const n = (v, a, b) => Math.min(b, Math.max(a, Number(v) || 0));
+  const ev = eventoSemMarca(e);
+  // modo jogo: cada evento vem marcado (o ajudante 1.4+ manda como jogo mesmo sem o "modo")
+  if (ev && e.jogo === true && ['mouse', 'wheel', 'tecla'].includes(ev.t)) ev.jogo = true;
+  return ev;
+}
+
+function eventoSemMarca(e) {
+  const n =(v, a, b) => Math.min(b, Math.max(a, Number(v) || 0));
   const mod = n(e.mod, 0, 15) | 0;
   if (e.t === 'mouse' && ['down', 'up', 'move'].includes(e.a)) {
     const ev = { t: 'mouse', a: e.a, x: e.x === undefined && e.dx !== undefined ? 0.5 : n(e.x, 0, 1), y: e.y === undefined && e.dy !== undefined ? 0.5 : n(e.y, 0, 1), b: ['left', 'right', 'middle'].includes(e.b) ? e.b : 'left', n: n(e.n, 1, 3) | 0, arrastando: !!e.arrastando, mod };
@@ -1064,6 +1072,26 @@ function attachSockets(io) {
   const fantasmasDoSocket = ligarFantasmas(io, rooms, jogoLigado, moedasDoJogo); // caça-fantasmas (fantasmas-servidor.js)
   const kartDoSocket = ligarKart(io, rooms, jogoLigado, moedasDoJogo); // kart (kart-servidor.js)
   const pintaDoSocket = ligarPinta(io, rooms, jogoLigado, moedasDoJogo); // pinta-território (pinta-servidor.js)
+  // o telão a serviço da música da sala ("música no telão"): sem autor (by), para ninguém receber o
+  // aviso "fulano colocou um vídeo" a cada faixa que entra
+  const telaoDaMusica = {
+    carregar(room, id, time, playing) {
+      Object.assign(room.media, { provider: 'youtube', id, playing, time: Math.max(0, time), updatedAt: Date.now(), by: null });
+      room.main = 'media';
+      io.to(room.id).emit('main', { source: 'media', by: null });
+      io.to(room.id).emit('media', { ...mediaSnapshot(room), action: 'load' });
+    },
+    tocar(room, playing, time) {
+      Object.assign(room.media, { playing, time: Math.max(0, time), updatedAt: Date.now() });
+      io.to(room.id).emit('media', { ...mediaSnapshot(room), action: playing ? 'play' : 'pause' });
+    },
+    parar(room) {
+      Object.assign(room.media, { provider: null, id: null, playing: false, time: 0, updatedAt: Date.now() });
+      io.to(room.id).emit('media', { ...mediaSnapshot(room), action: 'stop' });
+    },
+    agora: (room) => ({ tempo: mediaCurrentTime(room.media), tocando: !!room.media.playing }),
+  };
+  const musicaDoSocket = ligarMusica(io, telaoDaMusica); // a fila de música da sala (musica-servidor.js)
   // alerta para os gestores que estão na sala (menos a própria pessoa)
   function avisarGestores(room, user, tipo, texto) {
     for (const u of room.users.values()) {
@@ -1124,6 +1152,7 @@ function attachSockets(io) {
     fantasmasDoSocket(socket, () => ({ room, user }));
     kartDoSocket(socket, () => ({ room, user }));
     pintaDoSocket(socket, () => ({ room, user }));
+    musicaDoSocket(socket, () => ({ room, user }));
 
     let entrando = false;
     let dono = false; // esta conexão provou ser o dono da sala (senha)
@@ -1418,7 +1447,7 @@ function attachSockets(io) {
     // Cada chamada é mais uma aba/janela (ou um arquivo) numa tela livre. No escritório, numa tela
     // da sala onde a pessoa está (sala = id do departamento), se tiver alguma livre.
     socket.on('share-start', (msg, ack) => {
-      const { streamId, sala, tela } = obj(msg);
+      const { streamId, sala, tela, superficie } = obj(msg);
       const reply = typeof ack === 'function' ? ack : () => {};
       if (!user) return;
       const sid = cleanText(streamId, 80);
@@ -1440,7 +1469,9 @@ function attachSockets(io) {
       }
       const key = `${user.id}~${++user.shareSeq}`;
       // site/titulo: em que página a aba compartilhada está (só o domínio, nunca o endereço inteiro)
-      const share = { key, slot, streamId: sid, controle: false, site: null, titulo: null };
+      // superficie: aba, janela ou tela inteira — o vídeo que chega aos outros não diz (só o de quem
+      // captura), e é por ela que eles sabem se dá para usar o modo jogo
+      const share = { key, slot, streamId: sid, controle: false, site: null, titulo: null, superficie: ['browser', 'window', 'monitor'].includes(superficie) ? superficie : null };
       if (slot != null) room.slots[slot] = key;
       user.shares.set(key, share);
       // Telão vazio? Fixa a tela compartilhada nele automaticamente.
@@ -1548,6 +1579,12 @@ function attachSockets(io) {
       const m = room.media;
       const now = Date.now();
       const current = mediaCurrentTime(m);
+      // o clipe não toca no player deste navegador: só importa para a música no telão (pula a faixa)
+      if (msg.action === 'erro') {
+        if (m.provider === 'youtube') musicaDoSocket.doTelao.erro(room, m.id);
+        return;
+      }
+      const daMusica = m.provider === 'youtube' ? m.id : null; // o que tocava antes desta ação
       switch (msg.action) {
         case 'load': {
           const provider = String(msg.provider || '');
@@ -1573,13 +1610,24 @@ function attachSockets(io) {
           m.time = Math.max(0, t);
           break;
         }
-        case 'ended': if (m.playing && current > 3) Object.assign(m, { playing: false, time: current }); break;
+        case 'ended': {
+          // todos avisam o fim; só o primeiro conta (os outros chegam com o vídeo já parado)
+          if (!(m.playing && current > 3)) return;
+          Object.assign(m, { playing: false, time: current, updatedAt: now });
+          io.to(room.id).emit('media', { ...mediaSnapshot(room), action: 'ended' });
+          // música no telão: entra a próxima da fila (que carrega no telão)
+          if (daMusica) musicaDoSocket.doTelao.acabou(room, daMusica);
+          return;
+        }
         case 'stop': Object.assign(m, { provider: null, id: null, playing: false, time: 0 }); break;
         default: return;
       }
       m.updatedAt = now;
       m.by = user.name;
       io.to(room.id).emit('media', { ...mediaSnapshot(room), action: msg.action });
+      // a música no telão acompanha o player dele, ou sai quando alguém põe outra coisa ali
+      if (msg.action === 'load' || msg.action === 'stop') musicaDoSocket.doTelao.trocou(room);
+      else musicaDoSocket.doTelao.mexeu(room);
     });
 
     // /pix: o dono da sala põe, tira ou acerta as moedas de quem está na sala. Não vai para o chat:
