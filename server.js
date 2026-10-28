@@ -1447,7 +1447,7 @@ function attachSockets(io) {
     // Cada chamada é mais uma aba/janela (ou um arquivo) numa tela livre. No escritório, numa tela
     // da sala onde a pessoa está (sala = id do departamento), se tiver alguma livre.
     socket.on('share-start', (msg, ack) => {
-      const { streamId, sala, tela } = obj(msg);
+      const { streamId, sala, tela, superficie } = obj(msg);
       const reply = typeof ack === 'function' ? ack : () => {};
       if (!user) return;
       const sid = cleanText(streamId, 80);
@@ -1469,7 +1469,9 @@ function attachSockets(io) {
       }
       const key = `${user.id}~${++user.shareSeq}`;
       // site/titulo: em que página a aba compartilhada está (só o domínio, nunca o endereço inteiro)
-      const share = { key, slot, streamId: sid, controle: false, site: null, titulo: null };
+      // superficie: aba, janela ou tela inteira — o vídeo que chega aos outros não diz (só o de quem
+      // captura), e é por ela que eles sabem se dá para usar o modo jogo
+      const share = { key, slot, streamId: sid, controle: false, site: null, titulo: null, superficie: ['browser', 'window', 'monitor'].includes(superficie) ? superficie : null };
       if (slot != null) room.slots[slot] = key;
       user.shares.set(key, share);
       // Telão vazio? Fixa a tela compartilhada nele automaticamente.

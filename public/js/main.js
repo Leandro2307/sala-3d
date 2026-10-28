@@ -1361,7 +1361,7 @@ function bindSocket() {
     refreshScreens();
   });
 
-  socket.on('share-update', ({ id, key, slot, streamId, gone, controle: podeControlar, site, titulo }) => {
+  socket.on('share-update', ({ id, key, slot, streamId, gone, controle: podeControlar, site, titulo, superficie }) => {
     const u = state.users.get(id);
     if (!u || typeof key !== 'string') return;
     const tinha = u.shares.get(key);
@@ -1372,6 +1372,7 @@ function bindSocket() {
       tinha.controle = !!podeControlar;
       tinha.site = site ?? null;
       tinha.titulo = titulo ?? null;
+      tinha.superficie = superficie ?? tinha.superficie ?? null;
       updateFocusCtrl();
     } else if (u.isSelf) {
       return;
@@ -1381,7 +1382,7 @@ function bindSocket() {
       soltarVideo(tinha);
       u.shares.delete(key);
     } else {
-      const sh = { key, slot: slot ?? null, streamId, video: null, controle: !!podeControlar, site: site ?? null, titulo: titulo ?? null };
+      const sh = { key, slot: slot ?? null, streamId, video: null, controle: !!podeControlar, site: site ?? null, titulo: titulo ?? null, superficie: superficie ?? null };
       u.shares.set(key, sh);
       toast(`${u.name} começou a compartilhar (${ondeEsta(sh)})`, 'info', 4500, u.color);
     }
@@ -2103,7 +2104,8 @@ async function capturarAbaDaExtensao({ streamId, aba, site, titulo }) {
 async function publishShare(stream, { file = false, height = 0, aba: abaConhecida = null, tela } = {}) {
   // no escritório, numa tela da sala onde a pessoa está
   const sala = world.salaEm(player.pos.x, player.pos.z);
-  const res = await new Promise((resolve) => socket.emit('share-start', { streamId: stream.id, sala, tela }, resolve));
+  const superficie = file ? null : stream.getVideoTracks()[0]?.getSettings?.().displaySurface ?? null;
+  const res = await new Promise((resolve) => socket.emit('share-start', { streamId: stream.id, sala, tela, superficie }, resolve));
   if (!res?.ok) {
     if (!file) for (const t of stream.getTracks()) t.stop();
     toast(res?.error || 'Não foi possível compartilhar.', 'error');
@@ -2228,10 +2230,16 @@ function updateShareButton() {
   if (!n) $('#share-pop').hidden = true;
 }
 
+// aba, janela ou tela inteira: o vídeo capturado aqui diz; o que chega de outra pessoa não
+// (getSettings do vídeo recebido vem sem displaySurface) — aí vale o que ela avisou à sala
+function superficieDe(sh) {
+  return sh.video?.srcObject?.getVideoTracks()[0]?.getSettings?.().displaySurface || sh.superficie || null;
+}
+
 // o que a pessoa escolheu no seletor do navegador
 function tipoDaTela(sh) {
   if (sh.file) return 'Vídeo do computador';
-  const surf = sh.video?.srcObject?.getVideoTracks()[0]?.getSettings?.().displaySurface;
+  const surf = superficieDe(sh);
   return surf === 'browser' ? 'Aba' : surf === 'window' ? 'Janela' : surf === 'monitor' ? 'Tela inteira' : 'Tela';
 }
 
@@ -2662,7 +2670,7 @@ function updateFocusCtrl() {
   // Modo jogo: só em janela/tela inteira dos outros (o ajudante nativo é quem manda delta/scancode)
   const jb = $('#focus-jogo');
   const janela = !!t && !t.user.isSelf
-    && ['window', 'monitor'].includes(t.share.video?.srcObject?.getVideoTracks?.()[0]?.getSettings?.().displaySurface);
+    && ['window', 'monitor'].includes(superficieDe(t.share));
   if ((!on || !janela) && controle.jogoNo === fv) controle.desligarJogo();
   jb.hidden = !on || !janela;
   const emJogo = controle.jogoNo === fv;
