@@ -728,13 +728,14 @@ export class Cartas {
     const levou = this.bonecoDe(M, alvo);
     const eu = alvoId && alvoId === this.eu;
     quem?.tapa(); // o braço do arremesso
-    this.sfx.tapa?.(vol);
+    this.sfx.arremessoVoo?.(vol);
     if (this.ativa === M) this.voarCoisa(de, alvo, A.emoji);
     setTimeout(() => {
-      levou?.levarTapa(dir, !eu);
+      this.sfx.arremesso?.(item, vol); // cada coisa com o seu barulho (a galinha cacareja, o ovo estala)
+      levou?.levarTapa(dir, !eu, A.texto);
       levou?.say(A.emoji);
       if (this.ativa === M && alvo !== M.lugar) this.balao(alvo, `${A.emoji} ${A.texto}`, true);
-      if (eu) this.levou?.('tapa', deNome, dir);
+      if (eu) this.levou?.('arremesso', deNome, dir, A);
     }, 480);
   }
 
@@ -1517,6 +1518,9 @@ body.ct-sentado #controls-help, body.ct-sentado #sit-hint { display: none !impor
 .ct-lado .ct-b { width: 100%; }
 .ct-dica { font-size: 12px; color: #a9bfc2; text-align: center; line-height: 1.3; padding: 0 2px; }
 /* as plaquinhas em cima das cadeiras */
+/* z-index: as plaquinhas (e o balão e o menu do que jogar que abrem nelas) ficam na frente da caixa
+   do rival do 21; a que está com o menu aberto, na frente das outras */
+.ct-assento { z-index: 1; } .ct-assento.aberto, .ct-assento:has(> .ct-arremesso:not([hidden])) { z-index: 2; }
 .ct-assento { position: absolute; left: 0; top: 0; display: flex; justify-items: center; gap: 3px; will-change: transform; }
 .ct-placa { display: flex; align-items: center; gap: 6px; padding: 3px 8px 4px; border-radius: 9px; background: #3a5055; box-shadow: 0 3px 0 #1e2b2d;
   border: 2px solid var(--time, #5f7377); white-space: nowrap; font-size: 14px; }

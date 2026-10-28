@@ -104,16 +104,16 @@ export const SINAIS = [
 ];
 
 // As coisas que dá para jogar em quem está na mesa ('ct-arremesso'), de brincadeira. texto: o barulho
-// do acerto no balão.
+// do acerto no balão; um: como aparece no aviso de quem levou ("Fulano jogou um ovo em você!").
 export const ARREMESSOS = {
-  tomate: { nome: 'Tomate', emoji: '🍅', texto: 'SPLAT!' },
-  galinha: { nome: 'Galinha', emoji: '🐔', texto: 'COCORICÓ!' },
-  ovo: { nome: 'Ovo', emoji: '🥚', texto: 'PLOC!' },
-  torta: { nome: 'Torta', emoji: '🥧', texto: 'PÁ!' },
-  chinelo: { nome: 'Chinelo', emoji: '🩴', texto: 'CHAP!' },
-  peixe: { nome: 'Peixe', emoji: '🐟', texto: 'FLAP!' },
-  agua: { nome: 'Balão d’água', emoji: '💦', texto: 'SPLASH!' },
-  coco: { nome: 'Coco', emoji: '🥥', texto: 'TUM!' },
+  tomate: { nome: 'Tomate', emoji: '🍅', texto: 'SPLAT!', um: 'um tomate' },
+  galinha: { nome: 'Galinha', emoji: '🐔', texto: 'COCORICÓ!', um: 'uma galinha' },
+  ovo: { nome: 'Ovo', emoji: '🥚', texto: 'PLOC!', um: 'um ovo' },
+  torta: { nome: 'Torta', emoji: '🥧', texto: 'PÁ!', um: 'uma torta' },
+  chinelo: { nome: 'Chinelo', emoji: '🩴', texto: 'CHAP!', um: 'um chinelo' },
+  peixe: { nome: 'Peixe', emoji: '🐟', texto: 'FLAP!', um: 'um peixe' },
+  agua: { nome: 'Balão d’água', emoji: '💦', texto: 'SPLASH!', um: 'um balão d’água' },
+  coco: { nome: 'Coco', emoji: '🥥', texto: 'TUM!', um: 'um coco' },
 };
 
 // ------------------------------------------------------------------ uno

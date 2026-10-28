@@ -163,6 +163,57 @@ export const sfx = {
   },
   // a mão passando no vazio
   tapaVento: () => ruido({ dur: 0.16, gain: 0.04, type: 'bandpass', freq: 2200, toFreq: 700, q: 1 }),
+  // a coisa jogada na mesa de cartas (ARREMESSOS em cartas-regras.js): o vento de quando sai da mão
+  // e o barulho de cada uma quando acerta
+  arremessoVoo: (vol = 1) => ruido({ dur: 0.3, gain: 0.05 * vol, type: 'bandpass', freq: 1600, toFreq: 500, q: 1.2 }),
+  arremesso: (item, vol = 1) => {
+    if (vol <= 0.02) return;
+    const v = vol;
+    switch (item) {
+      case 'galinha':
+        // có, có, cocoricóóó: cacarejo nasalado (quadrada) caindo de tom, e o último esticado
+        [0, 0.13, 0.26].forEach((d) => tone({ freq: 760, to: 520, dur: 0.08, type: 'square', gain: 0.035 * v, delay: d }));
+        tone({ freq: 620, to: 980, dur: 0.16, type: 'sawtooth', gain: 0.03 * v, delay: 0.42 });
+        tone({ freq: 980, to: 560, dur: 0.32, type: 'sawtooth', gain: 0.03 * v, delay: 0.58 });
+        ruido({ dur: 0.25, gain: 0.05 * v, type: 'bandpass', freq: 3000, toFreq: 1500, q: 0.8 }); // as penas
+        break;
+      case 'ovo':
+        // a casca estala (tique agudo) e a gema escorre (ploc grave e molhado)
+        ruido({ dur: 0.03, gain: 0.16 * v, type: 'highpass', freq: 3800, q: 1 });
+        ruido({ dur: 0.025, gain: 0.1 * v, type: 'highpass', freq: 3000, q: 1, delay: 0.035 });
+        tone({ freq: 520, to: 180, dur: 0.12, type: 'sine', gain: 0.09 * v, delay: 0.05 });
+        ruido({ dur: 0.18, gain: 0.07 * v, type: 'lowpass', freq: 900, toFreq: 250, q: 2, delay: 0.06 });
+        break;
+      case 'tomate':
+      case 'torta':
+        // splat: rajada molhada que abafa, e o tum do peso
+        ruido({ dur: 0.28, gain: 0.16 * v, type: 'lowpass', freq: 2400, toFreq: 300, q: 1.5 });
+        tone({ freq: item === 'torta' ? 140 : 200, to: 70, dur: 0.14, type: 'sine', gain: 0.1 * v });
+        break;
+      case 'chinelo':
+        // chap: o estalo da borracha (um tapa mais seco)
+        ruido({ dur: 0.05, gain: 0.26 * v, type: 'highpass', freq: 2200, q: 0.7 });
+        tone({ freq: 380, to: 160, dur: 0.06, type: 'triangle', gain: 0.06 * v });
+        break;
+      case 'peixe':
+        // flap flap: dois tapas molhados
+        [0, 0.12].forEach((d) => ruido({ dur: 0.09, gain: 0.14 * v, type: 'bandpass', freq: 1300, toFreq: 500, q: 2, delay: d }));
+        break;
+      case 'agua':
+        // o balão estoura e a água espirra
+        ruido({ dur: 0.04, gain: 0.2 * v, type: 'highpass', freq: 2500, q: 0.7 });
+        ruido({ dur: 0.55, gain: 0.1 * v, type: 'highpass', freq: 1800, toFreq: 5000, q: 0.6, delay: 0.02 });
+        break;
+      case 'coco':
+        // tum oco: madeira batendo
+        tone({ freq: 240, to: 150, dur: 0.18, type: 'sine', gain: 0.16 * v });
+        tone({ freq: 720, to: 450, dur: 0.06, type: 'triangle', gain: 0.05 * v });
+        ruido({ dur: 0.04, gain: 0.08 * v, type: 'bandpass', freq: 1200, q: 3 });
+        break;
+      default:
+        sfx.tapa(v);
+    }
+  },
 
   // Cartas (como no Balatro): o clique de escolher sobe de tom a cada carta, a carta voando, o tique
   // de cada ponto contado (subindo também) e o fogo do truco

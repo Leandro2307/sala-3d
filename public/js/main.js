@@ -250,7 +250,7 @@ const cartas = new Cartas({
   focar: () => focarCartas(),
   soltarFoco: () => { if (state.focus?.kind === 'cartas') sairDoFoco(); },
   avatarDe: (id) => state.users.get(id)?.avatar ?? null, // gritos, tapa e tiro mexem no boneco de quem está na mesa
-  levou: (tipo, nome, dir) => (tipo === 'tiro' ? leveiTiro(nome) : leveiTapa(nome, dir)),
+  levou: (tipo, nome, dir, item) => (tipo === 'tiro' ? leveiTiro(nome) : leveiTapa(nome, dir, item)),
   tiroFx: (de, ate) => desenharTiro(de, ate),
 });
 jogosDoParque.push(cartas);
@@ -5394,8 +5394,9 @@ function darTapa(alvoId = null) {
   socket?.emit('tapa', { to: alvoId });
 }
 
-// levei um tapa: empurrão (em pé; sentado na mesa ou no sofá só a tela sacode) e a marca da mão
-function leveiTapa(nome, dir) {
+// levei um tapa: empurrão (em pé; sentado na mesa ou no sofá só a tela sacode) e a marca da mão.
+// item: a coisa jogada na mesa de cartas (ARREMESSOS): a marca vira ela (a galinha, o ovo...)
+function leveiTapa(nome, dir, item) {
   if (!player.override && !player.sitting && Array.isArray(dir)) {
     player.vel.x += dir[0] * TAPA.empurrao;
     player.vel.z += dir[1] * TAPA.empurrao;
@@ -5404,7 +5405,8 @@ function leveiTapa(nome, dir) {
     player.ground = null;
   }
   player.addShake(0.8);
-  marcaNaTela('🖐️', 'PLAFT!', nome ? `${nome} te deu um tapa!` : 'Levou um tapa!', false);
+  if (item) marcaNaTela(item.emoji, item.texto, nome ? `${nome} jogou ${item.um} em você!` : `Levou ${item.um}!`, false);
+  else marcaNaTela('🖐️', 'PLAFT!', nome ? `${nome} te deu um tapa!` : 'Levou um tapa!', false);
 }
 
 // levei um tiro de brincadeira na mesa de cartas: a tela treme mais, o clarão e o BANG!
