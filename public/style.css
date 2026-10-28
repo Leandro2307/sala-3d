@@ -1166,6 +1166,9 @@ body.touch .help-grid[data-input="touch"] { display: grid; }
   padding: 10px 14px;
   background: linear-gradient(0deg, rgba(8, 9, 13, 0.7), rgba(8, 9, 13, 0));
   pointer-events: none;
+  /* camada própria: no app instalado do iPhone o canvas 3D, ao começar a desenhar, passava por
+     cima da barra (ela continuava lá e respondia ao toque, mas não aparecia) */
+  transform: translateZ(0);
 }
 #bar > * { pointer-events: auto; }
 .bar-left { display: flex; gap: 8px; align-items: center; font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; }

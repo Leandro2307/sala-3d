@@ -1021,7 +1021,6 @@ async function join() {
   iniciarGuiaBoasVindas();
   $('#hud').hidden = false;
   $('#bar').hidden = false;
-  diagBarra(); // TEMP diagnóstico da barra no PWA do iPhone
   avisarExtensaoVelha();
   localAvatar.setName(name);
   irParaEntrada();
@@ -1077,36 +1076,6 @@ async function join() {
       toast('Vire o celular na horizontal para jogar melhor.', 'warn', 7000);
     }
   }
-}
-
-// TEMP: diagnóstico da barra que some no PWA do iPhone. Mostra por 12 s o estado da #bar e o que
-// está no ponto do microfone e do nome da sala. Tocar na caixa fecha.
-function diagBarra() {
-  if (!instalado && params.get('diag') !== '1') return;
-  const caixa = document.createElement('pre');
-  caixa.style.cssText = 'position:fixed;left:4px;bottom:4px;z-index:99999;max-width:70vw;max-height:60vh;overflow:auto;margin:0;padding:6px;font:10px/1.3 monospace;color:#0f0;background:rgba(0,0,0,.85);white-space:pre-wrap;pointer-events:auto';
-  caixa.addEventListener('click', () => caixa.remove());
-  document.body.append(caixa);
-  const nome = (el) => el ? `${el.tagName.toLowerCase()}${el.id ? '#' + el.id : ''}${el.className && typeof el.className === 'string' ? '.' + el.className.trim().split(/\s+/).join('.') : ''}${el.closest('[id]') && el.closest('[id]') !== el ? ' em #' + el.closest('[id]').id : ''}` : 'nada';
-  const linhas = [];
-  const t0 = performance.now();
-  const medir = () => {
-    const b = $('#bar');
-    const cs = getComputedStyle(b);
-    const r = b.getBoundingClientRect();
-    const mic = $('#btn-mic').getBoundingClientRect();
-    const sala = $('#bar-room').getBoundingClientRect();
-    const noMic = document.elementFromPoint(mic.left + mic.width / 2, mic.top + mic.height / 2);
-    const naSala = document.elementFromPoint(sala.left + 5, sala.top + sala.height / 2);
-    linhas.push(`${Math.round(performance.now() - t0)}ms hid=${b.hidden} disp=${cs.display} vis=${cs.visibility} op=${cs.opacity} tr=${cs.transform}`
-      + ` bar=${Math.round(r.left)},${Math.round(r.top)} ${Math.round(r.width)}x${Math.round(r.height)} mic=${Math.round(mic.left)},${Math.round(mic.top)} ${Math.round(mic.width)}x${Math.round(mic.height)}`
-      + ` vp=${innerWidth}x${innerHeight} vv=${Math.round(visualViewport?.width)}x${Math.round(visualViewport?.height)}@${Math.round(visualViewport?.offsetTop)} sy=${scrollY}`
-      + `\n  noMic=${nome(noMic)} naSala=${nome(naSala)}\n  body=${document.body.className} jogo=${document.body.dataset.jogo || ''}`);
-    caixa.textContent = linhas.slice(-6).join('\n');
-  };
-  medir();
-  const iv = setInterval(medir, 500);
-  setTimeout(() => clearInterval(iv), 12000);
 }
 
 function emitJoin() {
