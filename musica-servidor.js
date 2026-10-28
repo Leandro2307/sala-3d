@@ -102,11 +102,29 @@ async function playlist(id) {
 
 // o "Mix" que o YouTube monta a partir de uma música (playlist RD + id): músicas do mesmo estilo.
 // As de até 10 min primeiro, para o rádio não emendar uma coletânea de 2 horas.
+// Pede pela API interna do site (a mesma que a página chama ao trocar de vídeo): a página
+// /watch costuma vir sem a lista para servidor de datacenter (no Render ela voltava vazia).
+// Se a API também falhar, tenta a página.
 async function mix(v) {
+  try {
+    const res = await fetch('https://www.youtube.com/youtubei/v1/next?prettyPrint=false', {
+      method: 'POST',
+      headers: { ...NAVEGADOR, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ context: { client: { clientName: 'WEB', clientVersion: '2.20260101.00.00', hl: 'pt-BR', gl: 'BR' } }, videoId: v, playlistId: `RD${v}` }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (res.ok) {
+      const achou = listaDoMix(v, await res.json());
+      if (achou.length) return achou;
+    }
+  } catch { /* tenta a página */ }
   const res = await fetch(`https://www.youtube.com/watch?v=${v}&list=RD${v}&hl=pt-BR&gl=BR`, { headers: NAVEGADOR, signal: AbortSignal.timeout(10_000) });
   if (!res.ok) throw new Error(`YouTube respondeu ${res.status}`);
-  const html = await res.text();
-  const m = html.match(/var ytInitialData = (\{.*?\});<\/script>/s);
+  const m = (await res.text()).match(/var ytInitialData = (\{.*?\});<\/script>/s);
+  return m ? listaDoMix(v, JSON.parse(m[1])) : [];
+}
+
+function listaDoMix(v, dados) {
   const musicas = [];
   const longas = [];
   const andar = (no) => {
@@ -121,9 +139,12 @@ async function mix(v) {
     }
     for (const filho of Object.values(no)) andar(filho);
   };
-  if (m) andar(JSON.parse(m[1]));
+  andar(dados);
   return [...musicas, ...longas];
 }
+
+// o artista de um título "Artista - Música (Clipe Oficial)", para o rádio buscar quando o Mix falha
+const artistaDo = (titulo) => String(titulo).split(/\s[-–|]\s/)[0].replace(/\(.*?\)|\[.*?\]/g, '').trim().slice(0, 60);
 
 // título de um vídeo só (o oEmbed é público e não pede chave)
 async function umVideo(v) {
@@ -276,14 +297,19 @@ function ligarMusica(io) {
       m.radioSeq = m.seq;
       const ultima = m.fila[m.idx];
       try {
-        const achou = await mix(ultima.v);
+        let achou = await mix(ultima.v).catch((err) => {
+          console.warn('  Música: o rádio não leu o mix do YouTube:', err.message);
+          return [];
+        });
+        // sem Mix: busca pelo artista da última (a busca funciona onde o Mix não abre)
+        if (!achou.length) achou = await buscar(artistaDo(ultima.t), 15);
         // enquanto buscava, alguém pôs música (ou apagou a fila): aí não precisa mais
         if (m.fila.at(-1) !== ultima) return;
         const naFila = new Set(m.fila.map((x) => x.v));
         const nova = achou.find((x) => !naFila.has(x.v));
         if (nova) enfileirar(room, { name: 'Rádio' }, [nova]);
       } catch (err) {
-        console.warn('  Música: o rádio não leu o mix do YouTube:', err.message);
+        console.warn('  Música: o rádio não achou música parecida:', err.message);
       }
     });
 
