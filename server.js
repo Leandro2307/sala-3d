@@ -732,6 +732,8 @@ function voltaDoControle(raw) {
     const site = /^[a-z0-9.-]{1,100}$/i.test(String(e.site ?? '')) ? String(e.site).toLowerCase() : null;
     return { t: 'dialogo', tipo: e.tipo, msg: String(e.msg ?? '').slice(0, 500), padrao: String(e.padrao ?? '').slice(0, 200), site };
   }
+  // o programa compartilhado está como administrador: o controle de quem mexeu não chega nele
+  if (e.t === 'admin') return { t: 'admin', titulo: String(e.titulo ?? '').replace(/[\u0000-\u001f]/g, '').slice(0, 120) };
   return null;
 }
 

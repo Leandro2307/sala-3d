@@ -21,6 +21,8 @@
 // lock) e o mouse vai como DELTA, não como posição — é assim que jogos tipo Minecraft giram a
 // câmera. As teclas já vão com o "code" físico, e o ajudante nativo as manda como scancode.
 // Esc solta o ponteiro (o jogo recebe um Esc e abre o menu dele); clicar na tela prende de novo.
+// Pelo canal direto a câmera sai a cada JOGO_MS e o movimento é lido no pointerrawupdate, que vem
+// na hora em que o mouse mexe (o pointermove espera o próximo quadro da tela).
 //
 // A volta (extensão 1.11+): o que o site da aba controlada responde vai para quem mexeu por último
 // nela (this.ultimo) — um aviso do site (alert, confirm...) esperando resposta (ver aviso-site.js)
@@ -33,6 +35,9 @@ const MOVE_MS = 25;
 const ARRASTO_MS = 16;
 const RODA_MS = 30;
 const RODA_MINHA_MS = 8;
+// Modo jogo pelo canal direto (sem o servidor e o limite dele): ~125 movimentos por segundo. Os
+// 25 ms do MOVE_MS eram atraso puro na câmera, e ela andava aos trancos.
+const JOGO_MS = 8;
 // Duplo e triplo clique: o pointerdown do Chrome vem sempre com detail 0 (só o mousedown traz a
 // contagem), e a aba controlada recebia todo clique como o primeiro — sem duplo clique para
 // selecionar palavra. A conta é feita aqui, como no Windows: mesmo botão, perto e logo em seguida.
@@ -74,8 +79,9 @@ export function eventoDeControle(e) {
 export const versaoNum = (v) => String(v || '0').split('.').map(Number).reduce((s, n, i) => s + (n || 0) * [1e6, 1e3, 1][i], 0);
 
 export class Controle {
-  constructor({ emitir, toast, onExtensao, minha, semPonteiro = false }) {
+  constructor({ emitir, toast, onExtensao, minha, direto, semPonteiro = false }) {
     this.emitir = emitir;
+    this.direto = direto || (() => false); // chave -> o evento vai pelo canal direto (sem servidor)?
     this.semPonteiro = semPonteiro; // celular: sem ponteiro preso no modo jogo (ver toque-jogo.js)
     this.toast = toast;
     this.onExtensao = onExtensao;
@@ -101,6 +107,7 @@ export class Controle {
     this.arrastando = null; // { video, key, b, x, y, n }
     this.ultimoClique = null; // { video, b, x, y, t, n }: para contar duplo e triplo clique
     this.jogo = null; // { video, key }: modo jogo ligado nessa tela (ver o cabeçalho)
+    this.cru = false; // o pointerrawupdate traz o movimento (aí o pointermove não manda de novo)
     // quem compartilha: key -> { deId, de, quando } de quem mexeu por último (deId null = eu mesmo)
     this.ultimo = new Map();
     // quem controla: key -> quando mandei algo para essa tela, e quando pedi um Ctrl+C nela (a volta
@@ -267,6 +274,12 @@ export class Controle {
     return this.pedir('janela-retomar', null, null, null, 15000);
   }
 
+  // o ajudante passa a cuidar dessa janela sem mexer em nada: a resposta diz se ela está como
+  // administrador (extensão 1.12+), e aí ninguém conseguiria mexer nela
+  conferirJanela(alvo) {
+    return this.pedir('janela', null, null, alvo);
+  }
+
   // ---------------------------------------------------------------- quem compartilha
   // Chegou um clique/tecla de alguém para uma das minhas telas.
   async receber(sh, { ev, de, deId }) {
@@ -285,6 +298,8 @@ export class Controle {
       else if (!['sem-resposta', 'cortado', 'sem-dialogo'].includes(r.erro)) console.warn('[controle]', r.erro);
       return;
     }
+    // o programa está como administrador: o evento foi, mas o Windows não deixou chegar nele
+    if (r?.admin) this.onAdmin?.(sh, String(r.admin.titulo || ''), deId || null);
     // Ctrl+C de quem controla de longe: o texto vai para a área de transferência dela (mexendo na
     // minha própria aba, o Chrome já copiou para a minha)
     if (deId && typeof r?.copia === 'string' && r.copia) this.emitir('controle-volta', { key: sh.key, para: deId, ev: { t: 'copia', s: r.copia } });
@@ -388,6 +403,16 @@ export class Controle {
     const falta = this.ultimoMove + intervalo - performance.now();
     if (falta <= 0) this.enviarMove();
     else this.moveTimer = setTimeout(() => this.enviarMove(), falta);
+  }
+
+  // modo jogo: o delta do mouse preso; pelo canal direto sai mais vezes (JOGO_MS)
+  moverJogo(v, e, a) {
+    const dx = e.movementX || 0;
+    const dy = e.movementY || 0;
+    if (!dx && !dy) return;
+    const key = this.superficies.get(v);
+    const ms = this.direto(key) ? JOGO_MS : a ? ARRASTO_MS : MOVE_MS;
+    this.mover(key, { t: 'mouse', a: 'move', dx, dy, b: a?.b || 'left', arrastando: !!a, mod: MOD(e) }, ms);
   }
 
   enviarMove() {
@@ -518,9 +543,7 @@ export class Controle {
       if (!v) return;
       // modo jogo com o ponteiro travado: o movimento vai como delta (é o que gira a câmera)
       if (this.jogo && this.jogo.video === v && document.pointerLockElement === v) {
-        const dx = e.movementX || 0;
-        const dy = e.movementY || 0;
-        if (dx || dy) this.mover(this.superficies.get(v), { t: 'mouse', a: 'move', dx, dy, b: a?.b || 'left', arrastando: !!a, mod: MOD(e) }, a ? ARRASTO_MS : MOVE_MS);
+        if (!this.cru) this.moverJogo(v, e, a);
         return;
       }
       const p = this.ponto(v, e);
@@ -528,6 +551,15 @@ export class Controle {
       if (a) Object.assign(a, { x: p.x, y: p.y });
       const ev = { t: 'mouse', a: 'move', x: p.x, y: p.y, b: a?.b || 'left', arrastando: !!a, mod: MOD(e) };
       this.mover(this.superficies.get(v), ev, a ? ARRASTO_MS : MOVE_MS);
+    });
+    // O mesmo movimento, sem esperar o quadro da tela (até 16 ms a 60 Hz). O primeiro que chega
+    // com movimento de verdade tira o pointermove da jogada; navegador que não manda movimento
+    // aqui fica com o pointermove, como antes.
+    document.addEventListener('pointerrawupdate', (e) => {
+      const j = this.jogo;
+      if (!j || document.pointerLockElement !== j.video || (!e.movementX && !e.movementY)) return;
+      this.cru = true;
+      this.moverJogo(j.video, e, this.arrastando?.video === j.video ? this.arrastando : null);
     });
     document.addEventListener('wheel', (e) => {
       const v = sob(e);

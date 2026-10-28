@@ -14,6 +14,11 @@
 // Minecraft leem a câmera pelo movimento RELATIVO do mouse (SetCursorPos não gera isso) e as
 // teclas pelo código físico (scancode) — letra mandada como texto Unicode não anda com o
 // personagem nem fica pressionada. No modo jogo o mouse vai como delta e as teclas como scancode.
+//
+// Programa aberto como administrador: o Windows não deixa um programa comum (este, aberto pelo
+// Chrome) mandar mouse e teclado para ele. O SendInput "dá certo" e o evento some, sem erro
+// nenhum. Por isso o ajudante confere a janela que recebe a entrada e avisa a extensão
+// ({ tipo: "admin" }): a sala diz a quem compartilha e a quem controla o que está acontecendo.
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -71,6 +76,14 @@ namespace Sala3d
         [DllImport("user32.dll")] static extern bool EnumDisplayMonitors(IntPtr dc, IntPtr clip, EnumMon p, IntPtr l);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern bool GetMonitorInfo(IntPtr m, ref MONITORINFOEX mi);
         [DllImport("user32.dll")] static extern int GetSystemMetrics(int i);
+        [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+        [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(PONTO p);
+        [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr h, uint f);
+        [DllImport("kernel32.dll")] static extern IntPtr OpenProcess(uint acesso, bool herdar, uint pid);
+        [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
+        [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
+        [DllImport("advapi32.dll")] static extern bool OpenProcessToken(IntPtr p, uint acesso, out IntPtr token);
+        [DllImport("advapi32.dll")] static extern bool GetTokenInformation(IntPtr token, int classe, out int valor, int tam, out int devolvido);
 
         const uint INPUT_MOUSE = 0, INPUT_KEYBOARD = 1;
         const uint MOUSEEVENTF_MOVE = 1, KEYEVENTF_EXTENDEDKEY = 1, KEYEVENTF_KEYUP = 2, KEYEVENTF_UNICODE = 4, KEYEVENTF_SCANCODE = 8;
@@ -91,6 +104,11 @@ namespace Sala3d
         // modo jogo: mouse relativo + teclas por scancode; ctrl/altRemoto seguem o que NÓS apertamos
         static bool jogo, ctrlRemoto, altRemoto;
         static readonly HashSet<int> scansApertados = new HashSet<int>();
+        // administrador: se este programa é (null = ainda não viu), a última janela conferida e o
+        // último aviso mandado à extensão
+        static bool? euAdmin;
+        static IntPtr conferida = IntPtr.Zero;
+        static bool avisouAdmin;
 
         // ------------------------------------------------------------ protocolo
         static string Ler(Stream e)
@@ -126,7 +144,7 @@ namespace Sala3d
             saida = Console.OpenStandardOutput();
             var entrada = Console.OpenStandardInput();
             new Thread(VigiarAtalho) { IsBackground = true }.Start();
-            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.4.1" } });
+            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.5.0" } });
             var json = new JavaScriptSerializer();
             string txt;
             while ((txt = Ler(entrada)) != null)
@@ -157,6 +175,9 @@ namespace Sala3d
                 string sup = S(m, "superficie");
                 bool ok = rotulo == rotuloAtual && temAlvo ? true : DefinirAlvo(rotulo, sup);
                 if (ok) rotuloAtual = rotulo;
+                // janela: já diz se ela está como administrador (antes da resposta, para a extensão
+                // saber junto). Tela inteira: quem conta é a janela que recebe cada clique e tecla.
+                if (ok) ConferirAdmin(ehJanela ? janela : IntPtr.Zero, true);
                 RECT r; Retangulo(out r);
                 Escrever(new Dictionary<string, object> { { "tipo", "alvo" }, { "ok", ok }, { "rotulo", rotulo },
                     { "x", r.Left }, { "y", r.Top }, { "w", r.Right - r.Left }, { "h", r.Bottom - r.Top } });
@@ -276,6 +297,51 @@ namespace Sala3d
             return true;
         }
 
+        // ------------------------------------------------------------ administrador
+        static bool Elevado(IntPtr processo)
+        {
+            IntPtr token;
+            if (!OpenProcessToken(processo, 8 /* TOKEN_QUERY */, out token)) return false;
+            try { int v, r; return GetTokenInformation(token, 20 /* TokenElevation */, out v, 4, out r) && v != 0; }
+            finally { CloseHandle(token); }
+        }
+
+        // a entrada que este programa manda não chega nessa janela? (dele como administrador, e
+        // este não). Sem como saber (processo protegido), não avisa.
+        static bool JanelaDeAdmin(IntPtr h)
+        {
+            if (euAdmin == null) euAdmin = Elevado(GetCurrentProcess());
+            if (euAdmin == true || h == IntPtr.Zero) return false;
+            uint pid;
+            GetWindowThreadProcessId(h, out pid);
+            if (pid == 0) return false;
+            IntPtr p = OpenProcess(0x1000 /* PROCESS_QUERY_LIMITED_INFORMATION */, false, pid);
+            if (p == IntPtr.Zero) return false;
+            try { return Elevado(p); } finally { CloseHandle(p); }
+        }
+
+        // Avisa a extensão quando muda (sempre: avisa de qualquer jeito, para um alvo novo). Cada
+        // janela é conferida uma vez: no WASD de um jogo isso roda a cada tecla.
+        static void ConferirAdmin(IntPtr h, bool sempre = false)
+        {
+            if (!sempre && h == conferida) return;
+            conferida = h;
+            bool admin = JanelaDeAdmin(h);
+            if (!sempre && admin == avisouAdmin) return;
+            avisouAdmin = admin;
+            var titulo = new StringBuilder(256);
+            if (admin) GetWindowText(h, titulo, 256);
+            Escrever(new Dictionary<string, object> { { "tipo", "admin" }, { "admin", admin }, { "titulo", titulo.ToString() } });
+        }
+
+        // tela inteira: o clique cai na janela embaixo do cursor, e as teclas na da frente
+        static void ConferirSob()
+        {
+            PONTO c;
+            if (!ehJanela && GetCursorPos(out c)) ConferirAdmin(GetAncestor(WindowFromPoint(c), 2 /* GA_ROOT */));
+        }
+        static void ConferirFrente() { if (!ehJanela) ConferirAdmin(GetForegroundWindow()); }
+
         // traz a janela compartilhada para a frente antes do clique (o "Alt" destrava o
         // SetForegroundWindow, que o Windows recusa para quem não está em primeiro plano)
         static void Focar()
@@ -304,6 +370,7 @@ namespace Sala3d
             if (a == "down") Focar();
             SetCursorPos(x, y);
             if (a == "move") return;
+            if (a == "down") ConferirSob();
             uint desce = b == "right" ? MOUSEEVENTF_RIGHTDOWN : b == "middle" ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_LEFTDOWN;
             uint sobe = b == "right" ? MOUSEEVENTF_RIGHTUP : b == "middle" ? MOUSEEVENTF_MIDDLEUP : MOUSEEVENTF_LEFTUP;
             if (a == "down") { MouseFlag(desce); botoesApertados.Add(b); }
@@ -334,6 +401,7 @@ namespace Sala3d
                 if (Retangulo(out r) && GetCursorPos(out c) && (c.X < r.Left || c.X >= r.Right || c.Y < r.Top || c.Y >= r.Bottom))
                     SetCursorPos((r.Left + r.Right) / 2, (r.Top + r.Bottom) / 2);
                 Focar();
+                ConferirSob();
             }
             if (a == "move")
             {
@@ -398,6 +466,7 @@ namespace Sala3d
             if (code == "End" && desce && ctrlRemoto && altRemoto) return;
             int scan;
             if (!SCANS.TryGetValue(code ?? "", out scan)) return;
+            if (desce) ConferirFrente();
             Scan(scan, !desce);
             if (desce) scansApertados.Add(scan); else scansApertados.Remove(scan);
         }
@@ -442,6 +511,7 @@ namespace Sala3d
             if (meta) return;
             // Ctrl+Alt+End é o atalho de emergência de quem compartilha: de fora, não
             if (kc == VK_END && ctrl && alt) return;
+            if (a == "down") ConferirFrente();
             // letra/símbolo sem Ctrl/Alt (ou do AltGr): vai como caractere — respeita acento e o
             // teclado de quem digita. Emoji são dois "char" (par substituto) e vão os dois.
             bool caractere = key.Length == 1 || (key.Length == 2 && char.IsSurrogatePair(key[0], key[1]));

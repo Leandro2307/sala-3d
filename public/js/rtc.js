@@ -175,6 +175,7 @@ export class RTC {
     // ao mesmo tempo. extraScale reduz vídeo de arquivo maior que o preset antes de codificar.
     this.screens = new Map(); // key -> { stream, extraScale }
     this.shareMode = 'max'; // preset das telas: leve, max ou ultra
+    this.medidas = new WeakMap(); // receptor de vídeo -> os totais da medida anterior (ver recebendo)
     escolherCodec();
 
     socket.on('signal', ({ from, data }) => this.handleSignal(from, data));
@@ -865,18 +866,44 @@ export class RTC {
     return melhor;
   }
 
-  // Como uma tela de outra pessoa está chegando aqui (altura e quadros por segundo): trackId é
-  // a trilha de vídeo que está no <video> daquela tela.
+  // Como uma tela de outra pessoa está chegando aqui: trackId é a trilha de vídeo que está no
+  // <video> daquela tela. altura e fps; atraso (ms), o que dá para medir deste lado: metade da ida
+  // e volta da rede + quanto cada quadro levou do 1º pacote chegar até estar decodificado (a
+  // espera do buffer e a decodificação), na média desde a medida anterior — a captura e a
+  // codificação no PC de quem compartilha não entram. turn: o caminho passa pelo servidor TURN
+  // ('udp', 'tcp' ou 'tls'; null = direto).
   async recebendo(peerId, trackId) {
     const peer = this.peers.get(peerId);
     const tr = peer?.pc.getTransceivers().find((t) => t.receiver.track?.id === trackId);
     if (!tr) return null;
-    let r = null;
+    let report;
     try {
-      (await tr.receiver.getStats()).forEach((s) => {
-        if (s.type === 'inbound-rtp' && s.kind === 'video' && s.frameHeight) r = { altura: s.frameHeight, fps: Math.round(s.framesPerSecond || 0) };
-      });
-    } catch { /* conexão fechando */ }
-    return r;
+      report = await tr.receiver.getStats();
+    } catch {
+      return null; // conexão fechando
+    }
+    let entrada = null;
+    let par = null;
+    report.forEach((s) => {
+      if (s.type === 'inbound-rtp' && s.kind === 'video' && s.frameHeight) entrada = s;
+      else if (s.type === 'transport' && s.selectedCandidatePairId) par = report.get(s.selectedCandidatePairId) || par;
+      else if (s.type === 'candidate-pair' && s.nominated && s.state === 'succeeded' && !par) par = s;
+    });
+    if (!entrada) return null;
+    const agora = { proc: entrada.totalProcessingDelay, quadros: entrada.framesDecoded, jb: entrada.jitterBufferDelay, jbn: entrada.jitterBufferEmittedCount };
+    const antes = this.medidas.get(tr.receiver);
+    this.medidas.set(tr.receiver, agora);
+    let espera = null;
+    if (antes && agora.proc != null && agora.quadros > antes.quadros) espera = (agora.proc - antes.proc) / (agora.quadros - antes.quadros);
+    else if (antes && agora.jb != null && agora.jbn > antes.jbn) espera = (agora.jb - antes.jb) / (agora.jbn - antes.jbn);
+    const rede = par?.currentRoundTripTime;
+    const local = par && report.get(par.localCandidateId);
+    const remoto = par && report.get(par.remoteCandidateId);
+    return {
+      altura: entrada.frameHeight,
+      fps: Math.round(entrada.framesPerSecond || 0),
+      atraso: espera == null ? null : Math.round(((rede || 0) / 2 + espera) * 1000),
+      turn: local?.candidateType === 'relay' ? local.relayProtocol || 'udp' : remoto?.candidateType === 'relay' ? 'udp' : null,
+    };
   }
 }

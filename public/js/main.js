@@ -1942,13 +1942,20 @@ async function medirEnvios() {
 }
 setInterval(() => { if (!$('#share-pop').hidden) medirEnvios(); }, 1000);
 
-// em foco: como a tela está chegando (altura e quadros)
+// em foco: como a tela está chegando (altura, quadros, atraso e se passa pelo TURN)
 async function medirFoco() {
   const el = $('#focus-qualidade');
   const t = state.focus?.kind === 'share' ? acharTela(state.focus.key) : null;
   const track = t && !t.user.isSelf ? t.share.video?.srcObject?.getVideoTracks()[0] : null;
   const r = track && rtc ? await rtc.recebendo(t.user.id, track.id) : null;
-  el.textContent = r ? `${r.altura}p · ${r.fps} qps` : '';
+  let texto = r ? `${r.altura}p · ${r.fps} qps` : '';
+  if (r?.atraso != null) texto += ` · ~${r.atraso} ms`;
+  // TURN por TCP: um pacote perdido segura todos os de trás (rede que bloqueia UDP)
+  if (r?.turn) texto += ` · via TURN${r.turn === 'udp' ? '' : ' (TCP)'}`;
+  el.textContent = texto;
+  el.title = r?.atraso != null
+    ? 'Atraso medido aqui: a rede (metade da ida e volta) mais a espera de cada quadro até ficar pronto. A captura e a codificação no PC de quem compartilha somam mais um pouco.'
+    : '';
 }
 setInterval(medirFoco, 1000);
 
@@ -2340,6 +2347,8 @@ const controle = new Controle({
     if (ev === 'controle-volta' && rtc?.mandarControle(data.para, { v: { key: data.key, ev: data.ev } })) return;
     return volatil ? socket?.volatile.emit(ev, data) : socket?.emit(ev, data);
   },
+  // o canal com o dono da tela está aberto (o modo jogo manda o mouse mais vezes por ele)
+  direto: (key) => !!rtc?.canalControle(String(key).split('~')[0]),
   semPonteiro: isTouch,
   // as minhas telas: o evento vai direto para a extensão, sem ida e volta pelo servidor
   minha: (key) => self()?.shares.get(key) ?? null,
@@ -2364,6 +2373,35 @@ function receberVolta({ key, ev, de } = {}) {
   if (typeof key !== 'string' || !ev) return;
   if (ev.t === 'copia' && typeof ev.s === 'string' && controle.pediuCopia(key)) copiarDaTela(ev.s, de);
   else if (ev.t === 'dialogo' && (ev.fechou || controle.mexeuEm(key))) avisoSite.receber(key, ev, `Na tela de ${de || 'alguém'}`);
+  else if (ev.t === 'admin' && controle.mexeuEm(key) && Date.now() - (avisosAdmin.get(`de:${key}`) || 0) > 30_000) {
+    avisosAdmin.set(`de:${key}`, Date.now());
+    const quem = de || 'quem compartilha';
+    toast(`O seu controle não chega na tela de ${quem}: ${ev.titulo ? `“${String(ev.titulo).slice(0, 40)}”` : 'o programa'} está aberto como administrador lá, e o Windows bloqueia. Peça para abrir sem administrador.`, 'warn', 12000);
+  }
+}
+
+// Programa aberto como administrador no PC de quem compartilha: o Windows não deixa o ajudante (um
+// programa comum) mexer nele, e os cliques e as teclas somem sem erro. Avisa quem compartilha e
+// quem estava mexendo — um aviso por tela a cada 30 s. Chaves: a tela; "de:" + tela do lado de
+// quem controla; "para:" + tela + pessoa para a volta.
+const avisosAdmin = new Map();
+controle.onAdmin = (sh, titulo, deId) => {
+  const agora = Date.now();
+  if (deId && agora - (avisosAdmin.get(`para:${sh.key}:${deId}`) || 0) > 30_000) {
+    avisosAdmin.set(`para:${sh.key}:${deId}`, agora);
+    controle.emitir('controle-volta', { key: sh.key, para: deId, ev: { t: 'admin', titulo } });
+  }
+  if (agora - (avisosAdmin.get(sh.key) || 0) < 30_000) return;
+  avisosAdmin.set(sh.key, agora);
+  toast(`${titulo ? `“${titulo.slice(0, 40)}”` : 'O programa compartilhado'} está aberto como administrador, e o Windows não deixa o controle chegar nele. Feche e abra de novo sem “Executar como administrador” (veja também em Propriedades → Compatibilidade do atalho).`, 'warn', 15000);
+};
+
+// Na hora de liberar uma janela: se ela está como administrador, avisa já (sem esperar alguém
+// tentar mexer e nada acontecer). Tela inteira é conferida a cada clique, na janela embaixo dele.
+async function conferirAdmin(sh) {
+  if (sh?.alvo?.superficie !== 'window') return;
+  const r = await controle.conferirJanela(sh.alvo);
+  if (r?.admin) controle.onAdmin(sh, String(r.admin.titulo || ''), null);
 }
 
 // O que chega pelo canal direto não passou pelo servidor: aqui se confere o que ele conferiria —
@@ -2507,6 +2545,7 @@ async function controleEmTodas() {
   const liberar = janelasOk ? [...abas, ...janelas] : abas;
   for (const s of liberar) socket.emit('controle-permitir', { key: s.key, on: true });
   if (liberar.length) toast(`Controle liberado em ${liberar.length} ${liberar.length === 1 ? 'tela' : 'telas'}: quem abrir já pode mexer.`, 'success', 5000);
+  if (janelasOk) for (const s of janelas) await conferirAdmin(s);
   if (janelas.length && !janelasOk) {
     toast('Janela e tela inteira precisam do ajudante do Windows — veja no guia.', 'warn', 8000);
     abrirGuiaExtensao('janelas');
@@ -2582,6 +2621,7 @@ async function permitirControle(key) {
   if (sh.aba != null && !controle.navega) {
     toast('Sua extensão é a versão antiga: sem barra de navegação e com links de aba nova fora da tela. Em chrome://extensions, clique em Recarregar na "Sala 3D — controle das abas".', 'warn', 11000);
   }
+  conferirAdmin(sh);
 }
 
 // Dá para mexer nesta tela daqui? As dos outros, se o dono liberou. As suas, só se for aba: quem

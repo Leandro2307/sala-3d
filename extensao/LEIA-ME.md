@@ -103,6 +103,14 @@ ou tela compartilhada. A tecla Windows nunca é enviada. **Ctrl+Alt+End** no seu
 controle na hora (só volta quando você liberar de novo). Para tirar: `nativo\desinstalar.bat`.
 Se mover a pasta do projeto, rode o `instalar.bat` de novo.
 
+**Programa aberto como administrador** (pelo "Executar como administrador", ou um launcher que
+abre o jogo assim): o Windows não deixa o ajudante, que é um programa comum, mexer nele. Os
+cliques e as teclas somem sem erro nenhum. Desde a extensão 1.12 (ajudante 1.5) a sala avisa:
+você, na hora de liberar o controle da janela (ou no primeiro clique, na tela inteira), e quem
+estava mexendo. Feche o programa e abra sem administrador. Se ele sempre abre assim, desmarque
+"Executar este programa como administrador" em Propriedades → Compatibilidade do atalho (e do
+.exe do launcher).
+
 O guia da sala (Ajustes → Extensão de controle) e o ícone da extensão dizem se o ajudante está
 instalado. Ele se compila na primeira vez que abre e guarda o resultado em
 `%LOCALAPPDATA%\Sala3d`: depois disso abre bem mais rápido, e só compila de novo quando o
@@ -116,6 +124,13 @@ o mouse pelo **movimento relativo** e as teclas pelo **código físico**, não p
 nem pelo texto digitado. Quem controla abre a tela da janela e clica em **Modo jogo** (ou aperta
 **F8**): o mouse vira câmera e as teclas andam com o personagem. **Esc** pausa o jogo e solta o
 mouse (para mexer nos menus); clicar na tela prende o mouse de novo.
+
+Menos atraso: pela conexão direta a câmera sai ~125 vezes por segundo, lida na hora em que o mouse
+mexe. O nome da tela em foco mostra o atraso medido (**~80 ms**, por exemplo: a rede mais a espera
+de cada quadro até ficar pronto) e **via TURN** quando a conexão não fechou direto (com **(TCP)** é
+uma rede que bloqueia UDP, e o atraso sobe). No PC de quem compartilha, limite os quadros do jogo
+(60 no Minecraft, em Vídeo → Taxa de quadros máxima): com a placa de vídeo a 100% a captura da
+janela fica esperando, e a imagem chega atrasada.
 
 ## Navegador nas telas da sala
 
