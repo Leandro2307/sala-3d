@@ -935,6 +935,10 @@ body.touch:has(#jogo-hud:not([hidden]):not(.min), #dados-hud:not([hidden]):not(.
 /* sentado numa mesa (tabuleiros, dados, cartas, poker, sinuca), a barra de cima fica só com o
    microfone. Andando entre as tacadas da sinuca vale o modo de jogo (o ☰ traz a barra inteira) */
 body.touch.mesa-limpa:not([data-jogo]) #bar { grid-template-columns: 1fr; background: none; }
+/* a faixa da barra é a largura toda: só o microfone recebe o toque, o resto passa para o menuzinho
+   do jogo e os botões das mesas que ficam embaixo dela */
+body.touch.mesa-limpa:not([data-jogo]) #bar .bar-center { pointer-events: none; }
+body.touch.mesa-limpa:not([data-jogo]) #btn-mic { pointer-events: auto; }
 body.touch.mesa-limpa:not([data-jogo]) :is(.bar-left, .bar-right, .bar-center > :not(#btn-mic)) { display: none !important; }
 
 #tv-unblock { position: absolute; top: 108px; left: 50%; transform: translateX(-50%); pointer-events: auto; }
