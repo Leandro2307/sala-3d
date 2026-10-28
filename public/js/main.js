@@ -8,7 +8,7 @@ import { CatalogoJogos } from './catalogo-jogos.js';
 import { SalasLaterais } from './salas.js';
 import { AoVivo, cartaoDoSaguao, COR_STATUS } from './aovivo.js';
 import { Player } from './player.js';
-import { RTC, presetDe } from './rtc.js';
+import { RTC, presetDe, codecsTestados } from './rtc.js';
 import { MediaSync, PROVIDERS, preloadYouTube } from './media.js';
 import { ParkourRun, formatTime, CHECKPOINT_COUNT } from './parkour.js';
 import { Combat } from './combat.js';
@@ -2462,7 +2462,8 @@ function jogoAqui(key, deId, ligar) {
     if (!quem?.delete(deId)) return;
     if (!quem.size) jogandoAqui.delete(key);
   }
-  rtc?.modoJogo(key, jogandoAqui.has(key));
+  rtc?.modoJogo(key, jogandoAqui.has(key), [...(jogandoAqui.get(key)?.keys() || [])]);
+  if (!ligar) ajusteDoJogo.delete(deId);
   const nome = state.users.get(deId)?.name || 'Alguém';
   diagJogo.evento(ligar ? 'modo jogo ligado por quem controla' : 'modo jogo desligado', { key, deId, nome });
   const agora = jogandoAqui.size > 0;
@@ -2471,7 +2472,7 @@ function jogoAqui(key, deId, ligar) {
     desenharMesmoAssim = false;
     diagJogo.comecar('compartilha', {
       gl: world.renderer.getContext(),
-      extra: { extensao: controle.ext?.versao ?? null, preset: rtc?.shareMode ?? null, superficie: superficieDe(self()?.shares.get(key)) },
+      extra: { extensao: controle.ext?.versao ?? null, preset: rtc?.shareMode ?? null, superficie: superficieDe(self()?.shares.get(key)), codecs: codecsTestados() },
     });
     toast(`${nome} está jogando no seu PC. A sala ficou em pausa aqui, para o jogo e a transmissão terem a placa de vídeo toda.`, 'info', 12000, null, {
       rotulo: 'Desenhar a sala',
@@ -2527,8 +2528,9 @@ async function amostrarJogo() {
       for (const id of quem.keys()) {
         const resumo = diagJogo.amostraEnvio(key, cru, id, sala);
         if (!resumo) continue;
-        const { t, captura, enviado, codificado, altura, kbps, limite, motivo, codificador, placa } = resumo;
-        controle.emitir('controle-volta', { key, para: id, ev: { t: 'jogo-envio', quando: t, captura, enviado, codificado, altura, kbps, limite, motivo, codificador, placa } });
+        ajustarJogo(id, resumo);
+        const { t, captura, enviado, codificado, altura, kbps, limite, motivo, codificador, placa, imagemBaixa } = resumo;
+        controle.emitir('controle-volta', { key, para: id, ev: { t: 'jogo-envio', quando: t, captura, enviado, codificado, altura, kbps, limite, motivo, codificador, placa, imagemBaixa } });
       }
     }
     if (jogandoLa) {
@@ -2540,6 +2542,29 @@ async function amostrarJogo() {
   }
 }
 setInterval(amostrarJogo, 2000);
+
+// O envio para quem joga se ajusta pelo que as amostras mostram (rtc: piso de banda e degradação):
+// a rede dela perdendo mais de 8% por 6 s com o piso → o piso sai (forçar banda numa rede que não
+// aguenta só perde mais); a imagem abaixo de 400 linhas por banda por 6 s → 'balanced', que troca
+// um pouco dos quadros por linhas, por pelo menos 30 s e até a banda folgar de novo. Só abaixo de
+// 400: o 'balanced' do libwebrtc desce até 15 qps em 480p, e 540p a 60 joga melhor que isso.
+const ajusteDoJogo = new Map(); // id de quem joga -> { perdas, baixas, boas, balanceadoDesde }
+function ajustarJogo(id, r) {
+  let st = ajusteDoJogo.get(id);
+  if (!st) ajusteDoJogo.set(id, (st = { perdas: 0, baixas: 0, boas: 0, balanceadoDesde: 0 }));
+  st.perdas = (r.perdaLa ?? 0) > 8 ? st.perdas + 1 : 0;
+  if (st.perdas >= 3 && rtc.soltarPisoJogo(id)) diagJogo.evento('piso de banda solto: a rede de quem joga está perdendo muito', { perdaLa: r.perdaLa, kbps: r.kbps });
+  const banda = r.limite === 'bandwidth';
+  st.baixas = r.imagemBaixa && r.altura < 400 && banda ? st.baixas + 1 : 0;
+  st.boas = !r.imagemBaixa && r.limite === 'none' ? st.boas + 1 : 0;
+  if (st.baixas >= 3 && rtc.imagemDeJogo(id, true)) {
+    st.balanceadoDesde = Date.now();
+    diagJogo.evento('imagem em migalhas: troca um pouco de quadros por resolução (balanced)', { altura: r.altura, kbps: r.kbps, saidaEstimadaKbps: r.saidaEstimadaKbps });
+  } else if (st.balanceadoDesde && Date.now() - st.balanceadoDesde > 30_000 && st.boas >= 3 && rtc.imagemDeJogo(id, false)) {
+    st.balanceadoDesde = 0;
+    diagJogo.evento('banda folgou: volta a segurar os 60 quadros', { altura: r.altura, kbps: r.kbps });
+  }
+}
 
 // O que chega pelo canal direto não passou pelo servidor: aqui se confere o que ele conferiria —
 // a tela é minha e está liberada, o evento é bem formado e ninguém manda mais de 240 por segundo.

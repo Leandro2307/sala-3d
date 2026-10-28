@@ -18,8 +18,8 @@ const dif = (agora, antes, campo) => (antes && agora?.[campo] != null && antes[c
 const MOTIVOS = {
   captura: 'A captura do Chrome está pegando poucos quadros do jogo: a placa de vídeo de quem compartilha está no talo, ou o jogo está em tela cheia exclusiva. Limite o jogo a 60 qps, baixe um pouco a qualidade gráfica e use “janela sem bordas”.',
   cpu: 'O codificador de quem compartilha não dá conta (PC no limite).',
-  software: 'O vídeo está sendo codificado no processador, não na placa de vídeo. No Chrome de quem compartilha: Configurações → Sistema → “Usar aceleração gráfica” ligado; no Windows, Configurações → Tela → Gráficos → Chrome em “Alto desempenho”.',
-  internet: 'A internet de quem compartilha está no limite de envio. Cabo em vez de Wi-Fi ajuda; o ideal é 25 Mbps de upload livres.',
+  software: 'O vídeo está sendo codificado no processador, não na placa de vídeo. No Chrome de quem compartilha: Configurações → Sistema → “Usar aceleração gráfica” ligado; no Windows, Configurações → Tela → Gráficos → Chrome em “Alto desempenho”. Em chrome://gpu, “Video Acceleration Information” diz se a placa codifica H.264. Tela cheia exclusiva também derruba para o processador: use janela sem bordas.',
+  internet: 'A banda entre vocês está no limite e o navegador baixou a resolução para não travar. O Wi-Fi perde pacotes e cada perda derruba a banda: cabo no PC de quem compartilha e o celular perto do roteador (rede de 5 GHz) ajudam; pela internet, o ideal é 25 Mbps de upload livres.',
   codificador: 'O codificador está soltando menos quadros do que a captura entrega.',
   perdas: 'A internet entre vocês está perdendo pacotes: o vídeo trava esperando o que se perdeu.',
   tela: 'O vídeo chega inteiro, mas este PC não está dando conta de mostrar todos os quadros.',
@@ -127,6 +127,9 @@ export class DiagJogo {
       nack: dif(o, ob, 'nackCount'),
       pli: dif(o, ob, 'pliCount'),
       reenviadosKbps: kbps(porSeg(o, ob, 'retransmittedBytesSent', dt)),
+      // quanto cada pacote esperou na fila de envio (o ritmo da banda estimada): atraso a mais
+      filaMs: dif(o, ob, 'packetsSent') > 0 ? r1((1000 * dif(o, ob, 'totalPacketSendDelay')) / dif(o, ob, 'packetsSent')) : null,
+      bandaJogo: env?.bandaJogo ?? null,
       placa: o?.powerEfficientEncoder ?? null,
       codificador: o?.encoderImplementation ?? null,
       codec: env?.codec ?? null,
@@ -139,11 +142,14 @@ export class DiagJogo {
       pessoas: cru.envios.length,
     };
     resumo.fpsFinal = resumo.enviado;
+    // quem joga (nível máximo) devia receber a captura inteira: abaixo de 60% das linhas é migalha
+    const capAltura = env?.captura?.height;
+    resumo.imagemBaixa = resumo.nivel === 'max' && resumo.altura && capAltura ? resumo.altura < capAltura * 0.6 : null;
     resumo.motivo = motivoEnvio(resumo);
     s.amostras.push({ ...resumo, sala, trilha: s.amostras.length % 15 === 0 ? cru.trilha : undefined, cru: s.amostras.length % 15 === 0 ? cru : undefined });
     if (s.amostras.length > GUARDA) s.amostras.shift();
-    console.log(`[modo-jogo] envio: captura ${resumo.captura} qps (${resumo.capturaRes}) → codificado ${resumo.codificado} → enviado ${resumo.enviado} qps · ${resumo.largura}x${resumo.altura} · ${resumo.kbps} kbps (alvo ${resumo.alvoKbps}, teto ${resumo.tetoKbps}) · ${resumo.codMs} ms/quadro · ${resumo.codificador}${resumo.placa ? ' (placa)' : ''} · limite ${resumo.limite} ${JSON.stringify(resumo.limitePct)} · rtt ${resumo.rttMs} ms · perda lá ${resumo.perdaLa}% · ${resumo.caminho}${resumo.motivo ? ` · MOTIVO: ${resumo.motivo}` : ''}`, { resumo, sala });
-    this.julgar(resumo.enviado, resumo.motivo, 'compartilha');
+    console.log(`[modo-jogo] envio: captura ${resumo.captura} qps (${resumo.capturaRes}) → codificado ${resumo.codificado} → enviado ${resumo.enviado} qps · ${resumo.largura}x${resumo.altura} · ${resumo.kbps} kbps (alvo ${resumo.alvoKbps}, teto ${resumo.tetoKbps}) · ${resumo.codMs} ms/quadro · ${resumo.codificador}${resumo.placa ? ' (placa)' : ''} · limite ${resumo.limite} ${JSON.stringify(resumo.limitePct)} · rtt ${resumo.rttMs} ms · perda lá ${resumo.perdaLa}% · fila ${resumo.filaMs} ms · ${resumo.caminho}${resumo.imagemBaixa ? ' · IMAGEM BAIXA' : ''}${resumo.motivo ? ` · MOTIVO: ${resumo.motivo}` : ''}`, { resumo, sala });
+    this.julgar(resumo, 'compartilha');
     return resumo;
   }
 
@@ -187,14 +193,15 @@ export class DiagJogo {
       caminho: cru.rede?.local ?? null,
       jitterBufferTarget: cru.jitterBufferTarget,
       playoutDelayHint: cru.playoutDelayHint,
-      la: la ? { captura: la.captura, enviado: la.enviado, kbps: la.kbps, limite: la.limite, motivo: la.motivo, codificador: la.codificador, placa: la.placa } : null,
+      la: la ? { captura: la.captura, enviado: la.enviado, altura: la.altura, kbps: la.kbps, limite: la.limite, motivo: la.motivo, codificador: la.codificador, placa: la.placa, imagemBaixa: la.imagemBaixa ?? null } : null,
     };
     resumo.fpsFinal = resumo.naTela ?? resumo.decodificado;
+    resumo.imagemBaixa = la?.imagemBaixa ?? null;
     resumo.motivo = motivoRecebe(resumo, la);
     s.amostras.push({ ...resumo, sala, cru: s.amostras.length % 15 === 0 ? cru : undefined });
     if (s.amostras.length > GUARDA) s.amostras.shift();
     console.log(`[modo-jogo] chegada: recebido ${resumo.recebido} → decodificado ${resumo.decodificado} → na tela ${resumo.naTela} qps · ${resumo.largura}x${resumo.altura} · ${resumo.kbps} kbps · decodifica ${resumo.decMs} ms (${resumo.decodificador}${resumo.placa ? ', placa' : ''}) · buffer ${resumo.bufferMs} ms · perdidos ${resumo.perdidos} · congelou ${resumo.congelou} (${resumo.congeladoMs} ms) · rtt ${resumo.rttMs} ms · ${resumo.caminho}${la ? ` · lá: captura ${la.captura}, enviado ${la.enviado}, limite ${la.limite}` : ' · sem notícia de lá'}${resumo.motivo ? ` · MOTIVO: ${resumo.motivo}` : ''}`, { resumo, sala });
-    this.julgar(resumo.fpsFinal, resumo.motivo, 'joga');
+    this.julgar(resumo, 'joga');
     return resumo;
   }
 
@@ -204,11 +211,13 @@ export class DiagJogo {
     this.sessao.outroLado = { ...resumo, recebido: Date.now() };
   }
 
-  // várias amostras ruins em seguida: avisa (com o porquê) de vez em quando
-  julgar(fps, motivo, lado) {
+  // várias amostras ruins em seguida (poucos quadros ou a imagem em migalhas): avisa (com o
+  // porquê) de vez em quando
+  julgar(r, lado) {
     const s = this.sessao;
+    const { fpsFinal: fps, motivo, imagemBaixa } = r;
     if (fps == null) return;
-    if (fps >= BOM) {
+    if (fps >= BOM && !imagemBaixa) {
       s.ruins = 0;
       return;
     }
@@ -216,8 +225,10 @@ export class DiagJogo {
     s.ultimoAviso = Date.now();
     const texto = MOTIVOS[motivo] || 'O motivo não ficou claro pelos números.';
     const onde = lado === 'joga' && ['captura', 'cpu', 'software', 'internet', 'codificador'].includes(motivo) ? 'No PC de quem compartilha: ' : '';
-    this.evento('aviso', { fps, motivo });
-    this.toast(`Modo jogo a ${Math.round(fps)} qps. ${onde}${texto}`, 'warn', 15000, null, { rotulo: 'Baixar relatório', fazer: () => this.baixar() });
+    const altura = lado === 'joga' ? r.la?.altura ?? r.altura : r.altura;
+    const como = fps >= BOM ? `com a imagem baixa${altura ? ` (${altura} linhas)` : ''}` : `a ${Math.round(fps)} qps${imagemBaixa && altura ? `, ${altura} linhas` : ''}`;
+    this.evento('aviso', { fps, motivo, imagemBaixa, altura });
+    this.toast(`Modo jogo ${como}. ${onde}${texto}`, 'warn', 15000, null, { rotulo: 'Baixar relatório', fazer: () => this.baixar() });
   }
 
   // ---------------------------------------------------------------- relatório
@@ -276,17 +287,23 @@ export class DiagJogo {
   }
 }
 
+// A imagem em migalhas por falta de banda vem antes da captura: num relatório a captura estava em
+// 32 qps e a tela saía em 345×210 por banda, e o motivo dizia só "captura".
 function motivoEnvio(r) {
+  const lim = r.limitePct || {};
+  const banda = (lim.bandwidth || 0) > 30 || r.limite === 'bandwidth';
+  const cpu = (lim.cpu || 0) > 30 || r.limite === 'cpu';
+  if (r.imagemBaixa) return banda ? 'internet' : cpu ? 'cpu' : 'internet';
   if (r.enviado == null || r.enviado >= BOM) return null;
   if (r.captura != null && r.captura < BOM) return 'captura';
   if (r.placa === false && /openh264|libvpx|libaom|dav1d|software/i.test(r.codificador || '')) return 'software';
-  const lim = r.limitePct || {};
-  if ((lim.cpu || 0) > 30 || r.limite === 'cpu') return 'cpu';
-  if ((lim.bandwidth || 0) > 30 || r.limite === 'bandwidth') return 'internet';
+  if (cpu) return 'cpu';
+  if (banda) return 'internet';
   return 'codificador';
 }
 
 function motivoRecebe(r, la) {
+  if (la?.imagemBaixa) return la.motivo || 'internet';
   const fps = r.naTela ?? r.decodificado;
   if (fps == null || fps >= BOM) return null;
   if (la?.enviado != null && la.enviado < BOM) return la.motivo || 'codificador';

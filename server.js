@@ -743,7 +743,7 @@ function voltaDoControle(raw) {
     return {
       t: 'jogo-envio', quando: num(e.quando), captura: num(e.captura), enviado: num(e.enviado), codificado: num(e.codificado),
       altura: num(e.altura), kbps: num(e.kbps), limite: txt(e.limite), motivo: txt(e.motivo), codificador: txt(e.codificador),
-      placa: typeof e.placa === 'boolean' ? e.placa : null,
+      placa: typeof e.placa === 'boolean' ? e.placa : null, imagemBaixa: typeof e.imagemBaixa === 'boolean' ? e.imagemBaixa : null,
     };
   }
   return null;

@@ -55,7 +55,45 @@ Conclusões:
   (pedi para olhar Gerenciador de Tarefas → Desempenho → GPU 1). God of War liso a 60 numa UHD é
   improvável: deve ter NVIDIA/AMD com a tela ligada na Intel (Optimus).
 
+## Segundo relatório (2026-10-28 21:54, outro PC: RTX 3060 Ti, 16 GB, quem joga num celular no mesmo Wi-Fi)
+
+- Janela de 926×562, captura ~32 qps (não sabemos a quantos qps o jogo rodava), codificador
+  **OpenH264** (processador), RTT de 6 ms (`host/udp wifi`).
+- **O problema era a banda**: limitação `bandwidth` 100%, estimativa de saída de 0,2 a 1,8 Mbps
+  com teto de 20 Mbps. A tela saiu em **345×210 → 693×420**. Perdas de 2–7% no Wi-Fi derrubavam a
+  estimativa; a fila de envio segurava ~44 ms por pacote. O `x-google-start-bitrate` não ajudou,
+  porque a conexão já existia (com a voz) quando a tela entrou.
+- O relatório dizia `captura` em tudo: em `motivoEnvio` a captura era testada primeiro.
+- No teste local (NVIDIA, Chrome 156) o `encodingInfo` diz `powerEfficient: false` para **todos**
+  os codecs e mesmo assim o Chrome codifica na placa (`NVIDIA H.264 Encoder MFT`). O OpenH264 do
+  relatório deve vir da imagem minúscula (o libwebrtc passa para o software em resolução baixa),
+  e não da escolha do codec. Falta confirmar com um relatório novo.
+
+### O que entrou depois disso
+
+- **Piso de banda para quem joga** (`rtc.js`: `bandaDeJogo`, `atualizarBandaJogo`, `bandaSdp`):
+  `rtc.modoJogo(key, on, ids)` renegocia a conexão de quem joga com `x-google-start-bitrate` = 50%
+  e `x-google-min-bitrate` = 30% (no máximo 6 Mbps) do `jogoBitrate` (na Máxima: começa em 10, piso de 6).
+  `peer.negociar()` é o antigo `onnegotiationneeded`, que agora também é chamado direto
+  (`renegociar`, e o vigia tenta de novo enquanto a conexão não estiver `stable`). No teste: de
+  ~0,2 a ~10 Mbps em 10 s; o piso sai ao desligar.
+- **Ajuste automático** (`ajustarJogo` no main.js): perda > 8% por 6 s → `soltarPisoJogo` (fica
+  só o começo alto); imagem < 400 linhas por banda por 6 s → `imagemDeJogo(id, true)` põe
+  `balanced`, por pelo menos 30 s, até `limite: none` de novo. Só abaixo de 400 linhas, porque o
+  `balanced` desce até 15 qps em 480p.
+- **Codec**: `escolherCodec` testa cada perfil de H.264 (High primeiro), AV1 e VP9 e guarda tudo
+  em `codecsTestados()` (vai em `ambiente.codecs` e em `cru.codecs` do relatório). `?codec=h264|vp9|av1|vp8`
+  força um para medir (testado: `?codec=vp9` sai em libvpx 1080p60).
+- **Relatório**: `imagemBaixa` (resolução enviada < 60% da captura para quem está no nível
+  máximo) vem antes da captura no motivo e também gera aviso; `filaMs` (espera na fila de
+  envio); `bandaJogo`. O resumo para quem joga leva `imagemBaixa` (servidor: `voltaDoControle`).
+
 ## Próximos passos sugeridos
+
+0. **Pedir um relatório novo dos dois lados** com o jogo em janela sem bordas 1920×1080 a 60 qps
+   fixos: conferir se, com o piso, a imagem fica em 1080/720 e se o codificador vira
+   `NVIDIA H.264 Encoder MFT`. Se continuar OpenH264 com imagem grande, olhar `chrome://gpu`
+   ("Video Acceleration Information") no PC do jogo.
 
 1. **Esperar o teste em Leve (720p)** que pedi: jogo em janela sem bordas 1920×1080, preset Leve
    (captura já sai reduzida a 1280×720). Se chegar perto de 60, a redução na captura resolve.

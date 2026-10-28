@@ -49,45 +49,71 @@ const nivelDe = (peer, k) => NIVEIS[peer.interesse.get(k)] || NIVEIS.mini;
 // Codec de vídeo das telas: o que este PC codifica na placa de vídeo (não pesa no processador nem
 // no jogo). Entre os acelerados, nesta ordem: H.264 (todo mundo decodifica na placa), AV1, VP9.
 // Nenhum acelerado: H.264 mesmo, que em software é o mais leve deles.
-let codecPreferido = null;
+// O H.264 é testado em cada perfil que o navegador oferece, o High primeiro: um codificador da
+// placa que só aceite o High ganha a frente. O encodingInfo nem sempre sabe: numa RTX ele disse
+// "não é na placa" para todos e o Chrome codificou na NVIDIA mesmo assim (sem perfil escolhido,
+// fica a ordem do navegador).
+// ?codec=h264|vp9|av1|vp8 na sala força um (para medir); o que cada um respondeu fica em
+// infoCodecs (vai no relatório do modo jogo).
+let codecPreferido = null; // { mimeType, perfil } (perfil: profile-level-id do H.264, ou null)
 let escolhendo = null;
+let infoCodecs = { preferido: null, forcado: null, testados: [] };
+export const codecsTestados = () => infoCodecs;
+const perfilDe = (c) => /profile-level-id=([0-9a-f]{6})/i.exec(c.sdpFmtpLine || '')?.[1]?.toLowerCase() || null;
+// High (64), Main (4d), Constrained Baseline (42e0), Baseline (4200)
+const ordemPerfil = (p) => (p?.startsWith('64') ? 0 : p?.startsWith('4d') ? 1 : p?.startsWith('42e0') ? 2 : 3);
 export function escolherCodec() {
   escolhendo ??= (async () => {
+    const caps = RTCRtpSender.getCapabilities?.('video')?.codecs || [];
+    const perfis = [...new Set(caps.filter((c) => c.mimeType === 'video/H264').map(perfilDe).filter(Boolean))]
+      .sort((a, b) => ordemPerfil(a) - ordemPerfil(b));
     const candidatos = [
-      ['video/H264', 'video/H264; profile-level-id=42e01f'],
-      ['video/AV1', 'video/AV1'],
-      ['video/VP9', 'video/VP9'],
+      ...perfis.map((p) => ({ mimeType: 'video/H264', perfil: p, contentType: `video/H264;profile-level-id=${p}` })),
+      { mimeType: 'video/AV1', perfil: null, contentType: 'video/AV1' },
+      { mimeType: 'video/VP9', perfil: null, contentType: 'video/VP9' },
     ];
-    let escolhido = 'video/H264';
+    const pedido = { h264: 'video/H264', vp9: 'video/VP9', av1: 'video/AV1', vp8: 'video/VP8' }[new URLSearchParams(location.search).get('codec')?.toLowerCase()] || null;
+    let escolhido = null;
+    const testados = [];
     if (navigator.mediaCapabilities?.encodingInfo) {
-      for (const [mime, contentType] of candidatos) {
+      for (const c of candidatos) {
         try {
           const r = await navigator.mediaCapabilities.encodingInfo({
             type: 'webrtc',
-            video: { contentType, width: 1920, height: 1080, bitrate: 12_000_000, framerate: 60 },
+            video: { contentType: c.contentType, width: 1920, height: 1080, bitrate: 12_000_000, framerate: 60 },
           });
-          if (r.supported && r.powerEfficient) {
-            escolhido = mime;
-            break;
-          }
-        } catch { /* navegador sem 'webrtc' no encodingInfo */ }
+          testados.push({ codec: c.contentType, suporta: r.supported, placa: r.powerEfficient, liso: r.smooth });
+          if (!escolhido && r.supported && r.powerEfficient) escolhido = c;
+        } catch (err) {
+          testados.push({ codec: c.contentType, erro: String(err?.message || err) }); // navegador sem 'webrtc' no encodingInfo
+        }
       }
     }
-    const temNoNavegador = RTCRtpSender.getCapabilities?.('video')?.codecs.some((c) => c.mimeType === escolhido);
-    codecPreferido = temNoNavegador ? escolhido : null;
+    if (pedido) {
+      // o forçado: no perfil que a placa aceitou, se for o H.264 dela; senão na ordem do navegador
+      escolhido = escolhido?.mimeType === pedido ? escolhido : { mimeType: pedido, perfil: null };
+    }
+    escolhido ??= { mimeType: 'video/H264', perfil: null };
+    codecPreferido = caps.some((c) => c.mimeType === escolhido.mimeType) ? escolhido : null;
+    infoCodecs = { preferido: codecPreferido && `${codecPreferido.mimeType}${codecPreferido.perfil ? ` ${codecPreferido.perfil}` : ''}`, forcado: pedido, testados };
+    console.info('[rtc] codec das telas', infoCodecs);
     return codecPreferido;
   })();
   return escolhendo;
 }
 
-// põe o codec escolhido na frente (os outros ficam de reserva; rtx, red e fec continuam)
+// põe o codec escolhido na frente, no perfil escolhido antes dos outros perfis dele (os outros
+// codecs ficam de reserva; rtx, red e fec continuam)
 function preferirCodec(transceiver) {
   if (!codecPreferido || !transceiver.setCodecPreferences) return;
   const todos = RTCRtpReceiver.getCapabilities?.('video')?.codecs || [];
-  const primeiro = todos.filter((c) => c.mimeType === codecPreferido);
+  const { mimeType, perfil } = codecPreferido;
+  // sem perfil escolhido a ordem do navegador fica (o OpenH264 só faz o Constrained Baseline)
+  const primeiro = todos.filter((c) => c.mimeType === mimeType)
+    .sort((a, b) => (perfil ? (perfilDe(b) === perfil) - (perfilDe(a) === perfil) : 0));
   if (!primeiro.length) return;
   try {
-    transceiver.setCodecPreferences([...primeiro, ...todos.filter((c) => c.mimeType !== codecPreferido)]);
+    transceiver.setCodecPreferences([...primeiro, ...todos.filter((c) => c.mimeType !== mimeType)]);
   } catch (err) {
     console.warn('[rtc] preferência de codec', err);
   }
@@ -112,9 +138,21 @@ function secoesDoSdp(sdp) {
 // pessoas assistindo eram 20 Mbps de subida forçados, com a voz picotando.
 const bandaInicial = (conexoes) => Math.round(Math.min(6000, Math.max(800, 12000 / Math.max(1, conexoes))));
 
+// Modo jogo: a conexão de quem joga no meu PC tem piso e começa alto. O estimador começava da
+// banda da voz (a conexão já existia) e cada perda do Wi-Fi o derrubava de novo: num celular na
+// mesma rede a tela saiu em 345×210, a ~200 kbps, por um minuto inteiro. Aqui o piso vale só para
+// essa pessoa (as outras não recebem nada pesado de mim no modo jogo) e sai se a rede dela perder
+// muito com ele (soltarPisoJogo).
+const bandaDeJogo = (preset) => ({
+  inicio: Math.round(preset.jogoBitrate * 0.5 / 1000),
+  piso: Math.round(Math.min(6_000_000, preset.jogoBitrate * 0.3) / 1000),
+});
+
 // A banda inicial (kbps) em todo codec de vídeo de cada seção: vale o da seção que acabar
-// escolhida. O piso que venha de uma aba antiga sai. Só no vídeo (o áudio não muda).
-function comBandaInicial(desc, kbps) {
+// escolhida. O piso que venha de uma aba antiga sai; piso (kbps) põe um novo.
+// Só no vídeo (o áudio não muda).
+function comBandaInicial(desc, kbps, piso = 0) {
+  const extra = [`x-google-start-bitrate=${kbps}`, ...(piso ? [`x-google-min-bitrate=${piso}`] : [])];
   if (!desc?.sdp) return desc;
   const saida = [];
   for (const sec of secoesDoSdp(desc.sdp)) {
@@ -130,13 +168,13 @@ function comBandaInicial(desc, kbps) {
         const [cabeca, ...resto] = l.split(' ');
         const params = resto.join(' ').split(';').map((p) => p.trim())
           .filter((p) => p && !/^x-google-(start|min)-bitrate=/.test(p));
-        saida.push(`${cabeca} ${[...params, `x-google-start-bitrate=${kbps}`].join(';')}`);
+        saida.push(`${cabeca} ${[...params, ...extra].join(';')}`);
         continue;
       }
       saida.push(l);
       // codec sem a=fmtp (o VP8, por exemplo): cria a linha
       const rtp = /^a=rtpmap:(\d+) ([\w-]+)\//.exec(l);
-      if (rtp && !comFmtp.has(rtp[1]) && !/^(rtx|red|ulpfec|flexfec-03)$/i.test(rtp[2])) saida.push(`a=fmtp:${rtp[1]} x-google-start-bitrate=${kbps}`);
+      if (rtp && !comFmtp.has(rtp[1]) && !/^(rtx|red|ulpfec|flexfec-03)$/i.test(rtp[2])) saida.push(`a=fmtp:${rtp[1]} ${extra.join(';')}`);
     }
   }
   return { type: desc.type, sdp: saida.join('\r\n') };
@@ -177,6 +215,7 @@ export class RTC {
     // ao mesmo tempo. extraScale reduz vídeo de arquivo maior que o preset antes de codificar.
     this.screens = new Map(); // key -> { stream, extraScale }
     this.jogoTelas = new Set(); // telas minhas em que alguém está jogando (modoJogo)
+    this.jogadores = new Map(); // tela minha em jogo -> ids de quem joga nela
     this.shareMode = 'max'; // preset das telas: leve, max ou ultra
     this.medidas = new WeakMap(); // receptor de vídeo -> os totais da medida anterior (ver recebendo)
     escolherCodec();
@@ -303,6 +342,7 @@ export class RTC {
           .catch((err) => console.warn('[rtc] oferta sem resposta', err));
         continue;
       }
+      if (peer.renegociar) this.renegociar(peer);
       const ice = pc.iceConnectionState;
       if (ice === 'disconnected' || ice === 'failed') {
         peer.caiuDesde ||= agora;
@@ -409,13 +449,70 @@ export class RTC {
   // já é tudo 60 quadros: o "turbo" de quando alguém controla a tela não muda mais nada
   turbo() {}
 
-  // Alguém ligou (ou desligou) o modo jogo numa tela minha: quem olha de perto leva a banda de jogo
-  modoJogo(key, ligar) {
+  // Alguém ligou (ou desligou) o modo jogo numa tela minha: quem olha de perto leva a banda de jogo,
+  // e a conexão de quem joga (quem: os ids) ganha o piso de banda (bandaDeJogo)
+  modoJogo(key, ligar, quem = []) {
+    if (ligar) this.jogadores.set(key, new Set(quem));
+    else this.jogadores.delete(key);
+    for (const peer of this.peers.values()) this.atualizarBandaJogo(peer);
     if (ligar === this.jogoTelas.has(key)) return;
     if (ligar) this.jogoTelas.add(key);
     else this.jogoTelas.delete(key);
     console.info('[modo-jogo] banda de jogo', ligar ? 'ligada' : 'desligada', key, this.preset());
     this.retuneAll();
+  }
+
+  joga(peer) {
+    for (const ids of this.jogadores.values()) if (ids.has(peer.id)) return true;
+    return false;
+  }
+
+  // a banda de jogo entra ou sai da conexão dessa pessoa: renegocia com o piso novo no SDP
+  atualizarBandaJogo(peer) {
+    const nova = this.joga(peer) ? bandaDeJogo(this.preset()) : null;
+    const atual = peer.bandaJogo;
+    if (nova?.inicio === atual?.inicio && nova?.piso === atual?.piso) return;
+    peer.bandaJogo = nova;
+    if (!nova) {
+      peer.semPiso = false;
+      peer.balanceado = false;
+      this.tuneScreen(peer);
+    }
+    console.info('[modo-jogo] banda da conexão', peer.id, nova ? `começa em ${nova.inicio} kbps, piso ${nova.piso} kbps` : 'normal');
+    this.renegociar(peer);
+  }
+
+  // a rede de quem joga perde muito com o piso: fica só o começo alto
+  soltarPisoJogo(id) {
+    const peer = this.peers.get(id);
+    if (!peer?.bandaJogo || peer.semPiso) return false;
+    peer.semPiso = true;
+    this.renegociar(peer);
+    return true;
+  }
+
+  // Quem joga está recebendo a imagem em migalhas (a banda não dá para a resolução): 'balanced'
+  // troca um pouco dos quadros por linhas. false volta a segurar os 60 quadros.
+  imagemDeJogo(id, balanceado) {
+    const peer = this.peers.get(id);
+    if (!peer?.bandaJogo || peer.balanceado === balanceado) return false;
+    peer.balanceado = balanceado;
+    this.tuneScreen(peer);
+    return true;
+  }
+
+  // banda inicial e piso (kbps) que vão no SDP desta conexão
+  bandaSdp(peer) {
+    const j = peer.bandaJogo;
+    return j ? [j.inicio, peer.semPiso ? 0 : j.piso] : [this.banda(peer), 0];
+  }
+
+  // uma oferta nova assim que a conexão estiver parada (senão o vigia tenta no próximo segundo)
+  renegociar(peer) {
+    peer.renegociar = true;
+    const { pc } = peer;
+    if (pc.connectionState === 'closed' || pc.signalingState !== 'stable' || peer.makingOffer) return;
+    peer.negociar();
   }
 
   // O envio de UMA tela para UMA pessoa: do quanto ela precisa (NIVEIS) e da banda do preset,
@@ -541,8 +638,9 @@ export class RTC {
             try {
               const params = sender.getParameters();
               if (!params.encodings || !params.encodings.length) params.encodings = [{}];
-              // 60 quadros sempre: se apertar, cai a resolução e não a fluidez
-              params.degradationPreference = 'maintain-framerate';
+              // 60 quadros sempre: se apertar, cai a resolução e não a fluidez (no modo jogo, com a
+              // imagem em migalhas, divide a perda entre os dois: imagemDeJogo)
+              params.degradationPreference = peer.balanceado && this.jogoTelas.has(key) ? 'balanced' : 'maintain-framerate';
               Object.assign(params.encodings[0], this.envioPara(peer, key), { networkPriority: 'high', priority: 'high' });
               await sender.setParameters(params);
             } catch (err) {
@@ -657,6 +755,10 @@ export class RTC {
       caiuDesde: 0, // desde quando o ICE está desconectado
       reinicioIce: 0,
       banda: null, // banda inicial da conexão, em kbps (ver banda)
+      bandaJogo: null, // { inicio, piso } em kbps: essa pessoa joga numa tela minha (atualizarBandaJogo)
+      semPiso: false, // o piso de jogo saiu (soltarPisoJogo)
+      balanceado: false, // a tela de jogo dela sai em 'balanced' (imagemDeJogo)
+      renegociar: false, // falta mandar uma oferta nova (renegociar)
       ctrl: null, // canal do controle remoto (ver canalControle)
       micSender: null,
       micVai: null, // a trilha que está no micSender agora (null: a voz não vai para essa pessoa)
@@ -667,14 +769,18 @@ export class RTC {
       pending: [],
     };
     this.peers.set(id, peer);
+    // quem joga e reconectou já volta com a banda de jogo
+    if (this.joga(peer)) peer.bandaJogo = bandaDeJogo(this.preset());
 
-    pc.onnegotiationneeded = async () => {
+    // também chamada direto quando só o SDP muda (renegociar), sem o navegador pedir
+    peer.negociar = async () => {
       try {
         peer.makingOffer = true;
+        peer.renegociar = false;
         const oferta = await pc.createOffer();
         // outra negociação começou enquanto a oferta era montada: o evento volta sozinho depois
         if (pc.signalingState !== 'stable') return;
-        await pc.setLocalDescription(comBandaInicial(oferta, this.banda(peer)));
+        await pc.setLocalDescription(comBandaInicial(oferta, ...this.bandaSdp(peer)));
         peer.ofertaDesde = performance.now();
         this.send(id, { description: pc.localDescription });
       } catch (err) {
@@ -683,6 +789,7 @@ export class RTC {
         peer.makingOffer = false;
       }
     };
+    pc.onnegotiationneeded = () => peer.negociar();
     pc.onicecandidate = ({ candidate }) => {
       if (candidate) this.send(id, { candidate });
     };
@@ -801,12 +908,12 @@ export class RTC {
         for (const trs of peer.screenTransceivers.values()) for (const tr of trs) if (tr.mid) semDtx.add(tr.mid);
         peer.aplicandoResposta = description.type === 'answer';
         try {
-          await pc.setRemoteDescription(comDtx(comBandaInicial(description, this.banda(peer)), semDtx));
+          await pc.setRemoteDescription(comDtx(comBandaInicial(description, ...this.bandaSdp(peer)), semDtx));
         } finally {
           peer.aplicandoResposta = false;
         }
         if (description.type === 'offer') {
-          await pc.setLocalDescription(comBandaInicial(await pc.createAnswer(), this.banda(peer)));
+          await pc.setLocalDescription(comBandaInicial(await pc.createAnswer(), ...this.bandaSdp(peer)));
           this.send(from, { description: pc.localDescription });
         }
       } else if (candidate) {
@@ -961,6 +1068,7 @@ export class RTC {
         continue;
       }
       const d = { id, nivel: peer.interesse.get(key) || null, conexao: peer.pc.connectionState };
+      if (peer.bandaJogo) d.bandaJogo = { ...peer.bandaJogo, semPiso: peer.semPiso, balanceado: peer.balanceado };
       try {
         const p = tr.sender.getParameters();
         d.params = { degradacao: p.degradationPreference ?? null, ...(p.encodings?.[0] || {}) };
@@ -983,6 +1091,7 @@ export class RTC {
       trilha: trilha ? { rotulo: trilha.label, estado: trilha.readyState, mudo: trilha.muted, dica: trilha.contentHint, config: trilha.getSettings?.() || null } : null,
       jogo: this.jogoTelas.has(key),
       preset: this.preset(),
+      codecs: infoCodecs,
       envios: lista,
     };
   }
