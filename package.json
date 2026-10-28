@@ -6,6 +6,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "test": "node --test \"testes/*.test.mjs\" && node scripts/testar-poker.js",
     "dev": "node --watch server.js",
     "https": "node server.js --https",
     "gerar-vozes-cartas": "node scripts/gerar-vozes-cartas.js",
@@ -23,12 +24,8 @@
     "express": "^5.2.1",
     "hls.js": "^1.7.3",
     "mysql2": "^3.24.5",
-    "python": "^0.0.4",
     "selfsigned": "^5.5.0",
     "socket.io": "^4.8.4",
     "three": "^0.186.1"
-  },
-  "devDependencies": {
-    "msedge-tts": "^2.1.0"
   }
 }

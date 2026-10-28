@@ -26,6 +26,14 @@ function arquivo(nome) {
         fs.mkdir(DADOS, { recursive: true }, () => fs.writeFile(arq, JSON.stringify(mapa), () => {}));
       }, 1500);
     },
+    // grava já o que estava esperando o atraso (servidor saindo)
+    agora() {
+      if (!timer) return;
+      clearTimeout(timer);
+      timer = null;
+      fs.mkdirSync(DADOS, { recursive: true });
+      fs.writeFileSync(arq, JSON.stringify(mapa));
+    },
   };
 }
 
@@ -128,18 +136,31 @@ function guardarSaldo(nome, saldo) {
   }
   pendentes.set(nome, saldo);
   if (timerSaldos) return;
-  timerSaldos = setTimeout(async () => {
-    timerSaldos = null;
-    const lote = [...pendentes];
-    pendentes.clear();
-    try {
-      await pool.query('INSERT INTO sala3d_moedas (nome, saldo) VALUES ? ON DUPLICATE KEY UPDATE saldo = VALUES(saldo)', [lote]);
-    } catch (err) {
-      console.warn('[banco] moedas', err.code || err.message);
-      // não perde: tenta de novo junto com a próxima mudança
-      for (const [k, v] of lote) if (!pendentes.has(k)) pendentes.set(k, v);
-    }
-  }, 2000);
+  timerSaldos = setTimeout(gravarSaldos, 2000);
 }
 
-module.exports = { iniciar, lerSala, salvarSala, lerSaldo, guardarSaldo };
+async function gravarSaldos() {
+  timerSaldos = null;
+  if (!pendentes.size) return;
+  const lote = [...pendentes];
+  pendentes.clear();
+  try {
+    await pool.query('INSERT INTO sala3d_moedas (nome, saldo) VALUES ? ON DUPLICATE KEY UPDATE saldo = VALUES(saldo)', [lote]);
+  } catch (err) {
+    console.warn('[banco] moedas', err.code || err.message);
+    // não perde: tenta de novo junto com a próxima mudança
+    for (const [k, v] of lote) if (!pendentes.has(k)) pendentes.set(k, v);
+  }
+}
+
+// Servidor saindo (deploy, Ctrl+C): o que esperava o atraso vai para o banco antes do fim.
+async function encerrar() {
+  salasArq.agora();
+  moedasArq.agora();
+  if (!pool) return;
+  clearTimeout(timerSaldos);
+  await gravarSaldos();
+  await pool.end().catch(() => {});
+}
+
+module.exports = { iniciar, lerSala, salvarSala, lerSaldo, guardarSaldo, encerrar };

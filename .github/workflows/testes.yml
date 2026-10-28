@@ -1,0 +1,25 @@
+# Roda os testes das regras (npm test) e confere se o servidor sobe, a cada push e pull request.
+name: Testes
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  testes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: O servidor sobe e responde
+        run: |
+          PORT=3199 node server.js &
+          for i in $(seq 1 30); do curl -sf localhost:3199/config > /dev/null && exit 0; sleep 1; done
+          echo 'o servidor não respondeu em 30 s'
+          exit 1

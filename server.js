@@ -900,6 +900,35 @@ const fundoDemais = (v, n = 0) => {
   return false;
 };
 
+// Quantas vezes cada evento pode chegar de uma conexão numa janela [vezes, ms]: acima disso o
+// pacote some (ver socket.use). São os que vão para a sala toda e que ninguém manda em rajada —
+// sem isto, um laço no console enchia o chat ou fazia todo mundo redesenhar o boneco sem parar.
+// Posição, controle e os lances dos jogos ficam de fora: têm ritmo próprio.
+const RITMO = {
+  chat: [6, 3000],
+  photo: [3, 10_000],
+  emote: [6, 1000],
+  mic: [8, 1000],
+  cam: [8, 1000],
+  shirt: [8, 1000],
+  arma: [8, 1000],
+  color: [8, 1000],
+  char: [8, 1000],
+  status: [8, 1000],
+  punch: [10, 1000],
+};
+function ritmoDoSocket() {
+  const janelas = new Map();
+  return (evento) => {
+    const lim = RITMO[evento];
+    if (!lim) return true;
+    const agora = Date.now();
+    let j = janelas.get(evento);
+    if (!j || agora - j.ini > lim[1]) janelas.set(evento, (j = { ini: agora, n: 0 }));
+    return ++j.n <= lim[0];
+  };
+}
+
 function mediaSnapshot(room) {
   return { ...room.media, serverNow: Date.now() };
 }
@@ -1137,9 +1166,10 @@ function attachSockets(io) {
     socket.setMaxListeners(30); // cada jogo (quadras, parque...) escuta o próprio 'disconnect'
     let room = null;
     let user = null;
-    // sem chamar o next o pacote some, sem chegar a nenhum handler (ver fundoDemais)
+    // sem chamar o next o pacote some, sem chegar a nenhum handler (ver fundoDemais e RITMO)
+    const noRitmo = ritmoDoSocket();
     socket.use((pacote, next) => {
-      if (!fundoDemais(pacote)) next();
+      if (!fundoDemais(pacote) && noRitmo(pacote[0])) next();
     });
 
     futebolDoSocket(socket, () => ({ room, user }));
@@ -2081,11 +2111,39 @@ async function main() {
   ARMAS = (await import('./public/js/armas-dados.js')).ARMAS;
   // o banco antes de abrir a porta: quem entrar já encontra a sala e as moedas no lugar
   await banco.iniciar();
-  const io = new Server({ cors: { origin: true }, maxHttpBufferSize: 1e6 });
+  // A página sempre conecta no próprio endereço (window.io()), então só a mesma origem entra:
+  // outro site não abre socket na sala com o navegador de quem o visita. SALA_ORIGENS (separadas
+  // por vírgula) libera mais alguma, se um dia precisar.
+  const extras = String(process.env.SALA_ORIGENS || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const io = new Server({
+    maxHttpBufferSize: 1e6,
+    allowRequest(req, cb) {
+      const origem = req.headers.origin;
+      if (!origem || extras.includes(origem)) return cb(null, true); // sem Origin: não é navegador de outro site
+      let host = '';
+      try { host = new URL(origem).host; } catch { /* Origin inválido */ }
+      const daqui = [req.headers.host, req.headers['x-forwarded-host']].filter(Boolean).map((h) => String(h).split(',')[0].trim());
+      cb(null, daqui.includes(host));
+    },
+  });
   attachSockets(io);
 
   const httpServer = http.createServer(app);
   io.attach(httpServer);
+  // No deploy o Render manda SIGTERM: fecha os sockets (as abas reconectam no servidor novo) e
+  // espera o banco gravar o que estava pendente antes de sair.
+  let saindo = false;
+  const sair = async (sinal) => {
+    if (saindo) return;
+    saindo = true;
+    console.log(`\n  ${sinal}: encerrando a sala...`);
+    setTimeout(() => process.exit(0), 5000).unref();
+    io.close();
+    await banco.encerrar().catch(() => {});
+    process.exit(0);
+  };
+  process.on('SIGTERM', () => sair('SIGTERM'));
+  process.on('SIGINT', () => sair('SIGINT'));
   httpServer.listen(PORT, () => {
     console.log('\n  Sala 3D rodando!');
     console.log(`  → Você:          http://localhost:${PORT}`);
@@ -2103,4 +2161,15 @@ async function main() {
   }
 }
 
-main();
+// Um erro solto num jogo (um await sem try, um timer) não pode derrubar a sala de todo mundo:
+// registra e segue. Erro na subida (main) continua derrubando — sem banco ou porta não há sala.
+process.on('unhandledRejection', (err) => console.error('[erro solto] promessa', err));
+process.on('uncaughtException', (err) => {
+  console.error('[erro solto]', err);
+  if (err?.code === 'EADDRINUSE') process.exit(1); // porta ocupada: sem ela não adianta seguir
+});
+
+main().catch((err) => {
+  console.error('  Não deu para subir a sala:', err);
+  process.exit(1);
+});
