@@ -721,6 +721,8 @@ export class MediaSync {
       onError: mine((msg) => {
         this.failed = true;
         this.onError?.(msg);
+        // música no telão: o servidor pula para a próxima faixa (fora dela, ignora)
+        this.send('erro');
       }),
       onNotice: mine((msg) => this.onNotice?.(msg)),
       onBlocked: mine(() => this.block()),

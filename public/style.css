@@ -86,6 +86,9 @@ body.sem-hud:not(.touch) #bar, body.sem-hud #cam-preview, body.sem-hud:not(.touc
 body.touch.sem-hud:not(.mesa-limpa) #bar { display: none !important; }
 #tb-hud .so-sem-hud, body.sem-hud #tb-hud .so-com-hud { display: none; }
 body.sem-hud #tb-hud .so-sem-hud { display: contents; }
+/* telão em foco: a tela fica só com o vídeo, a barra de sair do foco e os avisos */
+body.tv-focus #hud > :not(#tv-focus-hud):not(#toasts):not(#tv-unblock),
+body.tv-focus #bar, body.tv-focus #cam-preview, body.tv-focus #touch { display: none !important; }
 /* correr a pé não serve no toque (o analógico na borda já corre): o botão só fica como turbo do carro */
 body:not([data-jogo="futebol"]) #touch:not(.carro) #tb-run { display: none !important; }
 
@@ -3581,6 +3584,7 @@ body[data-jogo] .hud-bussola,
 .np-controls .icon-btn:disabled { opacity: 0.4; pointer-events: none; }
 .mu-telao { margin-top: 12px; }
 .mu-telao:disabled { opacity: 0.4; pointer-events: none; }
+.mu-telao.on { border-color: rgba(244, 114, 182, 0.6); background: rgba(244, 114, 182, 0.12); color: #f9a8d4; }
 
 /* celular: a capa vira miniatura ao lado do título (inteira, ela tomava a tela toda) e, deitado,
    a fila vai para uma segunda coluna */

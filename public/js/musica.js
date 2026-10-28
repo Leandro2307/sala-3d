@@ -47,14 +47,19 @@ export class Musica {
       if (!this.fila.length) return;
       this.socket()?.emit('mu-play', { tocando: !this.tocando, tempo: this.agora() });
     });
-    // o clipe vai para o telão no mesmo segundo, e a música da sala pausa (senão tocariam as duas)
+    // Música no telão: o clipe vai para o telão no mesmo segundo e a fila continua por lá (acabou,
+    // entra a próxima; na última, o rádio). O som sai do telão; o player escondido fica calado.
+    // De novo: a música volta para a sala, no ponto em que o telão estava.
+    this.noTelao = noTelao;
     $('#mu-telao').addEventListener('click', () => {
-      const a = this.atual();
-      if (!a) return;
-      const t = this.agora();
-      if (!noTelao(a.v, t)) return;
-      if (this.tocando) this.socket()?.emit('mu-play', { tocando: false, tempo: t });
-      this.toast('Clipe no telão. A música da sala pausou.', 'info', 3500, '#f472b6');
+      if (!this.atual()) return;
+      if (this.telao) {
+        this.socket()?.emit('mu-telao', { ligar: false });
+        return;
+      }
+      if (!noTelao.liberar()) return;
+      this.socket()?.emit('mu-telao', { ligar: true, tempo: this.agora() });
+      this.toast('A música está no telão: a fila segue por lá, uma atrás da outra.', 'info', 3500, '#f472b6');
     });
     $('#mu-ant').addEventListener('click', () => this.socket()?.emit('mu-pular', { dir: -1 }));
     $('#mu-prox').addEventListener('click', () => this.socket()?.emit('mu-pular', { dir: 1 }));
@@ -134,6 +139,7 @@ export class Musica {
     this.recebido = performance.now();
     this.seq = s.seq;
     this.por = s.por;
+    this.telao = !!s.telao;
     this.acompanhar();
     this.desenhar(!!s.fila);
   }
@@ -157,6 +163,8 @@ export class Musica {
 
   // o segundo que este navegador está tocando (o do player, quando ele já tem a faixa certa)
   agora() {
+    // no telão, o segundo do player dele
+    if (this.telao) return this.noTelao.tempo() ?? this.posicaoDaSala();
     const a = this.atual();
     if (a && this.carregado === `${this.seq}:${a.v}`) {
       try {
@@ -168,6 +176,7 @@ export class Musica {
   }
 
   duracao() {
+    if (this.telao) return this.noTelao.duracao() || 0;
     const a = this.atual();
     if (!a || this.carregado !== `${this.seq}:${a.v}`) return 0;
     try { return this.player.getDuration() || 0; } catch { return 0; }
@@ -176,7 +185,8 @@ export class Musica {
   // põe o player no ponto da sala: faixa, tocando ou pausado, e o segundo
   async acompanhar() {
     const a = this.atual();
-    if (!a) {
+    // no telão o som sai dele: o player daqui fica calado (e volta do ponto certo quando sair)
+    if (!a || this.telao) {
       this.carregado = null;
       try { this.player?.stopVideo(); } catch { /* nada tocando */ }
       return;
@@ -247,6 +257,8 @@ export class Musica {
     // conferência de vez em quando: player que travou no buffering ou ficou para trás volta ao ponto
     if (this.tocando && ++this.conta % 6 === 0) this.acompanhar();
     if (this.painelAberto()) this.desenharTempo();
+    // no telão o fim da faixa e o rádio são com o servidor (o telão avisa quando acaba)
+    if (this.telao) return;
     const dur = this.duracao();
     // o player chegou ao fim e a sala não andou (o YouTube nem sempre dispara o ENDED num player
     // escondido, ou o aviso se perdeu): avisa de novo. O servidor pula uma vez só (seq).
@@ -317,10 +329,13 @@ export class Musica {
     }
     $('#mu-capa-vazia').hidden = !!a;
     $('#mu-titulo').textContent = a ? a.t : 'Nenhuma música na fila';
-    $('#mu-quando').textContent = !a ? 'Fila vazia' : this.tocando ? 'Tocando agora' : 'Pausado';
+    $('#mu-quando').textContent = !a ? 'Fila vazia' : !this.tocando ? 'Pausado' : this.telao ? 'Tocando no telão' : 'Tocando agora';
     $('#mu-quando').classList.toggle('pausado', !this.tocando);
     $('#mu-por').textContent = a ? `Pedida por ${a.por}${this.por && this.por !== a.por ? ` · última ação: ${this.por}` : ''}` : 'Cole um link ou digite um artista abaixo.';
     $('#mu-play').innerHTML = icon(this.tocando ? 'pause' : 'play', 22);
+    const telao = $('#mu-telao');
+    telao.classList.toggle('on', !!this.telao);
+    telao.innerHTML = `${icon('tv', 16)}${this.telao ? 'Tirar do telão (volta para a sala)' : 'Tocar no telão'}`;
     for (const id of ['#mu-play', '#mu-ant', '#mu-prox', '#mu-telao']) $(id).disabled = !a;
     $('#mu-linha').hidden = !a;
     this.desenharTempo();

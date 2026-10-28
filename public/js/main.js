@@ -889,12 +889,16 @@ const musica = new Musica({
     saveSettings();
   },
   painelAberto: () => state.panel === 'musica',
-  // o clipe da música no telão, no mesmo segundo (o 'load' do telão vale para a sala toda)
-  noTelao: (id, time) => {
-    if (!tv) return false;
-    tv.send('load', { provider: 'youtube', id, time: Math.floor(time) });
-    tv.unblock();
-    return true;
+  // música no telão: quem carrega cada faixa no telão é o servidor; daqui só destrava o som do
+  // telão (o toque no botão vale como gesto) e lê o segundo e a duração do player dele
+  noTelao: {
+    liberar: () => {
+      if (!tv) return false;
+      tv.unblock();
+      return true;
+    },
+    tempo: () => (tv?.ready && tv.state.provider === 'youtube' ? tv.adapter.time() : null),
+    duracao: () => (tv?.ready && tv.state.provider === 'youtube' ? tv.adapter.duration() : 0),
   },
 });
 
@@ -5595,6 +5599,11 @@ function enterFocus(info) {
     $('#tv-focus-hud').hidden = false;
     $('#crosshair').hidden = true;
     $('#hover-hint').hidden = true;
+    // celular: analógico e botões somem (e soltam o que estava apertado), como nos outros focos —
+    // por cima do telão eles andavam, sentavam e viravam carro com a câmera presa no vídeo
+    syncTouchVisibility();
+    // tela limpa: só o vídeo e a barra de sair do foco (ver body.tv-focus no style.css)
+    if (state.panel) closePanel();
     setTimeout(atualizarInteresse, 0); // o vídeo cobre o 3D: as telas e webcams de trás param já
     return;
   }

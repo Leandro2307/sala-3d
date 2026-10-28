@@ -154,16 +154,69 @@ async function umVideo(v) {
   return { v, t: d.title || 'Música' };
 }
 
-function ligarMusica(io) {
-  const musicaDa = (room) => (room.musica ||= { fila: [], idx: 0, tocando: false, tempo: 0, em: Date.now(), por: null, seq: 0, n: 0 });
+// telao: o telão da sala a serviço da música (server.js) — carregar(room, v, tempo, tocando),
+// tocar(room, tocando, tempo), parar(room) e agora(room) → { v, tempo, tocando }.
+function ligarMusica(io, telao) {
+  const musicaDa = (room) => (room.musica ||= { fila: [], idx: 0, tocando: false, tempo: 0, em: Date.now(), por: null, seq: 0, n: 0, telao: false });
   const tempoAgora = (m) => (m.tocando ? m.tempo + (Date.now() - m.em) / 1000 : m.tempo);
 
   // comFila: a fila mudou (senão vai só o ponto da música, que é o que muda a toda hora)
   const publico = (m, comFila) => ({
     ...(comFila ? { fila: m.fila } : {}),
-    idx: m.idx, tocando: m.tocando, tempo: tempoAgora(m), por: m.por, seq: m.seq, agora: Date.now(),
+    idx: m.idx, tocando: m.tocando, tempo: tempoAgora(m), por: m.por, seq: m.seq, agora: Date.now(), telao: !!m.telao,
   });
-  const avisar = (room, comFila = false) => io.to(room.id).emit('mu-estado', publico(musicaDa(room), comFila));
+  const avisar = (room, comFila = false) => {
+    const m = musicaDa(room);
+    if (m.telao) acompanharTelao(room, m);
+    io.to(room.id).emit('mu-estado', publico(m, comFila));
+  };
+
+  // Música no telão: o clipe da faixa atual toca no telão da sala (com o som), e a fila segue por
+  // ele — acabou o clipe, entra a próxima; na última, o rádio já busca uma parecida, e assim não
+  // para nunca. Enquanto isso o player escondido de cada um fica calado (telao no estado).
+  // Faixa nova (seq): vai para o telão. Fila vazia: o telão para e o modo acaba.
+  function acompanharTelao(room, m) {
+    const a = m.fila[m.idx];
+    if (!a) {
+      m.telao = false;
+      telao.parar(room);
+      return;
+    }
+    if (m.telaoSeq === m.seq) return;
+    m.telaoSeq = m.seq;
+    telao.carregar(room, a.v, tempoAgora(m), m.tocando);
+    if (m.idx === m.fila.length - 1) radio(room, m, m.seq);
+  }
+  // o tempo e o play/pause da música passam a ser os do telão (alguém mexeu no player dele)
+  function doTelao(room, m) {
+    const t = telao.agora(room);
+    m.tempo = t.tempo;
+    m.tocando = t.tocando;
+    m.em = Date.now();
+  }
+
+  // Rádio: a última da fila está acabando; entra uma do Mix dela que ainda não está na fila. Assim
+  // a música não para nem volta para a primeira. O seq faz buscar uma vez só por faixa.
+  async function radio(room, m, seq) {
+    if (!m.fila.length || seq !== m.seq || m.radioSeq === m.seq || m.idx !== m.fila.length - 1) return;
+    m.radioSeq = m.seq;
+    const ultima = m.fila[m.idx];
+    try {
+      let achou = await mix(ultima.v).catch((err) => {
+        console.warn('  Música: o rádio não leu o mix do YouTube:', err.message);
+        return [];
+      });
+      // sem Mix: busca pelo artista da última (a busca funciona onde o Mix não abre)
+      if (!achou.length) achou = await buscar(artistaDo(ultima.t), 15);
+      // enquanto buscava, alguém pôs música (ou apagou a fila): aí não precisa mais
+      if (m.fila.at(-1) !== ultima) return;
+      const naFila = new Set(m.fila.map((x) => x.v));
+      const nova = achou.find((x) => !naFila.has(x.v));
+      if (nova) enfileirar(room, { name: 'Rádio' }, [nova]);
+    } catch (err) {
+      console.warn('  Música: o rádio não achou música parecida:', err.message);
+    }
+  }
 
   // troca de faixa: seq novo, e o "acabou"/"deu erro" da faixa anterior não pula esta
   function irPara(m, i, tocando = true) {
@@ -189,7 +242,42 @@ function ligarMusica(io) {
     return novas.length;
   }
 
-  return function porSocket(socket, quemDaSala) {
+  // O que acontece no telão e importa para a música (server.js chama, no 'media'):
+  // acabou: o clipe chegou ao fim (já filtrado: uma vez só) — entra a próxima.
+  // erro: o clipe não toca no telão (sem embed, privado) — pula, uma vez por faixa.
+  // mexeu: play, pause ou seek pelo player do telão — a aba Música acompanha.
+  // trocou: alguém pôs outra coisa no telão (ou parou) — a música sai dele e fica pausada.
+  const doTelaoParaMusica = {
+    acabou(room, v) {
+      const m = room.musica;
+      if (!m?.telao || m.fila[m.idx]?.v !== v) return;
+      irPara(m, m.idx + 1);
+      avisar(room);
+    },
+    erro(room, v) {
+      const m = room.musica;
+      if (!m?.telao || m.fila[m.idx]?.v !== v || m.erroSeq === m.seq) return;
+      m.erroSeq = m.seq;
+      irPara(m, m.idx + 1);
+      avisar(room);
+    },
+    mexeu(room) {
+      const m = room.musica;
+      if (!m?.telao) return;
+      doTelao(room, m);
+      io.to(room.id).emit('mu-estado', publico(m, false));
+    },
+    trocou(room) {
+      const m = room.musica;
+      if (!m?.telao) return;
+      m.telao = false;
+      m.tocando = false;
+      m.em = Date.now();
+      io.to(room.id).emit('mu-estado', publico(m, false));
+    },
+  };
+
+  return Object.assign(function porSocket(socket, quemDaSala) {
     const daSala = () => {
       const { room, user } = quemDaSala();
       return room && user ? { room, user, m: musicaDa(room) } : {};
@@ -261,10 +349,13 @@ function ligarMusica(io) {
       const { room, user, m } = daSala();
       if (!m?.fila.length) return;
       const t = Number(msg?.tempo);
-      m.tempo = Number.isFinite(t) && t >= 0 ? t : tempoAgora(m);
+      // no telão quem sabe o segundo certo é ele
+      if (m.telao) doTelao(room, m);
+      else m.tempo = Number.isFinite(t) && t >= 0 ? t : tempoAgora(m);
       m.tocando = !!msg?.tocando;
       m.em = Date.now();
       m.por = user.name;
+      if (m.telao) telao.tocar(room, m.tocando, m.tempo);
       avisar(room);
     });
 
@@ -275,6 +366,7 @@ function ligarMusica(io) {
       m.tempo = Math.max(0, t);
       m.em = Date.now();
       m.por = user.name;
+      if (m.telao) telao.tocar(room, m.tocando, m.tempo);
       avisar(room);
     });
 
@@ -282,35 +374,39 @@ function ligarMusica(io) {
     // avisam; o seq garante que pula uma vez só, e o tempo, que um aviso atrasado não corta a próxima.
     socket.on('mu-fim', (msg) => {
       const { room, m } = daSala();
-      if (!m?.fila.length || msg?.seq !== m.seq) return;
+      if (!m?.fila.length || msg?.seq !== m.seq || m.telao) return; // no telão quem avisa é ele
       if (!msg.erro && tempoAgora(m) < 3) return;
       irPara(m, m.idx + 1);
       avisar(room);
     });
 
     // Rádio: a última da fila está nos 30 s finais (quem avisa é o navegador, que sabe a duração).
-    // Entra uma do Mix dela que ainda não está na fila; assim a música não para nem volta para a
-    // primeira. Todos avisam: o seq faz buscar uma vez só por faixa.
-    socket.on('mu-radio', async (msg) => {
+    // Todos avisam: o seq faz buscar uma vez só por faixa. (No telão ele busca ao começar a última.)
+    socket.on('mu-radio', (msg) => {
       const { room, m } = daSala();
-      if (!m?.fila.length || msg?.seq !== m.seq || m.radioSeq === m.seq || m.idx !== m.fila.length - 1) return;
-      m.radioSeq = m.seq;
-      const ultima = m.fila[m.idx];
-      try {
-        let achou = await mix(ultima.v).catch((err) => {
-          console.warn('  Música: o rádio não leu o mix do YouTube:', err.message);
-          return [];
-        });
-        // sem Mix: busca pelo artista da última (a busca funciona onde o Mix não abre)
-        if (!achou.length) achou = await buscar(artistaDo(ultima.t), 15);
-        // enquanto buscava, alguém pôs música (ou apagou a fila): aí não precisa mais
-        if (m.fila.at(-1) !== ultima) return;
-        const naFila = new Set(m.fila.map((x) => x.v));
-        const nova = achou.find((x) => !naFila.has(x.v));
-        if (nova) enfileirar(room, { name: 'Rádio' }, [nova]);
-      } catch (err) {
-        console.warn('  Música: o rádio não achou música parecida:', err.message);
+      if (m) radio(room, m, msg?.seq);
+    });
+
+    // liga (com o segundo em que a música está) ou desliga a música no telão. Desligando, a música
+    // volta para o player escondido de cada um no ponto em que o telão estava.
+    socket.on('mu-telao', (msg) => {
+      const { room, user, m } = daSala();
+      if (!m?.fila.length) return;
+      if (msg?.ligar) {
+        const t = Number(msg.tempo);
+        m.tempo = Number.isFinite(t) && t >= 0 ? t : tempoAgora(m);
+        m.tocando = true;
+        m.em = Date.now();
+        m.telao = true;
+        m.telaoSeq = null;
+      } else {
+        if (!m.telao) return;
+        doTelao(room, m);
+        m.telao = false;
+        telao.parar(room);
       }
+      m.por = user.name;
+      avisar(room);
     });
 
     socket.on('mu-tirar', (msg) => {
@@ -335,7 +431,7 @@ function ligarMusica(io) {
       m.por = user.name;
       avisar(room, true);
     });
-  };
+  }, { doTelao: doTelaoParaMusica });
 }
 
 module.exports = { ligarMusica, lerLink };

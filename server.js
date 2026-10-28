@@ -1065,7 +1065,26 @@ function attachSockets(io) {
   const fantasmasDoSocket = ligarFantasmas(io, rooms, jogoLigado, moedasDoJogo); // caça-fantasmas (fantasmas-servidor.js)
   const kartDoSocket = ligarKart(io, rooms, jogoLigado, moedasDoJogo); // kart (kart-servidor.js)
   const pintaDoSocket = ligarPinta(io, rooms, jogoLigado, moedasDoJogo); // pinta-território (pinta-servidor.js)
-  const musicaDoSocket = ligarMusica(io); // a fila de música da sala (musica-servidor.js)
+  // o telão a serviço da música da sala ("música no telão"): sem autor (by), para ninguém receber o
+  // aviso "fulano colocou um vídeo" a cada faixa que entra
+  const telaoDaMusica = {
+    carregar(room, id, time, playing) {
+      Object.assign(room.media, { provider: 'youtube', id, playing, time: Math.max(0, time), updatedAt: Date.now(), by: null });
+      room.main = 'media';
+      io.to(room.id).emit('main', { source: 'media', by: null });
+      io.to(room.id).emit('media', { ...mediaSnapshot(room), action: 'load' });
+    },
+    tocar(room, playing, time) {
+      Object.assign(room.media, { playing, time: Math.max(0, time), updatedAt: Date.now() });
+      io.to(room.id).emit('media', { ...mediaSnapshot(room), action: playing ? 'play' : 'pause' });
+    },
+    parar(room) {
+      Object.assign(room.media, { provider: null, id: null, playing: false, time: 0, updatedAt: Date.now() });
+      io.to(room.id).emit('media', { ...mediaSnapshot(room), action: 'stop' });
+    },
+    agora: (room) => ({ tempo: mediaCurrentTime(room.media), tocando: !!room.media.playing }),
+  };
+  const musicaDoSocket = ligarMusica(io, telaoDaMusica); // a fila de música da sala (musica-servidor.js)
   // alerta para os gestores que estão na sala (menos a própria pessoa)
   function avisarGestores(room, user, tipo, texto) {
     for (const u of room.users.values()) {
@@ -1551,6 +1570,12 @@ function attachSockets(io) {
       const m = room.media;
       const now = Date.now();
       const current = mediaCurrentTime(m);
+      // o clipe não toca no player deste navegador: só importa para a música no telão (pula a faixa)
+      if (msg.action === 'erro') {
+        if (m.provider === 'youtube') musicaDoSocket.doTelao.erro(room, m.id);
+        return;
+      }
+      const daMusica = m.provider === 'youtube' ? m.id : null; // o que tocava antes desta ação
       switch (msg.action) {
         case 'load': {
           const provider = String(msg.provider || '');
@@ -1576,13 +1601,24 @@ function attachSockets(io) {
           m.time = Math.max(0, t);
           break;
         }
-        case 'ended': if (m.playing && current > 3) Object.assign(m, { playing: false, time: current }); break;
+        case 'ended': {
+          // todos avisam o fim; só o primeiro conta (os outros chegam com o vídeo já parado)
+          if (!(m.playing && current > 3)) return;
+          Object.assign(m, { playing: false, time: current, updatedAt: now });
+          io.to(room.id).emit('media', { ...mediaSnapshot(room), action: 'ended' });
+          // música no telão: entra a próxima da fila (que carrega no telão)
+          if (daMusica) musicaDoSocket.doTelao.acabou(room, daMusica);
+          return;
+        }
         case 'stop': Object.assign(m, { provider: null, id: null, playing: false, time: 0 }); break;
         default: return;
       }
       m.updatedAt = now;
       m.by = user.name;
       io.to(room.id).emit('media', { ...mediaSnapshot(room), action: msg.action });
+      // a música no telão acompanha o player dele, ou sai quando alguém põe outra coisa ali
+      if (msg.action === 'load' || msg.action === 'stop') musicaDoSocket.doTelao.trocou(room);
+      else musicaDoSocket.doTelao.mexeu(room);
     });
 
     // /pix: o dono da sala põe, tira ou acerta as moedas de quem está na sala. Não vai para o chat:
