@@ -567,6 +567,7 @@ const MAQUETES = {
     cilindro(g, 0.1, 0.18, 0.5, 0x451a03);
     const UNO = [['#ef4444', '7'], ['#facc15', '+2'], ['#22c55e', '3'], ['#3b82f6', '⟲'], ['#111827', '+4']];
     const TRUCO = [['♣', '4', '#111'], ['♥', '7', '#dc2626'], ['♠', 'A', '#111'], ['♦', '7', '#dc2626'], ['♥', '3', '#dc2626']];
+    const VINTE = ['2', '3', '4', '5', '7']; // no 21 as cartas vão de 1 a 11: esta mão fecha 21
     const frente = (i) => tela(96, 144, (ctx, w, h) => {
       if (id === 'uno') {
         const [cor, txt] = UNO[i];
@@ -580,6 +581,18 @@ const MAQUETES = {
         ctx.fill();
         ctx.fillStyle = cor === '#111827' ? '#a855f7' : cor;
         ctx.font = '900 40px system-ui';
+      } else if (id === 'vinteum') {
+        ctx.fillStyle = '#fffdf5';
+        ctx.fillRect(0, 0, w, h);
+        ctx.strokeStyle = '#4bc292';
+        ctx.lineWidth = 6;
+        ctx.strokeRect(6, 6, w - 12, h - 12);
+        ctx.fillStyle = '#111';
+        ctx.font = '900 64px system-ui';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(VINTE[i], w / 2, h / 2 + 4);
+        return;
       } else {
         const [naipe, txt, cor] = TRUCO[i];
         ctx.fillStyle = '#fffdf5';
@@ -599,7 +612,7 @@ const MAQUETES = {
       ctx.textBaseline = 'middle';
       ctx.fillText(UNO[i][1], w / 2, h / 2 + 2);
     });
-    const verso = mat(id === 'uno' ? 0x111827 : 0x1d4ed8);
+    const verso = mat(id === 'uno' ? 0x111827 : id === 'vinteum' ? 0x7f1d1d : 0x1d4ed8);
     const cartas = [];
     for (let i = 0; i < 5; i++) {
       const lados = [verso, verso, mat(0xffffff, { map: frente(i) }), verso, verso, verso];
@@ -610,7 +623,9 @@ const MAQUETES = {
       g.add(c);
       cartas.push(c);
     }
-    for (const [x, z, giro, cor] of [[-1.7, 0, Math.PI / 2, 0xf472b6], [1.7, 0, -Math.PI / 2, 0x60a5fa], [0, -1.7, 0, 0xfacc15]]) boneco(g, cor, x, z, giro, 1.4);
+    // o 21 é um duelo: só um rival, do outro lado da mesa
+    const rivais = id === 'vinteum' ? [[0, -1.7, 0, 0xfacc15]] : [[-1.7, 0, Math.PI / 2, 0xf472b6], [1.7, 0, -Math.PI / 2, 0x60a5fa], [0, -1.7, 0, 0xfacc15]];
+    for (const [x, z, giro, cor] of rivais) boneco(g, cor, x, z, giro, 1.4);
     return (t) => {
       cartas.forEach((c, i) => { c.position.y = 0.63 + i * 0.004 + (Math.floor(t) % 5 === i ? Math.sin((t % 1) * Math.PI) * 0.12 : 0); });
     };
@@ -774,6 +789,7 @@ const MAQUETES = {
 MAQUETES.truco = (g) => MAQUETES.cartas(g, 'truco');
 MAQUETES.uno = (g) => MAQUETES.cartas(g, 'uno');
 MAQUETES.cacheta = (g) => MAQUETES.cartas(g, 'cacheta');
+MAQUETES.vinteum = (g) => MAQUETES.cartas(g, 'vinteum');
 // poker: a mesa verde com as torres de fichas e uma ficha voando em arco até a pilha
 MAQUETES.poker = (g) => {
   // a mesa oval: os discos esticados no comprimento

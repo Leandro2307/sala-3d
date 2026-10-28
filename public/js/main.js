@@ -785,9 +785,9 @@ function irParaJogo(id) {
   if (id === 'ringue') return goToRing();
   if (id === 'corrida') return irParaLargada();
   if (['xadrez', 'dama', 'velha'].includes(id)) return irParaMesa(id);
-  if (id === 'cacheta') {
-    // a mesa da cacheta fica do outro lado do salão, longe das outras de cartas
-    const l = cartas.lugar('cacheta');
+  if (id === 'cacheta' || id === 'vinteum') {
+    // as mesas da cacheta e do 21 ficam longe das outras de cartas: leva direto à do jogo
+    const l = cartas.lugar(id);
     player.teleport([l.pos[0], l.pos[1], l.pos[2]], l.yaw);
     return sfx.teleport();
   }
