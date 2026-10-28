@@ -1700,7 +1700,12 @@ body.touch .ct-placa { font-size: 12px; }
 @keyframes ct-novo { 0% { transform: translateY(-26px) scale(.4) rotate(-12deg); opacity: 0; } 100% { transform: none; opacity: 1; } }
 @keyframes ct-sai { 0%, 85% { opacity: 1; } 100% { opacity: 0; } }
 .ct-tip small.nao { color: #fe8b83; }
-.ct-soma .ct-prox { font-style: normal; color: #38bdf8; }
+.ct-soma { position: relative; }
+.ct-soma .ct-prox { position: absolute; top: -26px; right: -30px; z-index: 2; rotate: 8deg; pointer-events: auto; animation: ct-novo .4s cubic-bezier(.2,1.5,.4,1) backwards; }
+.ct-soma .ct-prox img { display: block; width: 54px; height: 72px; border-radius: 6px; box-shadow: 0 0 0 2px #38bdf8, 0 4px 10px rgba(0,0,0,.45); }
+.ct-soma .ct-prox i { position: absolute; left: -9px; bottom: -6px; font: normal 14px/1 sans-serif; padding: 2px 3px; border-radius: 6px; background: #1e2b2d; box-shadow: 0 0 0 2px #38bdf8; }
+body.touch .ct-soma .ct-prox { top: -18px; right: -22px; } body.touch .ct-soma .ct-prox img { width: 38px; height: 51px; }
+body.touch .ct-soma .ct-prox i { font-size: 11px; left: -7px; bottom: -5px; }
 .ct-trunfo.nao { animation: ct-nao .3s linear; }
 .ct-tip { position: absolute; bottom: calc(100% + 12px); left: 50%; translate: -50% 0; width: 250px; padding: 8px 10px; font-size: 13px; line-height: 1.3; text-align: center; pointer-events: none; }
 .ct-tip b { display: block; font-size: 16px; margin-bottom: 3px; }
@@ -2638,10 +2643,10 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
       const vez = this.minhaVez21(M);
       const s = soma21(M.mao);
       const meta = e.meta ?? 21;
-      // com o Espiar, a próxima do monte aparece na linha da meta (só para mim; na mesma linha para a
-      // caixa não crescer no celular deitado)
-      const prox = M.proxima ? ` · <i class="ct-prox" title="A próxima carta do monte (Espiar)">👀 ${numero21(M.proxima)}</i>` : '';
-      esq.push(`<div class="ct-soma ct-caixa${s > meta ? ' passou' : s === meta ? ' cravou' : ''}"><small>SUA MÃO</small><b>${s}</b><small>META ${meta}${prox}</small></div>`);
+      // com o Espiar, a próxima do monte aparece de verdade, pendurada no canto de cima da caixa (só
+      // para mim; por cima da borda para a caixa não crescer no celular deitado)
+      const prox = M.proxima ? `<span class="ct-prox" title="A próxima carta do monte (Espiar)"><img src="${urlCarta(M.proxima)}" alt="Próxima: ${numero21(M.proxima)}"><i>👀</i></span>` : '';
+      esq.push(`<div class="ct-soma ct-caixa${s > meta ? ' passou' : s === meta ? ' cravou' : ''}">${prox}<small>SUA MÃO</small><b>${s}</b><small>META ${meta}</small></div>`);
       const calado = !!e.silencio?.[M.lugar];
       const estourou = s > meta; // passou da meta: só volta a pedir se a meta subir ou se devolver a carta
       const dica = calado ? 'O rival pôs Silêncio na mesa' : estourou ? 'Passou da meta: use uma Meta ou o Devolver' : 'Espaço';
