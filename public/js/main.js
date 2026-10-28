@@ -859,6 +859,9 @@ setTimeout(() => localAvatar.emote('wave'), 900);
 
 $('#lobby-form').addEventListener('submit', (e) => {
   e.preventDefault();
+  // Celular: a sala é sempre deitada. No Android a trava de orientação só vale em tela cheia, que
+  // precisa deste toque; no iPhone não há trava (nem tela cheia) e, em pé, um aviso cobre a sala
+  if (isTouch && temTelaCheia && !isFullscreen()) toggleFullscreen().then(updateFullscreenButton);
   join();
 });
 
@@ -1017,6 +1020,7 @@ async function join() {
   }
 
   state.joined = true;
+  document.body.classList.add('na-sala'); // celular em pé: o aviso de girar (style.css)
   $('#lobby').hidden = true;
   iniciarGuiaBoasVindas();
   $('#hud').hidden = false;
@@ -1041,6 +1045,7 @@ async function join() {
       sairJogo: () => sairDoJogo(),
       // em jogo a barra do topo some; o ☰ traz ela de volta
       menu: () => document.body.classList.toggle('barra-aberta'),
+      hud: () => alternarHud(),
       punch: () => punch(),
       tapa: () => darTapa(),
       sit: () => toggleSit(),
@@ -1072,9 +1077,6 @@ async function join() {
     syncTouchVisibility();
     poderesMudaram();
     if (!temTelaCheia) $('#tb-full').hidden = true; // iOS não tem tela cheia de página
-    if (window.matchMedia('(orientation: portrait)').matches) {
-      toast('Vire o celular na horizontal para jogar melhor.', 'warn', 7000);
-    }
   }
 }
 
@@ -3847,7 +3849,7 @@ let hudDaMesa = false; // quem escondeu foi o sentar numa mesa (e não o H): lev
 function alternarHud() {
   hudDaMesa = false;
   const sem = document.body.classList.toggle('sem-hud');
-  if (sem) toast('Interface escondida. Aperte H para mostrar de novo.', 'info', 2500);
+  if (sem) toast(isTouch ? 'Interface escondida. Toque no olho para mostrar de novo.' : 'Interface escondida. Aperte H para mostrar de novo.', 'info', 2500);
 }
 
 // Sentado numa mesa (cartas, poker, tabuleiros, dados, sinuca), a interface da sala some sozinha,
@@ -4949,7 +4951,8 @@ document.addEventListener('mousedown', (e) => {
   if (e.button === 2 && document.pointerLockElement === world.canvas && temSniper()) ligarLuneta(true);
 });
 document.addEventListener('mouseup', (e) => { if (e.button === 2) ligarLuneta(false); });
-world.canvas.addEventListener('contextmenu', (e) => { if (temSniper()) e.preventDefault(); });
+// no celular, segurar o dedo no 3D (a tacada da sinuca) abria o menu do toque longo
+world.canvas.addEventListener('contextmenu', (e) => { if (temSniper() || isTouch) e.preventDefault(); });
 
 $('#ep-arma').addEventListener('click', (e) => {
   const b = e.target.closest('[data-arma]');
@@ -6658,7 +6661,8 @@ function sairDoJogo() {
   else if (kart.inscrito) {
     kart.sairDaCorrida(); // esperando a largada
     hudJogos.mensagem('Saiu do kart', '', 1200);
-  } else if (run.state !== 'idle') run.abandon();
+  } else if (sinuca.sair()) { /* andando entre as tacadas, longe da mesa */ }
+  else if (run.state !== 'idle') run.abandon();
   else return false;
   return true;
 }
@@ -6684,7 +6688,7 @@ function jogoAtual() {
   if (run.state !== 'idle') return 'parkour';
   return '';
 }
-const SAI_COM_X = ['futebol', 'surf', 'matamata', 'batalha', 'gincana', 'fantasmas', 'kart', 'pinta', 'parkour'];
+const SAI_COM_X = ['futebol', 'surf', 'matamata', 'batalha', 'gincana', 'fantasmas', 'kart', 'pinta', 'parkour', 'sinuca'];
 let jogoNaTela = '';
 let armadoNaTela = false;
 function marcarJogoAtual() {
@@ -6897,6 +6901,9 @@ function atualizarChipFps() {
   const motivo = motivoDoTeto(teto);
   const res = qualidade.escala < 0.999 ? ` ${Math.round(qualidade.escala * 100)}%` : '';
   let texto = motivo ? `3D a ${teto} qps · ${motivo} · ${nivel}` : `${Math.round(qualidade.fps)} FPS · ${nivel}${res}`;
+  // quem segura é o aparelho (no iPhone: Pouca Energia ou aquecido), não a sala: baixar gráfico
+  // não muda nada, e o chip diz isso
+  if (!motivo && qualidade.presoNoSistema) texto += ' · limite do aparelho';
   if (PERF) {
     const info = world.renderer.info;
     const uq = world.ultimoQuadro;

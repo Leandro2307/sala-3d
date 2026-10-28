@@ -30,6 +30,14 @@
   <div id="media-sink" aria-hidden="true"></div>
 
   <!-- ============================================================ HUD -->
+  <!-- celular em pé dentro da sala: a sala é só deitada (style.css mostra isto na vertical) -->
+  <div id="gire-celular" role="alert">
+    <div class="gc-celular"></div>
+    <b>Gire o celular</b>
+    <span>A sala funciona só com o celular deitado.</span>
+    <small>Se a tela não girar, desligue o Bloqueio de Rotação na Central de Controle.</small>
+  </div>
+
   <div id="hud" hidden>
     <!-- salas já visitadas, no jeito do Discord (ver salas.js) -->
     <nav id="salas" aria-label="Suas salas">
@@ -281,6 +289,9 @@
       <button type="button" class="tb small" id="tb-sit" hidden aria-label="Sentar"><i data-icon="chair" data-size="18"></i></button>
       <button type="button" class="tb small" id="tb-respawn" aria-label="Voltar ao checkpoint"><i data-icon="undo" data-size="18"></i></button>
       <button type="button" class="tb small" id="tb-view" aria-label="Alternar câmera"><i data-icon="view" data-size="18"></i></button>
+      <!-- limpar a tela (o H do computador): o olho riscado esconde a interface, o olho a traz de volta -->
+      <button type="button" class="tb small" id="tb-hud" aria-label="Esconder ou mostrar a interface"><i class="so-com-hud" data-icon="eyeOff" data-size="18"></i><i class="so-sem-hud" data-icon="eye" data-size="18"></i></button>
+      <!-- de carro é o turbo; a pé não aparece (o analógico na borda já corre) -->
       <button type="button" class="tb small" id="tb-run" aria-pressed="false" aria-label="Correr"><i data-icon="run" data-size="18"></i></button>
       <button type="button" class="tb small" id="tb-car" data-jogo="corrida" aria-pressed="false" aria-label="Virar carro"><i data-icon="car" data-size="18"></i></button>
       <button type="button" class="tb punch" id="tb-punch" data-jogo="ringue" aria-label="Socar"><i data-icon="fist" data-size="22"></i></button>

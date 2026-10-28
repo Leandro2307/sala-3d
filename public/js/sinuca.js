@@ -474,15 +474,19 @@ export class Sinuca {
     return this.mesas.find((P) => Math.abs(p.x - P.m.x) < S.comp / 2 + 2.6 && Math.abs(p.z - P.m.z) < S.larg / 2 + 2.6 && p.y < 2) || null;
   }
 
+  // sai da partida (o E perto da mesa, ou o X do canto no celular, que funciona longe dela)
+  sair() {
+    if (!this.minhaMesa()) return false;
+    this.socket?.emit('sn-sair');
+    hud.mensagem('Saiu da mesa', '', 1200);
+    return true;
+  }
+
   usarE() {
     if (!this.ligado()) return false;
     const minha = this.minhaMesa();
     const P = this.mesaPerto();
-    if (minha && (!P || P === minha)) {
-      this.socket?.emit('sn-sair');
-      hud.mensagem('Saiu da mesa', '', 1200);
-      return true;
-    }
+    if (minha && (!P || P === minha)) return this.sair();
     if (!P) return false;
     if (P.e?.jogadores.length >= 2) {
       hud.mensagem('Mesa cheia', P.e.jogadores.map((j) => j.nome).join(' × '), 1600);

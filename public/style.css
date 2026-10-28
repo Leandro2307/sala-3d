@@ -80,7 +80,14 @@ body.pagina-focus .room-chip, body.pagina-focus #controls-help, body.pagina-focu
 /* H: a sala limpa — só o 3D (as barras de sair dos focos, os painéis dos jogos e os avisos ficam).
    Sentado numa mesa ele liga sozinho; no celular a barra fica, que lá não tem H para trazê-la */
 body.sem-hud #hud > :not(#pagina-hud):not(#tv-focus-hud):not(#toasts):not(#luneta):not(#jogo-hud):not(#dados-hud):not(#hud-fundo):not(#tv-unblock),
-body.sem-hud:not(.touch) #bar, body.sem-hud #cam-preview, body.sem-hud #touch { display: none !important; }
+body.sem-hud:not(.touch) #bar, body.sem-hud #cam-preview, body.sem-hud:not(.touch) #touch { display: none !important; }
+/* No celular o olho (#tb-hud) faz o papel do H: a barra some junto, e o analógico e os botões
+   ficam (o olho está entre eles). Sentado numa mesa a barra fica só com o microfone (mesa-limpa) */
+body.touch.sem-hud:not(.mesa-limpa) #bar { display: none !important; }
+#tb-hud .so-sem-hud, body.sem-hud #tb-hud .so-com-hud { display: none; }
+body.sem-hud #tb-hud .so-sem-hud { display: contents; }
+/* correr a pé não serve no toque (o analógico na borda já corre): o botão só fica como turbo do carro */
+body:not([data-jogo="futebol"]) #touch:not(.carro) #tb-run { display: none !important; }
 
 #gl {
   position: fixed;
@@ -349,6 +356,10 @@ input[type='range']::-webkit-slider-thumb {
 /* ------------------------------------------------------------ HUD */
 #hud { position: fixed; inset: 0; z-index: 3; pointer-events: none; }
 body.touch #hud, body.touch #bar, body.touch #touch { -webkit-user-select: none; user-select: none; }
+/* segurar o dedo (a tacada da sinuca, o soco carregado) não pode selecionar a página nem abrir a
+   lupa e o menu do iPhone: só os campos de texto continuam selecionáveis */
+body.touch { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+body.touch :is(input, textarea, [contenteditable="true"]) { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
 
 .room-chip {
   position: absolute;
@@ -2629,6 +2640,39 @@ body.touch #pk-quit kbd, body.touch #tv-focus-exit kbd { display: none; }
   .room-chip .chip-btn { display: none; }
 }
 
+/* celular em pé dentro da sala: cobre tudo e pede para girar (a sala é só deitada; no Android a
+   tela cheia ainda trava a orientação, no iPhone não há trava) */
+#gire-celular { display: none; }
+@media (orientation: portrait) {
+  body.touch.na-sala #gire-celular {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 24px;
+    text-align: center;
+    background: #0b0d12;
+    color: var(--text);
+    touch-action: none;
+  }
+}
+#gire-celular b { font-size: 20px; }
+#gire-celular span { color: var(--text); font-size: 14px; }
+#gire-celular small { max-width: 280px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.gc-celular {
+  width: 46px;
+  height: 80px;
+  margin-bottom: 12px;
+  border: 3px solid var(--accent);
+  border-radius: 10px;
+  animation: gc-gira 1.8s ease-in-out infinite;
+}
+@keyframes gc-gira { 0%, 25% { transform: rotate(0); } 60%, 100% { transform: rotate(-90deg); } }
+
 /* ------------------------------------------------------------ aparelho de toque */
 body.touch #gl, body.touch #css3d { touch-action: none; }
 
@@ -2798,6 +2842,9 @@ body.touch[data-jogo] .touch-jogo-topo { display: flex; }
 body.touch[data-jogo]:not(.barra-aberta) #bar { display: none; }
 /* No PWA não há a barra do Safari para servir de navegação: mantenha a barra da sala acessível. */
 body.touch.pwa[data-jogo] #bar { display: grid; }
+/* lá a barra não some: o ☰ não tem o que trazer, e o X desce para baixo dela (ficava por cima) */
+body.touch.pwa #tb-menu { display: none; }
+body.touch.pwa[data-jogo] .touch-jogo-topo { top: calc(60px + env(safe-area-inset-top)); }
 body.touch[data-jogo]:not(.barra-aberta) .tb.corner { top: calc(8px + env(safe-area-inset-top)); }
 body.touch.barra-aberta .touch-jogo-topo { top: calc(60px + env(safe-area-inset-top)); }
 body.touch.barra-aberta #tb-menu { background: rgba(110, 231, 200, 0.22); border-color: rgba(110, 231, 200, 0.5); }
