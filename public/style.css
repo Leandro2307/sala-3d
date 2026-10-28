@@ -932,9 +932,10 @@ body.touch .jh-dica, body.touch #jh-sair kbd, body.touch #dh-sair kbd { display:
 /* o fundo escurecido do modal: tocar fora fecha (e não mexe peça sem querer) */
 #hud-fundo { display: none; position: absolute; inset: 0; z-index: 5; background: rgba(4, 5, 8, 0.55); pointer-events: auto; }
 body.touch:has(#jogo-hud:not([hidden]):not(.min), #dados-hud:not([hidden]):not(.min)) #hud-fundo { display: block; }
-/* sentado num tabuleiro ou nos dados, a barra de cima fica só com o microfone */
-body.touch:has(#jogo-hud:not([hidden]), #dados-hud:not([hidden])) #bar { grid-template-columns: 1fr; background: none; }
-body.touch:has(#jogo-hud:not([hidden]), #dados-hud:not([hidden])) :is(.bar-left, .bar-right, .bar-center > :not(#btn-mic)) { display: none !important; }
+/* sentado numa mesa (tabuleiros, dados, cartas, poker, sinuca), a barra de cima fica só com o
+   microfone. Andando entre as tacadas da sinuca vale o modo de jogo (o ☰ traz a barra inteira) */
+body.touch.mesa-limpa:not([data-jogo]) #bar { grid-template-columns: 1fr; background: none; }
+body.touch.mesa-limpa:not([data-jogo]) :is(.bar-left, .bar-right, .bar-center > :not(#btn-mic)) { display: none !important; }
 
 #tv-unblock { position: absolute; top: 108px; left: 50%; transform: translateX(-50%); pointer-events: auto; }
 
