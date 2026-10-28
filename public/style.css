@@ -79,7 +79,7 @@ body.pagina-focus .room-chip, body.pagina-focus #controls-help, body.pagina-focu
 
 /* H: a sala limpa — só o 3D (as barras de sair dos focos, os painéis dos jogos e os avisos ficam).
    Sentado numa mesa ele liga sozinho; no celular a barra fica, que lá não tem H para trazê-la */
-body.sem-hud #hud > :not(#pagina-hud):not(#tv-focus-hud):not(#toasts):not(#luneta):not(#jogo-hud):not(#dados-hud):not(#tv-unblock),
+body.sem-hud #hud > :not(#pagina-hud):not(#tv-focus-hud):not(#toasts):not(#luneta):not(#jogo-hud):not(#dados-hud):not(#hud-fundo):not(#tv-unblock),
 body.sem-hud:not(.touch) #bar, body.sem-hud #cam-preview, body.sem-hud #touch { display: none !important; }
 
 #gl {
@@ -897,21 +897,44 @@ video.controlavel { cursor: default; }
 #jogo-hud.min > :not(.jh-head, .jh-status, .jh-msg) { display: none; }
 #dados-hud.min > :not(.jh-head, .dh-saldo, .jh-acoes, .jh-msg) { display: none; }
 #jogo-hud.min .jh-msg:empty, #dados-hud.min .jh-msg:empty { display: none; }
+/* No celular o painel é um modal no meio da tela (abre assim ao sentar); escolhido o que fazer, ele
+   vira um menuzinho no canto de cima, com o nome do jogo, a vez e o ☰ que abre o modal de novo */
 body.touch #jogo-hud, body.touch #dados-hud {
-  top: calc(58px + env(safe-area-inset-top));
+  z-index: 6;
+  top: 50%;
+  left: 50%;
+  right: auto;
   bottom: auto;
-  right: max(8px, env(safe-area-inset-right));
-  width: min(300px, 42vw);
-  max-height: calc(100dvh - 66px - env(safe-area-inset-top));
+  transform: translate(-50%, -50%);
+  width: min(380px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
   overflow: auto;
-  padding: 10px 12px;
+  padding: 12px 14px;
   gap: 8px;
-  font-size: 12.5px;
+  font-size: 13px;
+  background: rgba(14, 16, 23, 0.97);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
 }
+body.touch #jogo-hud.min, body.touch #dados-hud.min {
+  top: calc(8px + env(safe-area-inset-top));
+  left: max(8px, env(safe-area-inset-left));
+  transform: none;
+  width: min(300px, calc(100vw - 80px));
+  padding: 6px 6px 6px 12px;
+  gap: 2px;
+  font-size: 12px;
+  box-shadow: none;
+}
+body.touch .min .jh-head b { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body.touch .min .hud-min .ic { transform: none; }
+body.touch #dados-hud.min .jh-acoes { padding: 4px 0 2px; }
 body.touch .jh-dica, body.touch #jh-sair kbd, body.touch #dh-sair kbd { display: none; }
-@media (max-width: 640px) {
-  body.touch #jogo-hud, body.touch #dados-hud { left: 8px; right: 8px; width: auto; max-height: 52dvh; }
-}
+/* o fundo escurecido do modal: tocar fora fecha (e não mexe peça sem querer) */
+#hud-fundo { display: none; position: absolute; inset: 0; z-index: 5; background: rgba(4, 5, 8, 0.55); pointer-events: auto; }
+body.touch:has(#jogo-hud:not([hidden]):not(.min), #dados-hud:not([hidden]):not(.min)) #hud-fundo { display: block; }
+/* sentado num tabuleiro ou nos dados, a barra de cima fica só com o microfone */
+body.touch:has(#jogo-hud:not([hidden]), #dados-hud:not([hidden])) #bar { grid-template-columns: 1fr; background: none; }
+body.touch:has(#jogo-hud:not([hidden]), #dados-hud:not([hidden])) :is(.bar-left, .bar-right, .bar-center > :not(#btn-mic)) { display: none !important; }
 
 #tv-unblock { position: absolute; top: 108px; left: 50%; transform: translateX(-50%); pointer-events: auto; }
 

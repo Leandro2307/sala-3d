@@ -5516,7 +5516,7 @@ function enterFocus(info) {
     if (player.sitting) toggleSit();
     if (player.veiculo) toggleVeiculo();
     dados.entrar();
-    recolherPainel('#dados-hud', isTouch);
+    recolherPainel('#dados-hud', false);
     $('#hover-hint').hidden = true;
     syncTouchVisibility();
     return;
@@ -5526,7 +5526,7 @@ function enterFocus(info) {
     if (player.sitting) toggleSit();
     if (player.veiculo) toggleVeiculo();
     jogos.entrar(info.mesa);
-    recolherPainel('#jogo-hud', isTouch);
+    recolherPainel('#jogo-hud', false);
     $('#hover-hint').hidden = true;
     syncTouchVisibility();
     return;
@@ -5583,17 +5583,32 @@ function enterFocus(info) {
 }
 
 // Painel do jogo recolhido: só título, vez e mensagem — o resto do tabuleiro fica livre para tocar.
-// No celular ele abre recolhido; o botão ao lado do Sair (ou tocar no título) abre e fecha.
+// O botão ao lado do Sair (ou tocar no título) abre e fecha. No celular o painel aberto é um modal no
+// meio da tela (abre assim ao sentar) e o recolhido, um menuzinho no canto com o ☰ para reabrir.
 function recolherPainel(sel, recolher) {
   const hud = $(sel);
   hud.classList.toggle('min', recolher);
   const b = hud.querySelector('.hud-min');
   b.setAttribute('aria-expanded', String(!recolher));
   b.title = recolher ? 'Abrir o painel' : 'Recolher o painel';
+  if (isTouch) b.innerHTML = icon(recolher ? 'menu' : 'minimizar', 16);
 }
 for (const sel of ['#jogo-hud', '#dados-hud']) {
   $(sel).addEventListener('click', (e) => {
     if (e.target.closest('.hud-min, .jh-head > b')) recolherPainel(sel, !$(sel).classList.contains('min'));
+  });
+}
+// no celular, escolhido o que fazer (sentar, contra o computador, novo jogo, rolar), o modal fecha e o
+// tabuleiro fica livre; tocar no fundo escuro também fecha
+if (isTouch) {
+  $('#jogo-hud').addEventListener('click', (e) => {
+    if (e.target.closest('.jh-lado button, #jh-bot, #jh-novo')) recolherPainel('#jogo-hud', true);
+  });
+  $('#dados-hud').addEventListener('click', (e) => {
+    if (e.target.closest('#dh-rolar, #dh-so')) recolherPainel('#dados-hud', true);
+  });
+  $('#hud-fundo').addEventListener('click', () => {
+    for (const sel of ['#jogo-hud', '#dados-hud']) if (!$(sel).hidden) recolherPainel(sel, true);
   });
 }
 
