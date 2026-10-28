@@ -44,7 +44,7 @@
     <nav id="salas" aria-label="Suas salas">
       <div class="salas-lista"></div>
       <span class="salas-sep"></span>
-      <button type="button" class="salas-add" title="Entrar em outra sala"><i data-icon="mais" data-size="20"></i></button>
+      <button type="button" class="salas-add" data-tip="Entrar em outra sala" data-tip-lado="direita" aria-label="Entrar em outra sala"><i data-icon="mais" data-size="20"></i></button>
       <form class="salas-nova" hidden autocomplete="off">
         <b>Ir para a sala</b>
         <div class="input-prefix"><b>#</b><input maxlength="40" placeholder="nome-da-sala" aria-label="Nome da sala"></div>
@@ -59,9 +59,9 @@
       <span class="sep">·</span>
       <span id="room-count">1 pessoa</span>
       <span class="sep onde" hidden>·</span>
-      <span class="onde-chip onde" id="onde-chip" hidden title="Onde você está no escritório"></span>
+      <span class="onde-chip onde" id="onde-chip" hidden data-tip="Onde você está no escritório"></span>
       <span class="sep">·</span>
-      <span class="moedas-chip" id="moedas-chip" title="Suas moedas"><i data-icon="moeda" data-size="15"></i><b id="moedas-n">0</b></span>
+      <span class="moedas-chip" id="moedas-chip" data-tip="Suas moedas"><i data-icon="moeda" data-size="15"></i><b id="moedas-n">0</b></span>
       <button id="copy-invite" class="chip-btn" type="button"><i data-icon="link" data-size="15"></i>Copiar convite</button>
       <span class="sep">·</span>
       <button id="hud-btn-jogos" class="chip-btn chip-destaque" type="button" title="Abrir catálogo com 20+ jogos e teleporte"><i data-icon="gamepad" data-size="15"></i><b>Jogos & Teleporte</b></button>
@@ -145,8 +145,8 @@
       <button type="button" class="chip-btn" data-pg="sair" title="Digitando dentro do site: Esc duas vezes"><kbd>Esc</kbd> Voltar a andar</button>
     </div>
     <!-- a tela do lado (o monitor vizinho do posto): também Alt+← / Alt+→ -->
-    <button type="button" class="pg-lado esq" id="pg-esq" hidden title="Tela da esquerda (Alt+←)" aria-label="Tela da esquerda">‹</button>
-    <button type="button" class="pg-lado dir" id="pg-dir" hidden title="Tela da direita (Alt+→)" aria-label="Tela da direita">›</button>
+    <button type="button" class="pg-lado esq" id="pg-esq" hidden data-tip="Tela da esquerda (Alt+←)" aria-label="Tela da esquerda">‹</button>
+    <button type="button" class="pg-lado dir" id="pg-dir" hidden data-tip="Tela da direita (Alt+→)" aria-label="Tela da direita">›</button>
 
     <div id="hud-fundo"></div>
     <div id="jogo-hud" hidden>
@@ -334,7 +334,7 @@
 
     <div class="bar-center">
       <!-- celular: os ícones da barra que não cabem abrem numa grade por este botão -->
-      <button type="button" class="round" id="btn-mais" hidden aria-label="Mais botões" aria-expanded="false"><i data-icon="pontos"></i></button>
+      <button type="button" class="round" id="btn-mais" hidden aria-label="Mais botões" data-tip="Mais botões" aria-expanded="false"><i data-icon="pontos"></i></button>
       <button type="button" class="round" id="btn-mic" data-tip="Microfone (M)"><span class="mic-level"></span><i data-icon="mic"></i></button>
       <!-- webcam opcional: aparece no rosto do boneco -->
       <button type="button" class="round" id="btn-cam" data-tip="Ligar câmera (K)"><i data-icon="webcamOff"></i></button>
@@ -798,6 +798,10 @@
       <div class="toggle-row" id="ext-row">
         <span><b>Extensão de controle</b><small id="ext-status">Para deixarem mexer nas suas abas</small></span>
         <button type="button" class="secondary small" id="ext-guia">Instalar</button>
+      </div>
+      <div class="toggle-row">
+        <span><b>Tutorial da interface</b><small>O que faz cada botão da tela</small></span>
+        <button type="button" class="secondary small" id="ver-tutorial">Ver de novo</button>
       </div>
       <label class="slider-row">
         <span>Sensibilidade do mouse</span>

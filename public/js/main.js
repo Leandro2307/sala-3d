@@ -25,6 +25,7 @@ import { Mesa } from './mesa.js';
 import { Qualidade, NIVEIS, nivelInicial } from './qualidade.js';
 import * as moduloQualidade from './qualidade.js';
 import { GuiaExtensao } from './guia-extensao.js';
+import { TutorialHud, dicasAoPassar } from './guia-hud.js';
 import { Navegadores, siteDe } from './navegador.js';
 import { DEPARTAMENTOS, IDS_DEPARTAMENTOS, MAX_SALAS, rotuloDoPosto, portaDa, comTelas } from './escritorio.js';
 import { Dados, MESA_DADOS } from './dados.js';
@@ -100,6 +101,9 @@ function saveSettings() {
 
 hydrateIcons();
 setSfxEnabled(settings.sfx);
+// o nome de cada ícone ao passar o mouse, e o tutorial da interface na primeira visita (guia-hud.js)
+dicasAoPassar();
+const tutorialHud = new TutorialHud({ toque: isTouch });
 if (isTouch) {
   document.body.classList.add('touch');
   $('#lobby-note').hidden = true;
@@ -1049,7 +1053,8 @@ async function join() {
   state.joined = true;
   document.body.classList.add('na-sala'); // celular em pé: o aviso de girar (style.css)
   $('#lobby').hidden = true;
-  iniciarGuiaBoasVindas();
+  // primeira visita: o tutorial da interface vem antes do aviso de boas-vindas
+  if (!tutorialHud.precisa()) iniciarGuiaBoasVindas();
   $('#hud').hidden = false;
   $('#bar').hidden = false;
   avisarExtensaoVelha();
@@ -1105,6 +1110,8 @@ async function join() {
     poderesMudaram();
     if (!temTelaCheia) $('#tb-full').hidden = true; // iOS não tem tela cheia de página
   }
+  // com a barra e os botões de toque já no lugar (e um respiro para a sala aparecer)
+  if (tutorialHud.precisa()) setTimeout(() => tutorialHud.iniciar(iniciarGuiaBoasVindas), 900);
 }
 
 function emitJoin() {
@@ -2457,6 +2464,10 @@ function renderExtensao() {
 renderExtensao();
 if (isTouch) $('#ext-row').hidden = true; // celular não compartilha tela
 $('#ext-guia').addEventListener('click', () => abrirGuiaExtensao());
+$('#ver-tutorial').addEventListener('click', () => {
+  closePanel();
+  tutorialHud.iniciar();
+});
 
 // Com uma extensão mais velha que a do servidor, um aviso por visita (só para quem a tem: quem
 // compartilha). Ajustes e o guia continuam mostrando como atualizar.
@@ -3294,7 +3305,7 @@ setInterval(() => {
     ondeAntes = lugar;
     const fechada = !!DEPARTAMENTOS[lugar] && state.sala?.privacidade !== false;
     $('#onde-chip').innerHTML = `${fechada ? icon('lock', 12) : ''}${esc(nomeDoLugar(lugar))}`;
-    $('#onde-chip').title = fechada ? 'Sala à prova de som: só quem está aqui ouve a conversa' : 'Onde você está no escritório';
+    $('#onde-chip').dataset.tip = fechada ? 'Sala à prova de som: só quem está aqui ouve a conversa' : 'Onde você está no escritório';
     renderPeople();
   }
   if (esc0 && lugar === 'descanso' && !pausaAuto && settings.status === 'disponivel') {
