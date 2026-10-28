@@ -20,7 +20,7 @@ import {
   forcaTruco, valorDe, naipeDe, SIMBOLO, NOME_PEDIDO, PASSOS_TRUCO, MANILHAS, NOME_MANILHA, VALE_DEZ, ZOEIRA, SINAIS, ARREMESSOS,
   podeJogarUno, coringa, corUno, simboloUno, rotuloUno, falaUno, HEX_COR, NOME_COR, CORES_UNO,
   numero21, trunfo21, soma21, TRUNFOS_21, MAX_21, DEDOS_21, LIVRES_CADEADO_21, arquivoVoz,
-  NAIPES, VALORES_CACHETA, CARTAS_CACHETA, lerCacheta, faceCacheta, ehCuringa, nomeCuringa, nomeCartaCacheta, arranjoCacheta, comoBaterCacheta,
+  NAIPES, VALORES_CACHETA, CARTAS_CACHETA, PONTOS_CACHETA as PONTOS_C, lerCacheta, faceCacheta, ehCuringa, nomeCuringa, nomeCartaCacheta, arranjoCacheta, comoBaterCacheta,
 } from './cartas-regras.js';
 import { MESAS_CARTAS } from './parque-dados.js';
 import { hud, texturaViva, paraToque, arrumarPlacas, enfileirarPlacas, enquadrar, deslocarVista } from './hud-jogos.js';
@@ -33,6 +33,7 @@ const COR_PLACA = { truco: '#fe5f55', uno: '#f5b244', vinteum: '#4bc292', cachet
 const R_MESA = 1.15;
 const R_CADEIRA = 1.75;
 const Y_MESA = 0.85;
+const LIXO_C = 0.45; // cacheta: o lixo, à direita do vira (ver lugarC)
 const ALTURA_FILEIRA = 28; // px: a fileira das plaquinhas no celular deitado
 const PIXEL = "'Pixelify Sans', 'Plus Jakarta Sans', system-ui, sans-serif";
 const fontePx = (p, peso = 700) => `${peso} ${p}px ${PIXEL}`;
@@ -195,6 +196,52 @@ function texturaCarta(c) {
 // dourado) e uma carta de exemplo do curinga, para o placar
 const faceC = (c, cur) => `c:${faceCacheta(c)}${ehCuringa(c, cur) ? '*' : ''}`;
 const exemploCuringa = (cur) => `c:${VALORES_CACHETA[cur.v - 1]}${cur.vermelho ? 'c' : 'e'}*`;
+
+// ------------------------------------------------------------------ o tutorial da cacheta
+// cartas de exemplo: '7o', '10e', '7o*' (curinga); fora: as posições que ficam apagadas
+const exemploC = (faces, fora = []) => `<div class="ct-ex">${faces.map((f, j) => {
+  const v = f.replace('*', '').slice(0, -1);
+  const n = f.replace('*', '').slice(-1);
+  return `<img src="${urlCarta(`c:${f}`)}" alt="${esc(`${v}${SIMBOLO[n]}${f.endsWith('*') ? ' (curinga)' : ''}`)}"${fora.includes(j) ? ' class="fora"' : ''}>`;
+}).join('')}</div>`;
+// os passos: [título, () => html] (montado só quando abre: as cartas viram imagem)
+const PASSOS_CACHETA = [
+  ['O objetivo', () => `<p>Cada um recebe <b>9 cartas</b> (são dois baralhos misturados, do A ao K). Na sua vez você <b>compra uma</b> e <b>descarta outra</b>.</p>
+    <p>Quem fecha a mão toda em <b>jogos</b> pode <b>bater</b> e ganha a mão.</p>
+    <p>Todo mundo começa com <b>${PONTOS_C} pontos</b> ❤️. Quem bate tira pontos dos outros; quem fica sem pontos <b>quebra</b> 💀 e sai. O último que sobrar ganha a cacheta (e moedas).</p>`],
+  ['Os jogos', () => `<p><b>Trinca</b>: 3 ou 4 cartas do <b>mesmo valor</b>, de <b>naipes diferentes</b>.</p>
+    ${exemploC(['7o', '7c', '7e'])}
+    <p>Precisa de 3 naipes diferentes: 7♦ 7♦ 7♥ não vale (são dois baralhos, então a carta repete).</p>
+    <p><b>Sequência</b>: 3 ou mais cartas <b>seguidas</b> do <b>mesmo naipe</b>.</p>
+    ${exemploC(['4p', '5p', '6p', '7p'])}
+    <p>O Ás vem antes do 2 (A 2 3) ou depois do K (Q K A), mas não dá a volta (K A 2).</p>`],
+  ['O vira e o curinga', () => `<p>No começo de cada mão uma carta fica virada no meio da mesa: o <b>vira</b>. Os <b>curingas</b> são as cartas do <b>valor seguinte</b>, da <b>mesma cor</b> do vira.</p>
+    <p>Vira 6♥ (vermelho) → os curingas são os <b>7 vermelhos</b> (7♥ e 7♦). Na sua mão eles ficam <b>dourados</b>, com a estrela:</p>
+    ${exemploC(['6c', '7o*'])}
+    <p>O curinga entra no lugar da carta que falta: um por sequência, ou numa trinca com outras duas cartas.</p>
+    ${exemploC(['9e', '7o*', 'Je'])}
+    <p>Aqui ele faz o papel do 10♠. O vira e o curinga ficam sempre à vista no placar.</p>`],
+  ['Na sua vez', () => `<ul>
+      <li><b>Compre</b>: do monte (<b>Comprar</b>, ou Espaço) ou a carta de cima do lixo (<b>Pegar o lixo</b>, ou L). O lixo mostra a carta que você vai levar.</li>
+      <li>A carta que chegou aparece grande na tela e fica marcada <b>NOVA</b> na sua mão.</li>
+      <li><b>Descarte</b>: toque na carta que vai para o lixo (ou as teclas 1 a 9 e 0). A carta que veio do lixo não pode voltar para ele na mesma vez.</li>
+    </ul>
+    <p>A vez tem tempo: a barrinha amarela embaixo da mão mostra quanto resta. Se acabar, o jogo joga por você.</p>`],
+  ['Bater', () => `<p>Quando a mão fecha, aparece o botão <b>Bater!</b> (ou a tecla B):</p>
+    <ul>
+      <li><b>Com 9</b>: as 9 cartas em jogos e a 10ª vai para o lixo. Cada um perde <b>1 ponto</b>.</li>
+      <li><b>De 10</b>: as 10 cartas em jogos, sem descartar. Cada um perde <b>2 pontos</b>.</li>
+    </ul>
+    ${exemploC(['3o', '3c', '3p', '8e', '9e', '10e', 'Jo', 'Qo', 'Ko'])}
+    <p>Se o monte acabar e ninguém bater, ninguém perde ponto e vem outra mão.</p>`],
+  ['Dicas', () => `<ul>
+      <li>A <b>faixa colorida</b> em cima das cartas mostra os jogos que você já tem (<b>✓ Trinca</b>, <b>✓ Sequência</b>), uma cor por jogo. O placar conta quantas das 9 já estão em jogos.</li>
+      <li><b>↕</b> arruma a mão por jogos, naipe ou valor. Ou <b>arraste as cartas</b> para deixar do seu jeito (Livre).</li>
+      <li>Pegue do lixo só a carta que fecha (ou quase fecha) um jogo; o resto da mesa vê o que você pegou.</li>
+      <li>Descarte primeiro as cartas soltas e altas, que ninguém está pedindo.</li>
+      <li><b>Esc</b> ou <b>Sair da mesa</b> levanta: um robô assume as suas cartas.</li>
+    </ul>`],
+];
 
 function desenharCarta(ctx, w, h, c) {
   const corpo = (fundo, borda) => {
@@ -591,8 +638,11 @@ export class Cartas {
       // cacheta: mão nova (o ct-estado com o número dela chega antes) também entra distribuída
       if (M.e?.jogo === 'cacheta' && M.e.maoN !== M.maoN) {
         M.maoN = M.e.maoN;
+        M.novaC = null;
+        // a ordem livre era das cartas da mão passada: a nova chega arrumada em jogos
+        if (this.ordemC === 'manual') this.ordemC = 'jogos';
         if (mao.length) this.distribuir = true;
-      }
+      } else if (M.e?.jogo === 'cacheta') this.comprouC(M, antes, mao);
       if (M.e?.jogo === 'vinteum') this.mostrar3d(M); // a minha carta fechada (e a do raio-x) no 3D
       if (this.ativa === M) this.desenhar();
     });
@@ -947,15 +997,23 @@ export class Cartas {
         const cur = e.curinga;
         const mx = M.m.x;
         const mz = M.m.z;
-        // o vira atravessado embaixo do monte, e o lixo do lado
-        if (e.vira) por(0, faceC(e.vira, null), { x: mx - 0.3, y: Y_MESA + 0.004, z: mz, ry: Math.PI / 2, esc: 0.75 }, { chave: `vira:${e.vira}` });
-        if (e.monte) por(1, 'verso', { x: mx - 0.3, y: Y_MESA + 0.012, z: mz + 0.06, ry: 0.1, esc: 0.75 }, { chave: 'monte' });
+        // o monte, o vira (atravessado, inteiro à vista) e o lixo numa fileira de frente para quem está
+        // sentado, grandes: no celular, embaixo do monte o vira não se lia
+        const monte = this.lugarC(M, -0.43);
+        const vira = this.lugarC(M, 0);
+        const lixo = this.lugarC(M, LIXO_C);
+        if (e.vira) por(0, faceC(e.vira, null), { x: vira.x, y: Y_MESA + 0.004, z: vira.z, ry: vira.ry + Math.PI / 2, esc: 0.85 }, { chave: `vira:${e.vira}` });
+        if (e.monte) {
+          // o monte com altura: duas cartas por baixo, um pouco tortas
+          por(1, 'verso', { x: monte.x, y: Y_MESA + 0.016, z: monte.z, ry: monte.ry + 0.06, esc: 0.85 }, { chave: 'monte' });
+          if (e.monte > 6) por(15, 'verso', { x: monte.x + 0.012, y: Y_MESA + 0.008, z: monte.z - 0.01, ry: monte.ry - 0.05, esc: 0.85 }, { chave: 'monte2' });
+        }
         if (e.topoLixo) {
           // o descarte novo voa da cadeira de quem descartou (o meu já voou pela tela: ver voarCarta)
           const novo = e.topoLixo !== antes?.topoLixo && e.ultimo?.carta === e.topoLixo;
           const c = novo ? cadeira(M.m, e.ultimo.lugar) : null;
           const de = c && !(this.ativa === M && e.ultimo.lugar === M.lugar) ? { x: c.x, y: 1.2, z: c.z } : null;
-          por(2, faceC(e.topoLixo, cur), { x: mx + 0.3, y: Y_MESA + 0.014, z: mz, ry: -0.25, esc: 0.75 }, { de, chave: `lixo:${e.topoLixo}:${e.lixoN}` });
+          por(2, faceC(e.topoLixo, cur), { x: lixo.x, y: Y_MESA + 0.014, z: lixo.z, ry: lixo.ry - 0.12, esc: 0.9 }, { de, chave: `lixo:${e.topoLixo}:${e.lixoN}` });
         }
         // a batida: os jogos de quem bateu, abertos na frente da cadeira dele (um respiro entre os jogos)
         const b = e.batida;
@@ -1101,8 +1159,18 @@ export class Cartas {
       this.chaveMao = '';
       this.ladoDe = '';
       this.distribuir = true;
+      this.mostrar3d(M); // (a fileira do meio da cacheta vira de frente para a minha cadeira)
       this.desenhar();
       this.sfx.teleport();
+      // cacheta: o tutorial abre sozinho na primeira vez
+      if (M.m.jogo === 'cacheta') {
+        let viu = true;
+        try {
+          viu = !!localStorage.getItem('ct-tutorial-cacheta');
+          localStorage.setItem('ct-tutorial-cacheta', '1');
+        } catch {}
+        if (!viu) this.abrirGuia(0);
+      }
     });
   }
 
@@ -1123,7 +1191,10 @@ export class Cartas {
   sairDaMesa() {
     this.escolha.hidden = true; // o seletor de cadeira aberto some junto
     if (!this.ativa) return;
+    const M = this.ativa;
     this.ativa = null;
+    this.mostrar3d(M);
+    this.fecharGuia();
     this.world.setNitidez?.(0);
     this.desloc.alvoX = this.desloc.alvoY = 0;
     this.coberta = false;
@@ -1203,7 +1274,7 @@ export class Cartas {
     const el = this.mao.querySelector(`[data-carta="${CSS.escape(carta)}"] .ct-face`);
     if (!el || !M) return;
     const r = el.getBoundingClientRect();
-    const p = M.e?.jogo === 'truco' ? naMesa(M.m, M.lugar, 0.45) : M.e?.jogo === 'cacheta' ? { x: M.m.x + 0.3, z: M.m.z } : { x: M.m.x, z: M.m.z };
+    const p = M.e?.jogo === 'truco' ? naMesa(M.m, M.lugar, 0.45) : M.e?.jogo === 'cacheta' ? this.lugarC(M, LIXO_C) : { x: M.m.x, z: M.m.z };
     const v = new THREE.Vector3(p.x, Y_MESA, p.z).project(this.world.camera);
     const x = ((v.x + 1) / 2) * innerWidth;
     const y = ((1 - v.y) / 2) * innerHeight;
@@ -1227,6 +1298,7 @@ export class Cartas {
     const M = this.ativa;
     if (!M || ev.repeat || ev.ctrlKey || ev.metaKey || ev.altKey) return;
     if (ev.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
+    if (!this.$('.ct-guiafundo').hidden) return; // (o tutorial aberto: as teclas não jogam)
     // Z, em qualquer jogo: a frase aleatória do megafone (só com a partida andando, como o botão)
     if (ev.code === 'KeyZ') {
       if (M.e && M.e.fase !== 'espera') this.socket?.emit('ct-zoar', { mesa: M.i, i: Math.floor(Math.random() * ZOEIRA.length) });
@@ -1384,9 +1456,81 @@ export class Cartas {
   }
 
   // ---------------------------------------------------------------- cacheta
+  // O tutorial, passo a passo, por cima da mesa (como o do poker). Esc fecha só ele (pego antes do
+  // main.js, que levantaria da mesa).
+  abrirGuia(passo = 0) {
+    const fundo = this.$('.ct-guiafundo');
+    const k = Math.max(0, Math.min(PASSOS_CACHETA.length - 1, passo));
+    this.passoC = k;
+    const [titulo, corpo] = PASSOS_CACHETA[k];
+    const ultimo = k === PASSOS_CACHETA.length - 1;
+    this.$('.ct-conteudo').innerHTML = `<div class="ct-passo"><h3>${k + 1}. ${titulo}</h3>${corpo()}</div>
+      <div class="ct-nav">
+        <button type="button" class="ct-b cinza" data-passo="-1"${k === 0 ? ' disabled' : ''}>← Voltar</button>
+        <div class="ct-pontos">${PASSOS_CACHETA.map((_, i) => `<i class="${i === k ? 'on' : ''}"></i>`).join('')}</div>
+        ${ultimo ? '<button type="button" class="ct-b verde" data-guia="fechar">Bora jogar!</button>' : '<button type="button" class="ct-b verde" data-passo="1">Próximo →</button>'}
+      </div>`;
+    this.$('.ct-conteudo').scrollTop = 0;
+    this.$('.ct-guia').scrollTop = 0;
+    if (!fundo.hidden) return;
+    fundo.hidden = false;
+    this._escGuia = (ev) => {
+      if (ev.key !== 'Escape') return;
+      ev.stopPropagation();
+      ev.preventDefault();
+      this.fecharGuia();
+    };
+    document.addEventListener('keydown', this._escGuia, true);
+  }
+
+  fecharGuia() {
+    const fundo = this.$('.ct-guiafundo');
+    if (fundo) fundo.hidden = true;
+    if (this._escGuia) document.removeEventListener('keydown', this._escGuia, true);
+    this._escGuia = null;
+  }
+
+  // um ponto da fileira do meio (monte, vira, lixo): u metros para a direita de quem olha da cadeira
+  // (sentado, a minha; de fora, a do lugar 0), e o giro que deixa a carta de pé para essa cadeira
+  lugarC(M, u) {
+    const c = cadeira(M.m, this.ativa === M ? Math.max(0, M.lugar) : 0);
+    const dx = (c.x - M.m.x) / R_CADEIRA;
+    const dz = (c.z - M.m.z) / R_CADEIRA;
+    return { x: M.m.x + dz * u, z: M.m.z - dx * u, ry: -c.a + Math.PI / 2 };
+  }
+
   minhaVezC(M = this.ativa) {
     const e = M?.e;
     return !!e && e.jogo === 'cacheta' && e.fase === 'jogando' && e.vez === M.lugar;
+  }
+
+  // a mão mudou no meio da mão de cartas: chegou uma carta (a que eu comprei, do monte ou do lixo)
+  // ela aparece grande no meio da tela e fica marcada NOVA na mão até eu descartar
+  comprouC(M, antes, mao) {
+    if (mao.length !== (antes?.length || 0) + 1) {
+      if (mao.length < (antes?.length || 0)) M.novaC = null;
+      return;
+    }
+    const nova = mao.find((c) => !antes.includes(c));
+    M.novaC = nova || null;
+    if (!nova || this.ativa !== M) return;
+    const doLixo = nova === M.e.doLixo;
+    const f = this.$('#ct-trunfo');
+    f.querySelector('img').src = urlCarta(faceC(nova, M.e.curinga));
+    f.querySelector('img').alt = nomeCartaCacheta(nova);
+    f.style.setProperty('--cor', doLixo ? '#ff9800' : '#4bc292');
+    f.querySelector('span').innerHTML = `${doLixo ? 'Você pegou do lixo' : 'Você comprou'}: <b>${esc(nomeCartaCacheta(nova))}</b>${ehCuringa(nova, M.e.curinga) ? '<small>É curinga! ★</small>' : ''}`;
+    f.classList.add('compra');
+    f.hidden = false;
+    f.classList.remove('anda');
+    void f.offsetWidth;
+    f.classList.add('anda');
+    clearTimeout(this.tTrunfo);
+    this.tTrunfo = setTimeout(() => {
+      f.hidden = true;
+      f.classList.remove('compra');
+    }, 1400);
+    this.sfx.cartaSel?.(4);
   }
 
   // comprar do monte ou pegar o lixo (o servidor confere de novo)
@@ -1434,12 +1578,14 @@ export class Cartas {
   }
 
   // A mão arrumada: os jogos primeiro (cada um junto, com um respiro antes) e as soltas depois; ou
-  // por naipe; ou por valor (o curinga no fim). ini: as cartas que abrem um jogo; naJogo: as que
-  // estão em algum jogo (a faixinha verde em cima: embaixo, no celular, ficava fora da tela).
+  // por naipe; ou por valor (o curinga no fim); ou do meu jeito ('manual': a ordem em que eu arrastei,
+  // com a carta que chega no fim). ini: as cartas que abrem um jogo; grupo: de cada carta em jogo, o
+  // número do jogo e se é trinca ou sequência (a faixa colorida em cima, com o nome no começo do jogo);
+  // emJogo: quantas cartas da mão já estão em jogos.
   arrumadaC(M) {
     const e = M.e;
     this.ordemC ||= 'jogos';
-    const chave = `${M.mao.join()}|${e?.vira}|${this.ordemC}`;
+    const chave = `${M.mao.join()}|${e?.vira}|${this.ordemC}|${this.ordemC === 'manual' ? this.manualC.join() : ''}`;
     if (this._arrumadaC?.chave === chave) return this._arrumadaC;
     const cur = e?.curinga;
     const a = arranjoCacheta(M.mao, cur);
@@ -1459,9 +1605,83 @@ export class Cartas {
       const soltas = [...a.soltas].sort((x, y) => peso(x) - peso(y));
       if (soltas.length) ini.add(soltas[0]);
       cartas.push(...soltas);
+    } else if (this.ordemC === 'manual') {
+      cartas = this.manualC.filter((c) => M.mao.includes(c));
+      cartas.push(...M.mao.filter((c) => !cartas.includes(c)));
     } else cartas = [...M.mao].sort((x, y) => peso(x, this.ordemC === 'valor') - peso(y, this.ordemC === 'valor'));
-    this._arrumadaC = { chave, cartas, ini, naJogo: new Set(a.grupos.flat()) };
+    const grupo = new Map();
+    a.grupos.forEach((g, i) => {
+      // trinca: as cartas de verdade (sem o curinga) têm todas o mesmo valor
+      const valores = new Set(g.filter((c) => !ehCuringa(c, cur)).map((c) => lerCacheta(c)?.v));
+      const tipo = valores.size <= 1 ? 'Trinca' : 'Sequência';
+      g.forEach((c) => grupo.set(c, { i, tipo, n: g.length }));
+    });
+    this._arrumadaC = { chave, cartas, ini, grupo, emJogo: grupo.size, grupos: a.grupos.length };
     return this._arrumadaC;
+  }
+
+  // Arrastar uma carta da mão da cacheta muda ela de lugar (e a mão passa para a ordem 'manual').
+  // Um toque sem arrastar continua sendo descartar (o click). No celular o dedo precisa andar mais
+  // um pouco antes de virar arrasto, para o toque tremido não deixar de descartar.
+  arrastarC(ev) {
+    const M = this.ativa;
+    const el = ev.target.closest?.('.ct-carta');
+    if (!M || M.e?.jogo !== 'cacheta' || !el || ev.button > 0) return;
+    const limiar = ev.pointerType === 'mouse' ? 6 : 12;
+    const x0 = ev.clientX;
+    const y0 = ev.clientY;
+    let arrastando = false;
+    let tx = 0;
+    const mover = (e2) => {
+      if (e2.pointerId !== ev.pointerId) return;
+      const dx = e2.clientX - x0;
+      const dy = e2.clientY - y0;
+      if (!arrastando) {
+        if (Math.hypot(dx, dy) < limiar) return;
+        arrastando = true;
+        el.classList.add('arrasta');
+        this.mao.classList.add('arrastando');
+        this.mao.querySelectorAll('.ct-chave').forEach((x) => x.remove());
+        try { el.setPointerCapture(ev.pointerId); } catch {}
+      }
+      e2.preventDefault();
+      // a carta anda até o lugar em que o dedo está: passa por cima das outras e troca de posição
+      const irmas = [...this.mao.querySelectorAll('.ct-carta')].filter((x) => x !== el);
+      const antes = irmas.find((x) => {
+        const r = x.getBoundingClientRect();
+        return e2.clientX < r.left + r.width / 2;
+      }) || null;
+      if (el.nextElementSibling !== antes) {
+        const r0 = el.getBoundingClientRect().left - tx;
+        this.mao.insertBefore(el, antes);
+        // depois de mudar de lugar no DOM ela continuaria sob o dedo: desconta o pulo
+        const r1 = el.getBoundingClientRect().left - tx;
+        el._base = (el._base || 0) + (r1 - r0);
+        this.sfx.cartaSel?.(irmas.indexOf(antes) + 1);
+      }
+      tx = dx - (el._base || 0);
+      el.style.transform = `translate(${tx.toFixed(1)}px, ${Math.min(0, dy).toFixed(1)}px)`;
+    };
+    const soltar = (e2) => {
+      if (e2.pointerId !== ev.pointerId) return;
+      removeEventListener('pointermove', mover);
+      removeEventListener('pointerup', soltar);
+      removeEventListener('pointercancel', soltar);
+      if (!arrastando) return;
+      el.classList.remove('arrasta');
+      this.mao.classList.remove('arrastando');
+      el.style.transform = '';
+      el._base = 0;
+      // o click que vem logo depois do arrasto não descarta
+      this._semClique = performance.now() + 400;
+      this.manualC = [...this.mao.children].map((x) => x.dataset.carta).filter(Boolean);
+      this.ordemC = 'manual';
+      this.chaveMao = '';
+      this.desenhar();
+    };
+    addEventListener('pointermove', mover, { passive: false });
+    addEventListener('pointerup', soltar);
+    addEventListener('pointercancel', soltar);
   }
 
   // ---------------------------------------------------------------- o painel (Balatro)
@@ -1899,7 +2119,94 @@ body { --ct-vh: 1vh; }
    placar (o nome já está na placa da mesa) para o resto caber sem rolar */
 @media (orientation: landscape) and (max-height: 359px) {
   body.touch .ct-titulo, body.touch .ct-dica { display: none; }
-}`;
+}
+/* cacheta: os jogos da mão (uma cor por jogo: a faixa em cima das cartas e a chave com o nome) */
+.ct-mao.cacheta { position: relative; }
+.ct-mao.cacheta .ct-carta { touch-action: none; }
+.ct-carta.g0 { --gcor: #4bc292; } .ct-carta.g1, .ct-chave.g1 { --gcor: #38bdf8; } .ct-carta.g2, .ct-chave.g2 { --gcor: #f5b244; } .ct-carta.g3, .ct-chave.g3 { --gcor: #e879f9; }
+.ct-carta.jogo::after { top: -9px; height: 5px; left: 10%; right: 10%; background: var(--gcor, #4bc292); box-shadow: 0 1px 0 rgba(0,0,0,.4); }
+.ct-chave { --gcor: #4bc292; position: absolute; z-index: 1; border: 3px solid var(--gcor); border-bottom: 0; border-radius: 9px 9px 0 0; pointer-events: none; }
+.ct-chave b { position: absolute; left: 50%; top: 0; translate: -50% -55%; padding: 1px 7px 2px; border-radius: 7px; background: var(--gcor); color: #13201c;
+  font: 800 11px/1.25 ${NUMERO}; letter-spacing: .04em; text-transform: uppercase; white-space: nowrap; box-shadow: 0 2px 0 rgba(0,0,0,.35); }
+/* a carta que acabou de chegar: brilha e cai na mão; a etiqueta NOVA */
+.ct-carta.nova .ct-face { box-shadow: 0 6px 0 rgba(0,0,0,.28), 0 0 0 3px #73ffcc, 0 0 18px #73ffcc; }
+.ct-carta.nova.cai { animation: ct-nova .55s cubic-bezier(.2,1.5,.4,1) both; }
+.ct-fechada.ct-novac { background: #73ffcc; color: #13201c; font-weight: 800; }
+@keyframes ct-nova { from { transform: translateY(-70px) scale(1.25) rotate(-8deg); opacity: 0; } to { transform: none; opacity: 1; } }
+/* arrastando uma carta: ela fica por cima, maior, e as outras abrem espaço */
+.ct-carta.arrasta { z-index: 5; transition: none; cursor: grabbing; animation: none !important; }
+.ct-carta.arrasta .ct-face { --zoom: 1.12; box-shadow: 0 14px 22px rgba(0,0,0,.45), 0 0 0 3px #fff; }
+.ct-carta.arrasta .ct-balanca { animation: none; }
+.ct-mao.arrastando .ct-carta:not(.arrasta) { transition: rotate .2s, translate .2s, margin .15s; }
+/* o lixo: a carta de cima pendurada no botão, grande (como o Espiar do 21) */
+.ct-b.ct-lixob { position: relative; padding-left: 76px; }
+.ct-lixocarta { position: absolute; left: 6px; bottom: 5px; rotate: -8deg; pointer-events: none; animation: ct-novo .4s cubic-bezier(.2,1.5,.4,1) backwards; }
+.ct-lixocarta img { display: block; width: 52px; height: 70px; border-radius: 6px; box-shadow: 0 0 0 2px #ffb74d, 0 4px 10px rgba(0,0,0,.45); }
+.ct-lixocarta i { position: absolute; right: -8px; bottom: -6px; font: normal 13px/1 sans-serif; padding: 2px 3px; border-radius: 6px; background: #1e2b2d; box-shadow: 0 0 0 2px #ffb74d; }
+.ct-b.ct-lixob:hover .ct-lixocarta { rotate: -2deg; scale: 1.08; }
+/* a carta comprada, grande no meio (no lugar do trunfo do 21) */
+#ct-trunfo.compra img { width: 104px; height: 139px; }
+#ct-trunfo.compra.anda { animation: ct-compra 1.4s cubic-bezier(.2,1.4,.4,1) both; }
+#ct-trunfo span b { color: #f5b244; }
+@keyframes ct-compra { 0% { transform: translateY(-40px) scale(.3) rotate(-18deg); opacity: 0; } 22% { transform: scale(1.1) rotate(3deg); opacity: 1; } 34% { transform: none; }
+  78% { transform: none; opacity: 1; } 100% { transform: translateY(120px) scale(.55); opacity: 0; } }
+/* o placar: quanto da mão está em jogos, a dupla de botões (arrumar e o tutorial) */
+.ct-progc { padding: 6px 8px 8px; display: grid; justify-items: center; gap: 3px; }
+.ct-progc small { font-size: 11px; color: #a9bfc2; letter-spacing: .08em; }
+.ct-progc b { font: 800 14px ${NUMERO}; }
+.ct-barrac { width: 100%; height: 7px; border-radius: 99px; background: #2b3d40; overflow: hidden; }
+.ct-barrac i { display: block; height: 100%; width: 0; border-radius: 99px; background: #4bc292; transition: width .35s ease; }
+.ct-progc.fecha b { color: #f5b244; } .ct-progc.fecha .ct-barrac i { background: #f5b244; }
+.ct-botoesc { display: grid; grid-template-columns: 1fr auto; gap: 6px; }
+.ct-lado .ct-botoesc .ct-ajudac { width: auto; min-width: 42px; padding-left: 0; padding-right: 0; }
+/* o tutorial */
+.ct-guiafundo { position: absolute; inset: 0; z-index: 6; display: grid; place-items: center; padding: 12px; background: rgba(10,16,18,.6); pointer-events: auto; }
+.ct-guia { position: relative; width: min(600px, 100%); max-height: calc(100% - 8px); overflow-y: auto; padding: 18px 22px; font-family: 'Plus Jakarta Sans', system-ui, sans-serif; letter-spacing: 0;
+  animation: ct-entra .35s cubic-bezier(.2,1.5,.4,1) both; overscroll-behavior: contain; }
+.ct-guia h2 { margin: 0 34px 10px 0; font: 700 22px ${PIXEL}; color: #73c8ff; }
+.ct-guia h3 { margin: 0 0 8px; font: 700 18px ${PIXEL}; color: #f5b244; }
+.ct-guia p, .ct-guia li { font-weight: 600; font-size: 14.5px; line-height: 1.5; color: #e2e8f0; }
+.ct-guia p { margin: 0 0 10px; } .ct-guia ul { margin: 0 0 10px; padding-left: 20px; } .ct-guia li { margin-bottom: 6px; }
+.ct-guia b { color: #fff; }
+.ct-fechar { position: absolute; top: 10px; right: 10px; width: 34px; height: 34px; border: 0; border-radius: 9px; background: #1e2b2d; color: #fff; font-size: 16px; }
+.ct-ex { display: flex; flex-wrap: wrap; gap: 5px; margin: 0 0 10px; }
+.ct-ex img { width: 46px; height: 61px; border-radius: 5px; box-shadow: 0 3px 0 rgba(0,0,0,.35); }
+.ct-ex img.fora { opacity: .35; }
+.ct-nav { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; font-family: ${PIXEL}; }
+.ct-pontos { display: flex; gap: 6px; } .ct-pontos i { width: 9px; height: 9px; border-radius: 50%; background: #5f7377; } .ct-pontos i.on { background: #f5b244; }
+body.touch .ct-guiafundo { padding: 6px calc(8px + env(safe-area-inset-right)) 6px calc(8px + env(safe-area-inset-left)); }
+body.touch .ct-guia { padding: 12px 14px 0; max-height: 100%; }
+body.touch .ct-guia h2 { font-size: 17px; margin-bottom: 6px; } body.touch .ct-guia h3 { font-size: 15px; }
+body.touch .ct-guia p, body.touch .ct-guia li { font-size: 13px; line-height: 1.4; }
+body.touch .ct-ex img { width: 36px; height: 48px; }
+/* o Voltar/Próximo fica sempre à vista, grudado no pé (o texto rola por baixo dele) */
+body.touch .ct-nav { position: sticky; bottom: 0; margin: 8px -14px 0; padding: 8px 14px 10px; background: #3a5055; border-top: 1px solid #ffffff14; }
+body.touch .ct-nav .ct-b { min-height: 42px; }
+body.touch .ct-fechar { width: 40px; height: 40px; top: 6px; right: 6px; }
+body.touch .ct-b.ct-lixob { padding-left: 58px; }
+body.touch .ct-lixocarta img { width: 38px; height: 51px; }
+body.touch .ct-lixocarta { left: 5px; bottom: 4px; } body.touch .ct-lixocarta i { font-size: 10px; right: -6px; bottom: -5px; }
+body.touch .ct-chave b { font-size: 9px; padding: 1px 5px; }
+body.touch .ct-progc b { font-size: 12px; } body.touch .ct-progc small { font-size: 10px; }
+body.touch #ct-trunfo.compra img { width: 84px; height: 112px; }
+@media (orientation: landscape) and (max-height: 500px) {
+  /* espaço para a chave dos jogos em cima da mão */
+  body.touch .ct-mao.cacheta { padding-top: 22px; }
+  body.touch .ct-progc { padding: 3px 6px 5px; gap: 2px; } body.touch .ct-progc small { display: none; }
+  body.touch .ct-barrac { height: 5px; }
+  body.touch #ct-trunfo.compra img { width: calc(var(--carta) * .8); height: calc(var(--carta) * 1.07); }
+  body.touch .ct-guia { width: min(640px, 100%); }
+}
+body.touch .ct-botoesc { grid-template-columns: minmax(0, 1fr) auto; gap: 4px; }
+body.touch .ct-lado .ct-botoesc .ct-b { padding-left: 6px; padding-right: 6px; }
+body.touch .ct-lado .ct-botoesc .ct-ajudac { min-width: 36px; }
+/* tela bem baixa (SE, Android com as barras): o placar da cacheta perde os títulos das caixas e o
+   nome do curinga (a carta dele continua lá) para o arrumar, o ? e o Sair caberem sem rolar */
+@media (orientation: landscape) and (max-height: 359px) {
+  body.touch .ct-pontosc > small, body.touch .ct-vira > small:first-child, body.touch .ct-curinga, body.touch .ct-barrac { display: none; }
+  body.touch .ct-progc { padding: 3px 6px; }
+}
+@media (prefers-reduced-motion: reduce) { .ct-carta.nova.cai, #ct-trunfo.compra.anda, .ct-lixocarta { animation: none; } }`;
     document.head.appendChild(css);
 
     this.raiz = document.createElement('div');
@@ -1918,7 +2225,12 @@ body { --ct-vh: 1vh; }
   <div class="ct-linha"><div class="ct-esq"></div><div class="ct-mao"></div><div class="ct-dir"></div></div>
   <div class="ct-tempo" hidden><i></i></div>
 </div>
-<div class="ct-fim" hidden></div>`;
+<div class="ct-fim" hidden></div>
+<div class="ct-guiafundo" hidden><div class="ct-guia ct-painel" role="dialog" aria-modal="true" aria-labelledby="ct-guia-titulo">
+  <button type="button" class="ct-fechar" data-guia="fechar" aria-label="Fechar">✕</button>
+  <h2 id="ct-guia-titulo">♠ Como jogar cacheta</h2>
+  <div class="ct-conteudo"></div>
+</div></div>`;
     this.mao = this.$('.ct-mao');
     this.zoar = document.createElement('div');
     this.zoar.className = 'ct-zoar ct-painel';
@@ -1966,6 +2278,8 @@ body { --ct-vh: 1vh; }
       face.style.setProperty('--ry', `${x * 22}deg`);
       face.style.setProperty('--rx', `${-y * 22}deg`);
     });
+    // cacheta: arrastar uma carta muda ela de lugar na mão
+    this.mao.addEventListener('pointerdown', (ev) => this.arrastarC(ev));
     this.mao.addEventListener('pointerout', (ev) => {
       const face = ev.target.closest?.('.ct-face');
       if (!face || face.contains(ev.relatedTarget)) return;
@@ -2006,11 +2320,17 @@ body { --ct-vh: 1vh; }
       if (this.menu.parentElement !== assento || !abre) this.menu.hidden = true;
       return;
     }
+    if (!b && ev.target.classList.contains('ct-guiafundo')) return this.fecharGuia(); // (clique fora do tutorial)
+    if (b?.dataset.guia === 'fechar') return this.fecharGuia();
+    if (b?.dataset.passo) return this.abrirGuia((this.passoC || 0) + Number(b.dataset.passo));
     if (!b || !M) return;
     b.blur();
     const mesa = M.i;
     const d = b.dataset;
-    if (d.carta) return this.clicarCarta(d.carta, b);
+    if (d.carta) {
+      if (performance.now() < (this._semClique || 0)) return; // (acabou de arrastar a carta)
+      return this.clicarCarta(d.carta, b);
+    }
     if (d.trunfo) {
       // no celular o primeiro toque mostra o que o trunfo faz; o segundo usa
       if (document.body.classList.contains('touch') && this.armado !== d.trunfo) {
@@ -2092,10 +2412,15 @@ body { --ct-vh: 1vh; }
     if (acao?.startsWith('cacheta:')) {
       const a = acao.slice(8);
       if (a === 'ordem') {
-        // arrumar a mão: jogos → naipe → valor
+        // arrumar a mão: jogos → naipe → valor (a ordem livre, de arrastar, volta para os jogos)
         this.ordemC = { jogos: 'naipe', naipe: 'valor', valor: 'jogos' }[this.ordemC] || 'jogos';
+        if (!this.dicaArrastou) {
+          this.dicaArrastou = true;
+          hud.mensagem('Dica', 'Arraste as cartas para arrumar a mão do seu jeito', 2200);
+        }
         return this.desenhar();
       }
+      if (a === 'guia') return this.abrirGuia(this.passoC || 0);
       if (a === 'bater') return this.baterCacheta();
       return this.emitCacheta(a);
     }
@@ -2120,7 +2445,7 @@ body { --ct-vh: 1vh; }
   // A mão tem que caber entre os botões (no uno ela cresce, e no celular deitado as cartas são
   // grandes): quando não cabe, as cartas se encavalam mais, até sobrar um pedaço de cada uma.
   ajustarMao() {
-    const cartas = this.mao.children;
+    const cartas = this.mao.querySelectorAll('.ct-carta'); // (sem as chaves dos jogos da cacheta)
     const n = cartas.length;
     if (!n || this.juntaBase === undefined) return;
     const w = cartas[0].offsetWidth;
@@ -2132,6 +2457,32 @@ body { --ct-vh: 1vh; }
     const cabe = (livre / n - w) / 2;
     const junta = Math.max(-w * 0.36, Math.min(this.juntaBase, cabe));
     this.mao.style.setProperty('--junta', `${junta.toFixed(1)}px`);
+    if (this.mao.classList.contains('cacheta')) this.chavesC();
+  }
+
+  // cacheta: a chave em cima de cada jogo que está todo junto na mão, com o nome (✓ TRINCA,
+  // ✓ SEQUÊNCIA) na cor do jogo. Medida pelo layout (offsetLeft: sem o leque nem as animações).
+  chavesC() {
+    const M = this.ativa;
+    this.mao.querySelectorAll('.ct-chave').forEach((x) => x.remove());
+    if (!M || M.e?.jogo !== 'cacheta' || this.mao.classList.contains('arrastando')) return;
+    const { grupo } = this.arrumadaC(M);
+    const cartas = [...this.mao.querySelectorAll('.ct-carta')];
+    const pt = parseFloat(getComputedStyle(this.mao).paddingTop) || 30;
+    for (let i = 0; i < cartas.length; i++) {
+      const g = grupo.get(cartas[i].dataset.carta);
+      if (!g || (i && grupo.get(cartas[i - 1].dataset.carta)?.i === g.i)) continue;
+      const fim = i + g.n - 1;
+      if (cartas.slice(i, fim + 1).some((x) => grupo.get(x.dataset.carta)?.i !== g.i)) continue;
+      const a = cartas[i];
+      const b = cartas[fim];
+      const chave = document.createElement('span');
+      chave.className = `ct-chave g${g.i % 4}`;
+      const esq = a.offsetLeft + 6;
+      chave.style.cssText = `left:${esq}px;width:${Math.max(20, b.offsetLeft + b.offsetWidth - 6 - esq)}px;top:${(pt * 0.4).toFixed(0)}px;height:${Math.max(4, pt * 0.6 - 6).toFixed(0)}px`;
+      chave.innerHTML = `<b>✓ ${g.tipo}</b>`;
+      this.mao.append(chave);
+    }
   }
 
   // a coluna do placar (montada uma vez por jogo; os números trocam sem refazer, para poderem pular)
@@ -2244,9 +2595,10 @@ ${espera ? comecar : ''}<button type="button" class="ct-b cinza" data-acao="sair
     return `<div class="ct-titulo cacheta ondas">${ondas('CACHETA')}</div>
 <div class="ct-pontosc ct-caixa" hidden><small>PONTOS</small><div class="ct-quemc"></div></div>
 <div class="ct-vira ct-caixa" hidden><small>VIRA · CURINGA</small><span class="ct-viraimg"></span><em class="ct-curinga"></em><small>MONTE <b class="ct-monte">–</b></small></div>
+<div class="ct-progc ct-caixa" hidden><small>SUA MÃO</small><b class="ct-emjogo"></b><span class="ct-barrac"><i></i></span></div>
 ${espera ? '<div class="ct-dica ct-regrasc">Feche as 9 cartas em jogos: trinca (o mesmo valor, naipes diferentes) ou sequência (o mesmo naipe). Bater com 9 tira 1 ponto de cada um; com 10, tira 2.</div>'
-    : '<button type="button" class="ct-b cinza" data-acao="cacheta:ordem" title="Arrumar a mão">↕ <span class="ct-ordem"></span></button>'}
-<div class="ct-mesa-acoes">${espera ? comecar : ''}<button type="button" class="ct-b cinza" data-acao="sair">Sair da mesa</button></div>`;
+    : `<div class="ct-botoesc"><button type="button" class="ct-b cinza" data-acao="cacheta:ordem" title="Arrumar a mão (ou arraste as cartas)">↕ <span class="ct-ordem"></span></button><button type="button" class="ct-b cinza ct-ajudac" data-acao="cacheta:guia" title="Como jogar" aria-label="Como jogar">?</button></div>`}
+<div class="ct-mesa-acoes">${espera ? `${comecar}<button type="button" class="ct-b roxo" data-acao="cacheta:guia">❓ Como jogar</button>` : ''}<button type="button" class="ct-b cinza" data-acao="sair">Sair da mesa</button></div>`;
   }
 
   atualizarLadoC(M, e, lado) {
@@ -2277,7 +2629,21 @@ ${espera ? '<div class="ct-dica ct-regrasc">Feche as 9 cartas em jogos: trinca (
     lado.querySelector('.ct-curinga').textContent = cur ? nomeCuringa(cur) : '';
     lado.querySelector('.ct-monte').textContent = e.monte ?? '–';
     const ordem = lado.querySelector('.ct-ordem');
-    if (ordem) ordem.textContent = { jogos: 'Jogos', naipe: 'Naipe', valor: 'Valor' }[this.ordemC || 'jogos'];
+    if (ordem) ordem.textContent = { jogos: 'Jogos', naipe: 'Naipe', valor: 'Valor', manual: 'Livre' }[this.ordemC || 'jogos'];
+    // quanto da mão já está em jogos (com 9 em jogos, ou 10, dá para bater)
+    const prog = lado.querySelector('.ct-progc');
+    const jogando = e.fase === 'jogando' && M.mao.length > 0;
+    prog.hidden = !jogando;
+    if (jogando) {
+      const { emJogo, grupos } = this.arrumadaC(M);
+      const n = M.mao.length;
+      const fecha = emJogo >= CARTAS_CACHETA;
+      const de = Math.max(CARTAS_CACHETA, Math.min(emJogo, n)); // (as 10 em jogos: 10/10, bate de 10)
+      prog.querySelector('.ct-emjogo').textContent = `${emJogo}/${de} em ${grupos === 1 ? '1 jogo' : `${grupos} jogos`}`;
+      prog.querySelector('.ct-barrac i').style.width = `${Math.min(100, (emJogo / CARTAS_CACHETA) * 100)}%`;
+      prog.classList.toggle('fecha', fecha);
+      prog.title = fecha ? 'A mão fecha: dá para bater!' : `Faltam ${CARTAS_CACHETA - emJogo} carta${CARTAS_CACHETA - emJogo === 1 ? '' : 's'} em jogos para bater`;
+    }
   }
 
   // cacheta: o que mudou na mesa — o descarte de alguém (o balão com a carta), quem pegou o lixo, a
@@ -2365,7 +2731,8 @@ ${espera ? '<div class="ct-dica ct-regrasc">Feche as 9 cartas em jogos: trinca (
     const minhaVez = e.vez === M.lugar && e.fase === 'jogando';
     let aviso = comDuplas(e.aviso, M.lugar % 2);
     if (e.jogo === 'cacheta' && e.fase === 'jogando') {
-      if (minhaVez) aviso = e.etapa === 'comprar' ? 'Sua vez: compre do monte ou pegue o lixo' : this.baterC ? 'Escolha a carta que vai para o lixo' : 'Descarte uma carta';
+      const nova = M.novaC && M.mao.includes(M.novaC) ? `Veio o ${nomeCartaCacheta(M.novaC)} · ` : '';
+      if (minhaVez) aviso = e.etapa === 'comprar' ? 'Sua vez: compre do monte ou pegue o lixo' : this.baterC ? 'Escolha a carta que vai para o lixo' : `${nova}Descarte uma carta`;
       else if (!aviso && !e.joga?.[M.lugar]) aviso = 'Você entra na próxima partida';
     }
     if (e.fase === 'jogando' && !aviso) aviso = minhaVez ? (e.ferro ? 'Sua vez! (mão de ferro: sai a de cima)' : 'Sua vez!') : `Vez de ${e.lugares[e.vez]?.nome || '…'}`;
@@ -2514,6 +2881,7 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
     f.querySelector('img').alt = T.nome;
     f.style.setProperty('--cor', T.cor);
     f.querySelector('span').innerHTML = `${esc(quem)}: ${esc(T.nome)}<small>${esc(T.desc)}</small>`;
+    f.classList.remove('compra');
     f.hidden = false;
     f.classList.remove('anda');
     void f.offsetWidth;
@@ -2550,17 +2918,20 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
     for (let i = antes; i < n; i++) setTimeout(() => this.sfx.cartaSel?.(i), (i - antes) * 120);
   }
 
-  // cacheta: a mão arrumada (ver arrumadaC), com um respiro antes de cada jogo e a faixinha verde
-  // em cima das cartas que já estão em jogo. A carta que veio do lixo leva a etiqueta (não pode voltar).
+  // cacheta: a mão arrumada (ver arrumadaC), com um respiro antes de cada jogo e a faixa colorida em
+  // cima das cartas que já estão em jogo (uma cor por jogo, com TRINCA ou SEQUÊNCIA no começo dele).
+  // A carta que veio do lixo leva a etiqueta (não pode voltar); a que acabou de chegar, NOVA.
   desenharMaoCacheta(M, e) {
-    const { cartas: mao, ini, naJogo } = this.arrumadaC(M);
+    const { cartas: mao, ini, grupo } = this.arrumadaC(M);
     const pode = mao.map((c) => this.podeJogar(M, c));
     const vez = this.minhaVezC(M);
     this.mao.classList.toggle('vez', vez);
     this.mao.classList.toggle('escolhe', vez && e.etapa === 'descartar');
     this.mao.classList.toggle('batendo', !!this.baterC);
-    const chave = `${M.i}:c:${mao.join(',')}:${pode.join(',')}:${e.doLixo}:${e.curinga?.v}`;
-    if (chave === this.chaveMao) return;
+    const nova = M.novaC && mao.includes(M.novaC) ? M.novaC : null;
+    const chave = `${M.i}:c:${mao.join(',')}:${pode.join(',')}:${e.doLixo}:${e.curinga?.v}:${nova}`;
+    // (com uma carta sendo arrastada, a mão espera soltar para ser refeita)
+    if (chave === this.chaveMao || this.mao.classList.contains('arrastando')) return;
     this.chaveMao = chave;
     const n = mao.length;
     const meio = (n - 1) / 2;
@@ -2571,12 +2942,17 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
     const distribuir = this.distribuir;
     this.distribuir = false;
     const cur = e.curinga;
+    // a carta nova cai na mão uma vez só (a mão é refeita de novo ao ligar o Bater, arrumar...)
+    const cai = nova && this._caiu !== nova;
+    this._caiu = nova;
     this.mao.innerHTML = mao.map((c, i) => {
       const off = i - meio;
       const estilo = `--rot:${(off * passo).toFixed(2)}deg;--desce:${meio ? ((off / meio) ** 2 * desce).toFixed(1) : 0}px;--atraso:${-i * 0.37}s;--chega:${i * 0.07}s`;
-      const classe = `ct-carta${pode[i] ? ' pode' : ''}${distribuir ? ' chega' : ''}${ini.has(c) ? ' ini' : ''}${naJogo.has(c) ? ' jogo' : ''}`;
-      return `<button type="button" class="${classe}" data-carta="${esc(c)}" style="${estilo}" aria-label="${esc(nomeCartaCacheta(c))}${ehCuringa(c, cur) ? ' (curinga)' : ''}">`
-        + `<div class="ct-balanca"><div class="ct-face" style="background-image:url(${urlCarta(faceC(c, cur))})"></div></div>${c === e.doLixo ? '<span class="ct-fechada">do lixo</span>' : ''}</button>`;
+      const g = grupo.get(c);
+      const classe = `ct-carta${pode[i] ? ' pode' : ''}${distribuir ? ' chega' : ''}${ini.has(c) ? ' ini' : ''}${g ? ` jogo g${g.i % 4}` : ''}${c === nova ? ` nova${cai ? ' cai' : ''}` : ''}`;
+      const etiqueta = c === e.doLixo ? '<span class="ct-fechada">do lixo</span>' : c === nova ? '<span class="ct-fechada ct-novac">NOVA</span>' : '';
+      return `<button type="button" class="${classe}" data-carta="${esc(c)}" style="${estilo}" aria-label="${esc(nomeCartaCacheta(c))}${ehCuringa(c, cur) ? ' (curinga)' : ''}${g ? ` (${g.tipo.toLowerCase()})` : ''}">`
+        + `<div class="ct-balanca"><div class="ct-face" style="background-image:url(${urlCarta(faceC(c, cur))})"></div></div>${etiqueta}</button>`;
     }).join('');
     if (distribuir && n) mao.forEach((_, i) => setTimeout(() => this.sfx.cartaSel?.(i), i * 70));
   }
@@ -2662,9 +3038,11 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
       // comprar (do monte ou o lixo) e, depois de comprar, bater quando a mão fecha
       if (!(minhaVez && e.etapa === 'descartar')) this.baterC = false;
       if (minhaVez && e.etapa === 'comprar') {
+        // o lixo em cima, com a carta de cima dele grande, pendurada no canto (como o Espiar do 21)
         const topo = e.topoLixo;
+        const carta = topo ? `<span class="ct-lixocarta"><img src="${urlCarta(faceC(topo, e.curinga))}" alt="${esc(nomeCartaCacheta(topo))}"><i>🗑️</i></span>` : '';
+        esq.push(`<button type="button" class="ct-b laranja ct-lixob" data-acao="cacheta:lixo" title="L"${topo ? ` aria-label="Pegar o ${esc(nomeCartaCacheta(topo))} do lixo"` : ' disabled'}>${carta}Pegar o lixo<kbd>L</kbd></button>`);
         esq.push('<button type="button" class="ct-b verde grande" data-acao="cacheta:monte" title="Espaço">Comprar<kbd>␣</kbd></button>');
-        esq.push(`<button type="button" class="ct-b laranja ct-lixob" data-acao="cacheta:lixo" title="L"${topo ? '' : ' disabled'}>${topo ? `<img src="${urlCarta(faceC(topo, e.curinga))}" alt="">` : ''}Pegar o lixo<kbd>L</kbd></button>`);
       } else if (minhaVez && e.etapa === 'descartar') {
         const b = this.bateC(M);
         if (b.dez) dir.push('<button type="button" class="ct-b ouro grande truco" data-acao="cacheta:bater" title="B">Bater de 10!<kbd>B</kbd></button>');
@@ -2933,13 +3311,15 @@ ${e.subir ? `<button type="button" class="ct-b vermelho grande truco" data-acao=
     this.desloc.alvoY = r.dy;
   }
 
-  // a beira do tampo redondo
+  // a beira do tampo redondo. Na cacheta tudo acontece no meio (o monte, o vira, o lixo e os jogos de
+  // quem bateu): enquadra só ele, e as cartas saem bem maiores no celular deitado
   contorno(M) {
     if (M.contorno) return M.contorno;
     M.contorno = [];
+    const r = M.m.jogo === 'cacheta' ? R_MESA * 0.78 : R_MESA;
     for (let i = 0; i < 16; i++) {
       const a = (i / 16) * Math.PI * 2;
-      M.contorno.push(new THREE.Vector3(M.m.x + Math.cos(a) * R_MESA, Y_MESA, M.m.z + Math.sin(a) * R_MESA));
+      M.contorno.push(new THREE.Vector3(M.m.x + Math.cos(a) * r, Y_MESA, M.m.z + Math.sin(a) * r));
     }
     return M.contorno;
   }
