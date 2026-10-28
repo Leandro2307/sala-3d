@@ -94,6 +94,29 @@ Conclusões:
   amostras }]`. Do celular não precisa baixar nada. Sem o canal direto aberto a amostra não vai
   (não passa pelo servidor).
 
+## Terceiro relatório (2026-10-28 22:27, os dois lados: RTX 3060 Ti → iPhone no Safari, Minecraft)
+
+- Captura 50–55 qps (melhor), na tela do iPhone média de 46 qps.
+- **O piso de banda não segura**: o `x-google-min-bitrate=6000` estava no codec aplicado e a
+  estimativa caiu a 0,9–4 Mbps com as perdas do Wi-Fi. O começo alto funcionou (1ª amostra: 10 Mbps).
+- **O atraso está no iPhone**: buffer de 250–360 ms. O Safari não tem `jitterBufferTarget`
+  (o "buffer mínimo" de `baixaLatencia` não vale lá; Chrome no iPhone é o mesmo WebKit). O buffer
+  cresce com as perdas e com os quadros grandes que demoram a passar (fila de envio até 480 ms).
+- A resolução pulava (1920 → 1280 → 960 → 1918 → 1437...): cada troca é um quadro-chave enorme.
+- Ainda OpenH264. Nesse PC o `encodingInfo` diz H.264 `smooth: false` (no PC de teste, `true`):
+  o Chrome dele não oferece o H.264 da NVIDIA. Pedido ao usuário: `chrome://gpu` → "Video
+  Acceleration Information" e driver atualizado.
+- Bug corrigido: o título da janela de quem joga ia em `ambiente.tela` (agora `janelaDoJogo`).
+
+### O que entrou depois disso
+
+- **Resolução fixa com banda curta** (`rtc.linhasDeJogo`, `ajustarJogo`): estimativa < 5 Mbps por
+  4 s → no máximo 720 linhas para quem joga, com `degradationPreference =
+  'maintain-framerate-and-resolution'` (só a nitidez cede; com `maintain-framerate` o navegador
+  reduzia por cima da escala e 720p virava 360p). Volta à captura inteira com > 9 Mbps por 10 s,
+  depois de 30 s fixa. Navegador que não conhece o valor (TypeError no `setParameters`):
+  `rtc.semFixa` e fica no `maintain-framerate`. Testado: 720p a 60 qps.
+
 ## Próximos passos sugeridos
 
 0. **Pedir um relatório novo dos dois lados** com o jogo em janela sem bordas 1920×1080 a 60 qps

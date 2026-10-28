@@ -2502,7 +2502,8 @@ function jogoLa(video, key) {
   diagJogo.comecar('joga', {
     gl: world.renderer.getContext(),
     video,
-    extra: { tela: acharTela(key)?.share.titulo ?? null, toque: isTouch },
+    // janela, e não tela: o ambiente já tem "tela" (o tamanho da tela do aparelho)
+    extra: { janelaDoJogo: acharTela(key)?.share.titulo ?? null, toque: isTouch },
   });
   diagJogo.evento('buffer mínimo', rtc?.baixaLatencia(video.srcObject, true));
 }
@@ -2557,10 +2558,23 @@ setInterval(amostrarJogo, 2000);
 // aguenta só perde mais); a imagem abaixo de 400 linhas por banda por 6 s → 'balanced', que troca
 // um pouco dos quadros por linhas, por pelo menos 30 s e até a banda folgar de novo. Só abaixo de
 // 400: o 'balanced' do libwebrtc desce até 15 qps em 480p, e 540p a 60 joga melhor que isso.
-const ajusteDoJogo = new Map(); // id de quem joga -> { perdas, baixas, boas, balanceadoDesde }
+// E a banda estimada abaixo de 5 Mbps por 4 s → a tela fica fixa em 720p (rtc.linhasDeJogo), em
+// vez de pular de resolução a cada vaivém da banda; volta à captura inteira com mais de 9 Mbps
+// por 10 s, depois de pelo menos 30 s fixa.
+const ajusteDoJogo = new Map(); // id de quem joga -> { perdas, baixas, boas, balanceadoDesde, curta, larga, fixaDesde }
 function ajustarJogo(id, r) {
   let st = ajusteDoJogo.get(id);
-  if (!st) ajusteDoJogo.set(id, (st = { perdas: 0, baixas: 0, boas: 0, balanceadoDesde: 0 }));
+  if (!st) ajusteDoJogo.set(id, (st = { perdas: 0, baixas: 0, boas: 0, balanceadoDesde: 0, curta: 0, larga: 0, fixaDesde: 0 }));
+  const est = r.saidaEstimadaKbps;
+  st.curta = est != null && est < 5000 ? st.curta + 1 : 0;
+  st.larga = est != null && est > 9000 ? st.larga + 1 : 0;
+  if (st.curta >= 2 && rtc.linhasDeJogo(id, 720)) {
+    st.fixaDesde = Date.now();
+    diagJogo.evento('banda curta: tela fixa em 720p', { saidaEstimadaKbps: est, altura: r.altura });
+  } else if (st.fixaDesde && Date.now() - st.fixaDesde > 30_000 && st.larga >= 5 && rtc.linhasDeJogo(id, null)) {
+    st.fixaDesde = 0;
+    diagJogo.evento('banda folgou: tela de volta à captura inteira', { saidaEstimadaKbps: est });
+  }
   st.perdas = (r.perdaLa ?? 0) > 8 ? st.perdas + 1 : 0;
   if (st.perdas >= 3 && rtc.soltarPisoJogo(id)) diagJogo.evento('piso de banda solto: a rede de quem joga está perdendo muito', { perdaLa: r.perdaLa, kbps: r.kbps });
   const banda = r.limite === 'bandwidth';

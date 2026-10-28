@@ -476,6 +476,7 @@ export class RTC {
     if (!nova) {
       peer.semPiso = false;
       peer.balanceado = false;
+      peer.linhasJogo = null;
       this.tuneScreen(peer);
     }
     console.info('[modo-jogo] banda da conexão', peer.id, nova ? `começa em ${nova.inicio} kbps, piso ${nova.piso} kbps` : 'normal');
@@ -497,6 +498,18 @@ export class RTC {
     const peer = this.peers.get(id);
     if (!peer?.bandaJogo || peer.balanceado === balanceado) return false;
     peer.balanceado = balanceado;
+    this.tuneScreen(peer);
+    return true;
+  }
+
+  // A banda de quem joga está baixa: a tela sai com no máximo `linhas` linhas (null: a captura
+  // inteira). Com a banda subindo e descendo, o navegador pulava de 1080 a 540 e voltava; cada
+  // troca é um quadro-chave enorme, que demora a passar na banda curta, e o iPhone (o Safari não
+  // deixa baixar o buffer) aumentava a espera para quase 0,4 s. Fixa, a imagem chega por igual.
+  linhasDeJogo(id, linhas) {
+    const peer = this.peers.get(id);
+    if (!peer?.bandaJogo || peer.linhasJogo === linhas) return false;
+    peer.linhasJogo = linhas;
     this.tuneScreen(peer);
     return true;
   }
@@ -529,7 +542,9 @@ export class RTC {
     // pelo extraScale)
     const extra = scr?.extraScale || 1;
     const altura = (scr?.stream?.getVideoTracks()[0]?.getSettings?.().height || preset.height * extra) / extra;
-    const escala = nivel.linhas ? Math.max(1, altura / nivel.linhas) : nivel.escala;
+    let escala = nivel.linhas ? Math.max(1, altura / nivel.linhas) : nivel.escala;
+    // modo jogo com pouca banda: resolução fixa (linhasDeJogo) em vez de deixar pular
+    if (nivel === NIVEIS.max && peer.linhasJogo && this.jogoTelas.has(key)) escala = Math.max(1, altura / peer.linhasJogo);
     const banda = nivel === NIVEIS.max && this.jogoTelas.has(key) ? preset.jogoBitrate : preset.maxBitrate;
     return {
       active: nivel !== NIVEIS.off,
@@ -640,10 +655,20 @@ export class RTC {
               if (!params.encodings || !params.encodings.length) params.encodings = [{}];
               // 60 quadros sempre: se apertar, cai a resolução e não a fluidez (no modo jogo, com a
               // imagem em migalhas, divide a perda entre os dois: imagemDeJogo)
-              params.degradationPreference = peer.balanceado && this.jogoTelas.has(key) ? 'balanced' : 'maintain-framerate';
+              // e com a resolução fixa (linhasDeJogo), nem uma nem outra: o navegador reduzia por
+              // cima da escala (720p virava 360p) — só a nitidez cede (navegador sem: segura os quadros)
+              const jogo = this.jogoTelas.has(key);
+              params.degradationPreference = peer.balanceado && jogo ? 'balanced'
+                : peer.linhasJogo && jogo && !this.semFixa ? 'maintain-framerate-and-resolution' : 'maintain-framerate';
               Object.assign(params.encodings[0], this.envioPara(peer, key), { networkPriority: 'high', priority: 'high' });
               await sender.setParameters(params);
             } catch (err) {
+              // navegador que não conhece o 'maintain-framerate-and-resolution': fica no de sempre
+              if (err.name === 'TypeError' && !this.semFixa && peer.linhasJogo) {
+                this.semFixa = true;
+                peer.ajustarDeNovo = true;
+                continue;
+              }
               // a negociação mudou os parâmetros no meio (logo que a tela entra): tenta de novo já já
               if (err.name === 'InvalidModificationError' && (peer.tentativas = (peer.tentativas || 0) + 1) <= 5) {
                 setTimeout(() => this.tuneScreen(peer), 300);
@@ -758,6 +783,7 @@ export class RTC {
       bandaJogo: null, // { inicio, piso } em kbps: essa pessoa joga numa tela minha (atualizarBandaJogo)
       semPiso: false, // o piso de jogo saiu (soltarPisoJogo)
       balanceado: false, // a tela de jogo dela sai em 'balanced' (imagemDeJogo)
+      linhasJogo: null, // a tela de jogo dela sai com no máximo essas linhas (linhasDeJogo)
       renegociar: false, // falta mandar uma oferta nova (renegociar)
       ctrl: null, // canal do controle remoto (ver canalControle)
       micSender: null,
@@ -1068,7 +1094,7 @@ export class RTC {
         continue;
       }
       const d = { id, nivel: peer.interesse.get(key) || null, conexao: peer.pc.connectionState };
-      if (peer.bandaJogo) d.bandaJogo = { ...peer.bandaJogo, semPiso: peer.semPiso, balanceado: peer.balanceado };
+      if (peer.bandaJogo) d.bandaJogo = { ...peer.bandaJogo, semPiso: peer.semPiso, balanceado: peer.balanceado, linhas: peer.linhasJogo };
       try {
         const p = tr.sender.getParameters();
         d.params = { degradacao: p.degradationPreference ?? null, ...(p.encodings?.[0] || {}) };
