@@ -766,6 +766,25 @@ export class RTC {
     }
   }
 
+  // Modo jogo: a captura de uma tela minha no máximo com `linhas` linhas (null: a do preset). A
+  // captura de um jogo pesado em 1080p ficava em ~32 qps e numa janela pequena em ~55: menor, o
+  // Chrome copia menos da placa a cada quadro. Devolve as linhas que a captura tem agora.
+  async capturaDeJogo(key, linhas) {
+    const track = this.screens.get(key)?.stream?.getVideoTracks()[0];
+    if (!track || track.readyState !== 'live') return null;
+    const preset = this.preset();
+    const alto = linhas || preset.height;
+    const largo = linhas ? Math.round((linhas * 16) / 9) : preset.width;
+    try {
+      await track.applyConstraints({ width: { max: largo }, height: { max: alto }, frameRate: { ideal: preset.fps, max: preset.fps } });
+    } catch (err) {
+      console.warn('[modo-jogo] tamanho da captura', err);
+      return null;
+    }
+    this.retuneAll(); // a escala de cada envio sai da altura da captura
+    return track.getSettings().height ?? null;
+  }
+
   // reaplica em todos (preset mudou ou o número de telas mudou)
   retuneAll() {
     for (const peer of this.peers.values()) this.tuneScreen(peer);

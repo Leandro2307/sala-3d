@@ -152,6 +152,30 @@ Chrome não tem): com o iPhone, a tela sempre saía no processador.
 - **Falta confirmar com o iPhone de verdade**: se o Safari aceita o H.265 no WebRTC e decodifica o
   Baseline da NVIDIA. Se não, a rede de segurança volta em 6 s e o relatório mostra o evento.
 
+## Quarto relatório (2026-10-29 02:35, God of War, RTX 3060 Ti → iPhone no PWA): "mais fluido"
+
+- **A troca de perfil funcionou no iPhone de verdade**: codificador `D3D12VideoEncodeAccelerator`
+  (H.264 na NVIDIA) em `42001f`, decodificado no Safari sem recuo. O H.265 não foi combinado (o
+  Safari do iPhone não deve oferecer no WebRTC).
+- Rede boa: 10–25 Mbps usados, estimativa 26–50 Mbps, quase sem perda. Buffer do iPhone caiu de
+  250–360 ms para **55–150 ms**.
+- **Gargalo 1: captura ~32 qps em 1920×1032** (numa janela de 948×688, ~55). Não dá para separar
+  captura de jogo pelos números (janela menor também faz o jogo renderizar menos).
+- **Gargalo 2: o iPhone mostra no máximo ~30 qps**: no fim decodificava 54 e a tela (rVFC) mostrava
+  21–30. Provável Modo de Pouca Energia (o WebKit limita a 30 qps).
+- A tela fixou em 720p logo no começo (estimativa ainda em 1,5 Mbps subindo) e ficou 30 s à toa.
+
+### O que entrou depois disso
+
+- `ajustarCaptura` (main.js) + `rtc.capturaDeJogo(key, linhas)`: captura < 45 qps em ≥ 900 linhas,
+  sem limite de banda, por 6 s → `applyConstraints` para 720p; nas 3 amostras seguintes (a 1ª não
+  conta) subiu ≥ 8 qps → fica, senão volta ao preset e não tenta de novo. Eventos "captura em 720p
+  ajudou/não ajudou" respondem se o limite é a captura ou o jogo. Ao sair do modo jogo, volta ao preset.
+  Testado (animação a 30 qps): testou, não ajudou, voltou a 1920×1080.
+- A banda curta (720p fixo) só conta depois das 3 primeiras amostras do modo jogo.
+- Motivo `tela` quando quem joga decodifica ≥ 40 e mostra < 70% disso (vem antes de `perdas`),
+  com o texto do Modo de Pouca Energia do iPhone.
+
 ## Próximos passos sugeridos
 
 0. **Pedir um relatório novo dos dois lados** com o jogo em janela sem bordas 1920×1080 a 60 qps

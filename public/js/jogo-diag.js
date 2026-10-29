@@ -22,7 +22,7 @@ const MOTIVOS = {
   internet: 'A banda entre vocês está no limite e o navegador baixou a resolução para não travar. O Wi-Fi perde pacotes e cada perda derruba a banda: cabo no PC de quem compartilha e o celular perto do roteador (rede de 5 GHz) ajudam; pela internet, o ideal é 25 Mbps de upload livres.',
   codificador: 'O codificador está soltando menos quadros do que a captura entrega.',
   perdas: 'A internet entre vocês está perdendo pacotes: o vídeo trava esperando o que se perdeu.',
-  tela: 'O vídeo chega inteiro, mas este PC não está dando conta de mostrar todos os quadros.',
+  tela: 'O vídeo chega e é decodificado inteiro, mas o aparelho mostra menos quadros. No iPhone, o Modo de Pouca Energia limita o Safari a 30 qps: desligue em Ajustes → Bateria (e deixe o celular carregando, se esquentar). No PC, feche o que pesa na placa.',
   decod: 'Este PC não está dando conta de decodificar o vídeo.',
 };
 
@@ -315,6 +315,9 @@ function motivoRecebe(r, la) {
   const fps = r.naTela ?? r.decodificado;
   if (fps == null || fps >= BOM) return null;
   if (la?.enviado != null && la.enviado < BOM) return la.motivo || 'codificador';
+  // decodifica bem mais do que mostra (iPhone: 54 decodificados, 21–30 na tela): é a tela, mesmo
+  // com uma travada no meio
+  if (r.naTela != null && r.decodificado >= 40 && r.naTela < r.decodificado * 0.7) return 'tela';
   if ((r.perdidos || 0) > 0 || (r.congelou || 0) > 0) return 'perdas';
   if (r.decodificado != null && r.decodificado < BOM && (r.recebido ?? 0) >= BOM) return 'decod';
   if (r.naTela != null && r.naTela < BOM && (r.decodificado ?? 0) >= BOM) return 'tela';

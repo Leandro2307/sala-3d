@@ -2467,6 +2467,11 @@ function jogoAqui(key, deId, ligar) {
     ajusteDoJogo.delete(deId);
     semDecodificar.delete(deId);
   }
+  // ninguém mais joga nessa tela: a captura volta ao tamanho do preset
+  if (!jogandoAqui.has(key) && capturaDoJogo.has(key)) {
+    if (['testando', 'reduzida'].includes(capturaDoJogo.get(key).fase)) rtc?.capturaDeJogo(key, null);
+    capturaDoJogo.delete(key);
+  }
   const nome = state.users.get(deId)?.name || 'Alguém';
   diagJogo.evento(ligar ? 'modo jogo ligado por quem controla' : 'modo jogo desligado', { key, deId, nome });
   const agora = jogandoAqui.size > 0;
@@ -2533,6 +2538,7 @@ async function amostrarJogo() {
         const resumo = diagJogo.amostraEnvio(key, cru, id, sala);
         if (!resumo) continue;
         ajustarJogo(id, resumo);
+        if (id === quem.keys().next().value) ajustarCaptura(key, resumo); // a captura é uma só por tela
         const { t, captura, enviado, codificado, altura, kbps, limite, motivo, codificador, placa, imagemBaixa } = resumo;
         controle.emitir('controle-volta', { key, para: id, ev: { t: 'jogo-envio', quando: t, captura, enviado, codificado, altura, kbps, limite, motivo, codificador, placa, imagemBaixa } });
       }
@@ -2564,6 +2570,47 @@ setInterval(amostrarJogo, 2000);
 // E a banda estimada abaixo de 5 Mbps por 4 s → a tela fica fixa em 720p (rtc.linhasDeJogo), em
 // vez de pular de resolução a cada vaivém da banda; volta à captura inteira com mais de 9 Mbps
 // por 10 s, depois de pelo menos 30 s fixa.
+// A captura de um jogo pesado em 1080p ficava em ~32 qps (God of War numa RTX 3060 Ti; numa janela
+// pequena, ~55), com banda e codificador sobrando. Não dá para saber pelos números se o limite é
+// a captura ou o próprio jogo: então testa. Captura abaixo de 45 qps em 900 linhas ou mais por 6 s,
+// sem limite de banda → captura em 720p; nas 3 amostras seguintes (a 1ª depois da troca não
+// conta) subiu 8 qps ou mais → fica; senão volta e não tenta de novo (o limite é o jogo/placa).
+// Fica no relatório de um jeito ou de outro.
+const capturaDoJogo = new Map(); // tela -> { fase, ruins, base, depois, desde }
+async function ajustarCaptura(key, r) {
+  let st = capturaDoJogo.get(key);
+  if (!st) capturaDoJogo.set(key, (st = { fase: 'normal', ruins: 0, base: [], depois: [] }));
+  const linhas = Number(String(r.capturaRes || '').split('x')[1]) || 0;
+  if (st.fase === 'normal') {
+    const ruim = r.captura != null && r.captura < 45 && linhas >= 900 && r.limite === 'none';
+    st.ruins = ruim ? st.ruins + 1 : 0;
+    st.base = ruim ? [...st.base, r.captura].slice(-3) : [];
+    if (st.ruins < 3) return;
+    st.fase = 'testando';
+    st.depois = [];
+    const agora = await rtc.capturaDeJogo(key, 720);
+    diagJogo.evento('captura lenta em 1080p: testando a captura em 720p', { captura: mediaDe(st.base), linhas, agora });
+    if (agora == null) st.fase = 'nao-ajuda';
+  } else if (st.fase === 'testando') {
+    st.depois.push(r.captura);
+    if (st.depois.length < 4) return;
+    const antes = mediaDe(st.base);
+    const depois = mediaDe(st.depois.slice(1));
+    if (depois != null && antes != null && depois >= antes + 8) {
+      st.fase = 'reduzida';
+      diagJogo.evento('captura em 720p ajudou: fica', { antes, depois });
+    } else {
+      st.fase = 'nao-ajuda';
+      await rtc.capturaDeJogo(key, null);
+      diagJogo.evento('captura em 720p não ajudou: volta ao tamanho inteiro (o limite é o jogo ou a placa)', { antes, depois });
+    }
+  }
+}
+const mediaDe = (v) => {
+  const n = v.filter((x) => x != null);
+  return n.length ? Math.round((n.reduce((a, b) => a + b, 0) / n.length) * 10) / 10 : null;
+};
+
 // O codec de jogo (H.265, ou o H.264 da placa com o perfil trocado: rtc.preferirCodecDeJogo) é
 // aposta: se o aparelho de quem joga passar 6 s sem decodificar nenhum quadro, um passo atrás.
 const semDecodificar = new Map(); // id de quem joga -> amostras seguidas sem quadro decodificado
@@ -2581,7 +2628,10 @@ function ajustarJogo(id, r) {
   let st = ajusteDoJogo.get(id);
   if (!st) ajusteDoJogo.set(id, (st = { perdas: 0, baixas: 0, boas: 0, balanceadoDesde: 0, curta: 0, larga: 0, fixaDesde: 0 }));
   const est = r.saidaEstimadaKbps;
-  st.curta = est != null && est < 5000 ? st.curta + 1 : 0;
+  // nos primeiros 6 s a banda ainda está subindo (começava em ~1,5 Mbps e em 20 s passava de 26):
+  // fixar em 720p ali segurava a imagem baixa à toa por 30 s
+  st.n = (st.n || 0) + 1;
+  st.curta = st.n > 3 && est != null && est < 5000 ? st.curta + 1 : 0;
   st.larga = est != null && est > 9000 ? st.larga + 1 : 0;
   if (st.curta >= 2 && rtc.linhasDeJogo(id, 720)) {
     st.fixaDesde = Date.now();
