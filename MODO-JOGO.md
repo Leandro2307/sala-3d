@@ -176,6 +176,39 @@ Chrome não tem): com o iPhone, a tela sempre saía no processador.
 - Motivo `tela` quando quem joga decodifica ≥ 40 e mostra < 70% disso (vem antes de `perdas`),
   com o texto do Modo de Pouca Energia do iPhone.
 
+## Quinto e sexto relatórios (2026-10-29 02:52 Minecraft, 02:57 God of War, várias janelas)
+
+- **God of War: o melhor até agora.** Captura 53–55 qps em todos os tamanhos (1920×1080 inclusive),
+  placa o tempo todo, banda até 52 Mbps, iPhone mostrando 50–54 qps (o Modo de Pouca Energia
+  saiu), buffer quase sempre 55–150 ms.
+- **Minecraft pior**: os primeiros 30 s a 32 qps (o teste de captura em 720p não ajudou: era o
+  jogo; depois subiu a 54 no mesmo tamanho) e **~75 s no OpenH264**: ao diminuir a janela, a escala
+  do 720p fixo, calculada para o tamanho antigo, deu 617×375 e depois 1279×720.
+- **Medida ímpar → processador** (testado: `testar-impar.js`): 1279×720, 1280×719, 617×375 e uma
+  captura de 1283×751 (mesmo com a saída par) vão para o OpenH264; 1280×720, 618×376, 1340×720 na placa.
+  Abaixo de ~360 linhas o Chrome usa o processador de propósito.
+- **Depois de cair, não volta sozinho** (`testar-volta.js`): nem escala nova, nem `active`
+  desligado e ligado, nem `replaceTrack`, nem renegociar o codec. Volta quando o tamanho da própria
+  captura muda para medidas pares (`applyConstraints`).
+- O Chrome arredonda a largura e trunca a altura com erro de conta (751 / (751/736) → 735): a
+  escala mira 0,25 acima do par.
+- Teto de ~54–55 qps em todos os tamanhos e nos dois jogos: provável o ritmo da captura neste PC,
+  não o jogo. Ainda não investigado.
+
+### O que entrou depois disso
+
+- `escalaPar` em `envioPara`: toda redução sai com as duas medidas pares (validado em 14
+  tamanhos: `testar-escalas.js`); sem redução, escala 1 (escala minúscula dava medida imprevisível).
+- A escala é refeita quando a captura muda de tamanho: `vigiar` (pelo `getSettings`) e
+  `rtc.capturaMedida` (pelas estatísticas, a cada 2 s no modo jogo).
+- Para quem joga, sempre `maintain-framerate-and-resolution`: o navegador reduzindo sozinho
+  (3/4, 1/2, 3/8) dava medida ímpar. Com banda curta quem reduz é o 720p fixo.
+- `rtc.reiniciarCodificador` + `vigiarCodificador` (main.js): no processador num H.264 que a
+  placa faz, com 360 linhas ou mais → captura no par logo abaixo; voltou à placa e a captura de
+  antes era par → volta a ela. Captura ímpar fica no par logo abaixo (limite: se a janela crescer
+  depois, a captura fica presa nesse tamanho até sair do modo jogo). Ao sair do modo jogo, preset.
+- Evento "codificador trocou" no relatório (de, para, medidas).
+
 ## Próximos passos sugeridos
 
 0. **Pedir um relatório novo dos dois lados** com o jogo em janela sem bordas 1920×1080 a 60 qps

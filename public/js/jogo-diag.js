@@ -148,6 +148,9 @@ export class DiagJogo {
     const capAltura = env?.captura?.height;
     resumo.imagemBaixa = resumo.nivel === 'max' && resumo.altura && capAltura ? resumo.altura < capAltura * 0.6 : null;
     resumo.motivo = motivoEnvio(resumo);
+    // a placa recusou (medida ímpar, por exemplo) e o Chrome passou para o processador, ou voltou
+    const ant = s.amostras.at(-1)?.codificador;
+    if (ant && resumo.codificador && ant !== resumo.codificador) this.evento('codificador trocou', { de: ant, para: resumo.codificador, enviado: `${resumo.largura}x${resumo.altura}`, captura: resumo.capturaRes });
     s.amostras.push({ ...resumo, sala, trilha: s.amostras.length % 15 === 0 ? cru.trilha : undefined, cru: s.amostras.length % 15 === 0 ? cru : undefined });
     if (s.amostras.length > GUARDA) s.amostras.shift();
     console.log(`[modo-jogo] envio: captura ${resumo.captura} qps (${resumo.capturaRes}) → codificado ${resumo.codificado} → enviado ${resumo.enviado} qps · ${resumo.largura}x${resumo.altura} · ${resumo.kbps} kbps (alvo ${resumo.alvoKbps}, teto ${resumo.tetoKbps}) · ${resumo.codMs} ms/quadro · ${resumo.codificador}${resumo.placa ? ' (placa)' : ''} · limite ${resumo.limite} ${JSON.stringify(resumo.limitePct)} · rtt ${resumo.rttMs} ms · perda lá ${resumo.perdaLa}% · fila ${resumo.filaMs} ms · ${resumo.caminho}${resumo.imagemBaixa ? ' · IMAGEM BAIXA' : ''}${resumo.motivo ? ` · MOTIVO: ${resumo.motivo}` : ''}`, { resumo, sala });

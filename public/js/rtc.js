@@ -155,6 +155,29 @@ function trocarPerfil(desc, mids, de, para) {
   return { type: desc.type, sdp: saida.join('\r\n') };
 }
 
+// O codificador da placa (NVIDIA no Chrome 156) recusa largura ou altura ímpar e o Chrome cai no
+// OpenH264: 1279×720, 1280×719 e 617×375 no processador; 1280×720, 618×376 e 1340×720 na placa.
+// Uma janela de 926×562 com a escala de 1,5 saía em 617×375; uma janela de tamanho ímpar, sem
+// escala nenhuma, também. Daqui sai a escala mais próxima (para baixo) com as duas medidas pares: a
+// altura cai exata num número par e a largura logo acima de um par (menos de 0,45), que dá par
+// arredondando ou truncando. Perde no máximo uns 1,5% (1283×751 → 1264×740).
+function escalaPar(largura, altura, escala) {
+  if (!largura || !altura) return escala;
+  // Sem redução, sem escala: uma escala de 1,004 numa captura ímpar dava medidas imprevisíveis
+  // (1283×751 → 1277×747), e a placa recusa a captura ímpar mesmo com a saída par (1283×751 →
+  // 916×536 no processador). Captura ímpar se acerta na captura (reiniciarCodificador).
+  if (escala <= 1) return 1;
+  let linhas = Math.floor(altura / escala / 2) * 2;
+  if (linhas + 0.25 > altura) linhas -= 2; // a escala não pode ficar abaixo de 1
+  for (let i = 0; i < 40 && linhas >= 2; i++, linhas -= 2) {
+    // mira 0,25 acima do par: 751 / (751 / 736) dava 735,9999 e o Chrome entregava 735
+    const alvo = linhas + 0.25;
+    const colunas = (largura * alvo) / altura;
+    if (colunas - Math.floor(colunas / 2) * 2 < 0.45) return altura / alvo;
+  }
+  return escala;
+}
+
 // as linhas do SDP por seção: o cabeçalho e depois uma lista por m= (começando na linha m=)
 function secoesDoSdp(sdp) {
   const secoes = [[]];
@@ -367,6 +390,16 @@ export class RTC {
   // que dormiu) refaz o caminho em 3 s, em vez de esperar o "failed", que leva até 30 s.
   vigiar() {
     const agora = performance.now();
+    // A janela compartilhada mudou de tamanho: a escala de cada envio é refeita (ela sai do tamanho
+    // da captura). Sem isso, a escala de 1,5 de uma janela em 1080p ficava numa janela de 926×562.
+    let mudou = false;
+    for (const scr of this.screens.values()) {
+      const c = scr.stream?.getVideoTracks()[0]?.getSettings?.();
+      const tamanho = c ? `${c.width}x${c.height}` : null;
+      if (scr.tamanho && tamanho !== scr.tamanho) mudou = true;
+      scr.tamanho = tamanho;
+    }
+    if (mudou) this.retuneAll();
     for (const peer of this.peers.values()) {
       const { pc } = peer;
       if (pc.connectionState === 'closed') continue;
@@ -608,7 +641,9 @@ export class RTC {
     // altura do que sai no nível máximo: a da captura (no arquivo maior que o preset, já reduzida
     // pelo extraScale)
     const extra = scr?.extraScale || 1;
-    const altura = (scr?.stream?.getVideoTracks()[0]?.getSettings?.().height || preset.height * extra) / extra;
+    // o tamanho medido nos quadros (capturaMedida) vale mais que o das configurações
+    const cfg = scr?.medido || scr?.stream?.getVideoTracks()[0]?.getSettings?.() || {};
+    const altura = (cfg.height || preset.height * extra) / extra;
     let escala = nivel.linhas ? Math.max(1, altura / nivel.linhas) : nivel.escala;
     // modo jogo com pouca banda: resolução fixa (linhasDeJogo) em vez de deixar pular
     if (nivel === NIVEIS.max && peer.linhasJogo && this.jogoTelas.has(key)) escala = Math.max(1, altura / peer.linhasJogo);
@@ -617,7 +652,8 @@ export class RTC {
       active: nivel !== NIVEIS.off,
       maxBitrate: Math.round(Math.min(banda * nivel.teto, Math.max(nivel.piso, banda * parte))),
       maxFramerate: nivel.fps,
-      scaleResolutionDownBy: Math.max(1, escala * extra),
+      // medidas pares: senão a placa recusa e o Chrome codifica no processador (escalaPar)
+      scaleResolutionDownBy: escalaPar(cfg.width, cfg.height, Math.max(1, escala * extra)),
     };
   }
 
@@ -725,14 +761,17 @@ export class RTC {
               // imagem em migalhas, divide a perda entre os dois: imagemDeJogo)
               // e com a resolução fixa (linhasDeJogo), nem uma nem outra: o navegador reduzia por
               // cima da escala (720p virava 360p) — só a nitidez cede (navegador sem: segura os quadros)
+              // Para quem joga, sempre: o navegador reduzindo sozinho (3/4, 1/2, 3/8...) dava
+              // medida ímpar, e com medida ímpar a placa recusa e o Chrome fica no processador
+              // (escalaPar). Com a banda curta quem reduz é o linhasDeJogo, sempre em medida par.
               const jogo = this.jogoTelas.has(key);
               params.degradationPreference = peer.balanceado && jogo ? 'balanced'
-                : peer.linhasJogo && jogo && !this.semFixa ? 'maintain-framerate-and-resolution' : 'maintain-framerate';
+                : peer.bandaJogo && jogo && !this.semFixa ? 'maintain-framerate-and-resolution' : 'maintain-framerate';
               Object.assign(params.encodings[0], this.envioPara(peer, key), { networkPriority: 'high', priority: 'high' });
               await sender.setParameters(params);
             } catch (err) {
               // navegador que não conhece o 'maintain-framerate-and-resolution': fica no de sempre
-              if (err.name === 'TypeError' && !this.semFixa && peer.linhasJogo) {
+              if (err.name === 'TypeError' && !this.semFixa && peer.bandaJogo) {
                 this.semFixa = true;
                 peer.ajustarDeNovo = true;
                 continue;
@@ -781,8 +820,46 @@ export class RTC {
       console.warn('[modo-jogo] tamanho da captura', err);
       return null;
     }
+    delete this.screens.get(key).medido; // o medido era do tamanho antigo: vale o novo das configurações
     this.retuneAll(); // a escala de cada envio sai da altura da captura
     return track.getSettings().height ?? null;
+  }
+
+  // O Chrome caiu no processador (OpenH264) e não volta sozinho: nem escala nova, nem desligar e
+  // ligar o envio, nem trocar a trilha, nem renegociar o codec. Volta quando o tamanho da própria
+  // captura muda para medidas pares: aqui a captura vai para o par logo abaixo do tamanho atual.
+  // O Chrome mantém a proporção arredondando a largura (750 linhas numa janela de 1283×751 davam
+  // 1281), por isso a altura é escolhida com a largura que vai dar par.
+  async reiniciarCodificador(key) {
+    const scr = this.screens.get(key);
+    const track = scr?.stream?.getVideoTracks()[0];
+    if (!track || track.readyState !== 'live') return null;
+    const { width: largura, height: altura } = scr.medido || track.getSettings();
+    if (!largura || !altura) return null;
+    for (let linhas = Math.floor((altura - 1) / 2) * 2; linhas >= altura - 80 && linhas >= 2; linhas -= 2) {
+      const colunas = Math.round((largura * linhas) / altura);
+      if (colunas % 2 || Math.abs((largura * linhas) / altura - colunas) > 0.4) continue;
+      try {
+        await track.applyConstraints({ width: { max: colunas }, height: { max: linhas }, frameRate: { ideal: this.preset().fps, max: this.preset().fps } });
+      } catch (err) {
+        console.warn('[modo-jogo] reinício do codificador', err);
+        return null;
+      }
+      delete scr.medido;
+      this.retuneAll();
+      // nativoPar: a captura de antes era par (a medida ímpar vinha da escala): dá para voltar a ela
+      return { tamanho: `${colunas}x${linhas}`, nativoPar: largura % 2 === 0 && altura % 2 === 0 };
+    }
+    return null;
+  }
+
+  // O tamanho dos quadros que a captura de uma tela minha está entregando (das estatísticas, no
+  // modo jogo): mudou, a escala de cada envio é refeita
+  capturaMedida(key, width, height) {
+    const scr = this.screens.get(key);
+    if (!scr || !width || !height || (scr.medido?.width === width && scr.medido?.height === height)) return;
+    scr.medido = { width, height };
+    this.retuneAll();
   }
 
   // reaplica em todos (preset mudou ou o número de telas mudou)

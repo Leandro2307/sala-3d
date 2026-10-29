@@ -2468,9 +2468,10 @@ function jogoAqui(key, deId, ligar) {
     semDecodificar.delete(deId);
   }
   // ninguém mais joga nessa tela: a captura volta ao tamanho do preset
-  if (!jogandoAqui.has(key) && capturaDoJogo.has(key)) {
-    if (['testando', 'reduzida'].includes(capturaDoJogo.get(key).fase)) rtc?.capturaDeJogo(key, null);
+  if (!jogandoAqui.has(key) && (capturaDoJogo.has(key) || codificadorDoJogo.has(key))) {
+    if (['testando', 'reduzida'].includes(capturaDoJogo.get(key)?.fase) || codificadorDoJogo.get(key)?.mexeu) rtc?.capturaDeJogo(key, null);
     capturaDoJogo.delete(key);
+    codificadorDoJogo.delete(key);
   }
   const nome = state.users.get(deId)?.name || 'Alguém';
   diagJogo.evento(ligar ? 'modo jogo ligado por quem controla' : 'modo jogo desligado', { key, deId, nome });
@@ -2534,11 +2535,17 @@ async function amostrarJogo() {
         continue;
       }
       const cru = await rtc.diagEnvio(key);
+      const medida = cru.envios.find((e) => e.captura)?.captura;
+      if (medida) rtc.capturaMedida(key, medida.width, medida.height);
       for (const id of quem.keys()) {
         const resumo = diagJogo.amostraEnvio(key, cru, id, sala);
         if (!resumo) continue;
         ajustarJogo(id, resumo);
-        if (id === quem.keys().next().value) ajustarCaptura(key, resumo); // a captura é uma só por tela
+        // a captura e o codificador são um só por tela
+        if (id === quem.keys().next().value) {
+          ajustarCaptura(key, resumo);
+          vigiarCodificador(key, resumo);
+        }
         const { t, captura, enviado, codificado, altura, kbps, limite, motivo, codificador, placa, imagemBaixa } = resumo;
         controle.emitir('controle-volta', { key, para: id, ev: { t: 'jogo-envio', quando: t, captura, enviado, codificado, altura, kbps, limite, motivo, codificador, placa, imagemBaixa } });
       }
@@ -2606,6 +2613,34 @@ async function ajustarCaptura(key, r) {
     }
   }
 }
+// O codificador caiu no processador num codec que a placa faz (H.264 Baseline/Main/High, depois de
+// uma medida ímpar, por exemplo): rtc.reiniciarCodificador muda a captura para o par logo abaixo e
+// o Chrome volta para a placa. Voltou e a captura de antes era par, ela volta (ou ao 720p do teste
+// de captura): a escala par segura a placa. Captura ímpar (janela de tamanho ímpar) fica no par
+// logo abaixo. Abaixo de 360 linhas o Chrome usa o processador de propósito: não adianta tentar.
+// No máximo uma vez a cada 20 s.
+const codificadorDoJogo = new Map(); // tela -> { ultimo, restaurar }
+const NO_PROCESSADOR = /openh264|libvpx|libaom/i;
+async function vigiarCodificador(key, r) {
+  let st = codificadorDoJogo.get(key);
+  if (!st) codificadorDoJogo.set(key, (st = { ultimo: 0, restaurar: false }));
+  const naPlaca = r.codificador && !NO_PROCESSADOR.test(r.codificador);
+  if (st.restaurar && naPlaca) {
+    st.restaurar = false;
+    const linhas = capturaDoJogo.get(key)?.fase === 'reduzida' ? 720 : null;
+    const agora = await rtc.capturaDeJogo(key, linhas);
+    diagJogo.evento('codificador de volta na placa: captura no tamanho de antes', { codificador: r.codificador, captura: agora });
+    return;
+  }
+  const podiaPlaca = /H264/i.test(r.codec || '') && /profile-level-id=(42001f|4d00|6400)/i.test(r.codec || '');
+  if (!podiaPlaca || naPlaca || !r.codificador || !(r.altura >= 360) || Date.now() - st.ultimo < 20_000) return;
+  st.ultimo = Date.now();
+  const feito = await rtc.reiniciarCodificador(key);
+  st.restaurar = !!feito?.nativoPar;
+  st.mexeu ||= !!feito; // ao sair do modo jogo a captura volta ao preset
+  diagJogo.evento('codificador no processador: captura em medida par para voltar à placa', { codificador: r.codificador, enviado: `${r.largura}x${r.altura}`, captura: feito?.tamanho ?? null, voltaDepois: st.restaurar });
+}
+
 const mediaDe = (v) => {
   const n = v.filter((x) => x != null);
   return n.length ? Math.round((n.reduce((a, b) => a + b, 0) / n.length) * 10) / 10 : null;
