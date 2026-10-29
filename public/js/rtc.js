@@ -59,10 +59,12 @@ let codecPreferido = null; // { mimeType, perfil } (perfil: profile-level-id do 
 let escolhendo = null;
 let infoCodecs = { preferido: null, forcado: null, testados: [] };
 
-// ?qps=75 (até 240) na sala de quem compartilha: a captura de janela e tela é pedida acima de 60, e
-// o envio continua em no máximo 60 (maxFramerate). Para medir: os relatórios ficam presos em 54–58
-// qps com o jogo a 60 em todos os tamanhos e nos dois PCs, e a suspeita é o Chrome jogando fora o
-// quadro que chega um pouco adiantado quando o teto da captura é exatamente 60.
+// A captura de janela e tela é pedida a 75 qps, e o envio continua em no máximo 60 (maxFramerate do
+// nível). Com o teto da captura exatamente em 60 os relatórios ficavam presos em 54–58 qps com o
+// jogo a 60, em todos os tamanhos e nos dois PCs: o Chrome jogava fora o quadro que chegava um pouco
+// adiantado. ?qps=N (30 a 240) na sala de quem compartilha troca o ritmo, para medir (?qps=60: o
+// de antes).
+const QPS_PADRAO = 75;
 const QPS_CAPTURA = (() => {
   const n = Number(new URLSearchParams(location.search).get('qps'));
   return Number.isFinite(n) && n >= 30 && n <= 240 ? Math.round(n) : null;
@@ -666,11 +668,12 @@ export class RTC {
     };
   }
 
-  // pede a aba/janela/tela ao navegador; quem chama decide se publica (addScreen)
   // os quadros por segundo pedidos à captura (o envio sai em no máximo preset.fps)
   qpsCaptura() {
-    return QPS_CAPTURA || this.preset().fps;
+    return QPS_CAPTURA ?? Math.max(QPS_PADRAO, this.preset().fps);
   }
+
+  // pede a aba/janela/tela ao navegador; quem chama decide se publica (addScreen)
 
   async captureScreen() {
     const preset = this.preset();

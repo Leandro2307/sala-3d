@@ -228,8 +228,10 @@ Chrome não tem): com o iPhone, a tela sempre saía no processador.
   em no máximo 60 (`maxFramerate` do nível). Hipótese: com o teto exatamente em 60 o Chrome joga
   fora o quadro que chega um pouco adiantado. Conferido no Chromium do Playwright que 75 e 120 são
   aceitos (antes e depois de reduzir a captura). Vai em `ambiente.qpsCaptura` do relatório.
-  **Falta o A/B do usuário**: mesmo jogo e janela leve, com e sem `?qps=75`. Se passar de 58
-  para ~60, virar o padrão no modo jogo (captura a 75, envio a 60).
+  **Virou o padrão** (2026-10-29, a pedido do usuário, sem o relatório com 75 ainda): toda captura
+  de janela/tela sai a 75 (`QPS_PADRAO`), o envio a no máximo 60; `?qps=60` volta ao de antes.
+  Conferir no próximo relatório: `ambiente.qpsCaptura` 75, captura acima de 58 e enviado ~60 com
+  o jogo leve; e se o PC com Intel não piorou com a captura mais rápida (se piorar, 75 só no modo jogo).
 
 ## Próximos passos sugeridos
 
