@@ -119,7 +119,11 @@ function construirPracaDoParque(g, world, L, lanternas) {
   for (let k = 0; k < 12; k++) {
     const a = (k / 12) * Math.PI * 2 + Math.PI / 12;
     if (!longeDasSaidas(a, 0.32)) continue;
-    posteDoTema(L, lanternas, x + Math.cos(a) * (r - 1.5), z + Math.sin(a) * (r - 1.5));
+    const px = x + Math.cos(a) * (r - 1.5);
+    const pz = z + Math.sin(a) * (r - 1.5);
+    // nem colado na placa da entrada (o poste fica na frente das letras)
+    if (PLACA_PARQUE && Math.hypot(px - PLACA_PARQUE.x, pz - PLACA_PARQUE.z) < 4.5) continue;
+    posteDoTema(L, lanternas, px, pz);
   }
 }
 
@@ -150,7 +154,10 @@ function construirSalao(g, world, L) {
   const pontos = [];
   for (let i = 0; i <= nx; i++) pontos.push([S.x0 + (i * W) / nx, S.z0], [S.x0 + (i * W) / nx, S.z1]);
   for (let j = 1; j < nz; j++) pontos.push([S.x0, S.z0 + (j * D) / nz], [S.x1, S.z0 + (j * D) / nz]);
+  // sem pilar embaixo do letreiro: é a entrada
+  const entrada = { sul: [cx, S.z0], norte: [cx, S.z1], oeste: [S.x0, cz], leste: [S.x1, cz] }[S.letreiro] || [cx, S.z0];
   for (const [px, pz] of pontos) {
+    if (Math.hypot(px - entrada[0], pz - entrada[1]) < 6.5) continue;
     pilares.push(new THREE.BoxGeometry(0.5, S.altura, 0.5).translate(px, S.altura / 2, pz));
     world.addBox({ min: [px - 0.25, 0, pz - 0.25], max: [px + 0.25, S.altura, pz + 0.25] });
   }
@@ -165,8 +172,11 @@ function construirSalao(g, world, L) {
   }));
   vidro.position.set(cx, S.altura + 0.55, cz);
   g.add(vidro);
-  // o letreiro na frente (sul ou oeste, o lado de quem chega), dos dois lados
-  const lado = S.letreiro === 'oeste' ? { giro: Math.PI / 2, meio: W / 2 } : { giro: 0, meio: D / 2 };
+  // o letreiro na frente (o lado de quem chega), dos dois lados
+  const lado = {
+    sul: { giro: 0, meio: D / 2 }, norte: { giro: Math.PI, meio: D / 2 },
+    oeste: { giro: Math.PI / 2, meio: W / 2 }, leste: { giro: -Math.PI / 2, meio: W / 2 },
+  }[S.letreiro] || { giro: 0, meio: D / 2 };
   const letreiro = textura(1024, 128, (ctx, w, h) => {
     ctx.fillStyle = '#14532d';
     ctx.fillRect(0, 0, w, h);

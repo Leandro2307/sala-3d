@@ -11,7 +11,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import {
-  PRACA, RUAS, PRACAS, PISOS, AGUA, AREAS, PORTICOS, PLACAS, QUADROS, MAPAS_AQUI, BOSQUES, MESAS_NOVO, TORIIS,
+  PRACA, RUAS, PRACAS, PISOS, AGUA, AREAS, PORTICOS, PLACAS, QUADROS, MAPAS_AQUI, COM_LETRAS, BOSQUES, MESAS_NOVO, TORIIS,
 } from './cidade-dados.js';
 import { desenharMapa } from './mapa.js';
 import { PISTA, pontoEm } from './pista.js';
@@ -489,6 +489,8 @@ export function construirPostes(ruas, L, luzes, evitar = []) {
         const px = x0 + dx * d - dz * (r.largura / 2 + 1) * lado;
         const pz = z0 + dz * d + dx * (r.largura / 2 + 1) * lado;
         if (naPraca(px, pz, 2) || ruas.some((o) => o !== r && pertoDe(o, px, pz, 2))) continue;
+        // nem colado numa placa (o poste fica na frente das letras)
+        if (COM_LETRAS.some((p) => Math.hypot(px - p.x, pz - p.z) < 4.5)) continue;
         posteDoTema(L, luzes, px, pz, Math.atan2(dx, dz));
       }
       // o que sobrou deste trecho conta no próximo (nas trilhas os trechos são curtos)
@@ -632,10 +634,10 @@ function texturaPlacas(linhas) {
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
       ctx.fillStyle = '#f8fafc';
-      caber(ctx, nome, LW - LH - 40, 66);
-      ctx.fillText(nome, LH + 14, y + 58);
-      ctx.fillStyle = '#cbd5e1';
-      caber(ctx, sub, LW - LH - 40, 34, 600);
+      caber(ctx, nome, LW - LH - 40, 70);
+      ctx.fillText(nome, LH + 14, y + 56);
+      ctx.fillStyle = '#e2e8f0';
+      caber(ctx, sub, LW - LH - 40, 44, 600);
       ctx.fillText(sub, LH + 14, y + 122);
     });
   });
@@ -644,21 +646,27 @@ function texturaPlacas(linhas) {
 // Poste com uma placa por destino: a frente para quem vem pelo lado para onde o giro aponta e o
 // verso (outras placas, ou só o fundo escuro) para quem vem do outro lado
 export function placaDeSaida(g, L, x, z, giro, frente, verso = null) {
-  const w = 3.4;
+  const w = 3.8;
   const altura = (n) => (w * (n * (LH + VAO) - VAO)) / LW;
   const h = Math.max(altura(frente.length), verso ? altura(verso.length) : 0);
   const topo = 2.1 + h;
   const onde = new THREE.Matrix4().compose(_p.set(x, 0, z), _q.setFromAxisAngle(CIMA, giro), _s.set(1, 1, 1));
   const face = (linhas, lado) => {
     const hh = altura(linhas.length);
-    const geo = new THREE.PlaneGeometry(w, hh).translate(0, topo - hh / 2, 0.07);
+    const geo = new THREE.PlaneGeometry(w, hh).translate(0, topo - hh / 2, 0.19);
     if (lado) geo.rotateY(Math.PI);
     g.add(new THREE.Mesh(geo.applyMatrix4(onde), new THREE.MeshBasicMaterial({ map: texturaPlacas(linhas), toneMapped: false, transparent: true })));
   };
   face(frente, 0);
   if (verso) face(verso, 1);
-  // o fundo: uma chapa entre as faces (sem verso, ela é o que se vê por trás)
-  L.escuro.push(new THREE.BoxGeometry(w + 0.16, h + 0.16, 0.1).translate(0, topo - h / 2, 0).applyMatrix4(onde));
+  // uma tábua por destino (o lado com menos destinos mostra só o fundo das que sobram), grossa o
+  // bastante para o poste passar por dentro dela e não na frente das letras
+  const n = Math.max(frente.length, verso ? verso.length : 0);
+  const linha = (w * LH) / LW;
+  for (let k = 0; k < n; k++) {
+    const y = topo - (k * w * (LH + VAO)) / LW - linha / 2;
+    L.escuro.push(new THREE.BoxGeometry(w - 0.04, linha - 0.04, 0.36).translate(0, y, 0).applyMatrix4(onde));
+  }
   L.ferro.push(new THREE.CylinderGeometry(0.1, 0.13, topo + 0.2, 8).translate(0, (topo + 0.2) / 2, 0).applyMatrix4(onde));
 }
 
@@ -761,8 +769,8 @@ function arvoresEmFileira(ruas, ocupado) {
     && !PRACAS.some((c) => Math.hypot(x - c.x, z - c.z) < c.r + 6)
     && !AGUA.some((a) => Math.hypot(x - a.x, z - a.z) < a.r * 1.3 + 4)
     && !PORTICOS.some((p) => Math.hypot(x - p.x, z - p.z) < 9)
-    && !PLACAS.some((p) => Math.hypot(x - p.x, z - p.z) < 4)
-    && !QUADROS.some((p) => Math.hypot(x - p.x, z - p.z) < 4);
+    // a copa é larga: longe das placas, dos quadros e dos totens, para não tapar quem vem lendo
+    && !COM_LETRAS.some((p) => Math.hypot(x - p.x, z - p.z) < 8);
   for (const r of ruas) {
     if (r.tipo || r.largura < 8) continue;
     for (let i = 0; i < r.pontos.length - 1; i++) {
@@ -814,6 +822,8 @@ export function construirCidade(world) {
     { x, z, r: r + 4 },
     ...PRACAS.map((c) => ({ x: c.x, z: c.z, r: c.r + 4 })),
     ...PISOS.map((P) => ({ x: (P.x0 + P.x1) / 2, z: (P.z0 + P.z1) / 2, r: Math.hypot(P.x1 - P.x0, P.z1 - P.z0) / 2 + 3 })),
+    // nenhuma árvore tapando placa, quadro ou totem
+    ...COM_LETRAS.map((p) => ({ x: p.x, z: p.z, r: 7 })),
   );
   return {
     grupo: g,

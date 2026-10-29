@@ -5,7 +5,7 @@
 // sudeste, o autódromo ao norte.
 // Só números (ver mapas-dados.js). Setas das placas: quem olha para o norte (+z) tem o +x à esquerda.
 
-const SUL = ['↓', 'praca', 'Praça do Pagode e prédio'];
+const SUL = ['↑', 'praca', 'Praça do Pagode e prédio'];
 
 export const OUTONO = {
   nome: 'Jardim do Outono',
@@ -73,19 +73,19 @@ export const OUTONO = {
     placas: [
       { x: 110, z: 64, giro: Math.PI, frente: [['↑', 'jogos'], ['↑', 'estadio'], ['↑', 'quadras'], ['↑', 'lago'], ['↑', 'aventura'], ['↑', 'parque']] },
       { x: 124, z: 21, giro: -Math.PI / 2, frente: [['↑', 'salao'], ['↖', 'kart']], verso: [['↑', 'praca'], ['↑', 'predio']] },
-      { x: 75, z: 39, giro: Math.PI / 2, frente: [['↑', 'predio']], verso: [['↑', 'praca'], ['↑', 'kart']] },
+      { x: 75, z: 39, giro: Math.PI / 2, frente: [['↑', 'predio']], verso: [['↑', 'praca', 'Praça do Pagode, salão e kart']] },
       {
         x: 80, z: 262, giro: Math.PI,
         frente: [['←', 'estadio'], ['→', 'quadras'], ['↑', 'lago'], ['↑', 'aventura'], ['↑', 'parque']],
-        verso: [['→', 'estadio'], ['←', 'quadras'], ['↓', 'jogos'], SUL],
+        verso: [['→', 'estadio'], ['←', 'quadras'], ['↑', 'jogos'], ['↑', 'salao'], SUL],
       },
       {
         x: 94, z: 330, giro: Math.PI,
         frente: [['←', 'lago', 'Ponte das Carpas'], ['←', 'autodromo'], ['↑', 'aventura'], ['↑', 'parque']],
-        verso: [['→', 'autodromo'], ['↓', 'quadras'], ['↓', 'estadio'], SUL],
+        verso: [['→', 'autodromo'], ['↑', 'quadras'], ['↑', 'estadio'], SUL],
       },
       { x: 58, z: 400, giro: Math.PI - 1.1, frente: [['→', 'aventura'], ['↑', 'parque']] },
-      { x: 44, z: 446, giro: Math.PI, frente: [['↑', 'parque', 'Golfe, queimada e pinta']], verso: [['↓', 'aventura'], ['↓', 'lago'], SUL] },
+      { x: 44, z: 446, giro: Math.PI, frente: [['↑', 'parque', 'O caminho dos portais vermelhos'], ['↑', { nome: 'Minigolfe', sub: '9 buracos', cor: '#a3e635' }], ['↑', { nome: 'Queimada e pinta', sub: 'Dois times, uma bola · times pintam o chão', cor: '#f97316' }]], verso: [['↑', 'aventura'], ['↑', 'lago'], SUL] },
     ],
     quadros: [
       {

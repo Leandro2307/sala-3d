@@ -2,7 +2,8 @@
 // orla reta de madeira que sobe a cidade inteira com coqueiros dos dois lados: passa pela praça dos
 // jogos, pelo estádio, pela praia das quadras, pela lagoa azul (com píer) e chega no parque, no
 // norte. O autódromo fica a nordeste, o kartódromo a sudeste, colado na praça.
-// Só números (ver mapas-dados.js). Setas das placas: quem olha para o norte (+z) tem o +x à esquerda.
+// Só números (ver mapas-dados.js). Setas das placas: quem olha para o norte (+z) tem o +x à esquerda; no verso, ↑ é o que fica à frente de
+// quem lê. Os dois lados de uma placa têm o mesmo número de destinos (nada de tábua vazia).
 
 const AV = 95; // x do Calçadão
 const NORTE = ['↑', 'parque', 'Lagoa, aventura e o parque'];
@@ -16,7 +17,7 @@ export const TROPICAL = {
     kart: { x: 330, z: 140, giro: 0 },
     estadio: { cx: 33, cz: 190, giro: 0 },
     quadras: { x: 10, z: 340 },
-    salao: { x: 40, z: 87 }, // colado no prédio, ao norte; o letreiro olha para ele
+    salao: { x: 40, z: 87, letreiro: 'leste' }, // colado no prédio, ao norte; o letreiro olha para a Rua do Salão
     queimada: { x: 30, z: 760 },
     pinta: { x: 55, z: 637 },
     golfe: { x: -27, z: 757 },
@@ -52,7 +53,7 @@ export const TROPICAL = {
         frente: [
           ['→', { nome: 'Minigolfe e queimada', sub: 'Pela Rua do Golfe', cor: '#a3e635' }],
         ],
-        verso: [['↓', 'praca', 'O Calçadão: lagoa, praia, estádio e praça']],
+        verso: [['↑', 'praca', 'O Calçadão: lagoa, praia, estádio e praça']],
       },
     },
     areas: {
@@ -76,32 +77,32 @@ export const TROPICAL = {
     ],
     placas: [
       { x: AV + 9, z: 62, giro: Math.PI, frente: [['↗', 'salao'], ['↑', 'jogos'], ['↑', 'estadio'], ['↑', 'quadras'], ['↑', 'aventura'], ['↑', 'lago'], ['↑', 'autodromo'], ['↑', 'parque']] },
-      { x: 124, z: 21, giro: -Math.PI / 2, frente: [['↑', 'kart']], verso: [['↑', 'praca'], ['↑', 'predio']] },
-      { x: 75, z: 39, giro: Math.PI / 2, frente: [['↑', 'predio']], verso: [['↑', 'praca'], ['↑', 'kart']] },
+      { x: 124, z: 21, giro: -Math.PI / 2, frente: [['↑', 'kart']], verso: [['↑', 'praca', 'Praça do Farol e o prédio']] },
+      { x: 75, z: 39, giro: Math.PI / 2, frente: [['↑', 'predio']], verso: [['↑', 'praca', 'Praça do Farol, Calçadão e kart']] },
       {
         x: AV - 9, z: 168, giro: Math.PI,
         frente: [['←', 'jogos'], ['↑', 'estadio'], ['↑', 'quadras'], NORTE],
-        verso: [['→', 'jogos'], ['↓', 'praca', 'Praça do Farol, prédio e kart']],
+        verso: [['→', 'jogos'], ['↑', 'salao'], ['↑', 'praca', 'Praça do Farol e kart'], ['↑', 'predio']],
       },
       {
         x: AV + 9, z: 207, giro: Math.PI,
         frente: [['→', 'estadio'], ['↑', 'quadras'], ['↑', 'autodromo'], NORTE],
-        verso: [['←', 'estadio'], ['↓', 'jogos'], ['↓', 'praca', 'Praça do Farol, prédio e kart']],
+        verso: [['←', 'estadio'], ['↑', 'jogos'], ['↑', 'salao'], ['↑', 'praca', 'Praça do Farol, prédio e kart']],
       },
       {
         x: AV + 9, z: 315, giro: Math.PI,
         frente: [['→', 'quadras'], ['↑', 'aventura'], ['↑', 'autodromo'], NORTE],
-        verso: [['←', 'quadras'], ['↓', 'estadio'], ['↓', 'praca', 'Praça do Farol, prédio e kart']],
+        verso: [['←', 'quadras'], ['↑', 'estadio'], ['↑', 'salao'], ['↑', 'praca', 'Praça do Farol, prédio e kart']],
       },
       {
         x: AV + 9, z: 378, giro: Math.PI,
         frente: [['→', 'aventura'], ['↑', 'autodromo'], ['↑', 'lago'], ['↑', 'parque']],
-        verso: [['←', 'aventura'], ['↓', 'quadras'], ['↓', 'estadio'], ['↓', 'praca', 'Praça do Farol, prédio e kart']],
+        verso: [['←', 'aventura'], ['↑', 'quadras'], ['↑', 'estadio'], ['↑', 'praca', 'Praça do Farol, prédio e kart']],
       },
       {
         x: AV - 9, z: 420, giro: Math.PI,
-        frente: [['←', 'autodromo'], ['↑', 'lago'], ['↑', 'parque']],
-        verso: [['→', 'autodromo'], ['↓', 'aventura'], ['↓', 'quadras'], ['↓', 'praca', 'Praça do Farol, prédio e kart']],
+        frente: [['←', 'autodromo'], ['↑', 'lago'], ['↑', { nome: 'Pinta-território', sub: 'Na Rua do Pinta, antes do parque', cor: '#d946ef' }], ['↑', 'parque']],
+        verso: [['→', 'autodromo'], ['↑', 'aventura'], ['↑', 'quadras'], ['↑', 'praca', 'Praça do Farol, prédio e kart']],
       },
     ],
     quadros: [
@@ -136,7 +137,7 @@ export const TROPICAL = {
     ],
     mapasAqui: [
       { x: 76, z: 16, giro: -Math.PI / 2 },
-      { x: AV + 12, z: 688, giro: Math.PI },
+      { x: AV - 12, z: 688, giro: Math.PI },
     ],
     // onde nasce mata dentro da cerca (coqueiral)
     bosques: [

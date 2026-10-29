@@ -11,7 +11,7 @@ const anel = Array.from({ length: 41 }, (_, i) => {
   const a = (i / 40) * Math.PI * 2;
   return [LAGO.x + Math.cos(a) * R_ANEL, LAGO.z + Math.sin(a) * R_ANEL];
 });
-const SUL = ['↓', 'praca', 'Praça do Pinheirão e prédio'];
+const SUL = ['↑', 'praca', 'Praça do Pinheirão e prédio'];
 
 export const NEVE = {
   nome: 'Vila da Neve',
@@ -60,7 +60,7 @@ export const NEVE = {
           ['↑', { nome: 'Queimada', sub: 'Dois times, uma bola', cor: '#f97316' }],
           ['→', { nome: 'Minigolfe', sub: '9 buracos', cor: '#a3e635' }],
         ],
-        verso: [['↓', 'praca', 'A vila: lago, praça e prédio']],
+        verso: [['↑', 'praca', 'A vila: lago, praça e prédio'], ['↑', 'salao'], ['↑', 'predio']],
       },
     },
     areas: {
@@ -88,25 +88,25 @@ export const NEVE = {
         x: 108, z: 63, giro: Math.PI,
         frente: [['↗', 'estadio'], ['↖', 'autodromo'], ['↖', 'lago', 'Lago congelado, quadras e jogos'], ['↖', 'parque']],
       },
-      { x: 124, z: 21, giro: -Math.PI / 2, frente: [['↑', 'salao']], verso: [['↑', 'praca'], ['↑', 'predio']] },
+      { x: 124, z: 21, giro: -Math.PI / 2, frente: [['↑', 'salao']], verso: [['↑', 'praca', 'Praça do Pinheirão e o prédio']] },
       { x: 75, z: 39, giro: Math.PI / 2, frente: [['↑', 'predio']], verso: [['↑', 'praca']] },
       {
         x: 127, z: 100, giro: Math.PI,
         frente: [['←', 'autodromo'], ['↑', 'lago'], ['↑', 'parque']],
-        verso: [['→', 'autodromo'], SUL],
+        verso: [['→', 'autodromo'], ['↑', 'salao'], SUL],
       },
       {
         x: 143, z: 292, giro: Math.PI,
         frente: [['→', 'lago', 'Lago congelado: patine no gelo'], ['→', 'quadras'], ['→', 'jogos'], ['→', 'kart'], ['↑', 'parque']],
-        verso: [['←', 'lago'], ['←', 'quadras'], ['↓', 'autodromo'], SUL],
+        verso: [['←', 'lago'], ['←', 'quadras'], ['↑', 'autodromo'], ['↑', 'salao'], SUL],
       },
       { x: 127, z: 545, giro: Math.PI, frente: [['←', 'parque']] },
       {
         x: 22, z: 376, giro: Math.PI,
         frente: [['↑', 'quadras'], ['↑', 'jogos'], ['↑', 'aventura'], ['↑', 'kart']],
-        verso: [['↓', 'lago'], ['↓', 'praca', 'Praça do Pinheirão e prédio']],
+        verso: [['↑', 'lago'], ['↑', 'praca'], ['↑', 'salao'], ['↑', 'predio']],
       },
-      { x: 6, z: 478, giro: Math.PI, frente: [['→', 'aventura'], ['←', 'jogos'], ['↑', 'kart']], verso: [['↓', 'quadras'], ['↓', 'lago']] },
+      { x: 6, z: 478, giro: Math.PI, frente: [['→', 'aventura'], ['←', 'jogos'], ['↑', 'kart']], verso: [['↑', 'quadras'], ['↑', 'lago'], ['↑', 'praca', 'Praça do Pinheirão, salão e prédio']] },
     ],
     quadros: [
       {

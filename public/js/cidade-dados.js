@@ -30,5 +30,7 @@ export const PORTICOS = C.porticos || [];
 export const PLACAS = C.placas || [];
 export const QUADROS = C.quadros || [];
 export const MAPAS_AQUI = C.mapasAqui || [];
+// tudo o que tem letras para ler: nenhuma árvore nem poste colado na frente
+export const COM_LETRAS = [...PLACAS, ...(C.parque?.placa ? [C.parque.placa] : []), ...QUADROS, ...MAPAS_AQUI];
 export const BOSQUES = C.bosques || [];
 export const ROTULOS = C.rotulos || {};

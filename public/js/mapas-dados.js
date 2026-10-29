@@ -87,7 +87,7 @@ export function parqueDe(mapa) {
   const p = d('pinta');
   const g = d('golfe');
   return {
-    // letreiro: o lado do letreiro ('sul' ou 'oeste'), o que olha para quem chega
+    // letreiro: o lado do letreiro ('sul', 'norte', 'leste' ou 'oeste'), o que olha para quem chega
     SALAO: { x0: -10 + s.dx, x1: 50 + s.dx, z0: 628 + s.dz, z1: 670 + s.dz, altura: 7.5, letreiro: M.atracoes.salao.letreiro || 'sul' },
     MESAS_PINGUE: [{ x: 2 + s.dx, z: 638 + s.dz }, { x: 2 + s.dx, z: 660 + s.dz }],
     MESAS_SINUCA: [{ x: 22.5 + s.dx, z: 638 + s.dz }, { x: 22.5 + s.dx, z: 660 + s.dz }],
