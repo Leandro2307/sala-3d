@@ -58,6 +58,15 @@ const nivelDe = (peer, k) => NIVEIS[peer.interesse.get(k)] || NIVEIS.mini;
 let codecPreferido = null; // { mimeType, perfil } (perfil: profile-level-id do H.264, ou null)
 let escolhendo = null;
 let infoCodecs = { preferido: null, forcado: null, testados: [] };
+
+// ?qps=75 (até 240) na sala de quem compartilha: a captura de janela e tela é pedida acima de 60, e
+// o envio continua em no máximo 60 (maxFramerate). Para medir: os relatórios ficam presos em 54–58
+// qps com o jogo a 60 em todos os tamanhos e nos dois PCs, e a suspeita é o Chrome jogando fora o
+// quadro que chega um pouco adiantado quando o teto da captura é exatamente 60.
+const QPS_CAPTURA = (() => {
+  const n = Number(new URLSearchParams(location.search).get('qps'));
+  return Number.isFinite(n) && n >= 30 && n <= 240 ? Math.round(n) : null;
+})();
 export const codecsTestados = () => infoCodecs;
 const perfilDe = (c) => /profile-level-id=([0-9a-f]{6})/i.exec(c.sdpFmtpLine || '')?.[1]?.toLowerCase() || null;
 // High (64), Main (4d), Constrained Baseline (42e0), Baseline (4200)
@@ -658,11 +667,17 @@ export class RTC {
   }
 
   // pede a aba/janela/tela ao navegador; quem chama decide se publica (addScreen)
+  // os quadros por segundo pedidos à captura (o envio sai em no máximo preset.fps)
+  qpsCaptura() {
+    return QPS_CAPTURA || this.preset().fps;
+  }
+
   async captureScreen() {
     const preset = this.preset();
+    const qps = this.qpsCaptura();
     const stream = await navigator.mediaDevices.getDisplayMedia({
       video: {
-        frameRate: { ideal: preset.fps, max: preset.fps },
+        frameRate: { ideal: qps, max: qps },
         width: { max: preset.width },
         height: { max: preset.height },
         cursor: 'always',
@@ -815,7 +830,7 @@ export class RTC {
     const alto = linhas || preset.height;
     const largo = linhas ? Math.round((linhas * 16) / 9) : preset.width;
     try {
-      await track.applyConstraints({ width: { max: largo }, height: { max: alto }, frameRate: { ideal: preset.fps, max: preset.fps } });
+      await track.applyConstraints({ width: { max: largo }, height: { max: alto }, frameRate: { ideal: this.qpsCaptura(), max: this.qpsCaptura() } });
     } catch (err) {
       console.warn('[modo-jogo] tamanho da captura', err);
       return null;
@@ -840,7 +855,7 @@ export class RTC {
       const colunas = Math.round((largura * linhas) / altura);
       if (colunas % 2 || Math.abs((largura * linhas) / altura - colunas) > 0.4) continue;
       try {
-        await track.applyConstraints({ width: { max: colunas }, height: { max: linhas }, frameRate: { ideal: this.preset().fps, max: this.preset().fps } });
+        await track.applyConstraints({ width: { max: colunas }, height: { max: linhas }, frameRate: { ideal: this.qpsCaptura(), max: this.qpsCaptura() } });
       } catch (err) {
         console.warn('[modo-jogo] reinício do codificador', err);
         return null;

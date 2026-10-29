@@ -209,6 +209,28 @@ Chrome não tem): com o iPhone, a tela sempre saía no processador.
   depois, a captura fica presa nesse tamanho até sair do modo jogo). Ao sair do modo jogo, preset.
 - Evento "codificador trocou" no relatório (de, para, medidas).
 
+## Sétimo e oitavo relatórios (2026-10-29 12:04 e 12:14, PC com Intel UHD → iPhone, Minecraft)
+
+- 12:04, janela de 926×562 o tempo todo: captura 57, enviado 57, iPhone mostra ~55, buffer
+  25–42 ms, sem perda. O "não é Full HD" era só o tamanho da janela (o envio não reduziu nada).
+- 12:14, várias janelas: **o qps acompanha os pixels e a cena**, não a sala nem a rede:
+  1920×1032 → 16–25; 1280×688 → 17–27 em ação mas **52–55 com a cena parada** (kbps < 1 Mbps,
+  menu); 1280×664–720 → 44–55; 1166×644 → 55–57. Na Intel quem segura é o próprio jogo
+  renderizando (a captura só pega o que o jogo desenha); o "captura em 720p ajudou" (16,5 → 25)
+  provavelmente foi a cena mudando. Codificador na placa (Intel H.265 MFT) a 6–8 ms/quadro, banda
+  até 44 Mbps.
+- Teto de 55–58 com o jogo leve, igual ao do PC com a RTX.
+
+### O que entrou depois disso
+
+- `?qps=75` (30 a 240) na sala de quem compartilha: a captura é pedida a esse ritmo (`QPS_CAPTURA`,
+  `rtc.qpsCaptura()`, no `getDisplayMedia` e nos `applyConstraints` do modo jogo); o envio continua
+  em no máximo 60 (`maxFramerate` do nível). Hipótese: com o teto exatamente em 60 o Chrome joga
+  fora o quadro que chega um pouco adiantado. Conferido no Chromium do Playwright que 75 e 120 são
+  aceitos (antes e depois de reduzir a captura). Vai em `ambiente.qpsCaptura` do relatório.
+  **Falta o A/B do usuário**: mesmo jogo e janela leve, com e sem `?qps=75`. Se passar de 58
+  para ~60, virar o padrão no modo jogo (captura a 75, envio a 60).
+
 ## Próximos passos sugeridos
 
 0. **Pedir um relatório novo dos dois lados** com o jogo em janela sem bordas 1920×1080 a 60 qps

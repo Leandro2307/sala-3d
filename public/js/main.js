@@ -2481,7 +2481,7 @@ function jogoAqui(key, deId, ligar) {
     desenharMesmoAssim = false;
     diagJogo.comecar('compartilha', {
       gl: world.renderer.getContext(),
-      extra: { extensao: controle.ext?.versao ?? null, preset: rtc?.shareMode ?? null, superficie: superficieDe(self()?.shares.get(key)), codecs: codecsTestados() },
+      extra: { extensao: controle.ext?.versao ?? null, preset: rtc?.shareMode ?? null, superficie: superficieDe(self()?.shares.get(key)), codecs: codecsTestados(), qpsCaptura: rtc?.qpsCaptura() ?? null },
     });
     toast(`${nome} está jogando no seu PC. A sala ficou em pausa aqui, para o jogo e a transmissão terem a placa de vídeo toda.`, 'info', 12000, null, {
       rotulo: 'Desenhar a sala',
