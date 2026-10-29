@@ -165,7 +165,8 @@ function construirSalao(g, world, L) {
   }));
   vidro.position.set(cx, S.altura + 0.55, cz);
   g.add(vidro);
-  // o letreiro na frente (sul), dos dois lados
+  // o letreiro na frente (sul ou oeste, o lado de quem chega), dos dois lados
+  const lado = S.letreiro === 'oeste' ? { giro: Math.PI / 2, meio: W / 2 } : { giro: 0, meio: D / 2 };
   const letreiro = textura(1024, 128, (ctx, w, h) => {
     ctx.fillStyle = '#14532d';
     ctx.fillRect(0, 0, w, h);
@@ -177,9 +178,11 @@ function construirSalao(g, world, L) {
     ctx.textBaseline = 'middle';
     ctx.fillText('SALÃO DE JOGOS', w / 2, h / 2 - 4);
   });
-  const placas = [0, Math.PI].map((f) => new THREE.PlaneGeometry(12, 1.5).rotateY(f).translate(cx, S.altura - 0.6, S.z0 + (f ? 0.32 : -0.32)));
+  const naFrente = (geo, dz) => geo.translate(0, S.altura - 0.6, -lado.meio + dz).rotateY(lado.giro).translate(cx, 0, cz);
+  // cada face fica do lado para onde olha (a de fora para fora), senão a caixa escura a tapa
+  const placas = [0, Math.PI].map((f) => naFrente(new THREE.PlaneGeometry(12, 1.5).rotateY(f), f ? -0.32 : 0.32));
   g.add(fundir(placas, new THREE.MeshBasicMaterial({ map: letreiro, toneMapped: false })));
-  L.escuro.push(new THREE.BoxGeometry(12.4, 1.8, 0.5).translate(cx, S.altura - 0.6, S.z0));
+  L.escuro.push(naFrente(new THREE.BoxGeometry(12.4, 1.8, 0.5), 0));
 }
 
 // ------------------------------------------------------------------ tudo

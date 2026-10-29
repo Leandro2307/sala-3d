@@ -16,7 +16,7 @@ export const OUTONO = {
     kart: { x: 340, z: 190, giro: 0 },
     estadio: { cx: 140, cz: 180, giro: 0 },
     quadras: { x: 10, z: 300 },
-    salao: { x: 0, z: 600 },
+    salao: { x: 166, z: 11, letreiro: 'oeste' }, // ao lado da praça da porta do prédio
     queimada: { x: 0, z: 680 },
     pinta: { x: 0, z: 760 },
     golfe: { x: -15, z: 500 },
@@ -39,7 +39,7 @@ export const OUTONO = {
       { nome: 'Trilha do Kart', pontos: [[126, 40], [165, 60], [198, 88]], largura: 8, curva: true },
       { nome: 'Trilha da Aventura', pontos: [[46, 420], [28, 420]], largura: 6 },
       { nome: 'Trilha do Golfe', pontos: [[36, 466], [9, 466]], largura: 6 },
-      { nome: 'Trilha do Salão', pontos: [[36, 600], [31, 600]], largura: 6 },
+      { nome: 'Trilha do Salão', pontos: [[127, 28], [136, 28]], largura: 6 },
       { nome: 'Trilha da Queimada', pontos: [[36, 664], [0, 664]], largura: 6 },
       { nome: 'Trilha do Pinta', pontos: [[36, 727], [0, 727]], largura: 6 },
     ],
@@ -54,6 +54,7 @@ export const OUTONO = {
     areas: {
       predio: { nome: 'Prédio', sub: 'Cinema, telão, parkour e ringue', cor: '#e2e8f0', ir: { pos: [0, 0, -2], yaw: 0 } },
       praca: { nome: 'Praça do Pagode', sub: 'O ponto de encontro do jardim', cor: '#fca5a5', ir: { pos: [100, 0, 14], yaw: Math.PI } },
+      salao: { nome: 'Salão de jogos', sub: 'Pingue-pongue, sinuca, poker e cartas', cor: '#4ade80', ir: { pos: [126, 0, 28], yaw: -Math.PI / 2 } },
       kart: { nome: 'Kartódromo', sub: 'Corrida de kart com itens', cor: '#facc15', ir: { pos: [186, 0, 80], yaw: -Math.PI / 2 } },
       jogos: { nome: 'Jardim dos jogos', sub: 'Xadrez, dama, jogo da velha 2 e dados', cor: '#a78bfa', ir: { pos: [82, 0, 165], yaw: Math.PI / 2 } },
       estadio: { nome: 'Estádio', sub: 'Futebol de carro', cor: '#22d3ee', ir: { pos: [189, 0, 207], yaw: 0 } },
@@ -61,7 +62,7 @@ export const OUTONO = {
       lago: { nome: 'Lago das carpas', sub: 'Peixes coloridos e a ponte vermelha', cor: '#fb7185', ir: { pos: [100, 0, 320], yaw: -Math.PI / 2 } },
       autodromo: { nome: 'Autódromo', sub: 'Corrida de carro contra o relógio', cor: '#6ee7c8', ir: { pos: [250, 0, 392], yaw: -Math.PI / 2 } },
       aventura: { nome: 'Aventura', sub: 'Portais: surf, mata-mata, gincana e caça-fantasmas', cor: '#f472b6', ir: { pos: [34, 0, 420], yaw: Math.PI / 2 } },
-      parque: { nome: 'Caminho dos Torii', sub: 'Golfe, salão de jogos, queimada e pinta', cor: '#ef4444', ir: { pos: [36, 0, 448], yaw: Math.PI } },
+      parque: { nome: 'Caminho dos Torii', sub: 'Golfe, queimada e pinta', cor: '#ef4444', ir: { pos: [36, 0, 448], yaw: Math.PI } },
     },
     porticos: [
       { area: 'kart', x: 160, z: 57, giro: -Math.PI / 2 - 0.45, vao: 9 },
@@ -71,7 +72,7 @@ export const OUTONO = {
     ],
     placas: [
       { x: 110, z: 64, giro: Math.PI, frente: [['↑', 'jogos'], ['↑', 'estadio'], ['↑', 'quadras'], ['↑', 'lago'], ['↑', 'aventura'], ['↑', 'parque']] },
-      { x: 124, z: 21, giro: -Math.PI / 2, frente: [['↑', 'kart']], verso: [['↑', 'praca'], ['↑', 'predio']] },
+      { x: 124, z: 21, giro: -Math.PI / 2, frente: [['↑', 'salao'], ['↖', 'kart']], verso: [['↑', 'praca'], ['↑', 'predio']] },
       { x: 75, z: 39, giro: Math.PI / 2, frente: [['↑', 'predio']], verso: [['↑', 'praca'], ['↑', 'kart']] },
       {
         x: 80, z: 262, giro: Math.PI,
@@ -84,7 +85,7 @@ export const OUTONO = {
         verso: [['→', 'autodromo'], ['↓', 'quadras'], ['↓', 'estadio'], SUL],
       },
       { x: 58, z: 400, giro: Math.PI - 1.1, frente: [['→', 'aventura'], ['↑', 'parque']] },
-      { x: 44, z: 446, giro: Math.PI, frente: [['↑', 'parque', 'Golfe, salão, queimada e pinta']], verso: [['↓', 'aventura'], ['↓', 'lago'], SUL] },
+      { x: 44, z: 446, giro: Math.PI, frente: [['↑', 'parque', 'Golfe, queimada e pinta']], verso: [['↓', 'aventura'], ['↓', 'lago'], SUL] },
     ],
     quadros: [
       {
@@ -113,7 +114,7 @@ export const OUTONO = {
       },
       {
         area: 'parque', x: 28, z: 452, giro: Math.PI,
-        linhas: ['Siga os torii: cada jogo tem uma trilha', 'Minigolfe, salão de jogos (pingue, sinuca, cartas)', 'Queimada e, no fim, o pinta-território', 'Em cada jogo: chegue perto e aperte E'],
+        linhas: ['Siga os torii: cada jogo tem uma trilha', 'Minigolfe, queimada e, no fim, o pinta', 'O salão de jogos fica na praça do prédio', 'Em cada jogo: chegue perto e aperte E'],
       },
     ],
     mapasAqui: [
@@ -130,7 +131,7 @@ export const OUTONO = {
       { x0: 200, x1: 480, z0: -40, z1: 340 },
     ],
     rotulos: {
-      predio: [4, 10], praca: [100, 30], kart: [340, 190], jogos: [20, 165], estadio: [140, 180], quadras: [10, 300],
+      predio: [4, 10], praca: [100, 30], salao: [166, 11], kart: [340, 190], jogos: [20, 165], estadio: [140, 180], quadras: [10, 300],
       lago: [150, 320], autodromo: [270, 620], aventura: [12, 436], parque: [36, 640],
     },
   },

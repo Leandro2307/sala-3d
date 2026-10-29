@@ -20,15 +20,17 @@ const COR_MATA = { tropical: '#2f7d3a', neve: '#9fb4c9', outono: '#a4472a' }[TEM
 const COR_AGUA = { lagoa: '#22c3cf', gelo: '#bfe3fb', carpas: '#2a7f86' };
 // as ruas já com a curva e o trecho até o autódromo (na primeira vez que o mapa é desenhado)
 let RUAS = null;
-// os jogos do parque, com nome menor (o id é o do jogo: o mapa da tela leva até ele)
+// os jogos do parque, com nome menor (o id é o do jogo: o mapa da tela leva até ele). O salão de
+// jogos é uma área (AREAS.salao), com o nome dele.
 const NO_PARQUE = [
-  ['pingue', 'Salão de jogos', (SALAO.x0 + SALAO.x1) / 2, (SALAO.z0 + SALAO.z1) / 2],
   ['golfe', 'Minigolfe', (GOLFE_AREA.x0 + GOLFE_AREA.x1) / 2, (GOLFE_AREA.z0 + GOLFE_AREA.z1) / 2],
   ['queimada', 'Queimada', QUEIMADA.cx, QUEIMADA.cz],
   ['pinta', 'Pinta', PINTA_ARENA.cx, PINTA_ARENA.cz],
   ['gincana', 'Gincana', PORTAL_GINCANA.x, PORTAL_GINCANA.z - 8],
   ['fantasmas', 'Fantasmas', PORTAL_FANTASMAS.x, PORTAL_FANTASMAS.z + 9],
 ];
+// os jogos que ficam no salão
+const NO_SALAO = ['pingue', 'sinuca', 'cartas', 'poker'];
 
 function roundRect(ctx, x, y, w, h, r) {
   ctx.beginPath();
@@ -310,10 +312,13 @@ export class MapaTela {
     if (this.aberto) return;
     this.aberto = true;
     this.el.hidden = false;
-    const parque = this.opts.jogosDoParque();
+    // os jogos do salão ficam embaixo dele; os outros, embaixo do parque
+    const todos = this.opts.jogosDoParque();
+    const doSalao = (j) => NO_SALAO.includes(j.id);
     this.lista.innerHTML = Object.entries(AREAS).map(([id, a]) => {
       const item = `<button type="button" data-ir="${id}" style="--c:${a.cor}"><i></i><b>${a.nome}</b><small>${a.sub}</small></button>`;
-      if (id !== 'parque') return item;
+      if (id !== 'parque' && id !== 'salao') return item;
+      const parque = todos.filter((j) => doSalao(j) === (id === 'salao'));
       return item + parque.map((j) => `<button type="button" class="mt-sub" data-ir="${j.id}" style="--c:${j.cor}"><i></i><b>${j.nome}</b><small>${j.desc}</small></button>`).join('');
     }).join('');
     this.desenhar();

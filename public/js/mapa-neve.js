@@ -22,7 +22,7 @@ export const NEVE = {
     kart: { x: 100, z: 712, giro: 0 },
     estadio: { cx: 60, cz: 140, giro: Math.PI / 2 },
     quadras: { x: 40, z: 420 },
-    salao: { x: 300, z: 820 },
+    salao: { x: 166, z: 11, letreiro: 'oeste' }, // ao lado da praça da porta do prédio
     queimada: { x: 400, z: 820 },
     pinta: { x: 430, z: 720 },
     golfe: { x: 275, z: 690 },
@@ -41,8 +41,8 @@ export const NEVE = {
       { nome: 'Rua do Norte', pontos: [[14, 357], [14, 556], [-37, 556], [-37, 606]], largura: 8 },
       { nome: 'Rua da Aventura', pontos: [[14, 470], [-9, 470]], largura: 8 },
       { nome: 'Rua do Golfe', pontos: [[333, 712], [300, 712], [300, 657]], largura: 8 },
-      { nome: 'Rua do Salão', pontos: [[350, 737], [350, 790], [300, 790]], largura: 8 },
-      { nome: 'Rua da Queimada', pontos: [[350, 790], [400, 790], [400, 804]], largura: 8 },
+      { nome: 'Rua do Salão', pontos: [[127, 28], [136, 28]], largura: 6 },
+      { nome: 'Rua da Queimada', pontos: [[350, 737], [350, 790], [400, 790], [400, 804]], largura: 8 },
       { nome: 'Rua do Pinta', pontos: [[366, 708], [430, 686]], largura: 8 },
     ],
     pracas: [{ x: -25, z: 470, r: 16, cor: '#f472b6' }],
@@ -57,7 +57,6 @@ export const NEVE = {
         x: 358, z: 701, giro: Math.PI,
         frente: [
           ['↖', { nome: 'Pinta-território', sub: 'Times pintam o chão', cor: '#d946ef' }],
-          ['↑', { nome: 'Salão de jogos', sub: 'Pingue-pongue, sinuca, truco, uno e 21', cor: '#4ade80' }],
           ['↑', { nome: 'Queimada', sub: 'Dois times, uma bola', cor: '#f97316' }],
           ['→', { nome: 'Minigolfe', sub: '9 buracos', cor: '#a3e635' }],
         ],
@@ -67,6 +66,7 @@ export const NEVE = {
     areas: {
       predio: { nome: 'Prédio', sub: 'Cinema, telão, parkour e ringue', cor: '#e2e8f0', ir: { pos: [0, 0, -2], yaw: 0 } },
       praca: { nome: 'Praça do Pinheirão', sub: 'O ponto de encontro da vila', cor: '#fde68a', ir: { pos: [100, 0, 14], yaw: Math.PI } },
+      salao: { nome: 'Salão de jogos', sub: 'Pingue-pongue, sinuca, poker e cartas', cor: '#4ade80', ir: { pos: [126, 0, 28], yaw: -Math.PI / 2 } },
       estadio: { nome: 'Estádio', sub: 'Futebol de carro', cor: '#22d3ee', ir: { pos: [84, 0, 89], yaw: Math.PI } },
       autodromo: { nome: 'Autódromo', sub: 'Corrida de carro contra o relógio', cor: '#6ee7c8', ir: { pos: [200, 0, 107], yaw: -Math.PI / 2 } },
       lago: { nome: 'Lago congelado', sub: 'Pista de patinação no gelo', cor: '#93c5fd', ir: { pos: [114, 0, 300], yaw: Math.PI / 2 } },
@@ -74,7 +74,7 @@ export const NEVE = {
       jogos: { nome: 'Praça dos jogos', sub: 'Xadrez, dama, jogo da velha 2 e dados', cor: '#a78bfa', ir: { pos: [22, 0, 490], yaw: -Math.PI / 2 } },
       aventura: { nome: 'Aventura', sub: 'Portais: surf, mata-mata, gincana e caça-fantasmas', cor: '#f472b6', ir: { pos: [-4, 0, 470], yaw: Math.PI / 2 } },
       kart: { nome: 'Kartódromo', sub: 'Corrida de kart com itens', cor: '#facc15', ir: { pos: [-37, 0, 596], yaw: Math.PI } },
-      parque: { nome: 'Vale do parque', sub: 'Salão de jogos, queimada, pinta e golfe', cor: '#4ade80', ir: { pos: [350, 0, 690], yaw: Math.PI } },
+      parque: { nome: 'Vale do parque', sub: 'Queimada, pinta e golfe', cor: '#4ade80', ir: { pos: [350, 0, 690], yaw: Math.PI } },
     },
     porticos: [
       { area: 'autodromo', x: 190, z: 107, giro: -Math.PI / 2, vao: 10 },
@@ -88,7 +88,7 @@ export const NEVE = {
         x: 108, z: 63, giro: Math.PI,
         frente: [['↗', 'estadio'], ['↖', 'autodromo'], ['↖', 'lago', 'Lago congelado, quadras e jogos'], ['↖', 'parque']],
       },
-      { x: 124, z: 21, giro: -Math.PI / 2, frente: [['↑', 'praca']], verso: [['↑', 'predio']] },
+      { x: 124, z: 21, giro: -Math.PI / 2, frente: [['↑', 'salao']], verso: [['↑', 'praca'], ['↑', 'predio']] },
       { x: 75, z: 39, giro: Math.PI / 2, frente: [['↑', 'predio']], verso: [['↑', 'praca']] },
       {
         x: 127, z: 100, giro: Math.PI,
@@ -139,7 +139,7 @@ export const NEVE = {
       },
       {
         area: 'parque', x: 342, z: 610, giro: Math.PI,
-        linhas: ['Salão de jogos: pingue-pongue, sinuca, truco, uno e 21', 'Queimada, pinta-território e minigolfe', 'O salão fica no alto, no fim da subida', 'Em cada jogo: chegue perto e aperte E'],
+        linhas: ['Queimada, pinta-território e minigolfe', 'A queimada fica no alto, no fim da subida', 'O salão de jogos fica na praça do prédio', 'Em cada jogo: chegue perto e aperte E'],
       },
     ],
     mapasAqui: [
@@ -152,7 +152,7 @@ export const NEVE = {
       { x0: -52, x1: 480, z0: -40, z1: 60 },
     ],
     rotulos: {
-      predio: [4, 10], praca: [100, 30], estadio: [60, 140], autodromo: [340, 290], lago: [40, 300], quadras: [40, 420],
+      predio: [4, 10], praca: [100, 30], salao: [166, 11], estadio: [60, 140], autodromo: [340, 290], lago: [40, 300], quadras: [40, 420],
       jogos: [70, 490], aventura: [-25, 488], kart: [100, 712], parque: [350, 720],
     },
   },
