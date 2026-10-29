@@ -16,6 +16,8 @@
 //                                             em poker-regras.js); com a mão rolando, vale na próxima
 //     'pk-empilhar' { mesa, empilhado }     o pote da mesa em torres (ou espalhado): só o visual,
 //                                             repassado para a sala
+//     'pk-ausente'  { mesa, ausente }       fica fora das próximas mãos (sentado, sem receber cartas);
+//                                             a mão que já está rolando ele joga até o fim
 //     'pk-sair'     { mesa }                levanta da mesa
 //     'pk-ver'      (ack)                   ack com o estado público de todas as mesas
 //   server -> sala (room.id): 'pk-mesa' { ...publico(m) }  a cada mudança de estado
@@ -26,7 +28,7 @@
 //   pote (o que já foi recolhido das rodadas anteriores), apostaAtual, minimo (o raise mínimo),
 //   small, big, nivel, nivelProximo (o blind que entra na próxima mão, ou null), dono (o id do dono
 //   da mesa: o primeiro que sentou), minimoMesa (moedas para sentar), aviso, prazo, prazoTotal, resultado, mao (número da mão), empilhado, lugares: [{ id, nome, robo,
-//   cor, saldo, aposta, total, fold, fora, allIn, dealer, vez, mao }] }. Carta: { n, s } (ver
+//   cor, saldo, aposta, total, fold, fora, ausente, allIn, dealer, vez, mao }] }. Carta: { n, s } (ver
 //   poker-regras.js). mao do lugar é [2 cartas] só no showdown (ou null); o dono vê a sua em 'pk-mao'.
 //
 // Regras da mesa: 6 lugares, Texas Hold'em sem limite. Blinds 1/2, que o dono da mesa (quem sentou
@@ -115,11 +117,12 @@ function ligarPoker(io, rooms, jogoLigado, darMoedas) {
     }
     return -1;
   };
+  // o próximo com cartas nesta mão (quem está de fora não leva o botão nem paga blind)
   const proximoOcupado = (m, de) => {
     const n = m.lugares.length;
     for (let s = 1; s <= n; s++) {
       const k = (de + s) % n;
-      if (m.lugares[k]) return k;
+      if (m.lugares[k]?.mao?.length) return k;
     }
     return de;
   };
@@ -146,7 +149,7 @@ function ligarPoker(io, rooms, jogoLigado, darMoedas) {
           id: l.bot ? null : l.id, nome: l.nome, robo: !!l.bot, cor: u?.color || null,
           saldo: l.bot ? null : u?.moedas ?? 0,
           aposta: m.apostas[k] || 0, total: l.apostadoTotal || 0,
-          fold: !!l.fold, fora: !l.mao?.length && m.fase !== 'espera', allIn: !!l.allIn,
+          fold: !!l.fold, fora: !l.mao?.length && m.fase !== 'espera', ausente: !!l.ausente, allIn: !!l.allIn,
           dealer: k === m.dealerIndex && m.fase !== 'espera', vez: k === m.vez && emJogo(m),
           mao: abre && !l.fold && l.mao?.length ? l.mao.map(carta) : null,
         };
@@ -215,7 +218,12 @@ function ligarPoker(io, rooms, jogoLigado, darMoedas) {
   function novaMao(room, m) {
     zerarMesa(m);
     m.fantasmas = 0;
-    const jogando = ocupados(m);
+    const jogando = ocupados(m).filter((k) => !m.lugares[k].ausente);
+    if (!jogando.some((k) => !m.lugares[k].bot)) {
+      m.aviso = 'Todos de fora: desmarque "Ficar fora" para voltar a jogar';
+      avisar(room, m);
+      return;
+    }
     if (jogando.length < 2) {
       m.aviso = 'Esperando mais gente (mínimo 2): clique em Começar para chamar os robôs';
       avisar(room, m);
@@ -590,6 +598,19 @@ function ligarPoker(io, rooms, jogoLigado, darMoedas) {
       user.pkPilhaEm = Date.now();
       m.empilhado = !!msg.empilhado;
       socket.to(room.id).emit('pk-empilhar', { mesa: m.i, empilhado: m.empilhado, por: user.name });
+    });
+
+    socket.on('pk-ausente', (msg) => {
+      const { room, user, mesas } = daSala();
+      const m = mesas?.[msg?.mesa];
+      const k = m ? meuLugar(m, user) : -1;
+      if (k < 0) return;
+      const l = m.lugares[k];
+      l.ausente = !!msg.ausente;
+      m.aviso = l.ausente ? `${l.nome} fica fora das próximas mãos` : `${l.nome} volta na próxima mão`;
+      // a mesa tinha parado porque todo mundo estava de fora: volta a dar cartas
+      if (!l.ausente && m.fase === 'espera' && m.mao > 0 && ocupados(m).length >= 2) return novaMao(room, m);
+      avisar(room, m);
     });
 
     socket.on('pk-sair', () => {

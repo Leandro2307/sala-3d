@@ -413,6 +413,8 @@ const PASSOS = [
       <li><b>Aumentar</b> (raise): coloca mais. Use a barra ou os atalhos <b>Mín</b>, <b>½ pote</b> e <b>Pote</b>.</li>
       <li><b>All-in</b>: aposta todas as suas fichas de uma vez.</li>
     </ul>
+    <p>Fora da sua vez, marque antes o que vai fazer: <b>Desistir</b>, <b>Pagar</b> (desmarca se a aposta mudar) ou <b>Pagar qualquer</b>. Quando a vez chegar, a jogada sai sozinha.</p>
+    <p>À esquerda: <b>Desistir a qualquer aposta</b> passa quando dá e desiste quando apostam; <b>Ficar fora na próxima mão</b> deixa você sentado sem receber cartas.</p>
     <p>A plaquinha de cada oponente mostra quanto ele <b>apostou</b> nesta rodada e quanto já pôs <b>na mão</b>.</p>
     <p>A vez tem tempo: a barrinha amarela na plaquinha de quem joga mostra quanto resta.</p>`],
   ['Dicas', () => `<ul>
@@ -507,7 +509,7 @@ export class Poker {
     if (this.ativa !== M) return;
     this.desenhar();
     const minhaVez = e.lugares[M.lugar]?.vez;
-    if (minhaVez && !antes?.lugares[M.lugar]?.vez) {
+    if (minhaVez && !antes?.lugares[M.lugar]?.vez && !this.jogarSozinho(M)) {
       this.sfx.message();
       this.$('.pk-acoes').classList.remove('pulo');
       void this.$('.pk-acoes').offsetWidth;
@@ -975,6 +977,8 @@ export class Poker {
       }
       M.lugar = r.lugar;
       this.ativa = M;
+      this.pre = null;
+      this.foldQualquer = false;
       const c = cadeira(M.m, r.lugar);
       const yaw = Math.atan2(c.ux, c.uz);
       this.player.sentarEm({ x: c.x, y: 0.45, z: c.z, yaw });
@@ -1117,6 +1121,15 @@ body.pk-sentado #controls-help, body.pk-sentado #sit-hint { display: none !impor
 .pk-rapidos button { padding: 3px 7px; border: 1px solid #334155; border-radius: 6px; background: #1e293b; color: #cbd5e1; font-size: 11px !important; }
 .pk-rapidos button:hover { background: #334155; }
 .pk-espera { padding: 0 6px; color: #cbd5e1; font-size: 13px; max-width: 220px; }
+/* fora da vez: as pré-ações (a jogada que sai sozinha quando a vez chegar), marcadas como caixinhas */
+.pk-b.pk-pre { --cor: #1e293b; --sombra: #0b1220; display: inline-flex; align-items: center; gap: 7px; color: #cbd5e1; }
+.pk-b.pk-pre[hidden] { display: none; }
+.pk-pre::before { content: ''; width: 13px; height: 13px; flex: none; border: 2px solid #64748b; border-radius: 3px; }
+.pk-pre[aria-pressed="true"] { --cor: #0e7490; --sombra: #164e63; color: #fff; }
+.pk-pre[aria-pressed="true"]::before { content: '✓'; display: grid; place-items: center; border-color: #a5f3fc; background: #a5f3fc; color: #164e63; font-size: 11px; line-height: 1; }
+.pk-opcoes { display: grid; gap: 6px; padding: 8px 10px; font-size: 12px; }
+.pk-opcoes label { display: flex; align-items: center; gap: 7px; cursor: pointer; pointer-events: auto; color: #cbd5e1; }
+.pk-opcoes input { width: 15px; height: 15px; margin: 0; accent-color: #0891b2; cursor: pointer; }
 .pk-banner { position: absolute; left: 50%; bottom: 200px; transform: translateX(-50%); padding: 12px 22px; border-radius: 14px; text-align: center;
   background: linear-gradient(#78350ff2, #451a03f2); border: 2px solid #fbbf24; box-shadow: 0 12px 30px rgba(0,0,0,.45); font-size: 18px; animation: pk-chega .5s ease both; }
 .pk-banner small { display: block; font-size: 12px; color: #fde68a; margin-top: 2px; }
@@ -1215,6 +1228,10 @@ body.touch .pk-valor input { font-size: 16px; }
   body.touch .pk-saldo b { font-size: 18px; }
   body.touch [data-pk="comecar"] { grid-area: espera; } body.touch [data-pk="fold"] { grid-area: fold; } body.touch [data-pk="call"] { grid-area: call; }
   body.touch [data-pk="raise"] { grid-area: raise2; } body.touch [data-pk="allin"] { grid-area: allin; }
+  body.touch [data-slot="1"] { grid-area: fold; } body.touch [data-slot="2"] { grid-area: call; } body.touch [data-slot="3"] { grid-area: raise2 / raise2 / raise2 / allin; }
+  body.touch .pk-b.pk-pre { justify-content: center; gap: 4px; font-size: 12px; white-space: normal; line-height: 1.15; }
+  body.touch .pk-pre::before { width: 11px; height: 11px; }
+  body.touch .pk-opcoes { padding: 3px 7px; gap: 0; font-size: 11px; } body.touch .pk-opcoes label { min-height: 26px; white-space: nowrap; }
   body.touch .pk-acoes.subindo [data-pk="raise"] { box-shadow: 0 0 0 3px #bbf7d0, 0 4px 0 var(--sombra); }
   body.touch .pk-espera { grid-area: espera; align-self: center; max-width: none; padding: 0 4px; font-size: 12px; text-align: center; }
   /* na vez dos outros, quem joga aparece num selo em cima dos botões */
@@ -1332,6 +1349,10 @@ body { --pk-vh: 1vh; }
         <div class="pk-aviso"></div>
         <div class="pk-ajuda"><button type="button" data-guia="tutorial">❓ <span class="pk-longo">Como jogar</span><span class="pk-curto">Ajuda</span></button><button type="button" data-guia="cola">🃏 Cola</button></div>
       </div>
+      <div class="pk-opcoes pk-painel">
+        <label><input type="checkbox" data-opcao="foldQualquer"><span class="pk-longo">Desistir a qualquer aposta</span><span class="pk-curto">Desistir se apostarem</span></label>
+        <label><input type="checkbox" data-opcao="ausente"><span class="pk-longo">Ficar fora na próxima mão</span><span class="pk-curto">Ficar fora</span></label>
+      </div>
       <div class="pk-dica">Clique nas fichas da mesa para empilhar o pote</div>
       </div>
       <button type="button" class="pk-b pk-sair" data-pk="sair">Levantar <small>Esc</small></button>
@@ -1352,6 +1373,9 @@ body { --pk-vh: 1vh; }
           </div>
           <button type="button" class="pk-b verde" data-pk="raise" aria-expanded="false">Aumentar<small class="pk-v-raise">para 0</small></button>
           <button type="button" class="pk-b ouro" data-pk="allin">All-in<small class="pk-v-allin">0</small></button>
+          <button type="button" class="pk-b pk-pre" data-slot="1" aria-pressed="false" hidden>Desistir</button>
+          <button type="button" class="pk-b pk-pre" data-slot="2" aria-pressed="false" hidden>Passar</button>
+          <button type="button" class="pk-b pk-pre" data-slot="3" aria-pressed="false" hidden>Pagar qualquer</button>
           <div class="pk-espera"></div>
         </div>
       </div>
@@ -1396,6 +1420,15 @@ body { --pk-vh: 1vh; }
       if (M) this.socket?.emit('pk-blind', { mesa: M.i, nivel: Number(ev.target.value) });
       ev.target.blur();
     });
+    // as opções da esquerda: desistir sozinho quando apostarem, e ficar fora das próximas mãos
+    for (const el of raiz.querySelectorAll('[data-opcao]')) {
+      el.addEventListener('change', () => {
+        el.blur(); // o espaço (pular) não pode ficar marcando e desmarcando a caixinha
+        if (el.dataset.opcao === 'foldQualquer') this.foldQualquer = el.checked;
+        // a caixinha fica como a pessoa deixou até o servidor responder (o 'pk-mesa' redesenha)
+        else if (this.ativa) this.socket?.emit('pk-ausente', { mesa: this.ativa.i, ausente: el.checked });
+      });
+    }
     raiz.addEventListener('click', (ev) => this.clique(ev));
   }
 
@@ -1507,8 +1540,39 @@ body { --pk-vh: 1vh; }
     if (!c?.l.vez) return;
     if (tipo === 'call' && c.precisa === 0) tipo = 'check';
     this.socket?.emit('pk-apostar', { mesa: M.i, tipo, valor: this.valorRaise(c) });
+    this.apostouEm = performance.now();
     this.sfx.cartaSel?.(tipo === 'fold' ? 0 : 4);
     this.subindo(false);
+  }
+
+  // a pré-ação só vale na rua em que foi marcada; "Passar" cai se alguém apostar e "Pagar X" cai se
+  // a aposta mudar (como no PokerStars)
+  validarPre(M, c) {
+    const p = this.pre;
+    const e = M.e;
+    if (!p) return;
+    if (p.mesa !== M.i || p.mao !== e.mao || p.fase !== e.fase || !c || c.l.fold || c.l.allIn || c.l.fora) this.pre = null;
+    else if (c.precisa > 0 && p.tipo === 'check') this.pre = null;
+    else if (c.precisa > 0 && p.tipo === 'checkfold') p.tipo = 'fold';
+    else if (p.tipo === 'call' && e.apostaAtual !== p.aposta) this.pre = null;
+  }
+
+  // a vez chegou com uma pré-ação marcada (ou o "Desistir a qualquer aposta"): joga sozinho
+  jogarSozinho(M) {
+    const c = this.contas(M);
+    if (c) this.validarPre(M, c);
+    let tipo = this.pre?.tipo || (this.foldQualquer ? 'checkfold' : null);
+    this.pre = null;
+    if (!c || !tipo) return false;
+    if (tipo === 'checkfold' || tipo === 'fold') tipo = c.precisa > 0 ? 'fold' : 'check';
+    else if (tipo === 'callany') tipo = 'call';
+    const { mao, fase } = M.e;
+    // um instante para dar para ver a jogada; e o servidor ignora duas apostas em menos de 600 ms
+    const espera = Math.max(400, 650 - (performance.now() - (this.apostouEm || 0)));
+    setTimeout(() => {
+      if (this.ativa === M && M.e.mao === mao && M.e.fase === fase && M.e.lugares[M.lugar]?.vez) this.apostar(tipo);
+    }, espera);
+    return true;
   }
 
   clique(ev) {
@@ -1533,6 +1597,13 @@ body { --pk-vh: 1vh; }
       return;
     }
     if (d.fechaRaise !== undefined) return this.subindo(false);
+    if (d.slot) {
+      // marca (ou desmarca) a pré-ação: só uma por vez
+      const e = M.e;
+      this.pre = this.pre?.tipo === d.tipo ? null : { tipo: d.tipo, mesa: M.i, mao: e.mao, fase: e.fase, aposta: e.apostaAtual };
+      this.sfx.cartaSel?.(2);
+      return this.desenhar();
+    }
     if (d.pk === 'raise' && this.compacto()) {
       // o toque duplo sem querer não aumenta: o 2º toque vale depois de um instante
       if (!this.$('.pk-acoes').classList.contains('subindo')) return this.subindo(true);
@@ -1587,14 +1658,30 @@ body { --pk-vh: 1vh; }
     const b = (k) => this.$(`[data-pk="${k}"]`);
     b('comecar').hidden = e.fase !== 'espera';
     this.$('.pk-acoes').classList.toggle('decide', !!decide); // o celular deitado arruma a grade por isso
+    // fora da vez, no lugar dos comandos, as pré-ações
+    const pre = decide && !vez;
+    this.$('.pk-acoes').classList.toggle('pre', pre);
     for (const k of ['fold', 'call', 'raise', 'allin']) {
-      b(k).hidden = !decide;
+      b(k).hidden = !decide || pre;
       b(k).disabled = !vez;
     }
-    this.$('.pk-raise').hidden = !decide;
+    this.$('.pk-raise').hidden = !decide || pre;
+    if (c) this.validarPre(M, c);
+    else this.pre = null;
+    const slots = c?.precisa > 0
+      ? [['fold', 'Desistir'], ['call', `Pagar ${Math.min(c.precisa, c.saldo)}`], ['callany', 'Pagar qualquer']]
+      : [['checkfold', 'Passar ou desistir'], ['check', 'Passar'], ['callany', 'Pagar qualquer']];
+    this.raiz.querySelectorAll('[data-slot]').forEach((el, i) => {
+      el.hidden = !pre;
+      el.dataset.tipo = slots[i][0];
+      el.firstChild.textContent = slots[i][1];
+      el.setAttribute('aria-pressed', String(this.pre?.tipo === slots[i][0]));
+    });
+    const caixa = (k) => this.$(`[data-opcao="${k}"]`);
+    caixa('foldQualquer').checked = !!this.foldQualquer;
+    caixa('ausente').checked = !!c?.l.ausente;
     if (decide) {
       b('call').firstChild.textContent = c.precisa > 0 ? `Pagar ${Math.min(c.precisa, c.saldo)}` : 'Passar';
-      b('fold').hidden = !decide;
       const podeAumentar = c.max > e.apostaAtual && c.saldo > c.precisa;
       b('raise').disabled = !vez || !podeAumentar;
       for (const el of this.$('.pk-raise').querySelectorAll('input, button')) el.disabled = !vez || !podeAumentar;
@@ -1611,6 +1698,7 @@ body { --pk-vh: 1vh; }
     let txt = '';
     if (e.fase === 'espera') txt = '';
     else if (e.fase === 'showdown') txt = 'Próxima mão já já…';
+    else if (c?.l.fora && c.l.ausente) txt = 'Você está fora: desmarque "Ficar fora" para voltar';
     else if (c?.l.fora) txt = 'Você entra na próxima mão';
     else if (c?.l.fold) txt = 'Você desistiu desta mão';
     else if (c?.l.allIn) txt = 'Você está all-in: torcendo…';
@@ -1647,7 +1735,7 @@ body { --pk-vh: 1vh; }
       const nome = k === M.lugar ? 'Você' : `${l.robo ? '🤖 ' : ''}${l.nome}`;
       // no celular deitado, só o número (a palavra fica no pk-longo)
       const fichas = `${l.robo ? '∞' : l.saldo ?? 0}<span class="pk-longo"> fichas</span>`;
-      const estado = l.fora ? 'próxima mão' : l.fold ? 'desistiu' : '';
+      const estado = l.fora && l.ausente ? 'de fora' : l.fora ? 'próxima mão' : l.fold ? 'desistiu' : '';
       // o que apostou nesta rodada (em destaque) e o total que já pôs nesta mão
       const lance = l.aposta && !l.fora ? `<div class="lance"><i></i>apostou ${l.aposta}</div>` : '';
       const total = l.total && !l.fora && e.fase !== 'espera' ? `<div class="total">${l.total} na mão</div>` : '';
