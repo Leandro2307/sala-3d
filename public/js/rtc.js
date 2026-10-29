@@ -119,6 +119,42 @@ function preferirCodec(transceiver) {
   }
 }
 
+// Modo jogo: o codec da tela para quem joga, pelo que vai para a placa de vídeo. Medido numa RTX
+// 3060 Ti (Chrome 156): H.264 Baseline (42001f), Main e High → NVIDIA; Constrained Baseline
+// (42e01f) → OpenH264, no processador; VP9 e AV1 → processador; H.265 → NVIDIA. O Safari do
+// iPhone só oferece o H.264 em 42e01f e 640c1f (que o Chrome não tem): com ele a tela saía sempre
+// no processador. Ordem: H.265 (o Chrome só o lista para enviar quando a placa codifica), o H.264
+// que vai para a placa, e o resto de reserva. seguro: sem o H.265 (ver codecSeguroJogo).
+const PERFIS_DA_PLACA = /profile-level-id=(42001f|4d00|6400)/i;
+function preferirCodecDeJogo(transceiver, seguro) {
+  if (!transceiver.setCodecPreferences) return;
+  const todos = RTCRtpReceiver.getCapabilities?.('video')?.codecs || [];
+  const h265 = !seguro && RTCRtpSender.getCapabilities?.('video')?.codecs.some((c) => c.mimeType === 'video/H265');
+  const nota = (c) => (c.mimeType === 'video/H265' ? (h265 ? 0 : 9)
+    : c.mimeType === 'video/H264' ? (PERFIS_DA_PLACA.test(c.sdpFmtpLine || '') ? 1 : 2) + (/packetization-mode=1/.test(c.sdpFmtpLine || '') ? 0 : 0.5)
+      : 5);
+  try {
+    transceiver.setCodecPreferences([...todos].sort((a, b) => nota(a) - nota(b)));
+  } catch (err) {
+    console.warn('[modo-jogo] preferência de codec', err);
+  }
+}
+
+// O Constrained Baseline (42e01f) do outro lado vira Baseline (42001f) aqui dentro, nas seções das
+// telas que vão para quem joga: o Chrome codifica na placa, e o que sai é o mesmo para o
+// decodificador do iPhone (o Baseline do codificador não usa nada fora do Constrained). Para
+// fora vai o contrário, para o outro lado continuar reconhecendo o que ofereceu.
+function trocarPerfil(desc, mids, de, para) {
+  if (!desc?.sdp || !mids.size) return desc;
+  const saida = [];
+  for (const sec of secoesDoSdp(desc.sdp)) {
+    const mid = sec.find((l) => l.startsWith('a=mid:'))?.slice(6);
+    const troca = sec[0].startsWith('m=video') && mids.has(mid);
+    for (const l of sec) saida.push(troca && l.startsWith('a=fmtp:') ? l.replace(`profile-level-id=${de}`, `profile-level-id=${para}`) : l);
+  }
+  return { type: desc.type, sdp: saida.join('\r\n') };
+}
+
 // as linhas do SDP por seção: o cabeçalho e depois uma lista por m= (começando na linha m=)
 function secoesDoSdp(sdp) {
   const secoes = [[]];
@@ -473,6 +509,7 @@ export class RTC {
     const atual = peer.bandaJogo;
     if (nova?.inicio === atual?.inicio && nova?.piso === atual?.piso) return;
     peer.bandaJogo = nova;
+    this.codecDeJogo(peer);
     if (!nova) {
       peer.semPiso = false;
       peer.balanceado = false;
@@ -512,6 +549,36 @@ export class RTC {
     peer.linhasJogo = linhas;
     this.tuneScreen(peer);
     return true;
+  }
+
+  // o codec das telas para essa pessoa: o da placa enquanto ela joga, o de sempre fora disso
+  codecDeJogo(peer) {
+    for (const trs of peer.screenTransceivers.values()) {
+      for (const tr of trs) {
+        if (tr.receiver.track?.kind !== 'video') continue;
+        if (peer.bandaJogo) preferirCodecDeJogo(tr, peer.recuoCodec >= 1);
+        else preferirCodec(tr);
+      }
+    }
+  }
+
+  // as seções das minhas telas em que o perfil do H.264 é trocado (trocarPerfil)
+  midsDeJogo(peer) {
+    const mids = new Set();
+    if (!peer.bandaJogo || peer.recuoCodec >= 2) return mids;
+    for (const trs of peer.screenTransceivers.values()) for (const tr of trs) if (tr.mid && tr.receiver.track?.kind === 'video') mids.add(tr.mid);
+    return mids;
+  }
+
+  // Quem joga não decodificou nada por 6 s depois da troca de codec: um passo atrás (1: sem o
+  // H.265; 2: sem a troca de perfil, como era antes) e renegocia. Devolve o passo, ou 0.
+  codecSeguroJogo(id) {
+    const peer = this.peers.get(id);
+    if (!peer?.bandaJogo || peer.recuoCodec >= 2) return 0;
+    peer.recuoCodec++;
+    this.codecDeJogo(peer);
+    this.renegociar(peer);
+    return peer.recuoCodec;
   }
 
   // banda inicial e piso (kbps) que vão no SDP desta conexão
@@ -625,7 +692,8 @@ export class RTC {
           init.sendEncodings = [{ maxBitrate: 96_000, networkPriority: 'high', priority: 'high' }];
         }
         const tr = peer.pc.addTransceiver(track, init);
-        if (track.kind === 'video') preferirCodec(tr);
+        if (track.kind === 'video' && peer.bandaJogo) preferirCodecDeJogo(tr, peer.recuoCodec >= 1);
+        else if (track.kind === 'video') preferirCodec(tr);
         trs.push(tr);
       }
       peer.screenTransceivers.set(key, trs);
@@ -784,6 +852,7 @@ export class RTC {
       semPiso: false, // o piso de jogo saiu (soltarPisoJogo)
       balanceado: false, // a tela de jogo dela sai em 'balanced' (imagemDeJogo)
       linhasJogo: null, // a tela de jogo dela sai com no máximo essas linhas (linhasDeJogo)
+      recuoCodec: 0, // passos atrás no codec de jogo (codecSeguroJogo)
       renegociar: false, // falta mandar uma oferta nova (renegociar)
       ctrl: null, // canal do controle remoto (ver canalControle)
       micSender: null,
@@ -808,7 +877,7 @@ export class RTC {
         if (pc.signalingState !== 'stable') return;
         await pc.setLocalDescription(comBandaInicial(oferta, ...this.bandaSdp(peer)));
         peer.ofertaDesde = performance.now();
-        this.send(id, { description: pc.localDescription });
+        this.send(id, { description: trocarPerfil(pc.localDescription, this.midsDeJogo(peer), '42001f', '42e01f') });
       } catch (err) {
         console.warn('[rtc] offer', err);
       } finally {
@@ -934,13 +1003,14 @@ export class RTC {
         for (const trs of peer.screenTransceivers.values()) for (const tr of trs) if (tr.mid) semDtx.add(tr.mid);
         peer.aplicandoResposta = description.type === 'answer';
         try {
-          await pc.setRemoteDescription(comDtx(comBandaInicial(description, ...this.bandaSdp(peer)), semDtx));
+          const recebida = trocarPerfil(description, this.midsDeJogo(peer), '42e01f', '42001f');
+          await pc.setRemoteDescription(comDtx(comBandaInicial(recebida, ...this.bandaSdp(peer)), semDtx));
         } finally {
           peer.aplicandoResposta = false;
         }
         if (description.type === 'offer') {
           await pc.setLocalDescription(comBandaInicial(await pc.createAnswer(), ...this.bandaSdp(peer)));
-          this.send(from, { description: pc.localDescription });
+          this.send(from, { description: trocarPerfil(pc.localDescription, this.midsDeJogo(peer), '42001f', '42e01f') });
         }
       } else if (candidate) {
         try {
@@ -1094,7 +1164,7 @@ export class RTC {
         continue;
       }
       const d = { id, nivel: peer.interesse.get(key) || null, conexao: peer.pc.connectionState };
-      if (peer.bandaJogo) d.bandaJogo = { ...peer.bandaJogo, semPiso: peer.semPiso, balanceado: peer.balanceado, linhas: peer.linhasJogo };
+      if (peer.bandaJogo) d.bandaJogo = { ...peer.bandaJogo, semPiso: peer.semPiso, balanceado: peer.balanceado, linhas: peer.linhasJogo, recuoCodec: peer.recuoCodec };
       try {
         const p = tr.sender.getParameters();
         d.params = { degradacao: p.degradationPreference ?? null, ...(p.encodings?.[0] || {}) };

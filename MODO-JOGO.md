@@ -117,6 +117,41 @@ Conclusões:
   depois de 30 s fixa. Navegador que não conhece o valor (TypeError no `setParameters`):
   `rtc.semFixa` e fica no `maintain-framerate`. Testado: 720p a 60 qps.
 
+## Por que o OpenH264 (medido no próprio PC do jogo, 2026-10-28)
+
+O PC de desenvolvimento **é** o PC do jogo (RTX 3060 Ti, driver 610.88). `chrome://gpu` lista
+H.264 e HEVC na placa até 1920×1080 a 121 qps, e o `encodingInfo` dá `powerEfficient: false` para
+tudo (inútil para decidir). Codificando cada perfil numa conexão local (scratchpad
+`testar-perfis-canvas.js`):
+
+| Perfil | Codificador |
+|---|---|
+| H.264 Baseline `42001f`, Main `4d001f`, High `64001f` | NVIDIA H.264 Encoder MFT |
+| **H.264 Constrained Baseline `42e01f`** | **OpenH264** |
+| H.265 | NVIDIA HEVC Encoder MFT |
+| VP9, AV1 | libvpx, libaom |
+
+Chrome com Chrome combina `42001f` (placa). O **Safari só oferece `42e01f` e `640c1f`** (que o
+Chrome não tem): com o iPhone, a tela sempre saía no processador.
+
+### O que entrou (só na conexão de quem joga, com o modo jogo ligado)
+
+- `preferirCodecDeJogo`: H.265 primeiro (o Chrome só o lista para enviar quando a placa codifica),
+  depois o H.264 dos perfis da placa, o resto de reserva. Chamado por `codecDeJogo(peer)` em
+  `atualizarBandaJogo`; ao desligar, `preferirCodec` de sempre.
+- `trocarPerfil`: nas seções das telas de quem joga (`midsDeJogo`), o `42e01f` que chega vira
+  `42001f` antes do `setRemoteDescription`, e o `42001f` que sai vira `42e01f` no que é mandado.
+  O Chrome codifica Baseline na NVIDIA e o outro lado continua vendo o perfil que ofereceu.
+- Rede de segurança (`vigiarDecodificacao` no main.js, com as amostras de quem joga): 3 amostras
+  seguidas (6 s) sem quadro decodificado → `rtc.codecSeguroJogo(id)`: passo 1 tira o H.265, passo
+  2 tira a troca de perfil (como era antes). Evento no relatório; `bandaJogo.recuoCodec`.
+- Testado com um "Safari falso" (scratchpad `safari-falso.js`: o Chrome de quem joga só aceita
+  `42e01f`, e com `__comH265` também o H.265): antes, OpenH264; com o modo jogo, NVIDIA H.264 a 60
+  qps (só `42e01f`) e NVIDIA HEVC a 60 qps (com H.265), decodificando do outro lado. Chrome com
+  Chrome: HEVC na placa, 1080p60. Os dois passos atrás também testados.
+- **Falta confirmar com o iPhone de verdade**: se o Safari aceita o H.265 no WebRTC e decodifica o
+  Baseline da NVIDIA. Se não, a rede de segurança volta em 6 s e o relatório mostra o evento.
+
 ## Próximos passos sugeridos
 
 0. **Pedir um relatório novo dos dois lados** com o jogo em janela sem bordas 1920×1080 a 60 qps

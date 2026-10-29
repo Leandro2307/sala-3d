@@ -2463,7 +2463,10 @@ function jogoAqui(key, deId, ligar) {
     if (!quem.size) jogandoAqui.delete(key);
   }
   rtc?.modoJogo(key, jogandoAqui.has(key), [...(jogandoAqui.get(key)?.keys() || [])]);
-  if (!ligar) ajusteDoJogo.delete(deId);
+  if (!ligar) {
+    ajusteDoJogo.delete(deId);
+    semDecodificar.delete(deId);
+  }
   const nome = state.users.get(deId)?.name || 'Alguém';
   diagJogo.evento(ligar ? 'modo jogo ligado por quem controla' : 'modo jogo desligado', { key, deId, nome });
   const agora = jogandoAqui.size > 0;
@@ -2561,6 +2564,18 @@ setInterval(amostrarJogo, 2000);
 // E a banda estimada abaixo de 5 Mbps por 4 s → a tela fica fixa em 720p (rtc.linhasDeJogo), em
 // vez de pular de resolução a cada vaivém da banda; volta à captura inteira com mais de 9 Mbps
 // por 10 s, depois de pelo menos 30 s fixa.
+// O codec de jogo (H.265, ou o H.264 da placa com o perfil trocado: rtc.preferirCodecDeJogo) é
+// aposta: se o aparelho de quem joga passar 6 s sem decodificar nenhum quadro, um passo atrás.
+const semDecodificar = new Map(); // id de quem joga -> amostras seguidas sem quadro decodificado
+function vigiarDecodificacao(id, r) {
+  const n = r && typeof r === 'object' && !(r.decodificado > 0) ? (semDecodificar.get(id) || 0) + 1 : 0;
+  semDecodificar.set(id, n);
+  if (n < 3) return;
+  semDecodificar.set(id, 0);
+  const passo = rtc.codecSeguroJogo(id);
+  if (passo) diagJogo.evento(passo === 1 ? 'quem joga não decodificou: sem o H.265' : 'quem joga não decodificou: sem a troca de perfil do H.264', { codec: r.codec ?? null });
+}
+
 const ajusteDoJogo = new Map(); // id de quem joga -> { perdas, baixas, boas, balanceadoDesde, curta, larga, fixaDesde }
 function ajustarJogo(id, r) {
   let st = ajusteDoJogo.get(id);
@@ -2602,7 +2617,10 @@ function receberDireto(id, m) {
   }
   // modo jogo: o que quem joga numa tela minha mediu do lado dela (só dela, e pequeno)
   if (m.j && typeof m.j === 'object') {
-    if (typeof m.j.key === 'string' && jogandoAqui.get(m.j.key)?.has(id) && JSON.stringify(m.j).length < 20_000) diagJogo.doQuemJoga(id, u.name, m.j);
+    if (typeof m.j.key === 'string' && jogandoAqui.get(m.j.key)?.has(id) && JSON.stringify(m.j).length < 20_000) {
+      diagJogo.doQuemJoga(id, u.name, m.j);
+      vigiarDecodificacao(id, m.j.r);
+    }
     return;
   }
   const c = m.c;
