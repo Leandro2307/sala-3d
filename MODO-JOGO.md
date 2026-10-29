@@ -238,6 +238,12 @@ Chrome não tem): com o iPhone, a tela sempre saía no processador.
   errada, o teto de ~57 vem do ritmo em que o Windows/Chrome entrega a janela do jogo. Na Intel,
   1280×688–720 deu 36–54 (antes 44–55). O iPhone mostrou ~8 qps a menos do que decodificava no
   começo (motivo `tela`). **Voltou para 60** (`QPS_PADRAO`); o `?qps=N` continua para medir.
+- **"Otimizações para jogos em janela" do Windows desligada (2026-10-29 13:06 e 13:10, Intel UHD →
+  iPhone, Minecraft): a janela de 1920×1032 foi de 16–25 qps (12:14 e 12:45, ligada) para mediana
+  47, máx. 53** (Intel VP9 a 13 ms/quadro, ~10 Mbps). 926×562: 52–55 (igual). Preset Leve:
+  1280×688 → 43, 1278×720 → 47. Pode ter a ver com a cena, mas a diferença é grande: com a
+  otimização ligada o jogo apresenta no modelo "flip" e a captura da janela na Intel sofre. Falta
+  confirmar ligada × desligada na mesma cena, e se o PC com a RTX também ganha.
 - No mesmo relatório: ao ir para 1920×1032 o codificador caiu no libvpx e voltou com a captura
   em 720p; em 12:47:22 a captura de 1278×720 saiu como **1280×698** (escala estranha) e caiu no
   libvpx por 2 s. Vale olhar o `escalaPar` com captura de largura 1278.
