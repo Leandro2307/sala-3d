@@ -232,6 +232,15 @@ Chrome não tem): com o iPhone, a tela sempre saía no processador.
   de janela/tela sai a 75 (`QPS_PADRAO`), o envio a no máximo 60; `?qps=60` volta ao de antes.
   Conferir no próximo relatório: `ambiente.qpsCaptura` 75, captura acima de 58 e enviado ~60 com
   o jogo leve; e se o PC com Intel não piorou com a captura mais rápida (se piorar, 75 só no modo jogo).
+- **Relatório com 75 (2026-10-29 12:45, Intel UHD → iPhone, Minecraft): não ajudou.** A trilha
+  saiu a `frameRate: 75`, mas na mesma janela de 926×562 a captura ficou em 51–58 e o enviado em
+  51–56 (com 60 eram 57/57). A captura nunca passou de 58: a hipótese do quadro adiantado estava
+  errada, o teto de ~57 vem do ritmo em que o Windows/Chrome entrega a janela do jogo. Na Intel,
+  1280×688–720 deu 36–54 (antes 44–55). O iPhone mostrou ~8 qps a menos do que decodificava no
+  começo (motivo `tela`). Sugerido ao usuário voltar o padrão para 60 (`QPS_PADRAO`).
+- No mesmo relatório: ao ir para 1920×1032 o codificador caiu no libvpx e voltou com a captura
+  em 720p; em 12:47:22 a captura de 1278×720 saiu como **1280×698** (escala estranha) e caiu no
+  libvpx por 2 s. Vale olhar o `escalaPar` com captura de largura 1278.
 
 ## Próximos passos sugeridos
 
