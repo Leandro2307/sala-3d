@@ -237,7 +237,7 @@ Chrome não tem): com o iPhone, a tela sempre saía no processador.
   51–56 (com 60 eram 57/57). A captura nunca passou de 58: a hipótese do quadro adiantado estava
   errada, o teto de ~57 vem do ritmo em que o Windows/Chrome entrega a janela do jogo. Na Intel,
   1280×688–720 deu 36–54 (antes 44–55). O iPhone mostrou ~8 qps a menos do que decodificava no
-  começo (motivo `tela`). Sugerido ao usuário voltar o padrão para 60 (`QPS_PADRAO`).
+  começo (motivo `tela`). **Voltou para 60** (`QPS_PADRAO`); o `?qps=N` continua para medir.
 - No mesmo relatório: ao ir para 1920×1032 o codificador caiu no libvpx e voltou com a captura
   em 720p; em 12:47:22 a captura de 1278×720 saiu como **1280×698** (escala estranha) e caiu no
   libvpx por 2 s. Vale olhar o `escalaPar` com captura de largura 1278.

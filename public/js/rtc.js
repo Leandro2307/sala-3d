@@ -59,12 +59,11 @@ let codecPreferido = null; // { mimeType, perfil } (perfil: profile-level-id do 
 let escolhendo = null;
 let infoCodecs = { preferido: null, forcado: null, testados: [] };
 
-// A captura de janela e tela é pedida a 75 qps, e o envio continua em no máximo 60 (maxFramerate do
-// nível). Com o teto da captura exatamente em 60 os relatórios ficavam presos em 54–58 qps com o
-// jogo a 60, em todos os tamanhos e nos dois PCs: o Chrome jogava fora o quadro que chegava um pouco
-// adiantado. ?qps=N (30 a 240) na sala de quem compartilha troca o ritmo, para medir (?qps=60: o
-// de antes).
-const QPS_PADRAO = 75;
+// A captura de janela e tela é pedida no ritmo do preset (60). ?qps=N (30 a 240) na sala de quem
+// compartilha pede outro, para medir; o envio continua em no máximo 60 (maxFramerate do nível). Pedir
+// 75 não tirou o teto de ~57 qps da janela de um jogo (relatório de 2026-10-29 12:45: a captura nunca
+// passou de 58, e na placa Intel ficou um pouco pior).
+const QPS_PADRAO = 60;
 const QPS_CAPTURA = (() => {
   const n = Number(new URLSearchParams(location.search).get('qps'));
   return Number.isFinite(n) && n >= 30 && n <= 240 ? Math.round(n) : null;
