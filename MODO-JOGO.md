@@ -248,6 +248,55 @@ Chrome não tem): com o iPhone, a tela sempre saía no processador.
   em 720p; em 12:47:22 a captura de 1278×720 saiu como **1280×698** (escala estranha) e caiu no
   libvpx por 2 s. Vale olhar o `escalaPar` com captura de largura 1278.
 
+## Jogabilidade (2026-10-29): controle, teclas, imagem e som
+
+Revisão do lado do controle, que até aqui não tinha medida nenhuma. Extensão 1.15.0, ajudante 1.8.0.
+
+- **PC em tela cheia com o teclado travado** (`jogoNoPc` no main.js): o modo jogo põe o `#focus` em
+  tela cheia sem moldura (`body.jogo-pc`) e chama `navigator.keyboard.lock()`. Sem isso o Chrome
+  ficava com Ctrl+W/T/N (correr no Minecraft é Ctrl+W: a aba da sala fechava). O Esc curto vai para o
+  jogo (deduplicado com o do ponteiro solto por `controle.escEm`); segurar o Esc sai da tela cheia.
+- **Tecla presa**: quem joga manda `{t:'vivo'}` a cada 500 ms; o ajudante (`VigiarJogo`) solta tudo
+  depois de 1,5 s sem notícia com tecla ou botão apertado. A sala de quem compartilha manda
+  `modo: false` ao ajudante quando ninguém mais joga na tela (inclusive quem saiu ou caiu). Aba
+  escondida (`visibilitychange`) solta teclado, toque e controle.
+- **Botões do lado do mouse**: `x1`/`x2` (antes viravam clique esquerdo), no ajudante
+  (`MOUSEEVENTF_XDOWN`), nas abas (`back`/`forward` do CDP) e sem o "voltar" do Chrome na sala.
+- **Alt segurado** vai na hora no modo jogo; a repetição de tecla não vai (só o Backspace);
+  a roda vai em dentes inteiros (`girarJogo`, pelo `wheelDeltaY`).
+- **Movimento sem trava**: canal `controle-mov` (`ordered:false, maxRetransmits:0`, ver
+  `rtc.canalMovimento`) levando o total andado `{e, x, y, s}`; quem recebe aplica a diferença
+  (`somasDoJogo` em `receberDireto`). Perda não custa movimento nem segura teclas. Do lado de
+  quem compartilha, com a extensão 1.15+, o movimento vai por uma porta fixa até o ajudante
+  (`janela-rapida`, `chrome.runtime.connect`), sem resposta. **Não conferido de ponta a ponta**: o
+  teste no Playwright pega o mouse de quem está usando o PC.
+- **Menu automático**: o ajudante olha o cursor a cada 100 ms (`GetCursorInfo`/`GetClipCursor`) e
+  avisa `{tipo:'cursor', livre}`; vai na resposta dos eventos → `controle.onCursor` → volta
+  `{t:'cursor'}` para quem joga → `controle.cursorLivre`: no PC solta o ponteiro e o mouse vai pela
+  posição (`abs`); no celular os botões de menu entram sozinhos. Opção "Menu do jogo automático".
+  Falta conferir com Minecraft e God of War de verdade se a detecção acerta.
+- **Quem só assiste** a uma tela em jogo fica no máximo em 540p a 30 (`rtc.assiste`), em
+  `maintain-resolution` (sem medida ímpar no processador do PC do jogo). O relatório conta os
+  `codificadores` ativos.
+- **Piso de banda** sai também com a fila de envio acima de 60 ms ou a ida e volta no dobro da
+  menor vista (`ajustarJogo`).
+- **Som estéreo** para quem joga (`comEstereo`: stereo=1 na descrição remota de quem manda e nas
+  seções só de recebimento de quem recebe). O relatório de quem joga traz `somBufferMs` e
+  `bufferMinimoMs`: se o vídeo estiver esperando o som (sincronia), aparece ali. Separar os streams
+  não foi feito: a sala acha o som da tela pelo id do stream.
+- **Relatório de quem joga**: `controleRttMs` (ping pelo canal), `ajudanteMs`, `atrasoMs` (do dedo
+  ao olho, estimado), `movimentoCru` (`unadjustedMovement` aceito), `controleFisico`.
+- **Opções** (`jogo-opcoes.js`; no PC em "Opções" ao lado do Modo jogo, no celular no painel do
+  toque): imagem mais lisa (buffer de 40 ms), menu automático, selo de desempenho (`#jogo-selo`) e,
+  no celular, mira pelo giroscópio (sinais do `devicemotion` deduzidos, não testados num aparelho).
+- **Controle de videogame** (`gamepad-jogo.js`): Gamepad API → teclado e mouse, pelo mapa `pad` de
+  cada layout em `toque-jogo.js`. Sem instalar nada. O controle virtual de Xbox (ViGEmBus) ficou de
+  fora: precisa de driver e de uma DLL de terceiros no PC de quem compartilha.
+- **Toque**: fração de pixel guardada (mirar devagar não some mais), analógico flutuante
+  (`.tj-zona`), editor "Mover botões" (posições por layout no localStorage).
+- Teste barato que ficou para o usuário: o teto de ~57 qps com o jogo limitado a 120 qps e V-Sync
+  desligado — se a captura chegar a 60, o limite era o jogo perdendo quadros.
+
 ## Próximos passos sugeridos
 
 0. **Pedir um relatório novo dos dois lados** com o jogo em janela sem bordas 1920×1080 a 60 qps

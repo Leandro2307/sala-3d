@@ -29,7 +29,8 @@
 // e o texto do Ctrl+C, que cai na área de transferência de quem controla.
 
 const MOD = (e) => (e.altKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.metaKey ? 4 : 0) | (e.shiftKey ? 8 : 0);
-const BOTAO = ['left', 'middle', 'right'];
+// x1 e x2: os botões do lado do mouse (voltar e avançar) — antes iam como clique esquerdo
+const BOTAO = ['left', 'middle', 'right', 'x1', 'x2'];
 // intervalo mínimo entre movimentos de mouse (ms). O servidor corta acima de 120 eventos/s.
 const MOVE_MS = 25;
 const ARRASTO_MS = 16;
@@ -38,6 +39,12 @@ const RODA_MINHA_MS = 8;
 // Modo jogo pelo canal direto (sem o servidor e o limite dele): ~125 movimentos por segundo. Os
 // 25 ms do MOVE_MS eram atraso puro na câmera, e ela andava aos trancos.
 const JOGO_MS = 8;
+// Modo jogo: "estou aqui" a cada VIVO_MS. Sem notícia por um tempo, o ajudante solta o que estava
+// apertado (quem joga fechou a aba, o celular bloqueou, a rede caiu): o W não fica preso andando.
+const VIVO_MS = 500;
+// Roda no modo jogo: um "dente" do mouse vale 120 no Windows; o navegador manda 100 por dente com a
+// rolagem de 3 linhas, mas 166 com 5. Lá vai sempre um dente inteiro por evento (ver girarJogo).
+const DENTE = 120;
 // Duplo e triplo clique: o pointerdown do Chrome vem sempre com detail 0 (só o mousedown traz a
 // contagem), e a aba controlada recebia todo clique como o primeiro — sem duplo clique para
 // selecionar palavra. A conta é feita aqui, como no Windows: mesmo botão, perto e logo em seguida.
@@ -56,6 +63,7 @@ export function eventoDeControle(e) {
     ev = { t: 'mouse', a: e.a, x: e.x === undefined && e.dx !== undefined ? 0.5 : n(e.x, 0, 1), y: e.y === undefined && e.dy !== undefined ? 0.5 : n(e.y, 0, 1), b: BOTAO.includes(e.b) ? e.b : 'left', n: n(e.n, 1, 3) | 0, arrastando: !!e.arrastando, mod };
     if (e.a === 'move' && (e.dx !== undefined || e.dy !== undefined)) Object.assign(ev, { dx: n(e.dx, -4000, 4000), dy: n(e.dy, -4000, 4000) });
   } else if (e.t === 'modo') return { t: 'modo', jogo: !!e.jogo };
+  else if (e.t === 'vivo') return { t: 'vivo' };
   else if (e.t === 'wheel') ev = { t: 'wheel', x: n(e.x, 0, 1), y: n(e.y, 0, 1), dx: n(e.dx, -3000, 3000), dy: n(e.dy, -3000, 3000), mod };
   else if (e.t === 'tecla' && (e.a === 'down' || e.a === 'up')) {
     ev = { t: 'tecla', a: e.a, key: txt(e.key, 24), code: txt(e.code, 24).trim(), kc: n(e.kc, 0, 255) | 0, mod };
@@ -81,8 +89,10 @@ export function eventoDeControle(e) {
 export const versaoNum = (v) => String(v || '0').split('.').map(Number).reduce((s, n, i) => s + (n || 0) * [1e6, 1e3, 1][i], 0);
 
 export class Controle {
-  constructor({ emitir, toast, onExtensao, minha, direto, semPonteiro = false }) {
+  constructor({ emitir, toast, onExtensao, minha, direto, movimento, semPonteiro = false }) {
     this.emitir = emitir;
+    // modo jogo: (key, { e, x, y, s }) -> true se o total andado saiu pelo canal sem ordem (rtc.canalMovimento)
+    this.movimento = movimento || (() => false);
     this.direto = direto || (() => false); // chave -> o evento vai pelo canal direto (sem servidor)?
     this.semPonteiro = semPonteiro; // celular: sem ponteiro preso no modo jogo (ver toque-jogo.js)
     this.toast = toast;
@@ -110,6 +120,13 @@ export class Controle {
     this.ultimoClique = null; // { video, b, x, y, t, n }: para contar duplo e triplo clique
     this.jogo = null; // { video, key }: modo jogo ligado nessa tela (ver o cabeçalho)
     this.cru = false; // o pointerrawupdate traz o movimento (aí o pointermove não manda de novo)
+    this.soma = null; // modo jogo: o total andado pelo mouse { e: sessão, x, y, s: número } (ver enviarMove)
+    this.livre = false; // modo jogo com o cursor do jogo à mostra (menu): o mouse vai pela posição
+    this.soltandoPonteiro = false; // eu soltei o ponteiro (menu do jogo): não é o Esc da pessoa
+    this.escEm = -1e9; // quando o último Esc foi para o jogo (o do teclado e o do ponteiro solto são um só)
+    this.dentes = 0; // roda no modo jogo: o que sobrou de um dente
+    this.movimentoCru = null; // o navegador deu o movimento sem a aceleração do Windows? (relatório)
+    this.ajudanteMs = null; // modo jogo: daqui até o ajudante e de volta, em média (relatório)
     // quem compartilha: key -> { deId, de, quando } de quem mexeu por último (deId null = eu mesmo)
     this.ultimo = new Map();
     // quem controla: key -> quando mandei algo para essa tela, e quando pedi um Ctrl+C nela (a volta
@@ -120,15 +137,34 @@ export class Controle {
     document.addEventListener('pointerlockchange', () => {
       const j = this.jogo;
       if (!j || document.pointerLockElement === j.video) return;
+      // fui eu (o jogo mostrou o cursor: ver cursorLivre)
+      if (this.soltandoPonteiro || this.livre) {
+        this.soltandoPonteiro = false;
+        return;
+      }
       // Esc soltou o ponteiro: o jogo lá recebe um Esc (abre o menu dele) e o modo jogo continua
       // armado — clicar na tela prende o mouse de novo. No celular não há ponteiro preso: lá o
       // controle de toque (toque-jogo.js) cuida do jogo.
       if (this.semPonteiro) return;
       this.soltarTeclas();
       this.soltarMouse();
-      this.mandar(j.key, { t: 'tecla', a: 'down', key: 'Escape', code: 'Escape', kc: 27, mod: 0 });
-      this.mandar(j.key, { t: 'tecla', a: 'up', key: 'Escape', code: 'Escape', kc: 27, mod: 0 });
+      // o mesmo Esc já foi pelo teclado (o keydown pode chegar antes de o ponteiro soltar)
+      if (performance.now() - this.escEm > 300) {
+        this.escEm = performance.now();
+        this.mandar(j.key, { t: 'tecla', a: 'down', key: 'Escape', code: 'Escape', kc: 27, mod: 0 });
+        this.mandar(j.key, { t: 'tecla', a: 'up', key: 'Escape', code: 'Escape', kc: 27, mod: 0 });
+      }
       this.onJogoSoltou?.(j.video);
+    });
+    setInterval(() => {
+      if (this.jogo) this.mandar(this.jogo.key, { t: 'vivo' });
+    }, VIVO_MS);
+    // A aba sumiu (outro app no celular, tela bloqueada, minimizou): o que estava apertado sobe já
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) return;
+      this.soltarTeclas();
+      this.soltarMouse();
+      this.onEscondeu?.();
     });
 
     window.addEventListener('message', (e) => {
@@ -235,6 +271,9 @@ export class Controle {
     this.desligarJogo();
     const key = this.superficies.get(video);
     this.jogo = { video, key };
+    this.soma = { e: Math.floor(Math.random() * 2 ** 31), x: 0, y: 0, s: 0 };
+    this.livre = false;
+    this.dentes = 0;
     this.focar(video);
     this.travarPonteiro();
     this.mandar(key, { t: 'modo', jogo: true });
@@ -246,20 +285,46 @@ export class Controle {
     if (!j) return;
     this.onJogo?.(null); // antes de desligar: o que o controle de toque segurava sobe como jogo
     this.jogo = null;
+    this.soma = null;
+    this.livre = false;
     if (document.pointerLockElement === j.video) document.exitPointerLock();
     this.mandar(j.key, { t: 'modo', jogo: false });
   }
 
   travarPonteiro() {
     const v = this.jogo?.video;
-    if (!v || this.semPonteiro || document.pointerLockElement === v) return;
+    if (!v || this.semPonteiro || this.livre || document.pointerLockElement === v) return;
     try {
       // movimento cru (sem a aceleração do Windows de quem controla), onde o navegador deixa
       const p = v.requestPointerLock({ unadjustedMovement: true });
-      if (p?.catch) p.catch(() => v.requestPointerLock());
+      if (p?.then) {
+        p.then(() => { this.movimentoCru = true; }, () => {
+          this.movimentoCru = false;
+          try { v.requestPointerLock()?.catch?.(() => {}); } catch { /* sem gesto: o próximo clique tenta */ }
+        });
+      }
     } catch {
       try { v.requestPointerLock(); } catch { /* gesto não valeu: o próximo clique tenta de novo */ }
     }
+  }
+
+  // O jogo mostrou o cursor (menu, inventário, pausa) ou escondeu de novo: o ajudante de quem
+  // compartilha vê e avisa (ver onCursor no main.js). Com o cursor à mostra o ponteiro solta e o
+  // mouse vai pela posição na imagem, como fora do modo jogo, sem esperar o cursor de lá voltar no
+  // vídeo. No celular, o controle de toque troca para os botões de menu (onCursorLivre).
+  cursorLivre(key, livre) {
+    const j = this.jogo;
+    if (!j || j.key !== key || this.livre === livre) return;
+    this.livre = livre;
+    this.soltarMouse();
+    this.cancelarMove();
+    if (!this.semPonteiro) {
+      if (livre && document.pointerLockElement === j.video) {
+        this.soltandoPonteiro = true;
+        document.exitPointerLock();
+      } else if (!livre) this.travarPonteiro(); // sem gesto o navegador pode recusar: o próximo clique prende
+    }
+    this.onCursorLivre?.(livre);
   }
 
   soltar(aba) {
@@ -286,6 +351,8 @@ export class Controle {
   // Chegou um clique/tecla de alguém para uma das minhas telas.
   async receber(sh, { ev, de, deId }) {
     if (!sh?.controle || (sh.aba == null && !sh.alvo)) return;
+    // o "estou aqui" do modo jogo só serve ao ajudante (janela/tela inteira)
+    if (ev?.t === 'vivo' && sh.aba != null) return;
     // modo jogo de quem controla: a sala deste PC fica leve enquanto durar (onModo, no main.js)
     if (ev?.t === 'modo' && deId) this.onModo?.(sh, ev.jogo, deId);
     // aba trocando de página (sem marca por um instante): ignora até a página nova aparecer
@@ -294,8 +361,17 @@ export class Controle {
     if ((ev?.t === 'nav' || ev?.t === 'dialogo') && sh.aba == null) return;
     // quem mexeu por último nesta tela (o movimento sozinho não conta): é para essa pessoa que vão
     // os avisos do site e o texto do Ctrl+C
-    if (!(ev?.t === 'mouse' && ev.a === 'move')) this.ultimo.set(sh.key, { deId: deId || null, de: de || null, quando: Date.now() });
+    if (!(ev?.t === 'mouse' && ev.a === 'move') && ev?.t !== 'vivo') this.ultimo.set(sh.key, { deId: deId || null, de: de || null, quando: Date.now() });
+    // Movimento do modo jogo numa janela, com a extensão 1.15+: vai por uma porta fixa até o ajudante,
+    // sem esperar resposta (eram 125 pedidos por segundo, cada um com ida e volta)
+    if (sh.aba == null && ev?.jogo && ev.t === 'mouse' && ev.a === 'move' && !ev.abs && versaoNum(this.ext.versao) >= versaoNum('1.15')) {
+      window.postMessage({ sala3d: 'janela-rapida', ev, alvo: sh.alvo }, location.origin);
+      return;
+    }
+    const t0 = performance.now();
     const r = sh.aba != null ? await this.pedir('entrada', sh.aba, ev) : await this.pedir('janela', null, ev, sh.alvo);
+    // daqui até o ajudante e de volta (relatório: o atraso do controle no PC de quem compartilha)
+    if (ev?.jogo && !r?.erro) this.ajudanteMs = this.ajudanteMs == null ? performance.now() - t0 : this.ajudanteMs * 0.9 + (performance.now() - t0) * 0.1;
     if (r?.erro) {
       if (r.erro === 'alvo-nao-achado') this.onAlvoPerdido?.(sh);
       // sem-dialogo: o aviso já tinha sido respondido (por quem compartilha, no Chrome dele)
@@ -306,6 +382,8 @@ export class Controle {
     if (r?.admin) this.onAdmin?.(sh, String(r.admin.titulo || ''), deId || null);
     // que programa está na janela (ajudante 1.6+): a sala reconhece o jogo por ele
     if (r?.qual) this.onQual?.(sh, r.qual);
+    // o cursor do jogo à mostra (menu) ou escondido (ajudante 1.8+)
+    if (typeof r?.cursor === 'boolean') this.onCursor?.(sh, r.cursor);
     // Ctrl+C de quem controla de longe: o texto vai para a área de transferência dela (mexendo na
     // minha própria aba, o Chrome já copiou para a minha)
     if (deId && typeof r?.copia === 'string' && r.copia) this.emitir('controle-volta', { key: sh.key, para: deId, ev: { t: 'copia', s: r.copia } });
@@ -428,7 +506,15 @@ export class Controle {
     this.movePendente = null;
     if (!p) return;
     this.ultimoMove = performance.now();
-    this.mandar(p.key, p.ev, true);
+    // modo jogo: o total andado, pelo canal sem ordem. Só entra na soma o que saiu por ele — o que
+    // foi pelo caminho de sempre (canal ainda abrindo) não pode ser contado duas vezes do outro lado.
+    const s = this.soma;
+    if (s && this.jogo?.key === p.key && p.ev.dx !== undefined && !p.ev.abs && !this.minha(p.key)) {
+      const novo = { e: s.e, x: s.x + p.ev.dx, y: s.y + p.ev.dy, s: s.s + 1 };
+      if (this.movimento(p.key, novo)) return void Object.assign(s, novo);
+    }
+    // o delta não pode se perder (o servidor descarta o "volátil" quando aperta): só a posição pode
+    this.mandar(p.key, p.ev, p.ev.dx === undefined);
   }
 
   // sempre o movimento mais novo; os que chegaram enquanto a extensão trabalhava ficam para trás
@@ -463,6 +549,21 @@ export class Controle {
     this.roda.dy += dy;
     // na minha aba a rolagem sai a cada quadro, como numa aba de verdade
     if (!this.rodaTimer) this.rodaTimer = setTimeout(() => this.enviarRoda(), this.minha(key) ? RODA_MINHA_MS : RODA_MS);
+  }
+
+  // Roda no modo jogo: em dentes inteiros, um evento por dente, na hora (jogo que conta por
+  // mensagem pulava item da barra com dois dentes somados num evento só)
+  girarJogo(key, e) {
+    const f = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? 800 : 1;
+    // wheelDeltaY: 120 por dente, qualquer que seja a rolagem configurada no Windows (o lado vem do
+    // deltaY: o sinal do wheelDeltaY varia)
+    if (!e.deltaY) return;
+    this.dentes += e.wheelDeltaY ? Math.sign(e.deltaY) * Math.abs(e.wheelDeltaY) : e.deltaY * f * 1.2;
+    while (Math.abs(this.dentes) >= DENTE) {
+      const lado = Math.sign(this.dentes);
+      this.dentes -= lado * DENTE;
+      this.mandar(key, { t: 'wheel', x: 0.5, y: 0.5, dx: 0, dy: lado * 100, mod: MOD(e) });
+    }
   }
 
   enviarRoda() {
@@ -520,7 +621,8 @@ export class Controle {
       const v = sob(e);
       if (!v) return;
       const emJogo = this.jogo && this.jogo.video === v;
-      const p = emJogo ? { x: 0.5, y: 0.5, dentro: true } : this.ponto(v, e);
+      const livre = emJogo && this.livre; // menu do jogo: o clique vai no ponto, como fora do modo jogo
+      const p = emJogo && !livre ? { x: 0.5, y: 0.5, dentro: true } : this.ponto(v, e);
       if (!p.dentro) return;
       e.preventDefault();
       // um botão que ficou com o foco levaria o Espaço e o Enter que eram para a tela
@@ -532,8 +634,12 @@ export class Controle {
       const key = this.superficies.get(v);
       const b = BOTAO[e.button] || 'left';
       const n = this.contarClique(v, b, e);
-      this.arrastando = { video: v, key, b, x: p.x, y: p.y, n };
-      this.mandar(key, { t: 'mouse', a: 'down', x: p.x, y: p.y, b, n, mod: MOD(e) });
+      this.arrastando = { video: v, key, b, x: p.x, y: p.y, n, abs: livre };
+      this.mandar(key, { t: 'mouse', a: 'down', x: p.x, y: p.y, b, n, mod: MOD(e), ...(livre ? { abs: true } : {}) });
+    });
+    // o botão "voltar" do mouse: o Chrome voltaria a página da própria sala
+    document.addEventListener('mouseup', (e) => {
+      if ((e.button === 3 || e.button === 4) && (sob(e) || this.jogo)) e.preventDefault();
     });
     document.addEventListener('pointerup', (e) => {
       const a = this.arrastando;
@@ -541,7 +647,7 @@ export class Controle {
       const p = this.ponto(a.video, e);
       this.arrastando = null;
       this.cancelarMove();
-      this.mandar(a.key, { t: 'mouse', a: 'up', x: p.x, y: p.y, b: BOTAO[e.button] || a.b, n: a.n, mod: MOD(e) });
+      this.mandar(a.key, { t: 'mouse', a: 'up', x: p.x, y: p.y, b: BOTAO[e.button] || a.b, n: a.n, mod: MOD(e), ...(a.abs ? { abs: true } : {}) });
     });
     document.addEventListener('pointermove', (e) => {
       const a = this.arrastando;
@@ -556,6 +662,7 @@ export class Controle {
       if (!a && !p.dentro) return;
       if (a) Object.assign(a, { x: p.x, y: p.y });
       const ev = { t: 'mouse', a: 'move', x: p.x, y: p.y, b: a?.b || 'left', arrastando: !!a, mod: MOD(e) };
+      if (this.jogo?.video === v && this.livre) ev.abs = true; // menu do jogo: o cursor de lá vai ao ponto
       this.mover(this.superficies.get(v), ev, a ? ARRASTO_MS : MOVE_MS);
     });
     // O mesmo movimento, sem esperar o quadro da tela (até 16 ms a 60 Hz). O primeiro que chega
@@ -574,6 +681,7 @@ export class Controle {
       const p = emJogo ? { x: 0.5, y: 0.5, dentro: true } : this.ponto(v, e);
       if (!p.dentro) return;
       e.preventDefault();
+      if (this.jogo?.video === v) return void this.girarJogo(this.superficies.get(v), e);
       const f = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? 800 : 1;
       this.girar(this.superficies.get(v), p, e.deltaX * f, e.deltaY * f, MOD(e));
     }, { passive: false });
@@ -624,18 +732,32 @@ export class Controle {
       if (a === 'up') return;
       const key = this.teclado ? this.superficies.get(this.teclado) : null;
       if (!key) return;
-      if (e.key === 'Escape' && !e.shiftKey) return;
+      const emJogo = this.jogo?.key === key;
+      // Modo jogo: o Esc é do jogo (pausa, fecha o inventário). Com o teclado travado na tela cheia
+      // ele chega aqui sem soltar o ponteiro; sem a trava o ponteiro solta e o pointerlockchange
+      // manda — o que vier primeiro marca escEm e o outro não manda de novo.
+      if (e.key === 'Escape' && !e.shiftKey && !emJogo) return;
+      if (e.key === 'Escape' && emJogo && a === 'down' && !e.repeat) {
+        if (performance.now() - this.escEm < 300) {
+          e.preventDefault();
+          return;
+        }
+        this.escEm = performance.now();
+      }
       // Ctrl+V: deixa o navegador colar; o texto vai pelo evento "paste"
       if ((e.ctrlKey || e.metaKey) && e.code === 'KeyV') return;
       e.preventDefault();
       e.stopImmediatePropagation();
-      if (a === 'down' && e.repeat && e.key.length !== 1 && !/^(Backspace|Delete|Arrow)/.test(e.key)) return;
+      // No jogo a tecla fica apertada lá (scancode): a repetição só gastava mensagem (o Backspace
+      // continua repetindo, para o chat)
+      if (a === 'down' && e.repeat && (emJogo ? e.key !== 'Backspace' : e.key.length !== 1 && !/^(Backspace|Delete|Arrow)/.test(e.key))) return;
       // o Shift do Shift+Esc não vai junto (do outro lado, Shift+Esc abre o gerenciador do Chrome)
       const ev = { t: 'tecla', a, key: e.key, code: e.code, kc: e.keyCode, mod: e.key === 'Escape' ? MOD(e) & ~8 : MOD(e) };
       // AltGr (Ctrl+Alt no Windows) que dá um caractere — @, €, ° e, no ABNT2, / e ?: do outro lado vai
       // como o caractere, e não como o atalho Ctrl+Alt+tecla (que não escreveria nada)
       if ([...e.key].length === 1 && e.getModifierState?.('AltGraph')) ev.ag = true;
-      if (e.code === 'AltLeft' && a === 'down') {
+      // no jogo, Alt segurado é Alt segurado (andar devagar, olhar livre): vai na hora
+      if (e.code === 'AltLeft' && a === 'down' && !emJogo) {
         if (!this.alt) this.alt = { key, ev, usado: false };
         return;
       }

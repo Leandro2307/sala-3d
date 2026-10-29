@@ -181,8 +181,9 @@ const bloqueadas = new Map(); // aba -> até quando
 const bloquear = (aba) => bloqueadas.set(aba, Date.now() + 3000);
 const bloqueada = (aba) => (bloqueadas.get(aba) || 0) > Date.now();
 
-const BOTAO = { left: 'left', right: 'right', middle: 'middle' };
-const BOTOES = { left: 1, right: 2, middle: 4 };
+// x1 e x2: os botões do lado do mouse (voltar e avançar)
+const BOTAO = { left: 'left', right: 'right', middle: 'middle', x1: 'back', x2: 'forward' };
+const BOTOES = { left: 1, right: 2, middle: 4, x1: 8, x2: 16 };
 const num = (v, min, max) => Math.min(max, Math.max(min, Number(v) || 0));
 
 async function despachar(aba, ev) {
@@ -459,7 +460,7 @@ function avisoNoIcone(aba, texto, cor, titulo, ms) {
 // ajudante nativo (pasta nativo/, instalado pelo instalar.bat), que mexe no mouse e no teclado
 // de verdade, sempre dentro da janela/tela compartilhada.
 const NATIVO = 'com.sala3d.controle';
-let nativo = null; // { porta, ok: null|true|false, chegou, alvo, definindo, semAlvo, respostaAlvo, sala, admin, qual }
+let nativo = null; // { porta, ok: null|true|false, chegou, alvo, definindo, semAlvo, respostaAlvo, sala, admin, qual, cursor }
 
 // o que se sabe do ajudante, da última vez que ele abriu (ou não): { ok, versao, erro, quando }
 let nativoInfo; // undefined: ainda não leu do storage; null: nunca tentou abrir
@@ -484,7 +485,7 @@ function conectarNativo() {
     return null;
   }
   let chegou;
-  const n = { porta, ok: null, alvo: null, definindo: null, semAlvo: null, respostaAlvo: null, sala: null, admin: null, qual: null, chegou: new Promise((r) => { chegou = r; }) };
+  const n = { porta, ok: null, alvo: null, definindo: null, semAlvo: null, respostaAlvo: null, sala: null, admin: null, qual: null, cursor: null, chegou: new Promise((r) => { chegou = r; }) };
   porta.onMessage.addListener((m) => {
     if (m?.tipo === 'oi') {
       n.ok = true;
@@ -498,6 +499,9 @@ function conectarNativo() {
     // que programa está na janela (na tela inteira, o da frente) — ajudante 1.6+. A sala reconhece
     // o jogo por ele e o celular de quem controla troca para os botões desse jogo.
     if (m?.tipo === 'qual') n.qual = { titulo: String(m.titulo || '').slice(0, 200), programa: String(m.programa || '').slice(0, 80) };
+    // modo jogo: o jogo mostrou o cursor (menu) ou escondeu (ajudante 1.8+). Vai na resposta de cada
+    // evento, e quem joga troca entre a câmera (mouse preso) e o menu (o mouse pela posição).
+    if (m?.tipo === 'cursor') n.cursor = !!m.livre;
     // Ctrl+Alt+End no teclado de quem compartilha: avisa a sala para desligar a permissão
     if (m?.tipo === 'parado' && n.sala != null) avisarSala(n.sala, { tipo: 'desligou', janela: true });
   });
@@ -568,6 +572,7 @@ function janela(alvo, ev, sala) {
     const r = { ok: true };
     if (n.admin) r.admin = n.admin;
     if (n.qual) r.qual = n.qual;
+    if (n.cursor != null) r.cursor = n.cursor;
     return r;
   });
   filaNativo = vez.catch(() => {});
@@ -584,6 +589,7 @@ function soltarJanela(cortar = false) {
   nativo.semAlvo = null;
   nativo.admin = null;
   nativo.qual = null;
+  nativo.cursor = null;
 }
 
 async function tratar(m, sender) {
@@ -969,6 +975,18 @@ async function cortarTudo() {
   }
   return { ok: true };
 }
+
+// Modo jogo: o movimento do mouse numa janela vem por uma porta fixa (conteudo.js), sem resposta —
+// antes era uma mensagem nova, com ida e volta, a cada 8 ms. Só da sala liberada.
+chrome.runtime.onConnect.addListener((porta) => {
+  if (porta.name !== 'sala3d-rapida' || !porta.sender?.tab) return;
+  const sala = porta.sender.tab.id;
+  const ok = liberado(porta.sender.url);
+  porta.onMessage.addListener(async (m) => {
+    if (!(await ok) || m?.tipo !== 'janela' || !m.ev || typeof m.ev !== 'object') return;
+    janela(m.alvo, m.ev, sala).catch(() => {});
+  });
+});
 
 chrome.runtime.onMessage.addListener((m, sender, responder) => {
   tratar(m || {}, sender).then(responder, (err) => responder({ erro: String(err?.message || err) }));

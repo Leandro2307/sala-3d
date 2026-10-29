@@ -22,7 +22,7 @@ const MOTIVOS = {
   internet: 'A banda entre vocês está no limite e o navegador baixou a resolução para não travar. O Wi-Fi perde pacotes e cada perda derruba a banda: cabo no PC de quem compartilha e o celular perto do roteador (rede de 5 GHz) ajudam; pela internet, o ideal é 25 Mbps de upload livres.',
   codificador: 'O codificador está soltando menos quadros do que a captura entrega.',
   perdas: 'A internet entre vocês está perdendo pacotes: o vídeo trava esperando o que se perdeu.',
-  tela: 'O vídeo chega e é decodificado inteiro, mas o aparelho mostra menos quadros. No iPhone, o Modo de Pouca Energia limita o Safari a 30 qps: desligue em Ajustes → Bateria (e deixe o celular carregando, se esquentar). No PC, feche o que pesa na placa.',
+  tela: 'O vídeo chega e é decodificado inteiro, mas o aparelho mostra menos quadros. No iPhone, o Modo de Pouca Energia limita o Safari a 30 qps: desligue em Ajustes → Bateria (e deixe o celular carregando, se esquentar). No PC, feche o que pesa na placa, e no notebook na bateria a Economia de energia do Chrome também limita a 30 qps (chrome://settings/performance).',
   decod: 'Este PC não está dando conta de decodificar o vídeo.',
 };
 
@@ -142,6 +142,9 @@ export class DiagJogo {
       degradacao: env?.params?.degradacao ?? null,
       nivel: env?.nivel ?? null,
       pessoas: cru.envios.length,
+      // quantos codificadores desta tela estão trabalhando (um por pessoa que recebe, na malha): quem
+      // assiste ao jogo de perto custava quadros a quem joga
+      codificadores: cru.envios.filter((e) => e.params?.active !== false && (e.saida?.framesPerSecond ?? 0) > 0).length,
     };
     resumo.fpsFinal = resumo.enviado;
     // quem joga (nível máximo) devia receber a captura inteira: abaixo de 60% das linhas é migalha
@@ -159,13 +162,15 @@ export class DiagJogo {
   }
 
   // ---------------------------------------------------------------- quem joga
-  amostraRecebe(cru, sala) {
+  // extra: o que o main.js mediu do controle (ping, tempo até o ajudante, movimento cru...)
+  amostraRecebe(cru, sala, extra = {}) {
     const s = this.sessao;
     if (!s || !cru) return null;
     const agora = performance.now();
     const antes = s.antes.get('recebe');
     const q = this.video?.getVideoPlaybackQuality?.();
-    s.antes.set('recebe', { t: agora, entrada: cru.entrada, naTela: this.naTela, q });
+    s.antes.set('recebe', { t: agora, entrada: cru.entrada, naTela: this.naTela, q, som: cru.som });
+    const somEmitidos = dif(cru.som, antes?.som, 'jitterBufferEmittedCount');
     const dt = antes ? (agora - antes.t) / 1000 : 0;
     const i = cru.entrada;
     const ib = antes?.entrada;
@@ -198,14 +203,25 @@ export class DiagJogo {
       caminho: cru.rede?.local ?? null,
       jitterBufferTarget: cru.jitterBufferTarget,
       playoutDelayHint: cru.playoutDelayHint,
-      la: la ? { captura: la.captura, enviado: la.enviado, altura: la.altura, kbps: la.kbps, limite: la.limite, motivo: la.motivo, codificador: la.codificador, placa: la.placa, imagemBaixa: la.imagemBaixa ?? null } : null,
+      la: la ? { captura: la.captura, enviado: la.enviado, altura: la.altura, kbps: la.kbps, limite: la.limite, motivo: la.motivo, codificador: la.codificador, placa: la.placa, imagemBaixa: la.imagemBaixa ?? null, codMs: la.codMs ?? null, filaMs: la.filaMs ?? null } : null,
+      // o som da mesma tela: buffer maior que o do vídeo faz o vídeo esperar por ele (sincronia)
+      somBufferMs: somEmitidos > 0 ? r1((1000 * dif(cru.som, antes?.som, 'jitterBufferDelay')) / somEmitidos) : null,
+      bufferMinimoMs: emitidos > 0 && i?.jitterBufferMinimumDelay != null ? r1((1000 * dif(i, ib, 'jitterBufferMinimumDelay')) / emitidos) : null,
+      ...extra,
     };
+    // Do dedo ao olho, estimado: o comando vai (metade do ping, mais o caminho até o ajudante), o jogo
+    // desenha (um quadro a 60), a captura e o codificador lá, a imagem volta (metade da ida e volta),
+    // espera no buffer, decodifica e espera a vez na tela (meio quadro)
+    if (resumo.controleRttMs != null && resumo.rttMs != null) {
+      resumo.atrasoMs = Math.round(resumo.controleRttMs / 2 + (resumo.ajudanteMs ?? 2) / 2 + 16.7 + 8 + (la?.codMs ?? 8) + (la?.filaMs ?? 0)
+        + resumo.rttMs / 2 + (resumo.bufferMs ?? 0) + (resumo.decMs ?? 0) + 8);
+    }
     resumo.fpsFinal = resumo.naTela ?? resumo.decodificado;
     resumo.imagemBaixa = la?.imagemBaixa ?? null;
     resumo.motivo = motivoRecebe(resumo, la);
     s.amostras.push({ ...resumo, sala, cru: s.amostras.length % 15 === 0 ? cru : undefined });
     if (s.amostras.length > GUARDA) s.amostras.shift();
-    console.log(`[modo-jogo] chegada: recebido ${resumo.recebido} → decodificado ${resumo.decodificado} → na tela ${resumo.naTela} qps · ${resumo.largura}x${resumo.altura} · ${resumo.kbps} kbps · decodifica ${resumo.decMs} ms (${resumo.decodificador}${resumo.placa ? ', placa' : ''}) · buffer ${resumo.bufferMs} ms · perdidos ${resumo.perdidos} · congelou ${resumo.congelou} (${resumo.congeladoMs} ms) · rtt ${resumo.rttMs} ms · ${resumo.caminho}${la ? ` · lá: captura ${la.captura}, enviado ${la.enviado}, limite ${la.limite}` : ' · sem notícia de lá'}${resumo.motivo ? ` · MOTIVO: ${resumo.motivo}` : ''}`, { resumo, sala });
+    console.log(`[modo-jogo] chegada: recebido ${resumo.recebido} → decodificado ${resumo.decodificado} → na tela ${resumo.naTela} qps · ${resumo.largura}x${resumo.altura} · ${resumo.kbps} kbps · decodifica ${resumo.decMs} ms (${resumo.decodificador}${resumo.placa ? ', placa' : ''}) · buffer ${resumo.bufferMs} ms (som ${resumo.somBufferMs} ms) · controle ${resumo.controleRttMs} ms · atraso total ~${resumo.atrasoMs} ms · perdidos ${resumo.perdidos} · congelou ${resumo.congelou} (${resumo.congeladoMs} ms) · rtt ${resumo.rttMs} ms · ${resumo.caminho}${la ? ` · lá: captura ${la.captura}, enviado ${la.enviado}, limite ${la.limite}` : ' · sem notícia de lá'}${resumo.motivo ? ` · MOTIVO: ${resumo.motivo}` : ''}`, { resumo, sala });
     this.julgar(resumo, 'joga');
     return resumo;
   }

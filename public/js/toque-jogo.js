@@ -18,19 +18,42 @@
 // Tudo vai por controle.mandar/mover: o modo jogo marca cada evento e o ajudante nativo do PC
 // manda como scancode e movimento relativo, igual ao mouse e ao teclado de verdade.
 
+import { opcoesJogo } from './jogo-opcoes.js';
+
 const DEAD = 0.25; // zona morta do analógico
 const CORRE = 0.95; // empurrar até a borda (para a frente) corre
 const OLHAR = 2.2; // pixels do dedo -> pixels de mouse (vezes a sensibilidade)
+const GIRO = 9; // graus por segundo do aparelho virando -> pixels de mouse por segundo (vezes a sensibilidade)
 const MOVE_MS = 16;
 const TOQUE_PX = 12; // no menu, o dedo que andou menos que isso até soltar clicou (mais é arrastar)
 const CHAVE_SENS = 'sala3d-toque-sens';
+const CHAVE_POS = 'sala3d-toque-pos'; // onde a pessoa arrastou cada botão, por layout (editor)
+
+// Analógico (do toque ou do controle de videogame, ver gamepad-jogo.js): dx, dy de -1 a 1 -> as
+// teclas que ele segura. Empurrado até a borda para a frente, corre (a tecla de correr do jogo).
+export function direcoesDoStick(dx, dy, correr) {
+  let len = Math.hypot(dx, dy);
+  if (len > 1) {
+    dx /= len;
+    dy /= len;
+    len = 1;
+  }
+  const quer = new Set();
+  if (len < DEAD) return quer;
+  if (dy < -0.38) quer.add('KeyW');
+  if (dy > 0.38) quer.add('KeyS');
+  if (dx < -0.38) quer.add('KeyA');
+  if (dx > 0.38) quer.add('KeyD');
+  if (len >= CORRE && dy < -0.7) quer.add(correr);
+  return quer;
+}
 
 const ESPECIAIS = {
   Space: [' ', 32], ShiftLeft: ['Shift', 16], ControlLeft: ['Control', 17], AltLeft: ['Alt', 18],
   Escape: ['Escape', 27], Tab: ['Tab', 9], Enter: ['Enter', 13],
 };
 // code ("KeyW", "Digit1", "F5") -> key e keyCode do navegador
-function teclaDe(code) {
+export function teclaDe(code) {
   if (ESPECIAIS[code]) return { key: ESPECIAIS[code][0], kc: ESPECIAIS[code][1] };
   let m = /^Key([A-Z])$/.exec(code);
   if (m) return { key: m[1].toLowerCase(), kc: m[1].charCodeAt(0) };
@@ -55,7 +78,7 @@ export function jogoDaJanela({ titulo = '', programa = '' } = {}) {
 }
 
 // quem controla: o título da tela (o nome do jogo) -> o layout
-const layoutDoTitulo = (titulo) => JOGOS.find((j) => j.titulo.test(String(titulo || '')))?.id ?? 'generico';
+export const layoutDoTitulo = (titulo) => JOGOS.find((j) => j.titulo.test(String(titulo || '')))?.id ?? 'generico';
 
 // Botão: r = rótulo, k = a tecla no PC (miúda, embaixo), a = lugar na grade, e o que ele faz:
 //   tecla: 'KeyE'                  segura enquanto o dedo está nele
@@ -64,6 +87,10 @@ const layoutDoTitulo = (titulo) => JOGOS.find((j) => j.titulo.test(String(titulo
 //   trava: 'ShiftLeft'             liga e desliga (agachar, mirar)
 //   menu: true                     abre um menu do jogo: os botões da direita viram os de menu
 //   texto: true                    abre o teclado do celular (chat)
+// pad: o controle de videogame (gamepad-jogo.js), pelo número do botão no mapa padrão do navegador
+// (0 A/✕, 1 B/○, 2 X/□, 3 Y/△, 4 LB/L1, 5 RB/R1, 6 LT/L2, 7 RT/R2, 8 Back/Share, 9 Start/Options,
+// 10 L3, 11 R3, 12-15 setas cima/baixo/esquerda/direita) -> 'KeyE', 'mouse:left', 'roda:1' (um dente
+// da roda) ou 'trava:ShiftLeft' (liga e desliga). O analógico esquerdo anda, o direito é a câmera.
 // Grade da direita: linhas p (baixa), m (média) e g (grande); cada coluna tem a largura de um
 // botão grande. Os tamanhos ficam no CSS (--tj-p, --tj-m, --tj-g), que encolhe nos celulares baixos.
 const MENU_PADRAO = {
@@ -76,7 +103,7 @@ const MENU_PADRAO = {
   ],
 };
 
-const LAYOUTS = {
+export const LAYOUTS = {
   minecraft: {
     nome: 'Minecraft',
     dica: 'Bater segurando quebra o bloco; o ⋯ da barra abre o inventário.',
@@ -84,6 +111,11 @@ const LAYOUTS = {
     escFecha: true, // o Esc fecha qualquer tela do Minecraft (inventário, pausa, baú)
     texto: { abre: 'KeyT', cancela: 'Escape', dica: 'Mensagem ou /comando' },
     hotbar: true,
+    // como no Minecraft de console: A pula, gatilhos batem e usam, LB/RB trocam o item
+    pad: {
+      0: 'Space', 1: 'KeyQ', 2: 'KeyE', 3: 'F5', 4: 'roda:-1', 5: 'roda:1', 6: 'mouse:right', 7: 'mouse:left',
+      8: 'KeyT', 9: 'Escape', 10: 'ControlLeft', 11: 'trava:ShiftLeft', 12: 'F5', 13: 'KeyQ', 14: 'roda:-1', 15: 'roda:1',
+    },
     topo: [
       { r: 'Chat', k: 'T', texto: true },
       { r: 'Pausar', k: 'Esc', tecla: 'Escape', menu: true },
@@ -116,6 +148,11 @@ const LAYOUTS = {
     nome: 'God of War',
     dica: 'Mirar liga e desliga: com ele aceso, Leve e Pesado arremessam o machado.',
     correr: 'ShiftLeft',
+    // como no controle do PlayStation: L1+R1 dá o rúnico (Q+esq.) e L3+R3 a fúria (Shift+meio) sozinhos
+    pad: {
+      0: 'KeyE', 1: 'Space', 2: 'KeyF', 3: 'KeyR', 4: 'KeyQ', 5: 'mouse:left', 6: 'ControlLeft', 7: 'mouse:right',
+      8: 'KeyM', 9: 'Escape', 10: 'ShiftLeft', 11: 'mouse:middle', 12: 'KeyT', 13: 'KeyX',
+    },
     topo: [
       { r: 'Virar', k: 'X', tecla: 'KeyX' },
       { r: 'Flechas', k: 'T', tecla: 'KeyT' },
@@ -148,6 +185,10 @@ const LAYOUTS = {
   generico: {
     nome: 'Genérico',
     correr: 'ShiftLeft',
+    pad: {
+      0: 'Space', 1: 'ControlLeft', 2: 'KeyE', 3: 'KeyR', 4: 'KeyQ', 5: 'KeyF', 6: 'mouse:right', 7: 'mouse:left',
+      8: 'Tab', 9: 'Escape', 10: 'ShiftLeft', 11: 'mouse:middle', 12: 'Digit1', 13: 'Digit2', 14: 'Digit3', 15: 'Digit4',
+    },
     texto: { dica: 'Texto para o jogo (vai com Enter)' },
     topo: [
       { r: 'Tab', tecla: 'Tab' },
@@ -168,15 +209,25 @@ const LAYOUTS = {
 };
 
 const LINHA = { p: 'var(--tj-p)', m: 'var(--tj-m)', g: 'var(--tj-g)' };
-const htmlBotao = (b) => `<button type="button"${b.cls ? ` class="${b.cls}"` : ''}${b.a ? ` style="grid-area:${b.a}"` : ''}>`
+const htmlBotao = (b) => `<button type="button"${b.cls ? ` class="${b.cls}"` : ''}${b.a ? ` data-a="${b.a}" style="grid-area:${b.a}"` : ''}>`
   + `<b>${b.r}</b>${b.k ? `<small>${b.k}</small>` : ''}</button>`;
 
-function lerSens() {
+export function lerSens() {
   try {
     const v = Number(localStorage.getItem(CHAVE_SENS));
     return v >= 0.4 && v <= 2.5 ? v : 1;
   } catch {
     return 1;
+  }
+}
+
+// { layout: { lugar: [dx, dy] } }: o deslocamento de cada botão (e do 'stick' e da 'hotbar')
+function lerPosicoes() {
+  try {
+    const v = JSON.parse(localStorage.getItem(CHAVE_POS) || '{}');
+    return v && typeof v === 'object' ? v : {};
+  } catch {
+    return {};
   }
 }
 
@@ -200,20 +251,37 @@ export class ToqueJogo {
     this.menu = false;
     this.slot = null; // item escolhido na barra do Minecraft (0-8), depois do primeiro toque nela
     this.sens = lerSens();
+    this.layoutId = null;
+    this.posicoes = lerPosicoes();
+    this.editando = false; // "Mover botões": arrastar muda o lugar, não aperta
+    this.resto = { x: 0, y: 0 }; // fração de pixel do dedo e do giroscópio que ainda não foi (ver olhar)
     this.montar();
+    this.ligarGiro();
   }
 
   montar() {
     const r = this.raiz;
     r.innerHTML = `
       <div class="tj-olhar"></div>
+      <div class="tj-zona"></div>
       <button type="button" class="tj-chip" aria-haspopup="dialog"></button>
       <div class="tj-painel" role="dialog" aria-label="Botões do modo jogo" hidden>
         <p class="tj-painel-tit">Botões do controle</p>
         <div class="tj-opcoes"></div>
         <label class="tj-sens"><span>Sensibilidade</span><input type="range" min="0.4" max="2.5" step="0.1"><output></output></label>
+        <div class="tj-liga">
+          <label><input type="checkbox" data-op="liso"><span>Imagem mais lisa <small>(+40 ms de atraso)</small></span></label>
+          <label><input type="checkbox" data-op="menuAuto"><span>Menu do jogo automático</span></label>
+          <label><input type="checkbox" data-op="selo"><span>Mostrar desempenho</span></label>
+          <label><input type="checkbox" data-op="giro"><span>Mirar virando o celular</span></label>
+        </div>
+        <div class="tj-edicao">
+          <button type="button" class="tj-mover">Mover botões</button>
+          <button type="button" class="tj-restaurar">Lugar original</button>
+        </div>
         <button type="button" class="tj-ok">Pronto</button>
       </div>
+      <p class="tj-editando-dica" hidden>Arraste os botões e o analógico para onde quiser <button type="button" class="tj-fim-edicao">Pronto</button></p>
       <div class="tj-topo"></div>
       <p class="tj-dica" hidden>Menu do jogo: toque onde quer clicar · arraste para levar o cursor</p>
       <div class="tj-stick"><div class="tj-ring"></div><div class="tj-knob"></div></div>
@@ -257,6 +325,119 @@ export class ToqueJogo {
     });
     // nada de menu de toque longo, seleção de texto ou zoom por cima do jogo
     r.addEventListener('contextmenu', (e) => e.preventDefault());
+    // opções (jogo-opcoes.js): valem também no PC
+    r.querySelector('.tj-liga').addEventListener('change', async (e) => {
+      const k = e.target.dataset.op;
+      if (!k) return;
+      let v = e.target.checked;
+      // iPhone: o giroscópio só com a permissão, pedida no toque
+      if (k === 'giro' && v && typeof DeviceMotionEvent?.requestPermission === 'function') {
+        v = (await DeviceMotionEvent.requestPermission().catch(() => 'denied')) === 'granted';
+        e.target.checked = v;
+        if (!v) this.toast('Sem permissão para o giroscópio: libere em Ajustes → Safari → Movimento e orientação.', 'warn', 6000);
+      }
+      opcoesJogo.set(k, v);
+    });
+    r.querySelector('.tj-mover').addEventListener('click', () => this.editar(true));
+    r.querySelector('.tj-fim-edicao').addEventListener('click', () => this.editar(false));
+    r.querySelector('.tj-restaurar').addEventListener('click', () => {
+      if (!this.layoutId) return;
+      delete this.posicoes[this.layoutId];
+      this.gravarPosicoes();
+      this.posicionar();
+    });
+    this.ligarEditor();
+  }
+
+  // ---------------------------------------------------------------- editor (mover botões)
+  editar(on) {
+    this.editando = on;
+    if (on) {
+      this.soltarTudo();
+      this.fecharPainel();
+    }
+    this.raiz.classList.toggle('tj-editando', on);
+    this.raiz.querySelector('.tj-editando-dica').hidden = !on;
+  }
+
+  gravarPosicoes() {
+    try { localStorage.setItem(CHAVE_POS, JSON.stringify(this.posicoes)); } catch { /* sem armazenamento */ }
+  }
+
+  // os botões (pelo lugar na grade), o analógico e a barra de itens onde a pessoa deixou
+  posicionar() {
+    const pos = this.posicoes[this.layoutId] || {};
+    const r = this.raiz;
+    const por = (el, lugar) => {
+      const p = pos[lugar];
+      el.style.translate = p ? `${p[0]}px ${p[1]}px` : '';
+    };
+    r.querySelectorAll('.tj-acoes button[data-a]').forEach((el) => por(el, el.dataset.a));
+    por(r.querySelector('.tj-stick'), 'stick');
+    por(r.querySelector('.tj-hotbar'), 'hotbar');
+  }
+
+  // No modo de editar, arrastar um botão leva ele junto (na fase de captura: o botão nem fica sabendo)
+  ligarEditor() {
+    this.raiz.addEventListener('pointerdown', (e) => {
+      if (!this.editando) return;
+      const el = e.target.closest('.tj-acoes button[data-a], .tj-stick, .tj-hotbar');
+      if (!el) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const lugar = el.classList.contains('tj-stick') ? 'stick' : el.classList.contains('tj-hotbar') ? 'hotbar' : el.dataset.a;
+      const pos = (this.posicoes[this.layoutId] ||= {});
+      const [x0, y0] = pos[lugar] || [0, 0];
+      const sx = e.clientX;
+      const sy = e.clientY;
+      const id = e.pointerId;
+      const mover = (m) => {
+        if (m.pointerId !== id) return;
+        pos[lugar] = [Math.round(x0 + m.clientX - sx), Math.round(y0 + m.clientY - sy)];
+        el.style.translate = `${pos[lugar][0]}px ${pos[lugar][1]}px`;
+      };
+      const fim = (m) => {
+        if (m.pointerId !== id) return;
+        removeEventListener('pointermove', mover);
+        removeEventListener('pointerup', fim);
+        removeEventListener('pointercancel', fim);
+        this.gravarPosicoes();
+      };
+      addEventListener('pointermove', mover);
+      addEventListener('pointerup', fim);
+      addEventListener('pointercancel', fim);
+    }, true);
+  }
+
+  // ---------------------------------------------------------------- giroscópio (mirar virando o celular)
+  // O celular deitado: virar para os lados gira em volta do eixo x do aparelho (beta) e inclinar para
+  // trás, em volta do y (gamma). Deitado para o outro lado (270°), os dois se invertem.
+  ligarGiro() {
+    addEventListener('devicemotion', (e) => {
+      if (!this.key || this.menu || this.editando || !opcoesJogo.get('giro')) return;
+      const r = e.rotationRate;
+      if (!r || r.beta == null) return;
+      const dt = Math.min(0.1, (e.interval > 1 ? e.interval / 1000 : e.interval) || 1 / 60);
+      const lado = (screen.orientation?.angle ?? window.orientation ?? 90) === 270 || window.orientation === -90 ? 1 : -1;
+      this.olhar(lado * r.beta * GIRO * dt, lado * r.gamma * GIRO * dt);
+    });
+  }
+
+  // manda à câmera um movimento em pixels de mouse, com a fração que sobrou da vez anterior (sem
+  // isso, o dedo devagar — mirando — mandava 0,3 px por evento, que arredondava para nada)
+  olhar(fx, fy) {
+    const x = fx * this.sens + this.resto.x;
+    const y = fy * this.sens + this.resto.y;
+    const dx = Math.round(x);
+    const dy = Math.round(y);
+    this.resto = { x: x - dx, y: y - dy };
+    if (dx || dy) this.controle.mover(this.key, { t: 'mouse', a: 'move', dx, dy, b: 'left', arrastando: false, mod: 0 }, MOVE_MS);
+  }
+
+  // O jogo mostrou o cursor (menu, inventário) ou escondeu: os botões trocam sozinhos, se a pessoa deixou
+  cursorDoJogo(livre) {
+    if (!this.key || !opcoesJogo.get('menuAuto')) return;
+    this.trocarMenu(livre);
   }
 
   get painel() { return this.raiz.querySelector('.tj-painel'); }
@@ -268,6 +449,7 @@ export class ToqueJogo {
     this.soltarTudo();
     this.fecharTexto();
     this.layout = L;
+    this.layoutId = LAYOUTS[id] ? id : 'generico';
     this.menu = false;
     this.slot = null;
     this.raiz.dataset.layout = id;
@@ -309,6 +491,7 @@ export class ToqueJogo {
     hotbar.hidden = !L.hotbar || this.menu;
     hotbar.innerHTML = '';
     if (!hotbar.hidden) this.montarHotbar(hotbar);
+    this.posicionar();
   }
 
   // Barra de itens do Minecraft: 1 a 9 escolhem o item, e o ⋯ abre o inventário (como no
@@ -372,6 +555,7 @@ export class ToqueJogo {
       .map(([id, txt]) => `<button type="button" data-layout="${id}"${this.escolha === id ? ' class="on" aria-pressed="true"' : ''}>${txt}</button>`).join('');
     p.querySelector('.tj-sens input').value = String(this.sens);
     this.mostrarSens();
+    p.querySelectorAll('[data-op]').forEach((el) => { el.checked = !!opcoesJogo.get(el.dataset.op); });
     p.hidden = false;
   }
 
@@ -426,8 +610,11 @@ export class ToqueJogo {
     el.addEventListener('pointercancel', (e) => { if (e.pointerId === id) fim(false); });
   }
 
+  // O analógico: no lugar dele, ou flutuante — o polegar que encosta em qualquer ponto da zona da
+  // esquerda (.tj-zona) traz o analógico para baixo dele, como nos jogos de celular; ao soltar ele volta.
   ligarStick(el) {
     const knob = el.querySelector('.tj-knob');
+    const zona = this.raiz.querySelector('.tj-zona');
     let id = null;
     let cx = 0, cy = 0, raio = 60;
     const aplicar = (x, y) => {
@@ -437,14 +624,7 @@ export class ToqueJogo {
       if (len > 1) { dx /= len; dy /= len; }
       knob.style.transform = `translate(${dx * raio}px, ${dy * raio}px)`;
       const correr = this.layout?.correr || 'ShiftLeft';
-      const quer = new Set();
-      if (len >= DEAD) {
-        if (dy < -0.38) quer.add('KeyW');
-        if (dy > 0.38) quer.add('KeyS');
-        if (dx < -0.38) quer.add('KeyA');
-        if (dx > 0.38) quer.add('KeyD');
-        if (len >= CORRE && dy < -0.7) quer.add(correr);
-      }
+      const quer = direcoesDoStick(dx, dy, correr);
       el.classList.toggle('correndo', quer.has(correr));
       // a tecla de correr desce antes do W (o Minecraft só corre assim)
       for (const c of [correr, 'KeyW', 'KeyA', 'KeyS', 'KeyD']) {
@@ -462,32 +642,47 @@ export class ToqueJogo {
       id = null;
       el.classList.remove('ativo', 'correndo');
       knob.style.transform = '';
+      el.style.transform = '';
       for (const c of this.doStick) this.largar(c);
       this.doStick.clear();
     };
-    el.addEventListener('pointerdown', (e) => {
+    const comeca = (e, alvo, flutuante) => {
       e.preventDefault();
-      if (id !== null) return;
+      if (id !== null || this.editando) return;
       id = e.pointerId;
+      el.style.transform = '';
       const r = el.getBoundingClientRect();
-      cx = r.left + r.width / 2;
-      cy = r.top + r.height / 2;
       raio = r.width / 2;
-      try { el.setPointerCapture(id); } catch { /* ponteiro já solto */ }
+      if (flutuante) {
+        // o centro vai para baixo do polegar
+        el.style.transform = `translate(${e.clientX - (r.left + raio)}px, ${e.clientY - (r.top + raio)}px)`;
+        cx = e.clientX;
+        cy = e.clientY;
+      } else {
+        cx = r.left + raio;
+        cy = r.top + r.height / 2;
+      }
+      try { alvo.setPointerCapture(id); } catch { /* ponteiro já solto */ }
       el.classList.add('ativo');
       aplicar(e.clientX, e.clientY);
-    });
-    el.addEventListener('pointermove', (e) => {
+    };
+    const move = (e) => {
       if (e.pointerId === id) aplicar(e.clientX, e.clientY);
-    });
+    };
     const solta = (e) => {
       if (e.pointerId !== id) return;
       id = null;
       el.classList.remove('ativo');
       aplicar(cx, cy);
+      el.style.transform = '';
     };
-    el.addEventListener('pointerup', solta);
-    el.addEventListener('pointercancel', solta);
+    el.addEventListener('pointerdown', (e) => comeca(e, el, false));
+    zona.addEventListener('pointerdown', (e) => comeca(e, zona, true));
+    for (const alvo of [el, zona]) {
+      alvo.addEventListener('pointermove', move);
+      alvo.addEventListener('pointerup', solta);
+      alvo.addEventListener('pointercancel', solta);
+    }
   }
 
   // No jogo, arrastar = mexer o mouse (a câmera). Só o primeiro dedo vale: o segundo dedo está
@@ -528,9 +723,7 @@ export class ToqueJogo {
         ux = p.clientX;
         uy = p.clientY;
       }
-      dx = Math.round(dx * OLHAR * this.sens);
-      dy = Math.round(dy * OLHAR * this.sens);
-      if (dx || dy) this.controle.mover(this.key, { t: 'mouse', a: 'move', dx, dy, b: 'left', arrastando: false, mod: 0 }, MOVE_MS);
+      this.olhar(dx * OLHAR, dy * OLHAR);
     });
     el.addEventListener('pointerup', (e) => {
       if (e.pointerId !== id) return;

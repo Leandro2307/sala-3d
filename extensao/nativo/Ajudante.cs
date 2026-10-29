@@ -61,6 +61,7 @@ namespace Sala3d
             public int cbSize; public RECT rcMonitor; public RECT rcWork; public uint dwFlags;
             [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string szDevice;
         }
+        [StructLayout(LayoutKind.Sequential)] struct CURSORINFO { public int cbSize; public int flags; public IntPtr hCursor; public PONTO pt; }
         delegate bool EnumWin(IntPtr h, IntPtr l);
         delegate bool EnumMon(IntPtr m, IntPtr dc, ref RECT r, IntPtr l);
 
@@ -77,6 +78,8 @@ namespace Sala3d
         [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr h, out RECT r);
         [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr h, int a, out RECT r, int size);
         [DllImport("user32.dll")] static extern short GetAsyncKeyState(int vk);
+        [DllImport("user32.dll")] static extern bool GetCursorInfo(ref CURSORINFO ci);
+        [DllImport("user32.dll")] static extern bool GetClipCursor(out RECT r);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
         [DllImport("user32.dll")] static extern bool EnumWindows(EnumWin p, IntPtr l);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern bool EnumDisplayDevices(string dev, uint i, ref DISPLAY_DEVICE d, uint f);
@@ -97,7 +100,7 @@ namespace Sala3d
         const uint MOUSEEVENTF_MOVE = 1, KEYEVENTF_EXTENDEDKEY = 1, KEYEVENTF_KEYUP = 2, KEYEVENTF_UNICODE = 4, KEYEVENTF_SCANCODE = 8;
         const uint MOUSEEVENTF_LEFTDOWN = 2, MOUSEEVENTF_LEFTUP = 4, MOUSEEVENTF_RIGHTDOWN = 8, MOUSEEVENTF_RIGHTUP = 16,
                    MOUSEEVENTF_MIDDLEDOWN = 32, MOUSEEVENTF_MIDDLEUP = 64, MOUSEEVENTF_WHEEL = 0x800, MOUSEEVENTF_HWHEEL = 0x1000,
-                   MOUSEEVENTF_VIRTUALDESK = 0x4000, MOUSEEVENTF_ABSOLUTE = 0x8000;
+                   MOUSEEVENTF_VIRTUALDESK = 0x4000, MOUSEEVENTF_ABSOLUTE = 0x8000, MOUSEEVENTF_XDOWN = 0x80, MOUSEEVENTF_XUP = 0x100;
         const int VK_CONTROL = 0x11, VK_MENU = 0x12, VK_END = 0x23, VK_LWIN = 0x5B, VK_RWIN = 0x5C;
 
         // ------------------------------------------------------------ estado
@@ -119,6 +122,14 @@ namespace Sala3d
         static IntPtr conferida = IntPtr.Zero;
         static bool avisouAdmin;
         static string qualEnviado; // título + programa do último "qual" mandado
+        // Quem joga manda um "vivo" a cada meio segundo (site novo: vivoVisto). Sem nenhuma mensagem
+        // por SEM_NOTICIA_MS com tecla ou botão apertado, solta tudo: quem jogava fechou a aba, o
+        // celular bloqueou ou a rede caiu, e o personagem ficava andando sozinho.
+        const int SEM_NOTICIA_MS = 1500;
+        static int ultimaEntrada;
+        static bool vivoVisto;
+        // o cursor do jogo à mostra (menu) ou escondido: o último mandado (null = nenhum ainda)
+        static bool? cursorEnviado;
 
         // ------------------------------------------------------------ protocolo
         static string Ler(Stream e)
@@ -154,7 +165,8 @@ namespace Sala3d
             saida = Console.OpenStandardOutput();
             var entrada = Console.OpenStandardInput();
             new Thread(VigiarAtalho) { IsBackground = true }.Start();
-            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.7.0" } });
+            new Thread(VigiarJogo) { IsBackground = true }.Start();
+            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.8.0" } });
             var json = new JavaScriptSerializer();
             string txt;
             while ((txt = Ler(entrada)) != null)
@@ -198,15 +210,18 @@ namespace Sala3d
             // "parar"), só volta quando quem compartilha liberar de novo na sala
             if (tipo == "retomar") { parado = false; return; }
             if (tipo == "parar") { lock (travaEntrada) { parado = true; SoltarTudo(); } return; }
-            if (tipo == "soltar") { jogo = false; SoltarTudo(); temAlvo = false; rotuloAtual = null; qualEnviado = null; return; }
+            if (tipo == "soltar") { jogo = false; vivoVisto = false; cursorEnviado = null; SoltarTudo(); temAlvo = false; rotuloAtual = null; qualEnviado = null; return; }
             if (tipo != "entrada" || !temAlvo || parado) return;
             var ev = m["ev"] as Dictionary<string, object>;
             if (ev == null) return;
             string t = S(ev, "t");
+            ultimaEntrada = Environment.TickCount;
+            if (t == "vivo") { vivoVisto = true; return; }
             if (t == "modo")
             {
                 jogo = B(ev, "jogo");
-                if (!jogo) SoltarTudo();
+                cursorEnviado = null; // o jogo conta de novo se o cursor está à mostra
+                if (!jogo) { vivoVisto = false; SoltarTudo(); }
                 else EscreverQual(ehJanela ? janela : GetForegroundWindow()); // na tela inteira, o jogo já está na frente
                 return;
             }
@@ -425,10 +440,17 @@ namespace Sala3d
             SetCursorPos(x, y);
             if (a == "move") return;
             if (a == "down") ConferirSob();
-            uint desce = b == "right" ? MOUSEEVENTF_RIGHTDOWN : b == "middle" ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_LEFTDOWN;
-            uint sobe = b == "right" ? MOUSEEVENTF_RIGHTUP : b == "middle" ? MOUSEEVENTF_MIDDLEUP : MOUSEEVENTF_LEFTUP;
-            if (a == "down") { MouseFlag(desce); botoesApertados.Add(b); }
-            else if (a == "up") { MouseFlag(sobe); botoesApertados.Remove(b); }
+            if (a == "down" || a == "up") Botao(b, a == "down");
+        }
+
+        // aperta ou solta um botão: left, right, middle, ou x1/x2 (os do lado do mouse: voltar e avançar)
+        static void Botao(string b, bool desce)
+        {
+            if (b == "x1" || b == "x2") MouseFlag(desce ? MOUSEEVENTF_XDOWN : MOUSEEVENTF_XUP, b == "x1" ? 1u : 2u);
+            else if (b == "right") MouseFlag(desce ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP);
+            else if (b == "middle") MouseFlag(desce ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_MIDDLEUP);
+            else MouseFlag(desce ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP);
+            if (desce) botoesApertados.Add(b); else botoesApertados.Remove(b);
         }
 
         static void Roda(double fx, double fy, double dx, double dy)
@@ -467,10 +489,7 @@ namespace Sala3d
                 Enviar(i);
                 return;
             }
-            uint desce = b == "right" ? MOUSEEVENTF_RIGHTDOWN : b == "middle" ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_LEFTDOWN;
-            uint sobe = b == "right" ? MOUSEEVENTF_RIGHTUP : b == "middle" ? MOUSEEVENTF_MIDDLEUP : MOUSEEVENTF_LEFTUP;
-            if (a == "down") { MouseFlag(desce); botoesApertados.Add(b); }
-            else if (a == "up") { MouseFlag(sobe); botoesApertados.Remove(b); }
+            if (a == "down" || a == "up") Botao(b, a == "down");
         }
 
         // Menu do jogo pelo celular: o dedo aponta o lugar (x, y de 0 a 1 na janela/tela, como no
@@ -484,10 +503,7 @@ namespace Sala3d
             MoverPara(x, y);
             if (a == "move") return;
             if (a == "down" && !ehJanela) ConferirAdmin(GetAncestor(WindowFromPoint(new PONTO { X = x, Y = y }), 2 /* GA_ROOT */));
-            uint desce = b == "right" ? MOUSEEVENTF_RIGHTDOWN : b == "middle" ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_LEFTDOWN;
-            uint sobe = b == "right" ? MOUSEEVENTF_RIGHTUP : b == "middle" ? MOUSEEVENTF_MIDDLEUP : MOUSEEVENTF_LEFTUP;
-            if (a == "down") { MouseFlag(desce); botoesApertados.Add(b); }
-            else if (a == "up") { MouseFlag(sobe); botoesApertados.Remove(b); }
+            if (a == "down" || a == "up") Botao(b, a == "down");
         }
 
         // pixel da área de trabalho -> 0..65535 da tela virtual (todos os monitores juntos)
@@ -535,7 +551,9 @@ namespace Sala3d
             { "Numpad6", 0x4D }, { "NumpadAdd", 0x4E }, { "Numpad1", 0x4F }, { "Numpad2", 0x50 },
             { "Numpad3", 0x51 }, { "Numpad0", 0x52 }, { "NumpadDecimal", 0x53 }, { "IntlBackslash", 0x56 },
             { "F11", 0x57 }, { "F12", 0x58 }, { "IntlRo", 0x73 }, { "Convert", 0x79 }, { "NonConvert", 0x7B },
-            { "IntlYen", 0x7D },
+            { "IntlYen", 0x7D }, { "NumpadComma", 0x7E }, { "NumpadEqual", 0x59 },
+            { "F13", 0x64 }, { "F14", 0x65 }, { "F15", 0x66 }, { "F16", 0x67 }, { "F17", 0x68 }, { "F18", 0x69 },
+            { "F19", 0x6A }, { "F20", 0x6B }, { "F21", 0x6C }, { "F22", 0x6D }, { "F23", 0x6E }, { "F24", 0x76 },
             { "NumpadEnter", 0x11C }, { "ControlRight", 0x11D }, { "NumpadDivide", 0x135 }, { "AltRight", 0x138 },
             { "Home", 0x147 }, { "ArrowUp", 0x148 }, { "PageUp", 0x149 }, { "ArrowLeft", 0x14B },
             { "ArrowRight", 0x14D }, { "End", 0x14F }, { "ArrowDown", 0x150 }, { "PageDown", 0x151 },
@@ -622,9 +640,55 @@ namespace Sala3d
             foreach (var scan in new List<int>(scansApertados)) Scan(scan, true);
             scansApertados.Clear();
             ctrlRemoto = altRemoto = false;
-            foreach (var b in new List<string>(botoesApertados))
-                MouseFlag(b == "right" ? MOUSEEVENTF_RIGHTUP : b == "middle" ? MOUSEEVENTF_MIDDLEUP : MOUSEEVENTF_LEFTUP);
+            foreach (var b in new List<string>(botoesApertados)) Botao(b, false);
             botoesApertados.Clear();
+        }
+
+        // ------------------------------------------------------------ vigia do modo jogo
+        // A cada 100 ms: (1) sem notícia de quem joga, com tecla apertada, solta tudo; (2) o cursor do
+        // jogo apareceu (menu, inventário, pausa) ou sumiu — 3 leituras iguais seguidas antes de
+        // avisar, e quem joga troca o mouse entre câmera (delta) e menu (posição).
+        static void VigiarJogo()
+        {
+            bool? candidato = null;
+            int iguais = 0;
+            while (true)
+            {
+                Thread.Sleep(100);
+                try
+                {
+                    lock (travaEntrada)
+                    {
+                        if (jogo && vivoVisto && !parado && (scansApertados.Count > 0 || botoesApertados.Count > 0)
+                            && unchecked(Environment.TickCount - ultimaEntrada) > SEM_NOTICIA_MS)
+                        {
+                            SoltarTudo();
+                            Escrever(new Dictionary<string, object> { { "tipo", "soltou" } });
+                        }
+                    }
+                    if (!jogo || !temAlvo || parado) { candidato = null; iguais = 0; continue; }
+                    // janela: só vale com ela na frente (fora dela o cursor é o da área de trabalho)
+                    if (ehJanela && GetForegroundWindow() != janela) continue;
+                    bool livre = CursorLivre();
+                    if (livre == candidato) iguais++; else { candidato = livre; iguais = 1; }
+                    if (iguais < 3 || cursorEnviado == livre) continue;
+                    cursorEnviado = livre;
+                    Escrever(new Dictionary<string, object> { { "tipo", "cursor" }, { "livre", livre } });
+                }
+                catch { /* a saída fechou: o Rodar termina sozinho */ }
+            }
+        }
+
+        // O cursor está à mostra e solto? Jogo com a câmera no mouse esconde o cursor (ShowCursor ou
+        // cursor nulo) e alguns o prendem num ponto: preso numa área pequena conta como escondido.
+        static bool CursorLivre()
+        {
+            var ci = new CURSORINFO(); ci.cbSize = Marshal.SizeOf(ci);
+            if (!GetCursorInfo(ref ci)) return false;
+            bool visivel = (ci.flags & 1) != 0 && ci.hCursor != IntPtr.Zero; // CURSOR_SHOWING
+            RECT c;
+            bool preso = GetClipCursor(out c) && (c.Right - c.Left < 64 || c.Bottom - c.Top < 64);
+            return visivel && !preso;
         }
 
         // Ctrl+Alt+End no teclado de verdade: corta o controle e avisa a sala

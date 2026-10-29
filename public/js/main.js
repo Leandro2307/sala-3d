@@ -21,6 +21,8 @@ import { Jogos } from './jogos.js';
 import { Controle, versaoNum, eventoDeControle } from './controle.js';
 import { AvisoDoSite } from './aviso-site.js';
 import { ToqueJogo, jogoDaJanela } from './toque-jogo.js';
+import { ControleFisico } from './gamepad-jogo.js';
+import { opcoesJogo, LISO_MS } from './jogo-opcoes.js';
 import { Mesa } from './mesa.js';
 import { Qualidade, NIVEIS, nivelInicial } from './qualidade.js';
 import * as moduloQualidade from './qualidade.js';
@@ -1390,6 +1392,7 @@ function bindSocket() {
       updateFocusCtrl();
       // reconheceu o jogo da janela agora: o controle de toque passa para os botões dele
       toqueJogo.jogoDaTela(key, tinha.titulo);
+      fisico.jogoDaTela(key, tinha.titulo);
     } else if (u.isSelf) {
       return;
     } else if (gone) {
@@ -2369,6 +2372,8 @@ const controle = new Controle({
   },
   // o canal com o dono da tela está aberto (o modo jogo manda o mouse mais vezes por ele)
   direto: (key) => !!rtc?.canalControle(String(key).split('~')[0]),
+  // modo jogo: o total andado pelo mouse, no canal sem ordem (ver rtc.canalMovimento e receberDireto)
+  movimento: (key, total) => !!rtc?.mandarMovimento(String(key).split('~')[0], { m: { key, ...total } }),
   semPonteiro: isTouch,
   // as minhas telas: o evento vai direto para a extensão, sem ida e volta pelo servidor
   minha: (key) => self()?.shares.get(key) ?? null,
@@ -2395,6 +2400,12 @@ function receberVolta({ key, ev, de } = {}) {
   else if (ev.t === 'dialogo' && (ev.fechou || controle.mexeuEm(key))) avisoSite.receber(key, ev, `Na tela de ${de || 'alguém'}`);
   else if (ev.t === 'jogo-envio') {
     if (jogandoLa?.key === key) diagJogo.doOutroLado(ev);
+  } else if (ev.t === 'cursor') {
+    // o jogo mostrou o cursor (menu) ou escondeu: o mouse troca de jeito, se a pessoa deixou
+    if (jogandoLa?.key !== key) return;
+    jogandoLa.cursorLivre = !!ev.livre;
+    diagJogo.evento(ev.livre ? 'o jogo mostrou o cursor: mouse pela posição (menu)' : 'o jogo escondeu o cursor: mouse preso (câmera)');
+    if (opcoesJogo.get('menuAuto')) controle.cursorLivre(key, !!ev.livre);
   } else if (ev.t === 'admin' && controle.mexeuEm(key) && Date.now() - (avisosAdmin.get(`de:${key}`) || 0) > 30_000) {
     avisosAdmin.set(`de:${key}`, Date.now());
     const quem = de || 'quem compartilha';
@@ -2441,6 +2452,17 @@ controle.onQual = (sh, q) => {
   socket.emit('share-info', { key: sh.key, site: null, titulo: nome });
 };
 
+// O jogo na minha tela mostrou o cursor (menu, inventário) ou escondeu (ajudante 1.8+): quem joga nela
+// fica sabendo e troca o mouse entre a câmera e o menu (controle.cursorLivre)
+const cursorDoJogo = new Map(); // tela -> último estado mandado
+controle.onCursor = (sh, livre) => {
+  const quem = jogandoAqui.get(sh.key);
+  if (!quem || cursorDoJogo.get(sh.key) === livre) return;
+  cursorDoJogo.set(sh.key, livre);
+  diagJogo.evento(livre ? 'o jogo mostrou o cursor (menu)' : 'o jogo escondeu o cursor', { key: sh.key });
+  for (const id of quem.keys()) controle.emitir('controle-volta', { key: sh.key, para: id, ev: { t: 'cursor', livre } });
+};
+
 // ------------------------------------------------------------------ modo jogo
 // Alguém joga numa tela minha (ligou o modo jogo nela): a sala deste PC fica leve — o 3D para de
 // ser desenhado, e as telas e webcams dos outros param de chegar —, a placa de vídeo fica para o
@@ -2466,6 +2488,16 @@ function jogoAqui(key, deId, ligar) {
   if (!ligar) {
     ajusteDoJogo.delete(deId);
     semDecodificar.delete(deId);
+  } else if (cursorDoJogo.has(key)) {
+    // quem chegou agora já sabe se o jogo está num menu
+    controle.emitir('controle-volta', { key, para: deId, ev: { t: 'cursor', livre: cursorDoJogo.get(key) } });
+  }
+  // Ninguém mais joga nessa tela (desligou, saiu da sala, caiu): o ajudante solta o que estava
+  // apertado — antes, quem caía segurando o W deixava o personagem andando sozinho
+  if (!jogandoAqui.has(key)) {
+    cursorDoJogo.delete(key);
+    const sh = self()?.shares.get(key);
+    if (sh?.alvo && sh.controle) controle.receber(sh, { ev: { t: 'modo', jogo: false } });
   }
   // ninguém mais joga nessa tela: a captura volta ao tamanho do preset
   if (!jogandoAqui.has(key) && (capturaDoJogo.has(key) || codificadorDoJogo.has(key))) {
@@ -2506,16 +2538,47 @@ function jogoLa(video, key) {
     jogandoLa = null;
     diagJogo.parar();
   }
-  if (!video) return;
-  jogandoLa = { key, video };
+  if (!video) return void mostrarSelo();
+  jogandoLa = { key, video, cursorLivre: false };
   diagJogo.comecar('joga', {
     gl: world.renderer.getContext(),
     video,
     // janela, e não tela: o ambiente já tem "tela" (o tamanho da tela do aparelho)
-    extra: { janelaDoJogo: acharTela(key)?.share.titulo ?? null, toque: isTouch },
+    extra: { janelaDoJogo: acharTela(key)?.share.titulo ?? null, toque: isTouch, opcoes: { liso: opcoesJogo.get('liso'), menuAuto: opcoesJogo.get('menuAuto'), giro: opcoesJogo.get('giro') } },
   });
-  diagJogo.evento('buffer mínimo', rtc?.baixaLatencia(video.srcObject, true));
+  aplicarBuffer();
+  mostrarSelo();
 }
+
+// O buffer da imagem de quem joga: o mínimo, ou um pouco (LISO_MS) com "Imagem mais lisa"
+function aplicarBuffer() {
+  if (!jogandoLa) return;
+  const liso = opcoesJogo.get('liso');
+  diagJogo.evento(liso ? `buffer de ${LISO_MS} ms (imagem mais lisa)` : 'buffer mínimo', rtc?.baixaLatencia(jogandoLa.video.srcObject, true, liso ? LISO_MS : 0));
+}
+
+// Selo de desempenho (opção "Mostrar desempenho"): o que chega na tela, o atraso estimado e a banda,
+// a cada amostra do relatório (2 s)
+function mostrarSelo(r = null) {
+  const el = $('#jogo-selo');
+  const ver = !!jogandoLa && opcoesJogo.get('selo');
+  el.hidden = !ver;
+  if (!ver) return;
+  if (!r) return void (el.textContent = 'medindo…');
+  const qps = r.fpsFinal != null ? Math.round(r.fpsFinal) : '–';
+  const atraso = r.atrasoMs != null ? `${Math.round(r.atrasoMs)} ms` : '–';
+  const mbps = r.kbps != null ? (r.kbps / 1000).toFixed(1) : '–';
+  const linhas = r.altura ? `${r.altura}p` : '';
+  el.innerHTML = `<span class="${r.fpsFinal != null && r.fpsFinal < 50 ? 'ruim' : ''}">${qps} qps</span> · ${linhas} · ~${atraso} · ${mbps} Mbps`
+    + (r.motivo ? ` · <span class="ruim">${r.motivo}</span>` : '');
+}
+
+opcoesJogo.ouvir((k, v) => {
+  if (k === 'liso') aplicarBuffer();
+  else if (k === 'selo') mostrarSelo();
+  else if (k === 'menuAuto' && jogandoLa) controle.cursorLivre(jogandoLa.key, v ? jogandoLa.cursorLivre : false);
+  $$('#jogo-op-pop [data-op]').forEach((el) => { el.checked = !!opcoesJogo.get(el.dataset.op); });
+});
 
 // A cada 2 s, com o modo jogo ligado de algum lado: uma amostra para o relatório. Quem compartilha
 // manda o resumo para quem joga (a mesma volta do controle).
@@ -2525,6 +2588,8 @@ function salaAgora() {
   quadrosDaSala = 0;
   return { desenha: mundoVisivel(), teto: tetoDeQuadros(), quadros2s: q, escondida: document.hidden, foco: state.focus?.kind ?? null, pessoas: state.users.size };
 }
+// a última ida e volta do "ping" do controle e o tempo até o ajudante lá (ms)
+const pingDoJogo = { rtt: null, ajudante: null };
 async function amostrarJogo() {
   if (!rtc || !diagJogo.ativo) return;
   try {
@@ -2546,13 +2611,20 @@ async function amostrarJogo() {
           ajustarCaptura(key, resumo);
           vigiarCodificador(key, resumo);
         }
-        const { t, captura, enviado, codificado, altura, kbps, limite, motivo, codificador, placa, imagemBaixa } = resumo;
-        controle.emitir('controle-volta', { key, para: id, ev: { t: 'jogo-envio', quando: t, captura, enviado, codificado, altura, kbps, limite, motivo, codificador, placa, imagemBaixa } });
+        const { t, captura, enviado, codificado, altura, kbps, limite, motivo, codificador, placa, imagemBaixa, codMs, filaMs } = resumo;
+        controle.emitir('controle-volta', { key, para: id, ev: { t: 'jogo-envio', quando: t, captura, enviado, codificado, altura, kbps, limite, motivo, codificador, placa, imagemBaixa, codMs, filaMs } });
       }
     }
     if (jogandoLa) {
+      const dono = jogandoLa.key.split('~')[0];
+      // o atraso do controle: um "ping" pelo canal do mouse e do teclado; a volta (receberDireto)
+      // traz também quanto o PC de lá leva até o ajudante
+      rtc.mandarControle(dono, { p: performance.now() });
       const trilha = jogandoLa.video.srcObject?.getVideoTracks()[0];
-      const resumo = trilha && diagJogo.amostraRecebe(await rtc.diagRecebe(trilha), sala);
+      const som = jogandoLa.video.srcObject?.getAudioTracks()[0] || null;
+      const extra = { controleRttMs: pingDoJogo.rtt, ajudanteMs: pingDoJogo.ajudante, movimentoCru: controle.movimentoCru, controleFisico: fisico.usado, cursorLivre: jogandoLa.cursorLivre };
+      const resumo = trilha && diagJogo.amostraRecebe(await rtc.diagRecebe(trilha, som), sala, extra);
+      mostrarSelo(resumo);
       // a mesma amostra vai para quem compartilha, que baixa o relatório dos dois lados de uma vez
       // (do celular não dá para tirar o arquivo fácil). Só pelo canal direto: sem ele, fica aqui.
       if (resumo) {
@@ -2677,6 +2749,13 @@ function ajustarJogo(id, r) {
   }
   st.perdas = (r.perdaLa ?? 0) > 8 ? st.perdas + 1 : 0;
   if (st.perdas >= 3 && rtc.soltarPisoJogo(id)) diagJogo.evento('piso de banda solto: a rede de quem joga está perdendo muito', { perdaLa: r.perdaLa, kbps: r.kbps });
+  // O piso também enche a fila sem perder nada: forçando banda acima do que o Wi-Fi aguenta, os
+  // pacotes esperam (fila de envio até 480 ms num relatório) e atrasam a imagem e o controle juntos.
+  // Fila acima de 60 ms, ou a ida e volta o dobro da menor vista (e 20 ms a mais), por 6 s → sai.
+  if (r.rttMs != null) st.rttBase = Math.min(st.rttBase ?? Infinity, r.rttMs);
+  const enfileirou = (r.filaMs ?? 0) > 60 || (r.rttMs != null && st.rttBase != null && r.rttMs > st.rttBase * 2 && r.rttMs - st.rttBase > 20);
+  st.filas = enfileirou ? (st.filas || 0) + 1 : 0;
+  if (st.filas >= 3 && rtc.soltarPisoJogo(id)) diagJogo.evento('piso de banda solto: a fila cresceu (atraso)', { filaMs: r.filaMs, rttMs: r.rttMs, rttBase: st.rttBase, kbps: r.kbps });
   const banda = r.limite === 'bandwidth';
   st.baixas = r.imagemBaixa && r.altura < 400 && banda ? st.baixas + 1 : 0;
   st.boas = !r.imagemBaixa && r.limite === 'none' ? st.boas + 1 : 0;
@@ -2692,6 +2771,7 @@ function ajustarJogo(id, r) {
 // O que chega pelo canal direto não passou pelo servidor: aqui se confere o que ele conferiria —
 // a tela é minha e está liberada, o evento é bem formado e ninguém manda mais de 240 por segundo.
 const contasDiretas = new Map(); // id -> { janela, conta }
+const somasDoJogo = new Map(); // "id:tela" -> a última soma de movimento que chegou { e, x, y, s }
 function receberDireto(id, m) {
   const u = state.users.get(id);
   if (!u || !m || typeof m !== 'object') return;
@@ -2708,12 +2788,37 @@ function receberDireto(id, m) {
     }
     return;
   }
-  const c = m.c;
-  if (!c || typeof c.key !== 'string' || !self()?.shares.get(c.key)?.controle) return;
+  // ping do controle de quem joga numa tela minha: volta na hora, com o tempo até o ajudante daqui
+  if (typeof m.p === 'number') {
+    if ([...jogandoAqui.values()].some((q) => q.has(id))) rtc?.mandarControle(id, { pe: m.p, aj: controle.ajudanteMs != null ? Math.round(controle.ajudanteMs * 10) / 10 : null });
+    return;
+  }
+  // a volta do meu ping (eu jogo na tela dessa pessoa)
+  if (typeof m.pe === 'number') {
+    if (jogandoLa?.key.split('~')[0] === id) Object.assign(pingDoJogo, { rtt: Math.round((performance.now() - m.pe) * 10) / 10, ajudante: typeof m.aj === 'number' ? m.aj : null });
+    return;
+  }
   const agora = Date.now();
   const n = contasDiretas.get(id) || { janela: 0, conta: 0 };
   if (agora - n.janela > 1000) Object.assign(n, { janela: agora, conta: 0 });
   contasDiretas.set(id, n);
+  // Modo jogo: o total andado pelo mouse (canal sem ordem, ver controle.enviarMove). Aplica a
+  // diferença para a última soma que chegou; a que chega atrasada (número menor) já está somada.
+  if (m.m && typeof m.m === 'object') {
+    const t = m.m;
+    if (typeof t.key !== 'string' || !self()?.shares.get(t.key)?.controle || ![t.e, t.x, t.y, t.s].every(Number.isFinite)) return;
+    if (++n.conta > 240) return;
+    const chave = `${id}:${t.key}`;
+    const u0 = somasDoJogo.get(chave);
+    const antes = u0?.e === t.e ? u0 : { e: t.e, x: 0, y: 0, s: 0 };
+    if (t.s <= antes.s) return;
+    somasDoJogo.set(chave, { e: t.e, x: t.x, y: t.y, s: t.s });
+    const ev = eventoDeControle({ t: 'mouse', a: 'move', dx: t.x - antes.x, dy: t.y - antes.y, b: 'left', mod: 0, jogo: true });
+    if (ev) receberControle({ key: t.key, ev, de: u.name, deId: id });
+    return;
+  }
+  const c = m.c;
+  if (!c || typeof c.key !== 'string' || !self()?.shares.get(c.key)?.controle) return;
   if (++n.conta > 240) return;
   const ev = eventoDeControle(c.ev);
   if (ev) receberControle({ key: c.key, ev, de: u.name, deId: id });
@@ -3012,6 +3117,9 @@ function updateFocusCtrl() {
     && ['window', 'monitor'].includes(superficieDe(t.share));
   if ((!on || !janela) && controle.jogoNo === fv) controle.desligarJogo();
   jb.hidden = !on || !janela;
+  // as opções do modo jogo (no celular elas ficam no painel do controle de toque)
+  $('#focus-jogo-op-wrap').hidden = jb.hidden || isTouch;
+  if (jb.hidden) $('#jogo-op-pop').hidden = true;
   const emJogo = controle.jogoNo === fv;
   jb.classList.toggle('on', emJogo);
   jb.innerHTML = `${icon('gamepad', 16)}${emJogo ? 'Desligar modo jogo' : 'Modo jogo'}`;
@@ -3043,7 +3151,60 @@ $('#focus-jogo').addEventListener('click', () => {
     // celular: tela cheia deitada, e o controle de toque por cima (ver toque-jogo.js, que avisa
     // com que botões entrou)
     if (!document.fullscreenElement) $('#focus').requestFullscreen?.().then(() => screen.orientation?.lock?.('landscape')).catch(() => {});
-  } else if (ligar) toast('Modo jogo ligado: o mouse gira a câmera e o teclado anda com o personagem. Esc pausa o jogo e solta o mouse; clique na tela para voltar. F8 liga e desliga.', 'info', 9000);
+  } else if (ligar) {
+    jogoNoPc(true);
+    toast('Modo jogo ligado: tela cheia, o mouse gira a câmera e o teclado anda com o personagem (Ctrl+W e Esc vão para o jogo). Segure Esc para sair da tela cheia; F8 desliga o modo jogo.', 'info', 9000);
+  } else if (!isTouch) jogoNoPc(false);
+});
+
+// Modo jogo no PC: tela cheia da tela em foco, sem moldura, com o teclado travado (Keyboard Lock).
+// Sem a trava o Chrome fica com Ctrl+W, Ctrl+T e Ctrl+N — no Minecraft correr é Ctrl+W, e a aba
+// da sala fechava. Travado, um Esc rápido vai para o jogo (segurar o Esc sai da tela cheia).
+async function jogoNoPc(ligar) {
+  document.body.classList.toggle('jogo-pc', ligar);
+  if (ligar) {
+    try {
+      if (document.fullscreenElement !== $('#focus')) await $('#focus').requestFullscreen({ navigationUI: 'hide' });
+      await navigator.keyboard?.lock?.();
+      diagJogo.evento('tela cheia com o teclado travado', { trava: !!navigator.keyboard?.lock });
+    } catch (err) {
+      diagJogo.evento('tela cheia ou trava do teclado recusada', { erro: String(err?.message || err) });
+    }
+    controle.travarPonteiro(); // a tela cheia pode ter soltado o ponteiro
+  } else {
+    navigator.keyboard?.unlock?.();
+    if (document.fullscreenElement === $('#focus')) document.exitFullscreen().catch(() => {});
+  }
+}
+// saiu da tela cheia (Esc segurado, F11): a trava do teclado já caiu sozinha; o modo jogo continua
+document.addEventListener('fullscreenchange', () => {
+  if (!document.fullscreenElement) document.body.classList.remove('jogo-pc');
+  else if (controle.jogoNo && !isTouch) document.body.classList.add('jogo-pc');
+});
+
+// opções do modo jogo no PC (o celular tem as mesmas no painel do controle de toque)
+$('#focus-jogo-op').addEventListener('click', (e) => {
+  const pop = $('#jogo-op-pop');
+  pop.hidden = !pop.hidden;
+  e.currentTarget.setAttribute('aria-expanded', String(!pop.hidden));
+  e.currentTarget.blur();
+  $$('#jogo-op-pop [data-op]').forEach((el) => { el.checked = !!opcoesJogo.get(el.dataset.op); });
+});
+$('#jogo-op-pop').addEventListener('change', (e) => {
+  const k = e.target.dataset.op;
+  if (k) opcoesJogo.set(k, e.target.checked);
+  e.target.blur();
+});
+document.addEventListener('pointerdown', (e) => {
+  if (!e.target.closest('#focus-jogo-op-wrap')) $('#jogo-op-pop').hidden = true;
+});
+
+// Controle de videogame (gamepad-jogo.js): no modo jogo, no PC e no celular. No celular, usando o
+// controle, os botões da tela saem do caminho.
+const fisico = new ControleFisico({
+  controle,
+  toast,
+  onAtivo: (sim) => $('#toque-jogo').classList.toggle('tj-pad', sim),
 });
 // o controle de toque aparece e some junto com o modo jogo (inclusive quando ele desliga sozinho)
 const toqueJogo = new ToqueJogo({
@@ -3060,8 +3221,19 @@ const toqueJogo = new ToqueJogo({
 controle.onJogo = (video, key) => {
   if (video && isTouch) toqueJogo.mostrar(key, acharTela(key)?.share.titulo);
   else toqueJogo.esconder();
+  if (video) fisico.ligar(key, acharTela(key)?.share.titulo);
+  else fisico.desligar();
+  // o modo jogo desligou por fora do botão (a tela fechou, saiu do foco): sai da tela cheia também
+  if (!video && !isTouch && document.body.classList.contains('jogo-pc')) jogoNoPc(false);
   jogoLa(video, key);
 };
+// a aba sumiu (celular bloqueou, outro app): o que o toque e o controle seguravam sobe já
+controle.onEscondeu = () => {
+  toqueJogo.soltarTudo();
+  fisico.soltarTudo();
+};
+// o jogo mostrou ou escondeu o cursor: no celular, os botões de menu entram e saem sozinhos
+controle.onCursorLivre = (livre) => toqueJogo.cursorDoJogo(livre);
 controle.onJogoSoltou = () => {
   if (controle.jogoNo) toast('Esc soltou o mouse (o jogo recebeu o Esc). Clique na tela para voltar a jogar, ou F8 para desligar o modo jogo.', 'info', 6000);
 };
@@ -7161,6 +7333,7 @@ if (params.get('debug') === '1') {
     toggleVeiculo, irParaLargada, jogos, irParaMesa, exitFocus, dados, quadras, jogosDoParque, pingue, queimada, sinuca, golfe, cartas, poker, gincana, fantasmas, kart, pinta,
     tocarTela, telasMudas, liberarSomDasTelas, makeVideo, mesa, controle, abrirMesa, fecharMesa, marcaDaAba,
     publishShare, stopShare, acharTela, telasNoAr, get rtc() { return rtc; }, diagJogo, clima, ligarLuneta, futebol, surf, run,
+    enterFocus, get socket() { return socket; }, fisico, toqueJogo, opcoesJogo,
   };
 }
 

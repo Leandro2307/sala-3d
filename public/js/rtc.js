@@ -267,6 +267,23 @@ function comDtx(desc, semDtx) {
   return { type: desc.type, sdp: saida.join('\r\n') };
 }
 
+// Som do jogo em estéreo: com o Opus mono (o padrão) quem joga perdia de que lado vêm os passos e
+// os golpes. Quem manda lê o stereo=1 da descrição REMOTA (como o usedtx, ver comDtx): mids são as
+// seções do som das minhas telas para quem joga. Quem recebe declara na própria descrição que
+// aceita estéreo nas seções que só recebem (mids null) — o decodificador sai com dois canais.
+function comEstereo(desc, mids) {
+  if (!desc?.sdp) return desc;
+  if (mids && !mids.size) return desc;
+  const saida = [];
+  for (const sec of secoesDoSdp(desc.sdp)) {
+    const mid = sec.find((l) => l.startsWith('a=mid:'))?.slice(6);
+    const vale = sec[0].startsWith('m=audio') && (mids ? mids.has(mid) : sec.includes('a=recvonly'));
+    const opus = vale ? sec.map((l) => /^a=rtpmap:(\d+) opus\/48000/i.exec(l)?.[1]).find(Boolean) : null;
+    for (const l of sec) saida.push(opus && l.startsWith(`a=fmtp:${opus} `) && !l.includes('stereo=') ? `${l};stereo=1;sprop-stereo=1` : l);
+  }
+  return { type: desc.type, sdp: saida.join('\r\n') };
+}
+
 export class RTC {
   constructor(socket, { iceServers, onTrack, onPeerGone, onFalha }) {
     this.socket = socket;
@@ -534,16 +551,22 @@ export class RTC {
     if (ligar) this.jogadores.set(key, new Set(quem));
     else this.jogadores.delete(key);
     for (const peer of this.peers.values()) this.atualizarBandaJogo(peer);
-    if (ligar === this.jogoTelas.has(key)) return;
-    if (ligar) this.jogoTelas.add(key);
-    else this.jogoTelas.delete(key);
-    console.info('[modo-jogo] banda de jogo', ligar ? 'ligada' : 'desligada', key, this.preset());
-    this.retuneAll();
+    if (ligar !== this.jogoTelas.has(key)) {
+      if (ligar) this.jogoTelas.add(key);
+      else this.jogoTelas.delete(key);
+      console.info('[modo-jogo] banda de jogo', ligar ? 'ligada' : 'desligada', key, this.preset());
+    }
+    this.retuneAll(); // quem joga e quem só assiste (assiste) podem ter mudado
   }
 
   joga(peer) {
     for (const ids of this.jogadores.values()) if (ids.has(peer.id)) return true;
     return false;
+  }
+
+  // alguém joga nessa tela minha e essa pessoa não: só assiste
+  assiste(peer, key) {
+    return this.jogoTelas.has(key) && !this.jogadores.get(key)?.has(peer.id);
   }
 
   // a banda de jogo entra ou sai da conexão dessa pessoa: renegocia com o piso novo no SDP
@@ -605,6 +628,14 @@ export class RTC {
     }
   }
 
+  // as seções do som das minhas telas que vão em estéreo para quem joga (comEstereo)
+  midsSomDeJogo(peer) {
+    const mids = new Set();
+    if (!peer.bandaJogo) return mids;
+    for (const trs of peer.screenTransceivers.values()) for (const tr of trs) if (tr.mid && tr.receiver.track?.kind === 'audio') mids.add(tr.mid);
+    return mids;
+  }
+
   // as seções das minhas telas em que o perfil do H.264 é trocado (trocarPerfil)
   midsDeJogo(peer) {
     const mids = new Set();
@@ -644,7 +675,11 @@ export class RTC {
   envioPara(peer, key) {
     const preset = this.preset();
     const scr = this.screens.get(key);
-    const nivel = nivelDe(peer, key);
+    let nivel = nivelDe(peer, key);
+    // Alguém joga nesta tela e essa pessoa só assiste: no máximo 540p a 30. Na malha cada conexão
+    // tem o próprio codificador — quem assistia de perto fazia a placa codificar o 1080p60 duas
+    // vezes, e quem joga perdia os quadros.
+    if (this.assiste(peer, key) && (nivel === NIVEIS.max || nivel === NIVEIS.medio)) nivel = NIVEIS.baixo;
     let soma = 0;
     for (const k of this.screens.keys()) soma += nivelDe(peer, k).peso;
     const parte = nivel.peso / Math.max(1, soma);
@@ -685,6 +720,7 @@ export class RTC {
         cursor: 'always',
       },
       audio: {
+        channelCount: { ideal: 2 }, // estéreo: no modo jogo vai assim para quem joga (comEstereo)
         echoCancellation: false,
         noiseSuppression: false,
         autoGainControl: false,
@@ -782,8 +818,11 @@ export class RTC {
               // medida ímpar, e com medida ímpar a placa recusa e o Chrome fica no processador
               // (escalaPar). Com a banda curta quem reduz é o linhasDeJogo, sempre em medida par.
               const jogo = this.jogoTelas.has(key);
+              // Quem só assiste a um jogo: cede quadros e não linhas — reduzindo sozinho, o navegador
+              // dava medida ímpar e esse envio ia para o processador do PC do jogo.
               params.degradationPreference = peer.balanceado && jogo ? 'balanced'
-                : peer.bandaJogo && jogo && !this.semFixa ? 'maintain-framerate-and-resolution' : 'maintain-framerate';
+                : this.assiste(peer, key) ? 'maintain-resolution'
+                  : peer.bandaJogo && jogo && !this.semFixa ? 'maintain-framerate-and-resolution' : 'maintain-framerate';
               Object.assign(params.encodings[0], this.envioPara(peer, key), { networkPriority: 'high', priority: 'high' });
               await sender.setParameters(params);
             } catch (err) {
@@ -968,6 +1007,7 @@ export class RTC {
       recuoCodec: 0, // passos atrás no codec de jogo (codecSeguroJogo)
       renegociar: false, // falta mandar uma oferta nova (renegociar)
       ctrl: null, // canal do controle remoto (ver canalControle)
+      mov: null, // o do movimento do mouse no modo jogo (ver canalMovimento)
       micSender: null,
       micVai: null, // a trilha que está no micSender agora (null: a voz não vai para essa pessoa)
       ouveMic: true, // essa pessoa pode ouvir a minha voz (vozPara)
@@ -988,7 +1028,7 @@ export class RTC {
         const oferta = await pc.createOffer();
         // outra negociação começou enquanto a oferta era montada: o evento volta sozinho depois
         if (pc.signalingState !== 'stable') return;
-        await pc.setLocalDescription(comBandaInicial(oferta, ...this.bandaSdp(peer)));
+        await pc.setLocalDescription(comEstereo(comBandaInicial(oferta, ...this.bandaSdp(peer)), null));
         peer.ofertaDesde = performance.now();
         this.send(id, { description: trocarPerfil(pc.localDescription, this.midsDeJogo(peer), '42001f', '42e01f') });
       } catch (err) {
@@ -1012,6 +1052,7 @@ export class RTC {
     // canal do controle remoto: quem controla abre (ver canalControle); aqui chega o de quem me controla
     pc.ondatachannel = ({ channel }) => {
       if (channel.label === 'controle') this.ligarCanal(peer, channel);
+      else if (channel.label === 'controle-mov') this.ligarCanal(peer, channel, 'mov');
     };
     pc.ontrack = (ev) => {
       const stream = ev.streams[0] || new MediaStream([ev.track]);
@@ -1047,8 +1088,36 @@ export class RTC {
     return peer.ctrl.readyState === 'open' ? peer.ctrl : null;
   }
 
-  ligarCanal(peer, canal) {
-    peer.ctrl = canal;
+  // Modo jogo: o movimento do mouse vai num canal à parte, sem ordem e sem reenvio. No canal de
+  // sempre (ordenado), um pacote perdido no Wi-Fi segurava tudo o que vinha atrás até ser reenviado:
+  // a câmera travava e depois pulava. Aqui cada mensagem leva o total andado desde o começo (ver
+  // controle.enviarMove): a que se perde não faz falta, a seguinte traz a soma.
+  canalMovimento(id) {
+    const peer = this.peers.get(id);
+    if (!peer || ['failed', 'closed'].includes(peer.pc.connectionState)) return null;
+    if (!peer.mov || peer.mov.readyState === 'closed') {
+      try {
+        this.ligarCanal(peer, peer.pc.createDataChannel('controle-mov', { ordered: false, maxRetransmits: 0 }), 'mov');
+      } catch {
+        return null;
+      }
+    }
+    return peer.mov.readyState === 'open' ? peer.mov : null;
+  }
+
+  mandarMovimento(id, m) {
+    const canal = this.canalMovimento(id);
+    if (!canal) return false;
+    try {
+      canal.send(JSON.stringify(m));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  ligarCanal(peer, canal, tipo = 'ctrl') {
+    peer[tipo] = canal;
     canal.onmessage = (e) => {
       let m;
       try {
@@ -1117,12 +1186,12 @@ export class RTC {
         peer.aplicandoResposta = description.type === 'answer';
         try {
           const recebida = trocarPerfil(description, this.midsDeJogo(peer), '42e01f', '42001f');
-          await pc.setRemoteDescription(comDtx(comBandaInicial(recebida, ...this.bandaSdp(peer)), semDtx));
+          await pc.setRemoteDescription(comEstereo(comDtx(comBandaInicial(recebida, ...this.bandaSdp(peer)), semDtx), this.midsSomDeJogo(peer)));
         } finally {
           peer.aplicandoResposta = false;
         }
         if (description.type === 'offer') {
-          await pc.setLocalDescription(comBandaInicial(await pc.createAnswer(), ...this.bandaSdp(peer)));
+          await pc.setLocalDescription(comEstereo(comBandaInicial(await pc.createAnswer(), ...this.bandaSdp(peer)), null));
           this.send(from, { description: trocarPerfil(pc.localDescription, this.midsDeJogo(peer), '42001f', '42e01f') });
         }
       } else if (candidate) {
@@ -1240,8 +1309,9 @@ export class RTC {
   // -------------------------------------------------------------- modo jogo
   // Quem joga na tela de outra pessoa: o menor buffer possível no vídeo e no som dela. Cada quadro
   // vai para a tela assim que fica pronto; um tranco da rede vira um quadro repetido, não atraso.
-  // Devolve o que mudou (para o relatório).
-  baixaLatencia(stream, ligar) {
+  // Devolve o que mudou (para o relatório). alvoMs: quem joga pediu a imagem mais lisa (um buffer
+  // pequeno segura o tremido do Wi-Fi em troca de uns ms de atraso).
+  baixaLatencia(stream, ligar, alvoMs = 0) {
     const trilhas = new Set(stream?.getTracks() || []);
     const feitos = [];
     for (const peer of this.peers.values()) {
@@ -1249,7 +1319,7 @@ export class RTC {
         const r = t.receiver;
         if (!r.track || !trilhas.has(r.track)) continue;
         try {
-          if ('jitterBufferTarget' in r) r.jitterBufferTarget = ligar ? 0 : null;
+          if ('jitterBufferTarget' in r) r.jitterBufferTarget = ligar ? alvoMs : null;
           // o antigo do Chrome: 0 no vídeo liga o caminho de "quadro direto para a tela"
           if (r.track.kind === 'video' && 'playoutDelayHint' in r) r.playoutDelayHint = ligar ? 0 : null;
           feitos.push({ tipo: r.track.kind, jitterBufferTarget: r.jitterBufferTarget ?? null, playoutDelayHint: r.playoutDelayHint ?? null });
@@ -1306,7 +1376,7 @@ export class RTC {
   }
 
   // Os números crus da chegada de uma tela de outra pessoa (a trilha de vídeo que está no <video>)
-  async diagRecebe(trilha) {
+  async diagRecebe(trilha, somDaTela = null) {
     for (const peer of this.peers.values()) {
       const tr = peer.pc.getTransceivers().find((t) => t.receiver.track === trilha);
       if (!tr) continue;
@@ -1327,6 +1397,16 @@ export class RTC {
       });
       if (d.entrada?.codecId) d.codec = codecs.get(d.entrada.codecId) || null;
       if (par) d.rede = caminhoDe(report, par);
+      // O som da mesma tela: os dois vão no mesmo stream e quem recebe os sincroniza — se o buffer
+      // do som for maior, o vídeo espera por ele. O relatório compara os dois.
+      const som = somDaTela && peer.pc.getTransceivers().find((t) => t.receiver.track === somDaTela);
+      if (som) {
+        try {
+          (await som.receiver.getStats()).forEach((s) => {
+            if (s.type === 'inbound-rtp' && s.kind === 'audio') d.som = pegar(s, CAMPOS_SOM);
+          });
+        } catch { /* conexão fechando */ }
+      }
       return d;
     }
     return null;
@@ -1344,6 +1424,9 @@ const CAMPOS_ENTRADA = ['frameWidth', 'frameHeight', 'framesPerSecond', 'framesR
   'totalDecodeTime', 'totalProcessingDelay', 'totalAssemblyTime', 'totalInterFrameDelay', 'totalSquaredInterFrameDelay',
   'bytesReceived', 'headerBytesReceived', 'packetsReceived', 'packetsLost', 'packetsDiscarded', 'jitter', 'nackCount',
   'pliCount', 'firCount', 'qpSum', 'decoderImplementation', 'powerEfficientDecoder', 'codecId'];
+
+const CAMPOS_SOM = ['jitterBufferDelay', 'jitterBufferTargetDelay', 'jitterBufferMinimumDelay', 'jitterBufferEmittedCount',
+  'packetsLost', 'packetsReceived', 'concealedSamples', 'totalSamplesReceived'];
 
 // só os campos que vieram (cada versão do Chrome manda um pedaço)
 function pegar(s, campos) {

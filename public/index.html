@@ -867,6 +867,8 @@
     <video id="focus-video" playsinline autoplay muted></video>
     <!-- modo jogo no celular: analógico e botões por cima da tela (ver toque-jogo.js) -->
     <div id="toque-jogo" hidden></div>
+    <!-- modo jogo: o selo de desempenho de quem joga (qps, atraso, banda; ver jogoSelo no main.js) -->
+    <div id="jogo-selo" hidden></div>
     <div class="focus-bar">
       <div class="focus-name"><span class="live-dot"></span><span id="focus-name">Tela</span><small class="focus-qualidade" id="focus-qualidade"></small></div>
       <!-- navegação da aba controlada (a mesa tem uma igual em cada monitor) -->
@@ -879,6 +881,14 @@
       <div class="focus-actions">
         <button type="button" class="secondary small" id="focus-ctrl" hidden><i data-icon="cursor" data-size="16"></i>Controlar</button>
         <button type="button" class="secondary small" id="focus-jogo" hidden><i data-icon="gamepad" data-size="16"></i>Modo jogo</button>
+        <span class="jogo-op-wrap" id="focus-jogo-op-wrap" hidden>
+          <button type="button" class="secondary small" id="focus-jogo-op" aria-haspopup="true" aria-expanded="false" title="Opções do modo jogo">Opções</button>
+          <span class="jogo-op-pop" id="jogo-op-pop" hidden>
+            <label><input type="checkbox" data-op="liso"><span>Imagem mais lisa <small>(+40 ms de atraso)</small></span></label>
+            <label><input type="checkbox" data-op="menuAuto"><span>Menu do jogo automático <small>(mouse solto quando o jogo mostra o cursor)</small></span></label>
+            <label><input type="checkbox" data-op="selo"><span>Mostrar desempenho</span></label>
+          </span>
+        </span>
         <button type="button" class="secondary small" id="focus-mesa" title="Todas as telas lado a lado (Tab)"><i data-icon="monitores" data-size="16"></i>Mesa</button>
         <button type="button" class="secondary small" id="focus-pin"><i data-icon="pin" data-size="16"></i>Pôr no telão</button>
         <button type="button" class="secondary small" id="focus-full"><i data-icon="maximize" data-size="16"></i>Tela cheia</button>

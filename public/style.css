@@ -3826,6 +3826,83 @@ body.touch .mu-estilos button { flex: none; }
 body.toque-jogo #focus .focus-bar { display: none; }
 body.toque-jogo #focus video { padding: 0; }
 .tj-olhar { position: absolute; inset: 0; }
+/* analógico flutuante: o polegar que encosta aqui traz o analógico para baixo dele */
+.tj-zona { position: absolute; left: 0; bottom: 0; width: 42%; height: 62%; }
+#toque-jogo.tj-no-menu .tj-zona { display: none; }
+/* controle de videogame ligado no celular: os botões da tela saem do caminho */
+#toque-jogo.tj-pad .tj-stick, #toque-jogo.tj-pad .tj-zona, #toque-jogo.tj-pad .tj-acoes, #toque-jogo.tj-pad .tj-hotbar { display: none; }
+/* editor: arrastar muda o lugar dos botões */
+#toque-jogo.tj-editando .tj-olhar, #toque-jogo.tj-editando .tj-zona { pointer-events: none; }
+#toque-jogo.tj-editando .tj-acoes button, #toque-jogo.tj-editando .tj-stick, #toque-jogo.tj-editando .tj-hotbar { outline: 2px dashed rgba(251, 191, 36, 0.9); outline-offset: 2px; }
+.tj-editando-dica {
+  position: absolute;
+  z-index: 3;
+  top: calc(var(--tj-topo) + 46px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 6px 6px 6px 14px;
+  border-radius: 999px;
+  background: rgba(10, 12, 18, 0.85);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.tj-editando-dica[hidden] { display: none; }
+#toque-jogo .tj-editando-dica button { height: 30px; padding: 0 12px; border-radius: 999px; background: rgba(56, 189, 248, 0.4); font-size: 12px; }
+.tj-liga { display: grid; gap: 8px; font-size: 12.5px; font-weight: 600; }
+.tj-liga label { display: flex; align-items: center; gap: 8px; }
+.tj-liga input { width: 18px; height: 18px; margin: 0; accent-color: #38bdf8; }
+.tj-liga small { opacity: 0.65; font-weight: 500; }
+.tj-edicao { display: flex; gap: 6px; }
+#toque-jogo .tj-edicao button { flex: 1; height: 34px; border-radius: 10px; font-size: 12px; touch-action: manipulation; }
+
+/* modo jogo no PC: tela cheia sem moldura (o 1080p ocupa a tela toda, sem reduzir) */
+body.jogo-pc #focus:fullscreen video { padding: 0; outline: none; }
+body.jogo-pc #focus:fullscreen .focus-bar { display: none; }
+/* opções do modo jogo no PC (ao lado do botão Modo jogo) */
+.jogo-op-wrap { position: relative; display: inline-flex; }
+.jogo-op-wrap[hidden] { display: none; }
+.jogo-op-pop {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 6px);
+  right: 0;
+  display: grid;
+  gap: 10px;
+  width: 270px;
+  padding: 12px 14px;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.14));
+  border-radius: 12px;
+  background: var(--panel, #12151c);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  font-size: 13px;
+}
+.jogo-op-pop[hidden] { display: none; }
+.jogo-op-pop label { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; }
+.jogo-op-pop input { margin: 2px 0 0; accent-color: var(--accent); }
+.jogo-op-pop small { display: block; opacity: 0.65; }
+/* selo de desempenho de quem joga */
+#jogo-selo {
+  position: absolute;
+  z-index: 3;
+  top: max(10px, env(safe-area-inset-top));
+  right: max(10px, env(safe-area-inset-right));
+  padding: 4px 9px;
+  border-radius: 8px;
+  background: rgba(8, 10, 14, 0.62);
+  color: #e5e7eb;
+  font: 600 11.5px/1.3 ui-monospace, Consolas, monospace;
+  pointer-events: none;
+  white-space: pre;
+}
+#jogo-selo[hidden] { display: none; }
+body:not(.toque-jogo) #focus:not(:fullscreen) #jogo-selo { top: 76px; }
+#jogo-selo .ruim { color: #fbbf24; }
+body.toque-jogo #jogo-selo { top: auto; bottom: max(8px, env(safe-area-inset-bottom)); right: 50%; transform: translateX(50%); }
 #toque-jogo button {
   position: relative;
   display: flex;

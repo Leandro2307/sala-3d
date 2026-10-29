@@ -690,7 +690,7 @@ function eventoSemMarca(e) {
   const n =(v, a, b) => Math.min(b, Math.max(a, Number(v) || 0));
   const mod = n(e.mod, 0, 15) | 0;
   if (e.t === 'mouse' && ['down', 'up', 'move'].includes(e.a)) {
-    const ev = { t: 'mouse', a: e.a, x: e.x === undefined && e.dx !== undefined ? 0.5 : n(e.x, 0, 1), y: e.y === undefined && e.dy !== undefined ? 0.5 : n(e.y, 0, 1), b: ['left', 'right', 'middle'].includes(e.b) ? e.b : 'left', n: n(e.n, 1, 3) | 0, arrastando: !!e.arrastando, mod };
+    const ev = { t: 'mouse', a: e.a, x: e.x === undefined && e.dx !== undefined ? 0.5 : n(e.x, 0, 1), y: e.y === undefined && e.dy !== undefined ? 0.5 : n(e.y, 0, 1), b: ['left', 'right', 'middle', 'x1', 'x2'].includes(e.b) ? e.b : 'left', n: n(e.n, 1, 3) | 0, arrastando: !!e.arrastando, mod };
     // modo jogo: movimento relativo (delta), sem posição — é o que gira a câmera num jogo
     if (e.a === 'move' && (e.dx !== undefined || e.dy !== undefined)) {
       ev.dx = n(e.dx, -4000, 4000);
@@ -699,6 +699,7 @@ function eventoSemMarca(e) {
     return ev;
   }
   if (e.t === 'modo') return { t: 'modo', jogo: !!e.jogo }; // liga/desliga o modo jogo no ajudante nativo
+  if (e.t === 'vivo') return { t: 'vivo' }; // modo jogo: quem joga ainda está aí (sem ele o ajudante solta as teclas)
   if (e.t === 'wheel') return { t: 'wheel', x: n(e.x, 0, 1), y: n(e.y, 0, 1), dx: n(e.dx, -3000, 3000), dy: n(e.dy, -3000, 3000), mod };
   if (e.t === 'tecla' && (e.a === 'down' || e.a === 'up')) {
     // sem trim: a tecla de espaço é ' '. ag: veio do AltGr e dá um caractere (@, €...): do outro
@@ -744,8 +745,11 @@ function voltaDoControle(raw) {
       t: 'jogo-envio', quando: num(e.quando), captura: num(e.captura), enviado: num(e.enviado), codificado: num(e.codificado),
       altura: num(e.altura), kbps: num(e.kbps), limite: txt(e.limite), motivo: txt(e.motivo), codificador: txt(e.codificador),
       placa: typeof e.placa === 'boolean' ? e.placa : null, imagemBaixa: typeof e.imagemBaixa === 'boolean' ? e.imagemBaixa : null,
+      codMs: num(e.codMs), filaMs: num(e.filaMs),
     };
   }
+  // modo jogo: o jogo mostrou o cursor (menu) ou escondeu — quem joga troca o jeito de mexer o mouse
+  if (e.t === 'cursor') return { t: 'cursor', livre: !!e.livre };
   return null;
 }
 

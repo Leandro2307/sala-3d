@@ -56,6 +56,21 @@
     if (r?.liberado && !vivo) vivo = setInterval(() => mandar({ tipo: 'vivo' }), 20_000);
   });
 
+  // porta fixa até o fundo para o movimento do modo jogo (reabre se o fundo dormir)
+  let porta = null;
+  const rapida = (m) => {
+    if (!ligado()) return parar();
+    try {
+      if (!porta) {
+        porta = chrome.runtime.connect({ name: 'sala3d-rapida' });
+        porta.onDisconnect.addListener(() => { porta = null; });
+      }
+      porta.postMessage(m);
+    } catch {
+      porta = null;
+    }
+  };
+
   const PEDIDOS = ['entrada', 'soltar', 'aba-info', 'janela', 'janela-retomar', 'janela-soltar', 'abas', 'mostrar-sala', 'nativo-conferir'];
   const esperando = new Map(); // pedido -> responder: o fundo esperando a sala responder
   const aoSite = (e) => {
@@ -67,6 +82,8 @@
       esperando.delete(m.pedido);
       return responder?.(m.r && typeof m.r === 'object' ? m.r : { ok: true });
     }
+    // modo jogo: o movimento do mouse vai pela porta fixa, sem resposta (ver fundo.js)
+    if (m.sala3d === 'janela-rapida') return rapida({ tipo: 'janela', alvo: m.alvo, ev: m.ev });
     if (PEDIDOS.includes(m.sala3d)) {
       mandar({ tipo: m.sala3d, aba: m.aba, abas: m.abas, alvo: m.alvo, ev: m.ev, id: m.id }, (r) => {
         if (m.id != null) window.postMessage({ sala3dExt: 'resposta', id: m.id, r }, location.origin);
@@ -113,6 +130,7 @@
   function parar() {
     removeEventListener('message', aoSite);
     clearInterval(vivo);
+    try { porta?.disconnect(); } catch { /* órfão */ }
     try {
       chrome.runtime.onMessage.removeListener(aoFundo);
     } catch { /* órfão */ }
