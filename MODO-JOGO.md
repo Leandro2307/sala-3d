@@ -297,6 +297,29 @@ Revisão do lado do controle, que até aqui não tinha medida nenhuma. Extensão
 - Teste barato que ficou para o usuário: o teto de ~57 qps com o jogo limitado a 120 qps e V-Sync
   desligado — se a captura chegar a 60, o limite era o jogo perdendo quadros.
 
+## Relatórios de 2026-10-30 (1440p/720p em casa; de longe, na casa de outra pessoa)
+
+- Em casa: captura 54–58, NVIDIA H.265 (12 ms em 1080p, 7 ms em 720p), iPhone mostrando 53–56. As
+  travadas (0,75–3,4 s) vieram todas de quedas da banda do Wi-Fi (35 → 8, 23 → 3,5 Mbps) com 16–24
+  Mbps saindo: fila de envio de 240 ms a 1 s. O preset Ultra num monitor 1080p não ganha imagem
+  (a captura fica em 1920×1080), só mais banda e mais risco.
+- De longe (`modo-jogo-joga-*`, só o lado do iPhone): rede boa (5–19 Mbps chegando, ida e volta
+  45–80 ms, caminho pelo TURN da Cloudflare: `relay/udp` do lado do PC), mas **a captura presa em
+  30–37 qps os 3 minutos**. Com rede e codificador folgados, o provável é o jogo sem foco: o limite
+  de quadros em segundo plano da NVIDIA (costuma vir em 30), ou o monitor/suspensão do PC sozinho.
+  O Safari 27 aceitou o `jitterBufferTarget = 0` (antes vinha nulo); o buffer ainda variou 60–360 ms.
+
+### O que entrou depois disso
+
+- `jogoBitrate` mais baixo (Leve 7, Máxima 14, Ultra 20 Mbps): com o codificador da placa 14 Mbps
+  dão 1080p60 limpo e sobra folga para as quedas do Wi-Fi. O piso (`bandaDeJogo`) acompanha (4,2 Mbps
+  na Máxima).
+- `ajustarJogo`: o modo jogo **começa em 720p** (`linhasDeJogo(id, 720)` na 1ª amostra) e sobe
+  para a captura inteira com a banda acima de 9 Mbps por 6 s, no mínimo 8 s depois de começar.
+  Testado: 720p → 1080p em ~12 s, sempre na NVIDIA.
+- Motivo `fundo` (captura entre 26 e 38 qps) com o aviso do limite em segundo plano da NVIDIA, do
+  foco da janela e da tela/suspensão do Windows. Vai com "No PC de quem compartilha:" para quem joga.
+
 ## Próximos passos sugeridos
 
 0. **Pedir um relatório novo dos dois lados** com o jogo em janela sem bordas 1920×1080 a 60 qps

@@ -9,11 +9,14 @@ import { isTouch } from './touch.js';
 // contentHint 'motion' e não 'detail': o modo "tela" do codificador segura quadros em conteúdo
 // parado e derruba a fluidez quando algo se mexe.
 // jogoBitrate: a banda de quem joga na tela (modo jogo, ver modoJogo). Jogo de ação mexe a imagem
-// toda a cada quadro: com os 12 Mbps o codificador passava do alvo e descartava quadros.
+// toda a cada quadro: com os 12 Mbps o codificador do processador passava do alvo e descartava
+// quadros. Com o da placa (H.265/H.264 na NVIDIA) 14 Mbps dão 1080p60 limpo, e o teto mais baixo
+// deixa folga: saindo 16–24 Mbps, uma queda do Wi-Fi para 8 Mbps enchia a fila de envio (até 1 s)
+// e virava travada de 1–3 s no iPhone.
 export const SHARE_PRESETS = {
-  leve: { label: 'Leve', fps: 60, width: 1280, height: 720, maxBitrate: 5_000_000, jogoBitrate: 9_000_000 },
-  max: { label: 'Máxima', fps: 60, width: 1920, height: 1080, maxBitrate: 12_000_000, jogoBitrate: 20_000_000 },
-  ultra: { label: 'Ultra', fps: 60, width: 2560, height: 1440, maxBitrate: 20_000_000, jogoBitrate: 30_000_000 },
+  leve: { label: 'Leve', fps: 60, width: 1280, height: 720, maxBitrate: 5_000_000, jogoBitrate: 7_000_000 },
+  max: { label: 'Máxima', fps: 60, width: 1920, height: 1080, maxBitrate: 12_000_000, jogoBitrate: 14_000_000 },
+  ultra: { label: 'Ultra', fps: 60, width: 2560, height: 1440, maxBitrate: 20_000_000, jogoBitrate: 20_000_000 },
 };
 // os nomes antigos (texto nítido, vídeo, jogo) viram a Máxima
 export const presetDe = (modo) => (SHARE_PRESETS[modo] ? modo : 'max');

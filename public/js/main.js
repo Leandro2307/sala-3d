@@ -2735,16 +2735,24 @@ function ajustarJogo(id, r) {
   let st = ajusteDoJogo.get(id);
   if (!st) ajusteDoJogo.set(id, (st = { perdas: 0, baixas: 0, boas: 0, balanceadoDesde: 0, curta: 0, larga: 0, fixaDesde: 0 }));
   const est = r.saidaEstimadaKbps;
-  // nos primeiros 6 s a banda ainda está subindo (começava em ~1,5 Mbps e em 20 s passava de 26):
-  // fixar em 720p ali segurava a imagem baixa à toa por 30 s
   st.n = (st.n || 0) + 1;
+  // O modo jogo começa em 720p: a banda começa em 1–8 Mbps e leva uns segundos para subir, e em
+  // 1080p cheio a fila de envio chegava a 1 s, com 2 s de imagem parada no iPhone logo no começo.
+  // Sai com a banda acima de 9 Mbps por 6 s (no mínimo 8 s depois de começar).
+  if (st.n === 1 && rtc.linhasDeJogo(id, 720)) {
+    st.fixaDesde = Date.now();
+    st.comeco = true;
+    diagJogo.evento('começo em 720p até a banda subir', { saidaEstimadaKbps: est, altura: r.altura });
+  }
   st.curta = st.n > 3 && est != null && est < 5000 ? st.curta + 1 : 0;
   st.larga = est != null && est > 9000 ? st.larga + 1 : 0;
   if (st.curta >= 2 && rtc.linhasDeJogo(id, 720)) {
     st.fixaDesde = Date.now();
+    st.comeco = false;
     diagJogo.evento('banda curta: tela fixa em 720p', { saidaEstimadaKbps: est, altura: r.altura });
-  } else if (st.fixaDesde && Date.now() - st.fixaDesde > 30_000 && st.larga >= 5 && rtc.linhasDeJogo(id, null)) {
+  } else if (st.fixaDesde && Date.now() - st.fixaDesde > (st.comeco ? 8_000 : 30_000) && st.larga >= (st.comeco ? 3 : 5) && rtc.linhasDeJogo(id, null)) {
     st.fixaDesde = 0;
+    st.comeco = false;
     diagJogo.evento('banda folgou: tela de volta à captura inteira', { saidaEstimadaKbps: est });
   }
   st.perdas = (r.perdaLa ?? 0) > 8 ? st.perdas + 1 : 0;

@@ -17,6 +17,9 @@ const dif = (agora, antes, campo) => (antes && agora?.[campo] != null && antes[c
 
 const MOTIVOS = {
   captura: 'A captura do Chrome está pegando poucos quadros do jogo: a placa de vídeo de quem compartilha está no talo, ou o jogo está em tela cheia exclusiva. Limite o jogo a 60 qps, baixe um pouco a qualidade gráfica e use “janela sem bordas”.',
+  // presa perto de 30 com a placa sobrando: o jogo sem foco. Num relatório de longe (o PC sozinho
+  // em casa) a captura ficou em 30–37 os 3 minutos, com rede e codificador folgados.
+  fundo: 'A captura está presa perto de 30 qps: o jogo deve estar sem foco no PC de quem compartilha. No Painel de Controle da NVIDIA (Gerenciar as configurações 3D), desative “Taxa máxima de quadros do aplicativo em segundo plano”; deixe a janela do jogo ativa; e, jogando de longe, ponha a tela e a suspensão do Windows em “Nunca”.',
   cpu: 'O codificador de quem compartilha não dá conta (PC no limite).',
   software: 'O vídeo está sendo codificado no processador, não na placa de vídeo. No Chrome de quem compartilha: Configurações → Sistema → “Usar aceleração gráfica” ligado; no Windows, Configurações → Tela → Gráficos → Chrome em “Alto desempenho”. Em chrome://gpu, “Video Acceleration Information” diz se a placa codifica H.264. Tela cheia exclusiva também derruba para o processador: use janela sem bordas.',
   internet: 'A banda entre vocês está no limite e o navegador baixou a resolução para não travar. O Wi-Fi perde pacotes e cada perda derruba a banda: cabo no PC de quem compartilha e o celular perto do roteador (rede de 5 GHz) ajudam; pela internet, o ideal é 25 Mbps de upload livres.',
@@ -258,7 +261,7 @@ export class DiagJogo {
     if (++s.ruins < SEGUIDAS || Date.now() - s.ultimoAviso < ENTRE_AVISOS) return;
     s.ultimoAviso = Date.now();
     const texto = MOTIVOS[motivo] || 'O motivo não ficou claro pelos números.';
-    const onde = lado === 'joga' && ['captura', 'cpu', 'software', 'internet', 'codificador'].includes(motivo) ? 'No PC de quem compartilha: ' : '';
+    const onde = lado === 'joga' && ['captura', 'fundo', 'cpu', 'software', 'internet', 'codificador'].includes(motivo) ? 'No PC de quem compartilha: ' : '';
     const altura = lado === 'joga' ? r.la?.altura ?? r.altura : r.altura;
     const como = fps >= BOM ? `com a imagem baixa${altura ? ` (${altura} linhas)` : ''}` : `a ${Math.round(fps)} qps${imagemBaixa && altura ? `, ${altura} linhas` : ''}`;
     this.evento('aviso', { fps, motivo, imagemBaixa, altura });
@@ -322,6 +325,8 @@ function motivoEnvio(r) {
   const cpu = (lim.cpu || 0) > 30 || r.limite === 'cpu';
   if (r.imagemBaixa) return banda ? 'internet' : cpu ? 'cpu' : 'internet';
   if (r.enviado == null || r.enviado >= BOM) return null;
+  // perto de 30 (o limite de quadros em segundo plano da NVIDIA, a janela sem foco): 'fundo'
+  if (r.captura != null && r.captura >= 26 && r.captura <= 38) return 'fundo';
   if (r.captura != null && r.captura < BOM) return 'captura';
   if (r.placa === false && /openh264|libvpx|libaom|dav1d|software/i.test(r.codificador || '')) return 'software';
   if (cpu) return 'cpu';
