@@ -19,6 +19,7 @@ import { planta, salaEm, rotuloDaTela, postoDaTela, chaveDaTela, DEPARTAMENTOS, 
 import * as moduloQualidade from './qualidade.js';
 import { construirCidade } from './cidade.js';
 import { construirParque } from './parque.js';
+import { construirCatedral } from './catedral.js';
 import { construirPingue } from './pingue.js';
 import { construirQueimada } from './queimada.js';
 import { construirSinuca } from './sinuca.js';
@@ -828,6 +829,8 @@ export class World {
       },
       // o parque, no norte: praça, ruas e o salão de jogos (os jogos de lá vêm a seguir, cada um uma área)
       () => { this.parque = construirParque(this); },
+      // a catedral gótica, o ponto de encontro (os blocos chegam depois, pela rede)
+      () => { this.catedral = construirCatedral(this); },
       () => {
         this.pingue3d = this.area('pingue', () => construirPingue(this));
         this.queimada3d = this.area('queimada', () => construirQueimada(this));
@@ -2710,6 +2713,8 @@ export class World {
   // junto) e o escritório (sino, teclado e mouse do posto).
   update(time) {
     this.tempo = time;
+    // as caixas de colisão da catedral perto da câmera (ela fica a poucos metros do jogador)
+    this.catedral?.aproximar(this.camera.position.x, this.camera.position.z);
     // tempo absoluto: todo mundo vê as plataformas móveis na mesma posição
     const t = Date.now() / 1000;
     for (const c of this.movers) {

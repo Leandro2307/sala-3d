@@ -1,6 +1,6 @@
 // Controle do jogador: física simples com caixas (AABB), pulo com "coyote time", câmera 1ª/3ª pessoa.
 import * as THREE from 'three';
-import { ROOM } from './world.js';
+import { ROOM, SALA } from './world.js';
 
 const HW = 0.36; // meia largura do jogador
 const H = 1.8; // altura
@@ -659,6 +659,9 @@ export class Player {
     const hits = _ray.intersectObjects(this.world.cameraBlockers, false);
     let allowed = this.camDist;
     if (hits.length) allowed = Math.max(0.6, hits[0].distance - 0.4);
+    // a catedral não tem malha no raio (são muitos triângulos): a grade de blocos responde
+    const naCatedral = this.world.catedral?.raioCamera(target, _ray.ray.direction, this.camDist + 0.4);
+    if (naCatedral != null) allowed = Math.min(allowed, Math.max(0.6, naCatedral - 0.4));
     if (allowed < this.camDistCurrent) this.camDistCurrent = allowed;
     else this.camDistCurrent += (allowed - this.camDistCurrent) * Math.min(1, dt * 5);
 
@@ -668,7 +671,9 @@ export class Player {
     if (this.pos.y < ROOM.height) {
       cam.position.x = THREE.MathUtils.clamp(cam.position.x, ROOM.minX + 0.4, ROOM.maxX - 0.4);
       cam.position.z = THREE.MathUtils.clamp(cam.position.z, ROOM.minZ + 0.4, ROOM.maxZ - 0.4);
-      cam.position.y = THREE.MathUtils.clamp(cam.position.y, 0.3, ROOM.height - 0.4);
+      cam.position.y = Math.max(cam.position.y, 0.3);
+      // o teto só existe dentro do cinema
+      if (this.pos.x < SALA.maxX && this.pos.z < SALA.maxZ) cam.position.y = Math.min(cam.position.y, ROOM.height - 0.4);
     }
     cam.lookAt(target);
     this.lookPoint.copy(target);

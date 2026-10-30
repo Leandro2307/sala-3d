@@ -18,6 +18,7 @@ export const NEVE = {
   desc: 'Montanhas nevadas, pinheiros e um lago congelado para patinar',
   cor: '#93c5fd',
   atracoes: {
+    catedral: { x: 288, z: 798 }, // a catedral gótica, ponto de encontro (catedral.js); a fachada olha para o sul
     pista: { cx: 340, cz: 290, giro: -0.69 },
     kart: { x: 100, z: 712, giro: 0 },
     estadio: { cx: 60, cz: 140, giro: Math.PI / 2 },
@@ -64,6 +65,7 @@ export const NEVE = {
       },
     },
     areas: {
+      catedral: { nome: 'Catedral', sub: 'Ponto de encontro, com o interior aberto', cor: '#e9d5ff', ir: { pos: [288, 0, 729], yaw: Math.PI } },
       predio: { nome: 'Prédio', sub: 'Cinema, telão, parkour e ringue', cor: '#e2e8f0', ir: { pos: [0, 0, -2], yaw: 0 } },
       praca: { nome: 'Praça do Pinheirão', sub: 'O ponto de encontro da vila', cor: '#fde68a', ir: { pos: [100, 0, 14], yaw: Math.PI } },
       salao: { nome: 'Salão de jogos', sub: 'Pingue-pongue, sinuca, poker e cartas', cor: '#4ade80', ir: { pos: [126, 0, 28], yaw: -Math.PI / 2 } },
@@ -153,6 +155,7 @@ export const NEVE = {
       { x0: -52, x1: 480, z0: -40, z1: 60 },
     ],
     rotulos: {
+      catedral: [288, 798],
       predio: [4, 10], praca: [100, 30], salao: [166, 11], estadio: [60, 140], autodromo: [340, 290], lago: [40, 300], quadras: [40, 420],
       jogos: [70, 490], aventura: [-25, 488], kart: [100, 712], parque: [350, 720],
     },

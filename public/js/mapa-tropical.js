@@ -13,6 +13,7 @@ export const TROPICAL = {
   desc: 'Praia, lagoa azul e coqueiros, com um calçadão que liga tudo',
   cor: '#22d3ee',
   atracoes: {
+    catedral: { x: 148, z: 619 }, // a catedral gótica, ponto de encontro (catedral.js); a fachada olha para o sul
     pista: { cx: 345, cz: 580, giro: -0.95 },
     kart: { x: 330, z: 140, giro: 0 },
     estadio: { cx: 33, cz: 190, giro: 0 },
@@ -57,6 +58,7 @@ export const TROPICAL = {
       },
     },
     areas: {
+      catedral: { nome: 'Catedral', sub: 'Ponto de encontro, com o interior aberto', cor: '#e9d5ff', ir: { pos: [148, 0, 550], yaw: Math.PI } },
       predio: { nome: 'Prédio', sub: 'Cinema, telão, parkour e ringue', cor: '#e2e8f0', ir: { pos: [0, 0, -2], yaw: 0 } },
       praca: { nome: 'Praça do Farol', sub: 'O ponto de encontro: daqui sai o Calçadão', cor: '#fde68a', ir: { pos: [100, 0, 14], yaw: Math.PI } },
       salao: { nome: 'Salão de jogos', sub: 'Pingue-pongue, sinuca, poker e cartas', cor: '#4ade80', ir: { pos: [80, 0, 82], yaw: Math.PI / 2 } },
@@ -150,6 +152,7 @@ export const TROPICAL = {
     ],
     // nome de cada área no mapa da tela
     rotulos: {
+      catedral: [148, 619],
       predio: [4, 10], praca: [100, 30], salao: [40, 87], kart: [330, 140], jogos: [147, 175], estadio: [33, 190], quadras: [10, 340],
       aventura: [25, 400], lago: [25, 475], autodromo: [345, 580], parque: [AV, 700],
     },

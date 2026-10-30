@@ -12,6 +12,7 @@ export const OUTONO = {
   desc: 'Bordos vermelhos, cerejeiras, lago de carpas e caminho de torii',
   cor: '#f97316',
   atracoes: {
+    catedral: { x: 100, z: 510 }, // a catedral gótica, ponto de encontro (catedral.js); a fachada olha para o sul
     pista: { cx: 270, cz: 620, giro: -0.16 },
     kart: { x: 340, z: 190, giro: 0 },
     estadio: { cx: 140, cz: 180, giro: 0 },
@@ -52,6 +53,7 @@ export const OUTONO = {
     toriis: { rua: 'Trilha do Jardim', z0: 446, z1: 842, passo: 14 },
     parque: { praca: null, portico: null },
     areas: {
+      catedral: { nome: 'Catedral', sub: 'Ponto de encontro, com o interior aberto', cor: '#e9d5ff', ir: { pos: [100, 0, 441], yaw: Math.PI } },
       predio: { nome: 'Prédio', sub: 'Cinema, telão, parkour e ringue', cor: '#e2e8f0', ir: { pos: [0, 0, -2], yaw: 0 } },
       praca: { nome: 'Praça do Pagode', sub: 'O ponto de encontro do jardim', cor: '#fca5a5', ir: { pos: [100, 0, 14], yaw: Math.PI } },
       salao: { nome: 'Salão de jogos', sub: 'Pingue-pongue, sinuca, poker e cartas', cor: '#4ade80', ir: { pos: [126, 0, 28], yaw: -Math.PI / 2 } },
@@ -132,6 +134,7 @@ export const OUTONO = {
       { x0: 200, x1: 480, z0: -40, z1: 340 },
     ],
     rotulos: {
+      catedral: [100, 510],
       predio: [4, 10], praca: [100, 30], salao: [166, 11], kart: [340, 190], jogos: [20, 165], estadio: [140, 180], quadras: [10, 300],
       lago: [150, 320], autodromo: [270, 620], aventura: [12, 436], parque: [36, 640],
     },
