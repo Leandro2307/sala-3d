@@ -34,7 +34,7 @@ export const NEVE = {
     ruas: [
       { nome: 'Alameda do Prédio', pontos: [[62, 30], [74, 30]], largura: 12 },
       { nome: 'Rua do Estádio', pontos: [[96, 56], [86, 90]], largura: 10 },
-      { nome: 'Rua Leste', pontos: [[118, 52], [135, 76], [135, 550], [330, 550], [350, 566], [350, 704]], largura: 10, curva: true },
+      { nome: 'Rua Leste', pontos: [[114, 48], [135, 76], [135, 550], [330, 550], [350, 566], [350, 704]], largura: 10, curva: true },
       { nome: 'Rua do Autódromo', pontos: [[135, 107], [222, 107]], largura: 10, pista: true },
       { nome: 'Rua do Lago', pontos: [[102, 300], [135, 300]], largura: 8 },
       { nome: 'Anel do Lago', pontos: anel, largura: 8 },
@@ -144,8 +144,8 @@ export const NEVE = {
       },
     ],
     mapasAqui: [
-      { x: 76, z: 16, giro: -Math.PI / 2 },
-      { x: 342, z: 701, giro: Math.PI },
+      { x: 72, z: 14, giro: -Math.PI / 2 },
+      { x: 341, z: 698, giro: Math.PI },
     ],
     bosques: [
       { x0: -52, x1: 130, z0: 60, z1: 570 },

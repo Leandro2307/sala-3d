@@ -136,8 +136,8 @@ export const TROPICAL = {
       },
     ],
     mapasAqui: [
-      { x: 76, z: 16, giro: -Math.PI / 2 },
-      { x: AV - 12, z: 688, giro: Math.PI },
+      { x: 72, z: 14, giro: -Math.PI / 2 },
+      { x: 79, z: 684, giro: Math.PI },
     ],
     // onde nasce mata dentro da cerca (coqueiral)
     bosques: [

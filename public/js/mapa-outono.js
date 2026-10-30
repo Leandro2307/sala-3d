@@ -119,8 +119,8 @@ export const OUTONO = {
       },
     ],
     mapasAqui: [
-      { x: 76, z: 16, giro: -Math.PI / 2 },
-      { x: 26, z: 438, giro: Math.PI },
+      { x: 72, z: 14, giro: -Math.PI / 2 },
+      { x: 30, z: 441, giro: Math.PI },
     ],
     bosques: [
       { x0: -52, x1: 85, z0: 236, z1: 278 },
