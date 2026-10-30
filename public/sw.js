@@ -7,7 +7,8 @@
 // mundo baixa de novo uma vez; o activate apaga o cache velho.
 // v3: o visual novo do mapa (posprocesso.js) — havia quem ficasse com a página velha. Além de
 // apagar o cache velho, recarrega as abas abertas da sala para pegarem tudo novo.
-const CACHE = 'sala3d-v3';
+// v4: para de recarregar abas abertas — isso causava "entra e sai" no PWA durante o login.
+const CACHE = 'sala3d-v4';
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => {
@@ -19,10 +20,9 @@ self.addEventListener('activate', (e) => {
       await caches.delete(nome);
     }
     await self.clients.claim();
-    // só numa atualização (havia cache de outra versão): na primeira instalação não recarrega nada
-    if (velho) {
-      for (const c of await self.clients.matchAll({ type: 'window' })) c.navigate(c.url).catch(() => {});
-    }
+    // Não recarrega as abas abertas automaticamente: no PWA isso derrubava o login no meio da
+    // entrada ("entra e sai"). O cache velho é apagado; a nova versão entra na próxima abertura do
+    // app ou quando a pessoa recarregar a aba.
   })());
 });
 
