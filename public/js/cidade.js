@@ -13,7 +13,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import {
   PRACA, RUAS, PRACAS, PISOS, AGUA, AREAS, PORTICOS, PLACAS, QUADROS, MAPAS_AQUI, COM_LETRAS, BOSQUES, MESAS_NOVO, TORIIS,
 } from './cidade-dados.js';
-import { desenharMapa } from './mapa.js';
+import { desenharMapa, LIM } from './mapa.js';
 import { PISTA, pontoEm, projetar } from './pista.js';
 import {
   TEMA, textura, texturaRua, relevoRua, relevoFoto, texturaPiso, texturaPracaCentral, poste as posteDoTema, estruturaPortico, pecaDaPraca, ARVORE_DA_RUA,
@@ -729,14 +729,30 @@ export function quadroInfo(g, L, world, { area, x, z, giro, linhas, nome, sub, c
 // O mapa num totem (mapa.js), virado para o lado que a pessoa olha quando lê: o que fica à frente
 // dela no mundo fica para cima no mapa
 export function totemMapa(g, L, world, { x, z, giro }) {
-  const W = 1024;
-  const H = 1024;
   // quem lê olha para o lado oposto à frente do totem: (-sen giro, -cos giro)
   const olha = [-Math.sin(giro), -Math.cos(giro)];
+  const [fx, fz] = olha;
+  // mesma projeção usada em desenharMapa: eixo x para a direita de quem lê, eixo y para cima
+  const rx = fz;
+  const rz = -fx;
+  const proj = (px, pz) => [px * rx + pz * rz, -(px * fx + pz * fz)];
+  const cantos = [[LIM.x0, LIM.z0], [LIM.x1, LIM.z0], [LIM.x1, LIM.z1], [LIM.x0, LIM.z1]];
+  const ps = cantos.map(([px, pz]) => proj(px, pz));
+  const dx = Math.max(1, Math.max(...ps.map((p) => p[0])) - Math.min(...ps.map((p) => p[0])));
+  const dy = Math.max(1, Math.max(...ps.map((p) => p[1])) - Math.min(...ps.map((p) => p[1])));
+  const prop = dx / dy;
+
+  const W = 1024;
+  const MARGEM = 30;
+  const FAIXA = 90;
+  // área do mapa na textura mantém a proporção real do mundo para essa direção
+  const H_mapa = Math.max(320, Math.round((W - 2 * MARGEM) / prop + 2 * MARGEM));
+  const H = H_mapa + FAIXA;
+
   const tex = textura(W, H, (ctx) => {
-    desenharMapa(ctx, W, H - 90, { frente: olha, aqui: { x, z }, margem: 30 });
+    desenharMapa(ctx, W, H_mapa, { frente: olha, aqui: { x, z }, margem: MARGEM });
     ctx.fillStyle = '#0f172a';
-    ctx.fillRect(0, H - 90, W, 90);
+    ctx.fillRect(0, H_mapa, W, FAIXA);
     ctx.fillStyle = '#ef4444';
     ctx.beginPath();
     ctx.arc(52, H - 45, 16, 0, Math.PI * 2);
@@ -751,8 +767,15 @@ export function totemMapa(g, L, world, { x, z, giro }) {
     ctx.textAlign = 'right';
     ctx.fillText('Mapa na tela: botão do mapa ou L', W - 30, H - 45);
   });
-  const w = 4.6;
-  const h = w * (H / W);
+
+  // painel 3D com a mesma proporção da textura, sem esticar o mapa
+  let w = 4.6;
+  let h = w * (H / W);
+  const MAX_H = 6.0;
+  if (h > MAX_H) {
+    h = MAX_H;
+    w = h * (W / H);
+  }
   const base = 0.8;
   const onde = new THREE.Matrix4().compose(_p.set(x, 0, z), _q.setFromAxisAngle(CIMA, giro), _s.set(1, 1, 1));
   g.add(new THREE.Mesh(new THREE.PlaneGeometry(w, h).translate(0, base + h / 2, 0.08).applyMatrix4(onde), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false })));

@@ -12,7 +12,7 @@ import { SURF } from './ceu-dados.js';
 
 const FONTE = (px, peso = 800) => `${peso} ${px}px 'Plus Jakarta Sans', system-ui, sans-serif`;
 // a área cercada, com uma folga
-const LIM = { x0: -60, x1: 488, z0: -48, z1: 868 };
+export const LIM = { x0: -60, x1: 488, z0: -48, z1: 868 };
 // as cores do mapa no tema: o gramado, a mata e cada tipo de água
 const TEMA = MAPA_INFO.tema;
 const COR_CHAO = { tropical: '#4f9a45', neve: '#d9e3ee', outono: '#8f8b45' }[TEMA.id] || '#2f5d3a';
@@ -42,10 +42,10 @@ function roundRect(ctx, x, y, w, h, r) {
 // "você"; pessoas: [{ x, z, cor }]. Devolve onde ficou cada nome (para o toque escolher uma área).
 export function desenharMapa(ctx, w, h, { frente = [0, 1], aqui = null, pessoas = [], margem = 24, legenda = true } = {}) {
   const [fx, fz] = frente;
-  // a direita de quem olha para a frente. No 3D (three.js, y para cima) quem olha para +z tem o +x à
-  // esquerda: o mapa segue o que a pessoa vê, então com o norte para cima o "leste" (+x) fica à esquerda
-  const rx = -fz;
-  const rz = fx;
+  // a direita de quem olha para a frente: girar o vetor frente 90° no sentido horário no plano xz.
+  // Assim, com o norte para cima, o leste (+x) fica à direita no mapa.
+  const rx = fz;
+  const rz = -fx;
   const cantos = [[LIM.x0, LIM.z0], [LIM.x1, LIM.z0], [LIM.x1, LIM.z1], [LIM.x0, LIM.z1]];
   const proj = (x, z) => [x * rx + z * rz, -(x * fx + z * fz)];
   const ps = cantos.map(([x, z]) => proj(x, z));
@@ -350,8 +350,8 @@ export class MapaTela {
     }
     const ctx = cv.getContext('2d');
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    // o mapa é comprido de sul a norte: numa tela larga ele deita, com o norte à direita (o prédio,
-    // onde se começa, fica à esquerda)
+    // o mapa é comprido de sul a norte: numa tela larga ele deita, com o norte à esquerda (o prédio
+    // fica abaixo, entre oeste e leste)
     const frente = r.width > r.height * 1.1 ? [1, 0] : [0, 1];
     const { alvos } = desenharMapa(ctx, r.width, r.height, { frente, aqui: this.opts.posicao(), pessoas: this.opts.pessoas(), margem: 14 });
     this.alvos = alvos;
