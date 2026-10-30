@@ -993,7 +993,10 @@ async function join() {
   let config = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
   try { config = await (await fetch('/config')).json(); } catch { /* usa o padrão */ }
 
-  socket = window.io();
+  // websocket primeiro: evita o upgrade de polling -> websocket, que em algumas redes dispara
+  // disconnect/connect rápido logo após o join e faz a tela "entrar, sair e entrar de novo".
+  // Se websocket não der, o socket.io cai para polling sozinho.
+  socket = window.io({ transports: ['websocket', 'polling'] });
   combat.socket = socket;
   futebol.ligar(socket);
   quadras.ligar(socket);
@@ -1123,8 +1126,26 @@ async function join() {
   if (tutorialHud.precisa()) setTimeout(() => tutorialHud.iniciar(iniciarGuiaBoasVindas), 900);
 }
 
+let joinPromise = null;
+
 function emitJoin() {
-  return new Promise((resolve) => {
+  if (joinPromise) return joinPromise;
+  joinPromise = new Promise((resolve) => {
+    if (!socket?.connected) {
+      joinPromise = null;
+      return resolve({ erro: 'desconectado' });
+    }
+    const limite = setTimeout(() => {
+      socket.off('disconnect', aoCair);
+      joinPromise = null;
+      resolve({ erro: 'timeout' });
+    }, 20000);
+    const aoCair = () => {
+      clearTimeout(limite);
+      joinPromise = null;
+      resolve({ erro: 'desconectado' });
+    };
+    socket.once('disconnect', aoCair);
     socket.emit('join', {
       room: state.roomRequested,
       name: settings.name,
@@ -1138,8 +1159,14 @@ function emitJoin() {
       status: settings.status,
       passe: state.passe,
       proto: 2, // recebe as posições em lote ('states'); aba antiga continua no 'state' de cada um
-    }, resolve);
+    }, (data) => {
+      clearTimeout(limite);
+      socket.off('disconnect', aoCair);
+      joinPromise = null;
+      resolve(data);
+    });
   });
+  return joinPromise;
 }
 
 function applyJoined(data) {
@@ -1203,7 +1230,7 @@ function bindSocket() {
     if (state.joined) $('#reconnecting').hidden = false;
   });
   socket.on('connect', async () => {
-    if (!state.joined) return;
+    if (!state.joined || joinPromise) return;
     // reconexão: refaz tudo do zero com o novo id
     $('#reconnecting').hidden = true;
     pararTodasAsTelas(false);
