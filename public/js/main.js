@@ -1131,40 +1131,55 @@ let joinPromise = null;
 function emitJoin() {
   if (joinPromise) return joinPromise;
   joinPromise = new Promise((resolve) => {
-    if (!socket?.connected) {
-      joinPromise = null;
-      return resolve({ erro: 'desconectado' });
-    }
-    const limite = setTimeout(() => {
-      socket.off('disconnect', aoCair);
-      joinPromise = null;
-      resolve({ erro: 'timeout' });
-    }, 20000);
-    const aoCair = () => {
+    let limite;
+    let aoCair;
+    let aoConectar;
+
+    const limpar = () => {
       clearTimeout(limite);
-      joinPromise = null;
-      resolve({ erro: 'desconectado' });
+      socket?.off('disconnect', aoCair);
+      socket?.off('connect', aoConectar);
     };
-    socket.once('disconnect', aoCair);
-    socket.emit('join', {
-      room: state.roomRequested,
-      name: settings.name,
-      color: settings.color,
-      mic: state.micOn && state.micAvailable,
-      cam: rtc?.camId ?? null,
-      photo: settings.photo,
-      shirt: settings.shirt,
-      char: settings.char,
-      arma: settings.arma,
-      status: settings.status,
-      passe: state.passe,
-      proto: 2, // recebe as posições em lote ('states'); aba antiga continua no 'state' de cada um
-    }, (data) => {
-      clearTimeout(limite);
-      socket.off('disconnect', aoCair);
+
+    const falhar = (erro) => {
+      limpar();
       joinPromise = null;
-      resolve(data);
-    });
+      resolve({ erro });
+    };
+
+    const enviar = () => {
+      limpar();
+      limite = setTimeout(() => falhar('timeout'), 20000);
+      socket.once('disconnect', aoCair);
+      socket.emit('join', {
+        room: state.roomRequested,
+        name: settings.name,
+        color: settings.color,
+        mic: state.micOn && state.micAvailable,
+        cam: rtc?.camId ?? null,
+        photo: settings.photo,
+        shirt: settings.shirt,
+        char: settings.char,
+        arma: settings.arma,
+        status: settings.status,
+        passe: state.passe,
+        proto: 2, // recebe as posições em lote ('states'); aba antiga continua no 'state' de cada um
+      }, (data) => {
+        limpar();
+        joinPromise = null;
+        resolve(data);
+      });
+    };
+
+    aoCair = () => falhar('desconectado');
+    aoConectar = () => enviar();
+
+    if (socket?.connected) return enviar();
+
+    // ainda não conectou: espera o connect ou desiste em 15 s
+    limite = setTimeout(() => falhar('nao-conectou'), 15000);
+    socket.once('connect', aoConectar);
+    socket.once('disconnect', aoCair);
   });
   return joinPromise;
 }
