@@ -89,11 +89,16 @@ export function parqueDe(mapa) {
   return {
     // letreiro: o lado do letreiro ('sul', 'norte', 'leste' ou 'oeste'), o que olha para quem chega
     SALAO: { x0: -10 + s.dx, x1: 50 + s.dx, z0: 628 + s.dz, z1: 670 + s.dz, altura: 7.5, letreiro: M.atracoes.salao.letreiro || 'sul' },
-    MESAS_PINGUE: [{ x: 2 + s.dx, z: 638 + s.dz }, { x: 2 + s.dx, z: 660 + s.dz }],
-    MESAS_SINUCA: [{ x: 22.5 + s.dx, z: 638 + s.dz }, { x: 22.5 + s.dx, z: 660 + s.dz }],
-    MESAS_CARTAS: [{ x: 41.5 + s.dx, z: 638 + s.dz, jogo: 'truco' }, { x: 41.5 + s.dx, z: 660 + s.dz, jogo: 'uno' }, { x: 41.5 + s.dx, z: 649 + s.dz, jogo: 'vinteum' }, { x: 2 + s.dx, z: 649 + s.dz, jogo: 'cacheta' }],
-    // poker: no corredor do meio, entre o pingue-pongue e a sinuca e entre a sinuca e as cartas
-    MESAS_POKER: [{ x: 12 + s.dx, z: 649 + s.dz }, { x: 32 + s.dx, z: 649 + s.dz }],
+    // 2 de cada tipo, organizados em fileiras que preenchem os corredores
+    MESAS_PINGUE: [{ x: 0 + s.dx, z: 638 + s.dz }, { x: 0 + s.dx, z: 658 + s.dz }],
+    MESAS_SINUCA: [{ x: 18 + s.dx, z: 638 + s.dz }, { x: 18 + s.dx, z: 658 + s.dz }],
+    MESAS_POKER: [{ x: 36 + s.dx, z: 638 + s.dz }, { x: 36 + s.dx, z: 658 + s.dz }],
+    MESAS_CARTAS: [
+      { x: 9 + s.dx, z: 632 + s.dz, jogo: 'truco' }, { x: 9 + s.dx, z: 642 + s.dz, jogo: 'truco' },
+      { x: 9 + s.dx, z: 652 + s.dz, jogo: 'uno' }, { x: 9 + s.dx, z: 662 + s.dz, jogo: 'uno' },
+      { x: 27 + s.dx, z: 632 + s.dz, jogo: 'vinteum' }, { x: 27 + s.dx, z: 642 + s.dz, jogo: 'vinteum' },
+      { x: 27 + s.dx, z: 652 + s.dz, jogo: 'cacheta' }, { x: 27 + s.dx, z: 662 + s.dz, jogo: 'cacheta' },
+    ],
     QUEIMADA: { cx: 75 + q.dx, cz: 616 + q.dz, comp: 30, larg: 15, cemiterio: 5 },
     PINTA_ARENA: { cx: 133 + p.dx, cz: 637 + p.dz, lado: 56 },
     GOLFE_AREA: { x0: -48 + g.dx, x1: -6 + g.dx, z0: 548 + g.dz, z1: 626 + g.dz },
