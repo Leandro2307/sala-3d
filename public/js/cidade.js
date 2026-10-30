@@ -14,7 +14,7 @@ import {
   PRACA, RUAS, PRACAS, PISOS, AGUA, AREAS, PORTICOS, PLACAS, QUADROS, MAPAS_AQUI, COM_LETRAS, BOSQUES, MESAS_NOVO, TORIIS,
 } from './cidade-dados.js';
 import { desenharMapa } from './mapa.js';
-import { PISTA, pontoEm } from './pista.js';
+import { PISTA, pontoEm, projetar } from './pista.js';
 import {
   TEMA, textura, texturaRua, relevoRua, relevoFoto, texturaPiso, texturaPracaCentral, poste as posteDoTema, estruturaPortico, pecaDaPraca, ARVORE_DA_RUA,
 } from './temas3d.js';
@@ -491,12 +491,19 @@ export function construirPostes(ruas, L, luzes, evitar = []) {
         if (naPraca(px, pz, 2) || ruas.some((o) => o !== r && pertoDe(o, px, pz, 2))) continue;
         // nem colado numa placa (o poste fica na frente das letras)
         if (COM_LETRAS.some((p) => Math.hypot(px - p.x, pz - p.z) < 4.5)) continue;
+        // nem na pista: a rua do autódromo entra de lado no asfalto, e a beira dela cai em cima
+        if (naPista(px, pz)) continue;
         posteDoTema(L, luzes, px, pz, Math.atan2(dx, dz));
       }
       // o que sobrou deste trecho conta no próximo (nas trilhas os trechos são curtos)
       d0 = d - comp;
     }
   }
+}
+
+// o ponto cai no autódromo (asfalto, zebra, área de escape ou guard-rail)?
+function naPista(x, z) {
+  return projetar(x, z).dist < PISTA.largura / 2 + 9;
 }
 
 // a rua passa a menos de (largura/2 + folga) do ponto?
@@ -785,7 +792,7 @@ function arvoresEmFileira(ruas, ocupado) {
         for (const lado of [-1, 1]) {
           const x = x0 + dx * d - dz * afast * lado;
           const z = z0 + dz * d + dx * afast * lado;
-          if (!longe(x, z) || ruas.some((o) => pertoDe(o, x, z, 3))) continue;
+          if (!longe(x, z) || naPista(x, z) || ruas.some((o) => pertoDe(o, x, z, 3))) continue;
           arvores.push({ x, z, tipo: ARVORE_DA_RUA });
         }
       }

@@ -68,7 +68,7 @@ export const NEVE = {
       praca: { nome: 'Praça do Pinheirão', sub: 'O ponto de encontro da vila', cor: '#fde68a', ir: { pos: [100, 0, 14], yaw: Math.PI } },
       salao: { nome: 'Salão de jogos', sub: 'Pingue-pongue, sinuca, poker e cartas', cor: '#4ade80', ir: { pos: [126, 0, 28], yaw: -Math.PI / 2 } },
       estadio: { nome: 'Estádio', sub: 'Futebol de carro', cor: '#22d3ee', ir: { pos: [84, 0, 89], yaw: Math.PI } },
-      autodromo: { nome: 'Autódromo', sub: 'Corrida de carro contra o relógio', cor: '#6ee7c8', ir: { pos: [200, 0, 107], yaw: -Math.PI / 2 } },
+      autodromo: { nome: 'Autódromo', sub: 'Corrida de carro contra o relógio', cor: '#6ee7c8', ir: { pos: [175, 0, 107], yaw: -Math.PI / 2 } },
       lago: { nome: 'Lago congelado', sub: 'Pista de patinação no gelo', cor: '#93c5fd', ir: { pos: [114, 0, 300], yaw: Math.PI / 2 } },
       quadras: { nome: 'Quadras', sub: 'Vôlei, basquete e boliche', cor: '#facc15', ir: { pos: [14, 0, 392], yaw: Math.PI } },
       jogos: { nome: 'Praça dos jogos', sub: 'Xadrez, dama, jogo da velha 2 e dados', cor: '#a78bfa', ir: { pos: [22, 0, 490], yaw: -Math.PI / 2 } },
@@ -77,7 +77,8 @@ export const NEVE = {
       parque: { nome: 'Vale do parque', sub: 'Queimada, pinta e golfe', cor: '#4ade80', ir: { pos: [350, 0, 690], yaw: Math.PI } },
     },
     porticos: [
-      { area: 'autodromo', x: 190, z: 107, giro: -Math.PI / 2, vao: 10 },
+      // antes da curva da pista: mais adiante o pilar ficava no asfalto
+      { area: 'autodromo', x: 165, z: 107, giro: -Math.PI / 2, vao: 10 },
       { area: 'lago', x: 122, z: 300, giro: Math.PI / 2, vao: 8 },
       { area: 'quadras', x: 14, z: 384, giro: Math.PI, vao: 8 },
       { area: 'aventura', x: 2, z: 470, giro: Math.PI / 2, vao: 8 },
@@ -114,7 +115,7 @@ export const NEVE = {
         linhas: ['Futebol de carro, em dois times', 'Na faixa da entrada, aperte E para jogar', 'Turbo: Shift ou correr · pulo: Espaço', 'Faça gol empurrando a bola com o carro'],
       },
       {
-        area: 'autodromo', x: 180, z: 115, giro: -Math.PI / 2,
+        area: 'autodromo', x: 155, z: 115, giro: -Math.PI / 2,
         linhas: ['Vire carro (G ou o botão do carro) e entre na pista', 'Passe pela largada: o tempo da volta começa', 'Saiu da pista? R volta para ela', 'O melhor tempo fica no placar'],
       },
       {

@@ -2259,8 +2259,12 @@ export class World {
     const prof = 2.4;
     const alt = 0.9;
     // a reta corre quase no eixo X: a frente fica virada para +Z, de cara para a pista
-    const x = Math.round(p.x + lx * (meia + 20));
-    const zFrente = Math.round(p.z + lz * (meia + 20));
+    // (nos mapas em que a reta corre na diagonal, afasta até as quinas saírem da área de escape)
+    let afast = meia + 20;
+    const quinaNaPista = (cx, cz) => [-1, 1].some((s) => [0, -DEGRAUS * prof].some((dz) => projetar(cx + s * (L / 2), cz + dz).dist < meia + 8));
+    while (afast < meia + 50 && quinaNaPista(Math.round(p.x + lx * afast), Math.round(p.z + lz * afast))) afast += 1;
+    const x = Math.round(p.x + lx * afast);
+    const zFrente = Math.round(p.z + lz * afast);
     const zFundo = zFrente - DEGRAUS * prof;
 
     // degraus numa malha só, e os assentos numa por cor (os colisores continuam caixas à parte)

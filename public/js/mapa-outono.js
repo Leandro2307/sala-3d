@@ -60,7 +60,7 @@ export const OUTONO = {
       estadio: { nome: 'Estádio', sub: 'Futebol de carro', cor: '#22d3ee', ir: { pos: [189, 0, 207], yaw: 0 } },
       quadras: { nome: 'Quadras', sub: 'Vôlei, basquete e boliche', cor: '#facc15', ir: { pos: [10, 0, 280], yaw: Math.PI } },
       lago: { nome: 'Lago das carpas', sub: 'Peixes coloridos e a ponte vermelha', cor: '#fb7185', ir: { pos: [100, 0, 320], yaw: -Math.PI / 2 } },
-      autodromo: { nome: 'Autódromo', sub: 'Corrida de carro contra o relógio', cor: '#6ee7c8', ir: { pos: [250, 0, 392], yaw: -Math.PI / 2 } },
+      autodromo: { nome: 'Autódromo', sub: 'Corrida de carro contra o relógio', cor: '#6ee7c8', ir: { pos: [232, 0, 379], yaw: -Math.PI / 2 - 0.75 } },
       aventura: { nome: 'Aventura', sub: 'Portais: surf, mata-mata, gincana e caça-fantasmas', cor: '#f472b6', ir: { pos: [34, 0, 420], yaw: Math.PI / 2 } },
       parque: { nome: 'Caminho dos Torii', sub: 'Golfe, queimada e pinta', cor: '#ef4444', ir: { pos: [36, 0, 448], yaw: Math.PI } },
     },
@@ -105,7 +105,8 @@ export const OUTONO = {
         linhas: ['Vôlei e basquete: é só chegar perto da bola', 'Segure o clique (ou Ação) e solte para jogar', 'Boliche: E na pista para entrar na fila', 'Na sua vez, a mesma coisa: segure e solte'],
       },
       {
-        area: 'autodromo', x: 244, z: 400, giro: -Math.PI / 2 - 0.6,
+        // ao lado do pórtico, do lado de fora da curva (mais adiante ficava em cima da pista)
+        area: 'autodromo', x: 228, z: 362, giro: -Math.PI / 2 - 0.75,
         linhas: ['Vire carro (G ou o botão do carro) e entre na pista', 'Passe pela largada: o tempo da volta começa', 'Saiu da pista? R volta para ela', 'O melhor tempo fica no placar'],
       },
       {
