@@ -62,7 +62,7 @@ export function eventoDeControle(e) {
   if (e.t === 'mouse' && ['down', 'up', 'move'].includes(e.a)) {
     ev = { t: 'mouse', a: e.a, x: e.x === undefined && e.dx !== undefined ? 0.5 : n(e.x, 0, 1), y: e.y === undefined && e.dy !== undefined ? 0.5 : n(e.y, 0, 1), b: BOTAO.includes(e.b) ? e.b : 'left', n: n(e.n, 1, 3) | 0, arrastando: !!e.arrastando, mod };
     if (e.a === 'move' && (e.dx !== undefined || e.dy !== undefined)) Object.assign(ev, { dx: n(e.dx, -4000, 4000), dy: n(e.dy, -4000, 4000) });
-  } else if (e.t === 'modo') return { t: 'modo', jogo: !!e.jogo };
+  } else if (e.t === 'modo') return { t: 'modo', jogo: !!e.jogo, rapido: !!e.rapido };
   else if (e.t === 'vivo') return { t: 'vivo' };
   else if (e.t === 'wheel') ev = { t: 'wheel', x: n(e.x, 0, 1), y: n(e.y, 0, 1), dx: n(e.dx, -3000, 3000), dy: n(e.dy, -3000, 3000), mod };
   else if (e.t === 'tecla' && (e.a === 'down' || e.a === 'up')) {
@@ -354,7 +354,7 @@ export class Controle {
     // o "estou aqui" do modo jogo só serve ao ajudante (janela/tela inteira)
     if (ev?.t === 'vivo' && sh.aba != null) return;
     // modo jogo de quem controla: a sala deste PC fica leve enquanto durar (onModo, no main.js)
-    if (ev?.t === 'modo' && deId) this.onModo?.(sh, ev.jogo, deId);
+    if (ev?.t === 'modo' && deId) this.onModo?.(sh, ev.jogo, deId, !!ev.rapido);
     // aba trocando de página (sem marca por um instante): ignora até a página nova aparecer
     if (sh.semMarca) return;
     // voltar/endereço e os avisos do site só existem em aba; numa janela quem clica é o ajudante

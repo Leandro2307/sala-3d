@@ -320,6 +320,36 @@ Revisão do lado do controle, que até aqui não tinha medida nenhuma. Extensão
 - Motivo `fundo` (captura entre 26 e 38 qps) com o aviso do limite em segundo plano da NVIDIA, do
   foco da janela e da tela/suspensão do Windows. Vai com "No PC de quem compartilha:" para quem joga.
 
+## O atraso (2026-10-30: Wi-Fi de outra casa e 5G)
+
+Somando as medianas do Wi-Fi: captura ~20–35 + codificação ~12 (1080p) + fila ~0–40 + rede ~18 +
+**buffer do iPhone ~100 (p90 285, até 450)** + decodificação ~6,5 + tela ~10–17 ≈ 180–200 ms, mais
+~40 ms do toque até o jogo: os 200–300 ms que o usuário sente. No 5G: ida e volta de ~170 ms (até
+889) pelo TURN e buffer de 230–660 ms — a rede móvel, sem conserto no código.
+
+- O buffer do iPhone cresce com a chegada irregular: depois de uma fila de 1 s ficou em 400–450 ms
+  por ~20 s; com a captura a ~30 qps, 160–260 ms; com a captura estável em 53–55, **15–60 ms**.
+- **Sincronia som/imagem não é o problema** (testado): numa conexão local do Chrome o vídeo ficou
+  com ~5 ms de buffer com o som no mesmo stream ou separado; no Safari de verdade (`somBufferMs` do
+  relatório) o vídeo ficou muitas vezes bem abaixo do som (17 × 121, 47 × 292 ms) — não espera por
+  ele. Separar os dois não foi feito. O som do jogo, esse sim, chega com ~200 ms de buffer médio.
+- Os ~30 qps "do Ultra": o preset não faz isso sozinho (`medir-preset.js`: Leve, Máxima e Ultra dão
+  os mesmos ~55 qps numa janela). Num relatório a captura em 720p subiu de 21 para 32: a placa no
+  limite. O aviso `fundo` agora diz isso (limitar o jogo a 60, gráficos, preset Leve).
+
+### O que entrou depois disso
+
+- `ajustarJogo`: **fila de envio acima de 150 ms numa amostra → 720p na hora** (e cada fila alta
+  seguinte segura o 720p por mais 30 s), sem esperar a estimativa de banda cair.
+- `envioPara`: com a tela fixa abaixo da captura (720p), **a banda cai junto com os pixels**
+  (no mínimo metade): 720p de 1080 vai com 7 Mbps na Máxima.
+- Opção **"Menos atraso (720p)"** (`opcoesJogo.rapido`, nos dois painéis de opções): quem joga
+  manda `{t:'modo', jogo:true, rapido}` (`avisarRapido`, também a cada mudança da opção; passa por
+  `eventoDeControle` no controle.js e no server.js) → `controle.onModo(sh, jogo, deId, rapido)` →
+  `rtc.rapidoJogo(id, ligar)`: 720p fixo e até 8 Mbps para essa pessoa. Testado (Chrome que só
+  aceita o que o Safari aceita): 1280×720 a 60 qps, 7 Mbps, NVIDIA, mesmo com a banda folgada; ao
+  desligar, 1080p e 14 Mbps. A reação à fila não foi testada aqui (não dá para provocar a queda).
+
 ## Próximos passos sugeridos
 
 0. **Pedir um relatório novo dos dois lados** com o jogo em janela sem bordas 1920×1080 a 60 qps

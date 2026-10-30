@@ -4,9 +4,11 @@
 //   menuAuto: quando o jogo mostra o cursor (menu, inventário), o mouse passa a ir pela posição
 //   selo:     o selo de desempenho no canto (qps, atraso, banda)
 //   giro:     no celular, mirar virando o aparelho (giroscópio)
+//   rapido:   menos atraso: quem compartilha manda 720p fixo e até 8 Mbps (quadros menores
+//             codificam, viajam e decodificam mais rápido, e o buffer do celular fica menor)
 
 const CHAVE = 'sala3d-jogo-opcoes';
-const PADRAO = { liso: false, menuAuto: true, selo: false, giro: false };
+const PADRAO = { liso: false, menuAuto: true, selo: false, giro: false, rapido: false };
 export const LISO_MS = 40;
 
 function ler() {

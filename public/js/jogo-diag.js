@@ -17,9 +17,10 @@ const dif = (agora, antes, campo) => (antes && agora?.[campo] != null && antes[c
 
 const MOTIVOS = {
   captura: 'A captura do Chrome está pegando poucos quadros do jogo: a placa de vídeo de quem compartilha está no talo, ou o jogo está em tela cheia exclusiva. Limite o jogo a 60 qps, baixe um pouco a qualidade gráfica e use “janela sem bordas”.',
-  // presa perto de 30 com a placa sobrando: o jogo sem foco. Num relatório de longe (o PC sozinho
-  // em casa) a captura ficou em 30–37 os 3 minutos, com rede e codificador folgados.
-  fundo: 'A captura está presa perto de 30 qps: o jogo deve estar sem foco no PC de quem compartilha. No Painel de Controle da NVIDIA (Gerenciar as configurações 3D), desative “Taxa máxima de quadros do aplicativo em segundo plano”; deixe a janela do jogo ativa; e, jogando de longe, ponha a tela e a suspensão do Windows em “Nunca”.',
+  // Presa perto de 30. O preset sozinho não faz isso (medido: Leve, Máxima e Ultra dão os mesmos
+  // ~55 qps numa janela), e num relatório a captura em 720p subiu de 21 para 32: a placa no limite
+  // (jogo + codificação + captura disputando). Ou o jogo sem foco (limite de quadros em segundo plano).
+  fundo: 'A captura está presa perto de 30 qps no PC de quem compartilha: a placa de vídeo deve estar no limite, ou o jogo sem foco. Limite o jogo a 60 qps (sem quadros sobrando a captura volta a ~55), baixe um pouco os gráficos ou use o preset Leve; no Painel de Controle da NVIDIA, desative “Taxa máxima de quadros do aplicativo em segundo plano”.',
   cpu: 'O codificador de quem compartilha não dá conta (PC no limite).',
   software: 'O vídeo está sendo codificado no processador, não na placa de vídeo. No Chrome de quem compartilha: Configurações → Sistema → “Usar aceleração gráfica” ligado; no Windows, Configurações → Tela → Gráficos → Chrome em “Alto desempenho”. Em chrome://gpu, “Video Acceleration Information” diz se a placa codifica H.264. Tela cheia exclusiva também derruba para o processador: use janela sem bordas.',
   internet: 'A banda entre vocês está no limite e o navegador baixou a resolução para não travar. O Wi-Fi perde pacotes e cada perda derruba a banda: cabo no PC de quem compartilha e o celular perto do roteador (rede de 5 GHz) ajudam; pela internet, o ideal é 25 Mbps de upload livres.',

@@ -2474,7 +2474,8 @@ const jogoNoMeuPc = () => jogandoAqui.size > 0 && !desenharMesmoAssim;
 let jogandoLa = null;
 const diagJogo = new DiagJogo({ toast });
 
-function jogoAqui(key, deId, ligar) {
+// rapido: quem joga pediu menos atraso (opção "Menos atraso"): a tela vai para ela em 720p fixo
+function jogoAqui(key, deId, ligar, rapido = false) {
   const antes = jogandoAqui.size > 0;
   let quem = jogandoAqui.get(key);
   if (ligar) {
@@ -2485,6 +2486,7 @@ function jogoAqui(key, deId, ligar) {
     if (!quem.size) jogandoAqui.delete(key);
   }
   rtc?.modoJogo(key, jogandoAqui.has(key), [...(jogandoAqui.get(key)?.keys() || [])]);
+  const mudouRapido = rtc?.rapidoJogo(deId, ligar && rapido);
   if (!ligar) {
     ajusteDoJogo.delete(deId);
     semDecodificar.delete(deId);
@@ -2508,7 +2510,9 @@ function jogoAqui(key, deId, ligar) {
   const nome = state.users.get(deId)?.name || 'Alguém';
   diagJogo.evento(ligar ? 'modo jogo ligado por quem controla' : 'modo jogo desligado', { key, deId, nome });
   const agora = jogandoAqui.size > 0;
-  if (antes === agora) return;
+  // depois do comecar abaixo (o 1º pedido chega junto com o modo jogo, antes do relatório existir)
+  const registrarRapido = () => { if (mudouRapido) diagJogo.evento(ligar && rapido ? 'quem joga pediu menos atraso: 720p fixo' : 'menos atraso desligado', { deId }); };
+  if (antes === agora) return void registrarRapido();
   if (agora) {
     desenharMesmoAssim = false;
     diagJogo.comecar('compartilha', {
@@ -2526,9 +2530,16 @@ function jogoAqui(key, deId, ligar) {
     desenharMesmoAssim = false;
     diagJogo.parar();
   }
+  registrarRapido();
   atualizarInteresse();
 }
-controle.onModo = (sh, jogo, deId) => jogoAqui(sh.key, deId, jogo);
+controle.onModo = (sh, jogo, deId, rapido) => jogoAqui(sh.key, deId, jogo, rapido);
+
+// quem joga: a opção "Menos atraso" vai para quem compartilha junto com o modo jogo (de novo a cada
+// mudança dela, no meio da jogatina)
+function avisarRapido() {
+  if (jogandoLa) controle.mandar(jogandoLa.key, { t: 'modo', jogo: true, rapido: !!opcoesJogo.get('rapido') });
+}
 
 // eu liguei (ou desliguei) o modo jogo numa tela de outra pessoa
 function jogoLa(video, key) {
@@ -2544,10 +2555,11 @@ function jogoLa(video, key) {
     gl: world.renderer.getContext(),
     video,
     // janela, e não tela: o ambiente já tem "tela" (o tamanho da tela do aparelho)
-    extra: { janelaDoJogo: acharTela(key)?.share.titulo ?? null, toque: isTouch, opcoes: { liso: opcoesJogo.get('liso'), menuAuto: opcoesJogo.get('menuAuto'), giro: opcoesJogo.get('giro') } },
+    extra: { janelaDoJogo: acharTela(key)?.share.titulo ?? null, toque: isTouch, opcoes: { liso: opcoesJogo.get('liso'), menuAuto: opcoesJogo.get('menuAuto'), giro: opcoesJogo.get('giro'), rapido: opcoesJogo.get('rapido') } },
   });
   aplicarBuffer();
   mostrarSelo();
+  if (opcoesJogo.get('rapido')) avisarRapido();
 }
 
 // O buffer da imagem de quem joga: o mínimo, ou um pouco (LISO_MS) com "Imagem mais lisa"
@@ -2575,6 +2587,7 @@ function mostrarSelo(r = null) {
 
 opcoesJogo.ouvir((k, v) => {
   if (k === 'liso') aplicarBuffer();
+  else if (k === 'rapido') avisarRapido();
   else if (k === 'selo') mostrarSelo();
   else if (k === 'menuAuto' && jogandoLa) controle.cursorLivre(jogandoLa.key, v ? jogandoLa.cursorLivre : false);
   $$('#jogo-op-pop [data-op]').forEach((el) => { el.checked = !!opcoesJogo.get(el.dataset.op); });
@@ -2746,7 +2759,19 @@ function ajustarJogo(id, r) {
   }
   st.curta = st.n > 3 && est != null && est < 5000 ? st.curta + 1 : 0;
   st.larga = est != null && est > 9000 ? st.larga + 1 : 0;
-  if (st.curta >= 2 && rtc.linhasDeJogo(id, 720)) {
+  // Fila de envio acima de 150 ms numa amostra só: 720p (e metade da banda) na hora, sem esperar a
+  // estimativa cair. Esperando, a fila chegava a 1 s, a imagem parava 1–2 s e o iPhone ficava com
+  // o buffer em 400 ms por uns 20 s depois. Já em 720p, a fila alta segura o 720p por mais 30 s.
+  const filaAlta = (r.filaMs ?? 0) > 150;
+  if (filaAlta && st.fixaDesde) {
+    st.fixaDesde = Date.now();
+    st.comeco = false;
+  }
+  if (filaAlta && rtc.linhasDeJogo(id, 720)) {
+    st.fixaDesde = Date.now();
+    st.comeco = false;
+    diagJogo.evento('fila de envio cresceu: tela em 720p na hora', { filaMs: r.filaMs, saidaEstimadaKbps: est, altura: r.altura });
+  } else if (st.curta >= 2 && rtc.linhasDeJogo(id, 720)) {
     st.fixaDesde = Date.now();
     st.comeco = false;
     diagJogo.evento('banda curta: tela fixa em 720p', { saidaEstimadaKbps: est, altura: r.altura });

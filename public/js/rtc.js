@@ -583,6 +583,7 @@ export class RTC {
       peer.semPiso = false;
       peer.balanceado = false;
       peer.linhasJogo = null;
+      peer.rapido = false;
       this.tuneScreen(peer);
     }
     console.info('[modo-jogo] banda da conexão', peer.id, nova ? `começa em ${nova.inicio} kbps, piso ${nova.piso} kbps` : 'normal');
@@ -658,6 +659,17 @@ export class RTC {
     return peer.recuoCodec;
   }
 
+  // Quem joga pediu menos atraso (opção "Menos atraso"): 720p fixo e até 8 Mbps para essa pessoa.
+  // Quadros menores codificam (12 → ~5 ms na NVIDIA), viajam e decodificam mais rápido, e chegam
+  // mais por igual: o buffer do celular, a maior parte do atraso, fica menor.
+  rapidoJogo(id, ligar) {
+    const peer = this.peers.get(id);
+    if (!peer || !!peer.rapido === ligar) return false;
+    peer.rapido = ligar;
+    this.tuneScreen(peer);
+    return true;
+  }
+
   // banda inicial e piso (kbps) que vão no SDP desta conexão
   bandaSdp(peer) {
     const j = peer.bandaJogo;
@@ -693,9 +705,18 @@ export class RTC {
     const cfg = scr?.medido || scr?.stream?.getVideoTracks()[0]?.getSettings?.() || {};
     const altura = (cfg.height || preset.height * extra) / extra;
     let escala = nivel.linhas ? Math.max(1, altura / nivel.linhas) : nivel.escala;
-    // modo jogo com pouca banda: resolução fixa (linhasDeJogo) em vez de deixar pular
-    if (nivel === NIVEIS.max && peer.linhasJogo && this.jogoTelas.has(key)) escala = Math.max(1, altura / peer.linhasJogo);
-    const banda = nivel === NIVEIS.max && this.jogoTelas.has(key) ? preset.jogoBitrate : preset.maxBitrate;
+    const jogo = nivel === NIVEIS.max && this.jogoTelas.has(key);
+    let banda = jogo ? preset.jogoBitrate : preset.maxBitrate;
+    // modo jogo com pouca banda: resolução fixa (linhasDeJogo) em vez de deixar pular; com "Menos
+    // atraso" (rapidoJogo), 720p sempre
+    const linhasJogo = jogo ? Math.min(peer.linhasJogo || Infinity, peer.rapido ? 720 : Infinity) : Infinity;
+    if (linhasJogo < altura) {
+      escala = altura / linhasJogo;
+      // A banda cai junto com os pixels (720 de 1080: metade). Em 720p com a banda do 1080p a fila
+      // de envio não esvaziava na queda do Wi-Fi, e a travada continuava.
+      banda *= Math.max(0.5, (linhasJogo / altura) ** 2);
+    }
+    if (jogo && peer.rapido) banda = Math.min(banda, 8_000_000);
     return {
       active: nivel !== NIVEIS.off,
       maxBitrate: Math.round(Math.min(banda * nivel.teto, Math.max(nivel.piso, banda * parte))),
@@ -1007,6 +1028,7 @@ export class RTC {
       semPiso: false, // o piso de jogo saiu (soltarPisoJogo)
       balanceado: false, // a tela de jogo dela sai em 'balanced' (imagemDeJogo)
       linhasJogo: null, // a tela de jogo dela sai com no máximo essas linhas (linhasDeJogo)
+      rapido: false, // ela pediu menos atraso: 720p fixo (rapidoJogo)
       recuoCodec: 0, // passos atrás no codec de jogo (codecSeguroJogo)
       renegociar: false, // falta mandar uma oferta nova (renegociar)
       ctrl: null, // canal do controle remoto (ver canalControle)
@@ -1350,7 +1372,7 @@ export class RTC {
         continue;
       }
       const d = { id, nivel: peer.interesse.get(key) || null, conexao: peer.pc.connectionState };
-      if (peer.bandaJogo) d.bandaJogo = { ...peer.bandaJogo, semPiso: peer.semPiso, balanceado: peer.balanceado, linhas: peer.linhasJogo, recuoCodec: peer.recuoCodec };
+      if (peer.bandaJogo) d.bandaJogo = { ...peer.bandaJogo, semPiso: peer.semPiso, balanceado: peer.balanceado, linhas: peer.linhasJogo, recuoCodec: peer.recuoCodec, rapido: peer.rapido };
       try {
         const p = tr.sender.getParameters();
         d.params = { degradacao: p.degradationPreference ?? null, ...(p.encodings?.[0] || {}) };

@@ -698,7 +698,8 @@ function eventoSemMarca(e) {
     }
     return ev;
   }
-  if (e.t === 'modo') return { t: 'modo', jogo: !!e.jogo }; // liga/desliga o modo jogo no ajudante nativo
+  // liga/desliga o modo jogo no ajudante nativo; rapido: quem joga pediu menos atraso (720p fixo)
+  if (e.t === 'modo') return { t: 'modo', jogo: !!e.jogo, rapido: !!e.rapido };
   if (e.t === 'vivo') return { t: 'vivo' }; // modo jogo: quem joga ainda está aí (sem ele o ajudante solta as teclas)
   if (e.t === 'wheel') return { t: 'wheel', x: n(e.x, 0, 1), y: n(e.y, 0, 1), dx: n(e.dx, -3000, 3000), dy: n(e.dy, -3000, 3000), mod };
   if (e.t === 'tecla' && (e.a === 'down' || e.a === 'up')) {

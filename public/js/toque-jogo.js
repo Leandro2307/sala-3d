@@ -271,6 +271,7 @@ export class ToqueJogo {
         <label class="tj-sens"><span>Sensibilidade</span><input type="range" min="0.4" max="2.5" step="0.1"><output></output></label>
         <div class="tj-liga">
           <label><input type="checkbox" data-op="liso"><span>Imagem mais lisa <small>(+40 ms de atraso)</small></span></label>
+          <label><input type="checkbox" data-op="rapido"><span>Menos atraso <small>(imagem em 720p)</small></span></label>
           <label><input type="checkbox" data-op="menuAuto"><span>Menu do jogo automático</span></label>
           <label><input type="checkbox" data-op="selo"><span>Mostrar desempenho</span></label>
           <label><input type="checkbox" data-op="giro"><span>Mirar virando o celular</span></label>
