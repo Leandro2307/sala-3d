@@ -993,10 +993,14 @@ async function join() {
   let config = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
   try { config = await (await fetch('/config')).json(); } catch { /* usa o padrão */ }
 
-  // websocket primeiro: evita o upgrade de polling -> websocket, que em algumas redes dispara
+  // No celular (redes móveis/operadoras) o polling costuma ser mais estável; no desktop,
+  // websocket primeiro evita o upgrade polling->websocket que em algumas redes dispara
   // disconnect/connect rápido logo após o join e faz a tela "entrar, sair e entrar de novo".
-  // Se websocket não der, o socket.io cai para polling sozinho.
-  socket = window.io({ transports: ['websocket', 'polling'] });
+  socket = window.io({
+    transports: isTouch ? ['polling', 'websocket'] : ['websocket', 'polling'],
+    reconnectionDelay: 1500,
+    reconnectionDelayMax: 10000,
+  });
   combat.socket = socket;
   futebol.ligar(socket);
   quadras.ligar(socket);
@@ -1063,6 +1067,7 @@ async function join() {
   }
 
   state.joined = true;
+  state.entradaEm = Date.now();
   document.body.classList.add('na-sala'); // celular em pé: o aviso de girar (style.css)
   $('#lobby').hidden = true;
   // primeira visita: o tutorial da interface vem antes do aviso de boas-vindas
@@ -1246,6 +1251,8 @@ function bindSocket() {
   });
   socket.on('connect', async () => {
     if (!state.joined || joinPromise) return;
+    // logo após entrar, ignora reconnects rápidos (upgrade de transporte, pulso da rede no celular)
+    if (state.entradaEm && Date.now() - state.entradaEm < 3000) return;
     // reconexão: refaz tudo do zero com o novo id
     $('#reconnecting').hidden = true;
     pararTodasAsTelas(false);
