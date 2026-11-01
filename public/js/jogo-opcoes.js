@@ -9,15 +9,22 @@
 //   turbo:    modo turbo (turbo.js): a imagem por fora do vídeo, sem o buffer do navegador
 
 const CHAVE = 'sala3d-jogo-opcoes';
-const PADRAO = { liso: false, menuAuto: true, selo: false, giro: false, rapido: false, turbo: false };
+// Turbo e 720p ligados de fábrica: nos testes (relatório de 2026-11-01 03:35, PS5 → iPhone) o turbo
+// em 720p deu ~60 ms de atraso contra ~150 ms do vídeo normal, com metade da banda do turbo em 1080p.
+const PADRAO = { liso: false, menuAuto: true, selo: false, giro: false, rapido: true, turbo: true };
+// Versão das opções: quem guardou as de antes (turbo e 720p desligados, que eram o padrão) passa uma
+// vez para os padrões novos; o que a pessoa mudar depois disso fica.
+const VERSAO = 2;
 export const LISO_MS = 40;
 
 function ler() {
   try {
     const v = JSON.parse(localStorage.getItem(CHAVE) || '{}');
-    return { ...PADRAO, ...(v && typeof v === 'object' ? v : {}) };
+    const o = { ...PADRAO, ...(v && typeof v === 'object' ? v : {}) };
+    if (o.v !== VERSAO) Object.assign(o, { v: VERSAO, turbo: PADRAO.turbo, rapido: PADRAO.rapido });
+    return o;
   } catch {
-    return { ...PADRAO };
+    return { ...PADRAO, v: VERSAO };
   }
 }
 

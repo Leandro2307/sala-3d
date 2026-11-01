@@ -446,3 +446,16 @@ ida e volta 35 ms, **buffer do iPhone 75–83 ms (p90 137)** — o maior pedaço
   `modo: 'turbo'`, qps/kbps/medidas do turbo e um `atrasoMs` próprio: controle + jogo + captura +
   `codMs` (vem no cabeçalho de cada quadro) + `redeMs` (metade do ping `{ping}/{pong}` do canal
   turbo) + `montagemMs` + `decMs` + meio quadro.
+
+### Turbo × normal (relatório de 2026-11-01 03:35, PS5 pelo chiaki-ng a 60 → iPhone, mesmo Wi-Fi)
+
+| Modo | qps | Atraso estimado | Banda |
+|---|---|---|---|
+| Normal 1080p | ~55 | 110–190 ms (400–740 com fila) | 14–24 Mbps |
+| Normal 720p | ~55 | 130–170 ms | 7–8 Mbps |
+| Turbo 1080p | ~55 | 57–75 ms | ~9 Mbps |
+| Turbo 720p | 56–58 | 52–76 ms (mediana ~60) | ~5,6 Mbps |
+
+O usuário achou o turbo em 720p o melhor: **turbo e "Menos atraso" ligados de fábrica** (`PADRAO` em
+`jogo-opcoes.js`, com `VERSAO` 2 migrando uma vez quem tinha as opções antigas guardadas). Sem turbo
+no navegador, o aviso sai uma vez por página (`turboAvisado`).

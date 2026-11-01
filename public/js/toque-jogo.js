@@ -304,7 +304,7 @@ export class ToqueJogo {
           <label><input type="checkbox" data-op="liso"><span>Imagem mais lisa <small>(+40 ms de atraso)</small></span></label>
           <label><input type="checkbox" data-op="rapido"><span>Menos atraso <small>(imagem em 720p)</small></span></label>
           <label><input type="checkbox" data-op="menuAuto"><span>Menu do jogo automático</span></label>
-          <label><input type="checkbox" data-op="turbo"><span>Modo turbo <small>(experimental: imagem sem buffer, bem menos atraso)</small></span></label>
+          <label><input type="checkbox" data-op="turbo"><span>Modo turbo <small>(imagem sem buffer: bem menos atraso)</small></span></label>
           <label><input type="checkbox" data-op="selo"><span>Mostrar desempenho</span></label>
           <label><input type="checkbox" data-op="giro"><span>Mirar virando o celular</span></label>
         </div>

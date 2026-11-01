@@ -2633,10 +2633,13 @@ const MOTIVO_TURBO = {
   conexao: 'a conexão direta com quem compartilha não está aberta',
   'sem-imagem': 'nenhuma imagem chegou em 4 s',
 };
+const turboAvisado = new Set(); // motivos já avisados nesta página (o turbo vem ligado de fábrica)
 const turboRecebe = new TurboRecebe({
   abrir: (id) => rtc?.abrirTurbo(id),
   onFalhou: (motivo) => {
     diagJogo.evento('modo turbo falhou: vídeo normal de volta', { motivo });
+    if (turboAvisado.has(motivo)) return;
+    turboAvisado.add(motivo);
     toast(`Modo turbo desligado: ${MOTIVO_TURBO[motivo] || motivo}. A imagem voltou ao normal.`, 'warn', 8000);
   },
 });
