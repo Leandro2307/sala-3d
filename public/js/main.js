@@ -23,6 +23,7 @@ import { AvisoDoSite } from './aviso-site.js';
 import { ToqueJogo, jogoDaJanela } from './toque-jogo.js';
 import { ControleFisico } from './gamepad-jogo.js';
 import { PadVirtual } from './pad-virtual.js';
+import { TurboEnvio, TurboRecebe } from './turbo.js';
 import { opcoesJogo, LISO_MS } from './jogo-opcoes.js';
 import { Mesa } from './mesa.js';
 import { Qualidade, NIVEIS, nivelInicial } from './qualidade.js';
@@ -1029,6 +1030,7 @@ async function join() {
   });
   rtc.onMicCaiu = religarMic;
   rtc.onControle = receberDireto;
+  rtc.onTurbo = (id, canal) => turboEnvio.receber(id, canal);
   // a credencial do TURN vence (48 h na Cloudflare): renova com a página aberta
   setInterval(() => {
     fetch('/config').then((r) => r.json()).then((c) => rtc.trocarIce(c.iceServers)).catch(() => {});
@@ -2609,7 +2611,43 @@ function avisarRapido() {
 }
 
 // eu liguei (ou desliguei) o modo jogo numa tela de outra pessoa
+// Modo turbo (turbo.js). Quem compartilha: manda a imagem de uma tela minha liberada para quem
+// pediu, e o vídeo da conexão para essa pessoa para. Quem joga: liga com a opção "Modo turbo".
+const turboEnvio = new TurboEnvio({
+  tela: (key) => {
+    const sh = self()?.shares.get(key);
+    const scr = rtc?.screens.get(key);
+    return sh && scr ? { stream: scr.stream, controle: !!sh.controle } : null;
+  },
+  onMudou: (id, key, ligado) => {
+    rtc?.turboPara(id, key, ligado);
+    diagJogo.evento(ligado ? 'modo turbo: mandando a imagem por fora do vídeo' : 'modo turbo desligado: vídeo normal', { para: state.users.get(id)?.name ?? id });
+  },
+});
+const MOTIVO_TURBO = {
+  navegador: 'este navegador não tem o que o modo turbo precisa',
+  'sem-controle': 'a tela não está com o controle liberado',
+  'sem-tela': 'a tela saiu do ar',
+  codificador: 'o PC de quem compartilha não conseguiu codificar',
+  decodificador: 'este aparelho não conseguiu decodificar',
+  conexao: 'a conexão direta com quem compartilha não está aberta',
+  'sem-imagem': 'nenhuma imagem chegou em 4 s',
+};
+const turboRecebe = new TurboRecebe({
+  abrir: (id) => rtc?.abrirTurbo(id),
+  onFalhou: (motivo) => {
+    diagJogo.evento('modo turbo falhou: vídeo normal de volta', { motivo });
+    toast(`Modo turbo desligado: ${MOTIVO_TURBO[motivo] || motivo}. A imagem voltou ao normal.`, 'warn', 8000);
+  },
+});
+function ligarTurbo() {
+  if (!jogandoLa) return;
+  turboRecebe.ligar(jogandoLa.key, jogandoLa.video, opcoesJogo.get('rapido') ? 720 : 1080);
+  diagJogo.evento('modo turbo ligado');
+}
+
 function jogoLa(video, key) {
+  turboRecebe.desligar();
   if (jogandoLa) {
     const feitos = rtc?.baixaLatencia(jogandoLa.video.srcObject, false);
     diagJogo.evento('buffer normal de volta', feitos);
@@ -2627,6 +2665,7 @@ function jogoLa(video, key) {
   aplicarBuffer();
   mostrarSelo();
   if (opcoesJogo.get('rapido')) avisarRapido();
+  if (opcoesJogo.get('turbo')) ligarTurbo();
 }
 
 // O buffer da imagem de quem joga: o mínimo, ou um pouco (LISO_MS) com "Imagem mais lisa"
@@ -2648,13 +2687,19 @@ function mostrarSelo(r = null) {
   const atraso = r.atrasoMs != null ? `${Math.round(r.atrasoMs)} ms` : '–';
   const mbps = r.kbps != null ? (r.kbps / 1000).toFixed(1) : '–';
   const linhas = r.altura ? `${r.altura}p` : '';
-  el.innerHTML = `<span class="${r.fpsFinal != null && r.fpsFinal < 50 ? 'ruim' : ''}">${qps} qps</span> · ${linhas} · ~${atraso} · ${mbps} Mbps`
+  el.innerHTML = (turboRecebe.ligado ? '<b>turbo</b> · ' : '') + `<span class="${r.fpsFinal != null && r.fpsFinal < 50 ? 'ruim' : ''}">${qps} qps</span> · ${linhas} · ~${atraso} · ${mbps} Mbps`
     + (r.motivo ? ` · <span class="ruim">${r.motivo}</span>` : '');
 }
 
 opcoesJogo.ouvir((k, v) => {
   if (k === 'liso') aplicarBuffer();
-  else if (k === 'rapido') avisarRapido();
+  else if (k === 'rapido') {
+    avisarRapido();
+    if (turboRecebe.ligado) ligarTurbo(); // o turbo também manda em 720p com "Menos atraso"
+  } else if (k === 'turbo' && jogandoLa) {
+    if (v) ligarTurbo();
+    else turboRecebe.desligar();
+  }
   else if (k === 'selo') mostrarSelo();
   else if (k === 'menuAuto' && jogandoLa) controle.cursorLivre(jogandoLa.key, v ? jogandoLa.cursorLivre : false);
   $$('#jogo-op-pop [data-op]').forEach((el) => { el.checked = !!opcoesJogo.get(el.dataset.op); });
@@ -2702,7 +2747,7 @@ async function amostrarJogo() {
       rtc.mandarControle(dono, { p: performance.now() });
       const trilha = jogandoLa.video.srcObject?.getVideoTracks()[0];
       const som = jogandoLa.video.srcObject?.getAudioTracks()[0] || null;
-      const extra = { controleRttMs: pingDoJogo.rtt, ajudanteMs: pingDoJogo.ajudante, movimentoCru: controle.movimentoCru, controleFisico: fisico.usado, cursorLivre: jogandoLa.cursorLivre };
+      const extra = { turbo: turboRecebe.stats(), controleRttMs: pingDoJogo.rtt, ajudanteMs: pingDoJogo.ajudante, movimentoCru: controle.movimentoCru, controleFisico: fisico.usado, cursorLivre: jogandoLa.cursorLivre };
       const resumo = trilha && diagJogo.amostraRecebe(await rtc.diagRecebe(trilha, som), sala, extra);
       mostrarSelo(resumo);
       // a mesma amostra vai para quem compartilha, que baixa o relatório dos dois lados de uma vez

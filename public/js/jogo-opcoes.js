@@ -6,9 +6,10 @@
 //   giro:     no celular, mirar virando o aparelho (giroscópio)
 //   rapido:   menos atraso: quem compartilha manda 720p fixo e até 8 Mbps (quadros menores
 //             codificam, viajam e decodificam mais rápido, e o buffer do celular fica menor)
+//   turbo:    modo turbo (turbo.js): a imagem por fora do vídeo, sem o buffer do navegador
 
 const CHAVE = 'sala3d-jogo-opcoes';
-const PADRAO = { liso: false, menuAuto: true, selo: false, giro: false, rapido: false };
+const PADRAO = { liso: false, menuAuto: true, selo: false, giro: false, rapido: false, turbo: false };
 export const LISO_MS = 40;
 
 function ler() {

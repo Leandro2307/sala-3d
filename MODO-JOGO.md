@@ -409,3 +409,27 @@ aceita controle virtual.
   foram lidos do binário; botões podem ser propriedade ou campo, `Estatico` tenta os dois). Testado:
   o estado do `PadVirtual`, a validação, a detecção do layout e o ajudante sem a DLL (avisa e segue).
 - Remote Play do PS5 aceita um controle só: um jogador por vez.
+
+## Modo turbo (2026-11-01, experimental)
+
+Relatório de 2026-11-01 (PS5 pelo chiaki-ng, RTX 3060 Ti → iPhone, mesma casa): caminho `host/udp`,
+ida e volta 35 ms, **buffer do iPhone 75–83 ms (p90 137)** — o maior pedaço do atraso, que o
+`jitterBufferTarget = 0` não tira no Safari. O turbo tira o vídeo do jitter buffer:
+
+- `turbo.js`: quem joga (opção "Modo turbo", `opcoesJogo.turbo`) abre o canal `turbo`
+  (`rtc.abrirTurbo`: ordenado, `maxPacketLifeTime` 90) → quem compartilha (`rtc.onTurbo` →
+  `TurboEnvio.receber`) pega uma cópia da trilha da tela, `MediaStreamTrackProcessor` →
+  `VideoEncoder` (H.264, `latencyMode: realtime`, formato `avc`, até 1080p ou 720p com "Menos
+  atraso") → pedaços de 15 KB com cabeçalho de 20 bytes. A descrição (avcC) vai em texto antes do
+  quadro-chave. Fila do canal acima de 96 KB ou codificador atrasado: o quadro nem é codificado.
+- Quem joga (`TurboRecebe`): junta os pedaços, `VideoDecoder` (`optimizeForLatency`) e desenha num
+  `<canvas class="turbo-tela">` por cima do vídeo (posição copiada do `<video>` a cada 250 ms).
+  Quadro perdido → para até um quadro-chave e pede `{chave:true}`. Nada desenhado em 4 s →
+  desliga e volta ao vídeo normal com aviso (`MOTIVO_TURBO` no main.js).
+- Enquanto o turbo funciona, `rtc.turboPara(id, key, true)` deixa o vídeo da conexão para essa
+  pessoa `active: false` (`envioPara`); o som continua no WebRTC.
+- Relatório de quem joga: `turbo: { qps, perdidos, pedidosDeChave, decMs, codec }`; selo com "turbo".
+- Testado no Chrome invisível (scratchpad `turbo-teste/`: os dois lados numa página, conexão WebRTC
+  local): 1280×720, 1920×1080 e 1080→720 a ~60 qps sem perda; com 1% dos pedaços jogados fora,
+  50–60 qps e recuperação pelos quadros-chave. **Não testado no Safari do iPhone** (WebCodecs,
+  `drawImage(VideoFrame)`): se falhar, volta sozinho ao vídeo normal em 4 s.

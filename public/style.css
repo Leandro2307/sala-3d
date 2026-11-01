@@ -4127,3 +4127,7 @@ body.toque-jogo #jogo-selo { top: auto; bottom: max(8px, env(safe-area-inset-bot
 @media (max-width: 640px) {
   .tj-hotbar { top: calc(var(--tj-topo) + 46px); bottom: auto; left: 12px; right: 12px; }
 }
+
+/* modo turbo (turbo.js): a imagem desenhada por cima do vídeo, na mesma caixa (o JS copia a posição) */
+#focus .turbo-tela { position: absolute; box-sizing: border-box; pointer-events: none; }
+#focus .turbo-tela[hidden] { display: none; }

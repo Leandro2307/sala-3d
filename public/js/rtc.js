@@ -688,6 +688,8 @@ export class RTC {
   // dividida pelo peso das telas que ela vê (a que olha de perto leva quase tudo), entre o piso e
   // o teto do nível. Uma tela pequena sozinha não fica com o preset inteiro (soma < 1).
   envioPara(peer, key) {
+    // modo turbo: a imagem vai pelo canal "turbo" (turboPara)
+    if (peer.turbo?.has(key)) return { active: false, maxBitrate: 150_000, maxFramerate: 1, scaleResolutionDownBy: 1 };
     const preset = this.preset();
     const scr = this.screens.get(key);
     let nivel = nivelDe(peer, key);
@@ -1078,6 +1080,8 @@ export class RTC {
     pc.ondatachannel = ({ channel }) => {
       if (channel.label === 'controle') this.ligarCanal(peer, channel);
       else if (channel.label === 'controle-mov') this.ligarCanal(peer, channel, 'mov');
+      // modo turbo: quem joga pediu a imagem de uma tela minha por fora do vídeo (turbo.js)
+      else if (channel.label === 'turbo') this.onTurbo?.(peer.id, channel);
     };
     pc.ontrack = (ev) => {
       const stream = ev.streams[0] || new MediaStream([ev.track]);
@@ -1128,6 +1132,31 @@ export class RTC {
       }
     }
     return peer.mov.readyState === 'open' ? peer.mov : null;
+  }
+
+  // Modo turbo (turbo.js), do lado de quem joga: um canal só para a imagem, ordenado e com vida
+  // curta (um pedaço que perdeu a hora não segura os seguintes). Um por vez: abrir de novo fecha o anterior.
+  abrirTurbo(id) {
+    const peer = this.peers.get(id);
+    if (!peer || ['failed', 'closed'].includes(peer.pc.connectionState)) return null;
+    try { peer.turboCanal?.close(); } catch { /* já fechado */ }
+    try {
+      peer.turboCanal = peer.pc.createDataChannel('turbo', { ordered: true, maxPacketLifeTime: 90 });
+      return peer.turboCanal;
+    } catch {
+      return null;
+    }
+  }
+
+  // Do lado de quem compartilha: enquanto essa pessoa recebe a tela pelo turbo, o vídeo da conexão
+  // para ela fica desligado (o som continua) — os dois juntos disputariam o Wi-Fi.
+  turboPara(id, key, ligar) {
+    const peer = this.peers.get(id);
+    if (!peer) return;
+    peer.turbo ??= new Set();
+    if (ligar) peer.turbo.add(key);
+    else peer.turbo.delete(key);
+    this.tuneScreen(peer);
   }
 
   mandarMovimento(id, m) {
