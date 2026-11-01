@@ -386,3 +386,26 @@ Somando as medianas do Wi-Fi: captura ~20–35 + codificação ~12 (1080p) + fil
   jogo: na aba que joga `__sala3d.controle.onJogo(video, key)`; na que compartilha
   `__sala3d.controle.onModo(share, true, idDeQuemJoga)`.
 - O usuário fala português: responder sempre em pt-BR.
+
+## Controle virtual para o PS5 (2026-10-31)
+
+O PS5 joga pela sala com o **chiaki-ng** (Remote Play aberto) no PC de quem compartilha: a janela do
+chiaki-ng é compartilhada como qualquer jogo, e o controle de quem joga vira um **controle de Xbox
+virtual** no Windows (driver ViGEmBus), que o chiaki-ng repassa ao PS5. O app oficial da Sony não
+aceita controle virtual.
+
+- Site: `pad-virtual.js` (`PadVirtual`) junta o toque e o controle físico e manda o estado inteiro
+  `{t:'pad', b, lx, ly, rx, ry, lt, rt}` (bit i = botão i do mapa padrão; 16 = PS), só quando muda,
+  no máximo a cada 12 ms. Validação em `eventoDeControle` (controle.js e server.js).
+- Layout `ps5` (`virtual: true`) em `toque-jogo.js`: botões com `pad: N`, analógico esquerdo =
+  `lx/ly`, o dedo que arrasta na direita = analógico direito flutuante (`RAIO_DIR`). Detectado pelo
+  programa `chiaki*` ou pelo título (`JOGOS`). Menu automático desligado nele (o cursor à mostra é
+  o do Windows). `gamepad-jogo.js`: no layout ps5 o controle vai inteiro (`pad.fisico(g)`).
+- Ajudante 1.9: `t == "pad"` → `Pad()`; carrega `Nefarius.ViGEm.Client.dll` por reflexão de
+  `%LOCALAPPDATA%\Sala3d` (o `instalar.ps1` baixa do NuGet, 1.21.256, netstandard2.0). Sem notícia
+  (o "vivo") por 1,5 s → `PadNeutro`. Sem driver/biblioteca: `{tipo:'pad', ok:false, erro}` →
+  extensão 1.16 (`r.pad`) → `controle.onPadErro` → aviso para quem compartilha e `pad-erro` para quem joga.
+- **Não testado com o driver nem com o PS5**: a DLL não foi carregada aqui (os nomes dos membros
+  foram lidos do binário; botões podem ser propriedade ou campo, `Estatico` tenta os dois). Testado:
+  o estado do `PadVirtual`, a validação, a detecção do layout e o ajudante sem a DLL (avisa e segue).
+- Remote Play do PS5 aceita um controle só: um jogador por vez.

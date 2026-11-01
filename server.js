@@ -701,6 +701,11 @@ function eventoSemMarca(e) {
   // liga/desliga o modo jogo no ajudante nativo; rapido: quem joga pediu menos atraso (720p fixo)
   if (e.t === 'modo') return { t: 'modo', jogo: !!e.jogo, rapido: !!e.rapido };
   if (e.t === 'vivo') return { t: 'vivo' }; // modo jogo: quem joga ainda está aí (sem ele o ajudante solta as teclas)
+  // controle virtual (PS5 pelo chiaki-ng): o estado inteiro do controle (ver pad-virtual.js)
+  if (e.t === 'pad') {
+    const r = (v, a) => Math.round(n(v, a, 1) * 1000) / 1000;
+    return { t: 'pad', b: n(e.b, 0, 0x1ffff) | 0, lx: r(e.lx, -1), ly: r(e.ly, -1), rx: r(e.rx, -1), ry: r(e.ry, -1), lt: r(e.lt, 0), rt: r(e.rt, 0) };
+  }
   if (e.t === 'wheel') return { t: 'wheel', x: n(e.x, 0, 1), y: n(e.y, 0, 1), dx: n(e.dx, -3000, 3000), dy: n(e.dy, -3000, 3000), mod };
   if (e.t === 'tecla' && (e.a === 'down' || e.a === 'up')) {
     // sem trim: a tecla de espaço é ' '. ag: veio do AltGr e dá um caractere (@, €...): do outro
@@ -738,6 +743,8 @@ function voltaDoControle(raw) {
   }
   // o programa compartilhado está como administrador: o controle de quem mexeu não chega nele
   if (e.t === 'admin') return { t: 'admin', titulo: String(e.titulo ?? '').replace(/[\u0000-\u001f]/g, '').slice(0, 120) };
+  // o controle virtual do PS5 não abriu no PC de quem compartilha (falta o driver ViGEmBus)
+  if (e.t === 'pad-erro') return { t: 'pad-erro', erro: String(e.erro ?? '').replace(/[\u0000-\u001f]/g, '').slice(0, 80) };
   // modo jogo: como a tela está saindo do PC de quem compartilha (o relatório de quem joga)
   if (e.t === 'jogo-envio') {
     const num = (v) => (Number.isFinite(v) ? Math.round(v * 10) / 10 : null);

@@ -29,6 +29,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
@@ -166,7 +168,7 @@ namespace Sala3d
             var entrada = Console.OpenStandardInput();
             new Thread(VigiarAtalho) { IsBackground = true }.Start();
             new Thread(VigiarJogo) { IsBackground = true }.Start();
-            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.8.0" } });
+            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.9.0" } });
             var json = new JavaScriptSerializer();
             string txt;
             while ((txt = Ler(entrada)) != null)
@@ -237,6 +239,7 @@ namespace Sala3d
             else if (t == "wheel") { if (jogo) RodaJogo(D(ev, "dx"), D(ev, "dy")); else Roda(D(ev, "x"), D(ev, "y"), D(ev, "dx"), D(ev, "dy")); }
             else if (t == "tecla") { if (jogo) TeclaJogo(S(ev, "a"), S(ev, "code")); else Tecla(S(ev, "a"), S(ev, "key"), (int)D(ev, "kc"), (int)D(ev, "mod"), B(ev, "ag")); }
             else if (t == "texto") Texto(S(ev, "s"));
+            else if (t == "pad") Pad(ev);
         }
 
         // ------------------------------------------------------------ alvo
@@ -636,6 +639,7 @@ namespace Sala3d
         // solta tudo que ficou apertado (quem controlava saiu no meio de um Ctrl, de um arrasto...)
         static void SoltarTudo()
         {
+            PadNeutro();
             foreach (var vk in new List<ushort>(teclasApertadas)) Teclado(vk, true);
             foreach (var scan in new List<int>(scansApertados)) Scan(scan, true);
             scansApertados.Clear();
@@ -659,6 +663,9 @@ namespace Sala3d
                 {
                     lock (travaEntrada)
                     {
+                        // controle virtual: o "vivo" de quem joga vale também para ele (analógico parado
+                        // num lugar não manda estado novo); sem notícia, tudo solto e no centro
+                        if (!padNeutro && unchecked(Environment.TickCount - ultimaEntrada) > SEM_NOTICIA_MS) PadNeutro();
                         if (jogo && vivoVisto && !parado && (scansApertados.Count > 0 || botoesApertados.Count > 0)
                             && unchecked(Environment.TickCount - ultimaEntrada) > SEM_NOTICIA_MS)
                         {
@@ -690,6 +697,126 @@ namespace Sala3d
             bool preso = GetClipCursor(out c) && (c.Right - c.Left < 64 || c.Bottom - c.Top < 64);
             return visivel && !preso;
         }
+
+        // ------------------------------------------------------------ controle virtual (PS5)
+        // ev.t == "pad": o estado inteiro de um controle (botões + analógicos + gatilhos), vindo do
+        // controle de verdade de quem joga (Gamepad API) ou do controle de toque do celular. Aqui
+        // vira um controle de Xbox virtual no Windows (driver ViGEmBus + Nefarius.ViGEm.Client.dll,
+        // que o instalar.bat baixa). O chiaki-ng (Remote Play do PS5 no PC) vê esse controle como
+        // um de verdade e repassa para o PS5. A biblioteca é carregada só aqui, por reflexão: sem
+        // ela o ajudante compila e funciona igual, só sem controle.
+        static object padCliente, pad;
+        static Type tipoPad;
+        static string padErro;
+        static bool padNeutro = true;
+        static int padUltimo; // Environment.TickCount do último estado recebido
+        // mesma ordem dos botões da Gamepad API ("standard"): o bit i é o botão i
+        static readonly string[] BOTOES_PAD = { "A", "B", "X", "Y", "LeftShoulder", "RightShoulder", null, null,
+            "Back", "Start", "LeftThumb", "RightThumb", "Up", "Down", "Left", "Right", "Guide" };
+        static object[] botoesPad;
+        static object eixoLX, eixoLY, eixoRX, eixoRY, gatilhoL, gatilhoR;
+        static MethodInfo mBotao, mEixo, mGatilho, mEnviar;
+
+        static object Estatico(Type t, string nome)
+        {
+            var p = t.GetProperty(nome, BindingFlags.Public | BindingFlags.Static);
+            if (p != null) return p.GetValue(null, null);
+            var f = t.GetField(nome, BindingFlags.Public | BindingFlags.Static);
+            return f != null ? f.GetValue(null) : null;
+        }
+
+        // o método pode estar na interface do controle ou numa das que ela herda
+        static MethodInfo MetodoPad(string nome, params Type[] tipos)
+        {
+            var m = tipoPad.GetMethod(nome, tipos);
+            if (m != null) return m;
+            foreach (var i in tipoPad.GetInterfaces()) { m = i.GetMethod(nome, tipos); if (m != null) return m; }
+            throw new MissingMethodException("IXbox360Controller", nome);
+        }
+
+        static bool AbrirPad()
+        {
+            if (pad != null) return true;
+            if (padErro != null) return false;
+            try
+            {
+                string dll = null;
+                foreach (var p in new[] { Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Sala3d", "Nefarius.ViGEm.Client.dll"),
+                                          Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Nefarius.ViGEm.Client.dll") })
+                    if (File.Exists(p)) { dll = p; break; }
+                if (dll == null) throw new FileNotFoundException("sem-biblioteca");
+                var a = Assembly.LoadFrom(dll);
+                var tCli = a.GetType("Nefarius.ViGEm.Client.ViGEmClient", true);
+                tipoPad = a.GetType("Nefarius.ViGEm.Client.Targets.IXbox360Controller", true);
+                var tBotao = a.GetType("Nefarius.ViGEm.Client.Targets.Xbox360.Xbox360Button", true);
+                var tEixo = a.GetType("Nefarius.ViGEm.Client.Targets.Xbox360.Xbox360Axis", true);
+                var tGatilho = a.GetType("Nefarius.ViGEm.Client.Targets.Xbox360.Xbox360Slider", true);
+                padCliente = Activator.CreateInstance(tCli); // sem o driver: VigemBusNotFoundException
+                object c = tCli.GetMethod("CreateXbox360Controller", Type.EmptyTypes).Invoke(padCliente, null);
+                MetodoPad("Connect").Invoke(c, null);
+                foreach (var i in new[] { tipoPad }.Concat(tipoPad.GetInterfaces()))
+                {
+                    var auto = i.GetProperty("AutoSubmitReport");
+                    if (auto != null) { auto.SetValue(c, false, null); break; }
+                }
+                botoesPad = BOTOES_PAD.Select(n => n == null ? null : Estatico(tBotao, n)).ToArray();
+                eixoLX = Estatico(tEixo, "LeftThumbX"); eixoLY = Estatico(tEixo, "LeftThumbY");
+                eixoRX = Estatico(tEixo, "RightThumbX"); eixoRY = Estatico(tEixo, "RightThumbY");
+                gatilhoL = Estatico(tGatilho, "LeftTrigger"); gatilhoR = Estatico(tGatilho, "RightTrigger");
+                mBotao = MetodoPad("SetButtonState", tBotao, typeof(bool));
+                mEixo = MetodoPad("SetAxisValue", tEixo, typeof(short));
+                mGatilho = MetodoPad("SetSliderValue", tGatilho, typeof(byte));
+                mEnviar = MetodoPad("SubmitReport");
+                pad = c;
+                Escrever(new Dictionary<string, object> { { "tipo", "pad" }, { "ok", true } });
+                return true;
+            }
+            catch (Exception err)
+            {
+                var raiz = err is TargetInvocationException && err.InnerException != null ? err.InnerException : err;
+                padErro = raiz.GetType().Name.Contains("BusNotFound") ? "sem-driver" : raiz.Message;
+                Escrever(new Dictionary<string, object> { { "tipo", "pad" }, { "ok", false }, { "erro", padErro } });
+                return false;
+            }
+        }
+
+        static short Eixo(double v) { return (short)Math.Round(Math.Max(-1, Math.Min(1, v)) * 32767); }
+        static byte Gatilho(double v) { return (byte)Math.Round(Math.Max(0, Math.Min(1, v)) * 255); }
+
+        static void AplicarPad(int b, double lx, double ly, double rx, double ry, double lt, double rt)
+        {
+            for (int i = 0; i < botoesPad.Length; i++)
+                if (botoesPad[i] != null) mBotao.Invoke(pad, new object[] { botoesPad[i], (b & (1 << i)) != 0 });
+            // na Gamepad API o "para baixo" é positivo; no controle de Xbox, o "para cima"
+            mEixo.Invoke(pad, new object[] { eixoLX, Eixo(lx) });
+            mEixo.Invoke(pad, new object[] { eixoLY, Eixo(-ly) });
+            mEixo.Invoke(pad, new object[] { eixoRX, Eixo(rx) });
+            mEixo.Invoke(pad, new object[] { eixoRY, Eixo(-ry) });
+            mGatilho.Invoke(pad, new object[] { gatilhoL, Gatilho(lt) });
+            mGatilho.Invoke(pad, new object[] { gatilhoR, Gatilho(rt) });
+            mEnviar.Invoke(pad, null);
+            padNeutro = b == 0 && lx == 0 && ly == 0 && rx == 0 && ry == 0 && lt == 0 && rt == 0;
+        }
+
+        static void Pad(Dictionary<string, object> ev)
+        {
+            if (!AbrirPad()) return;
+            int agora = Environment.TickCount;
+            // controle voltando depois de um tempo parado: o chiaki-ng na frente (o controle virtual
+            // vale para a janela em foco, como um de verdade)
+            if (unchecked(agora - padUltimo) > 5000) Focar();
+            padUltimo = agora;
+            AplicarPad((int)D(ev, "b"), D(ev, "lx"), D(ev, "ly"), D(ev, "rx"), D(ev, "ry"), D(ev, "lt"), D(ev, "rt"));
+        }
+
+        // tudo solto e no centro (quem jogava saiu, a conexão caiu, Ctrl+Alt+End)
+        static void PadNeutro()
+        {
+            if (pad == null || padNeutro) return;
+            try { AplicarPad(0, 0, 0, 0, 0, 0, 0); } catch { }
+            padNeutro = true;
+        }
+
 
         // Ctrl+Alt+End no teclado de verdade: corta o controle e avisa a sala
         static void VigiarAtalho()

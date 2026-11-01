@@ -25,6 +25,33 @@ try {
   exit 1
 }
 
+# Controle virtual (PS5 pelo chiaki-ng, ver Ajudante.cs): a biblioteca que cria o controle de Xbox
+# vem do NuGet (Nefarius.ViGEm.Client, a oficial do ViGEm). Opcional: sem ela o resto funciona igual.
+$vigem = Join-Path $pasta 'Nefarius.ViGEm.Client.dll'
+if (-not (Test-Path -LiteralPath $vigem)) {
+  try {
+    $zip = Join-Path $env:TEMP 'sala3d-vigem.zip'
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    Invoke-WebRequest -UseBasicParsing -Uri 'https://www.nuget.org/api/v2/package/Nefarius.ViGEm.Client/1.21.256' -OutFile $zip
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $z = [IO.Compression.ZipFile]::OpenRead($zip)
+    try {
+      $item = $z.Entries | Where-Object { $_.FullName -eq 'lib/netstandard2.0/Nefarius.ViGEm.Client.dll' }
+      [IO.Compression.ZipFileExtensions]::ExtractToFile($item, $vigem, $true)
+    } finally { $z.Dispose(); Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue }
+  } catch {
+    Write-Host "  (controle virtual do PS5 ficou de fora: nao consegui baixar a biblioteca - $($_.Exception.Message))" -ForegroundColor DarkYellow
+  }
+}
+$driver = Get-Service -Name 'ViGEmBus' -ErrorAction SilentlyContinue
+if (Test-Path -LiteralPath $vigem) {
+  if ($driver) { Write-Host '  Controle virtual (PS5): pronto.' -ForegroundColor Green }
+  else {
+    Write-Host '  Controle virtual (PS5): falta o driver ViGEmBus. Para jogar no PS5 pela sala, instale:' -ForegroundColor Yellow
+    Write-Host '     https://github.com/nefarius/ViGEmBus/releases  (ViGEmBus_..._x64_x86_arm64.exe)'
+  }
+}
+
 $json = Join-Path $pasta "$nome.json"
 $manifesto = [ordered]@{
   name = $nome

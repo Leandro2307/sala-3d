@@ -64,7 +64,11 @@ export function eventoDeControle(e) {
     if (e.a === 'move' && (e.dx !== undefined || e.dy !== undefined)) Object.assign(ev, { dx: n(e.dx, -4000, 4000), dy: n(e.dy, -4000, 4000) });
   } else if (e.t === 'modo') return { t: 'modo', jogo: !!e.jogo, rapido: !!e.rapido };
   else if (e.t === 'vivo') return { t: 'vivo' };
-  else if (e.t === 'wheel') ev = { t: 'wheel', x: n(e.x, 0, 1), y: n(e.y, 0, 1), dx: n(e.dx, -3000, 3000), dy: n(e.dy, -3000, 3000), mod };
+  // controle virtual (PS5): o estado inteiro do controle — bits dos botões, analógicos e gatilhos
+  else if (e.t === 'pad') {
+    const r = (v, a) => Math.round(n(v, a, 1) * 1000) / 1000;
+    return { t: 'pad', b: n(e.b, 0, 0x1ffff) | 0, lx: r(e.lx, -1), ly: r(e.ly, -1), rx: r(e.rx, -1), ry: r(e.ry, -1), lt: r(e.lt, 0), rt: r(e.rt, 0) };
+  } else if (e.t === 'wheel') ev = { t: 'wheel', x: n(e.x, 0, 1), y: n(e.y, 0, 1), dx: n(e.dx, -3000, 3000), dy: n(e.dy, -3000, 3000), mod };
   else if (e.t === 'tecla' && (e.a === 'down' || e.a === 'up')) {
     ev = { t: 'tecla', a: e.a, key: txt(e.key, 24), code: txt(e.code, 24).trim(), kc: n(e.kc, 0, 255) | 0, mod };
     if (e.ag === true) ev.ag = true;
@@ -380,6 +384,8 @@ export class Controle {
     }
     // o programa está como administrador: o evento foi, mas o Windows não deixou chegar nele
     if (r?.admin) this.onAdmin?.(sh, String(r.admin.titulo || ''), deId || null);
+    // o controle virtual do PS5 não abriu no ajudante (sem driver ou sem biblioteca)
+    if (r?.pad) this.onPadErro?.(sh, String(r.pad), deId || null);
     // que programa está na janela (ajudante 1.6+): a sala reconhece o jogo por ele
     if (r?.qual) this.onQual?.(sh, r.qual);
     // o cursor do jogo à mostra (menu) ou escondido (ajudante 1.8+)

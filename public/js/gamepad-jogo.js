@@ -23,8 +23,9 @@ const curva = (v) => {
 };
 
 export class ControleFisico {
-  constructor({ controle, toast, onAtivo }) {
+  constructor({ controle, pad, toast, onAtivo }) {
     this.controle = controle;
+    this.pad = pad; // controle virtual: no layout PS5 o controle vai inteiro, sem virar teclado
     this.toast = toast || (() => {});
     this.onAtivo = onAtivo; // (true|false): o controle está sendo usado (o celular esconde os botões da tela)
     this.key = null;
@@ -91,6 +92,14 @@ export class ControleFisico {
     const g = this.pad();
     if (!g) return;
     const L = LAYOUTS[this.layoutId] || LAYOUTS.generico;
+    if (L.virtual) {
+      this.pad?.fisico(g);
+      if (!this.usado && g.buttons.some((b) => b.pressed)) {
+        this.usado = true;
+        this.onAtivo?.(true);
+      }
+      return;
+    }
     const mapa = L.pad || LAYOUTS.generico.pad;
     const agora = g.buttons.map((b, i) => (i === 6 || i === 7 ? b.value > GATILHO || b.pressed : b.pressed));
     let mexeu = false;
@@ -179,6 +188,7 @@ export class ControleFisico {
     this.doStick.clear();
     this.antes = [];
     this.resto = { x: 0, y: 0 };
+    this.pad?.soltar('fisico');
     if (this.usado) {
       this.usado = false;
       this.onAtivo?.(false);

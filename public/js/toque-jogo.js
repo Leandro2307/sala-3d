@@ -6,7 +6,7 @@
 //   - arrastar o dedo no resto da tela: gira a câmera (o mesmo delta do mouse no modo jogo);
 //   - botões à direita e em cima: os do jogo que está na tela.
 //
-// Cada jogo tem o seu layout (LAYOUTS): Minecraft, God of War e um genérico para os outros. O
+// Cada jogo tem o seu layout (LAYOUTS): Minecraft, God of War, PS5 e um genérico para os outros. O
 // ajudante do Windows de quem compartilha diz que programa está na janela; a sala dele conta o
 // nome do jogo como título da tela (jogoDaJanela) e aqui o layout troca sozinho. O nome do layout,
 // no canto de cima, abre a escolha à mão e a sensibilidade.
@@ -17,6 +17,10 @@
 //
 // Tudo vai por controle.mandar/mover: o modo jogo marca cada evento e o ajudante nativo do PC
 // manda como scancode e movimento relativo, igual ao mouse e ao teclado de verdade.
+//
+// O layout PS5 (virtual: true) é outro bicho: nada vira tecla. Os botões, o analógico e o dedo que
+// arrasta (analógico direito flutuante) vão para o controle virtual (pad-virtual.js), que vira um
+// controle de Xbox no PC de quem compartilha — o chiaki-ng passa para o PS5.
 
 import { opcoesJogo } from './jogo-opcoes.js';
 
@@ -25,6 +29,7 @@ const CORRE = 0.95; // empurrar até a borda (para a frente) corre
 const OLHAR = 2.2; // pixels do dedo -> pixels de mouse (vezes a sensibilidade)
 const GIRO = 9; // graus por segundo do aparelho virando -> pixels de mouse por segundo (vezes a sensibilidade)
 const MOVE_MS = 16;
+const RAIO_DIR = 70; // layout PS5: o dedo que andou isso (px) desde onde encostou é o analógico direito no fundo
 const TOQUE_PX = 12; // no menu, o dedo que andou menos que isso até soltar clicou (mais é arrastar)
 const CHAVE_SENS = 'sala3d-toque-sens';
 const CHAVE_POS = 'sala3d-toque-pos'; // onde a pessoa arrastou cada botão, por layout (editor)
@@ -67,6 +72,8 @@ export function teclaDe(code) {
 // Jogos com layout próprio: pelo título da janela ou pelo nome do programa (sem o .exe). O
 // Minecraft Java roda no javaw (genérico): ali vale o título.
 const JOGOS = [
+  // o Remote Play do PS5 no PC (o app da Sony não aceita controle virtual: tem que ser o chiaki-ng)
+  { id: 'ps5', nome: 'PS5 (chiaki-ng)', titulo: /chiaki|\bps5\b|playstation/i, programa: /^chiaki/i },
   { id: 'gow', nome: 'God of War', titulo: /god of war/i, programa: /^gowr?$/i },
   { id: 'minecraft', nome: 'Minecraft', titulo: /minecraft|lunar client|badlion/i, programa: /^minecraft/i },
 ];
@@ -181,6 +188,29 @@ export const LAYOUTS = {
       { r: 'Esquiva', k: 'Espaço', tecla: 'Space', a: 'esquiva', cls: 'tj-redondo' },
     ],
   },
+  // PS5 pelo chiaki-ng: tudo vai para o controle virtual (pad: o botão no mapa padrão do navegador)
+  ps5: {
+    nome: 'PS5',
+    dica: 'O analógico da esquerda anda; arraste o dedo à direita como o analógico direito.',
+    virtual: true,
+    topo: [
+      { r: '▲', pad: 12 }, { r: '▼', pad: 13 }, { r: '◀', pad: 14 }, { r: '▶', pad: 15 },
+      { r: 'Create', pad: 8 }, { r: 'Options', pad: 9 }, { r: 'PS', pad: 16 },
+      { r: 'L3', pad: 10 }, { r: 'R3', pad: 11 },
+    ],
+    areas: ['l2 tri r2', 'qua . bol', 'l1 xis r1'],
+    linhas: 'ggg',
+    botoes: [
+      { r: 'L2', pad: 6, a: 'l2' },
+      { r: '△', pad: 3, a: 'tri', cls: 'tj-ps tj-tri' },
+      { r: 'R2', pad: 7, a: 'r2' },
+      { r: '□', pad: 2, a: 'qua', cls: 'tj-ps tj-qua' },
+      { r: '○', pad: 1, a: 'bol', cls: 'tj-ps tj-bol' },
+      { r: 'L1', pad: 4, a: 'l1' },
+      { r: '✕', pad: 0, a: 'xis', cls: 'tj-ps tj-xis' },
+      { r: 'R1', pad: 5, a: 'r1' },
+    ],
+  },
   // qualquer outro jogo de PC: as teclas mais comuns, com o nome da tecla no botão
   generico: {
     nome: 'Genérico',
@@ -232,9 +262,10 @@ function lerPosicoes() {
 }
 
 export class ToqueJogo {
-  constructor({ raiz, controle, toast, onSair }) {
+  constructor({ raiz, controle, pad, toast, onSair }) {
     this.raiz = raiz;
     this.controle = controle;
+    this.pad = pad; // controle virtual (layout PS5, ver pad-virtual.js)
     this.toast = toast || (() => {});
     this.onSair = onSair;
     this.key = null;
@@ -437,7 +468,8 @@ export class ToqueJogo {
 
   // O jogo mostrou o cursor (menu, inventário) ou escondeu: os botões trocam sozinhos, se a pessoa deixou
   cursorDoJogo(livre) {
-    if (!this.key || !opcoesJogo.get('menuAuto')) return;
+    // no PS5 o cursor à mostra é o do Windows em cima do chiaki-ng, não um menu do jogo
+    if (!this.key || !opcoesJogo.get('menuAuto') || this.layout?.virtual) return;
     this.trocarMenu(livre);
   }
 
@@ -510,6 +542,7 @@ export class ToqueJogo {
   }
 
   ligar(el, b) {
+    if (b.pad !== undefined) return this.segurar(el, () => this.pad?.botao(b.pad, true), () => this.pad?.botao(b.pad, false));
     if (b.texto) return this.segurar(el, () => {}, (tocou) => tocou && this.abrirTexto());
     if (b.volta) return this.segurar(el, () => {}, (tocou) => tocou && this.trocarMenu(false));
     if (b.trava) return this.segurar(el, () => this.travar(el, b), () => {});
@@ -624,6 +657,7 @@ export class ToqueJogo {
       const len = Math.hypot(dx, dy);
       if (len > 1) { dx /= len; dy /= len; }
       knob.style.transform = `translate(${dx * raio}px, ${dy * raio}px)`;
+      if (this.layout?.virtual) return void this.pad?.stick('l', dx, dy);
       const correr = this.layout?.correr || 'ShiftLeft';
       const quer = direcoesDoStick(dx, dy, correr);
       el.classList.toggle('correndo', quer.has(correr));
@@ -644,6 +678,7 @@ export class ToqueJogo {
       el.classList.remove('ativo', 'correndo');
       knob.style.transform = '';
       el.style.transform = '';
+      if (this.layout?.virtual) this.pad?.stick('l', 0, 0);
       for (const c of this.doStick) this.largar(c);
       this.doStick.clear();
     };
@@ -695,6 +730,7 @@ export class ToqueJogo {
     let ux = 0, uy = 0, x0 = 0, y0 = 0;
     let noMenu = false; // este dedo encostou com os botões de menu na tela
     let arrastou = false;
+    let virtual = false; // layout PS5: o dedo é o analógico direito, com o centro onde encostou
     el.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       this.fecharPainel();
@@ -704,11 +740,20 @@ export class ToqueJogo {
       uy = y0 = e.clientY;
       noMenu = this.menu;
       arrastou = false;
+      virtual = !!this.layout?.virtual;
       try { el.setPointerCapture(id); } catch { /* ponteiro já solto */ }
       if (noMenu) this.cursorNoDedo(e, 'move');
     });
     el.addEventListener('pointermove', (e) => {
       if (e.pointerId !== id || !this.key) return;
+      if (virtual) {
+        let x = (e.clientX - x0) / RAIO_DIR;
+        let y = (e.clientY - y0) / RAIO_DIR;
+        const len = Math.hypot(x, y);
+        if (len > 1) { x /= len; y /= len; }
+        this.pad?.stick('r', x, y);
+        return;
+      }
       if (noMenu) {
         if (Math.hypot(e.clientX - x0, e.clientY - y0) >= TOQUE_PX) arrastou = true;
         this.cursorNoDedo(e, 'move');
@@ -729,6 +774,7 @@ export class ToqueJogo {
     el.addEventListener('pointerup', (e) => {
       if (e.pointerId !== id) return;
       id = null;
+      if (virtual) return void this.pad?.stick('r', 0, 0);
       if (!noMenu || arrastou) return;
       // o movimento que esperava a vez sai antes do clique (senão chegaria depois e tiraria o
       // cursor do lugar); o tremido do dedo não muda onde o clique cai
@@ -737,7 +783,11 @@ export class ToqueJogo {
       this.cursorNoDedo(ponto, 'down');
       this.cursorNoDedo(ponto, 'up');
     });
-    el.addEventListener('pointercancel', (e) => { if (e.pointerId === id) id = null; });
+    el.addEventListener('pointercancel', (e) => {
+      if (e.pointerId !== id) return;
+      id = null;
+      if (virtual) this.pad?.stick('r', 0, 0);
+    });
   }
 
   // Leva o cursor do PC ao ponto da imagem embaixo do dedo (x, y de 0 a 1, descontadas as faixas
@@ -790,6 +840,7 @@ export class ToqueJogo {
     for (const p of this.seguras.keys()) this.enviar(p, false);
     this.seguras.clear();
     this.travadas.clear();
+    this.pad?.soltar('toque');
   }
 
   // ---------------------------------------------------------------- ligar e desligar
@@ -803,6 +854,10 @@ export class ToqueJogo {
     this.raiz.hidden = false;
     document.body.classList.add('toque-jogo');
     const nome = this.layout.nome;
+    if (this.layout.virtual) {
+      this.toast('Modo jogo no controle do PS5: o analógico da esquerda anda, arraste o dedo à direita para a câmera. Um controle de verdade ligado no aparelho também vale.', 'info', 7000);
+      return;
+    }
     this.toast(this.layout === LAYOUTS.generico
       ? `Modo jogo: analógico anda, arraste o dedo para olhar. Toque em “${nome}”, no canto, para usar os botões do Minecraft ou do God of War.`
       : `Modo jogo com os botões do ${nome}: analógico anda, arraste o dedo para olhar. ${this.layout.dica}`, 'info', 7000);

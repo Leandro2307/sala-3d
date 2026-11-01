@@ -485,7 +485,7 @@ function conectarNativo() {
     return null;
   }
   let chegou;
-  const n = { porta, ok: null, alvo: null, definindo: null, semAlvo: null, respostaAlvo: null, sala: null, admin: null, qual: null, cursor: null, chegou: new Promise((r) => { chegou = r; }) };
+  const n = { porta, ok: null, alvo: null, definindo: null, semAlvo: null, respostaAlvo: null, sala: null, admin: null, qual: null, cursor: null, pad: null, chegou: new Promise((r) => { chegou = r; }) };
   porta.onMessage.addListener((m) => {
     if (m?.tipo === 'oi') {
       n.ok = true;
@@ -502,6 +502,9 @@ function conectarNativo() {
     // modo jogo: o jogo mostrou o cursor (menu) ou escondeu (ajudante 1.8+). Vai na resposta de cada
     // evento, e quem joga troca entre a câmera (mouse preso) e o menu (o mouse pela posição).
     if (m?.tipo === 'cursor') n.cursor = !!m.livre;
+    // controle virtual do PS5 (ajudante 1.9+): não abriu — falta o driver ViGEmBus ou a biblioteca.
+    // Vai na resposta de cada evento, e a sala avisa quem compartilha e quem joga.
+    if (m?.tipo === 'pad') n.pad = m.ok ? null : String(m.erro || 'falhou').slice(0, 80);
     // Ctrl+Alt+End no teclado de quem compartilha: avisa a sala para desligar a permissão
     if (m?.tipo === 'parado' && n.sala != null) avisarSala(n.sala, { tipo: 'desligou', janela: true });
   });
@@ -573,6 +576,7 @@ function janela(alvo, ev, sala) {
     if (n.admin) r.admin = n.admin;
     if (n.qual) r.qual = n.qual;
     if (n.cursor != null) r.cursor = n.cursor;
+    if (n.pad) r.pad = n.pad;
     return r;
   });
   filaNativo = vez.catch(() => {});

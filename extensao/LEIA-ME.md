@@ -193,3 +193,15 @@ abre logada.
 - Os cookies dos sites que você abre nas telas passam a ser SameSite=None no Chrome todo (é o
   mesmo cookie das abas normais). Isso tira desses sites uma proteção contra pedidos vindos de
   outros sites; os outros sites do Chrome não mudam.
+
+## Jogar no PS5 pela sala
+
+O PS5 aparece no PC pelo **chiaki-ng** (Remote Play aberto, github.com/streetpea/chiaki-ng) e
+quem joga usa o controle de toque do celular (layout **PS5**) ou um controle ligado no aparelho dele.
+No PC de quem compartilha, além do ajudante:
+
+1. Instale o driver **ViGEmBus** (github.com/nefarius/ViGEmBus/releases) — ele cria o controle virtual.
+2. Rode o `nativo/instalar.bat` de novo (ele baixa a biblioteca do controle virtual).
+3. Feche e abra o Chrome. Compartilhe a janela do chiaki-ng e ligue **permitir controle**.
+
+O app oficial **PS Remote Play** não serve: ele só aceita controle da Sony de verdade.

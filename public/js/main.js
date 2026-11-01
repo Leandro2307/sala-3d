@@ -22,6 +22,7 @@ import { Controle, versaoNum, eventoDeControle } from './controle.js';
 import { AvisoDoSite } from './aviso-site.js';
 import { ToqueJogo, jogoDaJanela } from './toque-jogo.js';
 import { ControleFisico } from './gamepad-jogo.js';
+import { PadVirtual } from './pad-virtual.js';
 import { opcoesJogo, LISO_MS } from './jogo-opcoes.js';
 import { Mesa } from './mesa.js';
 import { Qualidade, NIVEIS, nivelInicial } from './qualidade.js';
@@ -2455,6 +2456,9 @@ function receberVolta({ key, ev, de } = {}) {
     jogandoLa.cursorLivre = !!ev.livre;
     diagJogo.evento(ev.livre ? 'o jogo mostrou o cursor: mouse pela posição (menu)' : 'o jogo escondeu o cursor: mouse preso (câmera)');
     if (opcoesJogo.get('menuAuto')) controle.cursorLivre(key, !!ev.livre);
+  } else if (ev.t === 'pad-erro' && jogandoLa?.key === key && Date.now() - (avisosAdmin.get(`pad:${key}`) || 0) > 60_000) {
+    avisosAdmin.set(`pad:${key}`, Date.now());
+    toast(`O controle do PS5 ainda não funciona no PC de ${de || 'quem compartilha'}: ${ev.erro === 'sem-driver' ? 'falta instalar o driver ViGEmBus' : 'falta rodar de novo o instalar.bat do ajudante'} lá.`, 'warn', 12000);
   } else if (ev.t === 'admin' && controle.mexeuEm(key) && Date.now() - (avisosAdmin.get(`de:${key}`) || 0) > 30_000) {
     avisosAdmin.set(`de:${key}`, Date.now());
     const quem = de || 'quem compartilha';
@@ -2467,6 +2471,20 @@ function receberVolta({ key, ev, de } = {}) {
 // quem estava mexendo — um aviso por tela a cada 30 s. Chaves: a tela; "de:" + tela do lado de
 // quem controla; "para:" + tela + pessoa para a volta.
 const avisosAdmin = new Map();
+// Controle virtual do PS5 (pad-virtual.js) que não abriu no ajudante: sem o driver ViGEmBus ou sem a
+// biblioteca que o instalar.bat baixa. Quem compartilha vê o que instalar; quem joga, que falta lá.
+controle.onPadErro = (sh, erro, deId) => {
+  const agora = Date.now();
+  if (deId && agora - (avisosAdmin.get(`pad-para:${sh.key}:${deId}`) || 0) > 60_000) {
+    avisosAdmin.set(`pad-para:${sh.key}:${deId}`, agora);
+    controle.emitir('controle-volta', { key: sh.key, para: deId, ev: { t: 'pad-erro', erro } });
+  }
+  if (agora - (avisosAdmin.get(`pad:${sh.key}`) || 0) < 60_000) return;
+  avisosAdmin.set(`pad:${sh.key}`, agora);
+  toast(erro === 'sem-driver'
+    ? 'Para o controle do PS5 funcionar, instale o driver ViGEmBus neste PC (github.com/nefarius/ViGEmBus/releases) e feche e abra o Chrome.'
+    : 'Para o controle do PS5 funcionar, rode de novo o instalar.bat da pasta extensao/nativo e feche e abra o Chrome.', 'warn', 15000);
+};
 controle.onAdmin = (sh, titulo, deId) => {
   const agora = Date.now();
   if (deId && agora - (avisosAdmin.get(`para:${sh.key}:${deId}`) || 0) > 30_000) {
@@ -3283,8 +3301,12 @@ document.addEventListener('pointerdown', (e) => {
 
 // Controle de videogame (gamepad-jogo.js): no modo jogo, no PC e no celular. No celular, usando o
 // controle, os botões da tela saem do caminho.
+// Controle virtual (pad-virtual.js): no layout PS5 o toque e o controle de videogame viram um
+// controle de Xbox no PC de quem compartilha, em vez de teclado e mouse
+const padVirtual = new PadVirtual({ controle });
 const fisico = new ControleFisico({
   controle,
+  pad: padVirtual,
   toast,
   onAtivo: (sim) => $('#toque-jogo').classList.toggle('tj-pad', sim),
 });
@@ -3292,6 +3314,7 @@ const fisico = new ControleFisico({
 const toqueJogo = new ToqueJogo({
   raiz: $('#toque-jogo'),
   controle,
+  pad: padVirtual,
   toast,
   onSair: () => {
     controle.desligarJogo();
@@ -3301,10 +3324,12 @@ const toqueJogo = new ToqueJogo({
 });
 // o título da tela traz o nome do jogo que está nela (ver onQual): os botões são os dele
 controle.onJogo = (video, key) => {
+  if (video) padVirtual.ligar(key);
   if (video && isTouch) toqueJogo.mostrar(key, acharTela(key)?.share.titulo);
   else toqueJogo.esconder();
   if (video) fisico.ligar(key, acharTela(key)?.share.titulo);
   else fisico.desligar();
+  if (!video) padVirtual.desligar(); // depois do toque e do controle: o último estado é tudo solto
   // o modo jogo desligou por fora do botão (a tela fechou, saiu do foco): sai da tela cheia também
   if (!video && !isTouch && document.body.classList.contains('jogo-pc')) jogoNoPc(false);
   jogoLa(video, key);
