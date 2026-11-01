@@ -2728,13 +2728,16 @@ async function amostrarJogo() {
       const medida = cru.envios.find((e) => e.captura)?.captura;
       if (medida) rtc.capturaMedida(key, medida.width, medida.height);
       for (const id of quem.keys()) {
-        const resumo = diagJogo.amostraEnvio(key, cru, id, sala);
+        // no turbo, os números da imagem dessa pessoa são os do canal turbo (o vídeo da conexão está parado)
+        const turbo = turboEnvio.stats(id, key);
+        const resumo = diagJogo.amostraEnvio(key, cru, id, sala, turbo);
         if (!resumo) continue;
-        ajustarJogo(id, resumo);
+        // os ajustes do vídeo da conexão não valem para quem está no turbo
+        if (!turbo) ajustarJogo(id, resumo);
         // a captura e o codificador são um só por tela
         if (id === quem.keys().next().value) {
           ajustarCaptura(key, resumo);
-          vigiarCodificador(key, resumo);
+          if (!turbo) vigiarCodificador(key, resumo);
         }
         const { t, captura, enviado, codificado, altura, kbps, limite, motivo, codificador, placa, imagemBaixa, codMs, filaMs } = resumo;
         controle.emitir('controle-volta', { key, para: id, ev: { t: 'jogo-envio', quando: t, captura, enviado, codificado, altura, kbps, limite, motivo, codificador, placa, imagemBaixa, codMs, filaMs } });
@@ -2847,6 +2850,10 @@ const mediaDe = (v) => {
 // aposta: se o aparelho de quem joga passar 6 s sem decodificar nenhum quadro, um passo atrás.
 const semDecodificar = new Map(); // id de quem joga -> amostras seguidas sem quadro decodificado
 function vigiarDecodificacao(id, r) {
+  // no modo turbo o vídeo da conexão para essa pessoa está parado de propósito (rtc.turboPara): não
+  // decodificar nada ali é o certo — antes isso tirava o H.265 e a troca de perfil à toa, e o vídeo
+  // normal voltava no processador
+  if ([...turboEnvio.sessoes.values()].some((s) => s.id === id) || r?.turbo) return void semDecodificar.set(id, 0);
   const n = r && typeof r === 'object' && !(r.decodificado > 0) ? (semDecodificar.get(id) || 0) + 1 : 0;
   semDecodificar.set(id, n);
   if (n < 3) return;

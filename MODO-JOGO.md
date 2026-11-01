@@ -433,3 +433,16 @@ ida e volta 35 ms, **buffer do iPhone 75–83 ms (p90 137)** — o maior pedaço
   local): 1280×720, 1920×1080 e 1080→720 a ~60 qps sem perda; com 1% dos pedaços jogados fora,
   50–60 qps e recuperação pelos quadros-chave. **Não testado no Safari do iPhone** (WebCodecs,
   `drawImage(VideoFrame)`): se falhar, volta sozinho ao vídeo normal em 4 s.
+
+### Relatório do turbo (2026-11-01 03:21, PS5 pelo chiaki-ng → iPhone) e o que entrou depois
+
+- **O turbo funcionou no Safari do iPhone**: H.264 decodificado em 3–4 ms, ~32 qps desenhados (os
+  mesmos 32 da captura: o chiaki-ng estava a 30), perdas raras com recuperação em < 1 s.
+- Bug: com o vídeo da conexão parado de propósito, `vigiarDecodificacao` viu "0 decodificados" e
+  tirou o H.265 e a troca de perfil (`codecSeguroJogo`); ao sair do turbo o vídeo normal caiu no
+  OpenH264. Agora ela ignora quem está no turbo, e `ajustarJogo`/`vigiarCodificador` também.
+- O relatório e o selo mediam o vídeo parado (0 qps). Agora: `TurboEnvio.stats(id, key)` entra em
+  `amostraEnvio(…, turbo)` e `TurboRecebe.stats()` em `amostraRecebe` (via `extra.turbo`), com
+  `modo: 'turbo'`, qps/kbps/medidas do turbo e um `atrasoMs` próprio: controle + jogo + captura +
+  `codMs` (vem no cabeçalho de cada quadro) + `redeMs` (metade do ping `{ping}/{pong}` do canal
+  turbo) + `montagemMs` + `decMs` + meio quadro.

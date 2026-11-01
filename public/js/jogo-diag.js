@@ -97,7 +97,7 @@ export class DiagJogo {
   // ---------------------------------------------------------------- quem compartilha
   // cru: rtc.diagEnvio(key); quem: id de quem joga (o envio dela é o que importa). Devolve o resumo
   // que vai para quem joga.
-  amostraEnvio(key, cru, quem, sala) {
+  amostraEnvio(key, cru, quem, sala, turbo = null) {
     const s = this.sessao;
     if (!s || !cru) return null;
     const agora = performance.now();
@@ -151,6 +151,12 @@ export class DiagJogo {
       codificadores: cru.envios.filter((e) => e.params?.active !== false && (e.saida?.framesPerSecond ?? 0) > 0).length,
     };
     resumo.fpsFinal = resumo.enviado;
+    // modo turbo: a imagem dessa pessoa vai pelo canal turbo e o vídeo da conexão está parado de
+    // propósito — os números que valem são os do turbo (turbo.js, TurboEnvio.stats)
+    if (turbo) {
+      Object.assign(resumo, { modo: 'turbo', turbo, enviado: turbo.qps, fpsFinal: turbo.qps, kbps: turbo.kbps, largura: turbo.largura, altura: turbo.altura });
+      if (turbo.codMs != null) resumo.codMs = turbo.codMs;
+    }
     // quem joga (nível máximo) devia receber a captura inteira: abaixo de 60% das linhas é migalha
     const capAltura = env?.captura?.height;
     resumo.imagemBaixa = resumo.nivel === 'max' && resumo.altura && capAltura ? resumo.altura < capAltura * 0.6 : null;
@@ -223,6 +229,19 @@ export class DiagJogo {
     resumo.fpsFinal = resumo.naTela ?? resumo.decodificado;
     resumo.imagemBaixa = la?.imagemBaixa ?? null;
     resumo.motivo = motivoRecebe(resumo, la);
+    // modo turbo (turbo.js): a imagem chega pelo canal turbo e é desenhada sem buffer; o vídeo da
+    // conexão está parado. Atraso do dedo ao olho: o comando vai, o jogo desenha, a captura, a
+    // codificação lá, a viagem (metade da ida e volta do canal turbo), a montagem dos pedaços, a
+    // decodificação e meio quadro esperando a tela — sem buffer nenhum.
+    const tb = resumo.turbo;
+    if (tb) {
+      Object.assign(resumo, { modo: 'turbo', fpsFinal: tb.qps, kbps: tb.kbps, largura: tb.largura, altura: tb.altura });
+      if (resumo.controleRttMs != null && tb.redeMs != null) {
+        resumo.atrasoMs = Math.round(resumo.controleRttMs / 2 + (resumo.ajudanteMs ?? 2) / 2 + 16.7 + 8 + (tb.codMs ?? la?.codMs ?? 8)
+          + tb.redeMs + (tb.montagemMs ?? 0) + (tb.decMs ?? 0) + 8);
+      }
+      resumo.motivo = tb.qps >= BOM ? null : la?.captura != null && la.captura < BOM ? la.motivo || 'captura' : 'perdas';
+    }
     s.amostras.push({ ...resumo, sala, cru: s.amostras.length % 15 === 0 ? cru : undefined });
     if (s.amostras.length > GUARDA) s.amostras.shift();
     console.log(`[modo-jogo] chegada: recebido ${resumo.recebido} → decodificado ${resumo.decodificado} → na tela ${resumo.naTela} qps · ${resumo.largura}x${resumo.altura} · ${resumo.kbps} kbps · decodifica ${resumo.decMs} ms (${resumo.decodificador}${resumo.placa ? ', placa' : ''}) · buffer ${resumo.bufferMs} ms (som ${resumo.somBufferMs} ms) · controle ${resumo.controleRttMs} ms · atraso total ~${resumo.atrasoMs} ms · perdidos ${resumo.perdidos} · congelou ${resumo.congelou} (${resumo.congeladoMs} ms) · rtt ${resumo.rttMs} ms · ${resumo.caminho}${la ? ` · lá: captura ${la.captura}, enviado ${la.enviado}, limite ${la.limite}` : ' · sem notícia de lá'}${resumo.motivo ? ` · MOTIVO: ${resumo.motivo}` : ''}`, { resumo, sala });
