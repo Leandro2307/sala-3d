@@ -530,8 +530,23 @@ Custo: com o Wi-Fi apertando, a banda desce (no 20↔8, ~7 Mbps em 1080p em vez 
 em 720p) — a imagem fica menos nítida nas quedas em vez de atrasar. Os picos que sobram (p99 80–100
 ms) são o tempo de reagir (2 avisos de 0,5 s) numa queda de 60% que dura 1 s.
 
-**Falta**: um relatório real com a correção: conferir banda cheia e 55–58 qps no Wi-Fi de casa,
-`turbo.filaLaMs` (envio) e `turbo.filaMs` (quem joga), `trocasDeBanda`, `puladosFila` ~0. Fora do
+### Relatório de 2026-11-03 02:24 (a correção no ar, PS5 → iPhone, Wi-Fi de casa)
+
+- **Corrigido**: o turbo voltou a acompanhar a captura (720p 50–53 qps com captura 50–55; 1080p
+  50–53), banda cheia (720p 6 Mbps; 1080p 10 Mbps, ~8,5 saindo), `puladosFila` ~0. Imagem (captura →
+  desenhado) mediana 25 ms em 720p e 28 em 1080p; viagem 16–18 ms.
+- **A banda não voltava** depois de um aperto no começo (fila de 75–107 ms nos primeiros segundos):
+  ficou em 6,1 de 10 Mbps no 1º trecho em 1080p, porque só subia com a fila abaixo de 12 ms e nesse
+  Wi-Fi ela fica em ~17–25 ms mesmo com a banda cheia. `FILA_BAIXA` 12 → 24 (teste: 1080p no Wi-Fi
+  20↔8 em ~8 Mbps em vez de ~7,2; p90 32 ms, contra 77 antes de tudo).
+- **O selo mostrava ~350 ms** de atraso: `ajudanteMs` 506–624 ms (antes 2–3). Era a média do
+  `controle.js`, que só andava com tecla e mouse (no layout PS5 quase tudo é `pad`) e guardava a 1ª
+  resposta, com o ajudante abrindo (~0,6 s): pelas contas, as respostas seguintes deram ~1–2 ms.
+  Agora é a mediana das últimas 30, contando o `pad`. O atraso de verdade, somando as partes, ~70 ms.
+- A captura do chiaki-ng nesse teste ficou em 50–55 (no de 01/11, 55–58): é a origem, não o turbo.
+
+**Falta**: conferir num relatório novo a banda subindo de volta depois de um aperto e o `ajudanteMs`
+~2 ms com o PS5. Fora do
 código, o que mais pesa: o PC de quem compartilha no Wi-Fi (dois trechos sem fio para cada quadro) e,
 no PS5, o próprio Remote Play (chiaki-ng: PS5 → codifica → rede → decodifica → janela → captura), que
 nem entra na conta do selo.

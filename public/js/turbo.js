@@ -53,7 +53,10 @@ const FILA_QUADROS = 4;
 const FILA_MIN = 48 * 1024;
 const FILA_AVISO_MS = 500; // de quanto em quanto quem joga conta a viagem medida (ajustarBanda)
 const FILA_ALTA = 30; // ms de fila (viagem p90 − a menor) que fazem a banda descer...
-const FILA_BAIXA = 12; // ...e abaixo disso, ela pode subir
+// ...e abaixo disso, ela pode subir. Era 12: no Wi-Fi de casa a fila fica em ~17–25 ms mesmo com a
+// banda cheia (relatório de 2026-11-03 02:24), e depois de um aperto no começo a banda ficou em 6,1 de
+// 10 Mbps até o fim.
+const FILA_BAIXA = 24;
 const BANDA_MIN = 0.6; // a banda desce até 60% da do tamanho, no máximo
 const PEDIR_CHAVE_MS = 250; // intervalo mínimo entre pedidos de quadro-chave
 const PING_MS = 500;
@@ -303,8 +306,8 @@ export class TurboEnvio {
   // Quem joga conta a cada FILA_AVISO_MS a viagem medida dos quadros (fila de envio + rede): o p90 e a
   // menor dos últimos ~10 s. A diferença é a fila de verdade (o erro entre os relógios some na conta).
   // Acima de FILA_ALTA em 2 avisos seguidos (1 s): a banda desce 15%, até BANDA_MIN da do tamanho;
-  // abaixo de FILA_BAIXA em 4 seguidos (2 s): sobe 10%, até a do tamanho; no meio, fica. No relatório
-  // de 2026-11-03 02:10 (Wi-Fi de casa, PS5 → iPhone) a fila assim dava ~10–16 ms: a banda não mexeria.
+  // abaixo de FILA_BAIXA em 4 seguidos (2 s): sobe 10%, até a do tamanho; no meio, fica. Nos relatórios
+  // de 2026-11-03 (Wi-Fi de casa, PS5 → iPhone) a fila assim dava ~10–27 ms com a banda cheia.
   // Trocar só a banda não gera quadro-chave nem descrição nova (medido na NVIDIA e no OpenH264).
   ajustarBanda(s, f) {
     const p90 = Number(f.p90);

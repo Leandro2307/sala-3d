@@ -378,8 +378,18 @@ export class Controle {
     }
     const t0 = performance.now();
     const r = sh.aba != null ? await this.pedir('entrada', sh.aba, ev) : await this.pedir('janela', null, ev, sh.alvo);
-    // daqui até o ajudante e de volta (relatório: o atraso do controle no PC de quem compartilha)
-    if (ev?.jogo && !r?.erro) this.ajudanteMs = this.ajudanteMs == null ? performance.now() - t0 : this.ajudanteMs * 0.9 + (performance.now() - t0) * 0.1;
+    // Daqui até o ajudante e de volta (relatório: o atraso do controle no PC de quem compartilha). Conta
+    // também o controle do PS5 (pad), que no layout PS5 é quase tudo o que vai. Mediana dos últimos 30:
+    // a média de antes quase não andava sem tecla nem mouse e guardava a 1ª resposta, que traz o
+    // ajudante abrindo (~0,6 s) — no relatório de 2026-11-03 02:24, "624 ms" no lugar de ~2 e um
+    // atraso de ~350 ms no selo de quem jogava.
+    if ((ev?.jogo || ev?.t === 'pad') && !r?.erro) {
+      const lista = (this.ajudanteAmostras ??= []);
+      lista.push(performance.now() - t0);
+      if (lista.length > 30) lista.shift();
+      const o = [...lista].sort((a, b) => a - b);
+      this.ajudanteMs = o[o.length >> 1];
+    }
     if (r?.erro) {
       if (r.erro === 'alvo-nao-achado') this.onAlvoPerdido?.(sh);
       // sem-dialogo: o aviso já tinha sido respondido (por quem compartilha, no Chrome dele)
