@@ -2608,7 +2608,7 @@ function jogoAqui(key, deId, ligar, rapido = false) {
     desenharMesmoAssim = false;
     diagJogo.comecar('compartilha', {
       gl: world.renderer.getContext(),
-      extra: { extensao: controle.ext?.versao ?? null, preset: rtc?.shareMode ?? null, superficie: superficieDe(self()?.shares.get(key)), codecs: codecsTestados(), qpsCaptura: rtc?.qpsCaptura() ?? null },
+      extra: { extensao: controle.ext?.versao ?? null, preset: rtc?.shareMode ?? null, superficie: superficieDe(self()?.shares.get(key)), janelaDoJogo: self()?.shares.get(key)?.titulo ?? null, codecs: codecsTestados(), qpsCaptura: rtc?.qpsCaptura() ?? null },
     });
     toast(`${nome} está jogando no seu PC. A sala ficou em pausa aqui, para o jogo e a transmissão terem a placa de vídeo toda.`, 'info', 12000, null, {
       rotulo: 'Desenhar a sala',
@@ -2742,7 +2742,7 @@ function salaAgora() {
   return { desenha: mundoVisivel(), teto: tetoDeQuadros(), quadros2s: q, escondida: document.hidden, foco: state.focus?.kind ?? null, pessoas: state.users.size };
 }
 // a última ida e volta do "ping" do controle e o tempo até o ajudante lá (ms)
-const pingDoJogo = { rtt: null, ajudante: null };
+const pingDoJogo = { rtt: null, ida: null, ajudante: null };
 async function amostrarJogo() {
   if (!rtc || !diagJogo.ativo) return;
   try {
@@ -2758,7 +2758,7 @@ async function amostrarJogo() {
       for (const id of quem.keys()) {
         // no turbo, os números da imagem dessa pessoa são os do canal turbo (o vídeo da conexão está parado)
         const turbo = turboEnvio.stats(id, key);
-        const resumo = diagJogo.amostraEnvio(key, cru, id, sala, turbo);
+        const resumo = diagJogo.amostraEnvio(key, cru, id, sala, turbo, self()?.shares.get(key)?.titulo ?? null);
         if (!resumo) continue;
         // os ajustes do vídeo da conexão não valem para quem está no turbo
         if (!turbo) ajustarJogo(id, resumo);
@@ -2768,7 +2768,10 @@ async function amostrarJogo() {
           if (!turbo) vigiarCodificador(key, resumo);
         }
         const { t, captura, enviado, codificado, altura, kbps, limite, motivo, codificador, placa, imagemBaixa, codMs, filaMs } = resumo;
-        controle.emitir('controle-volta', { key, para: id, ev: { t: 'jogo-envio', quando: t, captura, enviado, codificado, altura, kbps, limite, motivo, codificador, placa, imagemBaixa, codMs, filaMs } });
+        // no turbo, o que só se vê daqui (a banda do codificador, os quadros pulados, os quadros-chave)
+        // vai junto: o relatório de quem joga explica sozinho uma queda de banda ou de quadros
+        const tb = turbo && { bandaKbps: turbo.bandaKbps, pulados: turbo.pulados, puladosFila: turbo.puladosFila, trocasDeBanda: turbo.trocasDeBanda, filaLaMs: turbo.filaLaMs, chaves: turbo.chaves, chaveKB: turbo.chaveKB, chavesIgnoradas: turbo.chavesIgnoradas };
+        controle.emitir('controle-volta', { key, para: id, ev: { t: 'jogo-envio', quando: t, captura, enviado, codificado, altura, kbps, limite, motivo, codificador, placa, imagemBaixa, codMs, filaMs, turbo: tb || null } });
       }
     }
     if (jogandoLa) {
@@ -2778,7 +2781,7 @@ async function amostrarJogo() {
       rtc.mandarControle(dono, { p: performance.now() });
       const trilha = jogandoLa.video.srcObject?.getVideoTracks()[0];
       const som = jogandoLa.video.srcObject?.getAudioTracks()[0] || null;
-      const extra = { turbo: turboRecebe.stats(), controleRttMs: pingDoJogo.rtt, ajudanteMs: pingDoJogo.ajudante, movimentoCru: controle.movimentoCru, controleFisico: fisico.usado, cursorLivre: jogandoLa.cursorLivre };
+      const extra = { turbo: turboRecebe.stats(), controleRttMs: pingDoJogo.rtt, controleIdaMs: pingDoJogo.ida, ajudanteMs: pingDoJogo.ajudante, movimentoCru: controle.movimentoCru, controleFisico: fisico.usado, cursorLivre: jogandoLa.cursorLivre };
       const resumo = trilha && diagJogo.amostraRecebe(await rtc.diagRecebe(trilha, som), sala, extra);
       mostrarSelo(resumo);
       // a mesma amostra vai para quem compartilha, que baixa o relatório dos dois lados de uma vez
@@ -2970,12 +2973,19 @@ function receberDireto(id, m) {
   }
   // ping do controle de quem joga numa tela minha: volta na hora, com o tempo até o ajudante daqui
   if (typeof m.p === 'number') {
-    if ([...jogandoAqui.values()].some((q) => q.has(id))) rtc?.mandarControle(id, { pe: m.p, aj: controle.ajudanteMs != null ? Math.round(controle.ajudanteMs * 10) / 10 : null });
+    // t: a hora daqui, para quem joga medir só a ida (com os relógios acertados pelo turbo)
+    if ([...jogandoAqui.values()].some((q) => q.has(id))) rtc?.mandarControle(id, { pe: m.p, aj: controle.ajudanteMs != null ? Math.round(controle.ajudanteMs * 10) / 10 : null, t: performance.now() });
     return;
   }
   // a volta do meu ping (eu jogo na tela dessa pessoa)
   if (typeof m.pe === 'number') {
-    if (jogandoLa?.key.split('~')[0] === id) Object.assign(pingDoJogo, { rtt: Math.round((performance.now() - m.pe) * 10) / 10, ajudante: typeof m.aj === 'number' ? m.aj : null });
+    if (jogandoLa?.key.split('~')[0] === id) {
+      // A ida sozinha (o comando): a hora de lá menos a diferença dos relógios (a do turbo, pelo pong
+      // de menor ida e volta). A volta do ping vem pelo caminho da imagem e espera atrás dela.
+      const dif = turboRecebe.dif;
+      const ida = typeof m.t === 'number' && dif != null ? Math.max(0, Math.round((m.t - dif - m.pe) * 10) / 10) : null;
+      Object.assign(pingDoJogo, { rtt: Math.round((performance.now() - m.pe) * 10) / 10, ida, ajudante: typeof m.aj === 'number' ? m.aj : null });
+    }
     return;
   }
   const agora = Date.now();

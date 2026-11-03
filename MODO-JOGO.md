@@ -550,3 +550,81 @@ ms) são o tempo de reagir (2 avisos de 0,5 s) numa queda de 60% que dura 1 s.
 código, o que mais pesa: o PC de quem compartilha no Wi-Fi (dois trechos sem fio para cada quadro) e,
 no PS5, o próprio Remote Play (chiaki-ng: PS5 → codifica → rede → decodifica → janela → captura), que
 nem entra na conta do selo.
+
+## Relatório de 2026-11-03 16:13 (PS5 pelo chiaki-ng → notebook Intel, pela internet)
+
+Quem joga: o notebook dos primeiros relatórios (Intel UHD 0xA7A8, 8 GB), Chrome 156, controle físico,
+no Wi-Fi; os dois lados pela internet (`srflx/udp`, ida e volta 15–22 ms). Turbo em 1080p, 2 min 46 s.
+Só veio o arquivo de quem joga.
+
+- **O turbo funcionou**: imagem (captura → desenhado) mediana 26 ms, atraso total ~69 ms,
+  decodificação 0,5–1 ms. A Intel também segurava quadros (4 presos) e o SPS reescrito
+  (`decAjuste: 'sps'`) resolveu: 1ª vez fora do PC de desenvolvimento. `ajudanteMs` 0,8–1,7 ms (a
+  correção de 02:24 confirmada).
+- **Média de 46 qps** (52 de 83 amostras abaixo de 50): captura lá 49 → enviado 48 → desenhado 46.
+  - A origem: a captura do chiaki-ng ia de 57 a 30 e voltava em 2–6 s (aos trancos, não presa em
+    30). É o PS5/Remote Play, e não o limite de segundo plano da NVIDIA que o aviso `fundo` apontou.
+  - As perdas: 67 quadros perdidos e 37 pedidos de quadro-chave; nas amostras com perda a mediana
+    cai para 42,5 qps (52 sem); p90 da imagem de 150–195 ms nesses trechos.
+- **O som** chega ~¼ s depois da imagem: buffer de 185–333 ms (mediana 258). Nos dados brutos o
+  `jitterBufferMinimumDelay` é igual ao `jitterBufferTargetDelay`: é a estimativa de variação da rede
+  do próprio Chrome (NetEq), não a sincronia com o vídeo nem o `jitterBufferTarget` (já em 0).
+  Separar os streams não resolve.
+- Banda recebida ~6,9 Mbps nos primeiros 45 s e ~4,8 depois; a fila mandada (`filaMs`) ficou entre
+  24 e 30 ms em 22 de 82 avisos — e ali a conta para subir a banda zerava.
+- O ping do controle subia a 107–254 ms nos picos e o atraso estimado ia junto (104–190 ms): a volta
+  do ping vem pelo canal `controle`, na mesma conexão, atrás da imagem. O comando vai no outro sentido.
+
+### O que entrou depois disso
+
+- `turbo.js`, **pedido de quadro-chave com `desde`** (o quadro mais novo de que chegou alguma coisa,
+  `maiorId`): `TurboEnvio.pedidoDeChave` ignora o pedido se o último quadro-chave mandado é mais novo
+  que isso e saiu há menos de `CHAVE_A_CAMINHO_MS` (400). Nos picos o quadro-chave levava mais que os
+  250 ms entre um pedido e outro. Sem `desde` (versão antiga), atende sempre.
+- `ajustarBanda`: aviso entre `FILA_BAIXA` e `FILA_ALTA` não zera mais a conta para subir. Quem joga
+  deixa fora da fila que manda (`janelaViagem`) o quadro-chave e os quadros capturados antes de ele
+  terminar de chegar (`fimChave`): essa fila vem da perda, não da banda. O relatório continua vendo tudo.
+- Números novos: lá, `chaves`, `chaveKB` (o maior) e `chavesIgnoradas`; quem joga, `chaves` e
+  `chaveKB`. O `jogo-envio` leva `turbo: { bandaKbps, pulados, puladosFila, trocasDeBanda, filaLaMs,
+  chaves, chaveKB, chavesIgnoradas }` (servidor: `voltaDoControle`), que aparece em `la.turbo` no
+  relatório de quem joga: ele sozinho já explica uma queda de banda ou de quadros.
+- `jogo-diag.js`: no turbo, `codificador`/`placa` nulos (eram os do vídeo parado, que davam
+  "D3D12VideoEncodeAccelerator" e o motivo `codificador`); motivo `fila` (captura inteira, quadros
+  pulados pela fila: `turbo.puladosFila`); `fundo` só com 3 amostras seguidas entre 26 e 38 e quase
+  iguais (até 8 de diferença); motivo `ps5` quando a janela é o chiaki-ng (`PS5`, o mesmo título de
+  `toque-jogo.js`; `amostraEnvio` recebe a janela, e `janelaDoJogo` vai no ambiente de quem
+  compartilha). Repassando as capturas deste relatório: `fundo` 12 → 1 (o trecho de 6 s em 30), o
+  resto `ps5`.
+- **Atraso pela ida do controle** (`controleIdaMs`): quem compartilha devolve o ping com a hora de lá
+  (`t`), e quem joga desconta a diferença dos relógios do turbo (`turboRecebe.dif`). Sem ela, metade
+  da ida e volta como antes. Com o ping de 254,8 ms do relatório: 187 → 69 ms.
+
+### Teste no Wi-Fi simulado (scratchpad `teste-turbo/`: `ponta.html` + `rodar.mjs`)
+
+As duas pontas numa página do Chrome 156 invisível, ligadas por um canal falso: banda pelo tempo,
+travadas, perda com reenvio dentro do TTL, vida de 90 ms por pedaço e o `bufferedAmount` aos trancos
+(só baixa quando a fila esvazia). Cena 1080p com muito movimento. Cenários: `picos` (15 Mbps e
+travadas de 120–250 ms a cada 3–6 s, como o relatório), `oscila` (20↔8), `apertado` (7), `folga`
+(40). `?v=antes|agora` ou `antes_agora` (quem compartilha_quem joga).
+
+- Mesma fluidez antes e depois (picos ~55 qps, oscila ~59, folga ~60): a diferença entre rodadas
+  iguais (até 6 qps) é maior que a das versões. Os pedidos repetidos não apareceram no simulador
+  (`chavesIgnoradas` 0): conferir no próximo relatório. Versões misturadas: 56 e 60 qps, sem falha.
+- **Testada e desfeita**: a trava da fila pela banda de agora e pelo TTL (2/3 dele: 1080p de 75 a 45
+  KB). Os pedaços vencidos são os das travadas (nenhuma trava evita) e só sobravam mais quadros pulados.
+- **O que o teste mostrou**: o quadro-chave da cena tem 90–145 KB, e um quadro-chave que não passa
+  inteiro em 90 ms nunca chega. A 7 Mbps (`apertado`) o turbo desiste nas duas versões (nada em 4 s);
+  com 15 Mbps e travadas, às vezes vira uma fila de quadros-chave vencendo (6 em 2 s numa rodada).
+  O `chaveKB` do próximo relatório diz o tamanho no jogo de verdade.
+
+### Próximos passos
+
+1. Relatório novo **dos dois lados** (o `modo-jogo-compartilha-*` traz os dois): `chaveKB`,
+   `chavesIgnoradas`, `la.turbo.bandaKbps` e os motivos novos.
+2. Se o `chaveKB` vier grande (bem acima do que a banda passa em 90 ms): quadro-chave com mais tempo
+   de vida — um 2º canal (`turbo-chave`, `maxPacketLifeTime` ~300) só para ele, e quem joga segurando
+   os quadros que chegarem antes de ele terminar (a ordem entre canais não é garantida).
+3. O som: só sai do buffer do Chrome indo pelo turbo também (Opus no WebCodecs + AudioWorklet com
+   buffer curto). Antes, o teste barato: quem joga no cabo — se o `somBufferMs` cair, é o Wi-Fi.
+4. Ideia sem prova: o `pad` vai pelo canal `controle` (ordenado). Um pacote perdido segura os
+   analógicos que vêm atrás, como o mouse antes do `controle-mov`.

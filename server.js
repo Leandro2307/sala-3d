@@ -762,6 +762,10 @@ function voltaDoControle(raw) {
       altura: num(e.altura), kbps: num(e.kbps), limite: txt(e.limite), motivo: txt(e.motivo), codificador: txt(e.codificador),
       placa: typeof e.placa === 'boolean' ? e.placa : null, imagemBaixa: typeof e.imagemBaixa === 'boolean' ? e.imagemBaixa : null,
       codMs: num(e.codMs), filaMs: num(e.filaMs),
+      // modo turbo: a banda do codificador, os quadros pulados e os quadros-chave de lá
+      turbo: e.turbo && typeof e.turbo === 'object'
+        ? Object.fromEntries(['bandaKbps', 'pulados', 'puladosFila', 'trocasDeBanda', 'filaLaMs', 'chaves', 'chaveKB', 'chavesIgnoradas'].map((k) => [k, num(e.turbo[k])]))
+        : null,
     };
   }
   // modo jogo: o jogo mostrou o cursor (menu) ou escondeu — quem joga troca o jeito de mexer o mouse

@@ -8,6 +8,7 @@ const BOM = 50; // abaixo disso (quadros por segundo) a jogatina já engasga
 const SEGUIDAS = 3; // amostras ruins em seguida (6 s) antes de avisar
 const ENTRE_AVISOS = 45_000;
 const GUARDA = 900; // amostras guardadas (30 min a cada 2 s)
+const PS5 = /chiaki|\bps5\b|playstation/i; // a janela do Remote Play do PS5 (o mesmo título de toque-jogo.js)
 
 const kbps = (bytesPorSeg) => (bytesPorSeg == null ? null : Math.round((bytesPorSeg * 8) / 100) / 10);
 const r1 = (v) => (v == null || !Number.isFinite(v) ? null : Math.round(v * 10) / 10);
@@ -25,6 +26,12 @@ const MOTIVOS = {
   software: 'O vídeo está sendo codificado no processador, não na placa de vídeo. No Chrome de quem compartilha: Configurações → Sistema → “Usar aceleração gráfica” ligado; no Windows, Configurações → Tela → Gráficos → Chrome em “Alto desempenho”. Em chrome://gpu, “Video Acceleration Information” diz se a placa codifica H.264. Tela cheia exclusiva também derruba para o processador: use janela sem bordas.',
   internet: 'A banda entre vocês está no limite e o navegador baixou a resolução para não travar. O Wi-Fi perde pacotes e cada perda derruba a banda: cabo no PC de quem compartilha e o celular perto do roteador (rede de 5 GHz) ajudam; pela internet, o ideal é 25 Mbps de upload livres.',
   codificador: 'O codificador está soltando menos quadros do que a captura entrega.',
+  // PS5 pelo chiaki-ng com a captura caindo aos trancos (não presa em 30): a origem é o próprio Remote
+  // Play. No relatório de 2026-11-03 16:13 ela ia de 57 a 30 e voltava em 2–6 s, e o aviso falava do
+  // limite de segundo plano da NVIDIA.
+  ps5: 'O chiaki-ng está mostrando menos de 60 quadros: o jogo no PS5 pode estar abaixo de 60 nessa parte (modo qualidade, cena pesada ou parada) ou a conexão entre o PS5 e o PC está perdendo. PS5 e PC no cabo ajudam; no chiaki-ng, confira se o vídeo está em 60 qps e, no jogo, prefira o modo desempenho.',
+  // modo turbo: a captura veio inteira, mas a fila de envio encheu e os quadros foram pulados lá
+  fila: 'A internet entre vocês não está dando vazão: o PC de quem compartilha pula quadros para a imagem não atrasar. Cabo de rede no PC de quem compartilha (e no PS5) e o aparelho de quem joga no Wi-Fi de 5 GHz, perto do roteador, ajudam.',
   perdas: 'A internet entre vocês está perdendo pacotes: o vídeo trava esperando o que se perdeu.',
   tela: 'O vídeo chega e é decodificado inteiro, mas o aparelho mostra menos quadros. No iPhone, o Modo de Pouca Energia limita o Safari a 30 qps: desligue em Ajustes → Bateria (e deixe o celular carregando, se esquentar). No PC, feche o que pesa na placa, e no notebook na bateria a Economia de energia do Chrome também limita a 30 qps (chrome://settings/performance).',
   decod: 'Este PC não está dando conta de decodificar o vídeo.',
@@ -99,7 +106,8 @@ export class DiagJogo {
   // ---------------------------------------------------------------- quem compartilha
   // cru: rtc.diagEnvio(key); quem: id de quem joga (o envio dela é o que importa). Devolve o resumo
   // que vai para quem joga.
-  amostraEnvio(key, cru, quem, sala, turbo = null) {
+  // janela: o título da janela compartilhada (o PS5 pelo chiaki-ng tem aviso próprio)
+  amostraEnvio(key, cru, quem, sala, turbo = null, janela = null) {
     const s = this.sessao;
     if (!s || !cru) return null;
     const agora = performance.now();
@@ -156,13 +164,19 @@ export class DiagJogo {
     // modo turbo: a imagem dessa pessoa vai pelo canal turbo e o vídeo da conexão está parado de
     // propósito — os números que valem são os do turbo (turbo.js, TurboEnvio.stats)
     if (turbo) {
-      Object.assign(resumo, { modo: 'turbo', turbo, enviado: turbo.qps, fpsFinal: turbo.qps, kbps: turbo.kbps, largura: turbo.largura, altura: turbo.altura });
+      // o codificador e a placa que aparecem aqui são os do vídeo da conexão, parado para essa pessoa
+      // (um relatório mostrava "D3D12VideoEncodeAccelerator" e o motivo "codificador" por eles)
+      Object.assign(resumo, { modo: 'turbo', turbo, enviado: turbo.qps, fpsFinal: turbo.qps, kbps: turbo.kbps, largura: turbo.largura, altura: turbo.altura, codificador: null, placa: null });
       if (turbo.codMs != null) resumo.codMs = turbo.codMs;
     }
     // quem joga (nível máximo) devia receber a captura inteira: abaixo de 60% das linhas é migalha
     const capAltura = env?.captura?.height;
     resumo.imagemBaixa = resumo.nivel === 'max' && resumo.altura && capAltura ? resumo.altura < capAltura * 0.6 : null;
-    resumo.motivo = motivoEnvio(resumo);
+    // as últimas capturas desta tela: "presa perto de 30" é de várias amostras, não de uma
+    s.capturas ??= new Map();
+    const caps = [...(s.capturas.get(chave) || []), resumo.captura].slice(-SEGUIDAS);
+    s.capturas.set(chave, caps);
+    resumo.motivo = motivoEnvio(resumo, { capturas: caps, ps5: PS5.test(janela || '') });
     // a placa recusou (medida ímpar, por exemplo) e o Chrome passou para o processador, ou voltou
     const ant = s.amostras.at(-1)?.codificador;
     if (ant && resumo.codificador && ant !== resumo.codificador) this.evento('codificador trocou', { de: ant, para: resumo.codificador, enviado: `${resumo.largura}x${resumo.altura}`, captura: resumo.capturaRes });
@@ -215,7 +229,7 @@ export class DiagJogo {
       caminho: cru.rede?.local ?? null,
       jitterBufferTarget: cru.jitterBufferTarget,
       playoutDelayHint: cru.playoutDelayHint,
-      la: la ? { captura: la.captura, enviado: la.enviado, altura: la.altura, kbps: la.kbps, limite: la.limite, motivo: la.motivo, codificador: la.codificador, placa: la.placa, imagemBaixa: la.imagemBaixa ?? null, codMs: la.codMs ?? null, filaMs: la.filaMs ?? null } : null,
+      la: la ? { captura: la.captura, enviado: la.enviado, altura: la.altura, kbps: la.kbps, limite: la.limite, motivo: la.motivo, codificador: la.codificador, placa: la.placa, imagemBaixa: la.imagemBaixa ?? null, codMs: la.codMs ?? null, filaMs: la.filaMs ?? null, turbo: la.turbo ?? null } : null,
       // o som da mesma tela: buffer maior que o do vídeo faz o vídeo esperar por ele (sincronia)
       somBufferMs: somEmitidos > 0 ? r1((1000 * dif(cru.som, antes?.som, 'jitterBufferDelay')) / somEmitidos) : null,
       bufferMinimoMs: emitidos > 0 && i?.jitterBufferMinimumDelay != null ? r1((1000 * dif(i, ib, 'jitterBufferMinimumDelay')) / emitidos) : null,
@@ -242,10 +256,19 @@ export class DiagJogo {
       Object.assign(resumo, { modo: 'turbo', fpsFinal: tb.qps, kbps: tb.kbps, largura: tb.largura, altura: tb.altura });
       if (resumo.controleRttMs != null && (tb.pontaMs != null || tb.redeMs != null)) {
         const imagem = tb.pontaMs ?? (tb.codMs ?? la?.codMs ?? 8) + tb.redeMs + (tb.montagemMs ?? 0) + (tb.decMs ?? 0);
-        resumo.atrasoMs = Math.round(resumo.controleRttMs / 2 + (resumo.ajudanteMs ?? 2) / 2 + 16.7 + 8 + imagem + 8);
+        // a ida do comando medida com os relógios acertados (controleIdaMs, main.js); metade da ida e
+        // volta só sem ela: a volta do ping espera atrás da imagem no mesmo caminho, e nos picos do
+        // Wi-Fi dava 107–254 ms de ida e volta com o comando indo pelo outro sentido
+        const ida = resumo.controleIdaMs ?? resumo.controleRttMs / 2;
+        resumo.atrasoMs = Math.round(ida + (resumo.ajudanteMs ?? 2) / 2 + 16.7 + 8 + imagem + 8);
         resumo.atrasoMedido = tb.pontaMs != null;
       }
-      resumo.motivo = tb.qps >= BOM ? null : la?.captura != null && la.captura < BOM ? la.motivo || 'captura' : 'perdas';
+      // a captura lá abaixo de 60: o motivo de lá; com ela inteira, as perdas no caminho ou o que lá
+      // viu (a fila de envio cheia)
+      resumo.motivo = tb.qps >= BOM ? null
+        : la?.captura != null && la.captura < BOM ? la.motivo || 'captura'
+          : tb.perdidos > 0 ? 'perdas'
+            : la?.motivo === 'fila' ? 'fila' : 'perdas';
       // imagem boa, mas esperando na fila/rede mais que um quadro e meio: o Wi-Fi é o atraso
       if (!resumo.motivo && tb.viagemMs != null && tb.viagemMs > 25) resumo.motivo = 'wifi';
     }
@@ -295,7 +318,7 @@ export class DiagJogo {
     if (++s.ruins < SEGUIDAS || Date.now() - s.ultimoAviso < ENTRE_AVISOS) return;
     s.ultimoAviso = Date.now();
     const texto = MOTIVOS[motivo] || 'O motivo não ficou claro pelos números.';
-    const onde = lado === 'joga' && ['captura', 'fundo', 'cpu', 'software', 'internet', 'codificador'].includes(motivo) ? 'No PC de quem compartilha: ' : '';
+    const onde = lado === 'joga' && ['captura', 'fundo', 'ps5', 'cpu', 'software', 'internet', 'codificador'].includes(motivo) ? 'No PC de quem compartilha: ' : '';
     const altura = lado === 'joga' ? r.la?.altura ?? r.altura : r.altura;
     const como = fps >= BOM ? `com a imagem baixa${altura ? ` (${altura} linhas)` : ''}` : `a ${Math.round(fps)} qps${imagemBaixa && altura ? `, ${altura} linhas` : ''}`;
     this.evento('aviso', { fps, motivo, imagemBaixa, altura });
@@ -353,15 +376,21 @@ export class DiagJogo {
 
 // A imagem em migalhas por falta de banda vem antes da captura: num relatório a captura estava em
 // 32 qps e a tela saía em 345×210 por banda, e o motivo dizia só "captura".
-function motivoEnvio(r) {
+// capturas: as últimas desta tela (com a de agora); ps5: a janela é o Remote Play do PS5 (chiaki-ng)
+function motivoEnvio(r, { capturas = [], ps5 = false } = {}) {
   const lim = r.limitePct || {};
   const banda = (lim.bandwidth || 0) > 30 || r.limite === 'bandwidth';
   const cpu = (lim.cpu || 0) > 30 || r.limite === 'cpu';
   if (r.imagemBaixa) return banda ? 'internet' : cpu ? 'cpu' : 'internet';
   if (r.enviado == null || r.enviado >= BOM) return null;
-  // perto de 30 (o limite de quadros em segundo plano da NVIDIA, a janela sem foco): 'fundo'
-  if (r.captura != null && r.captura >= 26 && r.captura <= 38) return 'fundo';
-  if (r.captura != null && r.captura < BOM) return 'captura';
+  // presa perto de 30 (o limite de quadros em segundo plano da NVIDIA, a janela sem foco): 'fundo'.
+  // Presa: SEGUIDAS amostras na faixa e quase iguais. Uma só (a captura caindo aos trancos) não é isso.
+  const validas = capturas.filter((c) => c != null);
+  const presa = validas.length >= SEGUIDAS && validas.every((c) => c >= 26 && c <= 38) && Math.max(...validas) - Math.min(...validas) <= 8;
+  if (r.captura != null && r.captura >= 26 && r.captura <= 38 && presa) return 'fundo';
+  if (r.captura != null && r.captura < BOM) return ps5 ? 'ps5' : 'captura';
+  // modo turbo: a captura veio inteira e os quadros ficaram de fora pela fila de envio cheia
+  if (r.turbo) return r.turbo.puladosFila > 0 ? 'fila' : 'codificador';
   if (r.placa === false && /openh264|libvpx|libaom|dav1d|software/i.test(r.codificador || '')) return 'software';
   if (cpu) return 'cpu';
   if (banda) return 'internet';

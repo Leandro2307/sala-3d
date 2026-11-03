@@ -14,7 +14,7 @@
 // perdido no Wi-Fi é reenviado se ainda der tempo; se não der, o quadro se perde, quem joga para de
 // decodificar até um quadro-chave novo e o pede ({chave:true}). Assim um engasgo vira uma imagem
 // parada por um instante, e não atraso acumulado.
-// Mensagens de texto (JSON): quem joga → {ligar: key, codecs, altura, versao}, {chave: true},
+// Mensagens de texto (JSON): quem joga → {ligar: key, codecs, altura, versao}, {chave: true, desde},
 // {desligar: true}, {ping: t} (a cada PING_MS; volta {pong: t, t: agora lá}: a ida e volta do próprio
 // canal e a diferença entre os relógios dos dois aparelhos), {fila: {p90, base}} (a cada FILA_AVISO_MS:
 // a viagem medida, ver ajustarBanda); quem compartilha → {cfg: {codec, w, h, description}}, {erro}. O
@@ -48,7 +48,9 @@ const VERSAO = 2;
 const TTL_MS = 90; // vida de cada pedaço no canal
 // Trava da fila de envio: com mais que tantos quadros da banda cheia esperando, o próximo é pulado.
 // Só trava: o bufferedAmount do Chrome atualiza aos trancos (ver o cabeçalho); quem manda na banda é
-// a fila medida do outro lado.
+// a fila medida do outro lado. Uma trava pela banda de agora e pelo TTL_MS (2/3 dele: 1080p de 75 a
+// 45 KB) foi testada em 2026-11-03 no Wi-Fi simulado e não serviu: os pedaços vencidos eram os das
+// travadas do Wi-Fi (nenhuma trava evita) e só sobravam mais quadros pulados.
 const FILA_QUADROS = 4;
 const FILA_MIN = 48 * 1024;
 const FILA_AVISO_MS = 500; // de quanto em quanto quem joga conta a viagem medida (ajustarBanda)
@@ -59,6 +61,9 @@ const FILA_ALTA = 30; // ms de fila (viagem p90 − a menor) que fazem a banda d
 const FILA_BAIXA = 24;
 const BANDA_MIN = 0.6; // a banda desce até 60% da do tamanho, no máximo
 const PEDIR_CHAVE_MS = 250; // intervalo mínimo entre pedidos de quadro-chave
+// Um quadro-chave que saiu há menos que isto e que quem joga ainda não viu está a caminho: outro
+// pedido por ele é ignorado (ver TurboEnvio.pedidoDeChave). Nos picos do Wi-Fi a viagem chegou a 250 ms.
+const CHAVE_A_CAMINHO_MS = 400;
 const PING_MS = 500;
 const SEGURANDO = 3; // quadros dentro do decodificador depois de ele já ter soltado algum...
 const SEGURANDO_QUADROS = 15; // ...em tantos quadros seguidos: ele está guardando (TurboRecebe.segurando)
@@ -229,7 +234,7 @@ export class TurboEnvio {
         return;
       }
       if (m.ligar) this.ligar(id, canal, m);
-      else if (m.chave) { const s = this.sessoes.get(id); if (s) s.chave = true; }
+      else if (m.chave) { const s = this.sessoes.get(id); if (s) this.pedidoDeChave(s, m.desde); }
       // t: a hora daqui, para quem joga acertar a diferença entre os relógios
       else if (m.ping != null) { try { canal.send(JSON.stringify({ pong: m.ping, t: performance.now() })); } catch { /* fechou */ } }
       // a fila medida do lado de lá (versão 2): é ela que manda na banda
@@ -251,7 +256,8 @@ export class TurboEnvio {
     original.addEventListener('ended', () => this.desligar(id), { once: true });
     const s = { id, key, canal, chave: true, quadro: 0, enc: null, cfg: null, config: null, banda: 0, trilha: original.clone(), parar: false, pulados: 0, enviados: 0,
       cfgEnviada: null, ajuste: { altas: 0, baixas: 0, mudou: 0, ultima: null }, // ajustarBanda
-      tempos: new Map(), conta: { enviados: 0, bytes: 0, pulados: 0, fila: 0, cod: [], ultimo: performance.now() } };
+      chaveId: 0, chaveEm: 0, // o último quadro-chave mandado (pedidoDeChave)
+      tempos: new Map(), conta: { enviados: 0, bytes: 0, pulados: 0, fila: 0, cod: [], chaves: 0, chaveMax: 0, ignorados: 0, ultimo: performance.now() } };
     this.sessoes.set(id, s);
     // quem joga com a versão 2 lê o cabeçalho com a hora da captura (a antiga leria como imagem)
     s.v2 = Number(versao) >= 2;
@@ -303,10 +309,25 @@ export class TurboEnvio {
     return Math.max(FILA_MIN, (bandaDe(s.cfg?.h ?? 720) / 8 / 60) * FILA_QUADROS);
   }
 
+  // Quem joga pediu um quadro-chave (perdeu um quadro). desde: o quadro mais novo de que chegou alguma
+  // coisa lá. Se o último quadro-chave daqui é mais novo que isso e saiu há pouco, ele ainda está a
+  // caminho: mandar outro só engrossaria a fila. Nos picos do Wi-Fi o quadro-chave levava mais que os
+  // 250 ms entre um pedido e outro, e saíam dois ou três seguidos (relatório de 2026-11-03 16:13).
+  // Quem joga numa versão antiga não manda o desde: aí vale sempre.
+  pedidoDeChave(s, desde) {
+    const d = Number(desde);
+    if (Number.isFinite(d) && s.chaveId > d && performance.now() - s.chaveEm < CHAVE_A_CAMINHO_MS) {
+      s.conta.ignorados++;
+      return;
+    }
+    s.chave = true;
+  }
+
   // Quem joga conta a cada FILA_AVISO_MS a viagem medida dos quadros (fila de envio + rede): o p90 e a
   // menor dos últimos ~10 s. A diferença é a fila de verdade (o erro entre os relógios some na conta).
   // Acima de FILA_ALTA em 2 avisos seguidos (1 s): a banda desce 15%, até BANDA_MIN da do tamanho;
-  // abaixo de FILA_BAIXA em 4 seguidos (2 s): sobe 10%, até a do tamanho; no meio, fica. Nos relatórios
+  // abaixo de FILA_BAIXA em 4 avisos (2 s; os do meio não contam nem zeram): sobe 10%, até a do tamanho.
+  // Quem joga deixa de fora da conta a fila que um quadro-chave causa (TurboRecebe.pedaco). Nos relatórios
   // de 2026-11-03 (Wi-Fi de casa, PS5 → iPhone) a fila assim dava ~10–27 ms com a banda cheia.
   // Trocar só a banda não gera quadro-chave nem descrição nova (medido na NVIDIA e no OpenH264).
   ajustarBanda(s, f) {
@@ -317,7 +338,10 @@ export class TurboEnvio {
     const a = s.ajuste;
     a.ultima = Math.round(fila * 10) / 10;
     a.altas = fila > FILA_ALTA ? a.altas + 1 : 0;
-    a.baixas = fila < FILA_BAIXA ? a.baixas + 1 : 0;
+    // Entre FILA_BAIXA e FILA_ALTA a conta para subir fica onde está: zerar ali (como era) quase nunca
+    // deixava juntar 4 seguidos — no relatório de 2026-11-03 16:13, 22 de 82 avisos caíram entre 24 e
+    // 30 ms (Wi-Fi), e a imagem recebida foi de ~6,9 para ~4,8 Mbps sem voltar.
+    a.baixas = fila < FILA_BAIXA ? a.baixas + 1 : fila > FILA_ALTA ? 0 : a.baixas;
     if (!s.enc || s.enc.state !== 'configured' || !s.config) return;
     const max = bandaDe(s.cfg.h);
     let nova = s.banda;
@@ -394,6 +418,12 @@ export class TurboEnvio {
     const cod = t0 != null ? performance.now() - t0 : 0;
     guardar(s.conta.cod, cod);
     const id = (s.quadro = (s.quadro + 1) >>> 0);
+    if (chunk.type === 'key') {
+      s.chaveId = id;
+      s.chaveEm = performance.now();
+      s.conta.chaves++;
+      s.conta.chaveMax = Math.max(s.conta.chaveMax, dados.length);
+    }
     const total = Math.ceil(dados.length / PEDACO) || 1;
     const cab = s.v2 ? CAB2 : CAB;
     try {
@@ -454,10 +484,13 @@ export class TurboEnvio {
       trocasDeBanda: s.ajuste.mudou,
       fila: s.canal.bufferedAmount,
       filaLaMs: s.ajuste.ultima, // a última fila medida do outro lado (viagem p90 − a menor; ajustarBanda)
+      chaves: s.conta.chaves, // quadros-chave mandados
+      chaveKB: s.conta.chaves ? Math.round(s.conta.chaveMax / 102.4) / 10 : null, // o maior deles
+      chavesIgnoradas: s.conta.ignorados, // pedidos de quadro-chave com um ainda a caminho (pedidoDeChave)
       versao: s.v2 ? VERSAO : 1,
     };
     s.ajuste.mudou = 0;
-    Object.assign(s.conta, { enviados: 0, bytes: 0, pulados: 0, fila: 0, cod: [], ultimo: agora });
+    Object.assign(s.conta, { enviados: 0, bytes: 0, pulados: 0, fila: 0, cod: [], chaves: 0, chaveMax: 0, ignorados: 0, ultimo: agora });
     return r;
   }
 
@@ -480,6 +513,10 @@ export class TurboRecebe {
 
   get ligado() { return !!this.s; }
 
+  // relógio de quem compartilha − o meu (pelo pong de menor ida e volta), ou null: o main.js mede com
+  // ele a ida do controle sem a volta (que espera atrás da imagem no mesmo caminho)
+  get dif() { return this.s?.dif ?? null; }
+
   async ligar(key, video, altura = 1080) {
     this.desligar();
     if (!temTurboRecebe()) return this.onFalhou?.('navegador');
@@ -494,7 +531,9 @@ export class TurboRecebe {
     const s = {
       key, video, canal, tela, ctx: tela.getContext('2d', { alpha: false, desynchronized: true }),
       dec: null, montando: null, ultimoId: 0, esperaChave: true, pedidoEm: 0, desenhou: 0, inicio: performance.now(),
-      conta: { desenhados: 0, perdidos: 0, pedidos: 0, decMs: [], montagem: [], cod: [], ponta: [], viagem: [], bytes: 0, ultimo: performance.now() }, pendentes: new Map(),
+      maiorId: 0, // o quadro mais novo de que chegou algum pedaço (vai no pedido de quadro-chave)
+      fimChave: null, // quando o último quadro-chave terminou de chegar, no relógio de lá (a fila dele não conta)
+      conta: { desenhados: 0, perdidos: 0, pedidos: 0, decMs: [], montagem: [], cod: [], ponta: [], viagem: [], bytes: 0, chaves: 0, chaveMax: 0, ultimo: performance.now() }, pendentes: new Map(),
       rtt: [], pingEm: 0,
       relogios: [], // { rtt, dif }: dos pongs com a hora de lá (versão 2)
       dif: null, // relógio de quem compartilha − o meu, do pong de menor ida e volta
@@ -630,6 +669,7 @@ export class TurboRecebe {
     const id = v.getUint32(0);
     const i = v.getUint16(4);
     const total = v.getUint16(6);
+    if (id > s.maiorId) s.maiorId = id;
     let q = s.montando;
     if (!q || q.id !== id) {
       // começou outro quadro com o anterior incompleto (pedaço que perdeu a vez): ele se perdeu
@@ -646,11 +686,22 @@ export class TurboRecebe {
     const chegou = performance.now();
     guardar(s.conta.montagem, chegou - q.t0);
     guardar(s.conta.cod, q.cod);
+    let tam = 0;
+    for (const p of q.partes) tam += p.length;
+    if (q.chave) {
+      s.conta.chaves++;
+      s.conta.chaveMax = Math.max(s.conta.chaveMax, tam);
+    }
     // da saída do codificador lá até o último pedaço aqui: a fila de envio + a rede
     if (q.lido != null && s.dif != null) {
       const viagem = chegou + s.dif - (q.lido + q.cod);
       guardar(s.conta.viagem, viagem);
-      s.janelaViagem.push(viagem); // vai para quem compartilha a cada FILA_AVISO_MS (vigiar)
+      // A fila que um quadro-chave causa (ele é bem maior que um quadro comum, e os capturados enquanto
+      // ele passava esperam atrás dele) vem da perda que o pediu, não da banda: fica fora da conta que
+      // vai para quem compartilha cortar a banda (ajustarBanda). O relatório continua vendo tudo.
+      const atrasDaChave = q.chave || (s.fimChave != null && q.lido < s.fimChave);
+      if (q.chave) s.fimChave = chegou + s.dif;
+      if (!atrasDaChave) s.janelaViagem.push(viagem); // vai para quem compartilha a cada FILA_AVISO_MS (vigiar)
     }
     // faltou um quadro inteiro no meio: os de depois não decodificam sem ele
     if (!q.chave && q.id !== s.ultimoId + 1) this.perdeu(s);
@@ -659,8 +710,6 @@ export class TurboRecebe {
     // esperando um quadro-chave e chegou outro: pede (sem esperar o vigia)
     else if (s.esperaChave) this.pedirChave(s);
     if (s.esperaChave || !s.dec || s.dec.state !== 'configured') return;
-    let tam = 0;
-    for (const p of q.partes) tam += p.length;
     const dados = new Uint8Array(tam);
     let o = 0;
     for (const p of q.partes) { dados.set(p, o); o += p.length; }
@@ -692,7 +741,9 @@ export class TurboRecebe {
     if (!ja && agora - s.pedidoEm < PEDIR_CHAVE_MS) return;
     s.pedidoEm = agora;
     s.conta.pedidos++;
-    try { s.canal.send(JSON.stringify({ chave: true })); } catch { /* canal fechou */ }
+    // desde: o quadro mais novo de que chegou alguma coisa. Lá, um quadro-chave mais novo que isso e
+    // recente está a caminho, e o pedido repetido não gera outro (TurboEnvio.pedidoDeChave)
+    try { s.canal.send(JSON.stringify({ chave: true, desde: s.maiorId })); } catch { /* canal fechou */ }
   }
 
   desenhar(s, frame) {
@@ -809,8 +860,10 @@ export class TurboRecebe {
       filaMs: s.filaMs, // a última fila mandada a quem compartilha (viagem p90 − a menor)
       decAjuste: [null, 'sps', 'processador', 'sem-saida'][s.ajusteDec] ?? null, // ver segurando
       codec: s.dec?.state === 'configured' ? 'h264' : null,
+      chaves: s.conta.chaves, // quadros-chave que chegaram inteiros
+      chaveKB: s.conta.chaves ? Math.round(s.conta.chaveMax / 102.4) / 10 : null, // o maior deles
     };
-    Object.assign(s.conta, { desenhados: 0, perdidos: 0, pedidos: 0, bytes: 0, montagem: [], cod: [], ponta: [], viagem: [], ultimo: agora });
+    Object.assign(s.conta, { desenhados: 0, perdidos: 0, pedidos: 0, bytes: 0, montagem: [], cod: [], ponta: [], viagem: [], chaves: 0, chaveMax: 0, ultimo: agora });
     return r;
   }
 }
