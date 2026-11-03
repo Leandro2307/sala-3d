@@ -459,3 +459,62 @@ ida e volta 35 ms, **buffer do iPhone 75–83 ms (p90 137)** — o maior pedaço
 O usuário achou o turbo em 720p o melhor: **turbo e "Menos atraso" ligados de fábrica** (`PADRAO` em
 `jogo-opcoes.js`, com `VERSAO` 2 migrando uma vez quem tinha as opções antigas guardadas). Sem turbo
 no navegador, o aviso sai uma vez por página (`turboAvisado`).
+
+## Turbo: menos atraso na imagem (2026-11-02)
+
+Pedido do usuário: o turbo dava 70–90 ms no selo, e o toque já chega na hora; o atraso a tirar é o da
+imagem. No relatório de 03:35 o PC estava no Wi-Fi (`host/udp wifi`) e a **fila de envio do canal
+turbo** (`bufferedAmount`) ficava em 10–30 KB e chegava a 107 KB — a 6 Mbps, 15 a 140 ms de imagem
+esperando, que a estimativa não via (usava metade do ping). Mudanças, todas em `turbo.js`:
+
+- **Fila medida em tempo** (`TurboEnvio.medirFila`): o que está na fila ÷ a velocidade com que ela
+  esvazia (medida só entre duas leituras com a fila ocupada; sem medida ou com ela velha, 3× a banda).
+  Quadro que fosse esperar mais de `FILA_MS` (20) não é codificado. A 1ª versão, em bytes (1 quadro),
+  pulava demais: a captura entrega quadros colados, e o 2º era pulado com a fila a 3 ms de esvaziar.
+- **Banda que acompanha o caminho** (`ajustarBanda`, a cada 250 ms): 2 pulos ou espera média > 10 ms
+  → 90% da velocidade medida (até metade da banda do tamanho); 0,5 s sem aperto → +10%. Trocar só o
+  `bitrate` num `configure()` não gera quadro-chave nem descrição nova (medido na NVIDIA e no OpenH264).
+- **Taxa constante** (`bitrateMode: 'constant'`, com a variável de reserva): na NVIDIA, 720p a 6 Mbps,
+  a variável dava 15,7 KB por quadro em média (acima do alvo) e quadro-chave de 46 KB; a constante,
+  12,5 KB e quadro-chave de 15 KB.
+- **Sem quadro-chave a cada 5 s** (era um pico na fila): o canal é ordenado, quem joga percebe a perda
+  e pede; e pede também quando chega quadro não-chave enquanto espera um.
+- **Medida de verdade** (versão 2 do cabeçalho, `CAB2` = 28 bytes, combinada no `{ligar, versao: 2}`):
+  cada quadro leva a hora em que saiu da captura; o `{pong}` leva a hora de lá, e quem joga acerta a
+  diferença dos relógios pelo pong de menor ida e volta. `pontaMs` (captura lá → desenhado aqui) e
+  `viagemMs` (fila + rede), mediana e p90. O `atrasoMs` do turbo usa o `pontaMs` (`atrasoMedido: true`);
+  o selo mostra "(imagem N ms)". Viagem > 25 ms com a imagem fluindo → motivo `wifi` e uma dica por
+  sessão (cabo no PC e no PS5, celular no 5 GHz). Versões misturadas funcionam nos dois sentidos
+  (quem tem a antiga fica sem a medida nova).
+- **Decodificador do Chrome segurando 5 quadros (83 ms)**: um dos dois codificadores da placa no
+  Chrome deste PC (a escolha entre eles variou de uma execução para outra) manda o SPS **sem VUI**;
+  sem `max_num_reorder_frames`, o decodificador da placa do Chrome guarda quadros. O do processador
+  solta em 1–2 ms; o iPhone (relatórios) em 2–4 ms. `TurboRecebe.segurando`: depois de soltar o 1º
+  quadro, 3 ou mais dentro por 15 quadros seguidos → passo 1, SPS reescrito com VUI só com
+  `bitstream_restriction` (reordenar 0) — `descricaoSemReordenar`, validado nos perfis High, Main e
+  Baseline da placa e no OpenH264: 83 → 0,3 ms e a imagem idêntica à do processador, pixel a pixel;
+  passo 2, `prefer-software`. Evento no relatório e `decAjuste` no `turbo`. Contar antes do 1º quadro
+  sair dava alarme falso (a placa demora a ligar). Também: erro no decodificador recria na hora com a
+  última configuração (antes ficava sem decodificador até mudar o tamanho da imagem).
+
+Medido no Chrome invisível deste PC (scratchpad `turbo/ponta.html`: as duas pontas numa página,
+conexão WebRTC de verdade, cena com muito movimento; o "Wi-Fi simulado" é um canal lento por fora,
+1 s de queda a cada 3 s; tempo do `encode()` lá ao `drawImage()` aqui, mesmo relógio):
+
+| Caso | Antes (mediana / p90 / p99) | Depois | qps depois |
+|---|---|---|---|
+| 720p, Wi-Fi 10↔4 Mbps | 18 / 191 / 211 ms | 13 / 22 / 32 ms | 52–60 (antes 50–62) |
+| 1080p, Wi-Fi 20↔8 Mbps | 20 / 102 / 110 ms | 18 / 23 / 31 ms | 42–60 |
+| 1080p, canal sem limite | 11,5 / 13,7 / 17 ms | 11,7 / 13,8 / 18 ms | 60, 10 Mbps |
+| 720p, codificador com SPS sem VUI | 92 / 97 / 102 ms | 10 / 13 / 15 ms | 60 |
+| 720p, 1% dos pedaços perdidos | 7 / 8 / 15 ms (um trecho a 44 qps) | 7 / 8 / 11 ms | 58–60 |
+
+Custo: com o Wi-Fi apertando, a banda desce (no 20↔8, ~5–7 Mbps em 1080p em vez de ~9,5) — a imagem
+fica menos nítida nas quedas em vez de atrasar. Com folga, fica na banda cheia. Em 1080p o canal
+lento do teste mede pouco (a página faz tudo ao mesmo tempo e o relógio dele atrasa); no canal de
+verdade, 10 Mbps sem pulo.
+
+**Falta**: um relatório real (PS5 → iPhone e jogo de PC) com `turbo.pontaMs`, `viagemMs`, `esperaMs`,
+`caminhoKbps`, `bandaKbps` e `decAjuste`. Fora do código, o que mais pesa: o PC de quem compartilha no
+Wi-Fi (dois trechos sem fio para cada quadro) e, no PS5, o próprio Remote Play (chiaki-ng: PS5 →
+codifica → rede → decodifica → janela → captura), que nem entra na conta do selo.

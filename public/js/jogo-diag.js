@@ -28,6 +28,8 @@ const MOTIVOS = {
   perdas: 'A internet entre vocês está perdendo pacotes: o vídeo trava esperando o que se perdeu.',
   tela: 'O vídeo chega e é decodificado inteiro, mas o aparelho mostra menos quadros. No iPhone, o Modo de Pouca Energia limita o Safari a 30 qps: desligue em Ajustes → Bateria (e deixe o celular carregando, se esquentar). No PC, feche o que pesa na placa, e no notebook na bateria a Economia de energia do Chrome também limita a 30 qps (chrome://settings/performance).',
   decod: 'Este PC não está dando conta de decodificar o vídeo.',
+  // modo turbo: a viagem medida (fila de envio + rede) passou de 25 ms com a imagem fluindo
+  wifi: 'A imagem chega inteira, mas demora no caminho entre vocês (fila e rede). O que mais tira atraso: cabo de rede no PC de quem compartilha (e no PS5) e o celular no Wi-Fi de 5 GHz, perto do roteador.',
 };
 
 export class DiagJogo {
@@ -230,17 +232,22 @@ export class DiagJogo {
     resumo.imagemBaixa = la?.imagemBaixa ?? null;
     resumo.motivo = motivoRecebe(resumo, la);
     // modo turbo (turbo.js): a imagem chega pelo canal turbo e é desenhada sem buffer; o vídeo da
-    // conexão está parado. Atraso do dedo ao olho: o comando vai, o jogo desenha, a captura, a
-    // codificação lá, a viagem (metade da ida e volta do canal turbo), a montagem dos pedaços, a
-    // decodificação e meio quadro esperando a tela — sem buffer nenhum.
+    // conexão está parado. Atraso do dedo ao olho: o comando vai, o jogo desenha, a captura, e daí
+    // até desenhado aqui — medido quadro a quadro (pontaMs: codificação, fila de envio, rede, montagem
+    // e decodificação, com os relógios acertados) ou, com quem compartilha numa versão antiga, somado
+    // das partes com a viagem estimada em metade da ida e volta (que não via a fila) — e meio quadro
+    // esperando a tela.
     const tb = resumo.turbo;
     if (tb) {
       Object.assign(resumo, { modo: 'turbo', fpsFinal: tb.qps, kbps: tb.kbps, largura: tb.largura, altura: tb.altura });
-      if (resumo.controleRttMs != null && tb.redeMs != null) {
-        resumo.atrasoMs = Math.round(resumo.controleRttMs / 2 + (resumo.ajudanteMs ?? 2) / 2 + 16.7 + 8 + (tb.codMs ?? la?.codMs ?? 8)
-          + tb.redeMs + (tb.montagemMs ?? 0) + (tb.decMs ?? 0) + 8);
+      if (resumo.controleRttMs != null && (tb.pontaMs != null || tb.redeMs != null)) {
+        const imagem = tb.pontaMs ?? (tb.codMs ?? la?.codMs ?? 8) + tb.redeMs + (tb.montagemMs ?? 0) + (tb.decMs ?? 0);
+        resumo.atrasoMs = Math.round(resumo.controleRttMs / 2 + (resumo.ajudanteMs ?? 2) / 2 + 16.7 + 8 + imagem + 8);
+        resumo.atrasoMedido = tb.pontaMs != null;
       }
       resumo.motivo = tb.qps >= BOM ? null : la?.captura != null && la.captura < BOM ? la.motivo || 'captura' : 'perdas';
+      // imagem boa, mas esperando na fila/rede mais que um quadro e meio: o Wi-Fi é o atraso
+      if (!resumo.motivo && tb.viagemMs != null && tb.viagemMs > 25) resumo.motivo = 'wifi';
     }
     s.amostras.push({ ...resumo, sala, cru: s.amostras.length % 15 === 0 ? cru : undefined });
     if (s.amostras.length > GUARDA) s.amostras.shift();
@@ -274,6 +281,13 @@ export class DiagJogo {
     const s = this.sessao;
     const { fpsFinal: fps, motivo, imagemBaixa } = r;
     if (fps == null) return;
+    // turbo com a imagem fluindo, mas demorando no caminho (motivo 'wifi'): a dica sai uma vez por sessão
+    s.lentas = motivo === 'wifi' ? (s.lentas || 0) + 1 : 0;
+    if (s.lentas >= SEGUIDAS && !s.avisouWifi) {
+      s.avisouWifi = true;
+      this.evento('aviso', { motivo, viagemMs: r.turbo?.viagemMs ?? null });
+      this.toast(`Modo turbo: ${MOTIVOS.wifi}`, 'info', 12000);
+    }
     if (fps >= BOM && !imagemBaixa) {
       s.ruins = 0;
       return;

@@ -2635,6 +2635,7 @@ const MOTIVO_TURBO = {
 const turboAvisado = new Set(); // motivos já avisados nesta página (o turbo vem ligado de fábrica)
 const turboRecebe = new TurboRecebe({
   abrir: (id) => rtc?.abrirTurbo(id),
+  onEvento: (texto, dados) => diagJogo.evento(texto, dados),
   onFalhou: (motivo) => {
     diagJogo.evento('modo turbo falhou: vídeo normal de volta', { motivo });
     if (turboAvisado.has(motivo)) return;
@@ -2689,7 +2690,9 @@ function mostrarSelo(r = null) {
   const atraso = r.atrasoMs != null ? `${Math.round(r.atrasoMs)} ms` : '–';
   const mbps = r.kbps != null ? (r.kbps / 1000).toFixed(1) : '–';
   const linhas = r.altura ? `${r.altura}p` : '';
-  el.innerHTML = (turboRecebe.ligado ? '<b>turbo</b> · ' : '') + `<span class="${r.fpsFinal != null && r.fpsFinal < 50 ? 'ruim' : ''}">${qps} qps</span> · ${linhas} · ~${atraso} · ${mbps} Mbps`
+  // turbo: da captura lá até desenhado aqui, medido quadro a quadro (turbo.js, pontaMs)
+  const imagem = r.turbo?.pontaMs != null ? ` (imagem ${Math.round(r.turbo.pontaMs)} ms)` : '';
+  el.innerHTML = (turboRecebe.ligado ? '<b>turbo</b> · ' : '') + `<span class="${r.fpsFinal != null && r.fpsFinal < 50 ? 'ruim' : ''}">${qps} qps</span> · ${linhas} · ~${atraso}${imagem} · ${mbps} Mbps`
     + (r.motivo ? ` · <span class="ruim">${r.motivo}</span>` : '');
 }
 
