@@ -11,6 +11,7 @@ import { Player } from './player.js';
 import { RTC, presetDe, codecsTestados } from './rtc.js';
 import { MediaSync, PROVIDERS, preloadYouTube } from './media.js';
 import { ParkourRun, formatTime, CHECKPOINT_COUNT } from './parkour.js';
+import { CHECKPOINTS_ESCALADA } from './catedral-dados.js';
 import { Combat } from './combat.js';
 import { RING, COMBAT, ringCorners } from './arena.js';
 import { Corrida, PISTA, largada, formatarVolta, projetar, pontoEm } from './pista.js';
@@ -5234,6 +5235,8 @@ $('#chat-sugestoes').addEventListener('click', (e) => {
 const run = new ParkourRun({
   onReady: () => {
     world.resetCheckpoints();
+    // um tracinho por checkpoint do percurso (o do cinema ou a escalada da catedral)
+    $('#pk-cps').innerHTML = '<i></i>'.repeat(run.percurso === 'escalada' ? CHECKPOINTS_ESCALADA : CHECKPOINT_COUNT);
     showParkourHud('ready', 'Pule para fora da largada para começar!');
     setPkTime(0);
     setPkCps(0);
@@ -5253,9 +5256,12 @@ const run = new ParkourRun({
   },
   onFinish: (t) => {
     sfx.finish();
-    socket.emit('parkour-finish', t);
+    // o placar do servidor é o do parkour do cinema; a escalada fica só com o tempo na tela
+    const escalada = run.percurso === 'escalada';
+    if (!escalada) socket.emit('parkour-finish', t);
     setPkTime(t);
-    showParkourHud('done', 'Chegou! Aproveite a vista do camarote 😎');
+    showParkourHud('done', escalada ? 'No topo da catedral! 🔔 O alçapão DESCER leva de volta' : 'Chegou! Aproveite a vista do camarote 😎');
+    if (escalada) toast(`Você escalou a catedral em ${formatTime(t)}!`, 'info', 5000);
     localAvatar.emote('party');
     socket.emit('emote', 'party');
     clearTimeout(pkHideTimer);
@@ -5304,7 +5310,7 @@ function goToStart() {
     toast('O parkour está desligado nesta sala.', 'info', 2600);
     return;
   }
-  const start = world.colliders.find((c) => c.data.type === 'start');
+  const start = world.colliders.find((c) => c.data.type === 'start' && !c.data.percurso);
   teleportToCollider(start, Math.PI);
 }
 

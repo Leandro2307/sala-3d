@@ -8,8 +8,9 @@
 import * as THREE from 'three';
 import { gunzipSync } from 'three/addons/libs/fflate.module.js';
 import { lerCatedral, montarCatedral, MAT } from './catedral-malha.js';
-import { CATEDRAL } from './catedral-dados.js';
-import { Collider } from './world.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { CATEDRAL, ESCALADA, DESCER } from './catedral-dados.js';
+import { Collider, textSprite } from './world.js';
 
 const TEX_BLOCOS = 4; // cada textura cobre 4 x 4 blocos
 const PX = 64; // pixels por bloco
@@ -346,5 +347,186 @@ export function construirCatedral(world) {
     return null;
   }
 
+  construirEscalada(world, grupo);
   return { grupo, aproximar, raioCamera, fisica };
 }
+
+// ------------------------------------------------------------------ a escalada
+// As peças do parkour (catedral-dados.js) no grupo da catedral, com as texturas dela. As colisões são
+// poucas: entram direto em world.colliders, com data.percurso = 'escalada' (ver ParkourRun).
+const TIPO_COLISAO = { L: 'start', C: 'checkpoint', F: 'finish' };
+
+// caixa com a textura na escala certa (uma volta da textura a cada TEX_BLOCOS metros)
+function caixa(w, h, d, x, y, z) {
+  const g = new THREE.BoxGeometry(w, h, d);
+  const uv = g.attributes.uv;
+  // faces: +x, -x, +y, -y, +z, -z (4 vértices cada)
+  const esc = [[d, h], [d, h], [w, d], [w, d], [w, h], [w, h]];
+  for (let f = 0; f < 6; f++) {
+    for (let i = 0; i < 4; i++) {
+      const k = f * 4 + i;
+      uv.setXY(k, (uv.getX(k) * esc[f][0]) / TEX_BLOCOS, (uv.getY(k) * esc[f][1]) / TEX_BLOCOS);
+    }
+  }
+  return g.translate(x, y, z);
+}
+
+function materialLiso(mat, extra = {}) {
+  return new THREE.MeshStandardMaterial({ map: tela(DESENHOS[mat], 900 + mat * 7), roughness: 0.85, ...extra });
+}
+
+// a placa de madeira da largada
+function texturaPlaca() {
+  const c = document.createElement('canvas');
+  c.width = 512;
+  c.height = 256;
+  const ctx = c.getContext('2d');
+  DESENHOS[MAT.madeira](ctx, 512, sorteio(5));
+  ctx.fillStyle = 'rgba(20,12,6,0.45)';
+  ctx.fillRect(16, 16, 480, 224);
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#f5e6c8';
+  ctx.font = "800 46px 'Plus Jakarta Sans', system-ui, sans-serif";
+  ctx.fillText('ESCALADA', 256, 92);
+  ctx.font = "700 30px 'Plus Jakarta Sans', system-ui, sans-serif";
+  ctx.fillText('da catedral · 102 m', 256, 140);
+  ctx.font = "600 24px 'Plus Jakarta Sans', system-ui, sans-serif";
+  ctx.fillStyle = '#e9d5b0';
+  ctx.fillText('Suba na pedra e pule para começar', 256, 196);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+function construirEscalada(world, grupo) {
+  const C = CATEDRAL;
+  const lotes = { madeira: [], pedra: [], marmore: [], ferro: [] };
+  const fogos = [];
+  let nCp = 0;
+  for (const [tipo, x, y, z, w, d] of ESCALADA) {
+    const L = lotes;
+    if (tipo === 'A') {
+      // andaime: tábuas, duas travessas e quatro escoras descendo até o andar de baixo
+      L.madeira.push(caixa(w, 0.22, d, x, y - 0.11, z));
+      for (const s of [-1, 1]) L.madeira.push(caixa(w, 0.18, 0.18, x, y - 0.32, z + s * (d / 2 - 0.25)));
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) L.madeira.push(caixa(0.16, 1.5, 0.16, x + sx * (w / 2 - 0.15), y - 1.0, z + sz * (d / 2 - 0.15)));
+    } else if (tipo === 'M') {
+      // mísula: um bloco de cantaria com o apoio afinando embaixo
+      L.pedra.push(caixa(w, 0.45, d, x, y - 0.225, z));
+      L.pedra.push(caixa(w * 0.7, 0.35, d * 0.7, x, y - 0.62, z));
+      L.pedra.push(caixa(w * 0.4, 0.35, d * 0.4, x, y - 0.97, z));
+    } else if (tipo === 'V') {
+      // viga: tábuas grossas com moldura de ferro e uma mão-francesa embaixo
+      L.madeira.push(caixa(w, 0.24, d, x, y - 0.12, z));
+      for (const s of [-1, 1]) {
+        L.ferro.push(caixa(w + 0.06, 0.08, 0.08, x, y - 0.2, z + s * (d / 2)));
+        L.ferro.push(caixa(0.08, 0.08, d + 0.06, x + s * (w / 2), y - 0.2, z));
+      }
+      L.ferro.push(caixa(0.14, 0.9, 0.14, x, y - 0.69, z));
+    } else {
+      // checkpoint, largada e chegada: laje de mármore sobre uma base de cantaria
+      L.marmore.push(caixa(w, 0.3, d, x, y - 0.15, z));
+      if (tipo === 'L') L.pedra.push(caixa(w - 0.3, 0.1, d - 0.3, x, y - 0.35, z));
+      else L.pedra.push(caixa(w - 0.3, 0.5, d - 0.3, x, y - 0.55, z));
+      if (tipo === 'C') {
+        // braseiro de ferro num canto, aceso
+        const bx = x - w / 2 + 0.45, bz = z - d / 2 + 0.45;
+        L.ferro.push(caixa(0.12, 0.7, 0.12, bx, y + 0.35, bz));
+        L.ferro.push(caixa(0.5, 0.18, 0.5, bx, y + 0.75, bz));
+        fogos.push([bx, y + 0.95, bz]);
+      }
+    }
+    // colisão
+    const data = { type: TIPO_COLISAO[tipo] || 'platform', percurso: 'escalada' };
+    if (tipo === 'C') {
+      nCp++;
+      Object.assign(data, { id: `esc-cp${nCp}`, label: `CHECKPOINT ${nCp}` });
+    }
+    const h = tipo === 'L' ? 0.4 : 0.5;
+    world.addBox({ min: [C.x0 + x - w / 2, y - h, C.z0 + z - d / 2], max: [C.x0 + x + w / 2, y, C.z0 + z + d / 2], data });
+    // letreiros (somem quando a câmera chega perto, como os do parkour do cinema)
+    const texto = tipo === 'C' ? data.label : tipo === 'F' ? 'TOPO · 102 m' : null;
+    if (texto) {
+      const rot = textSprite(texto, { size: 0.8, accent: tipo === 'F' ? '#fbbf24' : '#e9d5ff' });
+      rot.position.set(x, y + (tipo === 'F' ? 5.4 : 2.6), z);
+      grupo.add(rot);
+      world.fadeLabels.push(rot);
+      if (tipo === 'C') world.checkpointLabels.set(data.id, { label: rot, text: texto });
+    }
+  }
+
+  // a placa da largada: dois postes e a tábua pintada, virada para quem chega pela fachada (sul)
+  const [, lx, ly, lz] = ESCALADA[0];
+  lotes.madeira.push(caixa(0.18, 2.6, 0.18, lx - 1.3, ly + 1.3, lz - 1.6), caixa(0.18, 2.6, 0.18, lx + 1.3, ly + 1.3, lz - 1.6));
+  const placaMat = new THREE.MeshStandardMaterial({ map: texturaPlaca(), roughness: 0.8, side: THREE.DoubleSide });
+  const placa = new THREE.Mesh(new THREE.PlaneGeometry(2.8, 1.4), placaMat);
+  placa.position.set(lx, ly + 1.9, lz - 1.6);
+  placa.rotation.y = Math.PI;
+  grupo.add(placa);
+
+  // a chegada: o sino de bronze num pórtico de madeira
+  const [, fx, fy, fz, fw] = ESCALADA[ESCALADA.length - 1];
+  lotes.madeira.push(
+    caixa(0.22, 3.8, 0.22, fx - fw / 2 + 0.3, fy + 1.9, fz),
+    caixa(0.22, 3.8, 0.22, fx + fw / 2 - 0.3, fy + 1.9, fz),
+    caixa(fw - 0.2, 0.26, 0.3, fx, fy + 3.85, fz),
+  );
+  const perfil = [[0, -0.05], [0.62, 0], [0.6, 0.08], [0.5, 0.3], [0.42, 0.62], [0.36, 0.86], [0.3, 0.95], [0.12, 1.0], [0, 1.0]]
+    .map(([r, h]) => new THREE.Vector2(r, h));
+  const bronze = new THREE.MeshStandardMaterial({ color: 0xb07a3a, metalness: 0.85, roughness: 0.35, side: THREE.DoubleSide });
+  const sino = new THREE.Group();
+  const corpo = new THREE.Mesh(new THREE.LatheGeometry(perfil, 24), bronze);
+  corpo.position.y = -1.05;
+  corpo.castShadow = true;
+  const badalo = new THREE.Mesh(new THREE.SphereGeometry(0.12, 12, 8), bronze);
+  badalo.position.y = -0.95;
+  sino.add(corpo, badalo);
+  sino.position.set(fx, fy + 3.72, fz);
+  grupo.add(sino);
+
+  // descer: um alçapão de madeira ao lado do sino que leva de volta à largada
+  const [dx, dy, dz, dw, dd] = DESCER;
+  lotes.madeira.push(caixa(dw, 0.16, dd, dx, dy - 0.08, dz));
+  lotes.ferro.push(caixa(dw * 0.8, 0.04, 0.1, dx, dy + 0.01, dz - dd * 0.25), caixa(dw * 0.8, 0.04, 0.1, dx, dy + 0.01, dz + dd * 0.25));
+  world.addBox({
+    min: [C.x0 + dx - dw / 2, dy - 0.3, C.z0 + dz - dd / 2],
+    max: [C.x0 + dx + dw / 2, dy, C.z0 + dz + dd / 2],
+    data: { type: 'teleport', percurso: 'escalada', target: [C.x0 + lx, 0, C.z0 + lz - 4] },
+  });
+  const rotDescer = textSprite('DESCER', { size: 0.6, accent: '#e9d5ff' });
+  rotDescer.position.set(dx, dy + 1.6, dz);
+  grupo.add(rotDescer);
+  world.fadeLabels.push(rotDescer);
+
+  // tudo de um material numa malha só
+  const mats = {
+    madeira: materialLiso(MAT.madeira),
+    pedra: materialLiso(MAT.cantaria),
+    marmore: materialLiso(MAT.marmore, { roughness: 0.55 }),
+    ferro: materialLiso(MAT.ferro, { metalness: 0.5, roughness: 0.5 }),
+  };
+  for (const [k, geos] of Object.entries(lotes)) {
+    if (!geos.length) continue;
+    const m = new THREE.Mesh(mergeGeometries(geos), mats[k]);
+    for (const g of geos) g.dispose();
+    m.castShadow = true;
+    m.receiveShadow = true;
+    grupo.add(m);
+  }
+
+  // o fogo dos braseiros: chamas que tremulam
+  const chamaMat = new THREE.MeshBasicMaterial({ color: 0xffa53a, toneMapped: false, transparent: true, opacity: 0.92 });
+  const chamas = fogos.map(([x, y, z]) => {
+    const c = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.55, 7), chamaMat);
+    c.position.set(x, y, z);
+    grupo.add(c);
+    return c;
+  });
+  world.decorAnimated.push((t) => {
+    chamas.forEach((c, i) => c.scale.set(1, 1 + 0.18 * Math.sin(t * 11 + i * 2.3) + 0.1 * Math.sin(t * 17 + i), 1));
+    // o sino balança devagar com o vento lá em cima
+    sino.rotation.z = Math.sin(t * 1.3) * 0.08;
+    sino.rotation.x = Math.sin(t * 0.9 + 1) * 0.04;
+  });
+}
+

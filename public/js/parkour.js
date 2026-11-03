@@ -98,7 +98,9 @@ export function formatTime(seconds) {
   return `${m}:${s.toFixed(2).padStart(5, '0')}`;
 }
 
-// Estado de uma corrida: largada → checkpoints → chegada.
+// Estado de uma corrida: largada → checkpoints → chegada. Vale para os dois percursos: o do cinema e
+// a escalada da catedral (catedral.js), cujas peças têm data.percurso = 'escalada'. A largada pisada
+// escolhe o percurso; checkpoint e chegada do outro não contam.
 export class ParkourRun {
   constructor(callbacks) {
     this.cb = callbacks;
@@ -111,6 +113,7 @@ export class ParkourRun {
     this.checkpoint = null;
     this.reached = new Set();
     this.quit = false; // desistiu: não volta a valer até pisar na largada de novo
+    this.percurso = null; // 'cinema' ou 'escalada'
   }
 
   // chamado todo frame com a superfície em que o jogador está pisando (ou null no ar)
@@ -122,6 +125,7 @@ export class ParkourRun {
       if (this.state !== 'ready') {
         this.reset();
         this.state = 'ready';
+        this.percurso = ground.data.percurso || 'cinema';
         this.checkpoint = ground;
         this.cb.onReady?.();
       }
@@ -145,6 +149,8 @@ export class ParkourRun {
     }
 
     if (this.state !== 'running' || !ground) return;
+    // peça do outro percurso: só o chão conta
+    if (type !== 'floor' && (ground.data.percurso || 'cinema') !== this.percurso) return;
 
     if (type === 'checkpoint' && !this.reached.has(ground.data.id)) {
       this.reached.add(ground.data.id);

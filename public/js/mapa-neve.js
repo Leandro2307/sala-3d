@@ -65,7 +65,7 @@ export const NEVE = {
       },
     },
     areas: {
-      catedral: { nome: 'Catedral', sub: 'Ponto de encontro, com o interior aberto', cor: '#e9d5ff', ir: { pos: [288, 0, 729], yaw: Math.PI } },
+      catedral: { nome: 'Catedral', sub: 'Ponto de encontro · escalada de 102 m pelo lado oeste', cor: '#e9d5ff', ir: { pos: [288, 0, 729], yaw: Math.PI } },
       predio: { nome: 'Prédio', sub: 'Cinema, telão, parkour e ringue', cor: '#e2e8f0', ir: { pos: [0, 0, -2], yaw: 0 } },
       praca: { nome: 'Praça do Pinheirão', sub: 'O ponto de encontro da vila', cor: '#fde68a', ir: { pos: [100, 0, 14], yaw: Math.PI } },
       salao: { nome: 'Salão de jogos', sub: 'Pingue-pongue, sinuca, poker e cartas', cor: '#4ade80', ir: { pos: [126, 0, 28], yaw: -Math.PI / 2 } },

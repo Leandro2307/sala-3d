@@ -42,6 +42,8 @@ export const ROOM = { minX: -52, maxX: 480, minZ: -40, maxZ: 860, height: 60 };
 // leste, virada para o autódromo.
 export const SALA = { minX: ROOM.minX, maxX: 60, minZ: ROOM.minZ, maxZ: 60, height: ROOM.height, porta: { z0: 14, z1: 46, altura: 18 } };
 export const SPAWN = { pos: [0, 0, -2], yaw: 0 };
+// o teto do mapa (a cerca sobe até ele): acima da catedral, que tem 117 m
+export const TETO_MUNDO = 130;
 
 const FONT = "'Plus Jakarta Sans', system-ui, sans-serif";
 const _tmp = new THREE.Vector3();
@@ -805,6 +807,8 @@ export class World {
         cinema.objetos.push(...this.luzesCinema);
         // o chão de física e a cerca da área jogável (começam em y = -4) são do mundo todo: ficam sempre
         cinema.colisoes = cinema.colisoes.filter((c) => c.min.y >= 0);
+        // o teto do mapa todo, também do mundo todo (quem voa não sai por cima da cerca)
+        this.addBox({ min: [ROOM.minX, TETO_MUNDO, ROOM.minZ], max: [ROOM.maxX, TETO_MUNDO + 4, ROOM.maxZ] });
       },
       () => {
         this.area('plateia', () => this.buildAudience());
@@ -1403,10 +1407,10 @@ export class World {
     // os limites da área jogável (cerca lá fora) continuam sólidos
     const t = 4;
     const R = ROOM;
-    this.addBox({ min: [R.minX - t, -4, R.minZ - t], max: [R.maxX + t, height + 4, R.minZ] });
-    this.addBox({ min: [R.minX - t, -4, R.maxZ], max: [R.maxX + t, height + 4, R.maxZ + t] });
-    this.addBox({ min: [R.minX - t, -4, R.minZ - t], max: [R.minX, height + 4, R.maxZ + t] });
-    this.addBox({ min: [R.maxX, -4, R.minZ - t], max: [R.maxX + t, height + 4, R.maxZ + t] });
+    this.addBox({ min: [R.minX - t, -4, R.minZ - t], max: [R.maxX + t, TETO_MUNDO + 4, R.minZ] });
+    this.addBox({ min: [R.minX - t, -4, R.maxZ], max: [R.maxX + t, TETO_MUNDO + 4, R.maxZ + t] });
+    this.addBox({ min: [R.minX - t, -4, R.minZ - t], max: [R.minX, TETO_MUNDO + 4, R.maxZ + t] });
+    this.addBox({ min: [R.maxX, -4, R.minZ - t], max: [R.maxX + t, TETO_MUNDO + 4, R.maxZ + t] });
 
     // teto (e a laje por cima, para quem olha de fora)
     const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(W, D), new THREE.MeshStandardMaterial({ color: 0x0e1016, roughness: 1 }));
@@ -1416,7 +1420,8 @@ export class World {
     const laje = new THREE.Mesh(new THREE.BoxGeometry(W + 2 * esp, 0.6, D + 2 * esp), fachadaMat);
     laje.position.set(cx, height + 0.35, cz);
     this.fora.add(laje);
-    this.addBox({ min: [R.minX, height, R.minZ], max: [R.maxX, height + 4, R.maxZ] });
+    // o teto do cinema (só em cima da sala: lá fora a catedral passa dos 100 m)
+    this.addBox({ min: [S.minX, height, S.minZ], max: [S.maxX, height + 4, S.maxZ] });
 
     // faixas de luz no teto e rodapé neon
     const stripMat = new THREE.MeshBasicMaterial({ color: 0xdfe7ff, toneMapped: false });
