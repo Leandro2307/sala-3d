@@ -25,7 +25,7 @@ const curva = (v) => {
 export class ControleFisico {
   constructor({ controle, pad, toast, onAtivo }) {
     this.controle = controle;
-    this.pad = pad; // controle virtual: no layout PS5 o controle vai inteiro, sem virar teclado
+    this.virtual = pad; // controle virtual (não pode ser this.pad: apagava o método pad(), que lê o controle): no layout PS5 o controle vai inteiro, sem virar teclado
     this.toast = toast || (() => {});
     this.onAtivo = onAtivo; // (true|false): o controle está sendo usado (o celular esconde os botões da tela)
     this.key = null;
@@ -81,7 +81,12 @@ export class ControleFisico {
     const passo = (agora) => {
       this.raf = 0;
       if (!this.key) return;
-      this.ler(Math.min(0.05, (agora - this.t) / 1000));
+      // um erro numa leitura não pode parar o controle de vez: o próximo quadro lê de novo
+      try {
+        this.ler(Math.min(0.05, (agora - this.t) / 1000));
+      } catch (err) {
+        console.warn("[controle] leitura falhou", err);
+      }
       this.t = agora;
       this.raf = requestAnimationFrame(passo);
     };
@@ -93,7 +98,7 @@ export class ControleFisico {
     if (!g) return;
     const L = LAYOUTS[this.layoutId] || LAYOUTS.generico;
     if (L.virtual) {
-      this.pad?.fisico(g);
+      this.virtual?.fisico(g);
       if (!this.usado && g.buttons.some((b) => b.pressed)) {
         this.usado = true;
         this.onAtivo?.(true);
@@ -188,7 +193,7 @@ export class ControleFisico {
     this.doStick.clear();
     this.antes = [];
     this.resto = { x: 0, y: 0 };
-    this.pad?.soltar('fisico');
+    this.virtual?.soltar('fisico');
     if (this.usado) {
       this.usado = false;
       this.onAtivo?.(false);
