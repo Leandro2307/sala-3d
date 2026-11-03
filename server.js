@@ -7,7 +7,7 @@ const os = require('os');
 const path = require('path');
 const { Server } = require('socket.io');
 const compression = require('compression');
-const { paginaInicial, moduloVersionado, PREFIXO_THREE, THREE_DIR, PREFIXO_SIO, SIO_DIR } = require('./pagina.js');
+const { paginaInicial, moduloVersionado, listaOffline, servidorDeBolso, PREFIXO_THREE, THREE_DIR, PREFIXO_SIO, SIO_DIR } = require('./pagina.js');
 const { execFile } = require('child_process');
 const crypto = require('crypto');
 const banco = require('./banco');
@@ -271,6 +271,23 @@ app.get('/js/:arquivo', (req, res, next) => {
   if (!m) return next();
   res.set('Cache-Control', req.query.v === m.hash ? 'public, max-age=31536000, immutable' : 'no-cache');
   res.type('application/javascript').send(m.codigo);
+});
+// Modo offline (public/js/offline.js): a lista do que baixar e os módulos dos jogos de cartas do
+// servidor, que no offline rodam dentro do navegador (o "servidor de bolso", ver pagina.js)
+app.get('/offline-lista', (_req, res) => {
+  res.set('Cache-Control', 'no-cache');
+  res.json(listaOffline(MAPAS_SALA));
+});
+app.get('/offline/:nome.js', (req, res, next) => {
+  let codigo;
+  try {
+    codigo = servidorDeBolso(req.params.nome);
+  } catch (err) {
+    return next(err);
+  }
+  if (!codigo) return next();
+  res.set('Cache-Control', 'no-cache');
+  res.type('application/javascript').send(codigo);
 });
 app.use(express.static(path.join(__dirname, 'public'), {
   // modelos 3D e miniaturas quase nunca mudam: um dia sem nem perguntar ao servidor

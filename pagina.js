@@ -171,4 +171,76 @@ function paginaInicial() {
   return montar();
 }
 
-module.exports = { paginaInicial, moduloVersionado, PREFIXO_THREE, THREE_DIR, PREFIXO_SIO, SIO_DIR };
+// ------------------------------------------------------------------ modo offline
+// O pacote do modo offline (public/js/offline-pacote.js): tudo o que a página e os jogos de cartas
+// pedem, para o service worker entregar sem internet. Os nossos módulos vão nos dois endereços (com a
+// impressão, que é o que a página pede, e sem ela, que é o que os workers e o servidor de bolso
+// pedem); do three.js vai o que os módulos importam dele.
+const DIRS_OFFLINE = ['models', 'img', 'icons', 'audio/cartas'];
+const SERVIDOR_DE_BOLSO = ['cartas-servidor', 'poker-servidor', 'mapa-servidor']; // ver /offline/ no server.js
+// imports do three.js que o grafo não segue (import('three/addons/...') dinâmico)
+const THREE_DINAMICO = /import\(\s*['"](three(?:\/addons\/[^'"]+)?)['"]\s*\)/g;
+
+function arquivosDe(dir) {
+  const saida = [];
+  const andar = (d) => {
+    for (const f of fs.readdirSync(path.join(PUBLICO, d), { withFileTypes: true })) {
+      const rel = `${d}/${f.name}`;
+      if (f.isDirectory()) andar(rel);
+      else if (!/\.(md|txt)$/i.test(f.name)) saida.push(`/${rel}`);
+    }
+  };
+  try { andar(dir); } catch { /* pasta que não existe neste deploy */ }
+  return saida;
+}
+
+let offlinePronta = null;
+function listaOffline(mapas) {
+  if (PRODUCAO && offlinePronta) return offlinePronta;
+  const comVersao = (u) => {
+    const m = moduloVersionado(u);
+    return m ? `${u}?v=${m.hash}` : u;
+  };
+  const nossos = fs.readdirSync(path.join(PUBLICO, 'js')).filter((f) => f.endsWith('.js')).map((f) => `/js/${f}`);
+  const todos = new Set();
+  for (const u of nossos) {
+    for (const g of grafo(u)) todos.add(g);
+    let codigo = '';
+    try { codigo = fs.readFileSync(arquivo(u), 'utf8'); } catch { /* sumiu */ }
+    for (const m of codigo.matchAll(THREE_DINAMICO)) for (const g of grafo(resolver(m[1], u))) todos.add(g);
+  }
+  const urls = new Set(['/', '/style.css', '/manifest.webmanifest', `${PREFIXO_SIO}/socket.io.min.js`]);
+  for (const u of todos) {
+    urls.add(u);
+    if (u.startsWith('/js/')) urls.add(comVersao(u));
+  }
+  // o servidor de bolso carrega as mesas de cada mapa (mapa-servidor.js) com ?mapa= no endereço
+  for (const m of mapas) urls.add(`/js/parque-dados.js?mapa=${m}`);
+  for (const n of SERVIDOR_DE_BOLSO) urls.add(`/offline/${n}.js`);
+  for (const d of DIRS_OFFLINE) for (const u of arquivosDe(d)) urls.add(u);
+  const lista = [...urls];
+  // a versão do pacote: mudou a página (e com ela as impressões dos módulos) ou a lista, baixa de novo
+  const h = crypto.createHash('sha1').update(paginaInicial()).update(lista.join('\n'));
+  for (const n of SERVIDOR_DE_BOLSO) h.update(servidorDeBolso(n));
+  offlinePronta = { versao: h.digest('hex').slice(0, 12), urls: lista };
+  return offlinePronta;
+}
+
+// Um módulo do servidor (CommonJS) como módulo ES, para rodar no navegador no modo offline: os
+// require('./x.js') viram import de /offline/x.js, e o ./public/js/ dos import() vira /js/.
+function servidorDeBolso(nome) {
+  if (!SERVIDOR_DE_BOLSO.includes(nome)) return null;
+  let codigo = fs.readFileSync(path.join(__dirname, `${nome}.js`), 'utf8');
+  const deps = [];
+  const variavel = (dep) => `__${dep.replace(/-/g, '_')}`;
+  codigo = codigo.replace(/require\((['"])\.\/([\w-]+)\.js\1\)/g, (_, _a, dep) => {
+    if (!SERVIDOR_DE_BOLSO.includes(dep)) throw new Error(`servidor de bolso: ${nome} pede ${dep}`);
+    if (!deps.includes(dep)) deps.push(dep);
+    return variavel(dep);
+  });
+  codigo = codigo.replace(/(['"`])\.\/public\/js\//g, '$1/js/');
+  const topo = deps.map((d) => `import ${variavel(d)} from '/offline/${d}.js';`).join('\n');
+  return `${topo}\nconst module = { exports: {} };\n${codigo}\nexport default module.exports;\n`;
+}
+
+module.exports = { paginaInicial, moduloVersionado, listaOffline, servidorDeBolso, PREFIXO_THREE, THREE_DIR, PREFIXO_SIO, SIO_DIR };

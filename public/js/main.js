@@ -943,7 +943,19 @@ const redesenharSaguao = cartaoDoSaguao(aoVivo, {
   ativo: () => !state.joined, // dentro da sala o saguão fica escondido
 });
 roomInput.addEventListener('input', () => redesenharSaguao());
-if (params.get('entrar') === '1') {
+// Modo offline (offline.js): o jogo de cartas escolhido no saguão. Daqui em diante o clique num
+// jogo do cartão "Jogar sem internet" (entrada.js) vem para cá.
+let offlineJogo = null;
+function jogarOffline(id) {
+  if (state.joined || offlineJogo) return;
+  offlineJogo = id;
+  if (!nameInput.value.trim()) nameInput.value = 'Jogador';
+  join();
+}
+if (entrada) entrada.aoJogarOffline = jogarOffline;
+if (pedidoDaEntrada.offline) {
+  setTimeout(() => jogarOffline(pedidoDaEntrada.offline), 0);
+} else if (params.get('entrar') === '1') {
   const url = new URL(window.location.href);
   url.searchParams.delete('entrar');
   window.history.replaceState(null, '', url);
@@ -982,8 +994,9 @@ async function join() {
   settings.name = name;
   settings.mic = $('#in-mic').checked;
   saveSettings();
-  state.micOn = settings.mic;
-  state.roomRequested = roomInput.value.trim() || 'principal';
+  // offline não há com quem falar: nem pede o microfone
+  state.micOn = offlineJogo ? false : settings.mic;
+  state.roomRequested = offlineJogo ? 'offline' : roomInput.value.trim() || 'principal';
 
   const btn = $('#btn-join');
   btn.disabled = true;
@@ -991,7 +1004,7 @@ async function join() {
   audioContext();
 
   const sala = idDaSala(state.roomRequested);
-  const acesso = await liberarSala(sala, $('#in-senha-sala').value);
+  const acesso = offlineJogo ? {} : await liberarSala(sala, $('#in-senha-sala').value);
   if (!acesso) {
     btn.disabled = false;
     btn.textContent = 'Entrar na sala';
@@ -1006,17 +1019,32 @@ async function join() {
   }
 
   let config = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
-  try { config = await (await fetch('/config')).json(); } catch { /* usa o padrão */ }
+  if (!offlineJogo) try { config = await (await fetch('/config')).json(); } catch { /* usa o padrão */ }
 
   // No celular (redes móveis/operadoras) polling primeiro; no computador, websocket primeiro. Se
   // o primeiro não abrir (proxy ou antivírus que barra websocket), tryAllTransports tenta o outro:
   // sem ele o socket.io insiste só no primeiro e a pessoa nunca entra.
-  socket = window.io({
-    transports: isTouch ? ['polling', 'websocket'] : ['websocket', 'polling'],
-    tryAllTransports: true,
-    reconnectionDelay: 1500,
-    reconnectionDelayMax: 10000,
-  });
+  // Offline: o socket de mentira, ligado ao servidor de bolso dos jogos de cartas (offline.js).
+  if (offlineJogo) {
+    try {
+      const { criarSocketOffline } = await import('./offline.js');
+      socket = await criarSocketOffline({ mapa: MAPA_DA_PAGINA, nome: name, cor: settings.color });
+    } catch (err) {
+      console.error(err);
+      offlineJogo = null;
+      btn.disabled = false;
+      btn.textContent = 'Entrar na sala';
+      toast('Não deu para abrir o modo offline. Baixe os jogos de novo com internet.', 'error', 8000);
+      return;
+    }
+  } else {
+    socket = window.io({
+      transports: isTouch ? ['polling', 'websocket'] : ['websocket', 'polling'],
+      tryAllTransports: true,
+      reconnectionDelay: 1500,
+      reconnectionDelayMax: 10000,
+    });
+  }
   combat.socket = socket;
   futebol.ligar(socket);
   quadras.ligar(socket);
@@ -1088,7 +1116,7 @@ async function join() {
   document.body.classList.add('na-sala'); // celular em pé: o aviso de girar (style.css)
   $('#lobby').hidden = true;
   // primeira visita: o tutorial da interface vem antes do aviso de boas-vindas
-  if (!tutorialHud.precisa()) iniciarGuiaBoasVindas();
+  if (!offlineJogo && !tutorialHud.precisa()) iniciarGuiaBoasVindas();
   $('#hud').hidden = false;
   $('#bar').hidden = false;
   avisarExtensaoVelha();
@@ -1144,8 +1172,31 @@ async function join() {
     poderesMudaram();
     if (!temTelaCheia) $('#tb-full').hidden = true; // iOS não tem tela cheia de página
   }
+  if (offlineJogo) return entrarNoJogoOffline(offlineJogo);
   // com a barra e os botões de toque já no lugar (e um respiro para a sala aparecer)
   if (tutorialHud.precisa()) setTimeout(() => tutorialHud.iniciar(iniciarGuiaBoasVindas), 900);
+}
+
+// Offline: leva à mesa do jogo escolhido, senta e começa (os robôs completam a mesa)
+function entrarNoJogoOffline(id) {
+  document.body.classList.add('modo-offline');
+  toast('Modo offline: jogos de cartas contra os robôs. Voz, telas e o resto da sala voltam com a internet.', 'info', 7000);
+  const ehPoker = id === 'poker';
+  const l = ehPoker ? poker.lugar() : cartas.lugar(id);
+  player.teleport([l.pos[0], l.pos[1] ?? 0, l.pos[2]], l.yaw);
+  setTimeout(() => {
+    if (ehPoker) {
+      const M = poker.mesas[0];
+      if (!M || !focarCartas('poker')) return;
+      poker.sentar(M);
+      socket.emit('pk-comecar', { mesa: M.i });
+    } else {
+      const M = cartas.mesas.find((x) => x.m.jogo === id);
+      if (!M || !focarCartas()) return;
+      cartas.sentarNa(M);
+      socket.emit('ct-comecar', { mesa: M.i });
+    }
+  }, 400);
 }
 
 // Entra na sala e espera a resposta do servidor: os dados da sala, ou { erro: 'senha' }. Se a
@@ -1244,7 +1295,7 @@ function applyJoined(data) {
 
   const url = new URL(window.location.href);
   url.searchParams.set('sala', state.room);
-  window.history.replaceState(null, '', url);
+  if (!offlineJogo) window.history.replaceState(null, '', url);
   refreshScreens();
   renderPeople();
   updateRoomInfo();

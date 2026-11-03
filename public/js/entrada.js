@@ -14,6 +14,7 @@ import { AoVivo, cartaoDoSaguao } from './aovivo.js';
 import { hydrateIcons, icon } from './icons.js';
 import { isTouch, toggleFullscreen, isFullscreen, temTelaCheia } from './touch.js';
 import { photoFromFile } from './foto.js';
+import { versaoBaixada, listaDoServidor, baixarPacote } from './offline-pacote.js';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
@@ -241,6 +242,72 @@ ouvir($('#lobby-form'), 'submit', (e) => {
   progresso(Number(barra.dataset.f || 0));
 });
 
+// ---------------------------------------------------------------- modo offline
+// Os jogos de cartas sem internet (offline.js). Com o pacote no aparelho aparecem os botões dos
+// jogos; sem ele, o botão de baixar. Com internet e um pacote velho, atualiza sozinho por trás.
+// Estes ouvintes ficam depois do soltar(): o clique num jogo vai para o main.js (aoJogarOffline).
+let pedidoOffline = null;
+const caixaOffline = $('#offline');
+const textoOffline = (t) => { $('#offline-status').textContent = t; };
+function mostrarJogosOffline(sim) {
+  $('#offline-jogos').hidden = !sim;
+  $('#btn-offline-baixar').hidden = sim || !navigator.onLine;
+}
+async function baixarOffline(silencioso, lista) {
+  const carga = $('#offline-carga');
+  const barraO = $('#offline-barra');
+  if (!silencioso) {
+    carga.hidden = false;
+    carga.classList.remove('erro', 'ok');
+    $('#btn-offline-baixar').disabled = true;
+  }
+  try {
+    await baixarPacote((f) => {
+      barraO.style.transform = `scaleX(${f})`;
+      if (!silencioso) $('#offline-texto').textContent = `Baixando… ${Math.round(f * 100)}%`;
+    }, lista);
+    mostrarJogosOffline(true);
+    textoOffline('Pronto: funciona sem internet');
+    if (!silencioso) {
+      $('#offline-texto').textContent = 'Baixado. Os jogos de cartas abrem sem internet.';
+      carga.classList.add('ok');
+    }
+  } catch (err) {
+    if (silencioso) return;
+    carga.classList.add('erro');
+    $('#offline-texto').textContent = `Não deu para baixar: ${err.message}`;
+    $('#btn-offline-baixar').disabled = false;
+  }
+}
+async function prepararOffline() {
+  if (typeof caches === 'undefined' || !('serviceWorker' in navigator) || !window.isSecureContext) return;
+  const versao = await versaoBaixada();
+  if (!versao && !navigator.onLine) return;
+  caixaOffline.hidden = false;
+  caixaOffline.classList.toggle('sem-rede', !navigator.onLine);
+  mostrarJogosOffline(!!versao);
+  textoOffline(!navigator.onLine ? 'Sem internet: escolha um jogo' : versao ? 'Pronto: funciona sem internet' : 'Truco, Uno, 21, Cacheta e Poker contra robôs');
+  if (versao && navigator.onLine) {
+    const lista = await listaDoServidor();
+    if (lista && lista.versao !== versao) baixarOffline(true, lista);
+  }
+}
+$('#btn-offline-baixar').addEventListener('click', () => baixarOffline(false));
+$('#offline-jogos').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-offline]');
+  if (!b) return;
+  if (!nameInput.value.trim()) nameInput.value = 'Jogador';
+  salvar({ name: nameInput.value.trim() });
+  if (window.sala3dEntrada.aoJogarOffline) return window.sala3dEntrada.aoJogarOffline(b.dataset.offline);
+  // a sala ainda está carregando: entra no jogo assim que ela ficar pronta
+  pedidoOffline = b.dataset.offline;
+  querEntrar = true;
+  btn.disabled = true;
+  carga.classList.add('esperando');
+  progresso(Number(barra.dataset.f || 0));
+});
+prepararOffline();
+
 // Miniaturas dos personagens (~190 kB no total): logo depois do formulário, antes do mapa, para o
 // modal abrir com todas já na tela.
 function adiantarMiniaturas() {
@@ -311,7 +378,7 @@ window.sala3dEntrada = {
     progresso(0.97, 'Ligando a sala…');
     const entrar = querEntrar;
     querEntrar = false; // o botão agora é do join() do main.js
-    return { entrar };
+    return { entrar, offline: pedidoOffline };
   },
   // tudo pronto (fim do main.js): a barra some
   pronto() {

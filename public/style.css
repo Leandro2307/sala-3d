@@ -4133,3 +4133,15 @@ body.toque-jogo #jogo-selo { top: auto; bottom: max(8px, env(safe-area-inset-bot
 /* modo turbo (turbo.js): a imagem desenhada por cima do vídeo, na mesma caixa (o JS copia a posição) */
 #focus .turbo-tela { position: absolute; box-sizing: border-box; pointer-events: none; }
 #focus .turbo-tela[hidden] { display: none; }
+
+/* ------------------------------------------------------------------ modo offline (entrada) */
+.offline-card { margin-top: 14px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; display: grid; gap: 10px; }
+.offline-topo { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.offline-topo small { color: var(--muted); font-size: 12px; }
+.offline-card.sem-rede { border-color: var(--accent); }
+.offline-jogos { display: grid; grid-template-columns: repeat(auto-fit, minmax(72px, 1fr)); gap: 8px; }
+.offline-jogos button { min-height: 42px; border-radius: 10px; border: 1px solid var(--line-strong); background: rgba(255, 255, 255, 0.06); color: var(--text); font: inherit; font-weight: 700; cursor: pointer; }
+.offline-jogos button:hover { background: rgba(255, 255, 255, 0.12); }
+.offline-card .secondary.block { margin-top: 0; }
+@media (max-width: 640px) { #offline { order: 12; } }
+@media (max-height: 500px) and (orientation: landscape) { .lobby-card > #offline { grid-column: 1 / -1; } }
