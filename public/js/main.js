@@ -2451,6 +2451,9 @@ function receberVolta({ key, ev, de } = {}) {
   else if (ev.t === 'dialogo' && (ev.fechou || controle.mexeuEm(key))) avisoSite.receber(key, ev, `Na tela de ${de || 'alguém'}`);
   else if (ev.t === 'jogo-envio') {
     if (jogandoLa?.key === key) diagJogo.doOutroLado(ev);
+  } else if (ev.t === 'tremor') {
+    // o jogo do PS5 vibrou o controle: treme o celular (ou o controle ligado neste aparelho)
+    if (jogandoLa?.key === key) padVirtual.tremor(ev.g, ev.p);
   } else if (ev.t === 'cursor') {
     // o jogo mostrou o cursor (menu) ou escondeu: o mouse troca de jeito, se a pessoa deixou
     if (jogandoLa?.key !== key) return;
@@ -2529,6 +2532,25 @@ controle.onCursor = (sh, livre) => {
   cursorDoJogo.set(sh.key, livre);
   diagJogo.evento(livre ? 'o jogo mostrou o cursor (menu)' : 'o jogo escondeu o cursor', { key: sh.key });
   for (const id of quem.keys()) controle.emitir('controle-volta', { key: sh.key, para: id, ev: { t: 'cursor', livre } });
+};
+
+// O jogo do PS5 mandou o controle virtual tremer (ajudante 1.10+, extensão 1.17+): vai para quem
+// está jogando com ele, no máximo um a cada TREMOR_MS (o último sempre sai — senão o celular podia
+// ficar tremendo depois que o jogo parou).
+const TREMOR_MS = 40;
+let tremorVez = 0, tremorTimer = 0, tremorFila = null;
+controle.onTremor = ({ key, deId }, g, p) => {
+  if (!jogandoAqui.get(key)?.has(deId)) return;
+  tremorFila = { key, para: deId, ev: { t: 'tremor', g: Math.round(g * 100) / 100, p: Math.round(p * 100) / 100 } };
+  if (tremorTimer) return;
+  const sair = () => {
+    tremorTimer = 0;
+    tremorVez = performance.now();
+    controle.emitir('controle-volta', tremorFila);
+  };
+  const falta = tremorVez + TREMOR_MS - performance.now();
+  if (falta <= 0) sair();
+  else tremorTimer = setTimeout(sair, falta);
 };
 
 // ------------------------------------------------------------------ modo jogo

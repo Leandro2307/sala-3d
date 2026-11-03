@@ -3,28 +3,53 @@
 // ViGEmBus). O chiaki-ng — o Remote Play do PS5 no PC — vê esse controle como um dele e o PS5
 // recebe ✕ ○ □ △, analógicos e gatilhos analógicos, sem conversão nenhuma.
 //
-// Duas fontes alimentam o mesmo controle: o controle de toque (layout "PS5" do toque-jogo.js) e o
-// controle de videogame ligado no aparelho de quem joga (gamepad-jogo.js). Os botões somam e, em
-// cada analógico/gatilho, vale a fonte mais empurrada.
+// Três fontes alimentam o mesmo controle: o controle de toque (layout "PS5" do toque-jogo.js), o
+// giroscópio do celular (mirar virando o aparelho: vira o analógico direito) e o controle de
+// videogame ligado no aparelho de quem joga (gamepad-jogo.js). Os botões somam e, em cada
+// analógico/gatilho, vale a fonte mais empurrada.
 //
 // Vai o estado inteiro {t:'pad', b, lx, ly, rx, ry, lt, rt}, só quando muda e no máximo um a cada
 // ENVIO_MS (o último sempre sai). b: o bit i é o botão i do mapa padrão do navegador (0 ✕/A, 1 ○/B,
 // 2 □/X, 3 △/Y, 4 L1, 5 R1, 6 L2, 7 R2, 8 Create, 9 Options, 10 L3, 11 R3, 12-15 setas, 16 PS).
 // O "vivo" do modo jogo (controle.js) segura o estado no ajudante: sem notícia, ele solta tudo.
+//
+// Na volta, a vibração (tremor): o jogo manda o controle tremer, o ajudante 1.10+ fica sabendo e a
+// sala de quem compartilha repassa. Treme o controle ligado neste aparelho, se tiver um que vibra;
+// senão, o celular (navigator.vibrate: só Android — o Safari do iPhone não deixa site vibrar).
+
+import { opcoesJogo } from './jogo-opcoes.js';
 
 const ENVIO_MS = 12;
 const NEUTRO = { b: 0, lx: 0, ly: 0, rx: 0, ry: 0, lt: 0, rt: 0 };
 const EIXOS = ['lx', 'ly', 'rx', 'ry', 'lt', 'rt'];
+const FONTES = ['toque', 'giro', 'fisico'];
 const arred = (v) => Math.round(v * 1000) / 1000;
+const entre = (v) => Math.min(1, Math.max(0, Number(v) || 0));
+
+// Vibração: o celular só liga e desliga o motor, então a força vira pulsos — em cada PULSO_MS, o
+// motor fica ligado a parte da força. Cada ordem vale TREMOR_DURA ms e é renovada enquanto o jogo
+// manda tremer; sem notícia por TREMOR_MAX ms (a conexão caiu), para.
+const PULSO_MS = 60;
+const TREMOR_DURA = 1500;
+const TREMOR_RENOVA = 1200;
+const TREMOR_MAX = 15000;
 
 export class PadVirtual {
   constructor({ controle }) {
     this.controle = controle;
     this.key = null;
-    this.fontes = { toque: { ...NEUTRO }, fisico: { ...NEUTRO } };
+    this.fontes = this.neutras();
     this.enviado = { ...NEUTRO };
     this.ultimo = 0;
     this.timer = 0;
+    this.gpIndice = null; // o controle de videogame deste aparelho (para a vibração)
+    this.tremendo = null; // { g, p, desde }
+    this.tremorTimer = 0;
+    opcoesJogo.ouvir((k, v) => { if (k === 'vibrar' && !v) this.pararTremor(); });
+  }
+
+  neutras() {
+    return Object.fromEntries(FONTES.map((f) => [f, { ...NEUTRO }]));
   }
 
   ligar(key) {
@@ -33,8 +58,9 @@ export class PadVirtual {
   }
 
   desligar() {
+    this.pararTremor();
     if (!this.key) return;
-    this.fontes = { toque: { ...NEUTRO }, fisico: { ...NEUTRO } };
+    this.fontes = this.neutras();
     this.enviar(true);
     this.key = null;
   }
@@ -56,12 +82,24 @@ export class PadVirtual {
     this.mudou();
   }
 
+  // ------------------------------------------------------------ giroscópio (analógico direito)
+  // x, y de -1 a 1, já com a zona morta do jogo descontada (ver toque-jogo.js). Em degraus de 0,02:
+  // o giroscópio muda todo evento, e o tremido da mão não precisa ir pela rede.
+  giro(x, y) {
+    const q = (v) => Math.round(v * 50) / 50;
+    const f = this.fontes.giro;
+    f.rx = q(x);
+    f.ry = q(y);
+    this.mudou();
+  }
+
   // ------------------------------------------------------------ controle de videogame
   // g: o Gamepad do navegador. Zona morta pequena: o chiaki-ng e o jogo têm a deles.
   fisico(g) {
     const eixo = (v) => (Math.abs(v || 0) < 0.08 ? 0 : arred(v));
     let b = 0;
     g.buttons.forEach((x, i) => { if (i < 17 && x.pressed) b |= 1 << i; });
+    this.gpIndice = g.index;
     const f = this.fontes.fisico;
     Object.assign(f, {
       b,
@@ -76,11 +114,55 @@ export class PadVirtual {
     this.mudou();
   }
 
+  // ------------------------------------------------------------ vibração (o jogo mandou tremer)
+  // g: motor grande (o tranco), p: motor pequeno (o zumbido), de 0 a 1
+  tremor(g, p) {
+    if (!this.key || !opcoesJogo.get('vibrar')) return;
+    g = entre(g);
+    p = entre(p);
+    if (g < 0.05 && p < 0.05) return void this.pararTremor();
+    this.tremendo = { g, p, desde: performance.now() };
+    this.vibrar();
+  }
+
+  // o controle de videogame deste aparelho, se ele vibra (Chrome: DualSense, DualShock, Xbox...)
+  atuador() {
+    if (this.gpIndice == null) return null;
+    const g = navigator.getGamepads?.()[this.gpIndice];
+    return g?.connected && g.vibrationActuator?.playEffect ? g.vibrationActuator : null;
+  }
+
+  vibrar() {
+    clearTimeout(this.tremorTimer);
+    const t = this.tremendo;
+    if (!t || performance.now() - t.desde > TREMOR_MAX) return void this.pararTremor();
+    const a = this.atuador();
+    if (a) {
+      a.playEffect('dual-rumble', { duration: TREMOR_DURA, strongMagnitude: t.g, weakMagnitude: t.p }).catch(() => {});
+    } else if (navigator.vibrate) {
+      // no celular o motor pequeno conta menos: ele é o zumbido fino, que o celular não tem
+      const forca = Math.max(t.g, t.p * 0.6);
+      const liga = Math.max(10, Math.round(PULSO_MS * forca));
+      if (liga >= PULSO_MS - 6) navigator.vibrate(TREMOR_DURA);
+      else navigator.vibrate(Array.from({ length: Math.ceil(TREMOR_DURA / PULSO_MS) * 2 }, (_, i) => (i % 2 ? PULSO_MS - liga : liga)));
+    } else return;
+    this.tremorTimer = setTimeout(() => this.vibrar(), TREMOR_RENOVA);
+  }
+
+  pararTremor() {
+    clearTimeout(this.tremorTimer);
+    this.tremorTimer = 0;
+    if (!this.tremendo) return;
+    this.tremendo = null;
+    this.atuador()?.reset?.().catch(() => {});
+    navigator.vibrate?.(0);
+  }
+
   // ------------------------------------------------------------ envio
   estado() {
-    const { toque: a, fisico: b } = this.fontes;
-    const e = { b: a.b | b.b };
-    for (const k of EIXOS) e[k] = Math.abs(a[k]) >= Math.abs(b[k]) ? a[k] : b[k];
+    const fs = FONTES.map((k) => this.fontes[k]);
+    const e = { b: fs.reduce((b, f) => b | f.b, 0) };
+    for (const k of EIXOS) e[k] = fs.reduce((v, f) => (Math.abs(f[k]) > Math.abs(v) ? f[k] : v), 0);
     return e;
   }
 

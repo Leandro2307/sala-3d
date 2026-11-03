@@ -168,7 +168,7 @@ namespace Sala3d
             var entrada = Console.OpenStandardInput();
             new Thread(VigiarAtalho) { IsBackground = true }.Start();
             new Thread(VigiarJogo) { IsBackground = true }.Start();
-            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.9.0" } });
+            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.10.0" } });
             var json = new JavaScriptSerializer();
             string txt;
             while ((txt = Ler(entrada)) != null)
@@ -767,6 +767,7 @@ namespace Sala3d
                 mEixo = MetodoPad("SetAxisValue", tEixo, typeof(short));
                 mGatilho = MetodoPad("SetSliderValue", tGatilho, typeof(byte));
                 mEnviar = MetodoPad("SubmitReport");
+                OuvirTremor(c);
                 pad = c;
                 Escrever(new Dictionary<string, object> { { "tipo", "pad" }, { "ok", true } });
                 return true;
@@ -778,6 +779,38 @@ namespace Sala3d
                 Escrever(new Dictionary<string, object> { { "tipo", "pad" }, { "ok", false }, { "erro", padErro } });
                 return false;
             }
+        }
+
+        // Vibração (ajudante 1.10+): o jogo do PS5 manda tremer, o chiaki-ng repassa ao controle
+        // (que ele acha que é um de Xbox) e o ViGEm avisa aqui pelo FeedbackReceived — motor grande e
+        // pequeno, de 0 a 255. Vai para a sala (e de lá para quem joga) só quando muda, em 16
+        // degraus: o chiaki-ng repete o mesmo valor dezenas de vezes por segundo.
+        static int tremorEnviado = -1;
+        static void OuvirTremor(object c)
+        {
+            try
+            {
+                EventInfo ev = tipoPad.GetEvent("FeedbackReceived");
+                if (ev == null) foreach (var i in tipoPad.GetInterfaces()) { ev = i.GetEvent("FeedbackReceived"); if (ev != null) break; }
+                if (ev == null) return;
+                var m = typeof(Ajudante).GetMethod("AoTremor", BindingFlags.NonPublic | BindingFlags.Static);
+                ev.AddEventHandler(c, Delegate.CreateDelegate(ev.EventHandlerType, m));
+            }
+            catch { } // sem vibração, o controle funciona igual
+        }
+
+        static void AoTremor(object quem, object e)
+        {
+            try
+            {
+                var t = e.GetType();
+                int g = Convert.ToInt32(t.GetProperty("LargeMotor").GetValue(e, null)) >> 4;
+                int p = Convert.ToInt32(t.GetProperty("SmallMotor").GetValue(e, null)) >> 4;
+                int v = (g << 4) | p;
+                if (Interlocked.Exchange(ref tremorEnviado, v) == v) return;
+                Escrever(new Dictionary<string, object> { { "tipo", "tremor" }, { "g", g / 15.0 }, { "p", p / 15.0 } });
+            }
+            catch { }
         }
 
         static short Eixo(double v) { return (short)Math.Round(Math.Max(-1, Math.Min(1, v)) * 32767); }

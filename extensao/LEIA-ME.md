@@ -205,3 +205,10 @@ No PC de quem compartilha, além do ajudante:
 3. Feche e abra o Chrome. Compartilhe a janela do chiaki-ng e ligue **permitir controle**.
 
 O app oficial **PS Remote Play** não serve: ele só aceita controle da Sony de verdade.
+
+**Vibração** (ajudante 1.10 + extensão 1.17): quando o jogo faz o controle tremer, quem joga sente no
+celular (Android; o iPhone não deixa site vibrar) ou no controle ligado no aparelho dele. Liga e
+desliga em **Vibrar com o jogo**, nas opções do modo jogo.
+
+**Mirar virando o celular** no layout PS5: o giroscópio empurra o analógico direito (o PS5 recebe um
+controle de Xbox, que não tem giroscópio). A sensibilidade do painel vale para ele também.

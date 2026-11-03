@@ -505,6 +505,9 @@ function conectarNativo() {
     // controle virtual do PS5 (ajudante 1.9+): não abriu — falta o driver ViGEmBus ou a biblioteca.
     // Vai na resposta de cada evento, e a sala avisa quem compartilha e quem joga.
     if (m?.tipo === 'pad') n.pad = m.ok ? null : String(m.erro || 'falhou').slice(0, 80);
+    // vibração do controle virtual (ajudante 1.10+): o jogo do PS5 mandou tremer. Vai já para a sala,
+    // sem esperar o próximo evento (quem joga pode estar parado levando um tiro).
+    if (m?.tipo === 'tremor' && n.sala != null) avisarSala(n.sala, { tipo: 'tremor', g: Number(m.g) || 0, p: Number(m.p) || 0 });
     // Ctrl+Alt+End no teclado de quem compartilha: avisa a sala para desligar a permissão
     if (m?.tipo === 'parado' && n.sala != null) avisarSala(n.sala, { tipo: 'desligou', janela: true });
   });

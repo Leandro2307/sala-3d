@@ -116,6 +116,8 @@
     if (m.tipo === 'status-mudou') avisar();
     // o controle de uma aba caiu (a barra amarela do Chrome foi fechada, por exemplo)
     else if (m.tipo === 'desligou') window.postMessage({ sala3dExt: 'desligou', aba: m.aba, janela: !!m.janela, motivo: m.motivo }, location.origin);
+    // o controle virtual do PS5 vibrou (extensão 1.17+): a sala repassa a quem joga
+    else if (m.tipo === 'tremor') window.postMessage({ sala3dExt: 'tremor', g: m.g, p: m.p }, location.origin);
     // a aba compartilhada abriu outra página: a sala mostra o site na barra de navegação
     else if (m.tipo === 'aba-mudou') window.postMessage({ sala3dExt: 'aba-mudou', aba: m.aba, site: m.site, titulo: m.titulo }, location.origin);
     // aviso do site (alert, confirm...) numa aba sob controle: a sala mostra a quem controla

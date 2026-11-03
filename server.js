@@ -748,6 +748,11 @@ function voltaDoControle(raw) {
   if (e.t === 'admin') return { t: 'admin', titulo: String(e.titulo ?? '').replace(/[\u0000-\u001f]/g, '').slice(0, 120) };
   // o controle virtual do PS5 não abriu no PC de quem compartilha (falta o driver ViGEmBus)
   if (e.t === 'pad-erro') return { t: 'pad-erro', erro: String(e.erro ?? '').replace(/[\u0000-\u001f]/g, '').slice(0, 80) };
+  // o jogo do PS5 vibrou o controle virtual: motor grande (g) e pequeno (p), de 0 a 1
+  if (e.t === 'tremor') {
+    const f = (v) => Math.round(Math.min(1, Math.max(0, Number(v) || 0)) * 100) / 100;
+    return { t: 'tremor', g: f(e.g), p: f(e.p) };
+  }
   // modo jogo: como a tela está saindo do PC de quem compartilha (o relatório de quem joga)
   if (e.t === 'jogo-envio') {
     const num = (v) => (Number.isFinite(v) ? Math.round(v * 10) / 10 : null);
@@ -1613,14 +1618,17 @@ function attachSockets(io) {
     // nela nos últimos minutos — ninguém recebe um texto na área de transferência sem ter pedido.
     let voltaJanela = 0;
     let voltaConta = 0;
+    let tremorConta = 0;
     socket.on('controle-volta', (msg) => {
       const m = obj(msg);
       if (!user || typeof m.key !== 'string' || !user.shares.has(m.key) || typeof m.para !== 'string') return;
       const para = room.users.get(m.para);
       const agora = Date.now();
       if (!para || para === user || !(agora - (para.controlou?.get(m.key) ?? 0) < 10 * 60_000)) return;
-      if (agora - voltaJanela > 1000) { voltaJanela = agora; voltaConta = 0; }
-      if (++voltaConta > 10) return;
+      // a vibração do PS5 tem a conta dela (até 25 por segundo, ver TREMOR_MS no main.js)
+      const tremor = obj(m.ev).t === 'tremor';
+      if (agora - voltaJanela > 1000) { voltaJanela = agora; voltaConta = 0; tremorConta = 0; }
+      if (tremor ? ++tremorConta > 30 : ++voltaConta > 10) return;
       const ev = voltaDoControle(m.ev);
       if (ev) io.to(para.id).emit('controle-volta', { key: m.key, ev, de: user.name });
     });

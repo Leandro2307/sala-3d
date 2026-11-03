@@ -188,6 +188,9 @@ export class Controle {
         this.pedidos.delete(m.id);
       } else if (m.sala3dExt === 'desligou') {
         this.onDesligou?.(m.aba, m.motivo, !!m.janela);
+      } else if (m.sala3dExt === 'tremor') {
+        // vibração do controle virtual do PS5: vai para quem mandou o último estado do controle
+        if (this.ultimoPad) this.onTremor?.(this.ultimoPad, Math.min(1, Math.max(0, Number(m.g) || 0)), Math.min(1, Math.max(0, Number(m.p) || 0)));
       } else if (m.sala3dExt === 'capturar-aba' && typeof m.streamId === 'string') {
         // pedido: a extensão 1.11+ espera a resposta (o resultado aparece no ícone dela)
         this.onCapturarAba?.({ streamId: m.streamId, aba: Number(m.aba), site: m.site || null, titulo: m.titulo || '', pedido: m.pedido ?? null });
@@ -365,6 +368,7 @@ export class Controle {
     if ((ev?.t === 'nav' || ev?.t === 'dialogo') && sh.aba == null) return;
     // quem mexeu por último nesta tela (o movimento sozinho não conta): é para essa pessoa que vão
     // os avisos do site e o texto do Ctrl+C
+    if (ev?.t === 'pad' && deId && sh.aba == null) this.ultimoPad = { key: sh.key, deId };
     if (!(ev?.t === 'mouse' && ev.a === 'move') && ev?.t !== 'vivo') this.ultimo.set(sh.key, { deId: deId || null, de: de || null, quando: Date.now() });
     // Movimento do modo jogo numa janela, com a extensão 1.15+: vai por uma porta fixa até o ajudante,
     // sem esperar resposta (eram 125 pedidos por segundo, cada um com ida e volta)

@@ -28,6 +28,10 @@ const DEAD = 0.25; // zona morta do analógico
 const CORRE = 0.95; // empurrar até a borda (para a frente) corre
 const OLHAR = 2.2; // pixels do dedo -> pixels de mouse (vezes a sensibilidade)
 const GIRO = 9; // graus por segundo do aparelho virando -> pixels de mouse por segundo (vezes a sensibilidade)
+// layout PS5, o giroscópio no analógico direito (ver giroNoPad), em graus por segundo
+const GIRO_MORTO = 4; // abaixo disso é o tremido da mão
+const GIRO_CHEIO = 160; // virando assim (na sensibilidade 1), o analógico vai até o fim
+const GIRO_BASE = 0.16; // onde o analógico começa: a zona morta dos jogos do PS5
 const MOVE_MS = 16;
 const RAIO_DIR = 70; // layout PS5: o dedo que andou isso (px) desde onde encostou é o analógico direito no fundo
 const TOQUE_PX = 12; // no menu, o dedo que andou menos que isso até soltar clicou (mais é arrastar)
@@ -307,6 +311,7 @@ export class ToqueJogo {
           <label><input type="checkbox" data-op="turbo"><span>Modo turbo <small>(imagem sem buffer: bem menos atraso)</small></span></label>
           <label><input type="checkbox" data-op="selo"><span>Mostrar desempenho</span></label>
           <label><input type="checkbox" data-op="giro"><span>Mirar virando o celular</span></label>
+          <label><input type="checkbox" data-op="vibrar"><span>Vibrar com o jogo <small>(Android ou controle ligado)</small></span></label>
         </div>
         <div class="tj-edicao">
           <button type="button" class="tj-mover">Mover botões</button>
@@ -447,13 +452,36 @@ export class ToqueJogo {
   // trás, em volta do y (gamma). Deitado para o outro lado (270°), os dois se invertem.
   ligarGiro() {
     addEventListener('devicemotion', (e) => {
-      if (!this.key || this.menu || this.editando || !opcoesJogo.get('giro')) return;
+      if (!this.key || this.menu || this.editando || !opcoesJogo.get('giro')) return void this.soltarGiro();
       const r = e.rotationRate;
       if (!r || r.beta == null) return;
-      const dt = Math.min(0.1, (e.interval > 1 ? e.interval / 1000 : e.interval) || 1 / 60);
       const lado = (screen.orientation?.angle ?? window.orientation ?? 90) === 270 || window.orientation === -90 ? 1 : -1;
+      if (this.layout?.virtual) return void this.giroNoPad(lado * r.beta, lado * r.gamma);
+      const dt = Math.min(0.1, (e.interval > 1 ? e.interval / 1000 : e.interval) || 1 / 60);
       this.olhar(lado * r.beta * GIRO * dt, lado * r.gamma * GIRO * dt);
     });
+  }
+
+  // Layout PS5: o PS5 não recebe o giroscópio (o controle virtual é de Xbox), então virar o celular
+  // empurra o analógico direito — mais rápido virando, mais empurrado. vx, vy em graus por segundo.
+  // O tremido da mão (abaixo de GIRO_MORTO) não mexe; acima, o analógico já sai de GIRO_BASE, para
+  // passar da zona morta do jogo (senão o começo do giro se perdia e a mira fina não existia).
+  giroNoPad(vx, vy) {
+    const v = Math.hypot(vx, vy);
+    let x = 0, y = 0;
+    if (v >= GIRO_MORTO) {
+      const m = GIRO_BASE + (1 - GIRO_BASE) * Math.min(1, (v - GIRO_MORTO) / (GIRO_CHEIO / this.sens));
+      x = (vx / v) * m;
+      y = (vy / v) * m;
+    }
+    this.giroNoPadLigado = true;
+    this.pad?.giro(x, y);
+  }
+
+  soltarGiro() {
+    if (!this.giroNoPadLigado) return;
+    this.giroNoPadLigado = false;
+    this.pad?.soltar('giro');
   }
 
   // manda à câmera um movimento em pixels de mouse, com a fração que sobrou da vez anterior (sem
@@ -842,6 +870,7 @@ export class ToqueJogo {
     this.seguras.clear();
     this.travadas.clear();
     this.pad?.soltar('toque');
+    this.soltarGiro();
   }
 
   // ---------------------------------------------------------------- ligar e desligar
