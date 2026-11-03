@@ -552,6 +552,44 @@ function instanciar(scene, geo, mat, itens, { pedaco = PEDACO, sombra = true } =
   return malhas;
 }
 
+// ------------------------------------------------------------------ reflexo pré-compilado
+// Os reflexos do céu (mar, lagos e a luz ambiente) saem do PMREMGenerator do three, e o primeiro
+// fromScene compila os shaders dele na hora, travando a página: ~0,5 s num PC com placa Intel.
+// Chamado logo na primeira etapa do mundo, isto manda a placa compilar esses shaders em paralelo
+// (compileAsync) enquanto o resto do mapa é montado; o programa fica no cache do three enquanto
+// este gerador existir, e os geradores do mar e dos lagos o reaproveitam. Devolve quem solta tudo
+// (chamar depois que os reflexos forem feitos). Usa partes internas do PMREMGenerator: se uma
+// versão nova do three mudar isso, só deixa de adiantar (o fromScene compila como antes).
+export function preaquecerReflexo(renderer) {
+  try {
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    pmrem._setSize(256); // o tamanho que o fromScene usa
+    const rt = pmrem._allocateTargets();
+    const mats = [pmrem._ggxMaterial, pmrem._blurMaterial].filter(Boolean);
+    if (!mats.length || !renderer.compileAsync) {
+      rt.dispose();
+      pmrem.dispose();
+      return () => {};
+    }
+    const cena = new THREE.Scene();
+    // a geometria do próprio gerador: a chave do programa muda se a malha não tiver position
+    const geo = pmrem._lodMeshes?.[0]?.geometry || new THREE.PlaneGeometry();
+    for (const m of mats) cena.add(new THREE.Mesh(geo, m));
+    // compilado para desenhar numa textura, como o fromScene (sem tone mapping, cor linear)
+    const antes = renderer.getRenderTarget();
+    renderer.setRenderTarget(rt);
+    const compilando = renderer.compileAsync(cena, new THREE.OrthographicCamera()).catch(() => {});
+    renderer.setRenderTarget(antes);
+    // solta só depois que a compilação terminou (ela confere o material a cada quadro)
+    return () => compilando.then(() => {
+      rt.dispose();
+      pmrem.dispose();
+    });
+  } catch {
+    return () => {};
+  }
+}
+
 // ------------------------------------------------------------------ o mar (praia)
 // Um plano grande no nível do mar, com o reflexo do céu e ondinhas que andam; o relevo desce até ele
 function criarMar(scene, renderer, ceuMat, area, decorar) {

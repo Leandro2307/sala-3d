@@ -7,7 +7,7 @@
 // câmera entram em world.colliders (o jogador as testa uma a uma todo quadro).
 import * as THREE from 'three';
 import { gunzipSync } from 'three/addons/libs/fflate.module.js';
-import { lerCatedral, montarCatedral, MAT } from './catedral-malha.js';
+import { lerCatedral, montarCatedral, bloqueioCatedral, MAT } from './catedral-malha.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CATEDRAL, ESCALADA, DESCER } from './catedral-dados.js';
 import { Collider, textSprite } from './world.js';
@@ -255,6 +255,24 @@ function material(mat) {
   return new THREE.MeshStandardMaterial(opcoes);
 }
 
+// a malha montada no catedral-worker.js; sem Worker de módulo (navegador velho) ou se ele falhar,
+// aqui mesmo, como antes
+function montarFora(dados) {
+  const aqui = () => montarCatedral(dados, { texBlocos: TEX_BLOCOS });
+  let w;
+  try {
+    w = new Worker(new URL('./catedral-worker.js', import.meta.url), { type: 'module' });
+  } catch {
+    return Promise.resolve(aqui());
+  }
+  return new Promise((ok) => {
+    const fim = (r) => { w.terminate(); ok(r); };
+    w.onmessage = ({ data }) => fim(data.erro ? aqui() : data);
+    w.onerror = (e) => { e.preventDefault?.(); fim(aqui()); };
+    w.postMessage({ dados, texBlocos: TEX_BLOCOS });
+  });
+}
+
 // ------------------------------------------------------------------ montagem
 export function construirCatedral(world) {
   const C = CATEDRAL;
@@ -275,9 +293,9 @@ export function construirCatedral(world) {
       if (!r.ok) throw new Error(`catedral.bin: ${r.status}`);
       return r.arrayBuffer();
     })
-    .then((buf) => {
+    .then(async (buf) => {
       const dados = lerCatedral(gunzipSync(new Uint8Array(buf)));
-      const m = montarCatedral(dados, { texBlocos: TEX_BLOCOS });
+      const m = await montarFora(dados);
       for (const lt of m.lotes) {
         const g = new THREE.BufferGeometry();
         g.setAttribute('position', new THREE.BufferAttribute(lt.pos, 3));
@@ -306,7 +324,7 @@ export function construirCatedral(world) {
           }
         }
       }
-      fisica.bloqueia = m.bloqueia;
+      fisica.bloqueia = m.bloqueia || bloqueioCatedral(dados);
       fisica.pronta = true;
       fisica.centro = null;
       world.sombraSuja = true;

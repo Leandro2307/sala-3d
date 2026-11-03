@@ -2241,7 +2241,12 @@ body.touch .ct-lado .ct-botoesc .ct-ajudac { min-width: 36px; }
     this.sinais = document.createElement('div');
     this.sinais.className = 'ct-zoar ct-sinais ct-painel';
     this.sinais.hidden = true;
-    this.sinais.innerHTML = SINAIS.map((s, i) => `<button type="button" data-sinal="${i}">${s.carta ? `<img src="${urlCarta(s.carta)}" alt="${esc(s.carta)}">` : ''}${esc(s.f)}</button>`).join('');
+    // os botões (com o desenho das cartas) só são montados na primeira vez que o painel abre:
+    // desenhar essas cartas na abertura da sala custava ~0,3 s
+    this.sinais.montar = () => {
+      if (this.sinais.childElementCount) return;
+      this.sinais.innerHTML = SINAIS.map((s, i) => `<button type="button" data-sinal="${i}">${s.carta ? `<img src="${urlCarta(s.carta)}" alt="${esc(s.carta)}">` : ''}${esc(s.f)}</button>`).join('');
+    };
     // o menu do que jogar em alguém (abre dentro da plaquinha do alvo)
     this.menu = document.createElement('div');
     this.menu.className = 'ct-arremesso ct-painel';
@@ -2399,6 +2404,7 @@ body.touch .ct-lado .ct-botoesc .ct-ajudac { min-width: 36px; }
       return;
     }
     if (acao === 'sinal') {
+      this.sinais.montar();
       this.sinais.hidden = !this.sinais.hidden;
       if (!this.sinais.hidden) this.zoar.hidden = true;
       return;

@@ -8,7 +8,7 @@ import { mergeGeometries, mergeGroups } from 'three/addons/utils/BufferGeometryU
 import { COURSE, RAILS, FUN_PADS } from './parkour.js';
 import { RING } from './arena.js';
 import { PISTA, CAMINHO, CURVAS, pontoEm, projetar } from './pista.js';
-import { criarNatureza } from './natureza.js';
+import { criarNatureza, preaquecerReflexo } from './natureza.js';
 import { construirEstadio } from './futebol.js';
 import { construirVolei, construirBasquete, construirBoliche } from './quadras.js';
 import { construirPortal, construirSurf, construirArena } from './ceu.js';
@@ -798,6 +798,8 @@ export class World {
   async construir(aoProgresso) {
     const etapas = [
       () => {
+        // os shaders do reflexo do céu compilam em paralelo enquanto as próximas etapas rodam
+        this.soltarReflexo = preaquecerReflexo(this.renderer);
         this.buildLights();
         this.criarSombrasRedondas();
         // O cinema (casca, plateia e parede de telas) é do modo Lazer. No modo escritório ele some e o
@@ -878,6 +880,7 @@ export class World {
         const P = SALA.porta;
         this.portaBox = new THREE.Box3(new THREE.Vector3(SALA.maxX - 1, 0, P.z0), new THREE.Vector3(SALA.maxX + 1, P.altura, P.z1));
         this.ambiente = this.natureza.gerarAmbiente();
+        this.soltarReflexo?.();
         // qualidade antes do aquecimento: quantas luzes e se tem sombra fazem parte do shader
         if (this.qualidadeInicial) this.setQualidade(this.qualidadeInicial, { aquecer: false });
         this.aquecerShaders();

@@ -86,6 +86,17 @@ function tipo(id, d) {
   }
 }
 
+// o mesmo bloqueia(x, y, z) do montarCatedral, sem montar a malha: quando a malha é feita no
+// worker (catedral-worker.js), a função não atravessa para cá e é refeita com isto
+export function bloqueioCatedral({ L, A, C, paleta, grade }) {
+  const pForma = new Uint8Array(paleta.length);
+  for (let i = 0; i < paleta.length; i++) pForma[i] = tipo(paleta[i] >> 4, paleta[i] & 15)[0];
+  return (x, y, z) => {
+    const f = pForma[x < 0 || y < 0 || z < 0 || x >= L || y >= A || z >= C ? 0 : grade[x + L * (z + C * y)]];
+    return f === CHEIO || f === LAJE || f === DEGRAU;
+  };
+}
+
 // ------------------------------------------------------------------ montagem
 // Devolve { L, A, C, lotes: [{ pos, nor, uv, cor, idx }] por material, colisoes: [[x0,y0,z0,x1,y1,z1, tipo]],
 // tochas: [[x,y,z]], bancos: [[x0,y0,z0,x1,y1,z1]], bloqueia(x,y,z) para a câmera }

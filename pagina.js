@@ -71,33 +71,69 @@ const PRODUCAO = !!(process.env.RENDER || process.env.NODE_ENV === 'production')
 
 // imports relativos (estáticos, side-effect e dinâmicos) que terminam em .js
 const RELATIVOS = /((?:\bfrom|\bimport)\s*\(?\s*)(['"])(\.{1,2}\/[^'"]+?\.js)\2/g;
-const impressao = (codigo) => crypto.createHash('sha1').update(codigo).digest('hex').slice(0, 10);
 
 // /js/x.js -> { codigo (com os imports já versionados), hash }
+// Módulos que se importam em ciclo (cidade.js <-> mapa.js) ganham todos a mesma impressão, tirada
+// do conteúdo de todos eles juntos (e das impressões de quem eles importam de fora do ciclo). Antes
+// cada um via o outro com uma impressão diferente da que o resto do site usava: o navegador baixava
+// e rodava o cidade.js duas vezes, como dois módulos separados.
 function versionarModulos() {
-  const prontos = new Map();
-  const abertos = new Set();
-  const processar = (url) => {
-    if (prontos.has(url)) return prontos.get(url);
-    let codigo;
+  const cru = new Map(); // url -> código do disco
+  const deps = new Map(); // url -> [{ espec, destino }]
+  for (const f of fs.readdirSync(path.join(PUBLICO, 'js'))) {
+    if (!f.endsWith('.js')) continue;
+    const url = `/js/${f}`;
     try {
-      codigo = fs.readFileSync(arquivo(url), 'utf8');
-    } catch {
-      return null;
+      cru.set(url, fs.readFileSync(arquivo(url), 'utf8'));
+    } catch { /* sumiu entre o readdir e a leitura */ }
+  }
+  for (const [url, codigo] of cru) {
+    const lista = [];
+    for (const m of codigo.matchAll(RELATIVOS)) {
+      const destino = new URL(m[3], `http://x${url}`).pathname;
+      if (cru.has(destino)) lista.push(destino);
     }
-    if (abertos.has(url)) return { hash: impressao(codigo) }; // import em ciclo: usa o conteúdo cru
-    abertos.add(url);
-    const novo = codigo.replace(RELATIVOS, (tudo, antes, aspas, espec) => {
-      const destino = new URL(espec, `http://x${url}`).pathname;
-      const d = destino.startsWith('/js/') ? processar(destino) : null;
-      return d ? `${antes}${aspas}${espec}?v=${d.hash}${aspas}` : tudo;
-    });
-    abertos.delete(url);
-    const r = { codigo: novo, hash: impressao(novo) };
-    prontos.set(url, r);
-    return r;
+    deps.set(url, lista);
+  }
+  // componentes fortemente conexos (Tarjan): cada ciclo vira um grupo; sai na ordem em que os
+  // grupos de quem é importado vêm antes de quem importa
+  const indice = new Map(), baixo = new Map(), naPilha = new Set(), pilha = [], grupos = [];
+  let n = 0;
+  const visitar = (v) => {
+    indice.set(v, n); baixo.set(v, n); n++;
+    pilha.push(v); naPilha.add(v);
+    for (const w of deps.get(v)) {
+      if (!indice.has(w)) { visitar(w); baixo.set(v, Math.min(baixo.get(v), baixo.get(w))); }
+      else if (naPilha.has(w)) baixo.set(v, Math.min(baixo.get(v), indice.get(w)));
+    }
+    if (baixo.get(v) === indice.get(v)) {
+      const g = [];
+      let w;
+      do { w = pilha.pop(); naPilha.delete(w); g.push(w); } while (w !== v);
+      grupos.push(g.sort());
+    }
   };
-  for (const f of fs.readdirSync(path.join(PUBLICO, 'js'))) if (f.endsWith('.js')) processar(`/js/${f}`);
+  for (const url of cru.keys()) if (!indice.has(url)) visitar(url);
+
+  const hashDe = new Map();
+  for (const g of grupos) {
+    const dentro = new Set(g);
+    const h = crypto.createHash('sha1');
+    for (const url of g) {
+      h.update(url).update('\0').update(cru.get(url)).update('\0');
+      for (const d of deps.get(url)) if (!dentro.has(d)) h.update(`${d}=${hashDe.get(d)}\0`);
+    }
+    const hash = h.digest('hex').slice(0, 10);
+    for (const url of g) hashDe.set(url, hash);
+  }
+  const prontos = new Map();
+  for (const [url, codigo] of cru) {
+    const novo = codigo.replace(RELATIVOS, (tudo, antes, aspas, espec) => {
+      const hash = hashDe.get(new URL(espec, `http://x${url}`).pathname);
+      return hash ? `${antes}${aspas}${espec}?v=${hash}${aspas}` : tudo;
+    });
+    prontos.set(url, { codigo: novo, hash: hashDe.get(url) });
+  }
   return prontos;
 }
 

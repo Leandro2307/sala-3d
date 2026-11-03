@@ -307,7 +307,11 @@ export class RTC {
     this.jogadores = new Map(); // tela minha em jogo -> ids de quem joga nela
     this.shareMode = 'max'; // preset das telas: leve, max ou ultra
     this.medidas = new WeakMap(); // receptor de vídeo -> os totais da medida anterior (ver recebendo)
-    escolherCodec();
+    // A escolha do codec trava a página: o RTCRtpSender.getCapabilities levou 1,4 s na primeira
+    // chamada (o Chrome acorda os codificadores da placa), bem no meio da abertura da sala. Fica
+    // para quando a página estiver à toa; quem compartilha antes disso a puxa no captureScreen.
+    const depois = () => (window.requestIdleCallback ? requestIdleCallback(() => escolherCodec(), { timeout: 15000 }) : escolherCodec());
+    setTimeout(depois, 6000);
 
     socket.on('signal', ({ from, data }) => this.handleSignal(from, data));
     setInterval(() => this.vigiar(), 1000);
@@ -736,6 +740,7 @@ export class RTC {
   // pede a aba/janela/tela ao navegador; quem chama decide se publica (addScreen)
 
   async captureScreen() {
+    escolherCodec(); // se ainda não rodou (ver constructor): fica pronto enquanto a pessoa escolhe a janela
     const preset = this.preset();
     const qps = this.qpsCaptura();
     const stream = await navigator.mediaDevices.getDisplayMedia({
