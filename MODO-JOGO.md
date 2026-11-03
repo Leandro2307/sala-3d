@@ -467,13 +467,13 @@ imagem. No relatório de 03:35 o PC estava no Wi-Fi (`host/udp wifi`) e a **fila
 turbo** (`bufferedAmount`) ficava em 10–30 KB e chegava a 107 KB — a 6 Mbps, 15 a 140 ms de imagem
 esperando, que a estimativa não via (usava metade do ping). Mudanças, todas em `turbo.js`:
 
-- **Fila medida em tempo** (`TurboEnvio.medirFila`): o que está na fila ÷ a velocidade com que ela
-  esvazia (medida só entre duas leituras com a fila ocupada; sem medida ou com ela velha, 3× a banda).
-  Quadro que fosse esperar mais de `FILA_MS` (20) não é codificado. A 1ª versão, em bytes (1 quadro),
-  pulava demais: a captura entrega quadros colados, e o 2º era pulado com a fila a 3 ms de esvaziar.
-- **Banda que acompanha o caminho** (`ajustarBanda`, a cada 250 ms): 2 pulos ou espera média > 10 ms
-  → 90% da velocidade medida (até metade da banda do tamanho); 0,5 s sem aperto → +10%. Trocar só o
-  `bitrate` num `configure()` não gera quadro-chave nem descrição nova (medido na NVIDIA e no OpenH264).
+- **Banda pela fila medida do outro lado** (`TurboEnvio.ajustarBanda`; ver a correção de 2026-11-03
+  abaixo — a 1ª versão media a fila pelo `bufferedAmount` aqui e não serviu): a cada 0,5 s quem joga
+  manda `{fila: {p90, base}}` (a viagem dos quadros e a menor dos últimos ~10 s); `p90 − base` acima de
+  30 ms em 2 avisos → banda −15% (até 60% da do tamanho); abaixo de 12 ms em 4 → +10%. O
+  `bufferedAmount` só trava: mais de 4 quadros da banda cheia (720p ~50 KB, 1080p ~83 KB; antes 96 KB)
+  → pula. Trocar só o `bitrate` num `configure()` não gera quadro-chave nem descrição nova (medido na
+  NVIDIA e no OpenH264).
 - **Taxa constante** (`bitrateMode: 'constant'`, com a variável de reserva): na NVIDIA, 720p a 6 Mbps,
   a variável dava 15,7 KB por quadro em média (acima do alvo) e quadro-chave de 46 KB; a constante,
   12,5 KB e quadro-chave de 15 KB.
@@ -497,24 +497,41 @@ esperando, que a estimativa não via (usava metade do ping). Mudanças, todas em
   sair dava alarme falso (a placa demora a ligar). Também: erro no decodificador recria na hora com a
   última configuração (antes ficava sem decodificador até mudar o tamanho da imagem).
 
+### Relatório de 2026-11-03 02:10 (PS5 pelo chiaki-ng → iPhone, Wi-Fi de casa) e a correção
+
+- **A medida nova funcionou no iPhone**: `pontaMs` (captura → desenhado) ~21 ms em 720p e ~25 ms em
+  1080p (p90 ~30/35), `viagemMs` (fila + rede) ~12–15 ms (p90 ~21–25), decodificação 3–4 ms, o iPhone
+  não segurou quadros (`decAjuste` nulo). Atraso estimado total 58–72 ms.
+- **Mas a 1ª versão do controle de fila derrubou tudo**: 35–50 qps (antes 55–58) e a banda no piso
+  (720p ~2,5 Mbps em vez de 5,6; 1080p ~3,5 em vez de 9). `medirFila` usava o `bufferedAmount` do
+  Chrome, que de verdade **não desce aos poucos: atualiza aos trancos e atrasado** — deu "caminho" de
+  2–4 Mbps, esperas de 5 a 12 **segundos** (`esperaP90`), um terço dos quadros pulados pela "fila" e
+  a banda em 50% o tempo todo, com a viagem medida do outro lado em ~13 ms. No teste local isso não
+  aparecia: o canal lento do teste contava os bytes direitinho.
+- **Correção**: a banda passou a seguir a fila medida por quem joga (o item acima); o `bufferedAmount`
+  só trava. No teste, o `?trancos=1` do `ponta.html` imita o Chrome (o `bufferedAmount` só baixa quando
+  a fila esvazia toda).
+
 Medido no Chrome invisível deste PC (scratchpad `turbo/ponta.html`: as duas pontas numa página,
 conexão WebRTC de verdade, cena com muito movimento; o "Wi-Fi simulado" é um canal lento por fora,
-1 s de queda a cada 3 s; tempo do `encode()` lá ao `drawImage()` aqui, mesmo relógio):
+1 s de queda a cada 3 s, com o `bufferedAmount` aos trancos; tempo do `encode()` lá ao `drawImage()`
+aqui, mesmo relógio). Versão corrigida:
 
-| Caso | Antes (mediana / p90 / p99) | Depois | qps depois |
+| Caso | Antes de tudo (mediana / p90 / p99) | Agora | qps antes → agora |
 |---|---|---|---|
-| 720p, Wi-Fi 10↔4 Mbps | 18 / 191 / 211 ms | 13 / 22 / 32 ms | 52–60 (antes 50–62) |
-| 1080p, Wi-Fi 20↔8 Mbps | 20 / 102 / 110 ms | 18 / 23 / 31 ms | 42–60 |
-| 1080p, canal sem limite | 11,5 / 13,7 / 17 ms | 11,7 / 13,8 / 18 ms | 60, 10 Mbps |
-| 720p, codificador com SPS sem VUI | 92 / 97 / 102 ms | 10 / 13 / 15 ms | 60 |
-| 720p, 1% dos pedaços perdidos | 7 / 8 / 15 ms (um trecho a 44 qps) | 7 / 8 / 11 ms | 58–60 |
+| 720p, Wi-Fi 10↔4 Mbps | 18 / 139 / 201 ms | 14 / 42 / 104 ms | 50–62 → 52–61 |
+| 1080p, Wi-Fi 20↔8 Mbps | 20 / 77 / 105 ms | 19 / 26 / 80 ms | 53–61 → 56–61 |
+| 720p e 1080p, 30 Mbps com folga | — | banda cheia (6 / 10 Mbps), 0 pulos | 60 |
+| 1080p, canal sem limite | 11,5 / 13,7 / 17 ms | 12,3 / 14 / 19 ms | 60, 10 Mbps |
+| 720p, codificador com SPS sem VUI | 92 / 97 / 102 ms | 7 / 8 / 11 ms | 60 |
+| 720p, 1% dos pedaços perdidos (1ª versão) | 7 / 8 / 15 ms (um trecho a 44 qps) | 7 / 8 / 11 ms | 58–60 |
 
-Custo: com o Wi-Fi apertando, a banda desce (no 20↔8, ~5–7 Mbps em 1080p em vez de ~9,5) — a imagem
-fica menos nítida nas quedas em vez de atrasar. Com folga, fica na banda cheia. Em 1080p o canal
-lento do teste mede pouco (a página faz tudo ao mesmo tempo e o relógio dele atrasa); no canal de
-verdade, 10 Mbps sem pulo.
+Custo: com o Wi-Fi apertando, a banda desce (no 20↔8, ~7 Mbps em 1080p em vez de ~9,5; no 10↔4, ~4
+em 720p) — a imagem fica menos nítida nas quedas em vez de atrasar. Os picos que sobram (p99 80–100
+ms) são o tempo de reagir (2 avisos de 0,5 s) numa queda de 60% que dura 1 s.
 
-**Falta**: um relatório real (PS5 → iPhone e jogo de PC) com `turbo.pontaMs`, `viagemMs`, `esperaMs`,
-`caminhoKbps`, `bandaKbps` e `decAjuste`. Fora do código, o que mais pesa: o PC de quem compartilha no
-Wi-Fi (dois trechos sem fio para cada quadro) e, no PS5, o próprio Remote Play (chiaki-ng: PS5 →
-codifica → rede → decodifica → janela → captura), que nem entra na conta do selo.
+**Falta**: um relatório real com a correção: conferir banda cheia e 55–58 qps no Wi-Fi de casa,
+`turbo.filaLaMs` (envio) e `turbo.filaMs` (quem joga), `trocasDeBanda`, `puladosFila` ~0. Fora do
+código, o que mais pesa: o PC de quem compartilha no Wi-Fi (dois trechos sem fio para cada quadro) e,
+no PS5, o próprio Remote Play (chiaki-ng: PS5 → codifica → rede → decodifica → janela → captura), que
+nem entra na conta do selo.

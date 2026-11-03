@@ -16,20 +16,22 @@
 // parada por um instante, e não atraso acumulado.
 // Mensagens de texto (JSON): quem joga → {ligar: key, codecs, altura, versao}, {chave: true},
 // {desligar: true}, {ping: t} (a cada PING_MS; volta {pong: t, t: agora lá}: a ida e volta do próprio
-// canal e a diferença entre os relógios dos dois aparelhos); quem compartilha → {cfg: {codec, w, h,
-// description}}, {erro}. O H.264 vai no formato "avc" (tamanho na frente de cada NAL) com a descrição
-// (avcC) que o codificador entrega: é o que todo VideoDecoder aceita (o Safari inclusive), sem depender
-// do Annex B. Binário: cabeçalho (CAB bytes; CAB2 com a versao 2) + pedaço do quadro.
+// canal e a diferença entre os relógios dos dois aparelhos), {fila: {p90, base}} (a cada FILA_AVISO_MS:
+// a viagem medida, ver ajustarBanda); quem compartilha → {cfg: {codec, w, h, description}}, {erro}. O
+// H.264 vai no formato "avc" (tamanho na frente de cada NAL) com a descrição (avcC) que o codificador
+// entrega: é o que todo VideoDecoder aceita (o Safari inclusive), sem depender do Annex B. Binário:
+// cabeçalho (CAB bytes; CAB2 com a versao 2) + pedaço do quadro.
 //
 // O atraso que dá para tirar daqui (relatório de 2026-11-01, PC no Wi-Fi → iPhone): a fila de envio do
 // canal ficava em 10–30 KB e chegava a 107 KB — a 6 Mbps, 15 a 140 ms de imagem esperando a vez, que a
 // estimativa nem via (ela usava metade do ping). Por isso:
-//   - a fila medida em tempo (medirFila: o que ela tem ÷ a velocidade com que esvazia, medida): um
-//     quadro que fosse esperar mais de FILA_MS nem é codificado — melhor pular um quadro do que
-//     mandar atrasado; e com a fila apertando, a banda do codificador desce para caber no caminho
-//     medido (ajustarBanda) e sobe de volta aos poucos quando folga. Em quilobytes (um quadro só)
-//     pulava demais: a captura entrega quadros colados, e o segundo era pulado com a fila a 3 ms de
-//     esvaziar;
+//   - a banda do codificador segue a fila que quem joga MEDE (ajustarBanda): a viagem de cada quadro
+//     (fila + rede) menos a menor vista é o tempo de fila de verdade; crescendo, a banda desce; com
+//     folga, volta. A 1ª versão (2026-11-02) media a fila pelo bufferedAmount aqui e errou feio no
+//     Chrome de verdade: ele não desce aos poucos, atualiza aos trancos e atrasado — deu "caminho" de
+//     2–4 Mbps num Wi-Fi que levava 9, esperas de segundos, um terço dos quadros pulados e a banda no
+//     piso (relatório de 2026-11-03 02:10), com a viagem medida do outro lado em ~13 ms. Aqui o
+//     bufferedAmount só serve de trava (FILA_QUADROS quadros na banda cheia);
 //   - taxa constante (bitrateMode 'constant'): na NVIDIA, em 720p a 6 Mbps, a taxa variável dava
 //     quadros de 15,7 KB em média (acima do alvo) e quadro-chave de 46 KB; a constante, 12,5 KB e
 //     quadro-chave de 15 KB. Quadro grande é fila;
@@ -44,10 +46,15 @@ const CAB = 20; // id do quadro (u32), pedaço (u16), total (u16), chave (u8), v
 const CAB2 = 28; // versão 2: + saiu da captura (f64, ms no relógio de quem compartilha)
 const VERSAO = 2;
 const TTL_MS = 90; // vida de cada pedaço no canal
-const FILA_MS = 20; // um quadro novo que fosse esperar mais que isso na fila de envio é pulado
-const FILA_TETO = 256 * 1024; // e com a fila acima disso, sempre (a velocidade medida pode estar velha)
-const CONTROLE_MS = 250; // de quanto em quanto a banda do codificador é revista (ajustarBanda)
-const BANDA_MIN = 0.5; // a banda desce até metade da do tamanho, no máximo
+// Trava da fila de envio: com mais que tantos quadros da banda cheia esperando, o próximo é pulado.
+// Só trava: o bufferedAmount do Chrome atualiza aos trancos (ver o cabeçalho); quem manda na banda é
+// a fila medida do outro lado.
+const FILA_QUADROS = 4;
+const FILA_MIN = 48 * 1024;
+const FILA_AVISO_MS = 500; // de quanto em quanto quem joga conta a viagem medida (ajustarBanda)
+const FILA_ALTA = 30; // ms de fila (viagem p90 − a menor) que fazem a banda descer...
+const FILA_BAIXA = 12; // ...e abaixo disso, ela pode subir
+const BANDA_MIN = 0.6; // a banda desce até 60% da do tamanho, no máximo
 const PEDIR_CHAVE_MS = 250; // intervalo mínimo entre pedidos de quadro-chave
 const PING_MS = 500;
 const SEGURANDO = 3; // quadros dentro do decodificador depois de ele já ter soltado algum...
@@ -222,6 +229,8 @@ export class TurboEnvio {
       else if (m.chave) { const s = this.sessoes.get(id); if (s) s.chave = true; }
       // t: a hora daqui, para quem joga acertar a diferença entre os relógios
       else if (m.ping != null) { try { canal.send(JSON.stringify({ pong: m.ping, t: performance.now() })); } catch { /* fechou */ } }
+      // a fila medida do lado de lá (versão 2): é ela que manda na banda
+      else if (m.fila && typeof m.fila === 'object') { const s = this.sessoes.get(id); if (s) this.ajustarBanda(s, m.fila); }
       else if (m.desligar) this.desligar(id);
     };
     canal.onclose = () => this.desligar(id, canal);
@@ -238,9 +247,8 @@ export class TurboEnvio {
     // a tela saiu do ar (a cópia da trilha não acaba sozinha com ela)
     original.addEventListener('ended', () => this.desligar(id), { once: true });
     const s = { id, key, canal, chave: true, quadro: 0, enc: null, cfg: null, config: null, banda: 0, trilha: original.clone(), parar: false, pulados: 0, enviados: 0,
-      cfgEnviada: null, ajuste: { desde: performance.now(), pulos: 0, esperas: 0, n: 0, folga: 0, mudou: 0 },
-      totalBytes: 0, leitura: null, taxa: null, taxaEm: 0, // a fila de envio (medirFila); taxa em bytes por ms
-      tempos: new Map(), conta: { enviados: 0, bytes: 0, pulados: 0, fila: 0, cod: [], espera: [], ultimo: performance.now() } };
+      cfgEnviada: null, ajuste: { altas: 0, baixas: 0, mudou: 0, ultima: null }, // ajustarBanda
+      tempos: new Map(), conta: { enviados: 0, bytes: 0, pulados: 0, fila: 0, cod: [], ultimo: performance.now() } };
     this.sessoes.set(id, s);
     // quem joga com a versão 2 lê o cabeçalho com a hora da captura (a antiga leria como imagem)
     s.v2 = Number(versao) >= 2;
@@ -287,52 +295,37 @@ export class TurboEnvio {
     s.chave = true; // a descrição nova sai junto com o próximo quadro-chave (enviarQuadro)
   }
 
-  // Quanto um quadro novo esperaria na fila de envio do canal antes de começar a sair (ms): o que está
-  // nela ÷ a velocidade com que ela esvazia. A velocidade só é medida entre duas leituras com a fila
-  // ocupada nas duas (aí é a do caminho: o Wi-Fi, o controle de congestionamento do canal). Sem medida
-  // (a fila esvazia entre um quadro e outro: o caminho folga) ou com a medida velha (meio segundo sem
-  // fila), conta com o caminho a 3 vezes a banda: um quadro que acabou de entrar não é fila.
-  medirFila(s, agora) {
-    const fila = s.canal.bufferedAmount;
-    const saiu = s.totalBytes - fila;
-    const u = s.leitura;
-    if (!u || agora - u.t >= 4) {
-      if (u && u.fila > 0 && fila > 0) {
-        const taxa = (saiu - u.saiu) / (agora - u.t);
-        s.taxa = s.taxa == null ? taxa : s.taxa * 0.7 + taxa * 0.3;
-        s.taxaEm = agora;
-      }
-      s.leitura = { t: agora, saiu, fila };
-    }
-    if (s.taxa != null && agora - s.taxaEm > 500) s.taxa = null;
-    if (!fila) return 0;
-    const taxa = s.taxa ?? ((s.banda || 6_000_000) / 8000) * 3;
-    return fila / Math.max(1, taxa);
+  // A trava da fila de envio: FILA_QUADROS quadros da banda cheia (720p: ~50 KB; 1080p: ~83 KB)
+  limiteFila(s) {
+    return Math.max(FILA_MIN, (bandaDe(s.cfg?.h ?? 720) / 8 / 60) * FILA_QUADROS);
   }
 
-  // A cada CONTROLE_MS: com 2 quadros pulados ou a espera média acima de metade do limite, a banda vai
-  // para 90% do caminho medido (sem medida, 85% da atual), até BANDA_MIN da do tamanho; meio segundo sem
-  // aperto, sobe 10%, até a do tamanho. Trocar só a banda não gera quadro-chave nem descrição nova
-  // (medido na NVIDIA e no OpenH264); no máximo uma troca a cada CONTROLE_MS.
-  ajustarBanda(s, agora, espera) {
+  // Quem joga conta a cada FILA_AVISO_MS a viagem medida dos quadros (fila de envio + rede): o p90 e a
+  // menor dos últimos ~10 s. A diferença é a fila de verdade (o erro entre os relógios some na conta).
+  // Acima de FILA_ALTA em 2 avisos seguidos (1 s): a banda desce 15%, até BANDA_MIN da do tamanho;
+  // abaixo de FILA_BAIXA em 4 seguidos (2 s): sobe 10%, até a do tamanho; no meio, fica. No relatório
+  // de 2026-11-03 02:10 (Wi-Fi de casa, PS5 → iPhone) a fila assim dava ~10–16 ms: a banda não mexeria.
+  // Trocar só a banda não gera quadro-chave nem descrição nova (medido na NVIDIA e no OpenH264).
+  ajustarBanda(s, f) {
+    const p90 = Number(f.p90);
+    const base = Number(f.base);
+    if (!Number.isFinite(p90) || !Number.isFinite(base)) return;
+    const fila = Math.max(0, p90 - base);
     const a = s.ajuste;
-    a.esperas += espera;
-    a.n++;
-    if (agora - a.desde < CONTROLE_MS) return;
-    const apertou = a.pulos >= 2 || a.esperas / a.n > FILA_MS / 2;
-    Object.assign(a, { pulos: 0, esperas: 0, n: 0, desde: agora });
+    a.ultima = Math.round(fila * 10) / 10;
+    a.altas = fila > FILA_ALTA ? a.altas + 1 : 0;
+    a.baixas = fila < FILA_BAIXA ? a.baixas + 1 : 0;
     if (!s.enc || s.enc.state !== 'configured' || !s.config) return;
     const max = bandaDe(s.cfg.h);
     let nova = s.banda;
-    if (apertou) {
-      a.folga = 0;
-      const alvo = s.taxa != null ? s.taxa * 8000 * 0.9 : s.banda * 0.85;
-      nova = Math.max(max * BANDA_MIN, Math.min(s.banda, alvo));
-    } else if ((a.folga += CONTROLE_MS) >= 500) {
-      a.folga = 0;
+    if (a.altas >= 2) {
+      nova = Math.max(max * BANDA_MIN, s.banda * 0.85);
+      a.altas = 0;
+    } else if (a.baixas >= 4 && s.banda < max) {
       nova = Math.min(max, s.banda * 1.1);
+      a.baixas = 0;
     }
-    if (Math.abs(nova - s.banda) < s.banda * 0.05) return;
+    if (Math.abs(nova - s.banda) < s.banda * 0.03) return;
     try {
       s.config = { ...s.config, bitrate: Math.round(nova) };
       s.enc.configure(s.config);
@@ -352,19 +345,13 @@ export class TurboEnvio {
       if (done || s.parar) { frame?.close(); break; }
       try {
         const agora = performance.now();
-        const espera = this.medirFila(s, agora);
-        guardar(s.conta.espera, espera);
-        this.ajustarBanda(s, agora, espera);
-        // ia esperar demais na fila, ou o codificador está atrasado: este quadro fica de fora (o
-        // próximo é mais novo). Mandar assim mesmo só atrasaria este e todos os de depois.
-        const filaCheia = espera > FILA_MS || s.canal.bufferedAmount > FILA_TETO;
+        // fila de envio na trava ou codificador atrasado: este quadro fica de fora (o próximo é mais
+        // novo). Mandar assim mesmo só atrasaria este e todos os de depois.
+        const filaCheia = s.canal.bufferedAmount > this.limiteFila(s);
         if (s.canal.readyState !== 'open' || filaCheia || (s.enc && s.enc.encodeQueueSize > 1)) {
           s.pulados++;
           s.conta.pulados++;
-          if (filaCheia) {
-            s.conta.fila++;
-            s.ajuste.pulos++;
-          }
+          if (filaCheia) s.conta.fila++;
           continue;
         }
         await this.configurar(s, frame.displayWidth, frame.displayHeight);
@@ -393,9 +380,7 @@ export class TurboEnvio {
       if (!igual) {
         s.cfgEnviada = cfg;
         try {
-          const txt = JSON.stringify({ cfg });
-          s.canal.send(txt);
-          s.totalBytes += txt.length;
+          s.canal.send(JSON.stringify({ cfg }));
         } catch { /* canal fechou */ }
       }
     }
@@ -425,7 +410,6 @@ export class TurboEnvio {
         }
         msg.set(parte, cab);
         s.canal.send(msg);
-        s.totalBytes += msg.length;
       }
       s.enviados++;
       s.conta.enviados++;
@@ -466,13 +450,11 @@ export class TurboEnvio {
       bandaKbps: s.banda ? Math.round(s.banda / 1000) : null, // a do codificador agora (ajustarBanda)
       trocasDeBanda: s.ajuste.mudou,
       fila: s.canal.bufferedAmount,
-      esperaMs: mediana(s.conta.espera), // o que um quadro novo esperaria na fila (medirFila)
-      esperaP90: pct(s.conta.espera, 0.9),
-      caminhoKbps: s.taxa != null ? Math.round(s.taxa * 8) : null, // a velocidade medida da fila esvaziando
+      filaLaMs: s.ajuste.ultima, // a última fila medida do outro lado (viagem p90 − a menor; ajustarBanda)
       versao: s.v2 ? VERSAO : 1,
     };
     s.ajuste.mudou = 0;
-    Object.assign(s.conta, { enviados: 0, bytes: 0, pulados: 0, fila: 0, cod: [], espera: [], ultimo: agora });
+    Object.assign(s.conta, { enviados: 0, bytes: 0, pulados: 0, fila: 0, cod: [], ultimo: agora });
     return r;
   }
 
@@ -515,6 +497,8 @@ export class TurboRecebe {
       dif: null, // relógio de quem compartilha − o meu, do pong de menor ida e volta
       // o decodificador segurando quadros (segurando): 0 como veio, 1 SPS reescrito, 2 processador, 3 nada a fazer
       ajusteDec: 0,
+      // a fila medida, para quem compartilha (vigiar): viagens desde o último aviso, a menor de cada aviso
+      janelaViagem: [], minimos: [], filaEm: 0, filaMs: null,
     };
     this.s = s;
     const codecs = [];
@@ -660,7 +644,11 @@ export class TurboRecebe {
     guardar(s.conta.montagem, chegou - q.t0);
     guardar(s.conta.cod, q.cod);
     // da saída do codificador lá até o último pedaço aqui: a fila de envio + a rede
-    if (q.lido != null && s.dif != null) guardar(s.conta.viagem, chegou + s.dif - (q.lido + q.cod));
+    if (q.lido != null && s.dif != null) {
+      const viagem = chegou + s.dif - (q.lido + q.cod);
+      guardar(s.conta.viagem, viagem);
+      s.janelaViagem.push(viagem); // vai para quem compartilha a cada FILA_AVISO_MS (vigiar)
+    }
     // faltou um quadro inteiro no meio: os de depois não decodificam sem ele
     if (!q.chave && q.id !== s.ultimoId + 1) this.perdeu(s);
     s.ultimoId = q.id;
@@ -757,6 +745,18 @@ export class TurboRecebe {
       s.pingEm = agora;
       try { s.canal.send(JSON.stringify({ ping: agora })); } catch { /* fechou */ }
     }
+    // A fila medida aqui vai para quem compartilha, que ajusta a banda por ela (TurboEnvio.ajustarBanda):
+    // o p90 da viagem desde o último aviso e a menor dos últimos ~10 s (a menor de cada aviso, 20 avisos)
+    if (agora - s.filaEm >= FILA_AVISO_MS && s.janelaViagem.length >= 5 && s.canal.readyState === 'open') {
+      s.filaEm = agora;
+      const v = s.janelaViagem;
+      s.janelaViagem = [];
+      guardar(s.minimos, Math.min(...v), 20);
+      const base = Math.min(...s.minimos);
+      const p90 = pct(v, 0.9);
+      s.filaMs = Math.round(Math.max(0, p90 - base) * 10) / 10;
+      try { s.canal.send(JSON.stringify({ fila: { p90, base: Math.round(base * 10) / 10 } })); } catch { /* fechou */ }
+    }
   }
 
   falhou(motivo) {
@@ -803,6 +803,7 @@ export class TurboRecebe {
       viagemMs: mediana(s.conta.viagem), // fila de envio lá + rede
       viagemP90: pct(s.conta.viagem, 0.9),
       rttMinMs: s.relogios.length ? Math.round(Math.min(...s.relogios.map((x) => x.rtt)) * 10) / 10 : null,
+      filaMs: s.filaMs, // a última fila mandada a quem compartilha (viagem p90 − a menor)
       decAjuste: [null, 'sps', 'processador', 'sem-saida'][s.ajusteDec] ?? null, // ver segurando
       codec: s.dec?.state === 'configured' ? 'h264' : null,
     };
