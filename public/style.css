@@ -1399,6 +1399,8 @@ body.touch #cam-preview { right: auto; left: 12px; bottom: auto; top: calc(108px
   font-weight: 700;
 }
 .popover.share-pop .sp-all.on { border-color: var(--line-strong); color: var(--muted); font-weight: 600; }
+.popover.share-pop .sp-auto { display: flex; align-items: center; gap: 8px; margin: 8px 2px 0; color: var(--muted); font-size: 12.5px; cursor: pointer; }
+.popover.share-pop .sp-auto input { accent-color: var(--accent); margin: 0; }
 
 /* ------------------------------------------------------------ tutorial da interface (guia-hud.js)
    O véu desfoca a sala inteira menos o buraco do ícone da vez (o clip-path com evenodd, montado no

@@ -88,6 +88,8 @@ const DEFAULTS = {
   economia: 'auto',
   // presença (ver "empresa") e se o gestor quer os alertas da equipe
   status: 'disponivel', alertasGestor: true,
+  // com a extensão pronta, a tela já entra no ar com "Permitir controle" ligado
+  controleAuto: true,
 };
 const stored = (() => {
   try { return JSON.parse(localStorage.getItem('sala3d') || '{}'); } catch { return {}; }
@@ -2210,7 +2212,24 @@ async function publishShare(stream, { file = false, height = 0, aba: abaConhecid
   updateShareButton();
   refreshScreens();
   renderPeople();
+  if (!file) liberarAoCompartilhar(res.key);
   return res.key;
+}
+
+// "Já permitir controle ao compartilhar" (menu Suas telas): quem tem a extensão pronta não precisa
+// voltar no menu para ligar o controle depois de compartilhar. Sem extensão, sem aba reconhecida
+// ou sem o ajudante do Windows (janela/tela inteira), fica como antes: desligado e sem alarde.
+async function liberarAoCompartilhar(key) {
+  if (!settings.controleAuto || !controle.ext.ok || !controle.ext.liberado) return;
+  const sh = self()?.shares.get(key);
+  if (!sh || sh.file || sh.controle || (sh.aba == null && !sh.alvo)) return;
+  if (sh.aba == null) {
+    const r = await esperandoAjudante(controle.retomarJanela());
+    if (r?.erro || self()?.shares.get(key) !== sh || sh.controle) return;
+  }
+  socket.emit('controle-permitir', { key, on: true });
+  toast('Controle já liberado nessa tela: quem abrir pode mexer. Para tirar, use o botão do cursor em "Suas telas".', 'success', 6000);
+  if (sh.alvo) conferirAdmin(sh);
 }
 
 // A extensão marca a aba compartilhada ("sala3d-aba:<id>"), mas a marca é da PÁGINA: o Chrome a
@@ -2355,6 +2374,7 @@ function renderSharePop() {
     }).join('')
     + `<button type="button" class="sp-add" data-act="add"${cabe ? '' : ' disabled'}>${icon('share', 16)}${!cabe ? 'Telas e telão ocupados' : vaiProTelao ? 'Compartilhar outra direto no telão' : 'Compartilhar outra aba ou janela'}</button>`
     + (telas.length > 1 ? '<button type="button" class="sp-stop-all" data-act="stop-all">Parar todas</button>' : '')
+    + (controle.ext.ok ? `<label class="sp-auto"><input type="checkbox" data-act="ctrl-auto"${settings.controleAuto ? ' checked' : ''}>Já permitir controle ao compartilhar</label>` : '')
     + `<p class="sp-dica">${dicaSemFaixa()}</p>`;
 }
 
@@ -2383,9 +2403,16 @@ $('#btn-share').addEventListener('click', () => {
   $('#share-pop').hidden = !$('#share-pop').hidden;
 });
 
+$('#share-pop').addEventListener('change', (e) => {
+  if (e.target.dataset?.act !== 'ctrl-auto') return;
+  settings.controleAuto = e.target.checked;
+  saveSettings();
+  toast(settings.controleAuto ? 'As próximas telas já entram com o controle liberado.' : 'As próximas telas entram só para assistir; libere o controle quando quiser.', 'info', 4000);
+});
+
 $('#share-pop').addEventListener('click', (e) => {
   const b = e.target.closest('[data-act]');
-  if (!b || b.disabled) return;
+  if (!b || b.disabled || b.dataset.act === 'ctrl-auto') return;
   const key = b.closest('[data-key]')?.dataset.key;
   switch (b.dataset.act) {
     case 'add':
