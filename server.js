@@ -318,6 +318,8 @@ app.get('/ct-voz/:id.mp3', (req, res) => Voz.servir(req, res));
 
 // Antes de entrar: a sala tem senha? Com a senha certa (ou um passe ainda válido) devolve o passe
 // que o "join" do socket exige. É POST para a senha não ficar no log de endereços.
+// Diz também o mapa da sala (sempre, com ou sem senha: é só a paisagem): a página monta o mapa
+// antes de entrar e, sabendo qual é, não precisa entrar, ver que era outro e recarregar.
 app.post('/sala-acesso', express.json({ limit: '2kb' }), async (req, res) => {
   const b = obj(req.body);
   const id = idDaSala(b.sala);
@@ -325,16 +327,17 @@ app.post('/sala-acesso', express.json({ limit: '2kb' }), async (req, res) => {
   if (!rooms.has(id)) setTimeout(() => { if (rooms.get(id)?.users.size === 0) rooms.delete(id); }, 30 * 60 * 1000);
   const sala = getRoom(id);
   await carregarSala(sala);
-  if (!sala.entradaHash) return res.json({ ok: true, protegida: false });
-  if (b.passe && passeValido(sala, b.passe)) return res.json({ ok: true, protegida: true, passe: passeDa(sala) });
-  if (!b.senha) return res.json({ ok: false, protegida: true });
+  const responder = (r) => res.json({ ...r, mapa: sala.config?.mapa || MAPA_PADRAO });
+  if (!sala.entradaHash) return responder({ ok: true, protegida: false });
+  if (b.passe && passeValido(sala, b.passe)) return responder({ ok: true, protegida: true, passe: passeDa(sala) });
+  if (!b.senha) return responder({ ok: false, protegida: true });
   const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
-  if (bloqueado(ip)) return res.json({ ok: false, protegida: true, erro: 'Muitas tentativas. Espere alguns minutos.' });
+  if (bloqueado(ip)) return responder({ ok: false, protegida: true, erro: 'Muitas tentativas. Espere alguns minutos.' });
   if (typeof b.senha !== 'string' || b.senha.length > 100 || !confereSenha(b.senha, sala.entradaHash)) {
     podeTentar(ip);
-    return res.json({ ok: false, protegida: true, erro: 'Senha da sala errada.' });
+    return responder({ ok: false, protegida: true, erro: 'Senha da sala errada.' });
   }
-  res.json({ ok: true, protegida: true, passe: passeDa(sala) });
+  responder({ ok: true, protegida: true, passe: passeDa(sala) });
 });
 
 // Lista lateral de salas (salas.js): quantas pessoas há em cada sala que a pessoa já visitou.

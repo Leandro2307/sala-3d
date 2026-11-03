@@ -169,20 +169,25 @@ ouvir(roomInput, 'input', () => {
   $('#campo-senha-sala').hidden = true;
   $('#in-senha-sala').value = '';
 });
+// A sala do endereço (sem ?sala=, a principal): se tem senha e qual o mapa dela. O mapa 3D é montado
+// enquanto a pessoa preenche o formulário, então precisa saber o mapa antes (ver baixarSala e
+// MAPA_DA_PAGINA no mapas-dados.js).
+const salaDoEndereco = idDaSala(params.get('sala'));
+const acessoDaSala = fetch('/sala-acesso', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ sala: salaDoEndereco, passe: lerPasses()[salaDoEndereco] }),
+}).then((r) => r.json()).catch(() => null);
 // veio por um convite de sala com senha: já mostra o campo (sem gastar tentativa)
 if (params.get('sala')) {
-  const sala = idDaSala(params.get('sala'));
-  fetch('/sala-acesso', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sala, passe: lerPasses()[sala] }),
-  }).then((r) => r.json()).then((r) => {
-    if (r.protegida && !r.ok) {
+  acessoDaSala.then((r) => {
+    if (r?.protegida && !r.ok) {
       $('#campo-senha-sala').hidden = false;
       $('#senha-sala-erro').hidden = true;
     }
-  }).catch(() => {});
+  });
 }
+let mapaDaSala = null;
 
 // salas ao vivo: a conexão continua a mesma dentro da sala (o main.js a herda)
 const aoVivo = new AoVivo();
@@ -266,7 +271,13 @@ function baixarSala() {
     document.head.appendChild(l);
   }
   progresso(0, 'Baixando a sala…');
-  import('./main.js').catch((err) => {
+  // Os módulos já estão baixando (modulepreload só baixa, não roda). O main.js só roda — e monta o
+  // mapa — depois de saber o mapa da sala; sem resposta em 3 s vai com o último mapa visto nela.
+  const prazo = new Promise((pronto) => setTimeout(pronto, 3000, null));
+  Promise.race([acessoDaSala, prazo]).then((r) => {
+    mapaDaSala = typeof r?.mapa === 'string' ? r.mapa : null;
+    return import('./main.js');
+  }).catch((err) => {
     console.error(err);
     falhou = true;
     carga.classList.add('erro');
@@ -287,6 +298,8 @@ window.sala3dEntrada = {
   escolha,
   aoVivo,
   get pedidoDeInstalacao() { return pedidoDeInstalacao; },
+  // o mapa da sala do endereço, segundo o servidor (null se ele não respondeu a tempo)
+  get mapaDaSala() { return mapaDaSala; },
   // montagem do mapa (world.construir): f de 0 a 1
   mapa(f) {
     barra.dataset.f = 0.6 + 0.35 * f;

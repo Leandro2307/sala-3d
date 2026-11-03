@@ -624,7 +624,8 @@ function pedirSenhaDaSala(erro = '') {
   $('#senha-sala-erro').textContent = erro;
   $('#in-senha-sala').focus();
 }
-// false = a sala pediu senha (o campo aparece); true = pode entrar
+// false = a sala pediu senha (o campo aparece); senão pode entrar, e volta o que o servidor disse
+// da sala ({ mapa }; vazio se ele não respondeu)
 async function liberarSala(sala, senha) {
   let r;
   try {
@@ -635,12 +636,12 @@ async function liberarSala(sala, senha) {
     });
     r = await resp.json();
   } catch {
-    return true; // sem resposta: tenta entrar assim mesmo, o servidor confere de novo
+    return {}; // sem resposta: tenta entrar assim mesmo, o servidor confere de novo
   }
   if (r.ok) {
     state.passe = r.passe || null;
     guardarPasse(sala, r.passe);
-    return true;
+    return r;
   }
   guardarPasse(sala, null);
   pedirSenhaDaSala(r.erro || (senha ? '' : 'Esta sala tem senha. Peça a quem te convidou.'));
@@ -986,20 +987,30 @@ async function join() {
   btn.textContent = 'Entrando…';
   audioContext();
 
-  if (!(await liberarSala(idDaSala(state.roomRequested), $('#in-senha-sala').value))) {
+  const sala = idDaSala(state.roomRequested);
+  const acesso = await liberarSala(sala, $('#in-senha-sala').value);
+  if (!acesso) {
     btn.disabled = false;
     btn.textContent = 'Entrar na sala';
     return;
+  }
+  // Escolheu no saguão uma sala de outro mapa que o montado nesta página (o mapa é montado antes,
+  // pela sala do endereço): recarrega já entrando nela com o mapa certo, ainda no saguão. Entrar
+  // primeiro e recarregar depois (mapaDaSala) era o "entra, sai e entra de novo".
+  if (MAPAS[acesso.mapa] && acesso.mapa !== MAPA_DA_PAGINA) {
+    lembrarMapa(sala, acesso.mapa);
+    return recarregarNaSala(sala, acesso.mapa);
   }
 
   let config = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
   try { config = await (await fetch('/config')).json(); } catch { /* usa o padrão */ }
 
-  // No celular (redes móveis/operadoras) o polling costuma ser mais estável; no desktop,
-  // websocket primeiro evita o upgrade polling->websocket que em algumas redes dispara
-  // disconnect/connect rápido logo após o join e faz a tela "entrar, sair e entrar de novo".
+  // No celular (redes móveis/operadoras) polling primeiro; no computador, websocket primeiro. Se
+  // o primeiro não abrir (proxy ou antivírus que barra websocket), tryAllTransports tenta o outro:
+  // sem ele o socket.io insiste só no primeiro e a pessoa nunca entra.
   socket = window.io({
     transports: isTouch ? ['polling', 'websocket'] : ['websocket', 'polling'],
+    tryAllTransports: true,
     reconnectionDelay: 1500,
     reconnectionDelayMax: 10000,
   });
@@ -1070,7 +1081,6 @@ async function join() {
   }
 
   state.joined = true;
-  state.entradaEm = Date.now();
   document.body.classList.add('na-sala'); // celular em pé: o aviso de girar (style.css)
   $('#lobby').hidden = true;
   // primeira visita: o tutorial da interface vem antes do aviso de boas-vindas
@@ -1134,31 +1144,23 @@ async function join() {
   if (tutorialHud.precisa()) setTimeout(() => tutorialHud.iniciar(iniciarGuiaBoasVindas), 900);
 }
 
+// Entra na sala e espera a resposta do servidor: os dados da sala, ou { erro: 'senha' }. Se a
+// conexão cair no meio, o join daquela conexão morreu com ela (o servidor tira quem caiu): manda de
+// novo quando o socket.io reconectar. Antes, uma queda aqui virava erro e o erro era tratado como
+// senha recusada — a página voltava para o saguão e esquecia o passe da sala.
 let joinPromise = null;
 
 function emitJoin() {
   if (joinPromise) return joinPromise;
   joinPromise = new Promise((resolve) => {
-    let limite;
-    let aoCair;
-    let aoConectar;
-
-    const limpar = () => {
-      clearTimeout(limite);
-      socket?.off('disconnect', aoCair);
-      socket?.off('connect', aoConectar);
-    };
-
-    const falhar = (erro) => {
-      limpar();
-      joinPromise = null;
-      resolve({ erro });
-    };
-
+    let feito = false;
+    let lento;
     const enviar = () => {
-      limpar();
-      limite = setTimeout(() => falhar('timeout'), 20000);
-      socket.once('disconnect', aoCair);
+      if (feito) return;
+      clearTimeout(lento);
+      lento = setTimeout(() => {
+        if (!feito) toast('A conexão está lenta. Ainda tentando entrar na sala…', 'warn', 8000);
+      }, 15000);
       socket.emit('join', {
         room: state.roomRequested,
         name: settings.name,
@@ -1173,21 +1175,17 @@ function emitJoin() {
         passe: state.passe,
         proto: 2, // recebe as posições em lote ('states'); aba antiga continua no 'state' de cada um
       }, (data) => {
-        limpar();
+        if (feito) return;
+        feito = true;
+        clearTimeout(lento);
+        socket.off('connect', enviar);
         joinPromise = null;
         resolve(data);
       });
     };
-
-    aoCair = () => falhar('desconectado');
-    aoConectar = () => enviar();
-
-    if (socket?.connected) return enviar();
-
-    // ainda não conectou: espera o connect ou desiste em 15 s
-    limite = setTimeout(() => falhar('nao-conectou'), 15000);
-    socket.once('connect', aoConectar);
-    socket.once('disconnect', aoCair);
+    // cada conexão nova (a primeira ou uma reconexão no meio da entrada) manda o join de novo
+    socket.on('connect', enviar);
+    if (socket.connected) enviar();
   });
   return joinPromise;
 }
@@ -1253,10 +1251,11 @@ function bindSocket() {
     if (state.joined) $('#reconnecting').hidden = false;
   });
   socket.on('connect', async () => {
+    // durante um join o próprio emitJoin manda de novo nesta conexão
     if (!state.joined || joinPromise) return;
-    // logo após entrar, ignora reconnects rápidos (upgrade de transporte, pulso da rede no celular)
-    if (state.entradaEm && Date.now() - state.entradaEm < 3000) return;
-    // reconexão: refaz tudo do zero com o novo id
+    // Reconexão: refaz tudo do zero com o novo id. Sempre — mesmo logo depois de entrar: o
+    // servidor já tirou quem caiu, e sem o join de novo a pessoa ficava fantasma (ninguém a via)
+    // com o "Reconectando" na tela. A troca de transporte do socket.io não passa por aqui.
     $('#reconnecting').hidden = true;
     pararTodasAsTelas(false);
     for (const id of [...state.users.keys()]) if (id !== state.selfId) removeUser(id, true);

@@ -46,14 +46,23 @@ function lidos() {
   }
 }
 
-// O mapa desta página: ?mapa= no endereço e, sem ele, o último visto nesta sala neste navegador
+// O mapa desta página, montado enquanto a pessoa ainda está no formulário de entrada. Em ordem:
+// 1. o que o servidor acabou de dizer da sala do endereço (o entrada.js pergunta antes de baixar a
+//    sala: é o mais novo, vale até sobre o ?mapa=);
+// 2. ?mapa= no endereço (recarga para outro mapa, ver recarregarNaSala no main.js);
+// 3. o último visto nesta sala neste navegador.
+// Sem ?sala= (link puro, app instalado) a sala é a principal — a que o "Entrar" usa com o campo
+// vazio. Antes, sem ?sala=, o mapa era sempre o padrão: numa sala de outro mapa a página entrava,
+// via o mapa errado e recarregava já entrando de novo ("entra, sai e entra").
+const salaDoEndereco = (raw) => String(raw || '').trim().slice(0, 40).toLowerCase().replace(/[^a-z0-9-_]/g, '') || 'principal';
 export const MAPA_DA_PAGINA = (() => {
   if (typeof location === 'undefined') return MAPA_PADRAO;
   const params = new URLSearchParams(location.search);
+  const doServidor = globalThis.sala3dEntrada?.mapaDaSala;
+  if (MAPAS[doServidor]) return doServidor;
   const pedido = params.get('mapa');
   if (MAPAS[pedido]) return pedido;
-  const sala = params.get('sala');
-  const salvo = sala && lidos()[sala.toLowerCase()];
+  const salvo = lidos()[salaDoEndereco(params.get('sala'))];
   return MAPAS[salvo] ? salvo : MAPA_PADRAO;
 })();
 
