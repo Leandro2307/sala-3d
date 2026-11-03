@@ -1087,6 +1087,7 @@ export class RTC {
       else if (channel.label === 'controle-mov') this.ligarCanal(peer, channel, 'mov');
       // modo turbo: quem joga pediu a imagem de uma tela minha por fora do vídeo (turbo.js)
       else if (channel.label === 'turbo') this.onTurbo?.(peer.id, channel);
+      else if (channel.label === 'turbo-som') this.onTurboSom?.(peer.id, channel);
     };
     pc.ontrack = (ev) => {
       const stream = ev.streams[0] || new MediaStream([ev.track]);
@@ -1148,6 +1149,20 @@ export class RTC {
     try {
       peer.turboCanal = peer.pc.createDataChannel('turbo', { ordered: true, maxPacketLifeTime: 90 });
       return peer.turboCanal;
+    } catch {
+      return null;
+    }
+  }
+
+  // O som do turbo: canal à parte, sem ordem e com vida curta — um pacote de som não espera atrás de
+  // um pedaço de imagem nem de outro pacote perdido (o tocador de lá prefere uma falha de 10 ms).
+  abrirTurboSom(id) {
+    const peer = this.peers.get(id);
+    if (!peer || ['failed', 'closed'].includes(peer.pc.connectionState)) return null;
+    try { peer.turboSomCanal?.close(); } catch { /* já fechado */ }
+    try {
+      peer.turboSomCanal = peer.pc.createDataChannel('turbo-som', { ordered: false, maxPacketLifeTime: 60 });
+      return peer.turboSomCanal;
     } catch {
       return null;
     }

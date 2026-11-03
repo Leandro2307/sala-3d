@@ -1045,6 +1045,7 @@ async function join() {
   rtc.onMicCaiu = religarMic;
   rtc.onControle = receberDireto;
   rtc.onTurbo = (id, canal) => turboEnvio.receber(id, canal);
+  rtc.onTurboSom = (id, canal) => turboEnvio.receberSom(id, canal);
   // a credencial do TURN vence (48 h na Cloudflare): renova com a página aberta
   setInterval(() => {
     fetch('/config').then((r) => r.json()).then((c) => rtc.trocarIce(c.iceServers)).catch(() => {});
@@ -2685,6 +2686,7 @@ const MOTIVO_TURBO = {
 const turboAvisado = new Set(); // motivos já avisados nesta página (o turbo vem ligado de fábrica)
 const turboRecebe = new TurboRecebe({
   abrir: (id) => rtc?.abrirTurbo(id),
+  abrirSom: (id) => rtc?.abrirTurboSom(id),
   onEvento: (texto, dados) => diagJogo.evento(texto, dados),
   onFalhou: (motivo) => {
     diagJogo.evento('modo turbo falhou: vídeo normal de volta', { motivo });
@@ -2797,7 +2799,7 @@ async function amostrarJogo() {
         const { t, captura, enviado, codificado, altura, kbps, limite, motivo, codificador, placa, imagemBaixa, codMs, filaMs } = resumo;
         // no turbo, o que só se vê daqui (a banda do codificador, os quadros pulados, os quadros-chave)
         // vai junto: o relatório de quem joga explica sozinho uma queda de banda ou de quadros
-        const tb = turbo && { bandaKbps: turbo.bandaKbps, pulados: turbo.pulados, puladosFila: turbo.puladosFila, trocasDeBanda: turbo.trocasDeBanda, filaLaMs: turbo.filaLaMs, chaves: turbo.chaves, chaveKB: turbo.chaveKB, chavesIgnoradas: turbo.chavesIgnoradas };
+        const tb = turbo && { bandaKbps: turbo.bandaKbps, pulados: turbo.pulados, puladosFila: turbo.puladosFila, trocasDeBanda: turbo.trocasDeBanda, filaLaMs: turbo.filaLaMs, chaves: turbo.chaves, chaveKB: turbo.chaveKB, chavesIgnoradas: turbo.chavesIgnoradas, som: turbo.som };
         controle.emitir('controle-volta', { key, para: id, ev: { t: 'jogo-envio', quando: t, captura, enviado, codificado, altura, kbps, limite, motivo, codificador, placa, imagemBaixa, codMs, filaMs, turbo: tb || null } });
       }
     }

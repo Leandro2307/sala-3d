@@ -7,8 +7,15 @@
 //     (H.264 na placa, modo "realtime") → pedaços de PEDACO bytes no canal "turbo" da conexão;
 //   quem joga: junta os pedaços → VideoDecoder (optimizeForLatency) → desenha no <canvas> por cima
 //     do vídeo assim que sai do decodificador. Nenhum quadro espera.
-// O som continua no WebRTC (com o buffer dele). O vídeo da conexão para essa pessoa fica desligado
-// enquanto o turbo funciona (rtc.turboPara): não disputa a banda do Wi-Fi.
+// O vídeo da conexão para essa pessoa fica desligado enquanto o turbo funciona (rtc.turboPara): não
+// disputa a banda do Wi-Fi.
+// O som também vai por fora (2026-11-03): no WebRTC ele tinha o buffer do navegador e chegava depois
+// da imagem do turbo, que não espera nada. Quem compartilha: a trilha de som da tela →
+// MediaStreamTrackProcessor → AudioEncoder (Opus, quadros de SOM_QUADRO_US) → canal "turbo-som", sem
+// ordem e com vida curta (um pacote de som não espera atrás de um pedaço de imagem nem de outro
+// perdido). Quem joga: AudioDecoder → AudioWorklet (SOM_WORKLET) com um buffer curto que cresce só
+// quando falta som. O som do WebRTC continua vindo (é a reserva) e só fica calado enquanto o do
+// turbo está tocando de verdade (TurboRecebe.vigiarSom).
 //
 // Canal "turbo" (quem joga abre, rtc.abrirTurbo): ordenado e com vida curta (TTL_MS) — um pedaço
 // perdido no Wi-Fi é reenviado se ainda der tempo; se não der, o quadro se perde, quem joga para de
@@ -82,6 +89,102 @@ const CODECS = ['avc1.640033', 'avc1.4d0033', 'avc1.42e033', 'avc1.42001f'];
 
 export const temTurboEnvio = () => typeof MediaStreamTrackProcessor === 'function' && typeof VideoEncoder === 'function';
 export const temTurboRecebe = () => typeof VideoDecoder === 'function' && typeof EncodedVideoChunk === 'function';
+
+// ------------------------------------------------------------------ som
+const SOM_QUADRO_US = 10_000; // 10 ms de som por pacote (o Opus aceita de 2,5 a 60)
+// seq (u32), amostras/s (u32), canais (u8), livre (3), tempo em µs (f64), saiu do codificador (f64, relógio de lá)
+const SOM_CAB = 28;
+const SOM_FILA_MAX = 16 * 1024; // som esperando mais que isto no canal: o pacote novo fica de fora
+const SOM_PARADO_MS = 600; // sem pacote de som há tanto tempo: o som do WebRTC volta
+const temSomEnvio = () => typeof MediaStreamTrackProcessor === 'function' && typeof AudioEncoder === 'function';
+const temSomRecebe = () => typeof AudioDecoder === 'function' && typeof EncodedAudioChunk === 'function'
+  && typeof AudioWorkletNode === 'function' && typeof (window.AudioContext || window.webkitAudioContext) === 'function';
+
+// O tocador de quem joga (roda no fio de áudio): um anel com o som que chegou e a leitura começando
+// quando há `alvo` guardado. Faltou som (o Wi-Fi segurou): silêncio, enche de novo e o alvo cresce
+// 10 ms (até 120). 10 s sem faltar: diminui 5 ms (até 20). Fora do alvo, a leitura anda até 1% mais
+// rápida ou mais lenta (não se ouve) e acompanha a diferença entre os relógios dos dois aparelhos;
+// muito acima dele (60 ms a mais), pula direto para o alvo. Também converte a taxa de amostras
+// (o iPhone pode não abrir o AudioContext a 48 kHz).
+const SOM_WORKLET = `
+class TurboSom extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.cap = 1 << 16;
+    this.b = [new Float32Array(this.cap), new Float32Array(this.cap)];
+    this.w = 0;
+    this.r = 0;
+    this.hz = sampleRate;
+    this.alvo = 0.03;
+    this.enchendo = true;
+    this.faltas = 0;
+    this.descartes = 0;
+    this.semFalta = 0;
+    this.aviso = 0;
+    this.port.onmessage = (e) => this.chegou(e.data);
+  }
+  chegou({ canais, hz }) {
+    this.hz = hz;
+    const n = canais[0].length;
+    const m = this.cap - 1;
+    if (this.w - this.r + n > m - 256) { this.r = this.w - this.alvo * hz; this.descartes++; }
+    const a = canais[0];
+    const b = canais[1] || a;
+    for (let i = 0; i < n; i++) {
+      const k = (this.w + i) & m;
+      this.b[0][k] = a[i];
+      this.b[1][k] = b[i];
+    }
+    this.w += n;
+  }
+  process(_, outputs) {
+    const L = outputs[0][0];
+    const R = outputs[0][1] || L;
+    const n = L.length;
+    const hz = this.hz;
+    const alvo = this.alvo * hz;
+    let tem = this.w - this.r;
+    if (this.enchendo && tem >= alvo) this.enchendo = false;
+    if (this.enchendo) {
+      L.fill(0);
+      R.fill(0);
+    } else {
+      if (tem > alvo + 0.06 * hz) { this.r = this.w - alvo; tem = alvo; this.descartes++; }
+      let passo = hz / sampleRate;
+      if (tem > alvo * 1.4 + 0.005 * hz) passo *= 1.01;
+      else if (tem < alvo * 0.6) passo *= 0.99;
+      const m = this.cap - 1;
+      const [x, y] = this.b;
+      for (let i = 0; i < n; i++) {
+        if (this.w - this.r < 2) {
+          for (; i < n; i++) { L[i] = 0; R[i] = 0; }
+          this.faltas++;
+          this.enchendo = true;
+          this.semFalta = 0;
+          this.alvo = Math.min(0.12, this.alvo + 0.01);
+          break;
+        }
+        const p = Math.floor(this.r);
+        const f = this.r - p;
+        const i0 = p & m;
+        const i1 = (p + 1) & m;
+        L[i] = x[i0] + (x[i1] - x[i0]) * f;
+        R[i] = y[i0] + (y[i1] - y[i0]) * f;
+        this.r += passo;
+      }
+      this.semFalta += n;
+      if (this.semFalta > sampleRate * 10 && this.alvo > 0.02) { this.alvo = Math.max(0.02, this.alvo - 0.005); this.semFalta = 0; }
+    }
+    if ((this.aviso += n) >= sampleRate / 4) {
+      this.aviso = 0;
+      this.port.postMessage({ nivelMs: ((this.w - this.r) / hz) * 1000, alvoMs: this.alvo * 1000, faltas: this.faltas, descartes: this.descartes, tocando: !this.enchendo });
+    }
+    return true;
+  }
+}
+registerProcessor('turbo-som', TurboSom);
+`;
+let urlWorklet = null;
 
 const par = (n) => Math.max(2, Math.round(n / 2) * 2);
 const bandaDe = (h) => (h >= 1000 ? 10_000_000 : h >= 700 ? 6_000_000 : 3_500_000);
@@ -220,6 +323,14 @@ export class TurboEnvio {
     this.tela = tela;
     this.onMudou = onMudou;
     this.sessoes = new Map(); // id de quem joga -> sessão
+    this.canaisSom = new Map(); // id de quem joga -> canal "turbo-som"
+  }
+
+  // quem joga abriu o canal do som comigo (só pacotes de som, daqui para lá)
+  receberSom(id, canal) {
+    canal.binaryType = 'arraybuffer';
+    this.canaisSom.set(id, canal);
+    canal.onclose = () => { if (this.canaisSom.get(id) === canal) this.canaisSom.delete(id); };
   }
 
   // quem joga abriu o canal "turbo" comigo
@@ -244,7 +355,7 @@ export class TurboEnvio {
     canal.onclose = () => this.desligar(id, canal);
   }
 
-  async ligar(id, canal, { ligar: key, codecs, altura, versao }) {
+  async ligar(id, canal, { ligar: key, codecs, altura, versao, som }) {
     this.desligar(id);
     const t = typeof key === 'string' ? this.tela(key) : null;
     const responder = (m) => { try { canal.send(JSON.stringify(m)); } catch { /* canal fechou */ } };
@@ -268,6 +379,86 @@ export class TurboEnvio {
       responder({ erro: 'codificador' });
       this.desligar(id);
     });
+    // quem joga toca o som do turbo (versão nova, com o canal "turbo-som"): o som da tela vai junto
+    if (som) this.ligarSom(s, t.stream);
+  }
+
+  // ---------------------------------------------------------------- som
+  ligarSom(s, stream) {
+    const original = stream?.getAudioTracks()[0];
+    if (!original || original.readyState !== 'live' || !temSomEnvio()) return;
+    const som = { trilha: original.clone(), enc: null, cfg: null, seq: 0, conta: { enviados: 0, bytes: 0, pulados: 0 } };
+    s.som = som;
+    this.rodarSom(s, som).catch((err) => {
+      console.warn('[turbo] som', err);
+      this.pararSom(s, som);
+    });
+  }
+
+  async rodarSom(s, som) {
+    const leitor = new MediaStreamTrackProcessor({ track: som.trilha }).readable.getReader();
+    som.leitor = leitor;
+    while (!s.parar && s.som === som) {
+      const { value: data, done } = await leitor.read();
+      if (done || s.parar || s.som !== som) { data?.close(); break; }
+      try {
+        if (!som.enc) await this.configurarSom(s, som, data);
+        // codificador atrasado (o Opus é rápido: só se o PC engasgar) — o pedaço fica de fora
+        if (som.enc?.state === 'configured' && som.enc.encodeQueueSize < 4) som.enc.encode(data);
+        else som.conta.pulados++;
+      } finally {
+        data.close();
+      }
+    }
+  }
+
+  async configurarSom(s, som, data) {
+    const canais = Math.min(2, data.numberOfChannels);
+    const base = { codec: 'opus', sampleRate: data.sampleRate, numberOfChannels: canais, bitrate: canais > 1 ? 128_000 : 96_000 };
+    let cfg = null;
+    for (const c of [{ ...base, opus: { frameDuration: SOM_QUADRO_US } }, base]) {
+      const r = await AudioEncoder.isConfigSupported(c).catch(() => null);
+      if (r?.supported) { cfg = c; break; }
+    }
+    if (!cfg) throw new Error('sem Opus');
+    if (s.som !== som) return;
+    som.enc = new AudioEncoder({
+      output: (chunk) => this.enviarSom(s, som, chunk),
+      error: (err) => { console.warn('[turbo] codificador de som', err); this.pararSom(s, som); },
+    });
+    som.enc.configure(cfg);
+    som.cfg = cfg;
+  }
+
+  enviarSom(s, som, chunk) {
+    const canal = this.canaisSom.get(s.id);
+    if (s.som !== som || !canal || canal.readyState !== 'open') return;
+    // som esperando na fila: mandar mais só atrasaria (o tocador de lá prefere uma falha curta)
+    if (canal.bufferedAmount > SOM_FILA_MAX) { som.conta.pulados++; return; }
+    const msg = new Uint8Array(SOM_CAB + chunk.byteLength);
+    const v = new DataView(msg.buffer);
+    som.seq = (som.seq + 1) >>> 0;
+    v.setUint32(0, som.seq);
+    v.setUint32(4, som.cfg.sampleRate);
+    v.setUint8(8, som.cfg.numberOfChannels);
+    v.setFloat64(12, chunk.timestamp);
+    v.setFloat64(20, performance.now());
+    chunk.copyTo(msg.subarray(SOM_CAB));
+    try {
+      canal.send(msg);
+      som.conta.enviados++;
+      som.conta.bytes += msg.length;
+    } catch {
+      som.conta.pulados++;
+    }
+  }
+
+  pararSom(s, som = s.som) {
+    if (!som) return;
+    if (s.som === som) s.som = null;
+    som.leitor?.cancel().catch(() => {});
+    som.trilha.stop();
+    try { if (som.enc && som.enc.state !== 'closed') som.enc.close(); } catch { /* já fechado */ }
   }
 
   // escolhe o codec e (re)configura o codificador para o tamanho do quadro
@@ -460,6 +651,7 @@ export class TurboEnvio {
     s.leitor?.cancel().catch(() => {});
     s.trilha.stop();
     try { if (s.enc && s.enc.state !== 'closed') s.enc.close(); } catch { /* já fechado */ }
+    this.pararSom(s);
     this.onMudou?.(id, s.key, false);
   }
 
@@ -488,7 +680,10 @@ export class TurboEnvio {
       chaveKB: s.conta.chaves ? Math.round(s.conta.chaveMax / 102.4) / 10 : null, // o maior deles
       chavesIgnoradas: s.conta.ignorados, // pedidos de quadro-chave com um ainda a caminho (pedidoDeChave)
       versao: s.v2 ? VERSAO : 1,
+      // o som pelo turbo (null: quem joga não pediu, a tela não tem som ou o Opus não abriu)
+      som: s.som ? { pps: Math.round(s.som.conta.enviados / seg), kbps: Math.round((s.som.conta.bytes * 8) / seg / 1000), pulados: s.som.conta.pulados, canal: this.canaisSom.get(id)?.readyState ?? null } : null,
     };
+    if (s.som) Object.assign(s.som.conta, { enviados: 0, bytes: 0, pulados: 0 });
     s.ajuste.mudou = 0;
     Object.assign(s.conta, { enviados: 0, bytes: 0, pulados: 0, fila: 0, cod: [], chaves: 0, chaveMax: 0, ignorados: 0, ultimo: agora });
     return r;
@@ -504,8 +699,10 @@ export class TurboEnvio {
 export class TurboRecebe {
   // abrir(idDoDono) -> canal "turbo" (rtc.abrirTurbo); onFalhou(motivo): volta ao vídeo normal;
   // onEvento(texto, dados): para o relatório
-  constructor({ abrir, onFalhou, onEvento }) {
+  // abrirSom(idDoDono) -> canal "turbo-som" (rtc.abrirTurboSom)
+  constructor({ abrir, abrirSom, onFalhou, onEvento }) {
     this.abrir = abrir;
+    this.abrirSom = abrirSom;
     this.onFalhou = onFalhou;
     this.onEvento = onEvento;
     this.s = null;
@@ -543,14 +740,21 @@ export class TurboRecebe {
       janelaViagem: [], minimos: [], filaEm: 0, filaMs: null,
     };
     this.s = s;
+    // o AudioContext nasce aqui, antes de qualquer espera: ainda dentro do toque que ligou o modo
+    // jogo (o iPhone só deixa tocar assim; senão, destrava no próximo toque — ver prepararSom)
+    this.prepararSom(s, dono);
     const codecs = [];
     for (const codec of CODECS) {
       const r = await VideoDecoder.isConfigSupported({ codec, optimizeForLatency: true }).catch(() => null);
       if (r?.supported) codecs.push(codec);
     }
+    if (s.som) {
+      const r = await AudioDecoder.isConfigSupported({ codec: 'opus', sampleRate: 48000, numberOfChannels: 2 }).catch(() => null);
+      if (this.s === s && !r?.supported) this.pararSom(s, 'sem Opus');
+    }
     if (this.s !== s) return;
     if (!codecs.length) return this.falhou('navegador');
-    const ligar = () => canal.send(JSON.stringify({ ligar: key, codecs, altura, versao: VERSAO }));
+    const ligar = () => canal.send(JSON.stringify({ ligar: key, codecs, altura, versao: VERSAO, som: !!s.som }));
     if (canal.readyState === 'open') ligar();
     else canal.addEventListener('open', ligar, { once: true });
     canal.onmessage = (e) => (typeof e.data === 'string' ? this.texto(s, e.data) : this.pedaco(s, e.data));
@@ -746,6 +950,153 @@ export class TurboRecebe {
     try { s.canal.send(JSON.stringify({ chave: true, desde: s.maiorId })); } catch { /* canal fechou */ }
   }
 
+  // ---------------------------------------------------------------- som
+  // O tocador do som do turbo: AudioContext (latência "interactive") → AudioWorklet → volume (o do
+  // vídeo da tela: o mesmo controle e o mesmo "mudo" de sempre) → alto-falante. Sem o que precisa,
+  // ou sem o canal: fica o som do WebRTC.
+  prepararSom(s, dono) {
+    if (!temSomRecebe()) return;
+    const canal = this.abrirSom?.(dono);
+    if (!canal) return;
+    canal.binaryType = 'arraybuffer';
+    let ctx;
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      try {
+        ctx = new AC({ latencyHint: 'interactive', sampleRate: 48000 });
+      } catch {
+        ctx = new AC({ latencyHint: 'interactive' });
+      }
+    } catch (err) {
+      console.warn('[turbo] som: AudioContext', err);
+      try { canal.close(); } catch { /* já fechado */ }
+      return;
+    }
+    const som = {
+      canal, ctx, no: null, ganho: ctx.createGain(), dec: null, cfg: null, ultimoSeq: 0, chegouEm: 0, errosDec: 0,
+      estado: null, // o último aviso do tocador (nivelMs, alvoMs, faltas, descartes, tocando)
+      calada: null, // a trilha de som do WebRTC que eu calei (volta no fim)
+      ativo: false,
+      conta: { pacotes: 0, bytes: 0, perdidos: 0, atrasados: 0, viagem: [], faltas: 0, descartes: 0 },
+    };
+    s.som = som;
+    som.ganho.connect(ctx.destination);
+    // o navegador barrou o som (sem toque ainda): o próximo toque ou tecla destrava
+    som.destravar = () => { if (ctx.state === 'suspended') ctx.resume().catch(() => {}); };
+    for (const ev of ['pointerdown', 'keydown', 'touchend']) addEventListener(ev, som.destravar, true);
+    som.destravar();
+    canal.onmessage = (e) => { if (typeof e.data !== 'string') this.somPacote(s, som, e.data); };
+    urlWorklet ??= URL.createObjectURL(new Blob([SOM_WORKLET], { type: 'text/javascript' }));
+    ctx.audioWorklet.addModule(urlWorklet).then(() => {
+      if (s.som !== som) return;
+      som.no = new AudioWorkletNode(ctx, 'turbo-som', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2] });
+      som.no.port.onmessage = (e) => { som.estado = e.data; };
+      som.no.connect(som.ganho);
+    }).catch((err) => {
+      console.warn('[turbo] som: tocador', err);
+      if (s.som === som) this.pararSom(s, 'tocador');
+    });
+  }
+
+  somPacote(s, som, buf) {
+    if (s.som !== som || !som.no || buf.byteLength <= SOM_CAB) return;
+    const v = new DataView(buf);
+    const seq = v.getUint32(0);
+    const hz = v.getUint32(4);
+    const canais = v.getUint8(8);
+    const ts = v.getFloat64(12);
+    const lido = v.getFloat64(20);
+    const c = som.conta;
+    c.pacotes++;
+    c.bytes += buf.byteLength;
+    // canal sem ordem: um pacote que chegou depois do seguinte já não serve
+    if (som.ultimoSeq && seq <= som.ultimoSeq && som.ultimoSeq - seq < 1e6) { c.atrasados++; return; }
+    if (som.ultimoSeq && seq > som.ultimoSeq + 1) c.perdidos += seq - som.ultimoSeq - 1;
+    som.ultimoSeq = seq;
+    som.chegouEm = performance.now();
+    if (s.dif != null) guardar(c.viagem, som.chegouEm + s.dif - lido);
+    const cfg = `${hz}/${canais}`;
+    try {
+      if (!som.dec || som.dec.state === 'closed' || som.cfg !== cfg) {
+        if (!som.dec || som.dec.state === 'closed') {
+          som.dec = new AudioDecoder({
+            output: (data) => this.tocarSom(som, data),
+            error: (err) => {
+              console.warn('[turbo] decodificador de som', err);
+              som.dec = null;
+              if (++som.errosDec > 5 && s.som === som) this.pararSom(s, 'decodificador');
+            },
+          });
+        }
+        som.dec.configure({ codec: 'opus', sampleRate: hz, numberOfChannels: canais });
+        som.cfg = cfg;
+      }
+      som.dec.decode(new EncodedAudioChunk({ type: 'key', timestamp: ts, data: new Uint8Array(buf, SOM_CAB) }));
+    } catch (err) {
+      console.warn('[turbo] som: decodificar', err);
+    }
+  }
+
+  tocarSom(som, data) {
+    try {
+      if (!som.no) return;
+      const n = data.numberOfFrames;
+      const canais = [];
+      for (let i = 0; i < Math.min(2, data.numberOfChannels); i++) {
+        const p = new Float32Array(n);
+        data.copyTo(p, { planeIndex: i, format: 'f32-planar' });
+        canais.push(p);
+      }
+      som.errosDec = 0;
+      som.no.port.postMessage({ canais, hz: data.sampleRate }, canais.map((p) => p.buffer));
+    } catch (err) {
+      console.warn('[turbo] som: tocar', err);
+    } finally {
+      data.close();
+    }
+  }
+
+  // A cada volta do vigia: o volume segue o do vídeo da tela, e o som do WebRTC fica calado só
+  // enquanto o do turbo está tocando de verdade (som destravado, pacotes chegando, tocador cheio).
+  vigiarSom(s) {
+    const som = s.som;
+    if (!som) return;
+    const v = s.video;
+    const vol = v.muted ? 0 : v.volume;
+    if (Math.abs(som.ganho.gain.value - vol) > 0.005) som.ganho.gain.setTargetAtTime(vol, som.ctx.currentTime, 0.02);
+    // Para ligar, o tocador tem que estar tocando; depois, só os pacotes parando por SOM_PARADO_MS
+    // devolvem o som ao WebRTC. Uma falha curta (o tocador enchendo de novo) não troca: no teste com
+    // Wi-Fi ruim, trocar a cada falha alternava os dois sons, com atrasos diferentes.
+    const chegando = som.ctx.state === 'running' && !!som.no && performance.now() - som.chegouEm < SOM_PARADO_MS;
+    const ativo = chegando && (som.ativo || !!som.estado?.tocando);
+    const trilha = v.srcObject?.getAudioTracks?.()[0] || null;
+    // a conexão trocou a trilha: a antiga volta como estava
+    if (som.calada && som.calada !== trilha) { som.calada.enabled = true; som.calada = null; }
+    if (ativo && trilha && !som.calada) {
+      if (trilha.enabled) { trilha.enabled = false; som.calada = trilha; }
+    } else if (!ativo && som.calada) {
+      som.calada.enabled = true;
+      som.calada = null;
+    }
+    if (ativo !== som.ativo) {
+      som.ativo = ativo;
+      this.onEvento?.(ativo ? 'modo turbo: som pelo turbo' : 'modo turbo: som pelo WebRTC (o do turbo parou)', { contexto: som.ctx.state, nivelMs: som.estado ? Math.round(som.estado.nivelMs) : null });
+    }
+  }
+
+  pararSom(s, motivo = null) {
+    const som = s.som;
+    if (!som) return;
+    s.som = null;
+    if (som.calada) som.calada.enabled = true;
+    for (const ev of ['pointerdown', 'keydown', 'touchend']) removeEventListener(ev, som.destravar, true);
+    try { som.canal.close(); } catch { /* já fechado */ }
+    try { if (som.dec && som.dec.state !== 'closed') som.dec.close(); } catch { /* já fechado */ }
+    try { som.no?.disconnect(); } catch { /* já solto */ }
+    som.ctx.close().catch(() => {});
+    if (motivo) this.onEvento?.('modo turbo: som de volta ao WebRTC', { motivo });
+  }
+
   desenhar(s, frame) {
     try {
       if (this.s !== s) return;
@@ -791,6 +1142,7 @@ export class TurboRecebe {
     if (this.s !== s) return;
     const agora = performance.now();
     this.posicionar(s);
+    this.vigiarSom(s);
     // nada apareceu: este aparelho/PC não deu conta — vídeo normal de volta
     if (!s.desenhou && agora - s.inicio > SEM_IMAGEM_MS) return this.falhou('sem-imagem');
     // parado esperando um quadro-chave que não veio (o pedido se perdeu): pede de novo
@@ -828,7 +1180,34 @@ export class TurboRecebe {
     try { if (s.canal.readyState === 'open') s.canal.send(JSON.stringify({ desligar: true })); } catch { /* fechando */ }
     try { s.canal.close(); } catch { /* já fechado */ }
     try { if (s.dec && s.dec.state !== 'closed') s.dec.close(); } catch { /* já fechado */ }
+    this.pararSom(s);
     s.tela.remove();
+  }
+
+  // o som do turbo desde a última leitura (null: está no WebRTC). bufferMs: o que o tocador tem guardado
+  // (o atraso do som aqui, fora o do alto-falante, que vai em saidaMs); faltas: vezes que o som acabou
+  statsSom(s, seg) {
+    const som = s.som;
+    if (!som) return null;
+    const c = som.conta;
+    const e = som.estado;
+    const r1 = (x) => (x == null ? null : Math.round(x * 10) / 10);
+    const r = {
+      ativo: som.ativo,
+      contexto: som.ctx.state,
+      pps: Math.round(c.pacotes / seg),
+      kbps: Math.round((c.bytes * 8) / seg / 1000),
+      perdidos: c.perdidos,
+      atrasados: c.atrasados,
+      viagemMs: mediana(c.viagem),
+      bufferMs: r1(e?.nivelMs),
+      alvoMs: r1(e?.alvoMs),
+      faltas: e ? e.faltas - c.faltas : 0,
+      descartes: e ? e.descartes - c.descartes : 0,
+      saidaMs: r1(((som.ctx.baseLatency || 0) + (som.ctx.outputLatency || 0)) * 1000),
+    };
+    Object.assign(c, { pacotes: 0, bytes: 0, perdidos: 0, atrasados: 0, viagem: [], faltas: e?.faltas ?? 0, descartes: e?.descartes ?? 0 });
+    return r;
   }
 
   // para o relatório e o selo: quadros desenhados por segundo, perdidos, pedidos de chave e o tempo
@@ -862,6 +1241,7 @@ export class TurboRecebe {
       codec: s.dec?.state === 'configured' ? 'h264' : null,
       chaves: s.conta.chaves, // quadros-chave que chegaram inteiros
       chaveKB: s.conta.chaves ? Math.round(s.conta.chaveMax / 102.4) / 10 : null, // o maior deles
+      som: this.statsSom(s, seg),
     };
     Object.assign(s.conta, { desenhados: 0, perdidos: 0, pedidos: 0, bytes: 0, montagem: [], cod: [], ponta: [], viagem: [], chaves: 0, chaveMax: 0, ultimo: agora });
     return r;

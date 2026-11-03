@@ -427,7 +427,8 @@ ida e volta 35 ms, **buffer do iPhone 75–83 ms (p90 137)** — o maior pedaço
   Quadro perdido → para até um quadro-chave e pede `{chave:true}`. Nada desenhado em 4 s →
   desliga e volta ao vídeo normal com aviso (`MOTIVO_TURBO` no main.js).
 - Enquanto o turbo funciona, `rtc.turboPara(id, key, true)` deixa o vídeo da conexão para essa
-  pessoa `active: false` (`envioPara`); o som continua no WebRTC.
+  pessoa `active: false` (`envioPara`). O som vai pelo turbo também desde 2026-11-03 (ver "Som pelo
+  turbo" abaixo); o do WebRTC continua chegando como reserva.
 - Relatório de quem joga: `turbo: { qps, perdidos, pedidosDeChave, decMs, codec }`; selo com "turbo".
 - Testado no Chrome invisível (scratchpad `turbo-teste/`: os dois lados numa página, conexão WebRTC
   local): 1280×720, 1920×1080 e 1080→720 a ~60 qps sem perda; com 1% dos pedaços jogados fora,
@@ -624,7 +625,35 @@ travadas de 120–250 ms a cada 3–6 s, como o relatório), `oscila` (20↔8), 
 2. Se o `chaveKB` vier grande (bem acima do que a banda passa em 90 ms): quadro-chave com mais tempo
    de vida — um 2º canal (`turbo-chave`, `maxPacketLifeTime` ~300) só para ele, e quem joga segurando
    os quadros que chegarem antes de ele terminar (a ordem entre canais não é garantida).
-3. O som: só sai do buffer do Chrome indo pelo turbo também (Opus no WebCodecs + AudioWorklet com
-   buffer curto). Antes, o teste barato: quem joga no cabo — se o `somBufferMs` cair, é o Wi-Fi.
+3. ~~O som pelo turbo~~: feito em 2026-11-03 (abaixo). Conferir no relatório `turbo.som` dos dois lados.
 4. Ideia sem prova: o `pad` vai pelo canal `controle` (ordenado). Um pacote perdido segura os
    analógicos que vêm atrás, como o mouse antes do `controle-mov`.
+
+### Som pelo turbo (2026-11-03)
+
+No WebRTC o som tinha o buffer do navegador e chegava depois da imagem do turbo (que não espera
+nada). Agora vai por fora também (`turbo.js`, seções "som"):
+
+- Quem joga abre um 2º canal, `turbo-som` (`rtc.abrirTurboSom`: **sem ordem**, `maxPacketLifeTime`
+  60) — no canal `turbo` (ordenado) o som esperaria atrás dos pedaços de 15 KB da imagem. O pedido
+  `{ligar}` leva `som: true`; quem compartilha antigo ignora e o som fica no WebRTC.
+- Quem compartilha (`TurboEnvio.ligarSom`): cópia da trilha de som da tela →
+  `MediaStreamTrackProcessor` → `AudioEncoder` Opus (quadros de 10 ms, 128 kbps estéreo / 96 mono) →
+  um pacote por quadro com cabeçalho de 28 bytes (seq, taxa, canais, tempo, hora de saída). Fila do
+  canal acima de 16 KB: o pacote fica de fora.
+- Quem joga (`TurboRecebe.prepararSom`): `AudioDecoder` → `AudioWorklet` (`SOM_WORKLET`, por Blob):
+  anel com alvo de 30 ms; faltou som → +10 ms (até 120); 10 s sem faltar → −5 ms (até 20); leitura
+  até 1% mais rápida/lenta fora do alvo (acompanha os relógios); 60 ms acima → pula. Converte a taxa
+  se o AudioContext não abrir a 48 kHz.
+- O volume segue o `<video>` da tela (`volume` e `muted`). O som do WebRTC continua chegando e só é
+  calado (`track.enabled = false`) enquanto o do turbo toca de verdade: contexto `running`, pacote
+  há menos de 600 ms e tocador cheio. Uma falha curta não devolve (alternaria os dois sons); só os
+  pacotes parados por 600 ms → volta sozinho (evento no relatório).
+- Teste no Chrome invisível (scratchpad `teste-som/`: as duas pontas numa página, tom de 440 Hz):
+  rede local → buffer 19–29 ms, alvo 30, nenhuma falha; 5% de perda + travada de 150 ms a cada 2 s →
+  alvo sobe a 90–110, ~1 falha por travada, sem voltar ao WebRTC. Volume e mudo seguem o vídeo.
+- Relatório: quem joga `turbo.som { ativo, contexto, pps, kbps, perdidos, atrasados, viagemMs,
+  bufferMs, alvoMs, faltas, descartes, saidaMs }`; quem compartilha `la.turbo.som { pps, kbps,
+  pulados, canal }`.
+- **Riscos não testados**: iPhone com a chave do silencioso ligada (o Web Audio respeita a chave, o
+  `<video>` não — o som pode sumir); AudioContext criado fora de um toque (destrava no próximo).
