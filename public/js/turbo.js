@@ -82,6 +82,13 @@ const pct = (v, p) => {
 const mediana = (v) => pct(v, 0.5);
 const guardar = (lista, v, max = 120) => { lista.push(v); if (lista.length > max) lista.shift(); };
 const SEM_IMAGEM_MS = 4000; // ligou e nenhum quadro apareceu: o turbo não serve aqui, volta ao normal
+// A conexão não aguenta o turbo: volta ao vídeo normal (que baixa a resolução sozinho). No relatório de
+// 2026-11-04 13:16 a conexão ia pelo servidor TURN (160 ms de ida e volta, contra 15 ms na direta): o
+// canal não levava nem os 6 Mbps do piso da banda em 1080p, a fila foi a 3,4 s e a imagem ficou parada
+// (0 qps) por 25 s sem o turbo desistir. O vídeo normal, no mesmo caminho, deu 27 qps em 720p.
+const PAROU_MS = 2500; // já desenhou, e nenhum quadro novo há tanto tempo
+const FILA_LENTA = 600; // ms de fila medida (viagem p90 − a menor)...
+const FILA_LENTA_MS = 3000; // ...seguidos por tanto tempo
 
 // H.264 nos perfis High, Main e Baseline (nível 5.1: até 1080p acima de 60 qps). Quem joga diz quais
 // decodifica; quem compartilha escolhe o primeiro que a placa dele codifica.
@@ -746,6 +753,7 @@ export class TurboRecebe {
       ajusteDec: 0,
       // a fila medida, para quem compartilha (vigiar): viagens desde o último aviso, a menor de cada aviso
       janelaViagem: [], minimos: [], filaEm: 0, filaMs: null,
+      filaLentaDesde: 0, // desde quando a fila medida passa de FILA_LENTA (vigiar)
     };
     this.s = s;
     // o AudioContext nasce aqui, antes de qualquer espera: ainda dentro do toque que ligou o modo
@@ -1153,6 +1161,12 @@ export class TurboRecebe {
     this.vigiarSom(s);
     // nada apareceu: este aparelho/PC não deu conta — vídeo normal de volta
     if (!s.desenhou && agora - s.inicio > SEM_IMAGEM_MS) return this.falhou('sem-imagem');
+    // a imagem parou ou a fila não para de crescer: a conexão não aguenta (ver PAROU_MS). Parou só
+    // conta com quadro a caminho (chegando aos pedaços ou à espera do quadro-chave): tela parada lá não
+    // manda quadro nenhum, e aí não é a conexão.
+    const aCaminho = s.esperaChave || s.montando;
+    if (aCaminho && s.desenhou && agora - s.desenhou > PAROU_MS && s.canal.readyState === 'open') return this.falhou('lento');
+    if (s.filaLentaDesde && agora - s.filaLentaDesde > FILA_LENTA_MS) return this.falhou('lento');
     // parado esperando um quadro-chave que não veio (o pedido se perdeu): pede de novo
     if (s.esperaChave && agora - s.pedidoEm > 500) this.pedirChave(s);
     if (agora - s.pingEm > PING_MS && s.canal.readyState === 'open') {
@@ -1169,6 +1183,8 @@ export class TurboRecebe {
       const base = Math.min(...s.minimos);
       const p90 = pct(v, 0.9);
       s.filaMs = Math.round(Math.max(0, p90 - base) * 10) / 10;
+      if (s.filaMs <= FILA_LENTA) s.filaLentaDesde = 0;
+      else if (!s.filaLentaDesde) s.filaLentaDesde = agora;
       try { s.canal.send(JSON.stringify({ fila: { p90, base: Math.round(base * 10) / 10 } })); } catch { /* fechou */ }
     }
   }

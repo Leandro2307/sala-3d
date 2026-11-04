@@ -2808,6 +2808,7 @@ const MOTIVO_TURBO = {
   decodificador: 'este aparelho não conseguiu decodificar',
   conexao: 'a conexão direta com quem compartilha não está aberta',
   'sem-imagem': 'nenhuma imagem chegou em 4 s',
+  lento: 'a conexão com quem compartilha não aguenta (a imagem atrasava ou parava)',
 };
 const turboAvisado = new Set(); // motivos já avisados nesta página (o turbo vem ligado de fábrica)
 const turboRecebe = new TurboRecebe({
