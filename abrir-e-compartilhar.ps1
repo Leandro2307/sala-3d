@@ -25,27 +25,15 @@ Write-Host ''
 Write-Host '  Sala 3D - abrir e compartilhar a tela inteira' -ForegroundColor Cyan
 Write-Host ''
 
-function Extensao-Instalada {
-  foreach ($arq in 'Secure Preferences', 'Preferences') {
-    $f = Join-Path $pastaPerfil $arq
-    if (-not (Test-Path -LiteralPath $f)) { continue }
-    try {
-      $j = Get-Content -LiteralPath $f -Raw -Encoding UTF8 | ConvertFrom-Json
-      $e = $j.extensions.settings.$Extensao
-      if ($e -and $e.path) { return $true }
-    } catch { }
-  }
-  return $false
-}
-
 # ------------------------------------------------------------------ 1. extensão
-if (Extensao-Instalada) {
-  Write-Host '  Extensao: instalada.' -ForegroundColor Green
-} else {
-  # O Chrome nao deixa instalar extensao "sem compactacao" sozinho (o --load-extension nao vale
-  # mais no Chrome oficial): abre a pagina e a pasta, e espera os tres cliques.
+# O registro nas preferencias nao diz se ela carregou: desde o Chrome 157 ele fica la e a extensao
+# some a cada abertura. O carregar-extensao.ps1 olha a lista de chrome://extensions e, se ela nao
+# estiver, aperta "Carregar sem compactacao" e escolhe a pasta sozinho.
+& powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'carregar-extensao.ps1') -Perfil $Perfil
+if ($LASTEXITCODE -ne 0) {
+  # nao deu sozinho: abre a pagina e a pasta, e espera os cliques
   $pasta = Join-Path $PSScriptRoot 'extensao'
-  Write-Host '  A extensao nao esta instalada. Vou abrir as extensoes do Chrome e a pasta dela:' -ForegroundColor Yellow
+  Write-Host '  Carregue a extensao a mao:' -ForegroundColor Yellow
   Write-Host '    1. Ligue o "Modo do desenvolvedor" (canto de cima, a direita).'
   Write-Host '    2. Clique em "Carregar sem compactacao" e escolha a pasta:'
   Write-Host "       $pasta"
@@ -53,14 +41,8 @@ if (Extensao-Instalada) {
   Write-Host '       (o caminho ja esta copiado: e so colar na barra de endereco da janela)' -ForegroundColor DarkGray
   Start-Process $chrome -ArgumentList "--profile-directory=$Perfil", 'chrome://extensions'
   Start-Process explorer.exe -ArgumentList "`"$pasta`""
-  while (-not (Extensao-Instalada)) {
-    Write-Host ''
-    Read-Host '  Depois de carregar, aperte Enter'
-    Start-Sleep -Seconds 1
-    if (-not (Extensao-Instalada)) { Write-Host '  Ainda nao achei a extensao no Chrome. Confira e aperte Enter de novo.' -ForegroundColor Yellow }
-  }
-  Write-Host '  Extensao: instalada.' -ForegroundColor Green
-  Write-Host '  (na sala, clique no icone da extensao e em "Liberar este site" uma vez)' -ForegroundColor DarkGray
+  Write-Host ''
+  Read-Host '  Depois de carregar, aperte Enter'
 }
 
 # ------------------------------------------------------------------ 2. ajudante do Windows
