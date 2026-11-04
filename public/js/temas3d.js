@@ -836,20 +836,24 @@ export function texturaRua() {
         ctx.fill();
       }
     }
-    // neve varrida para as beiradas
-    const g = ctx.createLinearGradient(0, 0, w, 0);
-    g.addColorStop(0, 'rgba(250,252,255,0.95)');
-    g.addColorStop(0.16, 'rgba(250,252,255,0)');
-    g.addColorStop(0.84, 'rgba(250,252,255,0)');
-    g.addColorStop(1, 'rgba(250,252,255,0.95)');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, w, h);
     for (let i = 0; i < 60; i++) {
       ctx.fillStyle = 'rgba(250,252,255,0.6)';
       ctx.beginPath();
       ctx.arc(Math.random() * w, Math.random() * h, 3 + Math.random() * 6, 0, Math.PI * 2);
       ctx.fill();
     }
+    // neve varrida para as beiradas: as pedras somem aos poucos e aparece o meio-fio branco por
+    // baixo (cidade.js). Transparente e não pintado de branco: num cruzamento a beirada de uma rua
+    // fica por cima das pedras da outra, e aí o que aparece são as pedras, não uma faixa de neve
+    ctx.globalCompositeOperation = 'destination-in';
+    const g = ctx.createLinearGradient(0, 0, w, 0);
+    g.addColorStop(0, 'rgba(0,0,0,0.05)');
+    g.addColorStop(0.16, 'rgba(0,0,0,1)');
+    g.addColorStop(0.84, 'rgba(0,0,0,1)');
+    g.addColorStop(1, 'rgba(0,0,0,0.05)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+    ctx.globalCompositeOperation = 'source-over';
   }, { repetir: true });
 }
 

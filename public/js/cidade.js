@@ -200,7 +200,17 @@ export function construirRuas(g, ruas, L) {
     calcadas.push(...fazer(r.largura, Y_RUA + 0.014 + ri * 0.0006));
   });
   if (guias.length) g.add(fundir(guias, guia, { recebe: true }));
-  if (calcadas.length) g.add(fundir(calcadas, mat, { recebe: true }));
+  if (!calcadas.length) return;
+  const piso = fundir(calcadas, mat, { recebe: true });
+  if (TEMA.rua.tipo === 'pedra') {
+    // as pedras da vila de neve têm a beirada transparente (texturaRua): sem gravar profundidade,
+    // a beirada de uma rua deixa ver as pedras da outra no cruzamento; desenhada antes das outras
+    // transparências (a neve caindo, as placas), que ficam por cima dela
+    mat.transparent = true;
+    mat.depthWrite = false;
+    piso.renderOrder = -1;
+  }
+  g.add(piso);
 }
 
 // píer de tábuas sobre a lagoa: o deque um pouco acima da água, estacas e um corrimão baixo
