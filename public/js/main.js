@@ -523,6 +523,8 @@ const params = new URLSearchParams(window.location.search);
 nameInput.value = settings.name;
 // o entrada.js já preencheu (e a pessoa pode ter digitado outra sala enquanto o mapa subia)
 if (!entrada) roomInput.value = params.get('sala') || '';
+// ?compartilhar=tela&entrar=1: ao entrar, já compartilha a tela inteira (ver o fim do join)
+let compartilharAoEntrar = params.get('compartilhar') === 'tela' && params.get('entrar') === '1';
 $('#in-mic').checked = settings.mic;
 
 // ------------------------------------------------------------------ app (PWA)
@@ -960,6 +962,7 @@ if (pedidoDaEntrada.offline) {
 } else if (params.get('entrar') === '1') {
   const url = new URL(window.location.href);
   url.searchParams.delete('entrar');
+  url.searchParams.delete('compartilhar'); // recarregar a página não compartilha de novo
   window.history.replaceState(null, '', url);
   // depois do resto do módulo: o join usa coisas declaradas mais abaixo
   if (nameInput.value.trim()) setTimeout(join, 0);
@@ -1175,6 +1178,13 @@ async function join() {
     if (!temTelaCheia) $('#tb-full').hidden = true; // iOS não tem tela cheia de página
   }
   if (offlineJogo) return entrarNoJogoOffline(offlineJogo);
+  // ?compartilhar=tela (o "abrir-e-compartilhar.bat" do PC de quem compartilha): já entra pedindo
+  // a tela inteira. O .bat abre o Chrome com --auto-select-desktop-capture-source, que escolhe a
+  // tela sem o seletor; sem ele, o seletor abre já na aba "Tela inteira".
+  if (compartilharAoEntrar) {
+    compartilharAoEntrar = false;
+    setTimeout(() => novaTela(undefined, { monitor: true }), 1500);
+  }
   // com a barra e os botões de toque já no lugar (e um respiro para a sala aparecer)
   if (tutorialHud.precisa()) setTimeout(() => tutorialHud.iniciar(iniciarGuiaBoasVindas), 900);
 }
@@ -2120,7 +2130,8 @@ setInterval(medirFoco, 1000);
 // Dá para compartilhar várias abas/janelas ao mesmo tempo: cada clique em "Compartilhar outra"
 // abre o seletor do navegador de novo e a escolhida vai para a próxima tela livre.
 // telaEscolhida: veio do (+) de uma tela (aí não pergunta onde)
-async function novaTela(telaEscolhida) {
+// monitor: o seletor abre já na tela inteira (o ?compartilhar=tela)
+async function novaTela(telaEscolhida, { monitor = false } = {}) {
   if (shareBusy) return;
   if (!navigator.mediaDevices?.getDisplayMedia) {
     toast('Seu navegador não permite compartilhar a tela aqui. Use Chrome/Edge no computador (https ou localhost).', 'error', 6000);
@@ -2137,7 +2148,7 @@ async function novaTela(telaEscolhida) {
   let key;
   shareBusy = true;
   try {
-    stream = await rtc.captureScreen();
+    stream = await rtc.captureScreen({ monitor });
     key = await publishShare(stream, { tela });
     if (!key) return;
   } catch (err) {

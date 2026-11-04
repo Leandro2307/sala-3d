@@ -739,7 +739,8 @@ export class RTC {
 
   // pede a aba/janela/tela ao navegador; quem chama decide se publica (addScreen)
 
-  async captureScreen() {
+  // monitor: o seletor abre na aba "Tela inteira"
+  async captureScreen({ monitor = false } = {}) {
     escolherCodec(); // se ainda não rodou (ver constructor): fica pronto enquanto a pessoa escolhe a janela
     const preset = this.preset();
     const qps = this.qpsCaptura();
@@ -749,6 +750,7 @@ export class RTC {
         width: { max: preset.width },
         height: { max: preset.height },
         cursor: 'always',
+        ...(monitor ? { displaySurface: 'monitor' } : {}),
       },
       audio: {
         channelCount: { ideal: 2 }, // estéreo: no modo jogo vai assim para quem joga (comEstereo)
