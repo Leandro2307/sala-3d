@@ -90,6 +90,8 @@ const DEFAULTS = {
   status: 'disponivel', alertasGestor: true,
   // com a extensão pronta, a tela já entra no ar com "Permitir controle" ligado
   controleAuto: true,
+  // compartilhar pelo OBS: qual monitor (1 = o 1 do Windows) o OBS captura, para o controle
+  obsMonitor: 1,
 };
 const stored = (() => {
   try { return JSON.parse(localStorage.getItem('sala3d') || '{}'); } catch { return {}; }
@@ -1137,6 +1139,8 @@ async function join() {
   }
   // o OBS chega como câmera: só no computador (o celular também tem câmera, mas não tem OBS)
   if (!navigator.mediaDevices?.getDisplayMedia || isTouch) $('#obs-row').hidden = true;
+  // com um monitor só não há o que escolher (o screen:0)
+  $('#obs-monitor-field').hidden = $('#obs-row').hidden || window.screen.isExtended === false;
   sfx.join();
   if (isTouch) {
     touchPad = setupTouchControls(player, {
@@ -2300,7 +2304,8 @@ async function capturarAbaDaExtensao({ streamId, aba, site, titulo }) {
 async function publishShare(stream, { file = false, height = 0, aba: abaConhecida = null, tela, qps = null } = {}) {
   // no escritório, numa tela da sala onde a pessoa está
   const sala = world.salaEm(player.pos.x, player.pos.z);
-  const superficie = file ? null : stream.getVideoTracks()[0]?.getSettings?.().displaySurface ?? null;
+  // a do OBS conta como tela inteira (modo jogo, controle pelo ajudante)
+  const superficie = file ? null : qps ? 'monitor' : stream.getVideoTracks()[0]?.getSettings?.().displaySurface ?? null;
   const res = await new Promise((resolve) => socket.emit('share-start', { streamId: stream.id, sala, tela, superficie }, resolve));
   if (!res?.ok) {
     if (!file) for (const t of stream.getTracks()) t.stop();
@@ -2313,8 +2318,12 @@ async function publishShare(stream, { file = false, height = 0, aba: abaConhecid
   // aba que veio pela extensão (Alt+Shift+S): já se sabe qual é, sem a marca da página
   const aba = file ? null : abaConhecida ?? controle.abaDe(stream, (nova) => marcaDaAba(res.key, nova));
   // não é aba (janela ou tela inteira): quem clica é o ajudante nativo da extensão
-  const alvo = file || aba != null ? null : controle.alvoDe(stream);
-  self().shares.set(res.key, { key: res.key, slot: res.slot ?? null, streamId: stream.id, video, file, aba, alvo, controle: false, site: null, titulo: null, obs: !!qps });
+  // A câmera do OBS não tem o rótulo "screen:N:0" da captura de tela: vale o monitor dos Ajustes.
+  // O ajudante numera os monitores como o Windows (o 1 do Windows é o screen:0).
+  const alvo = file || aba != null ? null
+    : qps ? { superficie: 'monitor', rotulo: `screen:${Math.max(0, (Number(settings.obsMonitor) || 1) - 1)}:0` }
+    : controle.alvoDe(stream);
+  self().shares.set(res.key, { key: res.key, slot: res.slot ?? null, streamId: stream.id, video, file, aba, alvo, controle: false, site: null, titulo: null, obs: !!qps, superficie });
   avisarAbas();
   rtc.addScreen(res.key, stream, { file, height, qps });
   // captura: a trilha acaba quando a pessoa clica em "Parar" na barra do navegador.
@@ -3191,6 +3200,15 @@ function renderExtensao() {
 renderExtensao();
 if (isTouch) $('#ext-row').hidden = true; // celular não compartilha tela
 $('#ext-guia').addEventListener('click', () => abrirGuiaExtensao());
+$('#set-obs-monitor').value = String(settings.obsMonitor || 1);
+$('#set-obs-monitor').addEventListener('change', (e) => {
+  settings.obsMonitor = Number(e.target.value) || 1;
+  saveSettings();
+  // a tela do OBS no ar passa a controlar o monitor novo
+  for (const sh of self()?.shares.values() || []) {
+    if (sh.obs && sh.alvo) sh.alvo = { superficie: 'monitor', rotulo: `screen:${settings.obsMonitor - 1}:0` };
+  }
+});
 $('#obs-compartilhar').addEventListener('click', () => {
   closePanel();
   novaTela(undefined, { obs: true });

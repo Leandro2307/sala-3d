@@ -799,6 +799,16 @@
         <span><b>Compartilhar pelo OBS · 120 quadros</b><small>O navegador não captura a tela acima de ~55 quadros. No OBS: FPS em 120 e “Iniciar câmera virtual”. Vai sem som.</small></span>
         <button type="button" class="secondary small" id="obs-compartilhar">Compartilhar</button>
       </div>
+      <label class="field" id="obs-monitor-field">
+        <span>Monitor que o OBS captura <small class="opt">(para deixarem controlar)</small></span>
+        <select id="set-obs-monitor">
+          <option value="1">Monitor 1</option>
+          <option value="2">Monitor 2</option>
+          <option value="3">Monitor 3</option>
+          <option value="4">Monitor 4</option>
+        </select>
+        <small class="hint">O número do Windows (Configurações → Sistema → Tela → Identificar).</small>
+      </label>
       <div class="toggle-row" id="ext-row">
         <span><b>Extensão de controle</b><small id="ext-status">Para deixarem mexer nas suas abas</small></span>
         <button type="button" class="secondary small" id="ext-guia">Instalar</button>
