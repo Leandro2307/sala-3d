@@ -811,6 +811,8 @@ const catalogo = new CatalogoJogos({
     run.abandon();
     if (player.veiculo && id !== 'corrida') toggleVeiculo();
     exitFocus();
+    // offline: já senta na mesa do jogo (offline.js)
+    if (offlineJogo) return entrarNoJogoOffline(id);
     irParaJogo(id);
   },
   painel: (nome) => openPanel(nome),
@@ -1177,10 +1179,27 @@ async function join() {
   if (tutorialHud.precisa()) setTimeout(() => tutorialHud.iniciar(iniciarGuiaBoasVindas), 900);
 }
 
-// Offline: leva à mesa do jogo escolhido, senta e começa (os robôs completam a mesa)
+// Offline: o catálogo (só com os jogos de cartas, os únicos ligados) é a página inicial e é para
+// onde se volta ao levantar da mesa
+function abrirCatalogoOffline() {
+  if (!offlineJogo || catalogo.aberto || Date.now() - sentandoOffline < 1500) return;
+  setTimeout(() => {
+    if (!catalogo.aberto && !cartas.ativa && !poker.ativa && Date.now() - sentandoOffline > 1500) catalogo.abrir();
+  }, 150); // depois de o foco da mesa sair (ele devolve o boneco)
+}
+let sentandoOffline = 0; // indo para outra mesa pelo catálogo: o levantar da anterior não reabre ele
+cartas.aoSairDaMesa = abrirCatalogoOffline;
+poker.aoSairDaMesa = abrirCatalogoOffline;
+
+// Offline: leva à mesa do jogo escolhido, senta e começa (os robôs completam a mesa).
+// id 'catalogo': só abre o catálogo.
 function entrarNoJogoOffline(id) {
-  document.body.classList.add('modo-offline');
-  toast('Modo offline: jogos de cartas contra os robôs. Voz, telas e o resto da sala voltam com a internet.', 'info', 7000);
+  if (!document.body.classList.contains('modo-offline')) {
+    document.body.classList.add('modo-offline');
+    toast('Modo offline: jogos de cartas contra os robôs. Voz, telas e o resto da sala voltam com a internet.', 'info', 7000);
+  }
+  if (id === 'catalogo') return abrirCatalogoOffline();
+  sentandoOffline = Date.now();
   const ehPoker = id === 'poker';
   const l = ehPoker ? poker.lugar() : cartas.lugar(id);
   player.teleport([l.pos[0], l.pos[1] ?? 0, l.pos[2]], l.yaw);

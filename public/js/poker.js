@@ -1033,6 +1033,7 @@ export class Poker {
     this.socket?.emit('pk-sair', { mesa: M.i });
     this.arrumarPote(M, true);
     this.mostrarCartas(M);
+    this.aoSairDaMesa?.(); // main.js: no offline, volta ao catálogo
   }
 
   // ---------------------------------------------------------------- o painel

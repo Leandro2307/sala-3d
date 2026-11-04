@@ -4145,3 +4145,5 @@ body.toque-jogo #jogo-selo { top: auto; bottom: max(8px, env(safe-area-inset-bot
 .offline-card .secondary.block { margin-top: 0; }
 @media (max-width: 640px) { #offline { order: 12; } }
 @media (max-height: 500px) and (orientation: landscape) { .lobby-card > #offline { grid-column: 1 / -1; } }
+/* sem internet: o saguão só mostra a barra enquanto o catálogo dos jogos offline abre */
+#lobby.abrindo-offline .lobby-card > :not(.brand, .lobby-acao), #lobby.abrindo-offline .ao-vivo, #lobby.abrindo-offline #btn-join { display: none; }

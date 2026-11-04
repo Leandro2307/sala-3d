@@ -1215,6 +1215,7 @@ export class Cartas {
     this.player.override = null;
     this.player.stand();
     this.socket?.emit('ct-sair');
+    this.aoSairDaMesa?.(); // main.js: no offline, volta ao catálogo
   }
 
   // ---------------------------------------------------------------- jogar

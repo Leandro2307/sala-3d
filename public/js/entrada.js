@@ -174,11 +174,15 @@ ouvir(roomInput, 'input', () => {
 // enquanto a pessoa preenche o formulário, então precisa saber o mapa antes (ver baixarSala e
 // MAPA_DA_PAGINA no mapas-dados.js).
 const salaDoEndereco = idDaSala(params.get('sala'));
+let semRede = false; // o servidor nem respondeu: sem internet (o navigator.onLine às vezes mente)
 const acessoDaSala = fetch('/sala-acesso', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({ sala: salaDoEndereco, passe: lerPasses()[salaDoEndereco] }),
-}).then((r) => r.json()).catch(() => null);
+}).then((r) => r.json(), () => {
+  semRede = true;
+  return null;
+}).catch(() => null);
 // veio por um convite de sala com senha: já mostra o campo (sem gastar tentativa)
 if (params.get('sala')) {
   acessoDaSala.then((r) => {
@@ -287,26 +291,35 @@ async function prepararOffline() {
   caixaOffline.classList.toggle('sem-rede', !navigator.onLine);
   mostrarJogosOffline(!!versao);
   textoOffline(!navigator.onLine ? 'Sem internet: escolha um jogo' : versao ? 'Pronto: funciona sem internet' : 'Truco, Uno, 21, Cacheta e Poker contra robôs');
+  if (versao) await acessoDaSala;
+  // sem internet e com o pacote: a página inicial é o catálogo, só com os jogos de cartas
+  if (versao && (!navigator.onLine || semRede)) return abrirOffline('catalogo');
   if (versao && navigator.onLine) {
     const lista = await listaDoServidor();
     if (lista && lista.versao !== versao) baixarOffline(true, lista);
   }
 }
-$('#btn-offline-baixar').addEventListener('click', () => baixarOffline(false));
-$('#offline-jogos').addEventListener('click', (e) => {
-  const b = e.target.closest('[data-offline]');
-  if (!b) return;
+// id: o jogo, ou 'catalogo' (abre o catálogo dos jogos offline)
+function abrirOffline(id) {
   if (!nameInput.value.trim()) nameInput.value = 'Jogador';
   salvar({ name: nameInput.value.trim() });
-  if (window.sala3dEntrada.aoJogarOffline) return window.sala3dEntrada.aoJogarOffline(b.dataset.offline);
-  // a sala ainda está carregando: entra no jogo assim que ela ficar pronta
-  pedidoOffline = b.dataset.offline;
+  if (id === 'catalogo') {
+    $('#lobby').classList.add('abrindo-offline');
+    textoCarga.textContent = 'Abrindo os jogos offline…';
+  }
+  if (window.sala3dEntrada.aoJogarOffline) return window.sala3dEntrada.aoJogarOffline(id);
+  // a sala ainda está carregando: entra assim que ela ficar pronta
+  pedidoOffline = id;
   querEntrar = true;
   btn.disabled = true;
   carga.classList.add('esperando');
   progresso(Number(barra.dataset.f || 0));
+}
+$('#btn-offline-baixar').addEventListener('click', () => baixarOffline(false));
+$('#offline-jogos').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-offline]');
+  if (b) abrirOffline(b.dataset.offline);
 });
-prepararOffline();
 
 // Miniaturas dos personagens (~190 kB no total): logo depois do formulário, antes do mapa, para o
 // modal abrir com todas já na tela.
@@ -387,3 +400,6 @@ window.sala3dEntrada = {
     setTimeout(() => { carga.hidden = true; }, 1200);
   },
 };
+
+// por último: usa o botão, a barra e o window.sala3dEntrada lá de cima
+prepararOffline();
