@@ -28,13 +28,22 @@ function Apertar($el) {
 }
 
 # o seletor: um diálogo "Escolha o que compartilhar com ..." dentro de uma janela do Chrome
+# Antes dele, o botão "Compartilhar a tela inteira" da sala (?compartilhar=tela): o Chrome só abre o
+# seletor depois de um clique na página, e o Invoke do UI Automation conta como clique. (A política
+# ScreenCaptureWithoutGestureAllowedForOrigins dispensaria o clique, mas com qualquer política o
+# Chrome passa a não carregar a extensão sem compactação.)
 $fim = (Get-Date).AddSeconds($Espera)
 $dialogo = $null
+$apertouSala = $false
 while (-not $dialogo -and (Get-Date) -lt $fim) {
   $pids = @((Get-Process chrome -ErrorAction SilentlyContinue).Id)
   foreach ($w in [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)) {
     if ($pids -notcontains $w.Current.ProcessId) { continue }
     foreach ($d in $w.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)) {
+      if (-not $apertouSala -and $d.Current.Name -eq 'Compartilhar a tela inteira' -and $d.Current.ControlType -eq $Botao) {
+        $apertouSala = Apertar $d
+        continue
+      }
       if ($d.Current.ControlType -ne $Janela) { continue }
       # os botões do seletor não ficam "dentro" deste elemento na árvore: procura na janela toda
       if ($d.Current.Name -like 'Escolha o que compartilhar*' -or $d.Current.Name -like 'Choose what to share*') { $dialogo = $w; break }

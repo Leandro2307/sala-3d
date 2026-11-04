@@ -73,16 +73,15 @@ if (Test-Path $chave) {
   & powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'extensao\nativo\instalar.ps1')
 }
 
-# ------------------------------------------------------------------ 3. compartilhar sem clique
-# Sem um clique na pagina o Chrome recusa o getDisplayMedia; esta politica libera so o site da sala.
-# (Com ela o Chrome mostra "gerenciado pela organizacao" nas configuracoes: e so isso.)
+# ------------------------------------------------------------------ 3. sem politica do Chrome
+# Uma versao antiga deste script criava a ScreenCaptureWithoutGestureAllowedForOrigins. Com qualquer
+# politica o Chrome fica "gerenciado" e nao carrega a extensao sem compactacao: tira, se ficou.
 $pol = 'HKCU:\Software\Policies\Google\Chrome\ScreenCaptureWithoutGestureAllowedForOrigins'
-$jaTem = (Test-Path $pol) -and ((Get-ItemProperty $pol).PSObject.Properties | Where-Object { $_.Value -eq $Site })
-if (-not $jaTem) {
-  New-Item -Path $pol -Force | Out-Null
-  $n = 1; while ((Get-ItemProperty $pol -ErrorAction SilentlyContinue).PSObject.Properties.Name -contains "$n") { $n++ }
-  New-ItemProperty -Path $pol -Name "$n" -Value $Site -PropertyType String -Force | Out-Null
-  Write-Host '  Politica do Chrome: liberado compartilhar sem clique no site da sala.' -ForegroundColor Green
+if (Test-Path $pol) {
+  Remove-Item $pol -Recurse -Force
+  $raiz = 'HKCU:\Software\Policies\Google\Chrome'
+  if (-not (Get-ChildItem $raiz -ErrorAction SilentlyContinue) -and -not ((Get-Item $raiz).Property)) { Remove-Item $raiz -Force }
+  Write-Host '  Politica antiga do Chrome removida: feche e abra o Chrome para a extensao voltar.' -ForegroundColor Yellow
 }
 
 # ------------------------------------------------------------------ 4. abrir o app

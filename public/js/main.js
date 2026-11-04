@@ -1178,12 +1178,21 @@ async function join() {
     if (!temTelaCheia) $('#tb-full').hidden = true; // iOS não tem tela cheia de página
   }
   if (offlineJogo) return entrarNoJogoOffline(offlineJogo);
-  // ?compartilhar=tela (o "abrir-e-compartilhar.bat" do PC de quem compartilha): já entra pedindo
-  // a tela inteira. O .bat abre o Chrome com --auto-select-desktop-capture-source, que escolhe a
-  // tela sem o seletor; sem ele, o seletor abre já na aba "Tela inteira".
+  // ?compartilhar=tela (o "abrir-e-compartilhar.bat" do PC de quem compartilha): aparece o botão
+  // "Compartilhar a tela inteira". O Chrome só abre o seletor depois de um clique na página; o .bat
+  // aperta este botão pelo UI Automation do Windows (que conta como clique) e depois o Compartilhar
+  // do seletor, que já abre na aba "Tela inteira". Sem o .bat, é só clicar.
   if (compartilharAoEntrar) {
     compartilharAoEntrar = false;
-    setTimeout(() => novaTela(undefined, { monitor: true }), 1500);
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = 'Compartilhar a tela inteira';
+    b.style.cssText = 'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:9999;padding:18px 28px;font:600 18px system-ui,sans-serif;border:0;border-radius:12px;background:#2563eb;color:#fff;box-shadow:0 8px 30px #0008;cursor:pointer';
+    b.addEventListener('click', () => {
+      b.remove();
+      novaTela(undefined, { monitor: true });
+    });
+    document.body.appendChild(b);
   }
   // com a barra e os botões de toque já no lugar (e um respiro para a sala aparecer)
   if (tutorialHud.precisa()) setTimeout(() => tutorialHud.iniciar(iniciarGuiaBoasVindas), 900);
