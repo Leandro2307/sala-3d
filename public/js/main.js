@@ -8,7 +8,7 @@ import { CatalogoJogos } from './catalogo-jogos.js';
 import { SalasLaterais } from './salas.js';
 import { AoVivo, cartaoDoSaguao, COR_STATUS } from './aovivo.js';
 import { Player } from './player.js';
-import { RTC, presetDe, codecsTestados } from './rtc.js';
+import { RTC, presetDe, codecsTestados, QPS_OBS } from './rtc.js';
 import { MediaSync, PROVIDERS, preloadYouTube } from './media.js';
 import { ParkourRun, formatTime, CHECKPOINT_COUNT } from './parkour.js';
 import { CHECKPOINTS_ESCALADA } from './catedral-dados.js';
@@ -1135,6 +1135,8 @@ async function join() {
     $('#share-unsupported').hidden = false;
     $('#share-mode-field').hidden = true;
   }
+  // o OBS chega como câmera: só no computador (o celular também tem câmera, mas não tem OBS)
+  if (!navigator.mediaDevices?.getDisplayMedia || isTouch) $('#obs-row').hidden = true;
   sfx.join();
   if (isTouch) {
     touchPad = setupTouchControls(player, {
@@ -2140,9 +2142,11 @@ setInterval(medirFoco, 1000);
 // abre o seletor do navegador de novo e a escolhida vai para a próxima tela livre.
 // telaEscolhida: veio do (+) de uma tela (aí não pergunta onde)
 // monitor: o seletor abre já na tela inteira (o ?compartilhar=tela)
-async function novaTela(telaEscolhida, { monitor = false } = {}) {
+// obs: pela câmera virtual do OBS, a 120 qps (rtc.captureObs; a captura de tela do Chrome não
+// passa de ~54)
+async function novaTela(telaEscolhida, { monitor = false, obs = false } = {}) {
   if (shareBusy) return;
-  if (!navigator.mediaDevices?.getDisplayMedia) {
+  if (obs ? !navigator.mediaDevices?.getUserMedia : !navigator.mediaDevices?.getDisplayMedia) {
     toast('Seu navegador não permite compartilhar a tela aqui. Use Chrome/Edge no computador (https ou localhost).', 'error', 6000);
     return;
   }
@@ -2157,17 +2161,24 @@ async function novaTela(telaEscolhida, { monitor = false } = {}) {
   let key;
   shareBusy = true;
   try {
-    stream = await rtc.captureScreen({ monitor });
-    key = await publishShare(stream, { tela });
+    stream = obs ? await rtc.captureObs() : await rtc.captureScreen({ monitor });
+    key = await publishShare(stream, { tela, qps: obs ? QPS_OBS : null });
     if (!key) return;
   } catch (err) {
-    if (err.name !== 'NotAllowedError' && err.name !== 'AbortError') toast(`Não foi possível compartilhar: ${err.message}`, 'error');
+    if (obs && err.name === 'NotAllowedError') toast('Para compartilhar pelo OBS, permita a câmera para este site (o OBS aparece como câmera).', 'error', 7000);
+    else if (err.name === 'SemObs') toast(err.message, 'error', 8000);
+    else if (err.name !== 'NotAllowedError' && err.name !== 'AbortError') toast(`Não foi possível compartilhar: ${err.message}`, 'error');
     return;
   } finally {
     shareBusy = false;
   }
   const onde = ondeEsta(self().shares.get(key));
-  if (!stream.getAudioTracks().length) {
+  if (obs) {
+    const qps = Math.round(stream.getVideoTracks()[0]?.getSettings?.().frameRate || 0);
+    const lugar = onde === 'Telão' ? 'telão' : onde;
+    if (qps && qps < 100) toast(`O OBS está mandando ${qps} qps para o ${lugar}. Para 120, mude em Configurações → Vídeo → FPS no OBS e reinicie a câmera virtual.`, 'warn', 9000);
+    else toast(`Você está compartilhando pelo OBS no ${lugar} a ${qps || QPS_OBS} qps (sem som: a câmera virtual só leva a imagem).`, 'success', 7000);
+  } else if (!stream.getAudioTracks().length) {
     toast(`${onde} sem som. Para mandar o som, escolha uma aba ou a tela inteira e marque “Compartilhar áudio”.`, 'warn', 8000);
   } else {
     toast(`Você está compartilhando no ${onde === 'Telão' ? 'telão' : onde} (com som)`);
@@ -2285,7 +2296,8 @@ async function capturarAbaDaExtensao({ streamId, aba, site, titulo }) {
 
 // Reserva uma tela no servidor e manda o stream (captura ou arquivo) para todo mundo.
 // Devolve a chave da tela, ou null se não deu.
-async function publishShare(stream, { file = false, height = 0, aba: abaConhecida = null, tela } = {}) {
+// qps: o ritmo da captura quando passa de 60 (a tela pelo OBS)
+async function publishShare(stream, { file = false, height = 0, aba: abaConhecida = null, tela, qps = null } = {}) {
   // no escritório, numa tela da sala onde a pessoa está
   const sala = world.salaEm(player.pos.x, player.pos.z);
   const superficie = file ? null : stream.getVideoTracks()[0]?.getSettings?.().displaySurface ?? null;
@@ -2302,9 +2314,9 @@ async function publishShare(stream, { file = false, height = 0, aba: abaConhecid
   const aba = file ? null : abaConhecida ?? controle.abaDe(stream, (nova) => marcaDaAba(res.key, nova));
   // não é aba (janela ou tela inteira): quem clica é o ajudante nativo da extensão
   const alvo = file || aba != null ? null : controle.alvoDe(stream);
-  self().shares.set(res.key, { key: res.key, slot: res.slot ?? null, streamId: stream.id, video, file, aba, alvo, controle: false, site: null, titulo: null });
+  self().shares.set(res.key, { key: res.key, slot: res.slot ?? null, streamId: stream.id, video, file, aba, alvo, controle: false, site: null, titulo: null, obs: !!qps });
   avisarAbas();
-  rtc.addScreen(res.key, stream, { file, height });
+  rtc.addScreen(res.key, stream, { file, height, qps });
   // captura: a trilha acaba quando a pessoa clica em "Parar" na barra do navegador.
   // Arquivo: acaba toda vez que o vídeo chega ao fim, e isso não é motivo para parar.
   if (!file) stream.getVideoTracks()[0]?.addEventListener('ended', () => stopShare(res.key, true));
@@ -2440,6 +2452,7 @@ function superficieDe(sh) {
 // o que a pessoa escolheu no seletor do navegador
 function tipoDaTela(sh) {
   if (sh.file) return 'Vídeo do computador';
+  if (sh.obs) return `OBS · ${QPS_OBS} qps`;
   const surf = superficieDe(sh);
   return surf === 'browser' ? 'Aba' : surf === 'window' ? 'Janela' : surf === 'monitor' ? 'Tela inteira' : 'Tela';
 }
@@ -2473,6 +2486,7 @@ function renderSharePop() {
       </div>`;
     }).join('')
     + `<button type="button" class="sp-add" data-act="add"${cabe ? '' : ' disabled'}>${icon('share', 16)}${!cabe ? 'Telas e telão ocupados' : vaiProTelao ? 'Compartilhar outra direto no telão' : 'Compartilhar outra aba ou janela'}</button>`
+    + (cabe ? `<button type="button" class="sp-obs" data-act="add-obs" title="Pela câmera virtual do OBS (o OBS a ${QPS_OBS} qps, com a câmera virtual ligada)">Compartilhar pelo OBS (${QPS_OBS} qps)</button>` : '')
     + (telas.length > 1 ? '<button type="button" class="sp-stop-all" data-act="stop-all">Parar todas</button>' : '')
     + (controle.ext.ok ? `<label class="sp-auto"><input type="checkbox" data-act="ctrl-auto"${settings.controleAuto ? ' checked' : ''}>Já permitir controle ao compartilhar</label>` : '')
     + `<p class="sp-dica">${dicaSemFaixa()}</p>`;
@@ -2518,6 +2532,10 @@ $('#share-pop').addEventListener('click', (e) => {
     case 'add':
       $('#share-pop').hidden = true;
       novaTela();
+      return;
+    case 'add-obs':
+      $('#share-pop').hidden = true;
+      novaTela(undefined, { obs: true });
       return;
     case 'pin':
       togglePin(key);
@@ -3173,6 +3191,10 @@ function renderExtensao() {
 renderExtensao();
 if (isTouch) $('#ext-row').hidden = true; // celular não compartilha tela
 $('#ext-guia').addEventListener('click', () => abrirGuiaExtensao());
+$('#obs-compartilhar').addEventListener('click', () => {
+  closePanel();
+  novaTela(undefined, { obs: true });
+});
 $('#ver-tutorial').addEventListener('click', () => {
   closePanel();
   tutorialHud.iniciar();

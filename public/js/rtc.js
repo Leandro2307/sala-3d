@@ -63,10 +63,15 @@ let escolhendo = null;
 let infoCodecs = { preferido: null, forcado: null, testados: [] };
 
 // A captura de janela e tela é pedida no ritmo do preset (60). ?qps=N (30 a 240) na sala de quem
-// compartilha pede outro, para medir; o envio continua em no máximo 60 (maxFramerate do nível). Pedir
-// 75 não tirou o teto de ~57 qps da janela de um jogo (relatório de 2026-10-29 12:45: a captura nunca
-// passou de 58, e na placa Intel ficou um pouco pior).
+// compartilha pede outro, para medir; o envio continua em no máximo 60 (maxFramerate do nível; só a
+// tela do OBS passa disso, ver QPS_OBS). Pedir 75 não tirou o teto de ~57 qps da janela de um jogo
+// (relatório de 2026-10-29 12:45: a captura nunca passou de 58, e na placa Intel ficou um pouco pior).
 const QPS_PADRAO = 60;
+// Compartilhar pelo OBS: a captura de tela do Chrome/Edge no Windows não passa de ~54 qps mesmo
+// pedindo 120/144/165 (teste de 2026-11-04, monitores de 144 e 165 Hz; igual com WGC, DXGI e pela
+// extensão). A câmera virtual do OBS não tem esse teto: com o OBS a 120 qps o Chrome recebeu 120
+// e o WebRTC enviou 120. A tela que vem por ela sai no ritmo da câmera no nível máximo.
+export const QPS_OBS = 120;
 const QPS_CAPTURA = (() => {
   const n = Number(new URLSearchParams(location.search).get('qps'));
   return Number.isFinite(n) && n >= 30 && n <= 240 ? Math.round(n) : null;
@@ -713,6 +718,9 @@ export class RTC {
     let escala = nivel.linhas ? Math.max(1, altura / nivel.linhas) : nivel.escala;
     const jogo = nivel === NIVEIS.max && this.jogoTelas.has(key);
     let banda = jogo ? preset.jogoBitrate : preset.maxBitrate;
+    // tela do OBS a 120: quem olha de perto recebe todos os quadros, com mais banda para eles
+    const qpsAlto = nivel === NIVEIS.max && scr?.qps > nivel.fps ? scr.qps : null;
+    if (qpsAlto) banda = Math.min(banda * 1.5, 30_000_000);
     // modo jogo com pouca banda: resolução fixa (linhasDeJogo) em vez de deixar pular; com "Menos
     // atraso" (rapidoJogo), 720p sempre
     const linhasJogo = jogo ? Math.min(peer.linhasJogo || Infinity, peer.rapido ? 720 : Infinity) : Infinity;
@@ -726,7 +734,7 @@ export class RTC {
     return {
       active: nivel !== NIVEIS.off,
       maxBitrate: Math.round(Math.min(banda * nivel.teto, Math.max(nivel.piso, banda * parte))),
-      maxFramerate: nivel.fps,
+      maxFramerate: qpsAlto || nivel.fps,
       // medidas pares: senão a placa recusa e o Chrome codifica no processador (escalaPar)
       scaleResolutionDownBy: escalaPar(cfg.width, cfg.height, Math.max(1, escala * extra)),
     };
@@ -735,6 +743,48 @@ export class RTC {
   // os quadros por segundo pedidos à captura (o envio sai em no máximo preset.fps)
   qpsCaptura() {
     return QPS_CAPTURA ?? Math.max(QPS_PADRAO, this.preset().fps);
+  }
+
+  // o ritmo pedido à captura de uma tela minha (a do OBS fica no dela ao mudar de tamanho)
+  qpsDaTela(key) {
+    return this.screens.get(key)?.qps || this.qpsCaptura();
+  }
+
+  // A tela pela câmera virtual do OBS ("Iniciar câmera virtual", com o OBS a 120 qps). Sem som:
+  // a câmera virtual só leva a imagem.
+  async captureObs() {
+    escolherCodec();
+    const preset = this.preset();
+    const acharObs = async () => (await navigator.mediaDevices.enumerateDevices())
+      .find((d) => d.kind === 'videoinput' && /obs/i.test(d.label));
+    let cam = await acharObs();
+    if (!cam) {
+      // sem a permissão da câmera os nomes vêm vazios: pede uma vez e procura de novo
+      const s = await navigator.mediaDevices.getUserMedia({ video: true }).catch((err) => {
+        if (err.name === 'NotAllowedError') throw err;
+        return null;
+      });
+      for (const t of s?.getTracks() || []) t.stop();
+      cam = await acharObs();
+    }
+    if (!cam) throw Object.assign(new Error('Não achei a câmera virtual do OBS. Instale o OBS Studio e clique em "Iniciar câmera virtual".'), { name: 'SemObs' });
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          deviceId: { exact: cam.deviceId },
+          width: { ideal: preset.width, max: preset.width },
+          height: { ideal: preset.height, max: preset.height },
+          frameRate: { ideal: QPS_OBS, max: QPS_OBS },
+        },
+      });
+    } catch (err) {
+      if (err.name === 'NotReadableError' || err.name === 'AbortError') {
+        throw Object.assign(new Error('A câmera virtual do OBS está desligada. No OBS, clique em "Iniciar câmera virtual" e tente de novo.'), { name: 'SemObs' });
+      }
+      throw err;
+    }
+    return this.prepararCaptura(stream);
   }
 
   // pede a aba/janela/tela ao navegador; quem chama decide se publica (addScreen)
@@ -790,10 +840,11 @@ export class RTC {
 
   // Põe uma tela no ar para todo mundo (chamar depois do servidor reservar a tela).
   // Arquivo transmitido: o stream vem do próprio <video> (captureStream).
-  addScreen(key, stream, { file = false, height = 0 } = {}) {
+  // qps: o ritmo da captura quando passa de 60 (a do OBS)
+  addScreen(key, stream, { file = false, height = 0, qps = null } = {}) {
     if (file) this.prepararCaptura(stream);
     const alto = this.preset().height;
-    this.screens.set(key, { stream, extraScale: file && height > alto ? height / alto : 1 });
+    this.screens.set(key, { stream, extraScale: file && height > alto ? height / alto : 1, qps });
     for (const peer of this.peers.values()) this.addScreenTo(peer, key);
     this.retuneAll(); // a banda de cada pessoa agora é dividida por mais uma
   }
@@ -904,7 +955,7 @@ export class RTC {
     const alto = linhas || preset.height;
     const largo = linhas ? Math.round((linhas * 16) / 9) : preset.width;
     try {
-      await track.applyConstraints({ width: { max: largo }, height: { max: alto }, frameRate: { ideal: this.qpsCaptura(), max: this.qpsCaptura() } });
+      await track.applyConstraints({ width: { max: largo }, height: { max: alto }, frameRate: { ideal: this.qpsDaTela(key), max: this.qpsDaTela(key) } });
     } catch (err) {
       console.warn('[modo-jogo] tamanho da captura', err);
       return null;
@@ -929,7 +980,7 @@ export class RTC {
       const colunas = Math.round((largura * linhas) / altura);
       if (colunas % 2 || Math.abs((largura * linhas) / altura - colunas) > 0.4) continue;
       try {
-        await track.applyConstraints({ width: { max: colunas }, height: { max: linhas }, frameRate: { ideal: this.qpsCaptura(), max: this.qpsCaptura() } });
+        await track.applyConstraints({ width: { max: colunas }, height: { max: linhas }, frameRate: { ideal: this.qpsDaTela(key), max: this.qpsDaTela(key) } });
       } catch (err) {
         console.warn('[modo-jogo] reinício do codificador', err);
         return null;

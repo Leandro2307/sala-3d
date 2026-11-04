@@ -238,6 +238,15 @@ Chrome não tem): com o iPhone, a tela sempre saía no processador.
   errada, o teto de ~57 vem do ritmo em que o Windows/Chrome entrega a janela do jogo. Na Intel,
   1280×688–720 deu 36–54 (antes 44–55). O iPhone mostrou ~8 qps a menos do que decodificava no
   começo (motivo `tela`). **Voltou para 60** (`QPS_PADRAO`); o `?qps=N` continua para medir.
+- **Acima de 60: só pelo OBS (2026-11-04, PC com RTX 3060 Ti, monitores de 144 e 165 Hz).** Teste
+  isolado: `getDisplayMedia` de tela inteira aceita `frameRate` 120/144/165, mas entrega 53–55
+  (`track.stats.totalFrames`), com a página redesenhando a 160+. Igual forçando WGC ou DXGI, no
+  Edge e pela extensão (`chrome.desktopCapture`: acima de ~61 dá OverconstrainedError). A câmera
+  virtual do OBS a 120 passa: o Chrome recebe 120. Entrou "Compartilhar pelo OBS · 120 quadros"
+  (Ajustes e menu Suas telas): `rtc.captureObs()` pega a "OBS Virtual Camera" a `QPS_OBS` (120),
+  a tela guarda `qps` e o `envioPara` manda 120 (com 1,5× a banda) só no nível máximo; os outros
+  níveis seguem como antes. Conferido na sala local com duas pessoas: 1080p a 120 enviado (NVIDIA
+  H.264 MFT) e recebido. Sem som (a câmera virtual só leva a imagem).
 - **"Otimizações para jogos em janela" do Windows desligada (2026-10-29 13:06 e 13:10, Intel UHD →
   iPhone, Minecraft): a janela de 1920×1032 foi de 16–25 qps (12:14 e 12:45, ligada) para mediana
   47, máx. 53** (Intel VP9 a 13 ms/quadro, ~10 Mbps). 926×562: 52–55 (igual). Preset Leve:
