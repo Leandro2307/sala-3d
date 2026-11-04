@@ -144,14 +144,16 @@ export class Combat {
 
   // ------------------------------------------------------------------ apanhar
   // arma: id da arma (ou true, de quem ainda manda o formato antigo); n: chumbos que pegaram
-  takeHit({ dir, from, fromName, arma, n = 1 }) {
+  // dano: valor pronto (o criador por voz manda quanto a coisa criada tirou)
+  takeHit({ dir, from, fromName, arma, n = 1, dano: danoFixo }) {
     if (this.knockedOut) return;
     const [dx, dz] = Array.isArray(dir) ? dir : [0, 0];
-    const def = arma ? ARMAS[arma] || ARMAS[ARMA_PADRAO] : null;
+    const fixo = Number.isFinite(danoFixo) && danoFixo > 0;
+    const def = !fixo && arma ? ARMAS[arma] || ARMAS[ARMA_PADRAO] : null;
     const chumbos = Math.max(1, Math.min(def?.chumbos || 1, Number(n) || 1));
-    const dano = def ? def.dano * chumbos : COMBAT.damage;
+    const dano = fixo ? Math.min(COMBAT.maxHealth, danoFixo) : def ? def.dano * chumbos : COMBAT.damage;
     const forte = this.health <= dano;
-    const push = forte ? COMBAT.koKnockback : def ? def.empurrao * Math.sqrt(chumbos) : COMBAT.knockback;
+    const push = forte ? COMBAT.koKnockback : fixo ? COMBAT.knockback * Math.min(2, 0.5 + dano / 20) : def ? def.empurrao * Math.sqrt(chumbos) : COMBAT.knockback;
     this.player.vel.x += dx * push;
     this.player.vel.z += dz * push;
     this.player.vel.y = Math.max(this.player.vel.y, forte ? COMBAT.koLift : COMBAT.lift);
@@ -160,7 +162,7 @@ export class Combat {
 
     this.health = Math.max(0, this.health - dano);
     this.sinceHit = 0;
-    this.ultimaArma = def ? def.id : 'soco';
+    this.ultimaArma = fixo ? (typeof arma === 'string' ? arma : 'criador') : def ? def.id : 'soco';
     this.ultimoAgressor = { id: from || null, name: fromName || null, idade: 0 };
     this.onDamage?.();
     this.onState?.(this.health, this.inRing);

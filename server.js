@@ -499,7 +499,8 @@ const JOGOS_SALA = ['parkour', 'ringue', 'corrida', 'futebol', 'volei', 'basquet
   // o parque (public/js/parque-dados.js)
   'pingue', 'queimada', 'sinuca', 'golfe', 'truco', 'uno', 'vinteum', 'cacheta', 'poker', 'gincana', 'fantasmas', 'kart', 'pinta',
   'tapa', // tapa nos amigos, no mapa todo (e na mesa de cartas)
-  'tiro']; // tiro de brincadeira na mesa de cartas
+  'tiro', // tiro de brincadeira na mesa de cartas
+  'criador']; // criador por voz (public/js/criador.js)
 const configPadrao = () => ({
   modulo: 'lazer',
   mapa: MAPA_PADRAO, // o mapa em volta do prédio (public/js/mapas-dados.js)
@@ -910,6 +911,7 @@ function publicUser(u) {
     posto: u.posto,
     status: u.status, inativo: u.inativo, gestor: u.gestor, desde: u.statusDesde,
     p: u.p, r: u.r, a: u.a, photo: u.photo, shirt: u.shirt, char: u.char, arma: u.arma, health: u.health, ko: u.ko, moedas: u.moedas,
+    criador: u.criador || null,
   };
 }
 
@@ -1864,6 +1866,50 @@ function attachSockets(io) {
       if (!d.every(Number.isFinite)) return;
       const chumbos = Math.max(1, Math.min(arma.chumbos, Math.floor(Number(n)) || 1));
       io.to(to).emit('hit', { from: user.id, fromName: user.name, dir: d, arma: idArma, n: chumbos });
+    });
+
+    // ------------------------------------------------------------ criador por voz
+    // A frase de cada um vai para a sala; cada navegador monta a mesma arma (criador-dados.js) e
+    // simula as coisas criadas. Do tiro só vai de onde saiu e as direções. O dano quem conta é o
+    // navegador de quem atirou: aqui confere o alcance, o teto por acerto e o total por segundo.
+    socket.on('criador-arma', (texto) => {
+      if (!user || !jogoLigado(room, 'criador')) return;
+      user.criador = typeof texto === 'string' && texto.trim() ? texto.trim().slice(0, 200) : null;
+      socket.to(room.id).emit('criador-arma', { id: user.id, texto: user.criador });
+    });
+
+    socket.on('criador-tiro', (msg) => {
+      const { o, d, os } = obj(msg);
+      if (!user || !user.criador || !jogoLigado(room, 'criador')) return;
+      const agora = Date.now();
+      if (agora - (user.ultimoCriadorTiro || 0) < 50) return; // até 20 por segundo
+      user.ultimoCriadorTiro = agora;
+      const a = ponto(o);
+      if (!a || dist(a, user.p) > 8) return;
+      const dirs = (Array.isArray(d) ? d.slice(0, 30) : []).map(ponto).filter(Boolean);
+      if (!dirs.length) return;
+      // a chuva cai do céu em volta de onde se mirou: cada coisa tem a sua origem, lá em cima
+      const origens = Array.isArray(os) ? os.slice(0, dirs.length).map(ponto) : null;
+      if (origens && (origens.length !== dirs.length || origens.some((p) => !p || dist(p, user.p) > 90))) return;
+      socket.to(room.id).emit('criador-tiro', origens ? { id: user.id, o: a, d: dirs, os: origens } : { id: user.id, o: a, d: dirs });
+    });
+
+    socket.on('criador-acerto', (msg) => {
+      const { to, dano, dir } = obj(msg);
+      if (!user || !user.criador || !jogoLigado(room, 'criador')) return;
+      const alvo = typeof to === 'string' ? room.users.get(to) : null;
+      if (!alvo || alvo.id === user.id || dist(user.p, alvo.p) > 160) return;
+      if (!batalha.podeAcertar(room, user, alvo)) return;
+      const v = Math.max(1, Math.min(60, Math.round(num(dano))));
+      const agora = Date.now();
+      if (agora - (user.criadorJanela || 0) > 1000) {
+        user.criadorJanela = agora;
+        user.criadorSoma = 0;
+      }
+      user.criadorSoma += v;
+      if (user.criadorSoma > 250) return;
+      const dd = Array.isArray(dir) ? dir.slice(0, 2).map(num) : [0, 0];
+      io.to(to).emit('hit', { from: user.id, fromName: user.name, dir: dd, arma: 'criador', dano: v });
     });
 
     socket.on('health', (v) => {

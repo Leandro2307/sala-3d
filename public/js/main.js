@@ -55,6 +55,7 @@ import { Batalha } from './batalha.js';
 import { TIMES } from './batalha-dados.js';
 import { Anuncios } from './anuncios.js';
 import { acertarAvatar, tamanhoDo } from './hitbox.js';
+import { Criador } from './criador.js';
 import { icon, hydrateIcons } from './icons.js';
 import { photoFromFile } from './foto.js';
 import { Musica } from './musica.js';
@@ -1390,6 +1391,7 @@ function bindSocket() {
     if (!u) return;
     sfx.leave();
     toast(`${u.name} saiu`, 'info', 3000, u.color);
+    criador.definirArma(id, null);
     removeUser(id);
     salas.atualizar();
   });
@@ -1507,9 +1509,12 @@ function bindSocket() {
     if (def.engatilhar) setTimeout(() => sfx.engatilhar(vol), 170);
   });
 
-  socket.on('hit', ({ from, fromName, dir, arma }) => {
-    combat.takeHit({ dir, from, fromName, arma });
+  socket.on('hit', ({ from, fromName, dir, arma, dano }) => {
+    combat.takeHit({ dir, from, fromName, arma, dano });
   });
+
+  socket.on('criador-arma', ({ id, texto }) => criador.definirArma(id, texto));
+  socket.on('criador-tiro', (m) => criador.tiroRemoto(m));
 
   socket.on('ko', ({ id, name, by, byColor, fights, arena, fica }) => {
     setFightBoard(fights);
@@ -1663,6 +1668,7 @@ function addUser(data) {
   if (data.char && data.char !== 'padrao') avatar.setPersonagem(PERSONAGENS[data.char]);
   if (data.health != null) avatar.setHealth(data.health);
   if (data.ko) avatar.setKo(true);
+  if (data.criador) criador.definirArma(data.id, data.criador);
   avatar.setNetworkState(data.p, data.r, data.a);
   avatar.setPresenca(COR_STATUS[presencaDe(data)]);
   world.scene.add(avatar.group);
@@ -3629,6 +3635,7 @@ const JOGOS_DA_SALA = [
   ['dados', 'Mesa de dados', 'Apostas com moedas'],
   ['poderes', 'Poderes', 'Voar e pulo alto'],
   ['armas', 'Arma da camiseta 22', ''],
+  ['criador', 'Criador por voz', 'Segure N e fale: a frase vira arma, no mapa todo'],
   ['pingue', 'Pingue-pongue', 'Salão de jogos do parque; sozinho, contra o robô'],
   ['queimada', 'Queimada', 'Times Azul × Vermelho, com cemitério'],
   ['sinuca', 'Sinuca', 'Bola 8 no salão de jogos, até dois por mesa'],
@@ -5303,7 +5310,12 @@ $('#chat-form').addEventListener('submit', (e) => {
   e.preventDefault();
   const input = $('#chat-input');
   const text = input.value.trim();
-  if (text) socket.emit('chat', text);
+  const criar = /^\/criar\b\s*(.*)$/i.exec(text);
+  if (criar) {
+    if (criar[1]) criador.pedir(criar[1]);
+    else criador.abrirCatalogo();
+  } else if (/^\/cat[aá]logo\b/i.test(text)) criador.abrirCatalogo();
+  else if (text) socket.emit('chat', text);
   input.value = '';
   fecharSugestoes();
   input.blur();
@@ -5844,18 +5856,23 @@ iniciarCapsulas(world.scene);
 // dispara sem parar nas automáticas; nas outras, um tiro por aperto
 let gatilho = false;
 function puxarGatilho() {
+  if (criador.armado) { // a criação por voz manda enquanto está na mão
+    criador.gatilho(true);
+    return;
+  }
   atirar();
   gatilho = true;
 }
 function soltarGatilho() {
   gatilho = false;
+  criador.gatilho(false);
 }
 window.addEventListener('keyup', (e) => { if (e.code === 'KeyX') soltarGatilho(); });
 document.addEventListener('mouseup', (e) => { if (e.button === 0) soltarGatilho(); });
 window.addEventListener('blur', soltarGatilho);
 
 function atualizarArmas(dt) {
-  const fp = player.mode === 'first' && !luneta && temArma() && !player.veiculo && !player.sitting && !state.focus && !combat.knockedOut && !player.override;
+  const fp = player.mode === 'first' && !luneta && temArma() && !criador.armado && !player.veiculo && !player.sitting && !state.focus && !combat.knockedOut && !player.override;
   if (fp && visaoArma.tipo !== armaAtual()) visaoArma.setTipo(armaAtual());
   visaoArma.update(dt, {
     visivel: fp,
@@ -6118,6 +6135,40 @@ function atirar() {
   if (r.alvo) sfx.punchHit();
   socket?.emit('tiro', { to: r.alvo?.id ?? null, dir: r.dirXZ, de: arred(de), ate: arred(r.ponto), mais, n: r.n });
 }
+
+// ------------------------------------------------------------------ criador por voz (criador.js)
+// Segurar N e falar (ou /criar no chat): a frase vira a arma na mão, no mapa todo.
+const criador = new Criador({
+  world, player, localAvatar,
+  toast: (...a) => toast(...a),
+  socket: () => socket,
+  eu: () => state.selfId,
+  avatarDe: (id) => state.users.get(id)?.avatar || null,
+  // quem as coisas criadas perseguem e acertam (eu também: as dos outros vêm para cima de mim)
+  alvos: () => {
+    const l = [];
+    for (const u of state.users.values()) {
+      if (!u.avatar || u.avatar.ko) continue;
+      if (u.isSelf) {
+        if (!combat.knockedOut) l.push({ id: u.id, pos: player.pos, raio: 0.45, altura: 1.8 });
+      } else if (batalha.podeAcertar(u.id)) l.push({ id: u.id, pos: u.avatar.group.position, ...tamanhoDo(u.avatar) });
+    }
+    return l;
+  },
+  podeUsar: () => state.joined && jogoLigado('criador') && !mataMata.ativo && !batalha.ativo,
+  podeAtirar: () => !player.veiculo && !player.sitting && !state.focus && !combat.knockedOut && !player.override,
+  acertar: (id, dano, dir) => socket?.emit('criador-acerto', { to: id, dano, dir }),
+  empurrar: (v) => {
+    player.vel.x += v.x;
+    player.vel.z += v.z;
+    if (v.y > 0) { // explosão: tira do chão; o buraco negro só puxa de lado
+      player.vel.y = Math.max(player.vel.y, v.y);
+      player.grounded = false;
+      player.ground = null;
+    }
+  },
+});
+window.addEventListener('keyup', (e) => { if (e.code === 'KeyN') criador.falarFim(); });
 
 // ------------------------------------------------------------------ poderes
 function toggleVoar() {
@@ -7462,6 +7513,14 @@ window.addEventListener('keydown', (e) => {
     batalha.trocarTime();
     return;
   }
+  if (e.code === 'KeyN' && !state.focus) {
+    criador.falarInicio();
+    return;
+  }
+  if (e.code === 'KeyU' && !state.focus) {
+    criador.abrirCatalogo();
+    return;
+  }
   if (batalha.espectando && (e.code === 'ArrowLeft' || e.code === 'ArrowRight')) {
     batalha.trocarAlvo(e.code === 'ArrowRight' ? 1 : -1);
     return;
@@ -7594,7 +7653,7 @@ document.addEventListener('mousedown', (e) => {
   // dentro do ringue o botão esquerdo é o soco; fora dele continua focando telas
   if (combat.inRing && !state.focus) punch();
   else if (state.hovered) enterFocus(state.hovered);
-  else if (temArma()) puxarGatilho();
+  else if (temArma() || criador.armado) puxarGatilho();
 });
 
 // o clique (ou o F) que começou uma ação de jogo termina nela (soltar = arremessar)
@@ -7703,7 +7762,7 @@ if (params.get('debug') === '1') {
     state, player, combat, run, corrida, world, settings, punch, goToRing, respawn, mataMata, batalha, anuncios,
     toggleVeiculo, irParaLargada, jogos, irParaMesa, exitFocus, dados, quadras, jogosDoParque, pingue, queimada, sinuca, golfe, cartas, poker, gincana, fantasmas, kart, pinta,
     tocarTela, telasMudas, liberarSomDasTelas, makeVideo, mesa, controle, abrirMesa, fecharMesa, marcaDaAba,
-    publishShare, stopShare, acharTela, telasNoAr, get rtc() { return rtc; }, diagJogo, clima, ligarLuneta, futebol, surf, run,
+    publishShare, stopShare, acharTela, telasNoAr, get rtc() { return rtc; }, diagJogo, clima, ligarLuneta, futebol, surf, criador, run,
     enterFocus, get socket() { return socket; }, fisico, toqueJogo, opcoesJogo,
   };
 }
@@ -8225,6 +8284,7 @@ function frame(ts = performance.now()) {
     quadras.update(dt, t);
     for (const j of jogosDoParque) j.update(dt, t);
     surf.update(dt);
+    criador.update(dt, t);
     mataMata.update(dt);
     batalha.update(dt);
     // com poder ligado o parkour nem começa (pular alto/voar até o camarote não é recorde)
