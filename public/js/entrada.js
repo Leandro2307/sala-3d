@@ -14,7 +14,7 @@ import { AoVivo, cartaoDoSaguao } from './aovivo.js';
 import { hydrateIcons, icon } from './icons.js';
 import { isTouch, toggleFullscreen, isFullscreen, temTelaCheia } from './touch.js';
 import { photoFromFile } from './foto.js';
-import { versaoBaixada, listaDoServidor, baixarPacote } from './offline-pacote.js';
+import { versaoBaixada, listaDoServidor, baixarPacote, quantoFalta } from './offline-pacote.js';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
@@ -257,13 +257,16 @@ function mostrarJogosOffline(sim) {
   $('#offline-jogos').hidden = !sim;
   $('#btn-offline-baixar').hidden = sim || !navigator.onLine;
 }
+let listaNova = null; // a lista do servidor, quando ela é mais nova que o pacote guardado
 async function baixarOffline(silencioso, lista) {
   const carga = $('#offline-carga');
   const barraO = $('#offline-barra');
+  const atualizar = $('#btn-offline-atualizar');
   if (!silencioso) {
     carga.hidden = false;
     carga.classList.remove('erro', 'ok');
     $('#btn-offline-baixar').disabled = true;
+    atualizar.disabled = true;
   }
   try {
     await baixarPacote((f) => {
@@ -272,15 +275,18 @@ async function baixarOffline(silencioso, lista) {
     }, lista);
     mostrarJogosOffline(true);
     textoOffline('Pronto: funciona sem internet');
+    atualizar.hidden = true;
+    listaNova = null;
     if (!silencioso) {
-      $('#offline-texto').textContent = 'Baixado. Os jogos de cartas abrem sem internet.';
+      $('#offline-texto').textContent = 'Pronto: os jogos de cartas estão atualizados e abrem sem internet.';
       carga.classList.add('ok');
     }
   } catch (err) {
     if (silencioso) return;
     carga.classList.add('erro');
-    $('#offline-texto').textContent = `Não deu para baixar: ${err.message}`;
+    $('#offline-texto').textContent = `Não deu para baixar: ${err.message}. Tente de novo.`;
     $('#btn-offline-baixar').disabled = false;
+    atualizar.disabled = false;
   }
 }
 async function prepararOffline() {
@@ -296,9 +302,19 @@ async function prepararOffline() {
   if (versao && (!navigator.onLine || semRede)) return abrirOffline('catalogo');
   if (versao && navigator.onLine) {
     const lista = await listaDoServidor();
-    if (lista && lista.versao !== versao) baixarOffline(true, lista);
+    if (lista && lista.versao !== versao) {
+      // tem versão nova: mostra o botão (antes atualizava escondido e, se falhasse, ninguém sabia)
+      listaNova = lista;
+      const n = await quantoFalta(lista);
+      textoOffline('Tem atualização');
+      const b = $('#btn-offline-atualizar');
+      b.querySelector('span').textContent = n ? `Atualizar o que falta (${n} ${n === 1 ? 'arquivo novo' : 'arquivos novos'})` : 'Atualizar os jogos offline';
+      b.hidden = false;
+      b.disabled = false;
+    }
   }
 }
+$('#btn-offline-atualizar').addEventListener('click', () => baixarOffline(false, listaNova));
 // id: o jogo, ou 'catalogo' (abre o catálogo dos jogos offline)
 function abrirOffline(id) {
   if (!nameInput.value.trim()) nameInput.value = 'Jogador';

@@ -36,6 +36,22 @@ export async function listaDoServidor() {
   }
 }
 
+// quantos arquivos da lista ainda não estão no aparelho (os que mudaram de conteúdo no mesmo
+// endereço só aparecem na hora de atualizar)
+export async function quantoFalta(lista) {
+  if (!temCache() || !lista?.urls) return 0;
+  try {
+    const cache = await caches.open(CACHE_OFFLINE);
+    const tenho = new Set((await cache.keys()).map((r) => {
+      const u = new URL(r.url);
+      return u.pathname + u.search;
+    }));
+    return lista.urls.filter((u) => !tenho.has(u)).length;
+  } catch {
+    return 0;
+  }
+}
+
 // Baixa (ou atualiza) o pacote. aoProgredir(fração 0–1). Lança erro se a internet cair.
 export async function baixarPacote(aoProgredir = () => {}, lista = null) {
   if (!temCache()) throw new Error('Este navegador não guarda arquivos para usar offline.');
@@ -54,9 +70,18 @@ export async function baixarPacote(aoProgredir = () => {}, lista = null) {
   const total = fila.length + 1;
   let feitos = 0;
   const um = async (u) => {
-    // no-cache: confere com o servidor (304 se nada mudou), sem pegar uma cópia velha do navegador
-    const r = await fetch(u, { cache: 'no-cache', credentials: 'same-origin' });
-    if (!r.ok) throw new Error(`${u}: ${r.status}`);
+    // no-cache: confere com o servidor (304 se nada mudou), sem pegar uma cópia velha do navegador.
+    // Uma segunda tentativa: a internet do celular oscila, e um arquivo perdido parava tudo.
+    let r;
+    for (let tentativa = 0; tentativa < 2; tentativa++) {
+      try {
+        r = await fetch(u, { cache: 'no-cache', credentials: 'same-origin' });
+        if (r.ok) break;
+      } catch (err) {
+        if (tentativa) throw new Error(`sem conexão (${u})`);
+      }
+    }
+    if (!r?.ok) throw new Error(`${u}: ${r?.status}`);
     await cache.put(u, r);
     aoProgredir(++feitos / total);
   };
