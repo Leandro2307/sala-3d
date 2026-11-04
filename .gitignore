@@ -29,3 +29,6 @@ models-brutos/
 tmp-guerreira/
 
 __pycache__/
+
+# relatórios do modo jogo baixados do servidor (npm run relatorios)
+relatorios/

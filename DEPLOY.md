@@ -96,6 +96,16 @@ ponha no Render:
 O TURN só entra como último recurso, quando a conexão direta falha. Ele repassa o vídeo inteiro:
 uma tela em 1080p gasta cerca de 1 GB por hora por pessoa assistindo.
 
+## Relatórios do modo jogo
+
+As páginas mandam o relatório do modo jogo sozinhas para o servidor (a cada minuto e ao terminar),
+de quem compartilha e de quem joga. Ficam no MySQL (tabela `sala3d_relatorios`, criada sozinha) por
+60 dias; sem MySQL, em `dados/relatorios/`, que no Render grátis some a cada reinício.
+
+Para ler, ponha no Render **Environment** a chave `RELATORIOS_CHAVE` (qualquer senha longa) e a
+mesma linha no `.env` do PC (`RELATORIOS_CHAVE=...`). Depois, no PC: `npm run relatorios` baixa os
+novos para a pasta `relatorios/`. Sem a chave no Render, ninguém de fora consegue ler.
+
 ## Salas com senha de entrada (opcional)
 
 O dono da sala pode pôr uma senha para entrar (painel **Sala da empresa → Senha para entrar**).

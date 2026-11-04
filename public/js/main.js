@@ -2723,7 +2723,7 @@ let desenharMesmoAssim = false; // quem compartilha pediu a sala de volta (botã
 const jogoNoMeuPc = () => jogandoAqui.size > 0 && !desenharMesmoAssim;
 // Eu jogo na tela de outra pessoa: { key, video }
 let jogandoLa = null;
-const diagJogo = new DiagJogo({ toast });
+const diagJogo = new DiagJogo({ toast, contexto: () => ({ sala: state.room || null, nome: settings.name || null }) });
 
 // rapido: quem joga pediu menos atraso (opção "Menos atraso"): a tela vai para ela em 720p fixo
 function jogoAqui(key, deId, ligar, rapido = false) {

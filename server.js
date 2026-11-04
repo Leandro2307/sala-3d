@@ -380,6 +380,77 @@ app.post('/salas-status', express.json({ limit: '8kb' }), (req, res) => {
   });
 });
 
+// ---------------------------------------------------------------- relatórios do modo jogo
+// A página (jogo-diag.js) manda o relatório da sessão a cada minuto e ao terminar, dos dois lados
+// (quem compartilha e quem joga): fica no MySQL (ou em dados/relatorios/ sem ele) para não precisar
+// baixar e mandar. Ler: GET /relatorios-jogo (lista) e /relatorios-jogo/<id>, com a chave
+// RELATORIOS_CHAVE (header x-chave ou ?chave=). Sem a chave no ambiente, só do próprio PC.
+const ID_RELATORIO = /^[a-z0-9-]{8,40}$/i;
+const envioRelatorio = new Map(); // ip → [vezes no último minuto]
+const texto40 = (v) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f]/g, '').slice(0, 40) || null : null);
+
+app.post('/relatorio-jogo', express.json({ limit: '12mb' }), async (req, res) => {
+  const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+  const agora = Date.now();
+  const vezes = (envioRelatorio.get(ip) || []).filter((t) => agora - t < 60_000);
+  if (vezes.length >= 12) return res.status(429).end();
+  vezes.push(agora);
+  envioRelatorio.set(ip, vezes);
+  if (envioRelatorio.size > 5000) envioRelatorio.clear();
+  const b = obj(req.body);
+  const r = obj(b.relatorio);
+  if (!ID_RELATORIO.test(String(b.id ?? '')) || !['compartilha', 'joga'].includes(r.lado) || !Array.isArray(r.amostras)) return res.status(400).end();
+  try {
+    const json = JSON.stringify(r);
+    await banco.guardarRelatorio({
+      id: String(b.id).toLowerCase(),
+      lado: r.lado,
+      sala: texto40(b.sala),
+      nome: texto40(b.nome),
+      inicio: texto40(r.inicio),
+      resumo: { ...obj(r.resumo), fim: texto40(r.fim), amostras: r.amostras.length, quemJoga: Array.isArray(r.quemJoga) ? r.quemJoga.map((q) => texto40(q?.nome)) : [] },
+      tamanho: json.length,
+      dados: require('zlib').gzipSync(json),
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    console.warn('[relatorio-jogo]', err.code || err.message);
+    res.status(500).end();
+  }
+});
+
+function podeLerRelatorios(req) {
+  const chave = process.env.RELATORIOS_CHAVE;
+  if (!chave) {
+    const local = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
+    return local && !req.headers['x-forwarded-for'] && !req.headers['cf-connecting-ip'];
+  }
+  const dada = Buffer.from(String(req.headers['x-chave'] || req.query.chave || ''));
+  const certa = Buffer.from(chave);
+  return dada.length === certa.length && crypto.timingSafeEqual(dada, certa);
+}
+
+app.get('/relatorios-jogo', async (req, res) => {
+  if (!podeLerRelatorios(req)) return res.status(403).end();
+  try {
+    res.json(await banco.listarRelatorios(Math.min(200, Math.max(1, Number(req.query.n) || 50))));
+  } catch (err) {
+    res.status(500).json({ erro: err.code || err.message });
+  }
+});
+
+app.get('/relatorios-jogo/:id', async (req, res) => {
+  if (!podeLerRelatorios(req)) return res.status(403).end();
+  if (!ID_RELATORIO.test(req.params.id)) return res.status(400).end();
+  try {
+    const gz = await banco.lerRelatorio(req.params.id.toLowerCase());
+    if (!gz) return res.status(404).end();
+    res.type('application/json').send(require('zlib').gunzipSync(gz));
+  } catch (err) {
+    res.status(500).json({ erro: err.code || err.message });
+  }
+});
+
 app.get('/config', async (_req, res) => res.json({
   iceServers: await iceServers(),
   shareSlots: SHARE_SLOTS,

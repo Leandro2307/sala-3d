@@ -52,7 +52,26 @@ const TABELAS = [
     mudou_em  TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (nome)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  // relatórios do modo jogo (jogo-diag.js), em JSON com gzip; ver guardarRelatorio
+  `CREATE TABLE IF NOT EXISTS sala3d_relatorios (
+    id        VARCHAR(40)  NOT NULL,
+    lado      VARCHAR(12)  NOT NULL,
+    sala      VARCHAR(40)  NULL,
+    nome      VARCHAR(40)  NULL,
+    inicio    VARCHAR(30)  NULL,
+    resumo    TEXT         NULL,
+    tamanho   INT          NOT NULL DEFAULT 0,
+    dados     MEDIUMBLOB   NOT NULL,
+    criado_em TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    mudou_em  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY (mudou_em)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 ];
+
+// relatórios guardados por no máximo tantos dias (e, sem MySQL, no máximo tantos arquivos)
+const RELATORIOS_DIAS = 60;
+const RELATORIOS_MAX = 300;
 
 const salasArq = arquivo('salas.json');
 const moedasArq = arquivo('moedas.json');
@@ -153,14 +172,77 @@ async function gravarSaldos() {
   }
 }
 
+// ---------------------------------------------------------------- relatórios do modo jogo
+// r: { id, lado, sala, nome, inicio, resumo (objeto), tamanho (bytes do JSON), dados (Buffer gzip) }.
+// O mesmo id substitui (a página manda a sessão de novo a cada minuto).
+const relatoriosArq = arquivo('relatorios.json'); // sem MySQL: o índice; o conteúdo em dados/relatorios/
+const DIR_RELATORIOS = path.join(DADOS, 'relatorios');
+let limpouRelatorios = 0;
+
+async function guardarRelatorio(r) {
+  const meta = { lado: r.lado, sala: r.sala, nome: r.nome, inicio: r.inicio, resumo: r.resumo, tamanho: r.tamanho };
+  if (!pool) {
+    await fs.promises.mkdir(DIR_RELATORIOS, { recursive: true });
+    await fs.promises.writeFile(path.join(DIR_RELATORIOS, `${r.id}.json.gz`), r.dados);
+    const m = relatoriosArq.mapa;
+    m[r.id] = { ...meta, criado: m[r.id]?.criado || new Date().toISOString(), mudou: new Date().toISOString() };
+    const ids = Object.keys(m).sort((a, b) => (m[a].mudou < m[b].mudou ? 1 : -1));
+    for (const velho of ids.slice(RELATORIOS_MAX)) {
+      delete m[velho];
+      fs.promises.unlink(path.join(DIR_RELATORIOS, `${velho}.json.gz`)).catch(() => {});
+    }
+    relatoriosArq.salvar();
+    return;
+  }
+  await pool.query(
+    `INSERT INTO sala3d_relatorios (id, lado, sala, nome, inicio, resumo, tamanho, dados) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE lado = VALUES(lado), sala = VALUES(sala), nome = VALUES(nome), inicio = VALUES(inicio),
+       resumo = VALUES(resumo), tamanho = VALUES(tamanho), dados = VALUES(dados)`,
+    [r.id, r.lado, r.sala, r.nome, r.inicio, JSON.stringify(r.resumo ?? null), r.tamanho, r.dados],
+  );
+  if (Date.now() - limpouRelatorios > 6 * 3600_000) {
+    limpouRelatorios = Date.now();
+    pool.query('DELETE FROM sala3d_relatorios WHERE mudou_em < NOW() - INTERVAL ? DAY', [RELATORIOS_DIAS]).catch(() => {});
+  }
+}
+
+// os mais recentes primeiro, sem o conteúdo
+async function listarRelatorios(limite = 50) {
+  if (!pool) {
+    const m = relatoriosArq.mapa;
+    return Object.entries(m).map(([id, v]) => ({ id, ...v }))
+      .sort((a, b) => (a.mudou < b.mudou ? 1 : -1)).slice(0, limite);
+  }
+  const [linhas] = await pool.query(
+    'SELECT id, lado, sala, nome, inicio, resumo, tamanho, criado_em, mudou_em FROM sala3d_relatorios ORDER BY mudou_em DESC LIMIT ?',
+    [limite],
+  );
+  return linhas.map((l) => {
+    let resumo = null;
+    try { resumo = JSON.parse(l.resumo); } catch { /* sem resumo */ }
+    return { id: l.id, lado: l.lado, sala: l.sala, nome: l.nome, inicio: l.inicio, resumo, tamanho: l.tamanho, criado: l.criado_em, mudou: l.mudou_em };
+  });
+}
+
+// o Buffer gzip do relatório, ou null
+async function lerRelatorio(id) {
+  if (!pool) {
+    if (!relatoriosArq.mapa[id]) return null;
+    return fs.promises.readFile(path.join(DIR_RELATORIOS, `${id}.json.gz`)).catch(() => null);
+  }
+  const [linhas] = await pool.query('SELECT dados FROM sala3d_relatorios WHERE id = ?', [id]);
+  return linhas[0]?.dados ?? null;
+}
+
 // Servidor saindo (deploy, Ctrl+C): o que esperava o atraso vai para o banco antes do fim.
 async function encerrar() {
   salasArq.agora();
   moedasArq.agora();
+  relatoriosArq.agora();
   if (!pool) return;
   clearTimeout(timerSaldos);
   await gravarSaldos();
   await pool.end().catch(() => {});
 }
 
-module.exports = { iniciar, lerSala, salvarSala, lerSaldo, guardarSaldo, encerrar };
+module.exports = { iniciar, lerSala, salvarSala, lerSaldo, guardarSaldo, guardarRelatorio, listarRelatorios, lerRelatorio, encerrar };

@@ -3,11 +3,15 @@
 // tela dele, e recebe o resumo do outro lado (controle-volta 'jogo-envio'). A cada 2 s sai uma
 // linha "[modo-jogo]" no console e tudo fica guardado: o aviso tem o botão "Baixar relatório", e no
 // console sala.relatorioJogo() copia o mesmo texto.
+// O relatório também vai sozinho para o servidor (POST /relatorio-jogo): a cada minuto, ao terminar
+// e ao fechar a aba. Assim não precisa baixar e mandar, e uma página que caiu não leva tudo junto.
+// Para ler: npm run relatorios (scripts/relatorios.js).
 
 const BOM = 50; // abaixo disso (quadros por segundo) a jogatina já engasga
 const SEGUIDAS = 3; // amostras ruins em seguida (6 s) antes de avisar
 const ENTRE_AVISOS = 45_000;
 const GUARDA = 900; // amostras guardadas (30 min a cada 2 s)
+const ENVIO_MS = 60_000; // de quanto em quanto tempo o relatório da sessão vai para o servidor
 const PS5 = /chiaki|\bps5\b|playstation/i; // a janela do Remote Play do PS5 (o mesmo título de toque-jogo.js)
 
 const kbps = (bytesPorSeg) => (bytesPorSeg == null ? null : Math.round((bytesPorSeg * 8) / 100) / 10);
@@ -40,9 +44,14 @@ const MOTIVOS = {
 };
 
 export class DiagJogo {
-  constructor({ toast }) {
+  // contexto(): { sala, nome } de quem está medindo, para achar o relatório no servidor
+  constructor({ toast, contexto = () => ({}) }) {
     this.toast = toast;
+    this.contexto = contexto;
     this.sessao = null;
+    // aba fechando ou indo para o fundo (celular): manda o que tem
+    addEventListener('pagehide', () => this.enviar(true));
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') this.enviar(true); });
   }
 
   get ativo() { return !!this.sessao; }
@@ -53,6 +62,7 @@ export class DiagJogo {
     if (this.sessao) this.parar(false);
     this.sessao = {
       lado,
+      id: idNovo(),
       inicio: new Date().toISOString(),
       ambiente: { ...ambiente(info.gl), ...info.extra },
       eventos: [],
@@ -64,6 +74,8 @@ export class DiagJogo {
       quemJoga: new Map(), // quem compartilha: o que cada pessoa que joga mediu do lado dela (doQuemJoga)
     };
     this.evento('começou', { lado, ...info.extra });
+    clearInterval(this.timerEnvio);
+    this.timerEnvio = setInterval(() => this.enviar(), ENVIO_MS);
     if (info.video) this.contarQuadros(info.video);
   }
 
@@ -73,12 +85,14 @@ export class DiagJogo {
     if (!s) return null;
     this.evento('terminou');
     this.video = null;
+    clearInterval(this.timerEnvio);
+    this.enviar();
     this.ultimo = this.relatorio();
     this.sessao = null;
     if (oferecer && s.amostras.length >= 2) {
       const m = mediaDe(s.amostras.map((a) => a.fpsFinal));
       const juntos = s.quemJoga.size ? ' (com o que o aparelho de quem jogou mediu)' : '';
-      this.toast(`Modo jogo encerrado${m != null ? ` — média de ${Math.round(m)} qps` : ''}. O relatório ficou guardado${juntos}.`, 'info', 15000, null, { rotulo: 'Baixar relatório', fazer: () => this.baixar() });
+      this.toast(`Modo jogo encerrado${m != null ? ` — média de ${Math.round(m)} qps` : ''}. O relatório foi salvo no servidor${juntos}.`, 'info', 15000, null, { rotulo: 'Baixar relatório', fazer: () => this.baixar() });
     }
     return this.ultimo;
   }
@@ -347,6 +361,33 @@ export class DiagJogo {
     return JSON.stringify(this.relatorio(), null, 1);
   }
 
+  // Manda o relatório da sessão para o servidor (o mesmo id substitui o anterior lá). O texto é
+  // montado na hora (síncrono), então vale também para a sessão que está terminando.
+  // saindo: a aba está fechando — vai com keepalive, que só passa até 64 kB (pode não ir; o envio
+  // de cada minuto já guardou quase tudo).
+  enviar(saindo = false) {
+    const s = this.sessao;
+    if (!s || s.amostras.length < 2) return;
+    const agora = Date.now();
+    if (saindo && agora - (s.enviadoEm || 0) < 5000) return;
+    s.enviadoEm = agora;
+    const { sala = null, nome = null } = this.contexto() || {};
+    const texto = JSON.stringify({ id: s.id, sala, nome, relatorio: this.relatorio() });
+    (async () => {
+      const gz = await gzip(texto);
+      const corpo = gz || texto;
+      const r = await fetch('/relatorio-jogo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(gz ? { 'Content-Encoding': 'gzip' } : {}) },
+        body: corpo,
+        keepalive: saindo && (gz ? gz.size : texto.length) < 60_000,
+      });
+      if (!r.ok) console.warn('[modo-jogo] o servidor não guardou o relatório:', r.status);
+    })().catch((err) => {
+      if (!saindo) console.warn('[modo-jogo] não deu para mandar o relatório ao servidor', err);
+    });
+  }
+
   baixar() {
     const r = this.relatorio();
     if (!r) return;
@@ -371,6 +412,18 @@ export class DiagJogo {
       this.baixar();
     }
     return this.relatorio();
+  }
+}
+
+const idNovo = () => (crypto.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`);
+
+// gzip pelo navegador (o relatório de 30 min passa de 1 MB em texto); sem CompressionStream, vai cru
+async function gzip(texto) {
+  if (typeof CompressionStream !== 'function') return null;
+  try {
+    return await new Response(new Blob([texto]).stream().pipeThrough(new CompressionStream('gzip'))).blob();
+  } catch {
+    return null;
   }
 }
 

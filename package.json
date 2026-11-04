@@ -12,7 +12,8 @@
     "gerar-vozes-cartas": "node scripts/gerar-vozes-cartas.js",
     "tunnel": "cloudflared.exe tunnel --url http://localhost:3000 --no-autoupdate",
     "publico": "node scripts/publico.js",
-    "navegador": "node scripts/navegador.js"
+    "navegador": "node scripts/navegador.js",
+    "relatorios": "node scripts/relatorios.js"
   },
   "engines": {
     "node": ">=18"
