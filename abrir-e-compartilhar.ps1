@@ -1,4 +1,4 @@
-# Abre a Sala 3D no app (PWA) do Chrome, entra na sala e já compartilha a tela inteira.
+﻿# Abre a Sala 3D no app (PWA) do Chrome, entra na sala e já compartilha a tela inteira.
 # Só para este PC. Quem chama é o abrir-e-compartilhar.bat (dois cliques nele).
 param(
   [string]$Sala = 'principal'
@@ -24,18 +24,6 @@ $pastaPerfil = Join-Path $dados $Perfil
 Write-Host ''
 Write-Host '  Sala 3D - abrir e compartilhar a tela inteira' -ForegroundColor Cyan
 Write-Host ''
-
-function Fechar-Chrome {
-  $p = Get-Process chrome -ErrorAction SilentlyContinue
-  if (-not $p) { return }
-  Write-Host '  Fechando o Chrome...'
-  & taskkill.exe /im chrome.exe 2>$null | Out-Null   # pede para fechar (como clicar no X)
-  for ($i = 0; $i -lt 16 -and (Get-Process chrome -ErrorAction SilentlyContinue); $i++) { Start-Sleep -Milliseconds 500 }
-  if (Get-Process chrome -ErrorAction SilentlyContinue) {
-    & taskkill.exe /f /im chrome.exe 2>$null | Out-Null   # o que ficou rodando em segundo plano
-    Start-Sleep -Seconds 1
-  }
-}
 
 function Extensao-Instalada {
   foreach ($arq in 'Secure Preferences', 'Preferences') {
@@ -98,25 +86,14 @@ if (-not $jaTem) {
 }
 
 # ------------------------------------------------------------------ 4. abrir o app
-# O --auto-select-desktop-capture-source escolhe a tela sem o seletor, mas o Chrome so le essa opcao
-# quando abre do zero: com ele aberto, ela seria ignorada.
-$automatico = $true
-if (Get-Process chrome -ErrorAction SilentlyContinue) {
-  Write-Host ''
-  Write-Host '  O Chrome esta aberto. Para compartilhar sem o seletor ele precisa abrir do zero.' -ForegroundColor Yellow
-  $r = Read-Host '  Fechar o Chrome agora? (S = fecha / N = deixa aberto e mostra o seletor) [S]'
-  if ($r -match '^[nN]') { $automatico = $false } else { Fechar-Chrome }
-}
-
+# Abre normal, sem fechar o Chrome. Nada de --auto-select-desktop-capture-source: com ele o Chrome
+# nao carrega extensoes sem compactacao, e a da Sala 3D sumia. Quem escolhe a tela no seletor e
+# aperta Compartilhar e o clicar-seletor.ps1.
 $url = "$Site/?sala=$([uri]::EscapeDataString($Sala))&entrar=1&compartilhar=tela"
-$argumentos = @("--profile-directory=$Perfil", "--app-id=$AppId", "--app-launch-url-for-shortcuts-menu-item=$url")
-if ($automatico) { $argumentos += "--auto-select-desktop-capture-source=`"$Fonte`"" }
-Start-Process $chrome -ArgumentList $argumentos
-
+Start-Process $chrome -ArgumentList @("--profile-directory=$Perfil", "--app-id=$AppId", "--app-launch-url-for-shortcuts-menu-item=$url")
 Write-Host ''
-if ($automatico) {
-  Write-Host "  Abrindo a sala '$Sala' e compartilhando: $Fonte" -ForegroundColor Green
-} else {
-  Write-Host "  Abrindo a sala '$Sala'. No seletor, a 'Tela inteira' ja vem escolhida: clique em Compartilhar." -ForegroundColor Green
-}
+Write-Host "  Abrindo a sala '$Sala'... (esperando o seletor de tela)" -ForegroundColor Cyan
+
+& powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'clicar-seletor.ps1') -Tela $Fonte -Espera 120
+if ($LASTEXITCODE -ne 0) { exit 1 }   # o .bat segura a janela para ler o aviso
 Start-Sleep -Seconds 3
