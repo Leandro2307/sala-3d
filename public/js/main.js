@@ -1196,7 +1196,10 @@ poker.aoSairDaMesa = abrirCatalogoOffline;
 function entrarNoJogoOffline(id) {
   if (!document.body.classList.contains('modo-offline')) {
     document.body.classList.add('modo-offline');
-    toast('Modo offline: jogos de cartas contra os robôs. Voz, telas e o resto da sala voltam com a internet.', 'info', 7000);
+    // o catálogo vira a tela inicial: só sai dele para um jogo, e volta a ele ao levantar
+    catalogo.fixo = true;
+    $('#catalogo-jogos').classList.add('cj-offline');
+    $('#cj-titulo').innerHTML = 'Jogos de cartas <small class="cj-sub">sem internet · contra os robôs</small>';
   }
   if (id === 'catalogo') return abrirCatalogoOffline();
   sentandoOffline = Date.now();
@@ -1216,6 +1219,12 @@ function entrarNoJogoOffline(id) {
       socket.emit('ct-comecar', { mesa: M.i });
     }
   }, 400);
+  // não conseguiu sentar (mesa cheia, sem moedas...): volta ao catálogo em vez de largar no mundo
+  setTimeout(() => {
+    if (cartas.ativa || poker.ativa) return;
+    sentandoOffline = 0;
+    abrirCatalogoOffline();
+  }, 2500);
 }
 
 // Entra na sala e espera a resposta do servidor: os dados da sala, ou { erro: 'senha' }. Se a

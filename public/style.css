@@ -4147,3 +4147,60 @@ body.toque-jogo #jogo-selo { top: auto; bottom: max(8px, env(safe-area-inset-bot
 @media (max-height: 500px) and (orientation: landscape) { .lobby-card > #offline { grid-column: 1 / -1; } }
 /* sem internet: o saguão só mostra a barra enquanto o catálogo dos jogos offline abre */
 #lobby.abrindo-offline .lobby-card > :not(.brand, .lobby-acao), #lobby.abrindo-offline .ao-vivo, #lobby.abrindo-offline #btn-join { display: none; }
+
+/* ------------------------------------------------------------------ catálogo do modo offline
+   A tela inicial sem internet: fundo fechado (o mundo não aparece), sem gêneros e sem o X. No
+   celular (deitado ou em pé) ocupa a tela toda, os cartões ficam menores e um toque já leva ao jogo;
+   a maquete continua montada fora da tela, porque é dela que saem as fotos dos cartões. */
+body.modo-offline #bar, body.modo-offline #touch, body.modo-offline #hud > :not(#toasts) { display: none !important; }
+#catalogo-jogos.cj-offline {
+  background:
+    radial-gradient(ellipse at 20% 0%, rgba(110, 231, 200, 0.10), transparent 55%),
+    radial-gradient(ellipse at 90% 100%, rgba(167, 139, 250, 0.12), transparent 55%),
+    #07090d;
+}
+.cj-offline .cj-filtros, .cj-offline [data-cj="fechar"], .cj-offline .cj-arraste { display: none; }
+.cj-offline .cj-card { grid-template-rows: auto 1fr; width: min(980px, 100%); }
+.cj-offline .guia-head h2 { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.cj-sub { color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: 0; }
+.cj-sub::before { content: ''; display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: var(--warn, #fbbf24); vertical-align: 1px; }
+.cj-offline .cj-grade { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+.cj-offline .cj-nome small { line-height: 1.35; }
+@media (max-width: 720px), (max-height: 520px) {
+  #catalogo-jogos.cj-offline { padding: 0; place-items: stretch; }
+  .cj-offline .cj-card {
+    width: 100%;
+    height: 100dvh;
+    max-height: 100dvh;
+    gap: 10px;
+    padding: calc(10px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left));
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+  .cj-offline .guia-head h2 { font-size: 17px; }
+  .cj-offline .cj-corpo { grid-template-columns: 1fr; min-height: 0; }
+  .cj-offline .cj-palco { position: fixed; left: -9999px; top: 0; width: 320px; visibility: hidden; pointer-events: none; }
+  .cj-offline .cj-grade {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    align-content: center;
+    gap: 10px;
+    padding: 2px;
+    overflow-y: auto;
+    perspective: none;
+  }
+  .cj-offline .cj-item { transform: none; border-radius: 12px; }
+  .cj-offline .cj-item:active { transform: scale(0.97); }
+  .cj-offline .cj-foto { aspect-ratio: 4 / 3; }
+  .cj-offline .cj-nome { padding: 6px 8px 8px; }
+  .cj-offline .cj-nome b { font-size: 13px; }
+  .cj-offline .cj-nome small { font-size: 10.5px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+}
+/* celular em pé: duas colunas, rolando */
+@media (max-width: 720px) and (orientation: portrait) {
+  .cj-offline .cj-grade { grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; }
+}
+/* deitado e baixinho: três colunas se as cinco não couberem na largura */
+@media (max-height: 520px) and (max-width: 640px) and (orientation: landscape) {
+  .cj-offline .cj-grade { grid-template-columns: repeat(3, minmax(0, 1fr)); align-content: start; }
+}

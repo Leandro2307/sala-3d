@@ -59,6 +59,8 @@ export class CatalogoJogos {
     this.palco = null;
     this.fotos = new Map(); // id -> imagem da maquete (fica para a próxima vez que abrir)
     this.genero = 'todos';
+    // fixo (modo offline): o catálogo é a tela inicial; só sai dele indo para um jogo, e um toque no cartão já vai
+    this.fixo = false;
     this.selecionado = null;
     this.grade = raiz.querySelector('#cj-grade');
     this.filtros = raiz.querySelector('#cj-filtros');
@@ -72,7 +74,9 @@ export class CatalogoJogos {
     });
     this.grade.addEventListener('click', (e) => {
       const b = e.target.closest('[data-id]');
-      if (b) this.selecionar(b.dataset.id);
+      if (!b) return;
+      if (this.fixo && this.toqueDireto()) return this.irPara(b.dataset.id);
+      this.selecionar(b.dataset.id);
     });
     this.grade.addEventListener('dblclick', (e) => {
       const b = e.target.closest('[data-id]');
@@ -101,15 +105,21 @@ export class CatalogoJogos {
       this.painel(j.painel);
     });
     raiz.addEventListener('click', (e) => {
+      if (this.fixo) return;
       if (e.target === raiz || e.target.closest('[data-cj="fechar"]')) this.fechar();
     });
     raiz.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         e.stopPropagation();
-        this.fechar();
+        if (!this.fixo) this.fechar();
       }
     });
     this.aoRedimensionar = () => this.ajustarTamanho();
+  }
+
+  // celular (ou janela baixa): sem a maquete ao lado, o toque no cartão já leva ao jogo
+  toqueDireto() {
+    return matchMedia('(max-width: 720px), (max-height: 520px)').matches;
   }
 
   get aberto() {
@@ -171,7 +181,7 @@ export class CatalogoJogos {
       const foto = this.fotos.get(j.id);
       return `<button type="button" class="cj-item${j.id === this.selecionado ? ' on' : ''}" data-id="${j.id}" style="--c:${j.cor}">
         <span class="cj-foto">${foto ? `<img src="${foto}" alt="">` : '<i class="cj-giro"></i>'}</span>
-        <span class="cj-nome"><b>${esc(j.nome)}</b><small>${esc(g.nome)}</small></span>
+        <span class="cj-nome"><b>${esc(j.nome)}</b><small>${esc(this.fixo ? j.desc : g.nome)}</small></span>
       </button>`;
     }).join('') || '<p class="hint">Os jogos estão desligados nesta sala.</p>';
   }
