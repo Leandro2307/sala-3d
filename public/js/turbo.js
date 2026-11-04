@@ -568,8 +568,9 @@ export class TurboEnvio {
         // novo). Mandar assim mesmo só atrasaria este e todos os de depois.
         // No máximo QPS_TURBO: o codificador é configurado para 60, e a tela do OBS chega a 120 — o
         // iPhone recebendo 115 qps em 1080p travava e a página caía (relatório de 2026-11-04 04:03).
-        // Não conta como pulado (não é fila nem codificador atrasado).
-        if (s.ultimoEnvio && agora - s.ultimoEnvio < 1000 / QPS_TURBO - 3) continue;
+        // Não conta como pulado (não é fila nem codificador atrasado). Ritmo fixo (proximoEnvio anda
+        // de 1/60 em 1/60 s): comparar com o último quadro deixava passar quadros adiantados (64 qps).
+        if (s.proximoEnvio && agora < s.proximoEnvio - 2) continue;
         const filaCheia = s.canal.bufferedAmount > this.limiteFila(s);
         if (s.canal.readyState !== 'open' || filaCheia || (s.enc && s.enc.encodeQueueSize > 1)) {
           s.pulados++;
@@ -577,7 +578,8 @@ export class TurboEnvio {
           if (filaCheia) s.conta.fila++;
           continue;
         }
-        s.ultimoEnvio = agora;
+        const passo = 1000 / QPS_TURBO;
+        s.proximoEnvio = s.proximoEnvio && agora - s.proximoEnvio < passo ? s.proximoEnvio + passo : agora + passo;
         await this.configurar(s, frame.displayWidth, frame.displayHeight);
         const chave = s.chave;
         s.chave = false;
