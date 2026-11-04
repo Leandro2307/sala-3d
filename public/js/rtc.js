@@ -72,6 +72,26 @@ const QPS_PADRAO = 60;
 // extensão). A câmera virtual do OBS não tem esse teto: com o OBS a 120 qps o Chrome recebeu 120
 // e o WebRTC enviou 120. A tela que vem por ela sai no ritmo da câmera no nível máximo.
 export const QPS_OBS = 120;
+// Quantos Hz a tela daqui mostra (medido pelo requestAnimationFrame; 60 até medir). Vai junto do
+// interesse: quem compartilha pelo OBS só manda acima de 60 para quem consegue mostrar. O iPhone a
+// 115 qps no turbo travava e a página caía (relatório de 2026-11-04 04:03).
+let HZ_TELA = 60;
+function medirHz() {
+  if (typeof requestAnimationFrame !== 'function') return;
+  let n = 0;
+  let t0 = 0;
+  const passo = (t) => {
+    if (!t0) t0 = t;
+    n++;
+    if (t - t0 < 1000) return requestAnimationFrame(passo);
+    const hz = (n - 1) / ((t - t0) / 1000);
+    // aba escondida ou travada: não vale (fica o da medida anterior)
+    if (hz >= 50) HZ_TELA = Math.round(hz);
+  };
+  requestAnimationFrame(passo);
+}
+setTimeout(medirHz, 3000);
+setInterval(medirHz, 30_000); // a janela pode ir para outro monitor
 const QPS_CAPTURA = (() => {
   const n = Number(new URLSearchParams(location.search).get('qps'));
   return Number.isFinite(n) && n >= 30 && n <= 240 ? Math.round(n) : null;
@@ -719,7 +739,7 @@ export class RTC {
     const jogo = nivel === NIVEIS.max && this.jogoTelas.has(key);
     let banda = jogo ? preset.jogoBitrate : preset.maxBitrate;
     // tela do OBS a 120: quem olha de perto recebe todos os quadros, com mais banda para eles
-    const qpsAlto = nivel === NIVEIS.max && scr?.qps > nivel.fps ? scr.qps : null;
+    const qpsAlto = nivel === NIVEIS.max && scr?.qps > nivel.fps && peer.hz >= 90 ? Math.min(scr.qps, peer.hz) : null;
     if (qpsAlto) banda = Math.min(banda * 1.5, 30_000_000);
     // modo jogo com pouca banda: resolução fixa (linhasDeJogo) em vez de deixar pular; com "Menos
     // atraso" (rapidoJogo), 720p sempre
@@ -1034,9 +1054,15 @@ export class RTC {
   // Quem assiste avisa quanto precisa de cada tela minha ({ chave: nível de NIVEIS }). Nível que
   // esta versão não conhece fica de fora: abas de versões diferentes convivem. Tela de que ela
   // ainda não falou vai como 'mini' (nivelDe). A chave 'cam' é a minha webcam (só 'max' ou 'off').
-  receberInteresse(peer, mapa) {
+  receberInteresse(peer, mapa, hz) {
     if (!mapa || typeof mapa !== 'object') return;
     let mudou = false;
+    // os Hz da tela dela (versão de antes: não diz, fica em 60)
+    const novoHz = Number.isFinite(hz) ? Math.max(30, Math.min(240, hz)) : null;
+    if (novoHz && Math.abs(novoHz - (peer.hz || 60)) >= 5) {
+      peer.hz = novoHz;
+      mudou = true;
+    }
     let cam = false;
     for (const [k, v] of Object.entries(mapa)) {
       if (!NIVEIS[v] || peer.interesse.get(k) === v) continue;
@@ -1061,7 +1087,7 @@ export class RTC {
       for (const [k, n] of Object.entries(mapa)) compat[k] = n === 'medio' ? 'baixo' : n;
       break;
     }
-    this.send(id, compat === mapa ? { interesse: mapa } : { interesse: compat, interesse2: mapa });
+    this.send(id, compat === mapa ? { interesse: mapa, hz: HZ_TELA } : { interesse: compat, interesse2: mapa, hz: HZ_TELA });
   }
 
   // -------------------------------------------------------------- conexões
@@ -1293,9 +1319,9 @@ export class RTC {
     this.socket.emit('signal', { to, data: JSON.parse(JSON.stringify(data)) });
   }
 
-  async handleSignal(from, { description, candidate, interesse, interesse2, voz }) {
+  async handleSignal(from, { description, candidate, interesse, interesse2, hz, voz }) {
     const peer = this.getPeer(from);
-    if (interesse2 || interesse) return this.receberInteresse(peer, interesse2 || interesse);
+    if (interesse2 || interesse) return this.receberInteresse(peer, interesse2 || interesse, hz);
     if (voz) return this.reforcarVoz(peer);
     const { pc } = peer;
     try {

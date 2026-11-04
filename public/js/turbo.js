@@ -87,6 +87,7 @@ const SEM_IMAGEM_MS = 4000; // ligou e nenhum quadro apareceu: o turbo não serv
 // decodifica; quem compartilha escolhe o primeiro que a placa dele codifica.
 const CODECS = ['avc1.640033', 'avc1.4d0033', 'avc1.42e033', 'avc1.42001f'];
 
+const QPS_TURBO = 60;
 export const temTurboEnvio = () => typeof MediaStreamTrackProcessor === 'function' && typeof VideoEncoder === 'function';
 export const temTurboRecebe = () => typeof VideoDecoder === 'function' && typeof EncodedVideoChunk === 'function';
 
@@ -565,6 +566,10 @@ export class TurboEnvio {
         const agora = performance.now();
         // fila de envio na trava ou codificador atrasado: este quadro fica de fora (o próximo é mais
         // novo). Mandar assim mesmo só atrasaria este e todos os de depois.
+        // No máximo QPS_TURBO: o codificador é configurado para 60, e a tela do OBS chega a 120 — o
+        // iPhone recebendo 115 qps em 1080p travava e a página caía (relatório de 2026-11-04 04:03).
+        // Não conta como pulado (não é fila nem codificador atrasado).
+        if (s.ultimoEnvio && agora - s.ultimoEnvio < 1000 / QPS_TURBO - 3) continue;
         const filaCheia = s.canal.bufferedAmount > this.limiteFila(s);
         if (s.canal.readyState !== 'open' || filaCheia || (s.enc && s.enc.encodeQueueSize > 1)) {
           s.pulados++;
@@ -572,6 +577,7 @@ export class TurboEnvio {
           if (filaCheia) s.conta.fila++;
           continue;
         }
+        s.ultimoEnvio = agora;
         await this.configurar(s, frame.displayWidth, frame.displayHeight);
         const chave = s.chave;
         s.chave = false;
