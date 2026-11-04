@@ -29,12 +29,50 @@ function Apertar($el) {
 
 $chrome = @("$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
             "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
-Start-Process $chrome -ArgumentList "--profile-directory=$Perfil", 'chrome://extensions'
+
+# Abre o Chrome (se estiver fechado) e espera uma janela dele
+if (-not (Get-Process chrome -ErrorAction SilentlyContinue)) {
+  Start-Process $chrome -ArgumentList "--profile-directory=$Perfil"
+}
+$fim = (Get-Date).AddSeconds(30)
+while (-not @(Janelas-Chrome | Where-Object { $_.Current.ClassName -eq 'Chrome_WidgetWin_1' -and $_.Current.Name -like '*Google Chrome' }).Count -and (Get-Date) -lt $fim) {
+  Start-Sleep -Milliseconds 500
+}
+
+# chrome://extensions passado na linha de comando o Chrome ignora (abre só a "Nova guia"): abre uma
+# aba e escreve o endereço na barra, como alguém digitando
+function Abrir-Extensoes {
+  $w = Janelas-Chrome | Where-Object { $_.Current.ClassName -eq 'Chrome_WidgetWin_1' -and $_.Current.Name -like '*Google Chrome' } | Select-Object -First 1
+  if (-not $w) { return }
+  $ws = New-Object -ComObject WScript.Shell
+  try { $w.SetFocus() } catch { [void]$ws.AppActivate($w.Current.ProcessId) }
+  Start-Sleep -Milliseconds 300
+  $ws.SendKeys('^t')
+  Start-Sleep -Milliseconds 600
+  $w = Janelas-Chrome | Where-Object { $_.Current.ClassName -eq 'Chrome_WidgetWin_1' -and $_.Current.Name -like '*Google Chrome' } | Select-Object -First 1
+  $barra = Achar $w { param($c) $c.ClassName -eq 'OmniboxViewViews' }
+  $p = $null
+  if ($barra -and $barra.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$p)) {
+    $barra.SetFocus()
+    $p.SetValue('chrome://extensions')
+    Start-Sleep -Milliseconds 200
+    $ws.SendKeys('{ENTER}')
+  } else {
+    $ws.SendKeys('chrome://extensions{ENTER}')
+  }
+}
+Abrir-Extensoes
+$reaberto = $false
 
 # a janela da página de extensões (o título é "Extensões - Google Chrome")
 $janela = $null; $botao = $null
 $fim = (Get-Date).AddSeconds(30)
 while (-not $botao -and (Get-Date) -lt $fim) {
+  # passou um tempo e a página não abriu: tenta mais uma vez
+  if (-not $reaberto -and (Get-Date) -gt $fim.AddSeconds(-20) -and -not @(Janelas-Chrome | Where-Object { $_.Current.Name -like 'Extens*' }).Count) {
+    $reaberto = $true
+    Abrir-Extensoes
+  }
   foreach ($w in Janelas-Chrome) {
     if ($w.Current.Name -notlike 'Extens*') { continue }
     # a primeira leitura liga a acessibilidade da página: as seguintes já veem os botões
