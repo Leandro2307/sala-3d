@@ -2872,16 +2872,21 @@ let testePresets = null;
 function rodarTestePresets() {
   if (testePresets) return pararTestePresets('interrompido');
   if (!jogandoLa) return void toast('Ligue o modo jogo numa tela e jogue: o teste troca o preset a cada minuto.', 'warn', 6000);
-  testePresets = { antes: { preset: opcoesJogo.get('preset'), ...Object.fromEntries(OPCOES_DO_PRESET.map((k) => [k, opcoesJogo.get(k)])) }, i: 0, timer: 0 };
+  testePresets = { antes: { preset: opcoesJogo.get('preset'), ...Object.fromEntries(OPCOES_DO_PRESET.map((k) => [k, opcoesJogo.get(k)])) }, i: 0, timer: 0, fim: 0, atual: null };
+  testePresets.relogio = setInterval(mostrarTeste, 250);
   diagJogo.evento('teste de presets começou', { minutosCada: TESTE_PRESET_MS / 60_000, presets: PRESETS.map((p) => p.id) });
   const passo = () => {
     const t = testePresets;
     if (!t) return;
     if (t.i >= ORDEM_TESTE.length) return pararTestePresets('terminou');
     const p = PRESETS.find((x) => x.id === ORDEM_TESTE[t.i++]);
-    aplicarPreset(p.id, `teste ${t.i}/${PRESETS.length}`);
-    toast(`Teste ${t.i}/${PRESETS.length}: ${p.nome} — jogue 1 minuto`, 'info', 4000);
+    aplicarPreset(p.id, `teste ${t.i}/${ORDEM_TESTE.length}`);
+    toast(`Teste ${t.i}/${ORDEM_TESTE.length}: ${p.nome} — jogue 1 minuto`, 'info', 4000);
     t.timer = setTimeout(passo, TESTE_PRESET_MS);
+    t.fim = Date.now() + TESTE_PRESET_MS;
+    t.atual = p;
+    anunciarTexto(`Preset ${p.id}: ${p.nome}`, `Teste ${t.i} de ${ORDEM_TESTE.length} · jogue 1 minuto`);
+    mostrarTeste();
     sincronizarPresets();
   };
   passo();
@@ -2890,7 +2895,10 @@ function pararTestePresets(como) {
   const t = testePresets;
   if (!t) return;
   clearTimeout(t.timer);
+  clearInterval(t.relogio);
   testePresets = null;
+  $('#jogo-teste').hidden = true;
+  if (como === 'terminou') anunciarTexto('Teste terminado', 'O relatório já foi para o servidor');
   diagJogo.evento(`teste de presets ${como}`, { chegouAte: t.i });
   // volta ao que estava antes do teste
   const voltar = PRESETS.find((p) => p.id === t.antes.preset);
@@ -2909,6 +2917,34 @@ function pararTestePresets(como) {
   else if (como === 'interrompido') toast('Teste de presets interrompido.', 'info', 3000);
   sincronizarPresets();
 }
+// Dentro da tela do jogo (o #focus, que é o que fica em tela cheia: os avisos comuns ficam fora dela e
+// não aparecem): o preset de agora e quanto falta, e nos últimos 5 s qual vem a seguir.
+function mostrarTeste() {
+  const el = $('#jogo-teste');
+  const t = testePresets;
+  if (!t?.atual || !jogandoLa) return void (el.hidden = true);
+  const resta = Math.max(0, Math.ceil((t.fim - Date.now()) / 1000));
+  const mmss = `${Math.floor(resta / 60)}:${String(resta % 60).padStart(2, '0')}`;
+  const prox = t.i < ORDEM_TESTE.length ? PRESETS.find((x) => x.id === ORDEM_TESTE[t.i]) : null;
+  const aviso = prox ? `próximo: preset ${prox.id}` : 'fim do teste';
+  el.hidden = false;
+  el.classList.toggle('acabando', resta <= 5);
+  el.innerHTML = `<b>Teste ${t.i}/${ORDEM_TESTE.length}</b> · Preset ${t.atual.id}: ${t.atual.nome} · <span class="jt-tempo">${mmss}</span>`
+    + (resta <= 5 ? ` · <span class="jt-prox">${aviso}</span>` : '');
+}
+// o aviso grande no meio da tela a cada troca (some sozinho em 3,5 s)
+let avisoTesteTimer = 0;
+function anunciarTexto(titulo, sub) {
+  const el = $('#jogo-teste-aviso');
+  el.innerHTML = `<b>${titulo}</b><span>${sub}</span>`;
+  el.hidden = false;
+  el.classList.remove('entra');
+  void el.offsetWidth; // recomeça a animação
+  el.classList.add('entra');
+  clearTimeout(avisoTesteTimer);
+  avisoTesteTimer = setTimeout(() => { el.hidden = true; }, 3500);
+}
+
 // o seletor e o botão do teste (no menu do PC e no painel do celular) mostram o estado de agora
 function sincronizarPresets() {
   $$('[data-preset]').forEach((el) => { el.value = String(opcoesJogo.get('preset') || 0); el.disabled = !!testePresets; });
