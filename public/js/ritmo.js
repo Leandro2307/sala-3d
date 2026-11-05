@@ -60,6 +60,12 @@ export class Ritmo {
     return this.brutas.length >= 10 && pct(this.brutas, 0.5) > 25;
   }
 
+  // Bem pior que lenta: menos de ~22 voltas por segundo (o Modo de Pouca Energia dá 30, isso não
+  // conta). A página está quase parada; o turbo não deve culpar a conexão (TurboRecebe.vigiar).
+  get parada() {
+    return this.brutas.length >= 5 && pct(this.brutas.slice(-10), 0.5) > 45;
+  }
+
   // Um quadro novo apareceu na tela em t (ms, relógio do performance.now). causa(): chamada só se o
   // buraco antes dele foi uma travada, devolve { causa, ... } para o relatório.
   marcar(t, causa = null) {

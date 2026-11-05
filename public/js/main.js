@@ -24,8 +24,8 @@ import { AvisoDoSite } from './aviso-site.js';
 import { ToqueJogo, jogoDaJanela } from './toque-jogo.js';
 import { ControleFisico } from './gamepad-jogo.js';
 import { PadVirtual } from './pad-virtual.js';
-import { TurboEnvio, TurboRecebe, TTL_MS } from './turbo.js';
-import { opcoesJogo, LISO_MS, PRESETS, OPCOES_DO_PRESET, htmlPresets } from './jogo-opcoes.js';
+import { TurboEnvio, TurboRecebe, TTL_MS, LISO_PCT } from './turbo.js';
+import { opcoesJogo, LISO_MS, PRESETS, OPCOES_DO_PRESET, ORDEM_TESTE, htmlPresets } from './jogo-opcoes.js';
 import { Mesa } from './mesa.js';
 import { Qualidade, NIVEIS, nivelInicial } from './qualidade.js';
 import * as moduloQualidade from './qualidade.js';
@@ -2834,9 +2834,12 @@ turboRecebe.liso = opcoesJogo.get('turboLiso');
 function ligarTurbo() {
   if (!jogandoLa) return;
   turboRecebe.liso = opcoesJogo.get('turboLiso');
-  turboRecebe.vidaMs = presetAtual()?.vida ?? TTL_MS;
+  const p = presetAtual();
+  turboRecebe.vidaMs = p?.vida ?? TTL_MS;
+  turboRecebe.h265 = !!p?.h265;
+  turboRecebe.lisoPct = p?.lisoPct ?? LISO_PCT;
   turboRecebe.ligar(jogandoLa.key, jogandoLa.video, opcoesJogo.get('rapido') ? 720 : 1080);
-  diagJogo.evento('modo turbo ligado', { liso: opcoesJogo.get('turboLiso'), vidaMs: turboRecebe.vidaMs });
+  diagJogo.evento('modo turbo ligado', { liso: opcoesJogo.get('turboLiso'), vidaMs: turboRecebe.vidaMs, h265: turboRecebe.h265, lisoPct: turboRecebe.lisoPct });
 }
 
 // ---------------------------------------------------------------- presets de teste (jogo-opcoes.js)
@@ -2855,7 +2858,7 @@ function aplicarPreset(n, porque = 'escolhido') {
   }
   turboRecebe.liso = opcoesJogo.get('turboLiso');
   if (!jogandoLa || !p) return;
-  diagJogo.evento(`preset ${p.id}: ${p.nome} (${porque})`, { ...p.opcoes, vidaMs: p.vida });
+  diagJogo.evento(`preset ${p.id}: ${p.nome} (${porque})`, { ...p.opcoes, vidaMs: p.vida, h265: !!p.h265, lisoPct: p.lisoPct ?? null });
   aplicarBuffer();
   avisarRapido();
   if (p.opcoes.turbo) ligarTurbo();
@@ -2865,16 +2868,16 @@ function aplicarPreset(n, porque = 'escolhido') {
 // Teste automático: 1 minuto em cada preset, na ordem, avisando a cada troca; no fim volta ao que
 // estava. De novo no botão (ou sair do modo jogo) interrompe.
 const TESTE_PRESET_MS = 60_000;
-// O 1080p (preset 2) por último: no teste de 2026-11-05 00:40 ele esquentou o iPhone (decodificação de
-// 4 para 9 ms em 1 minuto) e os presets seguintes rodaram com o aparelho lento — não dava para comparar.
-const ORDEM_TESTE = [1, 3, 4, 5, 6, 2];
+// A ordem (ORDEM_TESTE, em jogo-opcoes.js) deixa os de 1080p por último: no teste de 2026-11-05 00:40
+// o 1080p esquentou o iPhone (decodificação de 4 para 9 ms em 1 minuto) e os presets seguintes rodaram
+// com o aparelho lento — não dava para comparar.
 let testePresets = null;
 function rodarTestePresets() {
   if (testePresets) return pararTestePresets('interrompido');
   if (!jogandoLa) return void toast('Ligue o modo jogo numa tela e jogue: o teste troca o preset a cada minuto.', 'warn', 6000);
   testePresets = { antes: { preset: opcoesJogo.get('preset'), ...Object.fromEntries(OPCOES_DO_PRESET.map((k) => [k, opcoesJogo.get(k)])) }, i: 0, timer: 0, fim: 0, atual: null };
   testePresets.relogio = setInterval(mostrarTeste, 250);
-  diagJogo.evento('teste de presets começou', { minutosCada: TESTE_PRESET_MS / 60_000, presets: PRESETS.map((p) => p.id) });
+  diagJogo.evento('teste de presets começou', { minutosCada: TESTE_PRESET_MS / 60_000, presets: ORDEM_TESTE });
   const passo = () => {
     const t = testePresets;
     if (!t) return;
@@ -2953,7 +2956,7 @@ function anunciarTexto(titulo, sub) {
 function sincronizarPresets() {
   $$('[data-preset]').forEach((el) => { el.value = String(opcoesJogo.get('preset') || 0); el.disabled = !!testePresets; });
   $$('[data-teste-presets]').forEach((el) => {
-    el.innerHTML = testePresets ? `Parar o teste <small>(preset ${testePresets.i} de ${PRESETS.length})</small>` : `Teste automático <small>(1 min em cada, ${PRESETS.length} min)</small>`;
+    el.innerHTML = testePresets ? `Parar o teste <small>(${testePresets.i} de ${ORDEM_TESTE.length})</small>` : `Teste automático <small>(1 min em cada, ${ORDEM_TESTE.length} min)</small>`;
     el.classList.toggle('on', !!testePresets);
   });
 }

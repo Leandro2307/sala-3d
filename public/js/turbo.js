@@ -96,10 +96,17 @@ const SEM_IMAGEM_MS = 4000; // ligou e nenhum quadro apareceu: o turbo não serv
 const PAROU_MS = 2500; // já desenhou, e nenhum quadro novo há tanto tempo
 const FILA_LENTA = 600; // ms de fila medida (viagem p90 − a menor)...
 const FILA_LENTA_MS = 3000; // ...seguidos por tanto tempo
+const PARADA_GRACA_MS = 4000; // depois de a página do aparelho parar ou ficar lenta, não desiste por isso (vigiar)
 
 // H.264 nos perfis High, Main e Baseline (nível 5.1: até 1080p acima de 60 qps). Quem joga diz quais
 // decodifica; quem compartilha escolhe o primeiro que a placa dele codifica.
 const CODECS = ['avc1.640033', 'avc1.4d0033', 'avc1.42e033', 'avc1.42001f'];
+// H.265 (2026-11-05, presets de teste): a mesma imagem com uns 30–40% menos dados — menos fila no
+// Wi-Fi, ou mais nitidez na mesma banda. Main, nível 4.1 (1080p a 60). Só vai na lista quando quem
+// joga pede (TurboRecebe.h265) e o decodificador dele aceita; se a placa de quem compartilha não
+// codificar, cai no H.264 da lista (o relatório mostra o codec usado).
+const CODECS_HEVC = ['hvc1.1.6.L123.B0'];
+const ehHevc = (c) => /^(hvc1|hev1)\./.test(String(c));
 
 const QPS_TURBO = 60;
 
@@ -115,7 +122,7 @@ const QPS_TURBO = 60;
 // viraria folga à toa. Simulado com o tremido dos relatórios (captura a 55 qps, tela de 60 Hz): os
 // quadros que nunca apareciam caíram de ~360 para ~25 por minuto e os trancos de 3 voltas pela
 // metade, com ~27 ms a mais de atraso.
-const LISO_PCT = 0.95; // o tremido que a folga cobre
+export const LISO_PCT = 0.95; // o tremido que a folga cobre
 const LISO_MIN = 4;
 const LISO_MAX = 45;
 const LISO_INICIO = 16;
@@ -414,7 +421,7 @@ export class TurboEnvio {
     // quem joga com a versão 2 lê o cabeçalho com a hora da captura (a antiga leria como imagem)
     s.v2 = Number(versao) >= 2;
     s.altMax = Math.min(1080, Number(altura) || 1080);
-    s.aceitos = (Array.isArray(codecs) ? codecs : []).filter((c) => CODECS.includes(c));
+    s.aceitos = (Array.isArray(codecs) ? codecs : []).filter((c) => CODECS.includes(c) || CODECS_HEVC.includes(c));
     this.rodar(s).catch((err) => {
       console.warn('[turbo] envio', err);
       responder({ erro: 'codificador' });
@@ -513,7 +520,10 @@ export class TurboEnvio {
     for (const codec of s.aceitos.length ? s.aceitos : CODECS) {
       for (const hardwareAcceleration of ['prefer-hardware', 'no-preference']) {
         for (const bitrateMode of ['constant', undefined]) {
-          const config = { codec, width: cw, height: ch, bitrate: bandaDe(ch), framerate: 60, latencyMode: 'realtime', hardwareAcceleration, avc: { format: 'avc' } };
+          const config = { codec, width: cw, height: ch, bitrate: bandaDe(ch), framerate: 60, latencyMode: 'realtime', hardwareAcceleration };
+          // a descrição fora dos quadros (avcC / hvcC), que todo VideoDecoder aceita
+          if (ehHevc(codec)) config.hevc = { format: 'hevc' };
+          else config.avc = { format: 'avc' };
           if (bitrateMode) config.bitrateMode = bitrateMode;
           const r = await VideoEncoder.isConfigSupported(config).catch(() => null);
           if (r?.supported) { escolhido = config; break; }
@@ -522,7 +532,7 @@ export class TurboEnvio {
       }
       if (escolhido) break;
     }
-    if (!escolhido) throw new Error('nenhum H.264 em comum');
+    if (!escolhido) throw new Error('nenhum codec em comum');
     if (!s.enc || s.enc.state === 'closed') {
       s.enc = new VideoEncoder({
         output: (chunk, meta) => this.enviarQuadro(s, chunk, meta),
@@ -610,7 +620,10 @@ export class TurboEnvio {
         // iPhone recebendo 115 qps em 1080p travava e a página caía (relatório de 2026-11-04 04:03).
         // Não conta como pulado (não é fila nem codificador atrasado). Ritmo fixo (proximoEnvio anda
         // de 1/60 em 1/60 s): comparar com o último quadro deixava passar quadros adiantados (64 qps).
-        if (s.proximoEnvio && agora < s.proximoEnvio - 2) continue;
+        // Folga de 4 ms (era 2): com a tela do OBS cravada em 60, um quadro que chegava 2–3 ms antes
+        // da vez era jogado fora e virava tranco; a 120 os quadros do meio vêm 8 ms antes e continuam
+        // de fora.
+        if (s.proximoEnvio && agora < s.proximoEnvio - 4) continue;
         const fila = s.canal.bufferedAmount;
         const filaCheia = fila > this.limiteFila(s);
         const b = Math.min(49, Math.floor((agora - s.conta.ultimo) / 100));
@@ -771,6 +784,8 @@ export class TurboRecebe {
     this.s = null;
     this._liso = true;
     this.vidaMs = TTL_MS; // a vida dos pedaços no canal: vale na próxima vez que o turbo ligar
+    this.h265 = false; // pedir H.265 (presets de teste): vale na próxima vez que o turbo ligar
+    this.lisoPct = LISO_PCT; // quanto do tremido a folga do liso cobre (presets de teste)
   }
 
   get ligado() { return !!this.s; }
@@ -826,6 +841,8 @@ export class TurboRecebe {
       lisoConta: { atrasados: 0, trocados: 0, cheia: 0 },
     };
     s.vidaMs = this.vidaMs;
+    s.h265 = !!this.h265;
+    s.lisoPct = this.lisoPct;
     this.s = s;
     // a volta da tela: o liso escolhe o quadro, e o ritmo vê se apareceu um novo
     const volta = (t) => {
@@ -838,10 +855,12 @@ export class TurboRecebe {
     // jogo (o iPhone só deixa tocar assim; senão, destrava no próximo toque — ver prepararSom)
     this.prepararSom(s, dono);
     const codecs = [];
-    for (const codec of CODECS) {
+    // com o H.265 pedido, ele vem primeiro: quem compartilha escolhe o primeiro que a placa codifica
+    for (const codec of s.h265 ? [...CODECS_HEVC, ...CODECS] : CODECS) {
       const r = await VideoDecoder.isConfigSupported({ codec, optimizeForLatency: true }).catch(() => null);
       if (r?.supported) codecs.push(codec);
     }
+    if (s.h265) this.onEvento?.(codecs.some(ehHevc) ? 'turbo: H.265 pedido' : 'turbo: este aparelho não decodifica H.265 (vai H.264)', { codecs });
     if (s.som) {
       const r = await AudioDecoder.isConfigSupported({ codec: 'opus', sampleRate: 48000, numberOfChannels: 2 }).catch(() => null);
       if (this.s === s && !r?.supported) this.pararSom(s, 'sem Opus');
@@ -912,7 +931,7 @@ export class TurboRecebe {
       const config = { codec: cfg.codec, optimizeForLatency: true, hardwareAcceleration: s.ajusteDec === 2 ? 'prefer-software' : 'prefer-hardware' };
       if (cfg.description) {
         const d = Uint8Array.from(atob(cfg.description), (c) => c.charCodeAt(0));
-        config.description = (s.ajusteDec === 1 && descricaoSemReordenar(d)) || d;
+        config.description = (s.ajusteDec === 1 && !ehHevc(cfg.codec) && descricaoSemReordenar(d)) || d;
       }
       s.dec.configure(config);
       s.esperaChave = true;
@@ -940,7 +959,8 @@ export class TurboRecebe {
     try {
       const cfg = s.cfgAtual;
       const d = cfg.description ? Uint8Array.from(atob(cfg.description), (c) => c.charCodeAt(0)) : null;
-      let passo = s.ajusteDec === 0 && d && descricaoSemReordenar(d) ? 1 : 2;
+      // o SPS reescrito é só do H.264 (avcC); no H.265 vai direto para o processador
+      let passo = s.ajusteDec === 0 && d && !ehHevc(cfg.codec) && descricaoSemReordenar(d) ? 1 : 2;
       if (passo === 2) {
         const r = await VideoDecoder.isConfigSupported({ codec: cfg.codec, ...(d ? { description: d } : {}), optimizeForLatency: true, hardwareAcceleration: 'prefer-software' }).catch(() => null);
         if (this.s !== s) return;
@@ -1043,7 +1063,8 @@ export class TurboRecebe {
     s.seguros = s.saiuDoDec > 0 && s.pendentes.size >= SEGURANDO ? (s.seguros || 0) + 1 : 0;
     if (s.seguros >= SEGURANDO_QUADROS) {
       s.seguros = 0;
-      this.segurando(s);
+      // logo depois de a página ficar parada, os quadros se acumulam por isso, não pelo decodificador
+      if (performance.now() - (s.paradaEm || -1e9) > PARADA_GRACA_MS) this.segurando(s);
     }
     try {
       s.pendentes.set(q.ts, { t: chegou, lido: q.lido, chaveAtrasou: atrasDaChave, reg });
@@ -1282,7 +1303,7 @@ export class TurboRecebe {
     if (chaveAtrasou) return;
     guardar(s.atrasos, dif - s.base, 120);
     if (s.atrasos.length < 20) return;
-    const p95 = Math.min(LISO_MAX, Math.max(LISO_MIN, pct(s.atrasos, LISO_PCT) + 2));
+    const p95 = Math.min(LISO_MAX, Math.max(LISO_MIN, pct(s.atrasos, s.lisoPct ?? LISO_PCT) + 2));
     // sobe na hora, desce devagar (um tremido que passou pode voltar)
     s.alvo = p95 > s.alvo ? p95 : s.alvo + (p95 - s.alvo) * 0.02;
   }
@@ -1397,14 +1418,32 @@ export class TurboRecebe {
     const agora = performance.now();
     this.posicionar(s);
     this.vigiarSom(s);
+    // A própria página parou (o vigia, que é de 250 ms, ficou mais de 1 s sem rodar) ou a tela está
+    // lenta: a imagem parada e a fila "cheia" vêm daí, não da conexão. No teste de 2026-11-05 01:09 a
+    // página do iPhone parou ~6 s, o turbo desistiu ("lento") e o vídeo normal levou mais 8 s para
+    // voltar. Agora espera PARADA_GRACA_MS depois que ela volta, e pede um quadro-chave se faltar.
+    const vigiaAtrasou = s.vigiouEm ? agora - s.vigiouEm - 250 : 0;
+    s.vigiouEm = agora;
+    if (vigiaAtrasou > 750 || s.ritmo.parada) {
+      if (vigiaAtrasou > 750) {
+        this.onEvento?.('turbo: a página ficou parada (não é a conexão)', { ms: Math.round(vigiaAtrasou + 250) });
+        s.inicio += vigiaAtrasou;
+      }
+      s.paradaEm = agora;
+      if (s.desenhou) s.desenhou = Math.max(s.desenhou, agora);
+      s.filaLentaDesde = 0;
+      s.janelaViagem = [];
+      if (s.esperaChave) this.pedirChave(s, true);
+    }
+    const graca = agora - (s.paradaEm || -1e9) < PARADA_GRACA_MS;
     // nada apareceu: este aparelho/PC não deu conta — vídeo normal de volta
-    if (!s.desenhou && agora - s.inicio > SEM_IMAGEM_MS) return this.falhou('sem-imagem');
+    if (!graca && !s.desenhou && agora - s.inicio > SEM_IMAGEM_MS) return this.falhou('sem-imagem');
     // a imagem parou ou a fila não para de crescer: a conexão não aguenta (ver PAROU_MS). Parou só
     // conta com quadro a caminho (chegando aos pedaços ou à espera do quadro-chave): tela parada lá não
     // manda quadro nenhum, e aí não é a conexão.
     const aCaminho = s.esperaChave || s.montando;
-    if (aCaminho && s.desenhou && agora - s.desenhou > PAROU_MS && s.canal.readyState === 'open') return this.falhou('lento');
-    if (s.filaLentaDesde && agora - s.filaLentaDesde > FILA_LENTA_MS) return this.falhou('lento');
+    if (!graca && aCaminho && s.desenhou && agora - s.desenhou > PAROU_MS && s.canal.readyState === 'open') return this.falhou('lento');
+    if (!graca && s.filaLentaDesde && agora - s.filaLentaDesde > FILA_LENTA_MS) return this.falhou('lento');
     // parado esperando um quadro-chave que não veio (o pedido se perdeu): pede de novo
     if (s.esperaChave && agora - s.pedidoEm > 500) this.pedirChave(s);
     if (agora - s.pingEm > PING_MS && s.canal.readyState === 'open') {
@@ -1503,7 +1542,9 @@ export class TurboRecebe {
       rttMinMs: s.relogios.length ? Math.round(Math.min(...s.relogios.map((x) => x.rtt)) * 10) / 10 : null,
       filaMs: s.filaMs, // a última fila mandada a quem compartilha (viagem p90 − a menor)
       decAjuste: [null, 'sps', 'processador', 'sem-saida'][s.ajusteDec] ?? null, // ver segurando
-      codec: s.dec?.state === 'configured' ? 'h264' : null,
+      codec: s.dec?.state === 'configured' ? (ehHevc(s.cfgAtual?.codec) ? 'h265' : 'h264') : null,
+      codecLa: s.cfgAtual?.codec ?? null, // o codec que quem compartilha escolheu
+      lisoPct: s.lisoPct,
       chaves: s.conta.chaves, // quadros-chave que chegaram inteiros
       chaveKB: s.conta.chaves ? Math.round(s.conta.chaveMax / 102.4) / 10 : null, // o maior deles
       som: this.statsSom(s, seg),
