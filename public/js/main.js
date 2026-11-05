@@ -2879,7 +2879,11 @@ function rodarTestePresets() {
     const t = testePresets;
     if (!t) return;
     if (t.i >= ORDEM_TESTE.length) return pararTestePresets('terminou');
-    const p = PRESETS.find((x) => x.id === ORDEM_TESTE[t.i++]);
+    // o id antes da busca: o t.i++ dentro do find avançava uma vez por preset comparado (na 1ª troca
+    // ia de 1 a 7, não achava nenhum e o teste parava no preset 1 mostrando "7/6")
+    const id = ORDEM_TESTE[t.i++];
+    const p = PRESETS.find((x) => x.id === id);
+    if (!p) return pararTestePresets('terminou');
     aplicarPreset(p.id, `teste ${t.i}/${ORDEM_TESTE.length}`);
     toast(`Teste ${t.i}/${ORDEM_TESTE.length}: ${p.nome} — jogue 1 minuto`, 'info', 4000);
     t.timer = setTimeout(passo, TESTE_PRESET_MS);
