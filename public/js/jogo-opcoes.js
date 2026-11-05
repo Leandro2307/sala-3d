@@ -20,11 +20,40 @@ const PADRAO = { liso: false, menuAuto: true, selo: false, giro: false, rapido: 
 const VERSAO = 2;
 export const LISO_MS = 40;
 
+// Presets de teste (2026-11-05): cada um é um jeito completo de receber a imagem, para jogar 1 minuto
+// em cada e comparar no relatório (cada amostra leva o número do preset; o resumo separa por preset).
+// "Teste automático" passa por todos, 1 minuto em cada (main.js, rodarTestePresets). vida: a vida dos
+// pedaços no canal do turbo (turbo.js, TTL_MS). Mudar uma opção à mão volta para "Manual" (0).
+export const PRESETS = [
+  { id: 1, nome: 'Turbo liso 720p', opcoes: { turbo: true, turboLiso: true, rapido: true, liso: false }, vida: 250 },
+  { id: 2, nome: 'Turbo liso 1080p', opcoes: { turbo: true, turboLiso: true, rapido: false, liso: false }, vida: 250 },
+  { id: 3, nome: 'Turbo liso 720p, vida 90 ms (antigo)', opcoes: { turbo: true, turboLiso: true, rapido: true, liso: false }, vida: 90 },
+  { id: 4, nome: 'Turbo sem liso 720p', opcoes: { turbo: true, turboLiso: false, rapido: true, liso: false }, vida: 250 },
+  { id: 5, nome: 'Vídeo normal 720p', opcoes: { turbo: false, turboLiso: true, rapido: true, liso: false }, vida: 250 },
+  { id: 6, nome: 'Vídeo normal mais liso (+40 ms)', opcoes: { turbo: false, turboLiso: true, rapido: true, liso: true }, vida: 250 },
+];
+export const OPCOES_DO_PRESET = ['turbo', 'turboLiso', 'rapido', 'liso'];
+
+// o preset cujas opções são as de agora (o de vida 250 ganha do de 90 quando empatam), ou 0
+function presetQueCasa(o) {
+  return PRESETS.find((p) => p.vida === 250 && OPCOES_DO_PRESET.every((k) => !!o[k] === p.opcoes[k]))?.id ?? 0;
+}
+
+// o seletor de presets e o teste automático, igual no menu do PC e no painel do celular (main.js ouve)
+export function htmlPresets() {
+  const itens = PRESETS.map((p) => '<option value="' + p.id + '">' + p.id + '. ' + p.nome + '</option>').join('');
+  return '<div class="jogo-presets">'
+    + '<label><span>Preset de teste</span><select data-preset><option value="0">Manual</option>' + itens + '</select></label>'
+    + '<button type="button" data-teste-presets>Teste automático <small>(1 min em cada, ' + PRESETS.length + ' min)</small></button>'
+    + '</div>';
+}
+
 function ler() {
   try {
     const v = JSON.parse(localStorage.getItem(CHAVE) || '{}');
     const o = { ...PADRAO, ...(v && typeof v === 'object' ? v : {}) };
     if (o.v !== VERSAO) Object.assign(o, { v: VERSAO, turbo: PADRAO.turbo, rapido: PADRAO.rapido });
+    if (typeof o.preset !== 'number') o.preset = presetQueCasa(o);
     return o;
   } catch {
     return { ...PADRAO, v: VERSAO };
@@ -41,6 +70,12 @@ export const opcoesJogo = {
     valores[k] = v;
     try { localStorage.setItem(CHAVE, JSON.stringify(valores)); } catch { /* sem armazenamento */ }
     for (const f of ouvintes) f(k, v);
+  },
+  // várias de uma vez (um preset): grava tudo e avisa uma vez só, com a chave 'preset'
+  setVarios(obj) {
+    Object.assign(valores, obj);
+    try { localStorage.setItem(CHAVE, JSON.stringify(valores)); } catch { /* sem armazenamento */ }
+    for (const f of ouvintes) f('preset', valores.preset);
   },
   // f(chave, valor) a cada mudança
   ouvir(f) { ouvintes.add(f); },

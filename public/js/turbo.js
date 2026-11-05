@@ -21,6 +21,11 @@
 // perdido no Wi-Fi é reenviado se ainda der tempo; se não der, o quadro se perde, quem joga para de
 // decodificar até um quadro-chave novo e o pede ({chave:true}). Assim um engasgo vira uma imagem
 // parada por um instante, e não atraso acumulado.
+// A vida era 90 ms. Nos relatórios de 2026-11-05 (PC no Wi-Fi por um adaptador USB) o caminho parava
+// de 100 a 350 ms de vez em quando: os pedaços venciam, o quadro se perdia e a imagem ficava parada
+// de 170 a 820 ms (a travada + o pedido + o quadro-chave, que é grande). Com 250 ms a travada curta
+// vira só atraso: os quadros chegam juntos depois, e o liso mostra o mais novo e alcança a hora.
+// A vida vai na abertura do canal (TurboRecebe.vidaMs: os presets de teste trocam).
 // Mensagens de texto (JSON): quem joga → {ligar: key, codecs, altura, versao}, {chave: true, desde},
 // {desligar: true}, {ping: t} (a cada PING_MS; volta {pong: t, t: agora lá}: a ida e volta do próprio
 // canal e a diferença entre os relógios dos dois aparelhos), {fila: {p90, base}} (a cada FILA_AVISO_MS:
@@ -54,7 +59,7 @@ const PEDACO = 15000; // bytes de quadro por mensagem (abaixo do limite de 16 KB
 const CAB = 20; // id do quadro (u32), pedaço (u16), total (u16), chave (u8), versão (u8: 0 ou 2), ms codificando ×10 (u16), tempo em µs (f64)
 const CAB2 = 28; // versão 2: + saiu da captura (f64, ms no relógio de quem compartilha)
 const VERSAO = 2;
-const TTL_MS = 90; // vida de cada pedaço no canal
+export const TTL_MS = 250; // vida de cada pedaço no canal (era 90; ver o cabeçalho)
 // Trava da fila de envio: com mais que tantos quadros da banda cheia esperando, o próximo é pulado.
 // Só trava: o bufferedAmount do Chrome atualiza aos trancos (ver o cabeçalho); quem manda na banda é
 // a fila medida do outro lado. Uma trava pela banda de agora e pelo TTL_MS (2/3 dele: 1080p de 75 a
@@ -765,6 +770,7 @@ export class TurboRecebe {
     this.onEvento = onEvento;
     this.s = null;
     this._liso = true;
+    this.vidaMs = TTL_MS; // a vida dos pedaços no canal: vale na próxima vez que o turbo ligar
   }
 
   get ligado() { return !!this.s; }
@@ -789,7 +795,7 @@ export class TurboRecebe {
     this.desligar();
     if (!temTurboRecebe()) return this.onFalhou?.('navegador');
     const dono = String(key).split('~')[0];
-    const canal = this.abrir(dono);
+    const canal = this.abrir(dono, this.vidaMs);
     if (!canal) return this.onFalhou?.('conexao');
     canal.binaryType = 'arraybuffer';
     const tela = document.createElement('canvas');
@@ -819,6 +825,7 @@ export class TurboRecebe {
       caixa: [], // os últimos CAIXA quadros (caixaPreta)
       lisoConta: { atrasados: 0, trocados: 0, cheia: 0 },
     };
+    s.vidaMs = this.vidaMs;
     this.s = s;
     // a volta da tela: o liso escolhe o quadro, e o ritmo vê se apareceu um novo
     const volta = (t) => {
@@ -1486,6 +1493,7 @@ export class TurboRecebe {
       som: this.statsSom(s, seg),
       // o ritmo na tela (ritmo.js): de quantas em quantas voltas da tela veio cada quadro, e as travadas com a causa
       ritmo: s.ritmo.stats(),
+      vidaMs: s.vidaMs, // a vida dos pedaços no canal (TTL_MS ou a do preset)
       // o maior tempo sem nada chegando pela rede (Wi-Fi parado)
       silencioMaxMs: Math.round(s.silencioMax),
       // turbo liso: a folga de agora, quadros que chegaram depois da hora, trocados por um mais novo na

@@ -527,8 +527,49 @@ function resumoDe(amostras) {
     imagemBaixa: amostras.filter((a) => a.imagemBaixa).length,
     motivos,
     ritmo: resumoRitmo(amostras),
+    porPreset: resumoPorPreset(amostras),
     engasgosMarcados: amostras.reduce((n, a) => n + (a.engasgos?.length || 0), 0),
   };
+}
+
+// Presets de teste (jogo-opcoes.js): o que cada um deu, para comparar lado a lado. As 2 primeiras
+// amostras depois de cada troca ficam de fora (o turbo ligando, o buffer mudando).
+function resumoPorPreset(amostras) {
+  const grupos = {};
+  let ant = null;
+  let desde = 0;
+  for (const a of amostras) {
+    if (a.preset == null) continue;
+    if (a.preset !== ant) { ant = a.preset; desde = 0; }
+    if (++desde <= 2) continue;
+    (grupos[a.preset] ??= []).push(a);
+  }
+  const med = (v) => {
+    const o = v.filter((x) => x != null).sort((x, y) => x - y);
+    return o.length ? o[o.length >> 1] : null;
+  };
+  const out = {};
+  for (const [p, g] of Object.entries(grupos)) {
+    const rit = g.map((a) => a.ritmo).filter(Boolean);
+    const soma = (f) => rit.reduce((n, r) => n + (f(r) || 0), 0);
+    const porCausa = {};
+    for (const r of rit) for (const t of r.travadas || []) porCausa[t.causa || 'sem causa'] = (porCausa[t.causa || 'sem causa'] || 0) + 1;
+    const min = (g.length * 2) / 60;
+    out[p] = {
+      amostras: g.length,
+      modo: [...new Set(g.map((a) => a.modo || 'video'))].join('+'),
+      mediaQps: r1(mediaDe(g.map((a) => a.fpsFinal))),
+      atrasoMedianaMs: med(g.map((a) => a.atrasoMs)),
+      trancosPorMin: r1(soma((r) => r.trancos) / min),
+      travadasPorMin: r1(soma((r) => r.travadas?.length) / min),
+      invisiveisPorMin: r1(soma((r) => r.invisiveis) / min),
+      maiorTravadaMs: rit.length ? Math.max(...rit.map((r) => r.maiorMs || 0)) : null,
+      porCausa,
+      capturaLaMedia: r1(mediaDe(g.map((a) => a.la?.captura))),
+      engasgosMarcados: g.reduce((n, a) => n + (a.engasgos?.length || 0), 0),
+    };
+  }
+  return Object.keys(out).length ? out : null;
 }
 
 // O ritmo da sessão inteira, separado por modo (turbo e vídeo normal): de quantas em quantas voltas

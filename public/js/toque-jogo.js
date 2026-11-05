@@ -22,7 +22,7 @@
 // arrasta (analógico direito flutuante) vão para o controle virtual (pad-virtual.js), que vira um
 // controle de Xbox no PC de quem compartilha — o chiaki-ng passa para o PS5.
 
-import { opcoesJogo } from './jogo-opcoes.js';
+import { opcoesJogo, htmlPresets } from './jogo-opcoes.js';
 
 const DEAD = 0.25; // zona morta do analógico
 const CORRE = 0.95; // empurrar até a borda (para a frente) corre
@@ -307,6 +307,7 @@ export class ToqueJogo {
         <div class="tj-opcoes"></div>
         <label class="tj-sens"><span>Sensibilidade</span><input type="range" min="0.4" max="2.5" step="0.1"><output></output></label>
         <div class="tj-liga">
+          ${htmlPresets()}
           <label><input type="checkbox" data-op="liso"><span>Imagem mais lisa <small>(vídeo normal: +40 ms de atraso)</small></span></label>
           <label><input type="checkbox" data-op="rapido"><span>Menos atraso <small>(imagem em 720p)</small></span></label>
           <label><input type="checkbox" data-op="menuAuto"><span>Menu do jogo automático</span></label>
@@ -625,6 +626,7 @@ export class ToqueJogo {
     p.querySelector('.tj-sens input').value = String(this.sens);
     this.mostrarSens();
     p.querySelectorAll('[data-op]').forEach((el) => { el.checked = !!opcoesJogo.get(el.dataset.op); });
+    p.querySelectorAll('[data-preset]').forEach((el) => { el.value = String(opcoesJogo.get('preset') || 0); });
     p.hidden = false;
   }
 

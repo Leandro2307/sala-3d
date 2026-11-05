@@ -1221,12 +1221,13 @@ export class RTC {
 
   // Modo turbo (turbo.js), do lado de quem joga: um canal só para a imagem, ordenado e com vida
   // curta (um pedaço que perdeu a hora não segura os seguintes). Um por vez: abrir de novo fecha o anterior.
-  abrirTurbo(id) {
+  // vida: ms que cada pedaço vale no canal (turbo.js, TTL_MS); passou disso sem chegar, é largado
+  abrirTurbo(id, vida = 250) {
     const peer = this.peers.get(id);
     if (!peer || ['failed', 'closed'].includes(peer.pc.connectionState)) return null;
     try { peer.turboCanal?.close(); } catch { /* já fechado */ }
     try {
-      peer.turboCanal = peer.pc.createDataChannel('turbo', { ordered: true, maxPacketLifeTime: 90 });
+      peer.turboCanal = peer.pc.createDataChannel('turbo', { ordered: true, maxPacketLifeTime: Math.round(vida) });
       return peer.turboCanal;
     } catch {
       return null;

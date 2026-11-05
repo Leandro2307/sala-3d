@@ -24,8 +24,8 @@ import { AvisoDoSite } from './aviso-site.js';
 import { ToqueJogo, jogoDaJanela } from './toque-jogo.js';
 import { ControleFisico } from './gamepad-jogo.js';
 import { PadVirtual } from './pad-virtual.js';
-import { TurboEnvio, TurboRecebe } from './turbo.js';
-import { opcoesJogo, LISO_MS } from './jogo-opcoes.js';
+import { TurboEnvio, TurboRecebe, TTL_MS } from './turbo.js';
+import { opcoesJogo, LISO_MS, PRESETS, OPCOES_DO_PRESET, htmlPresets } from './jogo-opcoes.js';
 import { Mesa } from './mesa.js';
 import { Qualidade, NIVEIS, nivelInicial } from './qualidade.js';
 import * as moduloQualidade from './qualidade.js';
@@ -2820,7 +2820,7 @@ const MOTIVO_TURBO = {
 };
 const turboAvisado = new Set(); // motivos já avisados nesta página (o turbo vem ligado de fábrica)
 const turboRecebe = new TurboRecebe({
-  abrir: (id) => rtc?.abrirTurbo(id),
+  abrir: (id, vida) => rtc?.abrirTurbo(id, vida),
   abrirSom: (id) => rtc?.abrirTurboSom(id),
   onEvento: (texto, dados) => diagJogo.evento(texto, dados),
   onFalhou: (motivo) => {
@@ -2834,9 +2834,98 @@ turboRecebe.liso = opcoesJogo.get('turboLiso');
 function ligarTurbo() {
   if (!jogandoLa) return;
   turboRecebe.liso = opcoesJogo.get('turboLiso');
+  turboRecebe.vidaMs = presetAtual()?.vida ?? TTL_MS;
   turboRecebe.ligar(jogandoLa.key, jogandoLa.video, opcoesJogo.get('rapido') ? 720 : 1080);
-  diagJogo.evento('modo turbo ligado', { liso: opcoesJogo.get('turboLiso') });
+  diagJogo.evento('modo turbo ligado', { liso: opcoesJogo.get('turboLiso'), vidaMs: turboRecebe.vidaMs });
 }
+
+// ---------------------------------------------------------------- presets de teste (jogo-opcoes.js)
+const presetAtual = () => PRESETS.find((p) => p.id === opcoesJogo.get('preset')) || null;
+let aplicandoPreset = false;
+
+// Troca tudo de uma vez para o preset n (ou 0, manual: fica como está) e, no modo jogo, religa o que
+// precisa: buffer, 720p/1080p de quem compartilha, turbo (a vida do canal só vale ao abrir).
+function aplicarPreset(n, porque = 'escolhido') {
+  const p = PRESETS.find((x) => x.id === n) || null;
+  aplicandoPreset = true;
+  try {
+    opcoesJogo.setVarios({ preset: p ? p.id : 0, ...(p ? p.opcoes : {}) });
+  } finally {
+    aplicandoPreset = false;
+  }
+  turboRecebe.liso = opcoesJogo.get('turboLiso');
+  if (!jogandoLa || !p) return;
+  diagJogo.evento(`preset ${p.id}: ${p.nome} (${porque})`, { ...p.opcoes, vidaMs: p.vida });
+  aplicarBuffer();
+  avisarRapido();
+  if (p.opcoes.turbo) ligarTurbo();
+  else turboRecebe.desligar();
+}
+
+// Teste automático: 1 minuto em cada preset, na ordem, avisando a cada troca; no fim volta ao que
+// estava. De novo no botão (ou sair do modo jogo) interrompe.
+const TESTE_PRESET_MS = 60_000;
+let testePresets = null;
+function rodarTestePresets() {
+  if (testePresets) return pararTestePresets('interrompido');
+  if (!jogandoLa) return void toast('Ligue o modo jogo numa tela e jogue: o teste troca o preset a cada minuto.', 'warn', 6000);
+  testePresets = { antes: { preset: opcoesJogo.get('preset'), ...Object.fromEntries(OPCOES_DO_PRESET.map((k) => [k, opcoesJogo.get(k)])) }, i: 0, timer: 0 };
+  diagJogo.evento('teste de presets começou', { minutosCada: TESTE_PRESET_MS / 60_000, presets: PRESETS.map((p) => p.id) });
+  const passo = () => {
+    const t = testePresets;
+    if (!t) return;
+    if (t.i >= PRESETS.length) return pararTestePresets('terminou');
+    const p = PRESETS[t.i++];
+    aplicarPreset(p.id, `teste ${t.i}/${PRESETS.length}`);
+    toast(`Teste ${t.i}/${PRESETS.length}: ${p.nome} — jogue 1 minuto`, 'info', 4000);
+    t.timer = setTimeout(passo, TESTE_PRESET_MS);
+    sincronizarPresets();
+  };
+  passo();
+}
+function pararTestePresets(como) {
+  const t = testePresets;
+  if (!t) return;
+  clearTimeout(t.timer);
+  testePresets = null;
+  diagJogo.evento(`teste de presets ${como}`, { chegouAte: t.i });
+  // volta ao que estava antes do teste
+  const voltar = PRESETS.find((p) => p.id === t.antes.preset);
+  if (voltar) aplicarPreset(voltar.id, 'fim do teste');
+  else {
+    aplicandoPreset = true;
+    try { opcoesJogo.setVarios(t.antes); } finally { aplicandoPreset = false; }
+    if (jogandoLa) {
+      aplicarBuffer();
+      avisarRapido();
+      if (opcoesJogo.get('turbo')) ligarTurbo();
+      else turboRecebe.desligar();
+    }
+  }
+  if (como === 'terminou') toast('Teste de presets terminado. O relatório já foi para o servidor: é só me avisar.', 'info', 8000);
+  else if (como === 'interrompido') toast('Teste de presets interrompido.', 'info', 3000);
+  sincronizarPresets();
+}
+// o seletor e o botão do teste (no menu do PC e no painel do celular) mostram o estado de agora
+function sincronizarPresets() {
+  $$('[data-preset]').forEach((el) => { el.value = String(opcoesJogo.get('preset') || 0); el.disabled = !!testePresets; });
+  $$('[data-teste-presets]').forEach((el) => {
+    el.innerHTML = testePresets ? `Parar o teste <small>(preset ${testePresets.i} de ${PRESETS.length})</small>` : `Teste automático <small>(1 min em cada, ${PRESETS.length} min)</small>`;
+    el.classList.toggle('on', !!testePresets);
+  });
+}
+$('#jogo-op-pop').insertAdjacentHTML('afterbegin', htmlPresets());
+document.addEventListener('change', (e) => {
+  if (!e.target.matches?.('[data-preset]')) return;
+  aplicarPreset(Number(e.target.value) || 0);
+  e.target.blur();
+});
+document.addEventListener('click', (e) => {
+  if (!e.target.closest?.('[data-teste-presets]')) return;
+  e.target.closest('[data-teste-presets]').blur();
+  rodarTestePresets();
+});
+sincronizarPresets();
 
 // Quem joga sentiu um engasgo: F9 no PC, botão "Engasgou" no celular e no PC. Marca a hora no relatório,
 // com os últimos 3 s do turbo quadro a quadro (a caixa-preta), para cruzar o que se sentiu com os números.
@@ -2847,6 +2936,13 @@ function marcarEngasgo() {
 
 function jogoLa(video, key) {
   turboRecebe.desligar();
+  // saiu do modo jogo no meio do teste: para, e volta às opções de antes sem religar nada
+  if (!video && testePresets) {
+    const j = jogandoLa;
+    jogandoLa = null;
+    pararTestePresets('interrompido (saiu do modo jogo)');
+    jogandoLa = j;
+  }
   if (jogandoLa) {
     const feitos = rtc?.baixaLatencia(jogandoLa.video.srcObject, false);
     diagJogo.evento('buffer normal de volta', feitos);
@@ -2859,7 +2955,7 @@ function jogoLa(video, key) {
     gl: world.renderer.getContext(),
     video,
     // janela, e não tela: o ambiente já tem "tela" (o tamanho da tela do aparelho)
-    extra: { janelaDoJogo: acharTela(key)?.share.titulo ?? null, toque: isTouch, opcoes: { liso: opcoesJogo.get('liso'), menuAuto: opcoesJogo.get('menuAuto'), giro: opcoesJogo.get('giro'), rapido: opcoesJogo.get('rapido'), turbo: opcoesJogo.get('turbo'), turboLiso: opcoesJogo.get('turboLiso') } },
+    extra: { janelaDoJogo: acharTela(key)?.share.titulo ?? null, toque: isTouch, opcoes: { liso: opcoesJogo.get('liso'), menuAuto: opcoesJogo.get('menuAuto'), giro: opcoesJogo.get('giro'), rapido: opcoesJogo.get('rapido'), turbo: opcoesJogo.get('turbo'), turboLiso: opcoesJogo.get('turboLiso'), preset: opcoesJogo.get('preset') } },
   });
   aplicarBuffer();
   mostrarSelo();
@@ -2896,6 +2992,13 @@ function mostrarSelo(r = null) {
 }
 
 opcoesJogo.ouvir((k, v) => {
+  // mudou à mão uma opção que faz parte dos presets: agora é "Manual"
+  if (!aplicandoPreset && OPCOES_DO_PRESET.includes(k) && opcoesJogo.get('preset')) {
+    aplicandoPreset = true;
+    try { opcoesJogo.setVarios({ preset: 0 }); } finally { aplicandoPreset = false; }
+    if (jogandoLa) diagJogo.evento('preset: manual (opção mudada à mão)', { [k]: v });
+  }
+  if (k === 'preset') sincronizarPresets();
   if (k === 'liso') aplicarBuffer();
   else if (k === 'turboLiso') {
     turboRecebe.liso = v;
@@ -2961,7 +3064,7 @@ async function amostrarJogo() {
       rtc.mandarControle(dono, { p: performance.now() });
       const trilha = jogandoLa.video.srcObject?.getVideoTracks()[0];
       const som = jogandoLa.video.srcObject?.getAudioTracks()[0] || null;
-      const extra = { turbo: turboRecebe.stats(), controleRttMs: pingDoJogo.rtt, controleIdaMs: pingDoJogo.ida, ajudanteMs: pingDoJogo.ajudante, movimentoCru: controle.movimentoCru, controleFisico: fisico.usado, cursorLivre: jogandoLa.cursorLivre };
+      const extra = { preset: opcoesJogo.get('preset') || 0, turbo: turboRecebe.stats(), controleRttMs: pingDoJogo.rtt, controleIdaMs: pingDoJogo.ida, ajudanteMs: pingDoJogo.ajudante, movimentoCru: controle.movimentoCru, controleFisico: fisico.usado, cursorLivre: jogandoLa.cursorLivre };
       const resumo = trilha && diagJogo.amostraRecebe(await rtc.diagRecebe(trilha, som), sala, extra);
       mostrarSelo(resumo);
       // a mesma amostra vai para quem compartilha, que baixa o relatório dos dois lados de uma vez
@@ -3611,6 +3714,7 @@ const toqueJogo = new ToqueJogo({
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   },
 });
+sincronizarPresets(); // o painel do celular também tem o seletor de presets
 // o título da tela traz o nome do jogo que está nela (ver onQual): os botões são os dele
 controle.onJogo = (video, key) => {
   if (video) padVirtual.ligar(key);
