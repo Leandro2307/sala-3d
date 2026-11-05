@@ -2865,6 +2865,9 @@ function aplicarPreset(n, porque = 'escolhido') {
 // Teste automático: 1 minuto em cada preset, na ordem, avisando a cada troca; no fim volta ao que
 // estava. De novo no botão (ou sair do modo jogo) interrompe.
 const TESTE_PRESET_MS = 60_000;
+// O 1080p (preset 2) por último: no teste de 2026-11-05 00:40 ele esquentou o iPhone (decodificação de
+// 4 para 9 ms em 1 minuto) e os presets seguintes rodaram com o aparelho lento — não dava para comparar.
+const ORDEM_TESTE = [1, 3, 4, 5, 6, 2];
 let testePresets = null;
 function rodarTestePresets() {
   if (testePresets) return pararTestePresets('interrompido');
@@ -2874,8 +2877,8 @@ function rodarTestePresets() {
   const passo = () => {
     const t = testePresets;
     if (!t) return;
-    if (t.i >= PRESETS.length) return pararTestePresets('terminou');
-    const p = PRESETS[t.i++];
+    if (t.i >= ORDEM_TESTE.length) return pararTestePresets('terminou');
+    const p = PRESETS.find((x) => x.id === ORDEM_TESTE[t.i++]);
     aplicarPreset(p.id, `teste ${t.i}/${PRESETS.length}`);
     toast(`Teste ${t.i}/${PRESETS.length}: ${p.nome} — jogue 1 minuto`, 'info', 4000);
     t.timer = setTimeout(passo, TESTE_PRESET_MS);

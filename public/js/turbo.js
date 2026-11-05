@@ -931,6 +931,11 @@ export class TurboRecebe {
   // adiantar, o decodificador do processador (~2 ms em 720p). O iPhone solta na hora: lá nada muda.
   async segurando(s) {
     if (s.trocandoDec || s.ajusteDec >= 2 || !s.cfgAtual) return;
+    // Decodificador lento (cada quadro demorando) também deixa quadros lá dentro, e aí trocar para o
+    // processador só piora: no relatório de 2026-11-05 00:43 o iPhone quente foi para o processador
+    // (de 15 para 70 ms por quadro) e o turbo desistiu. Segurar de verdade é soltar rápido, com atraso.
+    const dec = mediana(s.conta.decMs);
+    if (dec != null && dec > 12) return;
     s.trocandoDec = true;
     try {
       const cfg = s.cfgAtual;
@@ -1234,7 +1239,18 @@ export class TurboRecebe {
     if (s.pendentes.size > 30) s.pendentes.clear();
     s.saiuDoDec = (s.saiuDoDec || 0) + 1;
     s.errosDec = 0;
-    if (!this._liso) return void this.pintar(s, frame, p);
+    // A tela está lenta (poucas voltas por segundo: ver Ritmo.lenta): esperar a volta só atrasa e joga
+    // quadros fora. Vai direto, como sem o liso, até a tela voltar ao normal.
+    const lenta = s.ritmo.lenta;
+    if (lenta !== !!s.lisoPausado) {
+      s.lisoPausado = lenta;
+      this.onEvento?.(lenta ? 'turbo liso pausado: a tela do aparelho está lenta' : 'turbo liso de volta: a tela voltou ao normal', { voltasMs: Math.round(s.ritmo.brutas.reduce((a, b) => a + b, 0) / s.ritmo.brutas.length) });
+      if (lenta) {
+        for (const q of s.fila) q.frame.close();
+        s.fila = [];
+      }
+    }
+    if (!this._liso || lenta) return void this.pintar(s, frame, p);
     // a hora deste quadro: o timestamp (µs, relógio da captura lá) + a base + a folga
     const ts = frame.timestamp / 1000;
     const dif = agora - ts;
@@ -1498,7 +1514,7 @@ export class TurboRecebe {
       silencioMaxMs: Math.round(s.silencioMax),
       // turbo liso: a folga de agora, quadros que chegaram depois da hora, trocados por um mais novo na
       // mesma volta e jogados fora com a fila cheia
-      liso: this._liso ? { alvoMs: Math.round(s.alvo * 10) / 10, fila: s.fila.length, ...s.lisoConta } : null,
+      liso: this._liso ? { alvoMs: Math.round(s.alvo * 10) / 10, fila: s.fila.length, pausado: !!s.lisoPausado, ...s.lisoConta } : null,
     };
     s.silencioMax = 0;
     s.lisoConta = { atrasados: 0, trocados: 0, cheia: 0 };

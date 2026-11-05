@@ -21,6 +21,9 @@ const pct = (v, p) => {
 export class Ritmo {
   constructor() {
     this.voltas = []; // duração das últimas voltas da tela (ms)
+    this.brutas = []; // as mesmas, sem filtro: com a página sobrecarregada elas passam de 50 ms (lenta)
+    this.nVoltas = 0;
+    this.desde = performance.now();
     this.ultimaVolta = 0;
     this.ultimo = 0; // quando apareceu o último quadro novo
     this.zerar();
@@ -37,14 +40,24 @@ export class Ritmo {
 
   // uma volta da tela aconteceu em t (requestAnimationFrame): mede a duração da volta
   volta(t) {
+    this.nVoltas++;
     if (this.ultimaVolta) {
       const d = t - this.ultimaVolta;
+      this.brutas.push(d);
+      if (this.brutas.length > 30) this.brutas.shift();
       if (d > 3 && d < 50) {
         this.voltas.push(d);
         if (this.voltas.length > 120) this.voltas.shift();
       }
     }
     this.ultimaVolta = t;
+  }
+
+  // A tela está dando menos de ~40 voltas por segundo (iPhone quente ou no Modo de Pouca Energia, página
+  // sobrecarregada): o requestAnimationFrame vem a cada 25 ms ou mais. No relatório de 2026-11-05 00:42
+  // ele chegou a ~6 por segundo, e o liso, que mostra um quadro por volta, travou em 6 qps.
+  get lenta() {
+    return this.brutas.length >= 10 && pct(this.brutas, 0.5) > 25;
   }
 
   // Um quadro novo apareceu na tela em t (ms, relógio do performance.now). causa(): chamada só se o
@@ -80,8 +93,15 @@ export class Ritmo {
       return null;
     }
     const iv = c.intervalos;
+    const agora = performance.now();
+    const voltasPorSeg = r1((this.nVoltas * 1000) / Math.max(1, agora - this.desde));
+    this.nVoltas = 0;
+    this.desde = agora;
     const r = {
       vsyncMs: r1(this.vsyncMs),
+      // voltas da tela por segundo (requestAnimationFrame): 60 ou 120 normal; ~30 no Modo de Pouca
+      // Energia; bem menos com o aparelho quente ou a página sobrecarregada
+      voltasPorSeg,
       quadros: c.quadros,
       emVsyncs: c.emVsyncs,
       p50Ms: r1(pct(iv, 0.5)),
