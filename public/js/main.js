@@ -2687,6 +2687,8 @@ controle.onQual = (sh, q) => {
 // O jogo na minha tela mostrou o cursor (menu, inventário) ou escondeu (ajudante 1.8+): quem joga nela
 // fica sabendo e troca o mouse entre a câmera e o menu (controle.cursorLivre)
 const cursorDoJogo = new Map(); // tela -> último estado mandado
+// o Wi-Fi deste PC (ajudante do Windows), na resposta dos eventos de quem joga: vai no relatório de envio
+controle.onWifi = (w) => diagJogo.wifiChegou(w);
 controle.onCursor = (sh, livre) => {
   const quem = jogandoAqui.get(sh.key);
   if (!quem || cursorDoJogo.get(sh.key) === livre) return;
@@ -2828,10 +2830,19 @@ const turboRecebe = new TurboRecebe({
     toast(`Modo turbo desligado: ${MOTIVO_TURBO[motivo] || motivo}. A imagem voltou ao normal.`, 'warn', 8000);
   },
 });
+turboRecebe.liso = opcoesJogo.get('turboLiso');
 function ligarTurbo() {
   if (!jogandoLa) return;
+  turboRecebe.liso = opcoesJogo.get('turboLiso');
   turboRecebe.ligar(jogandoLa.key, jogandoLa.video, opcoesJogo.get('rapido') ? 720 : 1080);
-  diagJogo.evento('modo turbo ligado');
+  diagJogo.evento('modo turbo ligado', { liso: opcoesJogo.get('turboLiso') });
+}
+
+// Quem joga sentiu um engasgo: F9 no PC, botão "Engasgou" no celular e no PC. Marca a hora no relatório,
+// com os últimos 3 s do turbo quadro a quadro (a caixa-preta), para cruzar o que se sentiu com os números.
+function marcarEngasgo() {
+  if (!jogandoLa) return;
+  if (diagJogo.marcarEngasgo(turboRecebe.ligado ? turboRecebe.caixaPreta() : null)) toast('Engasgo marcado no relatório', 'info', 1500);
 }
 
 function jogoLa(video, key) {
@@ -2848,7 +2859,7 @@ function jogoLa(video, key) {
     gl: world.renderer.getContext(),
     video,
     // janela, e não tela: o ambiente já tem "tela" (o tamanho da tela do aparelho)
-    extra: { janelaDoJogo: acharTela(key)?.share.titulo ?? null, toque: isTouch, opcoes: { liso: opcoesJogo.get('liso'), menuAuto: opcoesJogo.get('menuAuto'), giro: opcoesJogo.get('giro'), rapido: opcoesJogo.get('rapido') } },
+    extra: { janelaDoJogo: acharTela(key)?.share.titulo ?? null, toque: isTouch, opcoes: { liso: opcoesJogo.get('liso'), menuAuto: opcoesJogo.get('menuAuto'), giro: opcoesJogo.get('giro'), rapido: opcoesJogo.get('rapido'), turbo: opcoesJogo.get('turbo'), turboLiso: opcoesJogo.get('turboLiso') } },
   });
   aplicarBuffer();
   mostrarSelo();
@@ -2877,12 +2888,19 @@ function mostrarSelo(r = null) {
   const linhas = r.altura ? `${r.altura}p` : '';
   // turbo: da captura lá até desenhado aqui, medido quadro a quadro (turbo.js, pontaMs)
   const imagem = r.turbo?.pontaMs != null ? ` (imagem ${Math.round(r.turbo.pontaMs)} ms)` : '';
-  el.innerHTML = (turboRecebe.ligado ? '<b>turbo</b> · ' : '') + `<span class="${r.fpsFinal != null && r.fpsFinal < 50 ? 'ruim' : ''}">${qps} qps</span> · ${linhas} · ~${atraso}${imagem} · ${mbps} Mbps`
+  // trancos: quadros que ficaram 3 voltas da tela ou mais nos últimos 2 s (ritmo.js)
+  const trancos = r.ritmo ? ` · <span class="${r.ritmo.trancos > 2 ? 'ruim' : ''}">${r.ritmo.trancos} trancos</span>` : '';
+  const liso = r.turbo?.liso ? ` · liso ${Math.round(r.turbo.liso.alvoMs)} ms` : '';
+  el.innerHTML = (turboRecebe.ligado ? '<b>turbo</b> · ' : '') + `<span class="${r.fpsFinal != null && r.fpsFinal < 50 ? 'ruim' : ''}">${qps} qps</span>${trancos} · ${linhas} · ~${atraso}${imagem}${liso} · ${mbps} Mbps`
     + (r.motivo ? ` · <span class="ruim">${r.motivo}</span>` : '');
 }
 
 opcoesJogo.ouvir((k, v) => {
   if (k === 'liso') aplicarBuffer();
+  else if (k === 'turboLiso') {
+    turboRecebe.liso = v;
+    if (jogandoLa) diagJogo.evento(v ? 'turbo liso ligado' : 'turbo liso desligado');
+  }
   else if (k === 'rapido') {
     avisarRapido();
     if (turboRecebe.ligado) ligarTurbo(); // o turbo também manda em 720p com "Menos atraso"
@@ -3484,6 +3502,7 @@ function updateFocusCtrl() {
   jb.hidden = !on || !janela;
   // as opções do modo jogo (no celular elas ficam no painel do controle de toque)
   $('#focus-jogo-op-wrap').hidden = jb.hidden || isTouch;
+  $('#focus-engasgo').hidden = jb.hidden || isTouch || controle.jogoNo !== fv;
   if (jb.hidden) $('#jogo-op-pop').hidden = true;
   const emJogo = controle.jogoNo === fv;
   jb.classList.toggle('on', emJogo);
@@ -3555,6 +3574,10 @@ $('#focus-jogo-op').addEventListener('click', (e) => {
   e.currentTarget.blur();
   $$('#jogo-op-pop [data-op]').forEach((el) => { el.checked = !!opcoesJogo.get(el.dataset.op); });
 });
+$('#focus-engasgo').addEventListener('click', (e) => {
+  e.currentTarget.blur();
+  marcarEngasgo();
+});
 $('#jogo-op-pop').addEventListener('change', (e) => {
   const k = e.target.dataset.op;
   if (k) opcoesJogo.set(k, e.target.checked);
@@ -3581,6 +3604,7 @@ const toqueJogo = new ToqueJogo({
   controle,
   pad: padVirtual,
   toast,
+  onEngasgo: () => marcarEngasgo(),
   onSair: () => {
     controle.desligarJogo();
     updateFocusCtrl();
@@ -4527,6 +4551,11 @@ controle.atalho = (e, a) => {
   // F8 liga/desliga o modo jogo (com o ponteiro preso não dá para clicar no botão)
   if (e.code === 'F8' && !$('#focus-jogo').hidden) {
     if (a === 'down' && !e.repeat) $('#focus-jogo').click();
+    return true;
+  }
+  // F9: "engasgou agora" (marca no relatório do modo jogo)
+  if (e.code === 'F9' && jogandoLa) {
+    if (a === 'down' && !e.repeat) marcarEngasgo();
     return true;
   }
   return mesa.atalho(e, a);

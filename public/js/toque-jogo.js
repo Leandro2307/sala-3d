@@ -266,12 +266,14 @@ function lerPosicoes() {
 }
 
 export class ToqueJogo {
-  constructor({ raiz, controle, pad, toast, onSair }) {
+  // onEngasgo: quem joga tocou em "Engasgou" (marca no relatório do modo jogo)
+  constructor({ raiz, controle, pad, toast, onSair, onEngasgo }) {
     this.raiz = raiz;
     this.controle = controle;
     this.pad = pad; // controle virtual (layout PS5, ver pad-virtual.js)
     this.toast = toast || (() => {});
     this.onSair = onSair;
+    this.onEngasgo = onEngasgo;
     this.key = null;
     // tecla ou botão ("KeyW", "mouse:left") -> quantos botões da tela seguram agora: só sobe
     // quando o último solta (a Fúria aperta Shift com o analógico já correndo no Shift)
@@ -305,10 +307,11 @@ export class ToqueJogo {
         <div class="tj-opcoes"></div>
         <label class="tj-sens"><span>Sensibilidade</span><input type="range" min="0.4" max="2.5" step="0.1"><output></output></label>
         <div class="tj-liga">
-          <label><input type="checkbox" data-op="liso"><span>Imagem mais lisa <small>(+40 ms de atraso)</small></span></label>
+          <label><input type="checkbox" data-op="liso"><span>Imagem mais lisa <small>(vídeo normal: +40 ms de atraso)</small></span></label>
           <label><input type="checkbox" data-op="rapido"><span>Menos atraso <small>(imagem em 720p)</small></span></label>
           <label><input type="checkbox" data-op="menuAuto"><span>Menu do jogo automático</span></label>
           <label><input type="checkbox" data-op="turbo"><span>Modo turbo <small>(imagem sem buffer: bem menos atraso)</small></span></label>
+          <label><input type="checkbox" data-op="turboLiso"><span>Turbo liso <small>(+~20 ms: quadros no ritmo certo)</small></span></label>
           <label><input type="checkbox" data-op="selo"><span>Mostrar desempenho</span></label>
           <label><input type="checkbox" data-op="giro"><span>Mirar virando o celular</span></label>
           <label><input type="checkbox" data-op="vibrar"><span>Vibrar com o jogo <small>(Android ou controle ligado)</small></span></label>
@@ -533,8 +536,11 @@ export class ToqueJogo {
       ? [L.escFecha ? { r: 'Fechar', k: 'Esc', tecla: 'Escape', fecha: true } : { r: 'Esc', k: 'volta', tecla: 'Escape' },
         { r: 'Voltar ao jogo', volta: true, cls: 'tj-volta' }]
       : L.topo;
-    topo.innerHTML = doTopo.map(htmlBotao).join('') + '<button type="button" class="tj-sair" aria-label="Sair do modo jogo"><b>Sair</b></button>';
-    topo.querySelectorAll('button:not(.tj-sair)').forEach((el, i) => this.ligar(el, doTopo[i]));
+    topo.innerHTML = doTopo.map(htmlBotao).join('')
+      + '<button type="button" class="tj-engasgo" aria-label="Marcar engasgo no relatório"><b>Engasgou</b></button>'
+      + '<button type="button" class="tj-sair" aria-label="Sair do modo jogo"><b>Sair</b></button>';
+    topo.querySelectorAll('button:not(.tj-sair):not(.tj-engasgo)').forEach((el, i) => this.ligar(el, doTopo[i]));
+    this.segurar(topo.querySelector('.tj-engasgo'), () => {}, (tocou) => tocou && this.onEngasgo?.());
     this.segurar(topo.querySelector('.tj-sair'), () => {}, (tocou) => tocou && this.onSair?.());
 
     const grade = this.menu ? L.menu || MENU_PADRAO : L;

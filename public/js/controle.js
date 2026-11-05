@@ -404,6 +404,8 @@ export class Controle {
     if (r?.qual) this.onQual?.(sh, r.qual);
     // o cursor do jogo à mostra (menu) ou escondido (ajudante 1.8+)
     if (typeof r?.cursor === 'boolean') this.onCursor?.(sh, r.cursor);
+    // o Wi-Fi deste PC (ajudante 1.11+): sinal, faixa, canal e velocidade, para o relatório do modo jogo
+    if (r?.wifi && typeof r.wifi === 'object') this.onWifi?.(r.wifi);
     // Ctrl+C de quem controla de longe: o texto vai para a área de transferência dela (mexendo na
     // minha própria aba, o Chrome já copiou para a minha)
     if (deId && typeof r?.copia === 'string' && r.copia) this.emitir('controle-volta', { key: sh.key, para: deId, ev: { t: 'copia', s: r.copia } });

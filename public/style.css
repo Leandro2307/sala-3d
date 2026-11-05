@@ -3963,6 +3963,8 @@ body.toque-jogo #jogo-selo { top: auto; bottom: max(8px, env(safe-area-inset-bot
 }
 #toque-jogo .tj-topo button { flex-direction: row; gap: 5px; height: 38px; padding: 0 11px; font-size: 13px; }
 #toque-jogo .tj-topo .tj-sair { background: rgba(127, 29, 29, 0.55); }
+#toque-jogo .tj-topo .tj-engasgo { background: rgba(120, 83, 8, 0.6); }
+#focus-engasgo kbd { margin-left: 4px; font-size: 10px; opacity: 0.7; }
 #toque-jogo .tj-topo .tj-volta { background: rgba(14, 116, 144, 0.62); border-color: rgba(125, 211, 252, 0.85); }
 .tj-dica {
   position: absolute;

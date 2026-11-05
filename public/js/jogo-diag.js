@@ -7,6 +7,8 @@
 // e ao fechar a aba. Assim não precisa baixar e mandar, e uma página que caiu não leva tudo junto.
 // Para ler: npm run relatorios (scripts/relatorios.js).
 
+import { Ritmo } from './ritmo.js';
+
 const BOM = 50; // abaixo disso (quadros por segundo) a jogatina já engasga
 const SEGUIDAS = 3; // amostras ruins em seguida (6 s) antes de avisar
 const ENTRE_AVISOS = 45_000;
@@ -72,6 +74,8 @@ export class DiagJogo {
       ultimoAviso: 0,
       outroLado: null,
       quemJoga: new Map(), // quem compartilha: o que cada pessoa que joga mediu do lado dela (doQuemJoga)
+      engasgos: [], // quem joga: as vezes que marcou "engasgou" desde a última amostra (marcarEngasgo)
+      totalEngasgos: 0,
     };
     this.evento('começou', { lado, ...info.extra });
     clearInterval(this.timerEnvio);
@@ -104,17 +108,45 @@ export class DiagJogo {
     if (this.sessao && this.sessao.eventos.length > 300) this.sessao.eventos.shift();
   }
 
-  // quadros que chegam de verdade na tela (o <video> chama a cada quadro mostrado)
+  // Quadros que chegam de verdade na tela (o <video> chama a cada quadro mostrado) e o ritmo deles
+  // (ritmo.js): cada um marcado na volta da tela em que vai aparecer. No turbo o <video> fica parado e
+  // quem mede é o turbo.js.
   contarQuadros(video) {
     this.video = video;
     this.naTela = 0;
+    this.ritmoVideo = new Ritmo();
     if (!video?.requestVideoFrameCallback) return;
-    const conta = () => {
+    const ritmo = this.ritmoVideo;
+    const conta = (agora, meta) => {
       if (this.video !== video) return;
       this.naTela++;
+      ritmo.marcar(meta?.expectedDisplayTime ?? agora);
       video.requestVideoFrameCallback(conta);
     };
     video.requestVideoFrameCallback(conta);
+    const volta = (t) => {
+      if (this.video !== video) return;
+      ritmo.volta(t);
+      requestAnimationFrame(volta);
+    };
+    requestAnimationFrame(volta);
+  }
+
+  // Quem joga tocou em "Engasgou": marca a hora (vai na próxima amostra, que segue também para quem
+  // compartilha) e guarda no relatório a caixa-preta do turbo (os últimos 3 s, quadro a quadro).
+  marcarEngasgo(caixaPreta = null) {
+    const s = this.sessao;
+    if (!s) return false;
+    const quando = new Date().toISOString();
+    s.engasgos.push(quando);
+    s.totalEngasgos++;
+    const a = s.amostras.at(-1);
+    this.evento('engasgou (marcado por quem joga)', {
+      quando,
+      ultimaAmostra: a ? { modo: a.modo || 'video', fpsFinal: a.fpsFinal, atrasoMs: a.atrasoMs, ritmo: a.ritmo ?? null, motivo: a.motivo } : null,
+      caixaPreta,
+    });
+    return true;
   }
 
   // ---------------------------------------------------------------- quem compartilha
@@ -173,6 +205,8 @@ export class DiagJogo {
       // quantos codificadores desta tela estão trabalhando (um por pessoa que recebe, na malha): quem
       // assiste ao jogo de perto custava quadros a quem joga
       codificadores: cru.envios.filter((e) => e.params?.active !== false && (e.saida?.framesPerSecond ?? 0) > 0).length,
+      // o Wi-Fi deste PC (o ajudante do Windows lê: sinal, faixa, canal, velocidade); null sem ajudante
+      wifi: this.wifi && Date.now() - this.wifi.em < 30_000 ? this.wifi.info : null,
     };
     resumo.fpsFinal = resumo.enviado;
     // modo turbo: a imagem dessa pessoa vai pelo canal turbo e o vídeo da conexão está parado de
@@ -249,6 +283,17 @@ export class DiagJogo {
       bufferMinimoMs: emitidos > 0 && i?.jitterBufferMinimumDelay != null ? r1((1000 * dif(i, ib, 'jitterBufferMinimumDelay')) / emitidos) : null,
       ...extra,
     };
+    // o ritmo na tela: o do turbo quando ele desenha; senão o do <video>. A conta do <video> zera
+    // sempre (senão juntaria o que veio antes do turbo).
+    const ritmoVideo = this.ritmoVideo?.stats() ?? null;
+    if (resumo.turbo?.ritmo !== undefined) {
+      resumo.ritmo = resumo.turbo.ritmo;
+      delete resumo.turbo.ritmo;
+    } else resumo.ritmo = ritmoVideo;
+    if (s.engasgos.length) {
+      resumo.engasgos = s.engasgos;
+      s.engasgos = [];
+    }
     // Do dedo ao olho, estimado: o comando vai (metade do ping, mais o caminho até o ajudante), o jogo
     // desenha (um quadro a 60), a captura e o codificador lá, a imagem volta (metade da ida e volta),
     // espera no buffer, decodifica e espera a vez na tela (meio quadro)
@@ -293,6 +338,11 @@ export class DiagJogo {
     return resumo;
   }
 
+  // o Wi-Fi deste PC, lido pelo ajudante do Windows (main.js: controle.onWifi); vai em cada amostra de envio
+  wifiChegou(info) {
+    this.wifi = { info, em: Date.now() };
+  }
+
   // o resumo que quem compartilha manda a cada 2 s
   doOutroLado(resumo) {
     if (!this.sessao || !resumo) return;
@@ -307,6 +357,7 @@ export class DiagJogo {
     if (s?.lado !== 'compartilha' || !r || typeof r !== 'object') return;
     let q = s.quemJoga.get(id);
     if (!q) s.quemJoga.set(id, (q = { nome, ambiente: null, amostras: [] }));
+    if (Array.isArray(r.engasgos) && r.engasgos.length) this.evento('quem joga marcou engasgo', { nome, quando: r.engasgos.slice(0, 10) });
     if (amb && typeof amb === 'object') q.ambiente = amb;
     q.amostras.push({ ...r, chegou: Date.now() });
     if (q.amostras.length > GUARDA) q.amostras.shift();
@@ -475,7 +526,33 @@ function resumoDe(amostras) {
     abaixoDe50: fps.filter((v) => v < BOM).length,
     imagemBaixa: amostras.filter((a) => a.imagemBaixa).length,
     motivos,
+    ritmo: resumoRitmo(amostras),
+    engasgosMarcados: amostras.reduce((n, a) => n + (a.engasgos?.length || 0), 0),
   };
+}
+
+// O ritmo da sessão inteira, separado por modo (turbo e vídeo normal): de quantas em quantas voltas
+// da tela vieram os quadros (somado), os trancos por minuto e as travadas por causa.
+function resumoRitmo(amostras) {
+  const modos = {};
+  for (const a of amostras) {
+    const r = a.ritmo;
+    if (!r) continue;
+    const m = (modos[a.modo || 'video'] ??= { amostras: 0, quadros: 0, emVsyncs: [0, 0, 0, 0, 0], trancos: 0, invisiveis: 0, travadas: 0, porCausa: {}, maiorMs: 0 });
+    m.amostras++;
+    m.quadros += r.quadros || 0;
+    (r.emVsyncs || []).forEach((n, k) => { m.emVsyncs[k] += n; });
+    m.trancos += r.trancos || 0;
+    m.invisiveis += r.invisiveis || 0;
+    m.maiorMs = Math.max(m.maiorMs, r.maiorMs || 0);
+    for (const t of r.travadas || []) {
+      m.travadas++;
+      const c = t.causa || 'sem causa';
+      m.porCausa[c] = (m.porCausa[c] || 0) + 1;
+    }
+  }
+  for (const m of Object.values(modos)) m.trancosPorMin = Math.round((m.trancos / Math.max(1, m.amostras * 2)) * 60 * 10) / 10;
+  return Object.keys(modos).length ? modos : null;
 }
 
 function mediaDe(v) {

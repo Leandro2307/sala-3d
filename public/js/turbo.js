@@ -48,6 +48,8 @@
 //     compartilha), e quem joga, com a diferença dos relógios pelo ping, mede quanto ele levou até
 //     ser desenhado (pontaMs) e quanto ficou na fila + rede (viagemMs).
 
+import { Ritmo } from './ritmo.js';
+
 const PEDACO = 15000; // bytes de quadro por mensagem (abaixo do limite de 16 KB de qualquer navegador)
 const CAB = 20; // id do quadro (u32), pedaço (u16), total (u16), chave (u8), versão (u8: 0 ou 2), ms codificando ×10 (u16), tempo em µs (f64)
 const CAB2 = 28; // versão 2: + saiu da captura (f64, ms no relógio de quem compartilha)
@@ -95,6 +97,29 @@ const FILA_LENTA_MS = 3000; // ...seguidos por tanto tempo
 const CODECS = ['avc1.640033', 'avc1.4d0033', 'avc1.42e033', 'avc1.42001f'];
 
 const QPS_TURBO = 60;
+
+// Turbo liso (2026-11-04): sem buffer nenhum, cada quadro ia para a tela na hora em que saía do
+// decodificador. No Wi-Fi eles chegam com 10–30 ms de diferença entre si (relatório de 2026-11-04
+// 23:51: viagem p90 − mediana ~15 ms), e na tela de 60 Hz isso vira quadro repetido seguido de quadro
+// que nunca aparece: o vídeo normal, com 80–300 ms de buffer, parecia mais liso. Com o liso, cada
+// quadro tem a hora certa de aparecer: a hora em que saiu da captura lá (o timestamp, em µs) + a
+// diferença mínima vista (o caminho mais rápido) + uma folga (alvo) do tamanho do tremido medido —
+// o p95 de quanto cada quadro chegou atrasado em relação ao mais rápido, entre LISO_MIN e LISO_MAX. A
+// cada volta da tela (requestAnimationFrame) vai um quadro, o mais velho cuja hora chegou (ver volta).
+// A folga sobe na hora e desce devagar. O que um quadro-chave atrasa (perda) não entra na conta:
+// viraria folga à toa. Simulado com o tremido dos relatórios (captura a 55 qps, tela de 60 Hz): os
+// quadros que nunca apareciam caíram de ~360 para ~25 por minuto e os trancos de 3 voltas pela
+// metade, com ~27 ms a mais de atraso.
+const LISO_PCT = 0.95; // o tremido que a folga cobre
+const LISO_MIN = 4;
+const LISO_MAX = 45;
+const LISO_INICIO = 16;
+const LISO_ATRAS = 2; // quadros na hora ao mesmo tempo antes de pular um para alcançar (ver volta)
+const LISO_ALCANCAR = 8; // quadros seguidos mostrados uma volta atrasados antes de pular um para alcançar
+const LISO_FILA = 5; // quadros decodificados esperando a vez, no máximo (o decodificador do iPhone tem poucos)
+// caixa-preta: os últimos quadros, um por um (vai no relatório quando quem joga marca "engasgou")
+const CAIXA = 240;
+const CAIXA_MS = 3000;
 export const temTurboEnvio = () => typeof MediaStreamTrackProcessor === 'function' && typeof VideoEncoder === 'function';
 export const temTurboRecebe = () => typeof VideoDecoder === 'function' && typeof EncodedVideoChunk === 'function';
 
@@ -376,7 +401,10 @@ export class TurboEnvio {
     const s = { id, key, canal, chave: true, quadro: 0, enc: null, cfg: null, config: null, banda: 0, trilha: original.clone(), parar: false, pulados: 0, enviados: 0,
       cfgEnviada: null, ajuste: { altas: 0, baixas: 0, mudou: 0, ultima: null }, // ajustarBanda
       chaveId: 0, chaveEm: 0, // o último quadro-chave mandado (pedidoDeChave)
-      tempos: new Map(), conta: { enviados: 0, bytes: 0, pulados: 0, fila: 0, cod: [], chaves: 0, chaveMax: 0, ignorados: 0, ultimo: performance.now() } };
+      tempos: new Map(), conta: { enviados: 0, bytes: 0, pulados: 0, fila: 0, cod: [], chaves: 0, chaveMax: 0, ignorados: 0, ultimo: performance.now() },
+      // a fila de envio a cada 100 ms (a maior vista em cada um, em KB) e os pulados em cada um: mostra
+      // se os pulos são picos curtos do Wi-Fi ou falta de banda o tempo todo; rajada: pulados em seguida
+      serie: { fila: [], pulados: [] }, rajada: 0, maiorRajada: 0 };
     this.sessoes.set(id, s);
     // quem joga com a versão 2 lê o cabeçalho com a hora da captura (a antiga leria como imagem)
     s.v2 = Number(versao) >= 2;
@@ -578,13 +606,21 @@ export class TurboEnvio {
         // Não conta como pulado (não é fila nem codificador atrasado). Ritmo fixo (proximoEnvio anda
         // de 1/60 em 1/60 s): comparar com o último quadro deixava passar quadros adiantados (64 qps).
         if (s.proximoEnvio && agora < s.proximoEnvio - 2) continue;
-        const filaCheia = s.canal.bufferedAmount > this.limiteFila(s);
+        const fila = s.canal.bufferedAmount;
+        const filaCheia = fila > this.limiteFila(s);
+        const b = Math.min(49, Math.floor((agora - s.conta.ultimo) / 100));
+        const sf = s.serie.fila;
+        while (sf.length <= b) { sf.push(0); s.serie.pulados.push(0); }
+        if (fila / 1024 > sf[b]) sf[b] = Math.round(fila / 102.4) / 10;
         if (s.canal.readyState !== 'open' || filaCheia || (s.enc && s.enc.encodeQueueSize > 1)) {
           s.pulados++;
           s.conta.pulados++;
+          s.serie.pulados[b]++;
+          if (++s.rajada > s.maiorRajada) s.maiorRajada = s.rajada;
           if (filaCheia) s.conta.fila++;
           continue;
         }
+        s.rajada = 0;
         const passo = 1000 / QPS_TURBO;
         s.proximoEnvio = s.proximoEnvio && agora - s.proximoEnvio < passo ? s.proximoEnvio + passo : agora + passo;
         await this.configurar(s, frame.displayWidth, frame.displayHeight);
@@ -694,12 +730,19 @@ export class TurboEnvio {
       chaves: s.conta.chaves, // quadros-chave mandados
       chaveKB: s.conta.chaves ? Math.round(s.conta.chaveMax / 102.4) / 10 : null, // o maior deles
       chavesIgnoradas: s.conta.ignorados, // pedidos de quadro-chave com um ainda a caminho (pedidoDeChave)
+      // a fila de envio (KB) a cada 100 ms e os pulados em cada 100 ms; maiorRajada: pulados em seguida
+      filaSerieKB: s.serie.fila,
+      puladosSerie: s.serie.pulados.some((n) => n) ? s.serie.pulados : null,
+      maiorRajada: s.maiorRajada,
+      limiteFilaKB: Math.round(this.limiteFila(s) / 1024),
       versao: s.v2 ? VERSAO : 1,
       // o som pelo turbo (null: quem joga não pediu, a tela não tem som ou o Opus não abriu)
       som: s.som ? { pps: Math.round(s.som.conta.enviados / seg), kbps: Math.round((s.som.conta.bytes * 8) / seg / 1000), pulados: s.som.conta.pulados, canal: this.canaisSom.get(id)?.readyState ?? null } : null,
     };
     if (s.som) Object.assign(s.som.conta, { enviados: 0, bytes: 0, pulados: 0 });
     s.ajuste.mudou = 0;
+    s.serie = { fila: [], pulados: [] };
+    s.maiorRajada = 0;
     Object.assign(s.conta, { enviados: 0, bytes: 0, pulados: 0, fila: 0, cod: [], chaves: 0, chaveMax: 0, ignorados: 0, ultimo: agora });
     return r;
   }
@@ -721,9 +764,22 @@ export class TurboRecebe {
     this.onFalhou = onFalhou;
     this.onEvento = onEvento;
     this.s = null;
+    this._liso = true;
   }
 
   get ligado() { return !!this.s; }
+
+  // turbo liso (ver LISO_MIN): pode trocar com o turbo ligado
+  get liso() { return this._liso; }
+  set liso(v) {
+    this._liso = !!v;
+    const s = this.s;
+    if (s && !this._liso) {
+      // sem o liso: o que estava esperando a vez vai embora (o próximo quadro já vai direto)
+      for (const q of s.fila) q.frame.close();
+      s.fila = [];
+    }
+  }
 
   // relógio de quem compartilha − o meu (pelo pong de menor ida e volta), ou null: o main.js mede com
   // ele a ida do controle sem a volta (que espera atrás da imagem no mesmo caminho)
@@ -754,8 +810,23 @@ export class TurboRecebe {
       // a fila medida, para quem compartilha (vigiar): viagens desde o último aviso, a menor de cada aviso
       janelaViagem: [], minimos: [], filaEm: 0, filaMs: null,
       filaLentaDesde: 0, // desde quando a fila medida passa de FILA_LENTA (vigiar)
+      // liso: quadros decodificados esperando a hora { frame, hora, info }; base: a menor diferença
+      // (chegada − timestamp) por segundo, dos últimos 10 s; atrasos: quanto cada quadro veio depois da base
+      fila: [], baseSeg: [], baseSegEm: 0, atrasos: [], alvo: LISO_INICIO, base: null, foraDaBase: 0,
+      // ritmo na tela (ritmo.js) e o que explica cada travada (causa)
+      ritmo: new Ritmo(), pintados: 0, vistos: 0, tsChegou: null, saltoLa: 0,
+      ultimoPacote: 0, silencio: 0, silencioMax: 0, perdaEm: 0, chaveChegouEm: 0, esperouChave: null,
+      caixa: [], // os últimos CAIXA quadros (caixaPreta)
+      lisoConta: { atrasados: 0, trocados: 0, cheia: 0 },
     };
     this.s = s;
+    // a volta da tela: o liso escolhe o quadro, e o ritmo vê se apareceu um novo
+    const volta = (t) => {
+      if (this.s !== s) return;
+      this.volta(s, t);
+      s.raf = requestAnimationFrame(volta);
+    };
+    s.raf = requestAnimationFrame(volta);
     // o AudioContext nasce aqui, antes de qualquer espera: ainda dentro do toque que ligou o modo
     // jogo (o iPhone só deixa tocar assim; senão, destrava no próximo toque — ver prepararSom)
     this.prepararSom(s, dono);
@@ -881,6 +952,14 @@ export class TurboRecebe {
   pedaco(s, buf) {
     if (buf.byteLength < CAB) return;
     s.conta.bytes += buf.byteLength;
+    // o maior tempo sem nada chegando: o Wi-Fi parado (vai na causa da travada e no relatório)
+    const agoraP = performance.now();
+    if (s.ultimoPacote) {
+      const sem = agoraP - s.ultimoPacote;
+      if (sem > s.silencio) s.silencio = sem;
+      if (sem > s.silencioMax) s.silencioMax = sem;
+    }
+    s.ultimoPacote = agoraP;
     const v = new DataView(buf);
     // versão 2: o cabeçalho traz a hora em que o quadro saiu da captura lá (quem compartilha antigo: 0)
     const v2 = v.getUint8(9) === VERSAO;
@@ -913,16 +992,30 @@ export class TurboRecebe {
       s.conta.chaveMax = Math.max(s.conta.chaveMax, tam);
     }
     // da saída do codificador lá até o último pedaço aqui: a fila de envio + a rede
+    let viagem = null;
+    let atrasDaChave = q.chave;
     if (q.lido != null && s.dif != null) {
-      const viagem = chegou + s.dif - (q.lido + q.cod);
+      viagem = chegou + s.dif - (q.lido + q.cod);
       guardar(s.conta.viagem, viagem);
       // A fila que um quadro-chave causa (ele é bem maior que um quadro comum, e os capturados enquanto
       // ele passava esperam atrás dele) vem da perda que o pediu, não da banda: fica fora da conta que
       // vai para quem compartilha cortar a banda (ajustarBanda). O relatório continua vendo tudo.
-      const atrasDaChave = q.chave || (s.fimChave != null && q.lido < s.fimChave);
+      atrasDaChave = q.chave || (s.fimChave != null && q.lido < s.fimChave);
       if (q.chave) s.fimChave = chegou + s.dif;
       if (!atrasDaChave) s.janelaViagem.push(viagem); // vai para quem compartilha a cada FILA_AVISO_MS (vigiar)
     }
+    if (q.chave && s.perdaEm && !s.chaveChegouEm) {
+      s.chaveChegouEm = chegou;
+      s.esperouChave = Math.round(chegou - s.perdaEm); // da perda até o quadro-chave novo chegar inteiro
+    }
+    // quanto o timestamp de lá andou desde o quadro inteiro anterior: bem mais que 1/60 s = quadros que
+    // quem compartilha não mandou (pulados na fila ou captura parada; ver causa)
+    const tsMs = q.ts / 1000;
+    if (s.tsChegou != null && tsMs > s.tsChegou && tsMs - s.tsChegou > s.saltoLa) s.saltoLa = tsMs - s.tsChegou;
+    s.tsChegou = tsMs;
+    if (s.caixa.length >= CAIXA) s.caixa.shift();
+    const reg = { c: chegou, id: q.id, ts: q.ts / 1000, k: q.chave ? 1 : 0, kb: Math.round(tam / 102.4) / 10, mont: Math.round(chegou - q.t0), v: viagem != null ? Math.round(viagem) : null, d: null, m: null };
+    s.caixa.push(reg);
     // faltou um quadro inteiro no meio: os de depois não decodificam sem ele
     if (!q.chave && q.id !== s.ultimoId + 1) this.perdeu(s);
     s.ultimoId = q.id;
@@ -941,7 +1034,7 @@ export class TurboRecebe {
       this.segurando(s);
     }
     try {
-      s.pendentes.set(q.ts, { t: chegou, lido: q.lido });
+      s.pendentes.set(q.ts, { t: chegou, lido: q.lido, chaveAtrasou: atrasDaChave, reg });
       s.dec.decode(new EncodedVideoChunk({ type: q.chave ? 'key' : 'delta', timestamp: q.ts, data: dados }));
     } catch (err) {
       console.warn('[turbo] decodificar', err);
@@ -951,6 +1044,13 @@ export class TurboRecebe {
 
   perdeu(s) {
     s.conta.perdidos++;
+    // a 1ª perda desde o último quadro-chave: dela até a imagem voltar é o tempo esperando o quadro-chave
+    if (!s.perdaEm || s.chaveChegouEm) {
+      s.perdaEm = performance.now();
+      s.chaveChegouEm = 0;
+      s.esperouChave = null;
+    }
+    if (s.caixa.length) s.caixa[s.caixa.length - 1].perdeu = 1;
     s.montando = null;
     s.esperaChave = true;
     this.pedirChave(s);
@@ -1113,15 +1213,115 @@ export class TurboRecebe {
     if (motivo) this.onEvento?.('modo turbo: som de volta ao WebRTC', { motivo });
   }
 
+  // Saiu um quadro do decodificador: sem o liso, vai para a tela na hora; com o liso, espera a hora
+  // dele na fila (volta escolhe a cada volta da tela).
   desenhar(s, frame) {
-    try {
-      if (this.s !== s) return;
-      const p = s.pendentes.get(frame.timestamp);
-      if (p) {
-        s.pendentes.delete(frame.timestamp);
-        guardar(s.conta.decMs, performance.now() - p.t);
+    if (this.s !== s) return void frame.close();
+    const agora = performance.now();
+    const p = s.pendentes.get(frame.timestamp);
+    if (p) {
+      s.pendentes.delete(frame.timestamp);
+      guardar(s.conta.decMs, agora - p.t);
+      if (p.reg) p.reg.d = Math.round(agora - p.t);
+    }
+    if (s.pendentes.size > 30) s.pendentes.clear();
+    s.saiuDoDec = (s.saiuDoDec || 0) + 1;
+    s.errosDec = 0;
+    if (!this._liso) return void this.pintar(s, frame, p);
+    // a hora deste quadro: o timestamp (µs, relógio da captura lá) + a base + a folga
+    const ts = frame.timestamp / 1000;
+    const dif = agora - ts;
+    this.medirBase(s, dif, agora, p?.chaveAtrasou);
+    const hora = ts + s.base + s.alvo;
+    s.fila.push({ frame, hora, p });
+    // fila cheia (o decodificador do iPhone tem poucos quadros): o mais velho sai sem aparecer
+    while (s.fila.length > LISO_FILA) {
+      s.fila.shift().frame.close();
+      s.lisoConta.cheia++;
+      s.ritmo.invisivel();
+    }
+  }
+
+  // A base (a menor diferença chegada − timestamp: o caminho mais rápido, com a diferença dos relógios
+  // dentro) e a folga (alvo): o p95 de quanto os quadros vieram depois da base nos últimos ~2 s.
+  medirBase(s, dif, agora, chaveAtrasou) {
+    // relógios/timestamps que pularam (quem compartilha recomeçou a captura): recomeça a conta
+    if (s.base != null && Math.abs(dif - s.base) > 1000) {
+      if (++s.foraDaBase > 10) { s.base = null; s.baseSeg = []; s.atrasos = []; s.foraDaBase = 0; }
+    } else s.foraDaBase = 0;
+    const seg = Math.floor(agora / 1000);
+    if (seg !== s.baseSegEm || !s.baseSeg.length) {
+      s.baseSegEm = seg;
+      s.baseSeg.push(dif);
+      if (s.baseSeg.length > 10) s.baseSeg.shift();
+    } else if (dif < s.baseSeg[s.baseSeg.length - 1]) s.baseSeg[s.baseSeg.length - 1] = dif;
+    s.base = Math.min(...s.baseSeg);
+    if (chaveAtrasou) return;
+    guardar(s.atrasos, dif - s.base, 120);
+    if (s.atrasos.length < 20) return;
+    const p95 = Math.min(LISO_MAX, Math.max(LISO_MIN, pct(s.atrasos, LISO_PCT) + 2));
+    // sobe na hora, desce devagar (um tremido que passou pode voltar)
+    s.alvo = p95 > s.alvo ? p95 : s.alvo + (p95 - s.alvo) * 0.02;
+  }
+
+  // A cada volta da tela: com o liso, vai um quadro da fila (o mais velho que já está na hora). Depois,
+  // se apareceu quadro novo desde a última volta, o ritmo marca.
+  volta(s, t) {
+    s.ritmo.volta(t);
+    if (s.fila.length) {
+      const agora = performance.now();
+      const meia = s.ritmo.vsyncMs / 2;
+      // quantos já estão na hora
+      let n = 0;
+      while (n < s.fila.length && s.fila[n].hora <= agora + meia) n++;
+      // Um quadro que chegou atrasado ainda aparece (uma volta depois), e os seguintes vão uma volta
+      // atrás; só com LISO_ATRAS ou mais na hora ao mesmo tempo o mais velho sai, para alcançar.
+      // Jogar fora o atrasado (como era) virava quadro repetido + quadro pulado a cada atraso.
+      // Atrás há LISO_ALCANCAR quadros seguidos (com a captura a 60 cravados, nunca sobra uma volta
+      // para alcançar sozinho): pula um, uma vez, para voltar à hora.
+      const alcancar = n >= 2 && s.atrasSeguidos >= LISO_ALCANCAR;
+      while (n > LISO_ATRAS || (alcancar && n > 1)) {
+        s.fila.shift().frame.close();
+        s.lisoConta.trocados++;
+        s.ritmo.invisivel();
+        s.atrasSeguidos = 0;
+        n--;
       }
-      if (s.pendentes.size > 30) s.pendentes.clear();
+      if (n > 0) {
+        const q = s.fila.shift();
+        const atras = agora - q.hora > meia;
+        s.atrasSeguidos = atras ? (s.atrasSeguidos || 0) + 1 : 0;
+        if (atras) s.lisoConta.atrasados++;
+        this.pintar(s, q.frame, q.p);
+      }
+    }
+    const novos = s.pintados - s.vistos;
+    if (novos > 0) {
+      s.vistos = s.pintados;
+      if (novos > 1) s.ritmo.invisivel(novos - 1);
+      s.ritmo.marcar(t, (ms) => this.causa(s, t, ms));
+      s.silencio = 0;
+      s.saltoLa = 0;
+    }
+  }
+
+  // Por que a imagem ficou ms parada antes do quadro que apareceu em t. Na ordem: um quadro se perdeu
+  // e esperou o quadro-chave; quem compartilha não mandou (quadros pulados lá: o timestamp pulou junto);
+  // nada chegou pela rede (Wi-Fi parado); o decodificador demorou; senão, foi aqui (página ocupada).
+  causa(s, t, ms) {
+    const r = { silencioMs: Math.round(s.silencio), pulouLaMs: Math.round(s.saltoLa) };
+    const ult = s.caixa.length ? s.caixa[s.caixa.length - 1] : null;
+    if (ult?.v != null) r.viagemMs = ult.v;
+    if (s.perdaEm && s.perdaEm >= t - ms - 20) return { causa: 'perda: esperou o quadro-chave', esperouChaveMs: s.esperouChave, ...r };
+    if (s.saltoLa >= ms * 0.6) return { causa: 'lá: quadros não mandados (fila ou captura)', ...r };
+    if (s.silencio >= ms * 0.6) return { causa: 'rede: nada chegou (Wi-Fi parado)', ...r };
+    if (ult?.d != null && ult.d > ms * 0.5) return { causa: 'decodificador', decMs: ult.d, ...r };
+    if (ult?.v != null && ult.v > ms * 0.5) return { causa: 'rede: quadro atrasado', ...r };
+    return { causa: 'aqui: a página ou a tela demorou', ...r };
+  }
+
+  pintar(s, frame, p) {
+    try {
       const w = frame.displayWidth;
       const h = frame.displayHeight;
       if (s.tela.width !== w || s.tela.height !== h) {
@@ -1129,11 +1329,11 @@ export class TurboRecebe {
         s.tela.height = h;
       }
       s.ctx.drawImage(frame, 0, 0, w, h);
+      s.pintados++;
       s.conta.desenhados++;
-      s.saiuDoDec = (s.saiuDoDec || 0) + 1;
-      s.errosDec = 0;
       s.desenhou = performance.now();
-      // da captura lá até desenhado aqui (codificação, fila, rede, montagem, decodificação)
+      if (p?.reg) p.reg.m = Math.round(s.desenhou - p.reg.c);
+      // da captura lá até desenhado aqui (codificação, fila, rede, montagem, decodificação, liso)
       if (p?.lido != null && s.dif != null) guardar(s.conta.ponta, s.desenhou + s.dif - p.lido);
       if (s.tela.hidden) {
         s.tela.hidden = false;
@@ -1142,6 +1342,21 @@ export class TurboRecebe {
     } finally {
       frame.close();
     }
+  }
+
+  // Os últimos CAIXA_MS, quadro a quadro, para o relatório (quem joga marcou "engasgou"): quando chegou
+  // (ms antes de agora), id, timestamp de lá (ms, relativo ao primeiro), quadro-chave, tamanho (KB),
+  // montagem, viagem, decodificação, chegada→tela (m; null = não apareceu) e perdeu (faltou o de antes).
+  caixaPreta() {
+    const s = this.s;
+    if (!s) return null;
+    const agora = performance.now();
+    const q = s.caixa.filter((r) => agora - r.c <= CAIXA_MS);
+    const ts0 = q.length ? q[0].ts : 0;
+    return {
+      liso: this._liso, alvoMs: Math.round(s.alvo * 10) / 10,
+      quadros: q.map((r) => ({ ...r, c: -Math.round(agora - r.c), ts: Math.round((r.ts - ts0) * 10) / 10 })),
+    };
   }
 
   // o canvas fica exatamente onde o vídeo está (mesma caixa e mesmas margens: object-fit cuida do resto)
@@ -1204,6 +1419,9 @@ export class TurboRecebe {
     try { if (s.canal.readyState === 'open') s.canal.send(JSON.stringify({ desligar: true })); } catch { /* fechando */ }
     try { s.canal.close(); } catch { /* já fechado */ }
     try { if (s.dec && s.dec.state !== 'closed') s.dec.close(); } catch { /* já fechado */ }
+    cancelAnimationFrame(s.raf);
+    for (const q of s.fila) q.frame.close();
+    s.fila = [];
     this.pararSom(s);
     s.tela.remove();
   }
@@ -1266,7 +1484,16 @@ export class TurboRecebe {
       chaves: s.conta.chaves, // quadros-chave que chegaram inteiros
       chaveKB: s.conta.chaves ? Math.round(s.conta.chaveMax / 102.4) / 10 : null, // o maior deles
       som: this.statsSom(s, seg),
+      // o ritmo na tela (ritmo.js): de quantas em quantas voltas da tela veio cada quadro, e as travadas com a causa
+      ritmo: s.ritmo.stats(),
+      // o maior tempo sem nada chegando pela rede (Wi-Fi parado)
+      silencioMaxMs: Math.round(s.silencioMax),
+      // turbo liso: a folga de agora, quadros que chegaram depois da hora, trocados por um mais novo na
+      // mesma volta e jogados fora com a fila cheia
+      liso: this._liso ? { alvoMs: Math.round(s.alvo * 10) / 10, fila: s.fila.length, ...s.lisoConta } : null,
     };
+    s.silencioMax = 0;
+    s.lisoConta = { atrasados: 0, trocados: 0, cheia: 0 };
     Object.assign(s.conta, { desenhados: 0, perdidos: 0, pedidos: 0, bytes: 0, montagem: [], cod: [], ponta: [], viagem: [], chaves: 0, chaveMax: 0, ultimo: agora });
     return r;
   }

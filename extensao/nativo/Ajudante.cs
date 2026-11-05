@@ -26,6 +26,10 @@
 // frente na tela inteira. A sala reconhece o jogo (Minecraft, God of War...) e o celular de quem
 // controla troca para os botões dele. Vai ao achar o alvo, ao ligar o modo jogo e, na tela
 // inteira, quando a janela que recebe a entrada muda.
+//
+// Wi-Fi deste PC ({ tipo: "wifi", ... }, 1.11+): no modo jogo, a cada WIFI_MS, o sinal, a faixa, o
+// canal e a velocidade do Wi-Fi, pela API do Windows (wlanapi: não depende do idioma, como o netsh).
+// Vai para o relatório do modo jogo: a maior causa de engasgo nos testes era o Wi-Fi de quem compartilha.
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -68,6 +72,11 @@ namespace Sala3d
         delegate bool EnumMon(IntPtr m, IntPtr dc, ref RECT r, IntPtr l);
 
         [DllImport("user32.dll")] static extern bool SetProcessDpiAwarenessContext(IntPtr v);
+        [DllImport("wlanapi.dll")] static extern int WlanOpenHandle(uint versao, IntPtr r, out uint negociada, out IntPtr h);
+        [DllImport("wlanapi.dll")] static extern int WlanCloseHandle(IntPtr h, IntPtr r);
+        [DllImport("wlanapi.dll")] static extern int WlanEnumInterfaces(IntPtr h, IntPtr r, out IntPtr lista);
+        [DllImport("wlanapi.dll")] static extern int WlanQueryInterface(IntPtr h, ref Guid g, int op, IntPtr r, out int tam, out IntPtr dados, IntPtr tipo);
+        [DllImport("wlanapi.dll")] static extern void WlanFreeMemory(IntPtr p);
         [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
         [DllImport("user32.dll")] static extern bool GetCursorPos(out PONTO p);
         [DllImport("user32.dll")] static extern uint SendInput(uint n, INPUT[] i, int size);
@@ -168,7 +177,8 @@ namespace Sala3d
             var entrada = Console.OpenStandardInput();
             new Thread(VigiarAtalho) { IsBackground = true }.Start();
             new Thread(VigiarJogo) { IsBackground = true }.Start();
-            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.10.0" } });
+            new Thread(VigiarWifi) { IsBackground = true }.Start();
+            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.11.0" } });
             var json = new JavaScriptSerializer();
             string txt;
             while ((txt = Ler(entrada)) != null)
@@ -684,6 +694,84 @@ namespace Sala3d
                 }
                 catch { /* a saída fechou: o Rodar termina sozinho */ }
             }
+        }
+
+        // ------------------------------------------------------------ Wi-Fi
+        const int WIFI_MS = 4000;
+        static void VigiarWifi()
+        {
+            int ultimo = 0;
+            while (true)
+            {
+                Thread.Sleep(500);
+                try
+                {
+                    if (!jogo || !temAlvo) { ultimo = 0; continue; }
+                    if (ultimo != 0 && unchecked(Environment.TickCount - ultimo) < WIFI_MS) continue;
+                    ultimo = Environment.TickCount;
+                    Escrever(LerWifi());
+                }
+                catch { /* sem wlanapi (Windows Server) ou a saída fechou */ }
+            }
+        }
+
+        // O Wi-Fi conectado agora. Os números saem das estruturas do wlanapi pelas posições (64 bits ou
+        // 32, as mesmas): WLAN_INTERFACE_INFO tem 532 bytes (GUID, nome, estado) depois de 8 de
+        // cabeçalho; em WLAN_CONNECTION_ATTRIBUTES, a parte da associação começa em 520 — SSID (36),
+        // tipo (4), BSSID (6 + 2), tipo de rádio em 568, sinal (0–100) em 576, recepção e envio em kbps
+        // em 580 e 584. Canal: opcode 8; RSSI em dBm: opcode 0x10000102.
+        static Dictionary<string, object> LerWifi()
+        {
+            var r = new Dictionary<string, object> { { "tipo", "wifi" }, { "conectado", false } };
+            IntPtr h; uint neg;
+            if (WlanOpenHandle(2, IntPtr.Zero, out neg, out h) != 0) { r["erro"] = "wlan"; return r; }
+            IntPtr lista = IntPtr.Zero;
+            try
+            {
+                if (WlanEnumInterfaces(h, IntPtr.Zero, out lista) != 0) return r;
+                int n = Marshal.ReadInt32(lista, 0);
+                for (int i = 0; i < n; i++)
+                {
+                    IntPtr item = new IntPtr(lista.ToInt64() + 8 + i * 532);
+                    if (Marshal.ReadInt32(item, 528) != 1) continue; // wlan_interface_state_connected
+                    var bytes = new byte[16];
+                    Marshal.Copy(item, bytes, 0, 16);
+                    var g = new Guid(bytes);
+                    int tam; IntPtr d;
+                    if (WlanQueryInterface(h, ref g, 7, IntPtr.Zero, out tam, out d, IntPtr.Zero) != 0) continue;
+                    try
+                    {
+                        r["conectado"] = true;
+                        r["adaptador"] = Marshal.PtrToStringUni(new IntPtr(item.ToInt64() + 16));
+                        int fis = Marshal.ReadInt32(d, 568);
+                        r["radio"] = fis == 4 ? "802.11a" : fis == 5 ? "802.11b" : fis == 6 ? "802.11g" : fis == 7 ? "802.11n (Wi-Fi 4)" : fis == 8 ? "802.11ac (Wi-Fi 5)" : fis == 10 ? "802.11ax (Wi-Fi 6)" : fis == 11 ? "802.11be (Wi-Fi 7)" : "tipo " + fis;
+                        r["sinal"] = Marshal.ReadInt32(d, 576);
+                        r["recebeMbps"] = Marshal.ReadInt32(d, 580) / 1000;
+                        r["enviaMbps"] = Marshal.ReadInt32(d, 584) / 1000;
+                    }
+                    finally { WlanFreeMemory(d); }
+                    if (WlanQueryInterface(h, ref g, 8, IntPtr.Zero, out tam, out d, IntPtr.Zero) == 0)
+                    {
+                        int canal = Marshal.ReadInt32(d, 0);
+                        WlanFreeMemory(d);
+                        r["canal"] = canal;
+                        // canais até 14 são da faixa de 2,4 GHz; acima, 5 GHz (o 6 GHz usa os mesmos números)
+                        r["faixa"] = canal <= 14 ? "2.4 GHz" : "5 GHz";
+                    }
+                    if (WlanQueryInterface(h, ref g, 0x10000102, IntPtr.Zero, out tam, out d, IntPtr.Zero) == 0)
+                    {
+                        r["rssi"] = Marshal.ReadInt32(d, 0);
+                        WlanFreeMemory(d);
+                    }
+                    break;
+                }
+            }
+            finally
+            {
+                if (lista != IntPtr.Zero) WlanFreeMemory(lista);
+                WlanCloseHandle(h, IntPtr.Zero);
+            }
+            return r;
         }
 
         // O cursor está à mostra e solto? Jogo com a câmera no mouse esconde o cursor (ShowCursor ou

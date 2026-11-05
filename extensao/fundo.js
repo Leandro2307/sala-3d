@@ -505,6 +505,11 @@ function conectarNativo() {
     // controle virtual do PS5 (ajudante 1.9+): não abriu — falta o driver ViGEmBus ou a biblioteca.
     // Vai na resposta de cada evento, e a sala avisa quem compartilha e quem joga.
     if (m?.tipo === 'pad') n.pad = m.ok ? null : String(m.erro || 'falhou').slice(0, 80);
+    // o Wi-Fi deste PC (ajudante 1.11+), no modo jogo: vai na resposta dos eventos para o relatório
+    if (m?.tipo === 'wifi') {
+      const { tipo, ...w } = m;
+      n.wifi = w;
+    }
     // vibração do controle virtual (ajudante 1.10+): o jogo do PS5 mandou tremer. Vai já para a sala,
     // sem esperar o próximo evento (quem joga pode estar parado levando um tiro).
     if (m?.tipo === 'tremor' && n.sala != null) avisarSala(n.sala, { tipo: 'tremor', g: Number(m.g) || 0, p: Number(m.p) || 0 });
@@ -580,6 +585,7 @@ function janela(alvo, ev, sala) {
     if (n.qual) r.qual = n.qual;
     if (n.cursor != null) r.cursor = n.cursor;
     if (n.pad) r.pad = n.pad;
+    if (n.wifi) r.wifi = n.wifi;
     return r;
   });
   filaNativo = vez.catch(() => {});
