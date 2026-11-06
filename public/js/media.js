@@ -248,7 +248,10 @@ class YouTubeAdapter {
             this.load(o.id, o.start, o.autoplay);
             resolve();
           },
-          onStateChange: () => o.onState(this.state()),
+          onStateChange: () => {
+            this.checkLive();
+            o.onState(this.state());
+          },
           onError: (e) => {
             console.warn('[yt] erro do player:', e.data);
             o.onError(ytErrorMessage(e.data));
@@ -260,6 +263,9 @@ class YouTubeAdapter {
 
   // troca de vídeo reaproveitando o mesmo player (bem mais rápido que recriar o iframe)
   load(id, start, playing) {
+    this.isLive = false;
+    // aberto com tempo inicial: numa live isso cai no meio do DVR (ver checkLive)
+    this.edged = !(start > 1);
     if (playing) this.player.loadVideoById({ videoId: id, startSeconds: start });
     else this.player.cueVideoById({ videoId: id, startSeconds: start });
   }
@@ -275,11 +281,34 @@ class YouTubeAdapter {
     }
   }
 
+  // Live do YouTube: o tempo do player conta desde o começo da transmissão (ou da janela de DVR),
+  // não desde que alguém colou o link. Alinhar pelo relógio da sala fazia o player pular para
+  // trás a cada segundo e travar carregando. Na live, cada um deixa o YouTube cuidar do próprio
+  // buffer (ele já toca um pouco atrás do "ao vivo" para não engasgar) e só play/pause vale para todos.
+  checkLive() {
+    if (!this.isLive && this.player.getVideoData?.()?.isLive) this.isLive = true;
+    if (!this.isLive || this.edged) return;
+    const S = this.YT.PlayerState;
+    if (this.player.getPlayerState() !== S.PLAYING) return;
+    this.edged = true;
+    // quem entrou depois abriu com o startSeconds do relógio da sala e caiu no meio do DVR:
+    // volta para o ao vivo uma vez. Pedir o fim do vídeo (getDuration, que nas lives vem até
+    // adiantado) faz o YouTube parar no mesmo ponto de uma live aberta do zero, com a folga
+    // de buffer dele.
+    const end = this.player.getDuration() || 0;
+    if (end > this.time() + 60) this.player.seekTo(end, true);
+  }
+
+  get live() {
+    if (!this.isLive && this.player?.getVideoData?.()?.isLive) this.isLive = true;
+    return !!this.isLive;
+  }
+
   play() { this.player.playVideo(); }
   pause() { this.player.pauseVideo(); }
-  seek(t) { this.player.seekTo(t, true); }
+  seek(t) { if (!this.live) this.player.seekTo(t, true); }
   time() { return this.player.getCurrentTime() || 0; }
-  duration() { return this.player.getDuration() || 0; }
+  duration() { return this.live ? 0 : this.player.getDuration() || 0; }
   title() { return this.player.getVideoData?.()?.title || ''; }
   setVolume(v) { this.player.setVolume(v); }
   setMuted(m) {
