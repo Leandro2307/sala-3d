@@ -485,7 +485,16 @@ body.touch :is(input, textarea, [contenteditable="true"]) { -webkit-user-select:
   font-size: 13px;
   pointer-events: auto;
   white-space: nowrap;
+  transition: opacity 300ms ease;
 }
+/* some sozinha com o mouse parado; volta quando ele mexe (ver mostrarFocoHud no main.js).
+   O mouse em cima do vídeo não chega à página (é o iframe do YouTube): a própria barra, invisível,
+   continua pegando o mouse — com uma folga em volta (::before) — e reaparece quando ele passa no
+   alto da tela. Só no meio: o volume e a engrenagem do YouTube, nos cantos, seguem livres. */
+#tv-focus-hud::before { content: ''; position: absolute; inset: -16px -48px -36px; }
+#tv-focus-hud > * { position: relative; z-index: 1; }
+#tv-focus-hud.sumido { opacity: 0; }
+#tv-focus-hud.sumido > * { pointer-events: none; } /* invisível, o Sair não sai sem querer */
 
 /* navegador em foco (ver navegador.js): as abas e o endereço estão na tela; aqui só o Sair,
    no canto (no meio de cima ele taparia as abas) */

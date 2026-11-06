@@ -80,7 +80,10 @@ const ESCALA_TEXTURA = moduloQualidade.ESCALA_TEXTURA ?? 1;
 // setTimeout(0) seria freado para 1 s com a aba em segundo plano; isto não.
 const ceder = () => (globalThis.scheduler?.yield ? globalThis.scheduler.yield()
   : new Promise((r) => { const c = new MessageChannel(); c.port1.onmessage = () => r(); c.port2.postMessage(0); }));
-const TV_PX = { w: 1280, h: 720 }; // superfície CSS3D do player do telão (iframe/<video>)
+// superfície CSS3D do player do telão (iframe/<video>). Em 1920×1080: o navegador desenha o
+// player nesse tamanho e só depois estica até a tela; com 1280×720 o 1080p do YouTube virava
+// um 720p ampliado no foco (e o YouTube nem oferecia mais que isso para um player pequeno)
+const TV_PX = { w: 1920, h: 1080 };
 
 // Parede de telas: telão no centro, 4 telas de compartilhamento nas laterais (levemente viradas para o centro).
 const MAIN_LAYOUT = { x: 0, y: 12.6, z: ROOM.minZ + 0.6, w: 30, h: 16.875 };

@@ -2,7 +2,7 @@
 // (mp4, webm, HLS .m3u8, DASH .mpd), num iframe/<video> via CSS3D, sincronizado entre todos da sala.
 // Cada plataforma é um "adaptador" com a mesma cara: o MediaSync não precisa saber qual está tocando.
 
-const PX = { w: 1280, h: 720 }; // mesmo tamanho da superfície CSS3D do telão
+const PX = { w: 1920, h: 1080 }; // mesmo tamanho da superfície CSS3D do telão (TV_PX no world.js)
 
 // api: o player aceita comando de fora (play/pause/seek), então dá para sincronizar.
 // live: transmissão ao vivo — não existe "minuto 12:30" para alinhar, só play/pause.
@@ -264,10 +264,15 @@ class YouTubeAdapter {
   // troca de vídeo reaproveitando o mesmo player (bem mais rápido que recriar o iframe)
   load(id, start, playing) {
     this.isLive = false;
-    // aberto com tempo inicial: numa live isso cai no meio do DVR (ver checkLive)
+    this.started = false;
+    // Qualquer startSeconds numa live (até os 0,4 s de atraso de quem colou o link) faz o
+    // YouTube abrir no COMEÇO da transmissão. Sem tempo de verdade, nem manda: vídeo comum
+    // começa do 0 do mesmo jeito e live abre no ao vivo.
+    const v = start > 1 ? { videoId: id, startSeconds: start } : { videoId: id };
+    // com tempo inicial (quem entrou depois), se for live volta para o ao vivo (ver checkLive)
     this.edged = !(start > 1);
-    if (playing) this.player.loadVideoById({ videoId: id, startSeconds: start });
-    else this.player.cueVideoById({ videoId: id, startSeconds: start });
+    if (playing) this.player.loadVideoById(v);
+    else this.player.cueVideoById(v);
   }
 
   state() {
@@ -287,9 +292,10 @@ class YouTubeAdapter {
   // buffer (ele já toca um pouco atrás do "ao vivo" para não engasgar) e só play/pause vale para todos.
   checkLive() {
     if (!this.isLive && this.player.getVideoData?.()?.isLive) this.isLive = true;
-    if (!this.isLive || this.edged) return;
     const S = this.YT.PlayerState;
-    if (this.player.getPlayerState() !== S.PLAYING) return;
+    const st = this.player.getPlayerState();
+    if (st === S.PLAYING || st === S.PAUSED) this.started = true;
+    if (!this.isLive || this.edged || st !== S.PLAYING) return;
     this.edged = true;
     // quem entrou depois abriu com o startSeconds do relógio da sala e caiu no meio do DVR:
     // volta para o ao vivo uma vez. Pedir o fim do vídeo (getDuration, que nas lives vem até
@@ -306,7 +312,10 @@ class YouTubeAdapter {
 
   play() { this.player.playVideo(); }
   pause() { this.player.pauseVideo(); }
-  seek(t) { if (!this.live) this.player.seekTo(t, true); }
+  // Antes de tocar pela 1ª vez o player ainda não sabe se é live (isLive chega atrasado), e o
+  // acerto de atraso do MediaSync (os segundos que a API levou para abrir) mandava a live para
+  // o começo. Até começar, o startSeconds do load já põe no lugar; depois o tick corrige.
+  seek(t) { if (this.started && !this.live) this.player.seekTo(t, true); }
   time() { return this.player.getCurrentTime() || 0; }
   duration() { return this.live ? 0 : this.player.getDuration() || 0; }
   title() { return this.player.getVideoData?.()?.title || ''; }

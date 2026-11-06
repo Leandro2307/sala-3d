@@ -6682,6 +6682,7 @@ function enterFocus(info) {
       ? 'Clique no navegador para pegar o controle. Para voltar a andar, use o botão ao lado.'
       : 'Clique no vídeo para usar os controles do player';
     $('#tv-focus-hud').hidden = false;
+    mostrarFocoHud();
     $('#crosshair').hidden = true;
     $('#hover-hint').hidden = true;
     // celular: analógico e botões somem (e soltam o que estava apertado), como nos outros focos —
@@ -6791,6 +6792,27 @@ function sairDoFoco() {
 $('#focus-close').addEventListener('click', sairDoFoco);
 $('#jh-sair').addEventListener('click', sairDoFoco);
 $('#tv-focus-exit').addEventListener('click', sairDoFoco);
+
+// Barra do telão em foco ("Clique no vídeo..." + Sair): tapava o título do vídeo. Some com o
+// mouse parado e volta quando ele mexe. O mexer DENTRO do iframe do player não chega à página,
+// então também conta o mouse entrando no player e o clique nele (o iframe pega o foco: blur).
+// No navegador compartilhado ela fica: é ali que diz como voltar a andar.
+let focoHudTimer = 0;
+function mostrarFocoHud() {
+  if (state.focus?.kind !== 'tv') return;
+  const hud = $('#tv-focus-hud');
+  hud.classList.remove('sumido');
+  clearTimeout(focoHudTimer);
+  if (tv.state.provider === 'browser') return;
+  focoHudTimer = setTimeout(() => {
+    if (hud.matches(':hover')) mostrarFocoHud(); // com o mouse em cima do Sair, espera
+    else hud.classList.add('sumido');
+  }, 2500);
+}
+for (const ev of ['pointermove', 'pointerdown', 'pointerover']) {
+  document.addEventListener(ev, mostrarFocoHud, { passive: true });
+}
+window.addEventListener('blur', () => setTimeout(mostrarFocoHud, 0));
 // ------------------------------------------------------------------ a tela do lado
 // Usando uma tela (o navegador no monitor do posto, por exemplo): ‹ › nas bordas ou Alt+← / Alt+→
 // (até de dentro do site, com a extensão) passa para a tela vizinha — a câmera desliza até ela.
