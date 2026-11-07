@@ -4072,6 +4072,9 @@ body.toque-jogo #jogo-selo { top: auto; bottom: max(8px, env(safe-area-inset-bot
 #toque-jogo .tj-qua { color: #f0abfc; border-color: rgba(240, 171, 252, 0.6); }
 #toque-jogo .tj-ps.apertado { background: rgba(255, 255, 255, 0.28); }
 #toque-jogo[data-layout="ps5"] .tj-topo button { min-width: 0; padding-inline: 10px; }
+/* layout Switch: A B X Y redondos, as letras no lugar dos do Switch */
+#toque-jogo .tj-nx { color: #f8fafc; font-size: 24px; font-weight: 700; }
+#toque-jogo[data-layout="switch"] .tj-topo button { min-width: 0; padding-inline: 10px; }
 
 /* Barra de itens do Minecraft: ocupa o vão entre o analógico e os botões, com os itens no meio
    (encolhem quando o vão é estreito). O vão em si deixa o dedo passar para o olhar. */

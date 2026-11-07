@@ -666,3 +666,44 @@ nada). Agora vai por fora também (`turbo.js`, seções "som"):
   pulados, canal }`.
 - **Riscos não testados**: iPhone com a chave do silencioso ligada (o Web Audio respeita a chave, o
   `<video>` não — o som pode sumir); AudioContext criado fora de um toque (destrava no próximo).
+
+## Emulador de Switch: "trava e para tudo" (2026-11-07, lichii com Zelda Ocarina of Time de Switch 2)
+
+O usuário compartilha o `lichii.exe` (Eglantine, fork do Eden com jogos de Switch 2, em
+`~/Documents`; configuração em `%APPDATA%\eden`) e, quando alguém vai jogar pelo iPhone, tudo trava.
+
+- **A trava é falta de memória virtual, não o ajudante.** O lichii com o jogo confirma **~17 GB**
+  (layout de 12 GiB do Switch 2 + o resto); o resto do PC, ~13 GB; o limite era 30,9 GB (16 GB de RAM
+  + paginação gerenciada pelo sistema). Com o Chrome compartilhando passa do limite: às 10:20:59 o
+  Windows registrou "Memória virtual mínima muito baixa... as solicitações de memória de alguns
+  aplicativos podem ser negadas" no mesmo minuto em que o lichii fechou (APPCRASH em `nvoglv64.dll`
+  e depois no próprio `lichii.exe`, c0000005). Com dois lichii abertos, um caiu em 40 s.
+- Teste direto no ajudante (scratchpad `teste-emu/ajudante-teste.mjs`: fala com o `ajudante.bat` como
+  a extensão): toques (clique pela posição), teclas e o controle virtual com o jogo rodando — o lichii
+  respondeu o tempo todo. O ViGEm conectou e o emulador viu o controle novo (log: `accel=false gyro=false`).
+- **Por que não dava para jogar mesmo sem travar**: no emulador o Jogador 1 é o DualSense do usuário
+  (`player_0_* = engine:sdl,guid:0500...4c05...e60c` no `qt-config.ini`, `keyboard_enabled=false`),
+  então tecla nenhuma chegava; e o cursor do Windows fica à mostra na janela → o ajudante dizia
+  `cursor livre` → o celular ia para o "menu" e cada toque virava clique (relatório de 15:03 UTC).
+
+### O que entrou
+
+- Layout **`switch`** (`toque-jogo.js`, `virtual: true`): A/B/X/Y no lugar do Switch, mandados pela
+  posição no mapa padrão (A=1, B=0, X=3, Y=2 — o Eden liga controle de Xbox pela posição), L/R, ZL/ZR,
+  −/+ (8/9), Home (16), setas, L3/R3. Reconhecido pelo programa ou pelo começo do título
+  (`lichii|eden|yuzu|suyu|sudachi|citron|torzu|ryujinx`); nome na sala: "Switch (emulador)".
+- Jogo de controle (PS5 ou Switch): quem compartilha não manda mais o `cursor` (`deControle` em
+  `controle.onCursor`); antes o PC de quem joga também perdia o mouse preso no PS5.
+- `PadVirtual.acordar()`: num layout de controle o estado solto vai logo no começo, e o ajudante cria
+  o controle de Xbox na hora (o emulador só deixa escolher um controle que existe). `desligar()` só
+  manda o "solto" se algo foi apertado — antes criava um controle de Xbox no fim de todo modo jogo.
+- Quem compartilha um emulador de Switch recebe a dica de pôr o Jogador 1 no "Xbox 360 Controller"
+  (`avisarEmulador`, "Já fiz" guarda em `sala3d-emulador-ok`).
+- **Ajudante 1.12**: a memória do PC vai no mesmo pacote do Wi-Fi, em `pc { livreGb, limiteGb,
+  ramLivreGb, ramGb }` (`GlobalMemoryStatusEx`; a extensão já repassa o pacote inteiro, sem
+  atualizar). Com menos de 2 GB livres, aviso a quem compartilha (a cada 2 min) e evento
+  "pouca memória virtual no PC" no relatório.
+- Falta: a memória virtual fixa no PC do usuário (32768/49152 MB) — o modo automático do Claude Code
+  bloqueou mexer nisso; ficou com ele. Não testado: o layout no celular de verdade e o jogo inteiro
+  pelo controle virtual (o Jogador 1 ainda está no DualSense). Quem joga no PC sem controle não tem
+  teclado → controle virtual (no PS5 também não tinha).

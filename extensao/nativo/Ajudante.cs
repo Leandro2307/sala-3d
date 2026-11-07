@@ -30,6 +30,12 @@
 // Wi-Fi deste PC ({ tipo: "wifi", ... }, 1.11+): no modo jogo, a cada WIFI_MS, o sinal, a faixa, o
 // canal e a velocidade do Wi-Fi, pela API do Windows (wlanapi: não depende do idioma, como o netsh).
 // Vai para o relatório do modo jogo: a maior causa de engasgo nos testes era o Wi-Fi de quem compartilha.
+//
+// Memória deste PC (no mesmo pacote do Wi-Fi, em "pc", 1.12+: a extensão já repassa o pacote
+// inteiro): a confirmada livre e o limite (RAM + arquivo de paginação) e a RAM livre. O emulador de
+// Switch 2 (lichii) segura ~17 GB sozinho; com o Chrome compartilhando, a conta passava do limite e o
+// Windows negava memória enquanto aumentava o arquivo de paginação — o jogo, o Chrome ou o PC
+// inteiro travavam. A sala avisa quem compartilha.
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -68,6 +74,12 @@ namespace Sala3d
             [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string szDevice;
         }
         [StructLayout(LayoutKind.Sequential)] struct CURSORINFO { public int cbSize; public int flags; public IntPtr hCursor; public PONTO pt; }
+        [StructLayout(LayoutKind.Sequential)]
+        class MEMORYSTATUSEX
+        {
+            public uint dwLength = 64; public uint dwMemoryLoad;
+            public ulong ullTotalPhys, ullAvailPhys, ullTotalPageFile, ullAvailPageFile, ullTotalVirtual, ullAvailVirtual, ullAvailExtendedVirtual;
+        }
         delegate bool EnumWin(IntPtr h, IntPtr l);
         delegate bool EnumMon(IntPtr m, IntPtr dc, ref RECT r, IntPtr l);
 
@@ -77,6 +89,7 @@ namespace Sala3d
         [DllImport("wlanapi.dll")] static extern int WlanEnumInterfaces(IntPtr h, IntPtr r, out IntPtr lista);
         [DllImport("wlanapi.dll")] static extern int WlanQueryInterface(IntPtr h, ref Guid g, int op, IntPtr r, out int tam, out IntPtr dados, IntPtr tipo);
         [DllImport("wlanapi.dll")] static extern void WlanFreeMemory(IntPtr p);
+        [DllImport("kernel32.dll")] static extern bool GlobalMemoryStatusEx([In, Out] MEMORYSTATUSEX m);
         [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
         [DllImport("user32.dll")] static extern bool GetCursorPos(out PONTO p);
         [DllImport("user32.dll")] static extern uint SendInput(uint n, INPUT[] i, int size);
@@ -178,7 +191,7 @@ namespace Sala3d
             new Thread(VigiarAtalho) { IsBackground = true }.Start();
             new Thread(VigiarJogo) { IsBackground = true }.Start();
             new Thread(VigiarWifi) { IsBackground = true }.Start();
-            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.11.0" } });
+            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.12.0" } });
             var json = new JavaScriptSerializer();
             string txt;
             while ((txt = Ler(entrada)) != null)
@@ -709,10 +722,28 @@ namespace Sala3d
                     if (!jogo || !temAlvo) { ultimo = 0; continue; }
                     if (ultimo != 0 && unchecked(Environment.TickCount - ultimo) < WIFI_MS) continue;
                     ultimo = Environment.TickCount;
-                    Escrever(LerWifi());
+                    Dictionary<string, object> r;
+                    try { r = LerWifi(); }
+                    catch { r = new Dictionary<string, object> { { "tipo", "wifi" }, { "conectado", false }, { "erro", "wlan" } }; } // sem wlanapi (Windows Server)
+                    var pc = LerMemoria();
+                    if (pc != null) r["pc"] = pc;
+                    Escrever(r);
                 }
-                catch { /* sem wlanapi (Windows Server) ou a saída fechou */ }
+                catch { /* a saída fechou */ }
             }
+        }
+
+        // a memória deste PC em GB (ver o começo do arquivo); null se o Windows não disser
+        static Dictionary<string, object> LerMemoria()
+        {
+            var m = new MEMORYSTATUSEX();
+            if (!GlobalMemoryStatusEx(m)) return null;
+            const double GB = 1024.0 * 1024 * 1024;
+            return new Dictionary<string, object>
+            {
+                { "livreGb", Math.Round(m.ullAvailPageFile / GB, 1) }, { "limiteGb", Math.Round(m.ullTotalPageFile / GB, 1) },
+                { "ramLivreGb", Math.Round(m.ullAvailPhys / GB, 1) }, { "ramGb", Math.Round(m.ullTotalPhys / GB, 1) },
+            };
         }
 
         // O Wi-Fi conectado agora. Os números saem das estruturas do wlanapi pelas posições (64 bits ou

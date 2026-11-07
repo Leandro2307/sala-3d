@@ -18,9 +18,12 @@
 // Tudo vai por controle.mandar/mover: o modo jogo marca cada evento e o ajudante nativo do PC
 // manda como scancode e movimento relativo, igual ao mouse e ao teclado de verdade.
 //
-// O layout PS5 (virtual: true) é outro bicho: nada vira tecla. Os botões, o analógico e o dedo que
-// arrasta (analógico direito flutuante) vão para o controle virtual (pad-virtual.js), que vira um
-// controle de Xbox no PC de quem compartilha — o chiaki-ng passa para o PS5.
+// Os layouts PS5 e Switch (virtual: true) são outro bicho: nada vira tecla. Os botões, o analógico e
+// o dedo que arrasta (analógico direito flutuante) vão para o controle virtual (pad-virtual.js), que
+// vira um controle de Xbox no PC de quem compartilha — o chiaki-ng passa para o PS5, e o emulador de
+// Switch (lichii, Eden, yuzu, Ryujinx...) o usa como um controle de verdade. Emulador não lê teclado
+// por padrão (o Jogador 1 é um controle) e deixa o cursor do Windows à mostra, o que punha o
+// celular no "menu" e cada toque virava clique.
 
 import { opcoesJogo, htmlPresets } from './jogo-opcoes.js';
 
@@ -78,6 +81,8 @@ export function teclaDe(code) {
 const JOGOS = [
   // o Remote Play do PS5 no PC (o app da Sony não aceita controle virtual: tem que ser o chiaki-ng)
   { id: 'ps5', nome: 'PS5 (chiaki-ng)', titulo: /chiaki|\bps5\b|playstation/i, programa: /^chiaki/i },
+  // emulador de Switch: o título começa com o nome dele ("Lichii | build-95 | ... | The Legend of Zelda...")
+  { id: 'switch', nome: 'Switch (emulador)', titulo: /^(lichii|eden|yuzu|suyu|sudachi|citron|torzu|ryujinx)\b|switch \(emulador\)/i, programa: /^(lichii|eden|yuzu|suyu|sudachi|citron|torzu|ryujinx)/i },
   { id: 'gow', nome: 'God of War', titulo: /god of war/i, programa: /^gowr?$/i },
   { id: 'minecraft', nome: 'Minecraft', titulo: /minecraft|lunar client|badlion/i, programa: /^minecraft/i },
 ];
@@ -213,6 +218,31 @@ export const LAYOUTS = {
       { r: 'L1', pad: 4, a: 'l1' },
       { r: '✕', pad: 0, a: 'xis', cls: 'tj-ps tj-xis' },
       { r: 'R1', pad: 5, a: 'r1' },
+    ],
+  },
+  // Switch num emulador: como no PS5, tudo vai para o controle virtual de Xbox. Os botões ficam no
+  // lugar dos do Switch (A à direita, B embaixo) e saem pelo botão do Xbox que está nesse lugar: o
+  // emulador liga o controle de Xbox pela posição (o B do Xbox, à direita, vira o A do Switch).
+  switch: {
+    nome: 'Switch',
+    dica: 'O analógico da esquerda anda; arraste o dedo à direita como o analógico direito.',
+    virtual: true,
+    topo: [
+      { r: '▲', pad: 12 }, { r: '▼', pad: 13 }, { r: '◀', pad: 14 }, { r: '▶', pad: 15 },
+      { r: '−', pad: 8 }, { r: '+', pad: 9 }, { r: 'Home', pad: 16 },
+      { r: 'L3', pad: 10 }, { r: 'R3', pad: 11 },
+    ],
+    areas: ['zl nx zr', 'ny . na', 'l nb r'],
+    linhas: 'ggg',
+    botoes: [
+      { r: 'ZL', pad: 6, a: 'zl' },
+      { r: 'X', pad: 3, a: 'nx', cls: 'tj-ps tj-nx' },
+      { r: 'ZR', pad: 7, a: 'zr' },
+      { r: 'Y', pad: 2, a: 'ny', cls: 'tj-ps tj-nx' },
+      { r: 'A', pad: 1, a: 'na', cls: 'tj-ps tj-nx' },
+      { r: 'L', pad: 4, a: 'l' },
+      { r: 'B', pad: 0, a: 'nb', cls: 'tj-ps tj-nx' },
+      { r: 'R', pad: 5, a: 'r' },
     ],
   },
   // qualquer outro jogo de PC: as teclas mais comuns, com o nome da tecla no botão
@@ -520,6 +550,8 @@ export class ToqueJogo {
     this.slot = null;
     this.raiz.dataset.layout = id;
     this.desenhar();
+    // o controle virtual já aparece no PC de lá: o emulador só deixa escolher o controle que existe
+    if (L.virtual && this.key) this.pad?.acordar();
   }
 
   // monta os botões do layout (ou os do menu dele). Quem estava com o dedo num botão que some
@@ -893,7 +925,7 @@ export class ToqueJogo {
     document.body.classList.add('toque-jogo');
     const nome = this.layout.nome;
     if (this.layout.virtual) {
-      this.toast('Modo jogo no controle do PS5: o analógico da esquerda anda, arraste o dedo à direita para a câmera. Um controle de verdade ligado no aparelho também vale.', 'info', 7000);
+      this.toast(`Modo jogo no controle do ${nome}: o analógico da esquerda anda, arraste o dedo à direita para a câmera. Um controle de verdade ligado no aparelho também vale.`, 'info', 7000);
       return;
     }
     this.toast(this.layout === LAYOUTS.generico

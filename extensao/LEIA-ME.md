@@ -212,3 +212,22 @@ desliga em **Vibrar com o jogo**, nas opções do modo jogo.
 
 **Mirar virando o celular** no layout PS5: o giroscópio empurra o analógico direito (o PS5 recebe um
 controle de Xbox, que não tem giroscópio). A sensibilidade do painel vale para ele também.
+
+## Jogar num emulador de Switch pela sala
+
+Emulador de Switch (lichii, Eden, yuzu, Ryujinx...) não lê o teclado por padrão: o Jogador 1 é um
+controle. Por isso ele vai pelo mesmo **controle virtual de Xbox** do PS5 (ViGEmBus + `instalar.bat`,
+como acima). A sala reconhece o emulador pela janela, e quem joga no celular ganha os botões do
+Switch (A, B, X, Y no lugar de sempre, L/R, ZL/ZR, + e −, Home, setas e os dois analógicos).
+
+No emulador, uma vez: **Emulação → Configurar → Controles**, Jogador 1, **Dispositivo de entrada:
+“Xbox 360 Controller”**. Esse controle aparece assim que alguém liga o modo jogo na janela do
+emulador. Salve um perfil para ele e outro para o seu controle, e troque quando for jogar à distância.
+
+**Memória.** Jogo de Switch 2 no lichii segura uns 17 GB de memória virtual sozinho. Com o Chrome
+compartilhando, um PC de 16 GB passa do limite, e o Windows nega memória enquanto aumenta o arquivo
+de paginação: o emulador fecha, o Chrome trava ou o PC inteiro para. Deixe a memória virtual fixa e
+grande (Sistema → Sobre → Configurações avançadas do sistema → Desempenho → Configurações → Avançado
+→ Memória virtual → Alterar: desmarque o automático, Tamanho personalizado, inicial 32768 e máximo
+49152 MB, Definir, e reinicie) e feche o que não estiver usando. Desde o ajudante 1.12, a sala avisa
+quem compartilha quando a memória está acabando.

@@ -21,7 +21,7 @@ import { ARMAS, IDS_ARMAS, ARMA_PADRAO, defArma, VisaoArma, iniciarCapsulas, atu
 import { Jogos } from './jogos.js';
 import { Controle, versaoNum, eventoDeControle } from './controle.js';
 import { AvisoDoSite } from './aviso-site.js';
-import { ToqueJogo, jogoDaJanela } from './toque-jogo.js';
+import { ToqueJogo, jogoDaJanela, LAYOUTS, layoutDoTitulo } from './toque-jogo.js';
 import { ControleFisico } from './gamepad-jogo.js';
 import { PadVirtual } from './pad-virtual.js';
 import { TurboEnvio, TurboRecebe, TTL_MS, LISO_PCT } from './turbo.js';
@@ -2623,7 +2623,7 @@ function receberVolta({ key, ev, de } = {}) {
     if (opcoesJogo.get('menuAuto')) controle.cursorLivre(key, !!ev.livre);
   } else if (ev.t === 'pad-erro' && jogandoLa?.key === key && Date.now() - (avisosAdmin.get(`pad:${key}`) || 0) > 60_000) {
     avisosAdmin.set(`pad:${key}`, Date.now());
-    toast(`O controle do PS5 ainda não funciona no PC de ${de || 'quem compartilha'}: ${ev.erro === 'sem-driver' ? 'falta instalar o driver ViGEmBus' : 'falta rodar de novo o instalar.bat do ajudante'} lá.`, 'warn', 12000);
+    toast(`O controle virtual ainda não funciona no PC de ${de || 'quem compartilha'}: ${ev.erro === 'sem-driver' ? 'falta instalar o driver ViGEmBus' : 'falta rodar de novo o instalar.bat do ajudante'} lá.`, 'warn', 12000);
   } else if (ev.t === 'admin' && controle.mexeuEm(key) && Date.now() - (avisosAdmin.get(`de:${key}`) || 0) > 30_000) {
     avisosAdmin.set(`de:${key}`, Date.now());
     const quem = de || 'quem compartilha';
@@ -2687,10 +2687,36 @@ controle.onQual = (sh, q) => {
 // O jogo na minha tela mostrou o cursor (menu, inventário) ou escondeu (ajudante 1.8+): quem joga nela
 // fica sabendo e troca o mouse entre a câmera e o menu (controle.cursorLivre)
 const cursorDoJogo = new Map(); // tela -> último estado mandado
-// o Wi-Fi deste PC (ajudante do Windows), na resposta dos eventos de quem joga: vai no relatório de envio
-controle.onWifi = (w) => diagJogo.wifiChegou(w);
+// o Wi-Fi deste PC (ajudante do Windows), na resposta dos eventos de quem joga: vai no relatório de
+// envio. A memória do PC vem no mesmo pacote (ajudante 1.12+, em pc), que a extensão já repassa inteiro.
+controle.onWifi = (w) => {
+  const { pc, ...wifi } = w || {};
+  diagJogo.wifiChegou(wifi);
+  memoriaDoPc(pc);
+};
+
+// Memória do PC de quem compartilha, no modo jogo. A "confirmada" é o que os programas pediram ao
+// Windows (RAM + arquivo de paginação). O emulador de Switch 2 (lichii) segura ~17 GB sozinho: com o
+// Chrome compartilhando, a conta passa do limite, o Windows nega memória enquanto aumenta o arquivo de
+// paginação e o jogo, o Chrome ou o PC inteiro travam. Avisa antes, a cada 2 min no máximo.
+const MEMORIA_POUCA_GB = 2;
+let memoriaAvisada = 0;
+function memoriaDoPc(pc) {
+  const livre = Number(pc?.livreGb), limite = Number(pc?.limiteGb);
+  if (!Number.isFinite(livre) || !Number.isFinite(limite) || livre >= MEMORIA_POUCA_GB) return;
+  if (Date.now() - memoriaAvisada < 120_000) return;
+  memoriaAvisada = Date.now();
+  diagJogo.evento('pouca memória virtual no PC', pc);
+  toast(`Este PC está quase sem memória: ${livre.toFixed(1)} GB livres de ${limite.toFixed(1)} GB. O jogo, o Chrome ou o PC inteiro podem travar. Feche os programas que não está usando (Steam, Epic, WhatsApp...) e aumente a memória virtual do Windows (Sistema → Sobre → Configurações avançadas do sistema → Desempenho → Avançado → Memória virtual).`, 'warn', 20000);
+}
+
+// Jogo de controle (PS5 pelo chiaki-ng, emulador de Switch): o nome que a sala reconheceu na tela
+const deControle = (sh) => !!LAYOUTS[layoutDoTitulo(sh?.titulo)]?.virtual;
 controle.onCursor = (sh, livre) => {
   const quem = jogandoAqui.get(sh.key);
+  // num jogo de controle o cursor à mostra é o do Windows, não um menu: quem joga no PC perdia o
+  // mouse preso, e o celular, os botões
+  if (deControle(sh)) return;
   if (!quem || cursorDoJogo.get(sh.key) === livre) return;
   cursorDoJogo.set(sh.key, livre);
   diagJogo.evento(livre ? 'o jogo mostrou o cursor (menu)' : 'o jogo escondeu o cursor', { key: sh.key });
@@ -2772,6 +2798,7 @@ function jogoAqui(key, deId, ligar, rapido = false) {
       gl: world.renderer.getContext(),
       extra: { extensao: controle.ext?.versao ?? null, preset: rtc?.shareMode ?? null, superficie: superficieDe(self()?.shares.get(key)), janelaDoJogo: self()?.shares.get(key)?.titulo ?? null, codecs: codecsTestados(), qpsCaptura: rtc?.qpsCaptura() ?? null },
     });
+    avisarEmulador(self()?.shares.get(key));
     toast(`${nome} está jogando no seu PC. A sala ficou em pausa aqui, para o jogo e a transmissão terem a placa de vídeo toda.`, 'info', 12000, null, {
       rotulo: 'Desenhar a sala',
       fazer: () => {
@@ -2787,6 +2814,21 @@ function jogoAqui(key, deId, ligar, rapido = false) {
   atualizarInteresse();
 }
 controle.onModo = (sh, jogo, deId, rapido) => jogoAqui(sh.key, deId, jogo, rapido);
+
+// Emulador de Switch na tela: o controle de quem joga chega como um controle de Xbox virtual, e o
+// emulador só o usa se o Jogador 1 estiver nele (o padrão é o controle ligado no PC). Uma vez por
+// página, até a pessoa dizer que já fez.
+const CHAVE_EMULADOR = 'sala3d-emulador-ok';
+let emuladorAvisado = false;
+function avisarEmulador(sh) {
+  if (emuladorAvisado || layoutDoTitulo(sh?.titulo) !== 'switch') return;
+  emuladorAvisado = true;
+  try { if (localStorage.getItem(CHAVE_EMULADOR)) return; } catch { /* sem armazenamento */ }
+  toast('Emulador de Switch: o controle de quem joga chega como um “Xbox 360 Controller”. No emulador, em Emulação → Configurar → Controles, ponha o Jogador 1 nele (Dispositivo de entrada). Dica: salve um perfil para ele e outro para o seu controle.', 'info', 25000, null, {
+    rotulo: 'Já fiz',
+    fazer: () => { try { localStorage.setItem(CHAVE_EMULADOR, '1'); } catch { /* sem armazenamento */ } },
+  });
+}
 
 // quem joga: a opção "Menos atraso" vai para quem compartilha junto com o modo jogo (de novo a cada
 // mudança dela, no meio da jogatina)
@@ -3665,6 +3707,8 @@ controle.onJogo = (video, key) => {
   else toqueJogo.esconder();
   if (video) fisico.ligar(key, acharTela(key)?.share.titulo);
   else fisico.desligar();
+  // jogo de controle no PC (o celular faz isso no toque-jogo): o controle virtual já aparece lá
+  if (video && !isTouch && LAYOUTS[layoutDoTitulo(acharTela(key)?.share.titulo)]?.virtual) padVirtual.acordar();
   if (!video) padVirtual.desligar(); // depois do toque e do controle: o último estado é tudo solto
   // o modo jogo desligou por fora do botão (a tela fechou, saiu do foco): sai da tela cheia também
   if (!video && !isTouch && document.body.classList.contains('jogo-pc')) jogoNoPc(false);

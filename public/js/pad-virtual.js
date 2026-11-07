@@ -57,11 +57,21 @@ export class PadVirtual {
     this.key = key;
   }
 
+  // Manda o estado (solto) mesmo sem mudança: o ajudante cria o controle de Xbox já no primeiro
+  // estado. Num layout de controle, logo no começo — o emulador de Switch só deixa ligar o Jogador 1
+  // num controle que existe.
+  acordar() {
+    if (this.key) this.enviar(true);
+  }
+
   desligar() {
     this.pararTremor();
     if (!this.key) return;
+    // só solta se algo foi apertado: o "solto" mandado à toa criava um controle de Xbox no PC de lá
+    // no fim de qualquer modo jogo, até no Minecraft
+    const apertado = this.enviado.b || EIXOS.some((k) => this.enviado[k]);
     this.fontes = this.neutras();
-    this.enviar(true);
+    if (apertado) this.enviar(true);
     this.key = null;
   }
 
