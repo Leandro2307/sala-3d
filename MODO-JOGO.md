@@ -667,6 +667,27 @@ nada). Agora vai por fora também (`turbo.js`, seções "som"):
 - **Riscos não testados**: iPhone com a chave do silencioso ligada (o Web Audio respeita a chave, o
   `<video>` não — o som pode sumir); AudioContext criado fora de um toque (destrava no próximo).
 
+### O som do turbo saía mudo (corrigido em 2026-11-08)
+
+Queixa do usuário (Hookshot, o Zelda recompilado para PC, em `~/Games/Hookshot`, jogado de outro PC):
+"entra no modo jogo, o turbo liga e o som para; desligando o turbo, o som volta".
+
+- **Causa**: o volume do tocador seguia `s.video`, que é o `#focus-video` — o vídeo da **imagem** em
+  foco, que nasce `muted` no `index.html` (o som da tela toca no `sh.video`, no `#media-sink`). O ganho
+  ficava em 0 e, como o turbo "tocava", `vigiarSom` calava a trilha do WebRTC (a mesma do `sh.video`):
+  silêncio até desligar o turbo. Valia para todo mundo desde 2026-11-03, no iPhone também (os
+  relatórios do iPhone de 2026-11-08 traziam `ativo: true` com o som chegando, mas calado). O teste de
+  2026-11-03 tinha o `<video>` na mesma página, com som: não pegou.
+- **Correção**: `TurboRecebe` recebe `somDaTela(key)` (main.js: `shareVideo(acharTela(key)?.share)`) e o
+  volume, o mudo e a trilha calada vêm desse vídeo. Sem ele, o turbo não assume o som.
+  `turbo.som.volume` no relatório (0 a 1): "ativo" com 0 é este defeito.
+- O som de quem compartilha estava certo: a janela do Hookshot no seletor dá "Compartilhar com áudio do
+  sistema" (`deviceId: loopbackWithoutChrome`), estéreo 48 kHz, e o Opus do turbo aceita.
+- Teste de ponta a ponta (scratchpad `teste-turbo-som/rodar.mjs`: servidor na porta 3100, dois Chromes
+  invisíveis, tom de 440 Hz, quem joga como PC): antes, volume 0 e RMS 0 com o WebRTC calado; com a
+  correção, volume 0,9 e RMS 0,19 (o tom), 0,5 com "Volume das telas" em 50%, 0 com a tela muda, e o
+  WebRTC de volta ao sair do modo jogo. `__sala3d` (só com `?debug=1`) agora tem `turboRecebe` e `turboEnvio`.
+
 ## Emulador de Switch: "trava e para tudo" (2026-11-07, lichii com Zelda Ocarina of Time de Switch 2)
 
 O usuário compartilha o `lichii.exe` (Eglantine, fork do Eden com jogos de Switch 2, em

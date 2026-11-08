@@ -776,9 +776,12 @@ export class TurboRecebe {
   // abrir(idDoDono) -> canal "turbo" (rtc.abrirTurbo); onFalhou(motivo): volta ao vídeo normal;
   // onEvento(texto, dados): para o relatório
   // abrirSom(idDoDono) -> canal "turbo-som" (rtc.abrirTurboSom)
-  constructor({ abrir, abrirSom, onFalhou, onEvento }) {
+  // somDaTela(key) -> o <video> que toca o som dessa tela na sala (o da imagem, o #focus-video, é
+  // sempre mudo: com o volume dele o som do turbo saía calado — ver vigiarSom)
+  constructor({ abrir, abrirSom, somDaTela, onFalhou, onEvento }) {
     this.abrir = abrir;
     this.abrirSom = abrirSom;
+    this.somDaTela = somDaTela;
     this.onFalhou = onFalhou;
     this.onEvento = onEvento;
     this.s = null;
@@ -1205,20 +1208,23 @@ export class TurboRecebe {
     }
   }
 
-  // A cada volta do vigia: o volume segue o do vídeo da tela, e o som do WebRTC fica calado só
-  // enquanto o do turbo está tocando de verdade (som destravado, pacotes chegando, tocador cheio).
+  // A cada volta do vigia: o volume segue o do vídeo que toca o som da tela, e o som do WebRTC fica
+  // calado só enquanto o do turbo está tocando de verdade (som destravado, pacotes chegando, tocador
+  // cheio). Sem esse vídeo (a tela saindo do ar), o turbo não assume: o WebRTC continua.
+  // Bug de 2026-11-08: o volume vinha de s.video, o #focus-video (só a imagem, mudo no index.html) —
+  // o ganho ficava em 0 e a trilha do WebRTC era calada: entrar no modo jogo com o turbo tirava o som.
   vigiarSom(s) {
     const som = s.som;
     if (!som) return;
-    const v = s.video;
-    const vol = v.muted ? 0 : v.volume;
+    const v = this.somDaTela?.(s.key) || null;
+    const vol = !v || v.muted ? 0 : v.volume;
     if (Math.abs(som.ganho.gain.value - vol) > 0.005) som.ganho.gain.setTargetAtTime(vol, som.ctx.currentTime, 0.02);
     // Para ligar, o tocador tem que estar tocando; depois, só os pacotes parando por SOM_PARADO_MS
     // devolvem o som ao WebRTC. Uma falha curta (o tocador enchendo de novo) não troca: no teste com
     // Wi-Fi ruim, trocar a cada falha alternava os dois sons, com atrasos diferentes.
-    const chegando = som.ctx.state === 'running' && !!som.no && performance.now() - som.chegouEm < SOM_PARADO_MS;
+    const chegando = !!v && som.ctx.state === 'running' && !!som.no && performance.now() - som.chegouEm < SOM_PARADO_MS;
     const ativo = chegando && (som.ativo || !!som.estado?.tocando);
-    const trilha = v.srcObject?.getAudioTracks?.()[0] || null;
+    const trilha = (v || s.video).srcObject?.getAudioTracks?.()[0] || null;
     // a conexão trocou a trilha: a antiga volta como estava
     if (som.calada && som.calada !== trilha) { som.calada.enabled = true; som.calada = null; }
     if (ativo && trilha && !som.calada) {
@@ -1509,6 +1515,8 @@ export class TurboRecebe {
       faltas: e ? e.faltas - c.faltas : 0,
       descartes: e ? e.descartes - c.descartes : 0,
       saidaMs: r1(((som.ctx.baseLatency || 0) + (som.ctx.outputLatency || 0)) * 1000),
+      // o volume do tocador (0 a 1, o do vídeo da tela): "ativo" com 0 é o som calado de 2026-11-08
+      volume: Math.round(som.ganho.gain.value * 100) / 100,
     };
     Object.assign(c, { pacotes: 0, bytes: 0, perdidos: 0, atrasados: 0, viagem: [], faltas: e?.faltas ?? 0, descartes: e?.descartes ?? 0 });
     return r;

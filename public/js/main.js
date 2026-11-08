@@ -2864,6 +2864,8 @@ const turboAvisado = new Set(); // motivos já avisados nesta página (o turbo v
 const turboRecebe = new TurboRecebe({
   abrir: (id, vida) => rtc?.abrirTurbo(id, vida),
   abrirSom: (id) => rtc?.abrirTurboSom(id),
+  // o som da tela toca no vídeo dela no #media-sink (o #focus-video, da imagem, é mudo)
+  somDaTela: (key) => shareVideo(acharTela(key)?.share),
   onEvento: (texto, dados) => diagJogo.evento(texto, dados),
   onFalhou: (motivo) => {
     diagJogo.evento('modo turbo falhou: vídeo normal de volta', { motivo });
@@ -7905,7 +7907,7 @@ if (params.get('debug') === '1') {
     toggleVeiculo, irParaLargada, jogos, irParaMesa, exitFocus, dados, quadras, jogosDoParque, pingue, queimada, sinuca, golfe, cartas, poker, gincana, fantasmas, kart, pinta,
     tocarTela, telasMudas, liberarSomDasTelas, makeVideo, mesa, controle, abrirMesa, fecharMesa, marcaDaAba,
     publishShare, stopShare, acharTela, telasNoAr, get rtc() { return rtc; }, diagJogo, clima, ligarLuneta, futebol, surf, criador, run,
-    enterFocus, get socket() { return socket; }, fisico, toqueJogo, opcoesJogo,
+    enterFocus, get socket() { return socket; }, fisico, toqueJogo, opcoesJogo, turboRecebe, turboEnvio,
   };
 }
 
