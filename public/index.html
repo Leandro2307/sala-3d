@@ -272,6 +272,7 @@
           <span><b>↺</b> checkpoint · no carro, volta à pista</span>
           <span><b>⤢</b> tela cheia · <b>😊</b> reações</span>
           <span><b>Asa</b> voar · <b>seta</b> pulo alto</span>
+          <span data-jogo="criador"><b>Microfone</b> segure e fale: a frase vira arma · <b>grade</b> catálogo</span>
           <span><b>Luva</b> soca em qualquer lugar</span>
           <span><b>Mira amarela</b> joga a bola · <b>E</b> entra no jogo</span>
         </div>
@@ -319,6 +320,12 @@
       <button type="button" class="tb small" id="tb-pulo" data-jogo="poderes" aria-pressed="false" aria-label="Pulo alto"><i data-icon="mola" data-size="18"></i></button>
       <button type="button" class="tb small" id="tb-descer" hidden aria-label="Descer"><i data-icon="desce" data-size="18"></i></button>
       <button type="button" class="tb small" id="tb-luneta" hidden aria-pressed="false" aria-label="Mira da sniper"><i data-icon="luneta" data-size="18"></i></button>
+      <!-- criador por voz (o N e o U do computador): a grade abre o catálogo; o microfone, segurado,
+           ouve até soltar, e um toque curto liga até outro toque -->
+      <div class="tb-par" id="tb-criador" data-jogo="criador">
+        <button type="button" class="tb small" id="tb-catalogo" aria-label="Catálogo do criador"><i data-icon="grade" data-size="18"></i></button>
+        <button type="button" class="tb small voz" id="tb-voz" aria-pressed="false" aria-label="Segure e fale: a frase vira arma"><i data-icon="mic" data-size="18"></i></button>
+      </div>
       <button type="button" class="tb tiro" id="tb-tiro" hidden aria-label="Atirar"><i data-icon="mira" data-size="22"></i></button>
     </div>
   </div>

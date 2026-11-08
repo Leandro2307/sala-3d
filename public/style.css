@@ -2699,6 +2699,17 @@ body.touch .rh-time { font-size: 20px; }
 }
 .tb.tiro { width: 58px; height: 58px; background: rgba(80, 71, 29, 0.67); border-color: rgba(250, 204, 21, 0.55); color: #facc15; }
 .tb.tiro.held { background: rgba(140, 118, 26, 0.76); }
+/* criador por voz: a grade (catálogo) e o microfone lado a lado, numa linha da coluna. Ouvindo,
+   o microfone fica vermelho e pulsa */
+.tb-par { display: flex; gap: 8px; }
+.tb.voz { color: #fca5a5; border-color: rgba(248, 113, 113, 0.45); }
+.tb.voz.gravando { background: rgba(185, 28, 28, 0.82); border-color: #f87171; color: #fff; animation: tb-gravando 1.1s ease-in-out infinite; }
+@keyframes tb-gravando { 50% { box-shadow: 0 0 0 7px rgba(239, 68, 68, 0.3); } }
+/* deitado e baixinho a coluna não cabe com mais uma linha: os dois vão para a esquerda do último
+   botão dela (pulo alto, ou o tiro), onde só o E dos jogos aparece (e aí eles saem) */
+@media (max-height: 460px) {
+  body.touch #tb-criador { position: absolute; right: calc(100% + 6px); bottom: 0; gap: 6px; }
+}
 #poderes-hud {
   position: absolute;
   left: 50%;
@@ -2984,7 +2995,8 @@ body.touch[data-jogo] #tb-sit,
 body.touch[data-jogo] #tb-use,
 body.touch[data-jogo] #tb-voar,
 body.touch[data-jogo] #tb-pulo,
-body.touch[data-jogo] #tb-descer { display: none !important; }
+body.touch[data-jogo] #tb-descer,
+body.touch[data-jogo] #tb-criador { display: none !important; }
 /* carro e turbo só nas corridas e no futebol de carro; soco só onde se briga; o voltar (R) onde
    ele faz sentido no jogo (nos outros ele tiraria a pessoa da partida) */
 body.touch[data-jogo]:not([data-jogo="corrida"]) #tb-car,
@@ -2994,7 +3006,7 @@ body.touch[data-jogo] #tb-tapa,
 body.touch[data-jogo]:is([data-jogo="pingue"], [data-jogo="sinuca"], [data-jogo="golfe"], [data-jogo="queimada"], [data-jogo="pinta"],
   [data-jogo="quadras"], [data-jogo="futebol"], [data-jogo="ringue"]) #tb-respawn { display: none !important; }
 /* perto de um jogo, o E e a ação ficam no lugar de voar e pulo alto */
-#touch.perto-de-jogo #tb-voar, #touch.perto-de-jogo #tb-pulo, #touch.perto-de-jogo #tb-descer { display: none; }
+#touch.perto-de-jogo #tb-voar, #touch.perto-de-jogo #tb-pulo, #touch.perto-de-jogo #tb-descer, #touch.perto-de-jogo #tb-criador { display: none; }
 
 /* sem a barra, os painéis dos jogos sobem para o topo */
 body.touch[data-jogo]:not(.barra-aberta) #race-hud,

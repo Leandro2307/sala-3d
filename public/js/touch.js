@@ -173,6 +173,12 @@ export function setupTouchControls(player, actions = {}) {
   // luneta da sniper: um toque liga, outro desliga
   const luneta = root.querySelector('#tb-luneta');
   if (luneta && actions.luneta) setupButton(luneta, { onPress: actions.luneta });
+  // criador por voz: segurar o microfone fala (soltar cria) e um toque curto liga até outro toque;
+  // a grade abre o catálogo ao soltar o dedo, como um clique
+  const voz = root.querySelector('#tb-voz');
+  if (voz && actions.voz) setupButton(voz, { onPress: actions.voz, onRelease: actions.soltarVoz });
+  const catalogo = root.querySelector('#tb-catalogo');
+  if (catalogo && actions.catalogo) setupButton(catalogo, { noSoltar: actions.catalogo });
 
   // jogos do parque e quadras: o E e a ação (segurar carrega, soltar arremessa)
   const jogoE = root.querySelector('#tb-jogo-e');

@@ -1,6 +1,7 @@
 // Criador por voz: segure N, fale o que quer ("pistola que atira pombos que cagam granadas") e
 // solte — aquilo vira a arma na mão, no mapa todo. Também dá para digitar no chat: /criar <frase>.
 // Dizer "guardar" (ou /criar guardar) tira da mão. U abre o catálogo (criador-catalogo.js).
+// No celular o N é o botão de microfone (vozApertar/vozSoltar) e o U, o botão de grade.
 //
 // O leitor da frase e as peças ficam em criador-dados.js, os modelos em criador-modelos.js; aqui
 // ficam a física das coisas criadas (batem nas paredes do mapa, que são caixas em world.colliders)
@@ -141,7 +142,8 @@ function movDe(n) {
 export class Criador {
   // opts: world, player, toast, socket(), eu(), localAvatar, avatarDe(id), alvos() -> [{ id, pos, raio, altura }],
   // podeUsar() (ligado e fora das arenas), podeAtirar() (não está sentado, dirigindo, nocauteado...),
-  // acertar(id, dano, [dx, dz]), empurrar(vetor) (explosão ou buraco negro perto de mim)
+  // acertar(id, dano, [dx, dz]), empurrar(vetor) (explosão ou buraco negro perto de mim),
+  // toque (celular), aoOuvir(on) (o microfone ligou ou desligou), mudou() (criou ou guardou)
   constructor(opts) {
     Object.assign(this, opts);
     this.scene = opts.world.scene;
@@ -161,9 +163,20 @@ export class Criador {
     this.balanco = 0;
     this.ouvindo = false;
     this.rec = null;
+    this.paraVoz = null; // 'catalogo': a fala vai para o montador do catálogo em vez de criar
+    this.vozDesde = 0; // quando o botão de microfone foi apertado (0: solto)
+    this.textoVoz = '';
     this.montarHud();
     this.montarParticulas();
-    this.catalogo = new Catalogo({ criar: (t) => this.pedir(t), aberto: () => this.podeUsar() });
+    this.catalogo = new Catalogo({
+      criar: (t) => this.pedir(t),
+      toque: !!this.toque,
+      voz: {
+        apertar: () => this.vozApertar('catalogo'),
+        soltar: () => this.vozSoltar(),
+        parar: () => { if (this.paraVoz === 'catalogo') this.falarFim(); },
+      },
+    });
   }
 
   get armado() {
@@ -191,7 +204,19 @@ export class Criador {
   font: 600 15px 'Plus Jakarta Sans', system-ui, sans-serif; transition: opacity .35s; opacity: 0; }
 #criador-fala.ouvindo { box-shadow: 0 0 0 2px #ef4444; }
 #criador-fala .erro { color: #fca5a5; } #criador-fala .aviso { color: #fde68a; font-size: 13px; } #criador-fala .ok { color: #86efac; }
-#criador-hud[hidden] { display: none; }`;
+#criador-hud[hidden] { display: none; }
+/* celular: a criação fica acima do analógico (não em cima dele) e a fala desce da barra do topo,
+   longe dos botões dos dois cantos de baixo */
+body.touch #criador-hud { left: calc(12px + env(safe-area-inset-left)); bottom: calc(172px + env(safe-area-inset-bottom)); max-width: min(320px, 44vw); max-height: 32vh; padding: 7px 10px;
+  display: flex; flex-direction: column; }
+body.touch #criador-hud[hidden] { display: none; }
+body.touch #criador-hud pre { font-size: 11px; }
+/* a dica vem logo depois do título: faltando altura, o que some é o fim da árvore */
+body.touch #criador-hud small { order: -1; margin: 0 0 4px; }
+body.touch #criador-hud b { order: -2; }
+body.touch #criador-fala { top: calc(104px + env(safe-area-inset-top)); bottom: auto; max-width: calc(100vw - 32px); padding: 8px 14px; font-size: 14px; }
+@media (orientation: portrait) { body.touch #criador-hud { bottom: calc(152px + env(safe-area-inset-bottom)); max-width: calc(100vw - 120px); } }
+@media (max-height: 460px) { body.touch #criador-hud { bottom: calc(142px + env(safe-area-inset-bottom)); max-height: max(60px, calc(100dvh - 240px)); } }`;
     document.head.appendChild(css);
     this.hud = document.createElement('div');
     this.hud.id = 'criador-hud';
@@ -209,14 +234,16 @@ export class Criador {
   }
 
   // ---------------------------------------------------------------- voz
-  falarInicio() {
+  // para: 'catalogo' escreve a fala no montador do catálogo (sem criar); sem nada, cria na hora
+  falarInicio(para = null) {
     if (!this.podeUsar()) {
       this.toast('O criador por voz está desligado aqui.', 'info', 2600);
       return;
     }
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) {
-      this.mostrarFala('<span class="erro">Este navegador não reconhece voz. Use o Chrome ou o Edge, ou escreva no chat: /criar pistola que atira pombos</span>');
+      const qual = this.toque ? 'No celular, use o Chrome (Android) ou o Safari (iPhone)' : 'Use o Chrome ou o Edge';
+      this.avisarVoz(para, `<span class="erro">Este navegador não reconhece voz. ${qual}, ou escreva no chat: /criar pistola que atira pombos</span>`);
       return;
     }
     if (this.ouvindo) return;
@@ -224,45 +251,89 @@ export class Criador {
     const rec = new SR();
     rec.lang = 'pt-BR';
     rec.interimResults = true;
-    rec.continuous = true;
-    let final = '';
-    let parcial = '';
+    // no celular a fala vai até a primeira pausa: com continuous o Chrome do Android repete as
+    // palavras de um resultado no seguinte ("pistola pistola que atira")
+    rec.continuous = !this.toque;
+    this.textoVoz = '';
+    // a frase inteira é remontada a cada resultado (finais + o pedaço que ainda está mudando)
     rec.onresult = (ev) => {
-      parcial = '';
-      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+      let final = '';
+      let parcial = '';
+      for (let i = 0; i < ev.results.length; i++) {
         const r = ev.results[i];
         if (r.isFinal) final += `${r[0].transcript} `;
         else parcial += r[0].transcript;
       }
-      this.mostrarFala(`🎤 ${esc(final + parcial)}`, true);
+      this.textoVoz = (final + parcial).trim();
+      if (para === 'catalogo') this.catalogo.ouvido(this.textoVoz);
+      else this.mostrarFala(`🎤 ${esc(this.textoVoz)}`, true);
     };
     rec.onerror = (ev) => {
       const msg = {
-        'not-allowed': 'O microfone foi bloqueado para o reconhecimento de voz. Libere no cadeado da barra de endereço.',
+        'not-allowed': this.toque
+          ? 'O microfone foi bloqueado para o reconhecimento de voz. Libere o microfone deste site nas configurações do navegador.'
+          : 'O microfone foi bloqueado para o reconhecimento de voz. Libere no cadeado da barra de endereço.',
+        'service-not-allowed': 'O reconhecimento de voz está desligado neste aparelho ou navegador.',
         network: 'O reconhecimento de voz do navegador precisa de internet.',
         'no-speech': 'Não ouvi nada.',
-        'audio-capture': 'Nenhum microfone encontrado.',
+        'audio-capture': 'Não consegui usar o microfone (nenhum encontrado, ou outro app está usando).',
       }[ev.error] || `Erro de voz: ${ev.error}`;
-      if (ev.error !== 'aborted') this.mostrarFala(`<span class="erro">${esc(msg)}</span>`);
+      if (ev.error !== 'aborted') this.avisarVoz(para, `<span class="erro">${esc(msg)}</span>`);
     };
     rec.onend = () => {
-      this.ouvindo = false;
-      this.fala.classList.remove('ouvindo');
-      const t = (final + parcial).trim();
+      if (this.rec === rec) this.rec = null;
+      this.paraVoz = null;
+      this.marcarOuvindo(false);
+      const t = this.textoVoz;
+      if (para === 'catalogo') return; // a frase já está no montador; o Criar decide
       if (t) this.pedir(t);
       else if (this.fala.textContent.startsWith('🎤')) this.fala.style.opacity = 0;
     };
     try {
       rec.start();
       this.rec = rec;
-      this.ouvindo = true;
-      this.fala.classList.add('ouvindo');
-      this.mostrarFala('🎤 ouvindo… fale e solte o N', true);
+      this.paraVoz = para;
+      this.marcarOuvindo(true);
+      if (para !== 'catalogo') this.mostrarFala(`🎤 ouvindo… fale e solte ${this.toque ? 'o microfone' : 'o N'}`, true);
     } catch { /* já estava ouvindo */ }
   }
 
   falarFim() {
     if (this.rec && this.ouvindo) this.rec.stop();
+  }
+
+  // botão de microfone (celular e catálogo): segurar e soltar fala uma frase, como o N; um toque
+  // curto deixa ouvindo até outro toque (no celular, também para sozinho na pausa da fala). O toque
+  // curto também salva o primeiro uso, quando o pedido de permissão do microfone rouba o dedo.
+  vozApertar(para = null) {
+    if (this.ouvindo) {
+      this.vozDesde = 0;
+      this.falarFim();
+      return;
+    }
+    this.vozDesde = performance.now();
+    this.falarInicio(para);
+  }
+
+  vozSoltar() {
+    const segurou = this.vozDesde && performance.now() - this.vozDesde > 450;
+    this.vozDesde = 0;
+    if (!this.ouvindo) return;
+    if (segurou) this.falarFim();
+    else if (this.paraVoz !== 'catalogo' && !this.textoVoz) this.mostrarFala('🎤 ouvindo… fale e toque no microfone para parar', true);
+  }
+
+  marcarOuvindo(on) {
+    this.ouvindo = on;
+    this.fala.classList.toggle('ouvindo', on);
+    this.catalogo.vozEstado(on);
+    this.aoOuvir?.(on);
+  }
+
+  // aviso do microfone: no catálogo aberto vai para a prévia dele (a fala fica atrás do catálogo)
+  avisarVoz(para, html) {
+    if (para === 'catalogo' && this.catalogo.aberto) this.catalogo.avisoVoz(html);
+    else this.mostrarFala(html);
   }
 
   // ---------------------------------------------------------------- pedir / guardar
@@ -283,19 +354,24 @@ export class Criador {
     }
     if (!r) {
       som.erro();
-      this.mostrarFala(`${html}<br><span class="erro">Não reconheci nenhuma peça. Aperte U para ver o catálogo.</span>`);
+      const cat = this.toque ? 'Toque no botão de grade para ver o catálogo.' : 'Aperte U para ver o catálogo.';
+      this.mostrarFala(`${html}<br><span class="erro">Não reconheci nenhuma peça. ${cat}</span>`);
       return;
     }
     if (r.ignoradas.length) html += `<br><span class="aviso">Ignorei: ${esc(r.ignoradas.join(', '))}</span>`;
     this.raiz = r.raiz;
     this.texto = texto;
     this.montarVm();
-    this.hud.innerHTML = `<b>CRIAÇÃO NA MÃO</b><pre>${esc(arvore(r.raiz).trimEnd())}</pre><small>Clique ou X atira · N fala de novo · U catálogo · “guardar” tira</small>`;
+    const dica = this.toque
+      ? 'Botão amarelo atira · microfone fala de novo · “guardar” tira'
+      : 'Clique ou X atira · N fala de novo · U catálogo · “guardar” tira';
+    this.hud.innerHTML = `<b>CRIAÇÃO NA MÃO</b><pre>${esc(arvore(r.raiz).trimEnd())}</pre><small>${dica}</small>`;
     this.hud.hidden = false;
     som.criar();
     this.mostrarFala(`${html}<br><span class="ok">✔ ${esc(nomeDaCriacao(r.raiz))} na mão!</span>`);
     this.socket()?.emit('criador-arma', texto);
     this.definirArma(this.eu(), texto, r.raiz);
+    this.mudou?.();
   }
 
   guardar(avisar = true) {
@@ -308,6 +384,7 @@ export class Criador {
     this.hud.hidden = true;
     if (avisar) this.socket()?.emit('criador-arma', null);
     this.definirArma(this.eu(), null);
+    this.mudou?.();
   }
 
   // a criação de alguém (eu também, em 3ª pessoa): o modelo vai no boneco

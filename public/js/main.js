@@ -1169,6 +1169,11 @@ async function join() {
       },
       luneta: () => ligarLuneta(!luneta),
       soltarTiro: () => soltarGatilho(),
+      // criador por voz: o microfone é o N (segurar e soltar, ou tocar para ligar e desligar) e a
+      // grade é o U (catálogo)
+      voz: () => criador.vozApertar(),
+      soltarVoz: () => criador.vozSoltar(),
+      catalogo: () => criador.abrirCatalogo(),
       fullscreen: async () => {
         const r = await toggleFullscreen();
         updateFullscreenButton();
@@ -6058,7 +6063,7 @@ function ligarLuneta(on) {
   $('#luneta').hidden = !on;
   $('#crosshair').classList.toggle('luneta-on', on);
   document.body.classList.toggle('com-luneta', on);
-  touchPad?.setPoderes({ voando: player.voando, puloAlto: player.puloAlto, armado: temArma(), sniper: temSniper(), luneta });
+  touchPad?.setPoderes({ voando: player.voando, puloAlto: player.puloAlto, armado: temArma() || criador.armado, sniper: temSniper(), luneta });
 }
 // respiração: um oito bem lento somado à mira (e tirado ao sair)
 function balancarLuneta(t) {
@@ -6259,10 +6264,19 @@ function atirar() {
 }
 
 // ------------------------------------------------------------------ criador por voz (criador.js)
-// Segurar N e falar (ou /criar no chat): a frase vira a arma na mão, no mapa todo.
+// Segurar N e falar (ou /criar no chat): a frase vira a arma na mão, no mapa todo. No celular são os
+// botões de microfone e de grade (catálogo) da coluna da direita, e a criação atira pelo de tiro.
 const criador = new Criador({
   world, player, localAvatar,
+  toque: isTouch,
   toast: (...a) => toast(...a),
+  // o microfone do toque fica vermelho enquanto ouve
+  aoOuvir: (on) => {
+    const b = $('#tb-voz');
+    b?.classList.toggle('gravando', on);
+    b?.setAttribute('aria-pressed', String(on));
+  },
+  mudou: () => poderesMudaram(), // criou ou guardou: o botão de tiro do toque aparece ou some
   socket: () => socket,
   eu: () => state.selfId,
   avatarDe: (id) => state.users.get(id)?.avatar || null,
@@ -6337,7 +6351,7 @@ function poderesMudaram() {
     toast('Com poder ligado o parkour não conta: corrida cancelada.', 'warn', 4000);
   }
   if (!temSniper()) ligarLuneta(false);
-  touchPad?.setPoderes({ voando: player.voando, puloAlto: player.puloAlto, armado: temArma(), sniper: temSniper(), luneta });
+  touchPad?.setPoderes({ voando: player.voando, puloAlto: player.puloAlto, armado: temArma() || criador.armado, sniper: temSniper(), luneta });
   $('#help-luneta').hidden = !temSniper();
   const ativos = [player.voando && '🪽 Voando', player.puloAlto && '⬆ Pulo alto'].filter(Boolean);
   $('#poderes-hud').hidden = !ativos.length;
