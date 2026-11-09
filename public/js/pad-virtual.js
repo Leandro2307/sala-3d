@@ -22,7 +22,7 @@ import { opcoesJogo } from './jogo-opcoes.js';
 const ENVIO_MS = 12;
 const NEUTRO = { b: 0, lx: 0, ly: 0, rx: 0, ry: 0, lt: 0, rt: 0 };
 const EIXOS = ['lx', 'ly', 'rx', 'ry', 'lt', 'rt'];
-const FONTES = ['toque', 'giro', 'fisico'];
+const FONTES = ['toque', 'giro', 'fisico', 'teclado'];
 const arred = (v) => Math.round(v * 1000) / 1000;
 const entre = (v) => Math.min(1, Math.max(0, Number(v) || 0));
 
@@ -121,6 +121,12 @@ export class PadVirtual {
 
   soltar(fonte) {
     this.fontes[fonte] = { ...NEUTRO };
+    this.mudou();
+  }
+
+  // ------------------------------------------------------------ teclado e mouse do PC (teclado-pad.js)
+  definir(fonte, e) {
+    this.fontes[fonte] = { ...NEUTRO, ...e };
     this.mudou();
   }
 

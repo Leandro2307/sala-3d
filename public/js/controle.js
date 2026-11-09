@@ -113,6 +113,7 @@ export class Controle {
     this.consumidas = new Set(); // teclas que viraram atalho: o keyup delas também não sai daqui
     this.alt = null; // Alt esquerdo guardado (ver tecla())
     this.atalho = null; // (e, 'down'|'up') => true se a tecla é atalho de quem usa o Controle
+    this.paraPad = null; // (ev) => true se o evento do modo jogo virou controle virtual (teclado-pad.js)
     this.avisos = new Map();
     this.ultimoMove = 0;
     this.movePendente = null;
@@ -468,6 +469,8 @@ export class Controle {
   }
 
   mandar(key, ev, volatil = false) {
+    // jogo de controle no PC: tecla e mouse viram o controle virtual (teclado-pad.js)
+    if (this.jogo?.key === key && this.paraPad?.(ev)) return;
     // no modo jogo cada evento diz que é de jogo: o "modo" sozinho se perdia quando o ajudante
     // reabria (ou ainda compilava) e o WASD e a câmera paravam, mas o clique continuava
     if (this.jogo?.key === key && ['mouse', 'wheel', 'tecla'].includes(ev.t)) ev = { ...ev, jogo: true };
@@ -517,6 +520,7 @@ export class Controle {
     const dy = e.movementY || 0;
     if (!dx && !dy) return;
     const key = this.superficies.get(v);
+    if (this.jogo?.key === key && this.paraPad?.({ t: 'mouse', a: 'move', dx, dy })) return;
     const ms = this.direto(key) ? JOGO_MS : a ? ARRASTO_MS : MOVE_MS;
     this.mover(key, { t: 'mouse', a: 'move', dx, dy, b: a?.b || 'left', arrastando: !!a, mod: MOD(e) }, ms);
   }

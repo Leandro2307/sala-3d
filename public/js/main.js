@@ -24,6 +24,7 @@ import { AvisoDoSite } from './aviso-site.js';
 import { ToqueJogo, jogoDaJanela, LAYOUTS, layoutDoTitulo } from './toque-jogo.js';
 import { ControleFisico } from './gamepad-jogo.js';
 import { PadVirtual } from './pad-virtual.js';
+import { TecladoPad, DICA_TECLADO } from './teclado-pad.js';
 import { TurboEnvio, TurboRecebe, TTL_MS, LISO_PCT } from './turbo.js';
 import { opcoesJogo, LISO_MS, PRESETS, OPCOES_DO_PRESET, htmlPresets } from './jogo-opcoes.js';
 import { Mesa } from './mesa.js';
@@ -3687,6 +3688,8 @@ document.addEventListener('pointerdown', (e) => {
 // Controle virtual (pad-virtual.js): no layout PS5 o toque e o controle de videogame viram um
 // controle de Xbox no PC de quem compartilha, em vez de teclado e mouse
 const padVirtual = new PadVirtual({ controle });
+const tecladoPad = new TecladoPad({ pad: padVirtual });
+controle.paraPad = (ev) => tecladoPad.evento(ev);
 const fisico = new ControleFisico({
   controle,
   pad: padVirtual,
@@ -3714,8 +3717,14 @@ controle.onJogo = (video, key) => {
   else toqueJogo.esconder();
   if (video) fisico.ligar(key, acharTela(key)?.share.titulo);
   else fisico.desligar();
-  // jogo de controle no PC (o celular faz isso no toque-jogo): o controle virtual já aparece lá
-  if (video && !isTouch && LAYOUTS[layoutDoTitulo(acharTela(key)?.share.titulo)]?.virtual) padVirtual.acordar();
+  // jogo de controle no PC (o celular faz isso no toque-jogo): o controle virtual já aparece lá, e o
+  // teclado e o mouse daqui viram esse controle (o emulador e o chiaki-ng não escutam mouse)
+  const layoutPc = video && !isTouch ? layoutDoTitulo(acharTela(key)?.share.titulo) : null;
+  if (layoutPc && LAYOUTS[layoutPc]?.virtual) {
+    padVirtual.acordar();
+    tecladoPad.ligar();
+    if (DICA_TECLADO[layoutPc]) toast(`Teclado e mouse viram o controle. ${DICA_TECLADO[layoutPc]}`, 'info', 12000);
+  } else tecladoPad.desligar();
   if (!video) padVirtual.desligar(); // depois do toque e do controle: o último estado é tudo solto
   // o modo jogo desligou por fora do botão (a tela fechou, saiu do foco): sai da tela cheia também
   if (!video && !isTouch && document.body.classList.contains('jogo-pc')) jogoNoPc(false);
@@ -3725,6 +3734,7 @@ controle.onJogo = (video, key) => {
 controle.onEscondeu = () => {
   toqueJogo.soltarTudo();
   fisico.soltarTudo();
+  tecladoPad.soltarTudo();
 };
 // o jogo mostrou ou escondeu o cursor: no celular, os botões de menu entram e saem sozinhos
 controle.onCursorLivre = (livre) => toqueJogo.cursorDoJogo(livre);

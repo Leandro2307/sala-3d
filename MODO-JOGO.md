@@ -728,3 +728,14 @@ O usuário compartilha o `lichii.exe` (Eglantine, fork do Eden com jogos de Swit
   bloqueou mexer nisso; ficou com ele. Não testado: o layout no celular de verdade e o jogo inteiro
   pelo controle virtual (o Jogador 1 ainda está no DualSense). Quem joga no PC sem controle não tem
   teclado → controle virtual (no PS5 também não tinha).
+
+### PC sem controle no emulador (2026-11-09)
+
+O usuário jogou o Switch pelo PC e "o mouse não entra dentro do emulador": no layout `switch`/`ps5` o mouse
+e o teclado de quem joga no PC ainda iam como mouse e teclado do Windows, que o emulador (só o controle) ignora.
+Agora `teclado-pad.js` (fonte `teclado` do `PadVirtual`, ligada no `controle.onJogo` só no PC e só em layout
+`virtual`) converte: WASD = analógico esquerdo, mouse = analógico direito pela velocidade (janela de 40 ms,
+1,6 px/ms = fim do curso, curva em raiz), Espaço/E/Q/F = botões de baixo/direita/esquerda/cima, Shift L, R R,
+clique direito/esquerdo ZL/ZR, Tab −, Esc +, H Home, setas = direcional. Gancho: `controle.paraPad` em
+`mandar` e `moverJogo`. Tecla fora da lista continua indo como tecla; o mouse vai todo para o controle. Toast
+com a lista ao ligar. Não testado de ponta a ponta com o lichii (só a conversão, em node).
