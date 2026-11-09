@@ -2194,7 +2194,8 @@ async function novaTela(telaEscolhida, { monitor = false, obs = false, auto = fa
     const qps = Math.round(stream.getVideoTracks()[0]?.getSettings?.().frameRate || 0);
     const lugar = onde === 'Telão' ? 'telão' : onde;
     if (qps && qps < 100) toast(`O OBS está mandando ${qps} qps para o ${lugar}. Para 120, mude em Configurações → Vídeo → FPS no OBS e reinicie a câmera virtual.`, 'warn', 9000);
-    else toast(`Você está compartilhando pelo OBS no ${lugar} a ${qps || QPS_OBS} qps (sem som: a câmera virtual só leva a imagem).`, 'success', 7000);
+    else if (stream.getAudioTracks().length) toast(`Você está compartilhando pelo OBS no ${lugar} a ${qps || QPS_OBS} qps (com o som do PC).`, 'success', 7000);
+    else toast(`Pelo OBS no ${lugar} a ${qps || QPS_OBS} qps, sem som. Para o som, no seletor escolha “Tela inteira” e marque “Compartilhar áudio do sistema”.`, 'warn', 9000);
   } else if (!stream.getAudioTracks().length) {
     toast(`${onde} sem som. Para mandar o som, escolha uma aba ou a tela inteira e marque “Compartilhar áudio”.`, 'warn', 8000);
   } else {

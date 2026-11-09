@@ -770,10 +770,56 @@ export class RTC {
     return this.screens.get(key)?.qps || this.qpsCaptura();
   }
 
-  // A tela pela câmera virtual do OBS ("Iniciar câmera virtual", com o OBS a 120 qps). Sem som:
-  // a câmera virtual só leva a imagem.
+  // O som do PC para a tela do OBS (a câmera virtual só leva a imagem): pede a tela inteira com
+  // "Compartilhar áudio do sistema", fica só com o som e larga a imagem. Desistiu ou não marcou o
+  // áudio: null (a tela vai sem som). Vem antes da câmera, enquanto o clique ainda vale para o seletor.
+  async somDoSistema() {
+    if (!navigator.mediaDevices?.getDisplayMedia) return null;
+    let s;
+    try {
+      s = await navigator.mediaDevices.getDisplayMedia({
+        video: { displaySurface: 'monitor', frameRate: { ideal: 1, max: 5 }, width: { max: 640 }, height: { max: 360 } },
+        audio: {
+          channelCount: { ideal: 2 },
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+          suppressLocalAudioPlayback: false,
+          restrictOwnAudio: true, // não reenvia a voz dos amigos que sai desta aba
+        },
+        systemAudio: 'include',
+        selfBrowserSurface: 'exclude',
+        surfaceSwitching: 'exclude',
+        monitorTypeSurfaces: 'include',
+      });
+    } catch (err) {
+      console.warn('[rtc] som do sistema para o OBS', err);
+      return null;
+    }
+    for (const t of s.getVideoTracks()) t.stop();
+    return s.getAudioTracks()[0] || null;
+  }
+
+  // A tela pela câmera virtual do OBS ("Iniciar câmera virtual", com o OBS a 120 qps). A câmera
+  // só leva a imagem; o som vem do sistema (somDoSistema), se a pessoa marcar no seletor.
   async captureObs() {
     escolherCodec();
+    const som = await this.somDoSistema();
+    try {
+      const stream = await this.camObs();
+      if (som) {
+        stream.addTrack(som);
+        // parou o som pela faixa do Chrome: a tela continua, só sem som
+        som.addEventListener('ended', () => stream.removeTrack(som));
+      }
+      return this.prepararCaptura(stream);
+    } catch (err) {
+      som?.stop();
+      throw err;
+    }
+  }
+
+  async camObs() {
     const preset = this.preset();
     const acharObs = async () => (await navigator.mediaDevices.enumerateDevices())
       .find((d) => d.kind === 'videoinput' && /obs/i.test(d.label));
@@ -804,7 +850,7 @@ export class RTC {
       }
       throw err;
     }
-    return this.prepararCaptura(stream);
+    return stream;
   }
 
   // pede a aba/janela/tela ao navegador; quem chama decide se publica (addScreen)
