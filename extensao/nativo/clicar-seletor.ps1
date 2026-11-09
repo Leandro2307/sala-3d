@@ -1,12 +1,15 @@
 ﻿# Clica sozinho no seletor de compartilhamento do Chrome: escolhe a tela, liga o áudio do sistema
-# e aperta "Compartilhar". O abrir-e-compartilhar.ps1 roda este depois de abrir a sala.
+# e aperta "Compartilhar". Quem roda: o abrir-e-compartilhar.ps1 (depois de abrir a sala) e o
+# ajudante nativo, quando alguém manda /tela para este PC na sala.
 # (Antes era o --auto-select-desktop-capture-source, mas com ele o Chrome não carrega extensões
 # sem compactação: a extensão da Sala 3D sumia.)
 param(
   [string]$Tela = 'Tela 1',     # "Tela 1", "Tela 2"... (um monitor só: "Tela inteira")
   [int]$Espera = 90             # segundos esperando o seletor aparecer
 )
-Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Windows.Forms
+# com um monitor só não existe "Tela 1" no seletor
+if ($Tela -like 'Tela [0-9]*' -and [System.Windows.Forms.Screen]::AllScreens.Count -lt 2) { $Tela = 'Tela inteira' }
 $P  = [System.Windows.Automation.AutomationElement]::NameProperty
 $CT = [System.Windows.Automation.AutomationElement]::ControlTypeProperty
 $Botao = [System.Windows.Automation.ControlType]::Button

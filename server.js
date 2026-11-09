@@ -1832,10 +1832,44 @@ function attachSockets(io) {
       const clean = cleanText(text, 400);
       if (!clean) return;
       if (/^\/pix(\s|$)/i.test(clean)) return pix(clean);
+      if (/^\/tela(\s|$)/i.test(clean)) return; // o /tela é comando (ver 'tela-pedir'): não vai para o chat
       const msg = { id: user.id, name: user.name, color: user.color, text: clean, t: Date.now() };
       room.chat.push(msg);
       if (room.chat.length > MAX_CHAT) room.chat.shift();
       io.to(room.id).emit('chat', msg);
+    });
+
+    // ------------------------------------------------------------ /tela
+    // Um PC que fica na sala (o PC de casa do dono) é marcado uma vez, nele mesmo, com "/tela liberar".
+    // O dono da sala (provou a senha de dono) manda "/tela <nick>" de qualquer outro aparelho e esse
+    // PC compartilha a tela inteira com áudio e libera o controle (o ajudante do Windows aperta o
+    // seletor do Chrome lá). PC não marcado nunca recebe o pedido; quem não é dono não consegue pedir.
+    socket.on('tela-atender', (on, ack) => {
+      if (!user) return;
+      socket.data.tela = !!on;
+      if (typeof ack === 'function') ack({ ok: true });
+    });
+    socket.on('tela-pedir', async (msg, ack) => {
+      const r = typeof ack === 'function' ? ack : () => {};
+      if (!user) return r({ ok: false, erro: 'fora' });
+      if (!dono) return r({ ok: false, erro: 'dono' });
+      const nick = cleanText(obj(msg).nick, 20).toLowerCase();
+      if (!nick) return r({ ok: false, erro: 'nick' });
+      const alvos = (await io.in(room.id).fetchSockets()).filter((s) => s.id !== socket.id
+        && room.users.get(s.id)?.name.toLowerCase() === nick);
+      if (!alvos.length) return r({ ok: false, erro: 'ninguem' });
+      const liberados = alvos.filter((s) => s.data.tela);
+      if (!liberados.length) return r({ ok: false, erro: 'nao-liberado' });
+      const acao = obj(msg).acao === 'parar' ? 'parar' : 'compartilhar';
+      for (const s of liberados) {
+        s.data.telaDe = socket.id; // a resposta (deu ou não deu) volta só para quem pediu
+        s.emit('tela-pedido', { acao, de: user.name });
+      }
+      r({ ok: true, pcs: liberados.length });
+    });
+    socket.on('tela-resposta', (msg) => {
+      if (!user || !socket.data.telaDe) return;
+      io.to(socket.data.telaDe).emit('tela-resposta', { de: user.name, ok: !!obj(msg).ok, texto: cleanText(obj(msg).texto, 300) });
     });
 
     // ------------------------------------------------------------ foto do rosto

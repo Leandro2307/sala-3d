@@ -191,7 +191,7 @@ namespace Sala3d
             new Thread(VigiarAtalho) { IsBackground = true }.Start();
             new Thread(VigiarJogo) { IsBackground = true }.Start();
             new Thread(VigiarWifi) { IsBackground = true }.Start();
-            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.12.0" } });
+            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.13.0" } });
             var json = new JavaScriptSerializer();
             string txt;
             while ((txt = Ler(entrada)) != null)
@@ -234,6 +234,7 @@ namespace Sala3d
             // depois do Ctrl+Alt+End (ou do "Cortar o controle" no ícone da extensão, que manda o
             // "parar"), só volta quando quem compartilha liberar de novo na sala
             if (tipo == "retomar") { parado = false; return; }
+            if (tipo == "seletor") { Seletor(S(m, "tela")); return; }
             if (tipo == "parar") { lock (travaEntrada) { parado = true; SoltarTudo(); } return; }
             if (tipo == "soltar") { jogo = false; vivoVisto = false; cursorEnviado = null; SoltarTudo(); temAlvo = false; rotuloAtual = null; qualEnviado = null; return; }
             if (tipo != "entrada" || !temAlvo || parado) return;
@@ -263,6 +264,45 @@ namespace Sala3d
             else if (t == "tecla") { if (jogo) TeclaJogo(S(ev, "a"), S(ev, "code")); else Tecla(S(ev, "a"), S(ev, "key"), (int)D(ev, "kc"), (int)D(ev, "mod"), B(ev, "ag")); }
             else if (t == "texto") Texto(S(ev, "s"));
             else if (t == "pad") Pad(ev);
+        }
+
+        // ------------------------------------------------------------ /tela
+        // Alguém mandou /tela para este PC (1.13+): a sala já veio para a frente com o botão
+        // "Compartilhar a tela inteira". O clicar-seletor.ps1 (ao lado deste arquivo) aperta esse
+        // botão pelo UI Automation (o Chrome conta como clique) e depois escolhe a tela, liga o áudio
+        // do sistema e aperta Compartilhar no seletor. Roda em outra linha: o seletor leva segundos e
+        // a entrada não pode parar. Responde { tipo: "seletor", ok, msg }.
+        static int seletorRodando;
+        static void Seletor(string tela)
+        {
+            if (Interlocked.Exchange(ref seletorRodando, 1) == 1) return; // um de cada vez
+            new Thread(() =>
+            {
+                bool ok = false; string msg = "";
+                try
+                {
+                    string pasta = Environment.GetEnvironmentVariable("SALA3D_NATIVO") ?? "";
+                    string ps1 = Path.Combine(pasta, "clicar-seletor.ps1");
+                    if (!File.Exists(ps1)) msg = "sem-script";
+                    else
+                    {
+                        var info = new System.Diagnostics.ProcessStartInfo("powershell.exe",
+                            "-NoLogo -NoProfile -ExecutionPolicy Bypass -File \"" + ps1 + "\" -Tela \"" + tela.Replace("\"", "") + "\" -Espera 40")
+                        { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardInput = true };
+                        using (var p = System.Diagnostics.Process.Start(info))
+                        {
+                            // a saída dele não pode cair na deste programa (é o canal com o Chrome)
+                            msg = p.StandardOutput.ReadToEnd().Trim();
+                            if (!p.WaitForExit(60000)) { try { p.Kill(); } catch { } msg = "demorou"; }
+                            else ok = p.ExitCode == 0;
+                        }
+                    }
+                }
+                catch (Exception err) { msg = err.Message; }
+                finally { Interlocked.Exchange(ref seletorRodando, 0); }
+                if (msg.Length > 200) msg = msg.Substring(msg.Length - 200);
+                Escrever(new Dictionary<string, object> { { "tipo", "seletor" }, { "ok", ok }, { "msg", msg } });
+            }) { IsBackground = true }.Start();
         }
 
         // ------------------------------------------------------------ alvo

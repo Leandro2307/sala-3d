@@ -75,6 +75,6 @@ Start-Process $chrome -ArgumentList @("--profile-directory=$Perfil", "--app-id=$
 Write-Host ''
 Write-Host "  Abrindo a sala '$Sala'... (esperando o seletor de tela)" -ForegroundColor Cyan
 
-& powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'clicar-seletor.ps1') -Tela $Fonte -Espera 120
+& powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'extensao\nativo\clicar-seletor.ps1') -Tela $Fonte -Espera 120
 if ($LASTEXITCODE -ne 0) { exit 1 }   # o .bat segura a janela para ler o aviso
 Start-Sleep -Seconds 3

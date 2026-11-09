@@ -1197,15 +1197,7 @@ async function join() {
   // do seletor, que já abre na aba "Tela inteira". Sem o .bat, é só clicar.
   if (compartilharAoEntrar) {
     compartilharAoEntrar = false;
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.textContent = 'Compartilhar a tela inteira';
-    b.style.cssText = 'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:9999;padding:18px 28px;font:600 18px system-ui,sans-serif;border:0;border-radius:12px;background:#2563eb;color:#fff;box-shadow:0 8px 30px #0008;cursor:pointer';
-    b.addEventListener('click', () => {
-      b.remove();
-      novaTela(undefined, { monitor: true });
-    });
-    document.body.appendChild(b);
+    botaoTelaInteira();
   }
   // com a barra e os botões de toque já no lugar (e um respiro para a sala aparecer)
   if (tutorialHud.precisa()) setTimeout(() => tutorialHud.iniciar(iniciarGuiaBoasVindas), 900);
@@ -1349,6 +1341,7 @@ function applyJoined(data) {
   mostrarMoedas();
   aplicarSala(data.sala);
   reentrarComoDono();
+  reentrarAtendendoTela();
   salas.iniciar();
 
   for (const u of data.users) rtc.getPeer(u.id);
@@ -1597,6 +1590,12 @@ function bindSocket() {
 
   socket.on('chat', (m) => addChat(m, m.id !== state.selfId));
   socket.on('chat-aviso', addAviso);
+  // /tela: este PC (liberado) foi chamado; ou a resposta do PC que eu chamei
+  socket.on('tela-pedido', (m) => pedidoDeTela(m || {}).catch((err) => socket.emit('tela-resposta', { ok: false, texto: String(err?.message || err) })));
+  socket.on('tela-resposta', ({ de, ok, texto }) => {
+    avisoTela(`/tela ${de}: ${texto}`);
+    if (!ok) toast(`/tela ${de}: ${texto}`, 'warn', 8000);
+  });
 
   socket.on('browser-opened', ({ site, by }) => {
     toast(by === settings.name ? `Abrindo ${site} no telão` : `${by} abriu ${site} no navegador do telão`, 'info', 3500, '#38bdf8');
@@ -2160,7 +2159,9 @@ setInterval(medirFoco, 1000);
 // monitor: o seletor abre já na tela inteira (o ?compartilhar=tela)
 // obs: pela câmera virtual do OBS, a 120 qps (rtc.captureObs; a captura de tela do Chrome não
 // passa de ~54)
-async function novaTela(telaEscolhida, { monitor = false, obs = false } = {}) {
+// auto: veio do /tela (ninguém na frente deste PC): não pergunta em qual tela da sala
+// Devolve a chave da tela nova (ou nada, se não compartilhou).
+async function novaTela(telaEscolhida, { monitor = false, obs = false, auto = false } = {}) {
   if (shareBusy) return;
   if (obs ? !navigator.mediaDevices?.getUserMedia : !navigator.mediaDevices?.getDisplayMedia) {
     toast('Seu navegador não permite compartilhar a tela aqui. Use Chrome/Edge no computador (https ou localhost).', 'error', 6000);
@@ -2171,7 +2172,7 @@ async function novaTela(telaEscolhida, { monitor = false, obs = false } = {}) {
     return;
   }
   // escritório, fora do próprio posto: a pessoa escolhe em qual tela da sala vai aparecer
-  const tela = telaEscolhida ?? await escolherTela();
+  const tela = telaEscolhida ?? (auto ? undefined : await escolherTela());
   if (tela === null) return;
   let stream;
   let key;
@@ -2204,6 +2205,7 @@ async function novaTela(telaEscolhida, { monitor = false, obs = false } = {}) {
     dicaFaixaDada = true;
     setTimeout(() => toast(dicaSemFaixa().replace(/<[^>]+>/g, ''), 'info', 9000), 1500);
   }
+  return key;
 }
 let dicaFaixaDada = false;
 
@@ -5452,11 +5454,117 @@ $('#chat-form').addEventListener('submit', (e) => {
     if (criar[1]) criador.pedir(criar[1]);
     else criador.abrirCatalogo();
   } else if (/^\/cat[aá]logo\b/i.test(text)) criador.abrirCatalogo();
+  else if (/^\/tela(\s|$)/i.test(text)) comandoTela(text.slice(5).trim());
   else if (text) socket.emit('chat', text);
   input.value = '';
   fecharSugestoes();
   input.blur();
 });
+
+// ------------------------------------------------------------------ /tela
+// Acesso de longe ao PC de casa. Nele, uma vez: "/tela liberar" (fica guardado naquele navegador).
+// De qualquer outro aparelho, o dono da sala manda "/tela <nick>" e aquele PC, se estiver na sala
+// com esse nick, compartilha a Tela 1 com áudio e já libera o controle. "/tela parar <nick>" para.
+// No PC de casa, quem aperta o botão e o seletor do Chrome é o ajudante do Windows (extensão 1.19+,
+// clicar-seletor.ps1), pelo mesmo caminho do abrir-e-compartilhar.bat.
+const TELA_LIBERADA = 'sala3d-tela-liberada';
+let telaKey = null; // a tela que o /tela abriu aqui
+
+function telaLiberadaAqui() {
+  try { return localStorage.getItem(TELA_LIBERADA) === '1'; } catch { return false; }
+}
+function reentrarAtendendoTela() {
+  if (telaLiberadaAqui()) socket.emit('tela-atender', true);
+}
+const avisoTela = (text) => addAviso({ text, t: Date.now() });
+
+function comandoTela(resto) {
+  const [palavra = '', ...mais] = resto.split(/\s+/).filter(Boolean);
+  const p = palavra.toLowerCase();
+  if (p === 'liberar' || p === 'bloquear') {
+    const on = p === 'liberar';
+    try { on ? localStorage.setItem(TELA_LIBERADA, '1') : localStorage.removeItem(TELA_LIBERADA); } catch { /* sem armazenamento */ }
+    socket.emit('tela-atender', on);
+    if (!on) return avisoTela('Este PC não atende mais o /tela.');
+    const falta = !controle.ext.ok ? ' Falta a extensão da Sala 3D neste Chrome (com este site liberado no ícone dela).'
+      : !controle.ext.liberado ? ' Falta liberar este site no ícone da extensão.'
+      : controle.ext.nativo?.ok === false ? ' Falta o ajudante do Windows (extensao\\nativo\\instalar.bat).' : '';
+    return avisoTela(`Este PC agora atende o /tela: o dono da sala manda "/tela ${settings.name}" de outro aparelho e ele compartilha a Tela 1 com áudio e libera o controle. Deixe a sala aberta aqui.${falta}`);
+  }
+  const parar = p === 'parar';
+  const nick = (parar ? mais.join(' ') : resto).trim();
+  if (!nick) return avisoTela('Use "/tela <nick>" para o PC desse jogador compartilhar a tela, "/tela parar <nick>" para parar. No PC que vai atender, uma vez: "/tela liberar".');
+  if (!state.donoDaSala) return avisoTela('Só o dono da sala pode usar o /tela. Entre como dono (painel da sala) neste aparelho.');
+  socket.emit('tela-pedir', { nick, acao: parar ? 'parar' : 'compartilhar' }, (r) => {
+    if (r?.ok) return avisoTela(parar ? `Pedi para ${nick} parar de compartilhar.` : `Pedi a tela de ${nick}. Leva uns segundos…`);
+    const erros = {
+      dono: 'Só o dono da sala pode usar o /tela.',
+      ninguem: `Ninguém chamado "${nick}" está nesta sala.`,
+      'nao-liberado': `O PC de ${nick} não atende o /tela. Nele, mande uma vez "/tela liberar".`,
+    };
+    avisoTela(erros[r?.erro] || 'Não deu para mandar o /tela.');
+  });
+}
+
+// O botão "Compartilhar a tela inteira" (o ?compartilhar=tela e o /tela): o Chrome só abre o seletor
+// depois de um clique na página, e o UI Automation do Windows apertando o botão conta como clique.
+// Devolve a chave da tela quando ela entrar (ou null).
+function botaoTelaInteira({ auto = false } = {}) {
+  document.querySelector('#botao-tela-inteira')?.remove();
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.id = 'botao-tela-inteira';
+  b.textContent = 'Compartilhar a tela inteira';
+  b.style.cssText = 'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:9999;padding:18px 28px;font:600 18px system-ui,sans-serif;border:0;border-radius:12px;background:#2563eb;color:#fff;box-shadow:0 8px 30px #0008;cursor:pointer';
+  document.body.appendChild(b);
+  return new Promise((resolve) => {
+    b.addEventListener('click', async () => {
+      b.remove();
+      resolve((await novaTela(undefined, { monitor: true, auto })) ?? null);
+    });
+  });
+}
+
+async function pedidoDeTela({ acao, de }) {
+  const responder = (ok, texto) => socket.emit('tela-resposta', { ok, texto });
+  if (!telaLiberadaAqui()) return; // o servidor já não manda, mas por garantia
+  const minhas = self()?.shares;
+  if (acao === 'parar') {
+    const key = telaKey && minhas?.has(telaKey) ? telaKey : [...(minhas?.values() || [])].find((s) => s.alvo?.superficie === 'monitor')?.key;
+    if (!key) return responder(true, 'não estava compartilhando a tela');
+    stopShare(key, true);
+    telaKey = null;
+    return responder(true, 'parou de compartilhar');
+  }
+  let key = telaKey && minhas?.has(telaKey) ? telaKey : null;
+  if (!key) {
+    if (!controle.ext.ok || !controle.ext.liberado) return responder(false, 'a extensão da Sala 3D não está liberada no Chrome de lá');
+    if (shareBusy) return responder(false, 'já tem um compartilhamento começando lá');
+    toast(`${de} pediu a sua tela pelo /tela.`, 'info', 6000);
+    const entrou = botaoTelaInteira({ auto: true });
+    const r = await controle.pedir('tela-auto', undefined, undefined, 'Tela 1', 80_000);
+    if (r?.erro) {
+      document.querySelector('#botao-tela-inteira')?.remove();
+      const porque = r.erro === 'ajudante-ausente' ? 'o ajudante do Windows não está instalado lá'
+        : r.erro === 'sem-resposta' || r.msg === 'demorou' ? 'o seletor do Chrome não respondeu (ajudante antigo? recarregue a extensão lá)'
+        : r.msg === 'sem-script' ? 'falta o clicar-seletor.ps1 na pasta do ajudante'
+        : r.msg || r.erro;
+      return responder(false, `não compartilhou: ${porque}`);
+    }
+    key = await Promise.race([entrou, new Promise((ok) => setTimeout(() => ok(null), 15_000))]);
+    document.querySelector('#botao-tela-inteira')?.remove();
+    if (!key) return responder(false, 'o Chrome não começou a compartilhar');
+    telaKey = key;
+  }
+  // controle liberado: quem pediu já mexe no mouse e no teclado de lá
+  const sh = self()?.shares.get(key);
+  if (sh && !sh.controle && sh.alvo) {
+    const r = await controle.retomarJanela();
+    if (r?.erro) return responder(true, 'compartilhando a tela, mas sem controle (falta o ajudante do Windows)');
+    socket.emit('controle-permitir', { key, on: true });
+  }
+  responder(true, 'compartilhando a Tela 1 com áudio, controle liberado');
+}
 
 // /pix do dono: completa o comando, a ação e o nome de quem está na sala. Setas escolhem, Tab ou
 // Enter põem no campo (o Enter só manda quando a lista está fechada), Esc fecha.

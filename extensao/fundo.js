@@ -493,6 +493,8 @@ function conectarNativo() {
       lembrarNativo({ ok: true, versao: String(m.versao || '') });
     }
     if (m?.tipo === 'alvo') n.respostaAlvo?.(m);
+    // o clicar-seletor do /tela terminou (ajudante 1.13+)
+    if (m?.tipo === 'seletor') n.respostaSeletor?.(m);
     // a janela que recebe a entrada está como administrador (ajudante 1.5+): o Windows não deixa o
     // ajudante mexer nela. Vai na resposta de cada evento (ver janela()), e a sala avisa.
     if (m?.tipo === 'admin') n.admin = m.admin ? { titulo: String(m.titulo || '').slice(0, 120) } : null;
@@ -523,6 +525,7 @@ function conectarNativo() {
     n.ok = false;
     chegou();
     n.respostaAlvo?.(null);
+    n.respostaSeletor?.(null);
     if (nativo === n) nativo = null;
   });
   nativo = n;
@@ -605,6 +608,26 @@ function soltarJanela(cortar = false) {
   nativo.cursor = null;
 }
 
+async function telaAuto(aba, tela) {
+  if (!(await nativoPronto())) return { erro: 'ajudante-ausente' };
+  const n = nativo;
+  const w = await chrome.windows.get(aba.windowId).catch(() => null);
+  if (w?.state === 'minimized') await chrome.windows.update(aba.windowId, { state: 'normal' }).catch(() => {});
+  await chrome.tabs.update(aba.id, { active: true }).catch(() => {});
+  await chrome.windows.update(aba.windowId, { focused: true }).catch(() => {});
+  const r = await new Promise((resolve) => {
+    const fim = setTimeout(() => resolve({ ok: false, msg: 'demorou' }), 70_000);
+    n.respostaSeletor = (m) => {
+      clearTimeout(fim);
+      n.respostaSeletor = null;
+      // null: o ajudante fechou; sem "seletor" nenhum, é o ajudante de antes da 1.13
+      resolve(m ? { ok: !!m.ok, msg: String(m.msg || '').slice(0, 200) } : { ok: false, msg: 'ajudante-fechou' });
+    };
+    n.porta.postMessage({ tipo: 'seletor', tela });
+  });
+  return r.ok ? { ok: true } : { erro: 'seletor', msg: r.msg, versao: nativoInfo?.versao || '' };
+}
+
 async function tratar(m, sender) {
   if (m.tipo === 'meu-id') return { aba: sender.tab?.id };
   if (m.tipo === 'vivo') return { ok: true }; // a sala aberta mantém o fundo acordado
@@ -637,6 +660,10 @@ async function tratar(m, sender) {
     await chrome.windows.update(sender.tab.windowId, { focused: true }).catch(() => {});
     return { ok: true };
   }
+  // /tela (1.19+): alguém mandou este PC compartilhar a tela, e a sala já mostra o botão
+  // "Compartilhar a tela inteira". Traz a sala para a frente (o UI Automation só enxerga a aba
+  // visível) e o ajudante aperta o botão e o seletor do Chrome: a tela pedida, com áudio.
+  if (m.tipo === 'tela-auto') return telaAuto(sender.tab, String(m.alvo || 'Tela 1').slice(0, 40));
   if (m.tipo === 'janela') return janela(m.alvo, m.ev && typeof m.ev === 'object' ? m.ev : null, sender.tab.id);
   // quem compartilha ligou "permitir controle" (de novo): destrava depois de um Ctrl+Alt+End
   if (m.tipo === 'janela-retomar') {

@@ -71,7 +71,7 @@
     }
   };
 
-  const PEDIDOS = ['entrada', 'soltar', 'aba-info', 'janela', 'janela-retomar', 'janela-soltar', 'abas', 'mostrar-sala', 'nativo-conferir'];
+  const PEDIDOS = ['entrada', 'soltar', 'aba-info', 'janela', 'janela-retomar', 'janela-soltar', 'abas', 'mostrar-sala', 'nativo-conferir', 'tela-auto'];
   const esperando = new Map(); // pedido -> responder: o fundo esperando a sala responder
   const aoSite = (e) => {
     if (e.source !== window || !e.data || typeof e.data.sala3d !== 'string' || !ehSala()) return;

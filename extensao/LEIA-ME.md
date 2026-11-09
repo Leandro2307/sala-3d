@@ -117,6 +117,22 @@ instalado. Ele se compila na primeira vez que abre e guarda o resultado em
 `Ajudante.cs` muda (quando você atualiza a pasta). Se a janela compartilhada fechar, a sala avisa
 em vez de deixar os cliques sumirem.
 
+### /tela: abrir o PC de casa de longe
+
+Para acessar um PC que fica ligado na sala (o de casa) sem ninguém na frente dele:
+
+1. **No PC de casa, uma vez:** extensão 1.19+ liberada no site, ajudante instalado (`instalar.bat`)
+   e, no chat da sala, `/tela liberar`. Fica guardado naquele Chrome (`/tela bloquear` desfaz).
+   Deixe a sala aberta nele.
+2. **De qualquer outro aparelho**, entrando como **dono da sala**: `/tela <nick do PC de casa>`.
+   O PC de casa vem com a sala para a frente, o ajudante aperta o seletor do Chrome (Tela 1, com
+   áudio do sistema) e o controle já fica liberado. A resposta (deu ou o motivo de não ter dado)
+   aparece no seu chat. `/tela parar <nick>` para de compartilhar.
+
+Só o dono da sala consegue mandar, e só o PC marcado com `/tela liberar` atende. O comando não vai
+para o chat dos outros. Quem clica no seletor é o `nativo\clicar-seletor.ps1` (o mesmo do
+`abrir-e-compartilhar.bat`), então o Chrome do PC de casa precisa estar em português.
+
 ### Modo jogo
 
 No controle comum de janela, jogo tipo Minecraft não gira a câmera nem anda com WASD: o jogo lê

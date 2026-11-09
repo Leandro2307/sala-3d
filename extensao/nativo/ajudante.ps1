@@ -20,4 +20,6 @@ try {
   if ($dll) { Remove-Item -LiteralPath $dll -Force -ErrorAction SilentlyContinue }
   if (-not ('Sala3d.Ajudante' -as [type])) { Add-Type -Path $cs -ReferencedAssemblies 'System.Web.Extensions' | Out-Null }
 }
+# o /tela: o ajudante roda o clicar-seletor.ps1 desta pasta
+$env:SALA3D_NATIVO = $PSScriptRoot
 [Sala3d.Ajudante]::Rodar()
