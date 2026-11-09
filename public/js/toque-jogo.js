@@ -36,6 +36,7 @@ const GIRO_MORTO = 4; // abaixo disso é o tremido da mão
 const GIRO_CHEIO = 160; // virando assim (na sensibilidade 1), o analógico vai até o fim
 const GIRO_BASE = 0.16; // onde o analógico começa: a zona morta dos jogos do PS5
 const MOVE_MS = 16;
+const TOPO_MS = 4000; // a barra de cima, chamada com um toque (controle de verdade ligado), some depois disso
 const RAIO_DIR = 70; // layout PS5: o dedo que andou isso (px) desde onde encostou é o analógico direito no fundo
 const TOQUE_PX = 12; // no menu, o dedo que andou menos que isso até soltar clicou (mais é arrastar)
 const CHAVE_SENS = 'sala3d-toque-sens';
@@ -343,6 +344,7 @@ export class ToqueJogo {
           <label><input type="checkbox" data-op="menuAuto"><span>Menu do jogo automático</span></label>
           <label><input type="checkbox" data-op="turbo"><span>Modo turbo <small>(imagem sem buffer: bem menos atraso)</small></span></label>
           <label><input type="checkbox" data-op="turboLiso"><span>Turbo liso <small>(+~20 ms: quadros no ritmo certo)</small></span></label>
+          <label><input type="checkbox" data-op="preencher"><span>Preencher a tela <small>(sem faixas pretas: corta um pouco das bordas)</small></span></label>
           <label><input type="checkbox" data-op="selo"><span>Mostrar desempenho</span></label>
           <label><input type="checkbox" data-op="giro"><span>Mirar virando o celular</span></label>
           <label><input type="checkbox" data-op="vibrar"><span>Vibrar com o jogo <small>(Android ou controle ligado)</small></span></label>
@@ -397,6 +399,11 @@ export class ToqueJogo {
     });
     // nada de menu de toque longo, seleção de texto ou zoom por cima do jogo
     r.addEventListener('contextmenu', (e) => e.preventDefault());
+    // controle de verdade ligado (tj-pad): a barra de cima some; um toque na tela traz ela de volta
+    // por TOPO_MS (de novo a cada toque, e enquanto o painel estiver aberto)
+    r.addEventListener('pointerdown', () => {
+      if (r.classList.contains('tj-pad')) this.mostrarTopo();
+    }, true);
     // opções (jogo-opcoes.js): valem também no PC
     r.querySelector('.tj-liga').addEventListener('change', async (e) => {
       const k = e.target.dataset.op;
@@ -663,6 +670,16 @@ export class ToqueJogo {
   }
 
   fecharPainel() { this.painel.hidden = true; }
+
+  mostrarTopo() {
+    this.raiz.classList.add('tj-topo-vis');
+    clearTimeout(this.topoTimer);
+    const some = () => {
+      if (!this.painel.hidden) this.topoTimer = setTimeout(some, TOPO_MS);
+      else this.raiz.classList.remove('tj-topo-vis');
+    };
+    this.topoTimer = setTimeout(some, TOPO_MS);
+  }
 
   mostrarSens() { this.painel.querySelector('.tj-sens output').textContent = `${this.sens.toFixed(1)}×`; }
 

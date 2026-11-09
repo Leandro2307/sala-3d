@@ -10,6 +10,8 @@
 //   turboLiso: no turbo, cada quadro espera a hora certa de aparecer (uma folga do tamanho do tremido
 //             do Wi-Fi, ~10–30 ms): sem ela, os quadros aparecem na hora em que chegam e a imagem treme
 //   vibrar:   o jogo do PS5 vibra o controle: treme o celular (Android) ou o controle deste aparelho
+//   preencher: a imagem ocupa a tela toda, sem as faixas pretas (corta um pouco das bordas quando a
+//             tela tem outro formato, como o celular deitado, mais comprido que 16:9)
 
 const CHAVE = 'sala3d-jogo-opcoes';
 // Turbo e 720p ligados de fábrica: nos testes (relatório de 2026-11-01 03:35, PS5 → iPhone) o turbo
@@ -17,7 +19,7 @@ const CHAVE = 'sala3d-jogo-opcoes';
 // liso (o buffer de 40 ms do vídeo normal) ligado de fábrica desde 2026-11-05: no teste de presets o
 // "buffer mínimo" deu 401 ms de atraso e 43 travadas por minuto no iPhone, contra 160 ms e 6 com ele.
 // É o vídeo que entra quando o turbo não aguenta, então vale também com o turbo ligado.
-const PADRAO = { liso: true, menuAuto: true, selo: false, giro: false, rapido: true, turbo: true, turboLiso: true, vibrar: true };
+const PADRAO = { liso: true, menuAuto: true, selo: false, giro: false, rapido: true, turbo: true, turboLiso: true, vibrar: true, preencher: false };
 // Versão das opções: quem guardou as de antes passa uma vez para os padrões novos (v2: turbo e 720p;
 // v3: liso; v4: os modos de imagem definitivos, no 1); o que a pessoa mudar depois disso fica.
 const VERSAO = 4;

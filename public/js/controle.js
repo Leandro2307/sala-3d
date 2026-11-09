@@ -448,7 +448,8 @@ export class Controle {
 
   get ativo() { return !!this.teclado; }
 
-  // posição do mouse em 0..1 dentro da imagem (o vídeo fica "contain", com faixas em volta)
+  // posição do mouse em 0..1 dentro da imagem (o vídeo fica "contain", com faixas em volta, ou
+  // "cover" com "Preencher a tela": a imagem passa da caixa e as bordas dela ficam de fora)
   ponto(v, e) {
     const r = v.getBoundingClientRect();
     const cs = getComputedStyle(v);
@@ -460,7 +461,7 @@ export class Controle {
     const ch = r.height - pt - pb;
     const vw = v.videoWidth || 16;
     const vh = v.videoHeight || 9;
-    const k = Math.min(cw / vw, ch / vh);
+    const k = (cs.objectFit === 'cover' ? Math.max : Math.min)(cw / vw, ch / vh);
     const dw = vw * k;
     const dh = vh * k;
     const x = (e.clientX - (r.left + pl + (cw - dw) / 2)) / dw;

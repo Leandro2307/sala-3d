@@ -3855,6 +3855,10 @@ body.toque-jogo #focus video { padding: 0; }
 #toque-jogo.tj-no-menu .tj-zona { display: none; }
 /* controle de videogame ligado no celular: os botões da tela saem do caminho */
 #toque-jogo.tj-pad .tj-stick, #toque-jogo.tj-pad .tj-zona, #toque-jogo.tj-pad .tj-acoes, #toque-jogo.tj-pad .tj-hotbar { display: none; }
+/* ...e a barra de cima também: um toque na tela traz de volta por alguns segundos (tj-topo-vis) */
+#toque-jogo.tj-pad:not(.tj-topo-vis) .tj-chip, #toque-jogo.tj-pad:not(.tj-topo-vis) .tj-topo { display: none; }
+/* "Preencher a tela": a imagem cobre tudo, sem faixas pretas (o turbo copia o object-fit do vídeo) */
+body.jogo-preencher.toque-jogo #focus video, body.jogo-preencher.jogo-pc #focus video { object-fit: cover; }
 /* editor: arrastar muda o lugar dos botões */
 #toque-jogo.tj-editando .tj-olhar, #toque-jogo.tj-editando .tj-zona { pointer-events: none; }
 #toque-jogo.tj-editando .tj-acoes button, #toque-jogo.tj-editando .tj-stick, #toque-jogo.tj-editando .tj-hotbar { outline: 2px dashed rgba(251, 191, 36, 0.9); outline-offset: 2px; }
