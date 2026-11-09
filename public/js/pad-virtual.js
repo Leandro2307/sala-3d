@@ -142,6 +142,12 @@ export class PadVirtual {
       this.pararTremor();
       return 'parou';
     }
+    // O emulador de Switch traduz a vibração HD em valores bem baixos (teste de 2026-11-09: 0,07 e
+    // 0,13), que no controle mal se sentem. Reforço: qualquer tremor sai com pelo menos ~40% e a
+    // curva (raiz) sobe os fracos sem estourar os fortes.
+    const reforco = (v) => (v < 0.05 ? 0 : Math.min(1, 0.35 + 0.65 * Math.sqrt(v)));
+    g = reforco(g);
+    p = reforco(p);
     this.tremendo = { g, p, desde: performance.now() };
     return this.vibrar();
   }
