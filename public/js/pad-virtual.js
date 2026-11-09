@@ -132,37 +132,77 @@ export class PadVirtual {
 
   // ------------------------------------------------------------ vibração (o jogo mandou tremer)
   // g: motor grande (o tranco), p: motor pequeno (o zumbido), de 0 a 1
+  // Devolve como tremeu ('controle', 'celular', 'nada', 'desligado', 'parou'), para o relatório.
   tremor(g, p) {
-    if (!this.key || !opcoesJogo.get('vibrar')) return;
+    if (!this.key) return 'sem-jogo';
+    if (!opcoesJogo.get('vibrar')) return 'desligado';
     g = entre(g);
     p = entre(p);
-    if (g < 0.05 && p < 0.05) return void this.pararTremor();
+    if (g < 0.05 && p < 0.05) {
+      this.pararTremor();
+      return 'parou';
+    }
     this.tremendo = { g, p, desde: performance.now() };
-    this.vibrar();
+    return this.vibrar();
   }
 
-  // o controle de videogame deste aparelho, se ele vibra (Chrome: DualSense, DualShock, Xbox...)
+  // o controle de videogame deste aparelho: o ligado agora (o índice guardado pode ter mudado ao
+  // reconectar o Bluetooth), de preferência o que está sendo usado
+  gamepad() {
+    const lista = [...(navigator.getGamepads?.() || [])].filter((g) => g?.connected);
+    return lista.find((g) => g.index === this.gpIndice) || lista.find((g) => g.mapping === 'standard') || lista[0] || null;
+  }
+
+  // como esse controle vibra: vibrationActuator (Chrome e Safari) ou hapticActuators (o jeito antigo,
+  // Firefox e Safaris velhos). null: o navegador não deixa o site vibrar o controle.
   atuador() {
-    if (this.gpIndice == null) return null;
-    const g = navigator.getGamepads?.()[this.gpIndice];
-    return g?.connected && g.vibrationActuator?.playEffect ? g.vibrationActuator : null;
+    const g = this.gamepad();
+    if (!g) return null;
+    const v = g.vibrationActuator;
+    if (v?.playEffect) return { tipo: 'efeito', a: v };
+    const h = g.hapticActuators?.[0];
+    if (h?.pulse) return { tipo: 'pulso', a: h };
+    return null;
+  }
+
+  // o que o navegador oferece para vibrar (vai no relatório quando o primeiro tremor chega)
+  comoVibra() {
+    const g = this.gamepad();
+    return {
+      controle: g ? String(g.id).slice(0, 60) : null,
+      vibrationActuator: g ? (g.vibrationActuator ? (g.vibrationActuator.effects || g.vibrationActuator.type || 'sim') : 'não tem') : null,
+      hapticActuators: g ? (g.hapticActuators?.length || 0) : null,
+      navigatorVibrate: !!navigator.vibrate,
+    };
   }
 
   vibrar() {
     clearTimeout(this.tremorTimer);
     const t = this.tremendo;
-    if (!t || performance.now() - t.desde > TREMOR_MAX) return void this.pararTremor();
-    const a = this.atuador();
-    if (a) {
-      a.playEffect('dual-rumble', { duration: TREMOR_DURA, strongMagnitude: t.g, weakMagnitude: t.p }).catch(() => {});
+    if (!t || performance.now() - t.desde > TREMOR_MAX) {
+      this.pararTremor();
+      return 'parou';
+    }
+    const at = this.atuador();
+    let como = 'controle';
+    if (at?.tipo === 'efeito') {
+      const a = at.a;
+      // 'dual-rumble' é o efeito de todo controle; alguns navegadores só dizem o que têm em effects
+      const efeito = Array.isArray(a.effects) && a.effects.length && !a.effects.includes('dual-rumble') ? a.effects[0] : 'dual-rumble';
+      a.playEffect(efeito, { duration: TREMOR_DURA, startDelay: 0, strongMagnitude: t.g, weakMagnitude: t.p })
+        .catch((err) => { if (!this.erroTremor) { this.erroTremor = String(err?.message || err); this.onErroTremor?.(this.erroTremor); } });
+    } else if (at?.tipo === 'pulso') {
+      at.a.pulse(Math.max(t.g, t.p), TREMOR_DURA)?.catch?.(() => {});
     } else if (navigator.vibrate) {
+      como = 'celular';
       // no celular o motor pequeno conta menos: ele é o zumbido fino, que o celular não tem
       const forca = Math.max(t.g, t.p * 0.6);
       const liga = Math.max(10, Math.round(PULSO_MS * forca));
       if (liga >= PULSO_MS - 6) navigator.vibrate(TREMOR_DURA);
       else navigator.vibrate(Array.from({ length: Math.ceil(TREMOR_DURA / PULSO_MS) * 2 }, (_, i) => (i % 2 ? PULSO_MS - liga : liga)));
-    } else return;
+    } else return 'nada';
     this.tremorTimer = setTimeout(() => this.vibrar(), TREMOR_RENOVA);
+    return como;
   }
 
   pararTremor() {
@@ -170,7 +210,8 @@ export class PadVirtual {
     this.tremorTimer = 0;
     if (!this.tremendo) return;
     this.tremendo = null;
-    this.atuador()?.reset?.().catch(() => {});
+    const at = this.atuador();
+    if (at?.tipo === 'efeito') at.a.reset?.()?.catch?.(() => {});
     navigator.vibrate?.(0);
   }
 

@@ -2623,7 +2623,22 @@ function receberVolta({ key, ev, de } = {}) {
     if (jogandoLa?.key === key) diagJogo.doOutroLado(ev);
   } else if (ev.t === 'tremor') {
     // o jogo do PS5 vibrou o controle: treme o celular (ou o controle ligado neste aparelho)
-    if (jogandoLa?.key === key) padVirtual.tremor(ev.g, ev.p);
+    if (jogandoLa?.key !== key) return;
+    const como = padVirtual.tremor(ev.g, ev.p);
+    // relatório: o primeiro tremor diz o que o navegador oferece; depois, um resumo a cada 10 s
+    tremoresAqui.n++;
+    tremoresAqui.como[como] = (tremoresAqui.como[como] || 0) + 1;
+    const agora = performance.now();
+    if (!tremoresAqui.primeiro) {
+      tremoresAqui.primeiro = true;
+      tremoresAqui.desde = agora;
+      diagJogo.evento('tremor do jogo chegou', { g: ev.g, p: ev.p, como, ...padVirtual.comoVibra() });
+    } else if (agora - tremoresAqui.desde > 10_000) {
+      diagJogo.evento('tremores', { n: tremoresAqui.n, como: tremoresAqui.como });
+      tremoresAqui.n = 0;
+      tremoresAqui.como = {};
+      tremoresAqui.desde = agora;
+    }
   } else if (ev.t === 'cursor') {
     // o jogo mostrou o cursor (menu) ou escondeu: o mouse troca de jeito, se a pessoa deixou
     if (jogandoLa?.key !== key) return;
@@ -2737,7 +2752,16 @@ controle.onCursor = (sh, livre) => {
 // ficar tremendo depois que o jogo parou).
 const TREMOR_MS = 40;
 let tremorVez = 0, tremorTimer = 0, tremorFila = null;
+let tremoresLa = 0, tremoresLaDesde = 0;
 controle.onTremor = ({ key, deId }, g, p) => {
+  // relatório de quem compartilha: o ajudante contou que o jogo mandou tremer
+  const agora = performance.now();
+  tremoresLa++;
+  if (!tremoresLaDesde || agora - tremoresLaDesde > 10_000) {
+    diagJogo.evento(tremoresLaDesde ? 'o jogo mandou tremer' : 'o jogo mandou tremer (primeira vez)', { n: tremoresLa, g, p, joga: !!jogandoAqui.get(key)?.has(deId) });
+    tremoresLa = 0;
+    tremoresLaDesde = agora;
+  }
   if (!jogandoAqui.get(key)?.has(deId)) return;
   tremorFila = { key, para: deId, ev: { t: 'tremor', g: Math.round(g * 100) / 100, p: Math.round(p * 100) / 100 } };
   if (tremorTimer) return;
@@ -3695,6 +3719,9 @@ document.addEventListener('pointerdown', (e) => {
 // controle de Xbox no PC de quem compartilha, em vez de teclado e mouse
 const padVirtual = new PadVirtual({ controle });
 const tecladoPad = new TecladoPad({ pad: padVirtual });
+// tremores que chegaram aqui (quem joga), para o relatório (ver receberVolta)
+const tremoresAqui = { n: 0, como: {}, primeiro: false, desde: 0 };
+padVirtual.onErroTremor = (erro) => diagJogo.evento('o controle não aceitou o tremor', { erro, ...padVirtual.comoVibra() });
 controle.paraPad = (ev) => tecladoPad.evento(ev);
 const fisico = new ControleFisico({
   controle,
