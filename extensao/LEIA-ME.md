@@ -154,6 +154,10 @@ título), o ajudante tira as bordas e estica a janela no monitor dela. Jogo que 
 fica como está. Emulador: ponha o jogo e a tela cheia no próprio atalho (no lichii,
 `--fullscreen --game "caminho do jogo"`); sem o `--game` ele abre só o emulador.
 
+**O controle segue o jogo:** com dois monitores, o jogo abre no principal do Windows, que pode não
+ser o monitor do OBS nos Ajustes. Enquanto o jogo do catálogo está aberto, o mouse de quem joga vale
+no monitor onde ele está (e o cursor vai para lá); fechou, volta para o monitor de antes.
+
 Fechar é fechar a janela dos programas que abriram depois do clique (o jogo e o lançador dele, se
 não estava aberto) e, se não fecharem em 8 s, encerrá-los. Windows, Chrome, OBS, Steam, Epic e
 Discord nunca são fechados. A sala só sabe o nome, o ícone e a capa de cada atalho, nunca o caminho,

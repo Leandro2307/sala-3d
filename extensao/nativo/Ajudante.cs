@@ -191,7 +191,7 @@ namespace Sala3d
             new Thread(VigiarAtalho) { IsBackground = true }.Start();
             new Thread(VigiarJogo) { IsBackground = true }.Start();
             new Thread(VigiarWifi) { IsBackground = true }.Start();
-            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.14.1" } });
+            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.14.2" } });
             var json = new JavaScriptSerializer();
             string txt;
             while ((txt = Ler(entrada)) != null)
@@ -630,8 +630,61 @@ namespace Sala3d
         [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr h, IntPtr depois, int x, int y, int w, int hh, uint flags);
         [DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr h, uint flags);
         static readonly HashSet<string> LANCADORES = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Hydra", "TLauncher", "RobloxPlayerLauncher", "RobloxPlayerInstaller" };
+        // O controle segue o jogo: compartilhando a tela inteira (o OBS conta como o monitor dos
+        // Ajustes), o mouse de quem joga vale no monitor onde a janela do jogo está — o jogo abre no
+        // monitor principal, que pode não ser o dos Ajustes. Fechou o jogo, volta para o de antes.
+        static RECT? telaAntesDoJogo;
+        static void SeguirJogo(string jogo)
+        {
+            new Thread(() =>
+            {
+                try
+                {
+                    while (jogoAtual == jogo)
+                    {
+                        Thread.Sleep(2000);
+                        IntPtr maior = IntPtr.Zero; long area = 0;
+                        List<System.Diagnostics.Process> procs;
+                        lock (travaJogo) procs = ProcessosDoJogo();
+                        foreach (var p in procs)
+                        {
+                            if (LANCADORES.Contains(p.ProcessName)) continue;
+                            IntPtr h = p.MainWindowHandle;
+                            RECT r;
+                            if (!IsWindowVisible(h) || IsIconic(h) || !GetWindowRect(h, out r)) continue;
+                            long a = (long)(r.Right - r.Left) * (r.Bottom - r.Top);
+                            if (a > area) { area = a; maior = h; }
+                        }
+                        if (maior == IntPtr.Zero) continue;
+                        var mi = new MONITORINFOEX(); mi.cbSize = Marshal.SizeOf(mi);
+                        if (!GetMonitorInfo(MonitorFromWindow(maior, 2), ref mi)) continue;
+                        lock (travaEntrada)
+                        {
+                            if (!temAlvo || ehJanela) continue;
+                            var m = mi.rcMonitor;
+                            if (m.Left == tela.Left && m.Top == tela.Top && m.Right == tela.Right && m.Bottom == tela.Bottom) continue;
+                            if (telaAntesDoJogo == null) telaAntesDoJogo = tela;
+                            tela = m;
+                            // o cursor vai junto (senão o primeiro clique cai no outro monitor)
+                            SetCursorPos((m.Left + m.Right) / 2, (m.Top + m.Bottom) / 2);
+                        }
+                    }
+                }
+                catch { }
+                finally
+                {
+                    lock (travaEntrada)
+                    {
+                        if (telaAntesDoJogo != null && temAlvo && !ehJanela) tela = telaAntesDoJogo.Value;
+                        telaAntesDoJogo = null;
+                    }
+                }
+            }) { IsBackground = true }.Start();
+        }
+
         static void VigiarTelaCheia(string jogo)
         {
+            SeguirJogo(jogo);
             new Thread(() =>
             {
                 var feitas = new HashSet<IntPtr>();
