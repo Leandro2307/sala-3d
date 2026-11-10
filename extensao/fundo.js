@@ -495,6 +495,12 @@ function conectarNativo() {
     if (m?.tipo === 'alvo') n.respostaAlvo?.(m);
     // o clicar-seletor do /tela terminou (ajudante 1.13+)
     if (m?.tipo === 'seletor') n.respostaSeletor?.(m);
+    // jogos do PC (ajudante 1.14+): a resposta volta com o mesmo pid do pedido
+    if (m?.pid != null && n.respostas?.has(String(m.pid))) {
+      const r = n.respostas.get(String(m.pid));
+      n.respostas.delete(String(m.pid));
+      r(m);
+    }
     // a janela que recebe a entrada está como administrador (ajudante 1.5+): o Windows não deixa o
     // ajudante mexer nela. Vai na resposta de cada evento (ver janela()), e a sala avisa.
     if (m?.tipo === 'admin') n.admin = m.admin ? { titulo: String(m.titulo || '').slice(0, 120) } : null;
@@ -526,6 +532,8 @@ function conectarNativo() {
     chegou();
     n.respostaAlvo?.(null);
     n.respostaSeletor?.(null);
+    for (const r of n.respostas?.values() || []) r(null);
+    n.respostas?.clear();
     if (nativo === n) nativo = null;
   });
   nativo = n;
@@ -630,6 +638,29 @@ async function telaAuto(aba, tela) {
   return r.ok ? { ok: true } : { erro: 'seletor', msg: r.msg, versao: nativoInfo?.versao || '' };
 }
 
+// Jogos do PC (1.20+, ajudante 1.14+): este PC é o hub de jogos da sala. O ajudante lista os atalhos
+// da pasta "Jogos da Sala 3D" da área de trabalho, abre e fecha o jogo e abre o OBS (ver Ajudante.cs).
+let seqNativo = 0;
+async function pedidoNativo(tipo, dados, ms) {
+  if (!(await nativoPronto())) return { erro: 'ajudante-ausente' };
+  const n = nativo;
+  const pid = String(++seqNativo);
+  const r = await new Promise((resolve) => {
+    const fim = setTimeout(() => {
+      n.respostas?.delete(pid);
+      resolve({ erro: 'demorou' });
+    }, ms);
+    (n.respostas ||= new Map()).set(pid, (m) => {
+      clearTimeout(fim);
+      resolve(m || { erro: 'ajudante-fechou' });
+    });
+    n.porta.postMessage({ tipo, pid, ...dados });
+  });
+  // o ajudante de antes da 1.14 não responde: vai a versão, para a sala pedir a atualização
+  if (r.erro === 'demorou') r.versao = nativoInfo?.versao || '';
+  return r;
+}
+
 async function tratar(m, sender) {
   if (m.tipo === 'meu-id') return { aba: sender.tab?.id };
   if (m.tipo === 'vivo') return { ok: true }; // a sala aberta mantém o fundo acordado
@@ -666,6 +697,10 @@ async function tratar(m, sender) {
   // "Compartilhar a tela inteira". Traz a sala para a frente (o UI Automation só enxerga a aba
   // visível) e o ajudante aperta o botão e o seletor do Chrome: a tela pedida, com áudio.
   if (m.tipo === 'tela-auto') return telaAuto(sender.tab, String(m.alvo || 'Tela 1').slice(0, 40));
+  if (m.tipo === 'pc-jogos') return pedidoNativo('jogos', {}, 30_000);
+  if (m.tipo === 'pc-jogo-abrir') return pedidoNativo('jogo-abrir', { id: String(m.alvo || '').slice(0, 200) }, 40_000);
+  if (m.tipo === 'pc-jogo-fechar') return pedidoNativo('jogo-fechar', {}, 30_000);
+  if (m.tipo === 'pc-obs') return pedidoNativo('obs', {}, 30_000);
   if (m.tipo === 'janela') return janela(m.alvo, m.ev && typeof m.ev === 'object' ? m.ev : null, sender.tab.id);
   // quem compartilha ligou "permitir controle" (de novo): destrava depois de um Ctrl+Alt+End
   if (m.tipo === 'janela-retomar') {

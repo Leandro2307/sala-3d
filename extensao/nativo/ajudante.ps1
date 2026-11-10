@@ -10,7 +10,7 @@ try {
   $dll = Join-Path $pasta ('ajudante-' + (Get-FileHash -LiteralPath $cs -Algorithm SHA256).Hash.Substring(0, 16) + '.dll')
   if (-not (Test-Path -LiteralPath $dll)) {
     New-Item -ItemType Directory -Force -Path $pasta | Out-Null
-    Add-Type -Path $cs -ReferencedAssemblies 'System.Web.Extensions' -OutputAssembly $dll -OutputType Library | Out-Null
+    Add-Type -Path $cs -ReferencedAssemblies 'System.Web.Extensions', 'System.Drawing' -OutputAssembly $dll -OutputType Library | Out-Null
     # as versões de antes não servem mais (a que estiver aberta noutro Chrome fica para a próxima)
     Get-ChildItem -LiteralPath $pasta -Filter 'ajudante-*.dll' | Where-Object { $_.FullName -ne $dll } | Remove-Item -Force -ErrorAction SilentlyContinue
   }
@@ -18,7 +18,7 @@ try {
 } catch {
   # compilado estragado (ou pasta sem permissão): apaga e compila na memória, como antes
   if ($dll) { Remove-Item -LiteralPath $dll -Force -ErrorAction SilentlyContinue }
-  if (-not ('Sala3d.Ajudante' -as [type])) { Add-Type -Path $cs -ReferencedAssemblies 'System.Web.Extensions' | Out-Null }
+  if (-not ('Sala3d.Ajudante' -as [type])) { Add-Type -Path $cs -ReferencedAssemblies 'System.Web.Extensions', 'System.Drawing' | Out-Null }
 }
 # o /tela: o ajudante roda o clicar-seletor.ps1 desta pasta
 $env:SALA3D_NATIVO = $PSScriptRoot

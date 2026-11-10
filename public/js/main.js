@@ -5,6 +5,7 @@ import { Avatar } from './avatars.js';
 import { PERSONAGENS } from './modelo.js';
 import { EscolherPersonagem } from './escolher-personagem.js';
 import { CatalogoJogos } from './catalogo-jogos.js';
+import { PcJogos } from './pc-jogos.js';
 import { SalasLaterais } from './salas.js';
 import { AoVivo, cartaoDoSaguao, COR_STATUS } from './aovivo.js';
 import { Player } from './player.js';
@@ -825,6 +826,7 @@ const catalogo = new CatalogoJogos({
   aoAbrir: () => {
     if (document.pointerLockElement) document.exitPointerLock();
     if (state.panel) closePanel();
+    $('#cj-pc').hidden = !state.donoDaSala || !!offlineJogo; // os jogos do PC são só do dono
     player.enabled = false;
     player.keys.clear();
   },
@@ -833,6 +835,23 @@ const catalogo = new CatalogoJogos({
   },
 });
 $('#btn-jogos').addEventListener('click', () => (catalogo.aberto ? catalogo.fechar() : catalogo.abrir()));
+// Jogos do PC (pc-jogos.js): o catálogo do PC de jogos da sala, para o dono escolher (/jogos ou o botão
+// no catálogo de jogos). O PC de jogos atende em pedidoDeJogo.
+const pcJogos = new PcJogos({
+  socket: () => socket,
+  toast: (...a) => toast(...a),
+  dono: () => state.donoDaSala,
+  aoAbrir: () => {
+    if (document.pointerLockElement) document.exitPointerLock();
+    if (catalogo.aberto) catalogo.fechar();
+    player.enabled = false;
+    player.keys.clear();
+  },
+  aoFechar: () => {
+    if (state.joined) player.enabled = true;
+  },
+});
+$('#cj-pc').addEventListener('click', () => pcJogos.abrir());
 // P abre o personagem dentro da sala (trocar de boneco, cor, camiseta e arma sem sair)
 window.addEventListener('keydown', (e) => {
   if (e.code !== 'KeyP' || !state.joined || state.focus || escolha.aberto || avisoSite.aberto || e.repeat) return;
@@ -1592,10 +1611,16 @@ function bindSocket() {
   socket.on('chat-aviso', addAviso);
   // /tela: este PC (liberado) foi chamado; ou a resposta do PC que eu chamei
   socket.on('tela-pedido', (m) => pedidoDeTela(m || {}).catch((err) => socket.emit('tela-resposta', { ok: false, texto: String(err?.message || err) })));
-  socket.on('tela-resposta', ({ de, ok, texto }) => {
-    avisoTela(`/tela ${de}: ${texto}`);
-    if (!ok) toast(`/tela ${de}: ${texto}`, 'warn', 8000);
+  socket.on('tela-resposta', ({ de, ok, texto, jogo }) => {
+    const quem = jogo ? `PC de ${de}` : `/tela ${de}`;
+    avisoTela(`${quem}: ${texto}`);
+    if (!ok) toast(`${quem}: ${texto}`, 'warn', 8000);
+    else if (jogo) toast(`${quem}: ${texto}`, 'success', 7000);
+    if (jogo) pcJogos.resposta();
   });
+  // Jogos do PC: este PC (o de jogos) foi chamado; ou o catálogo de algum PC mudou
+  socket.on('hub-pedido', (m) => pedidoDeJogo(m || {}).catch((err) => socket.emit('tela-resposta', { ok: false, jogo: true, texto: String(err?.message || err) })));
+  socket.on('hub-mudou', () => pcJogos.mudou());
 
   socket.on('browser-opened', ({ site, by }) => {
     toast(by === settings.name ? `Abrindo ${site} no telão` : `${by} abriu ${site} no navegador do telão`, 'info', 3500, '#38bdf8');
@@ -5486,6 +5511,7 @@ $('#chat-form').addEventListener('submit', (e) => {
     else criador.abrirCatalogo();
   } else if (/^\/cat[aá]logo\b/i.test(text)) criador.abrirCatalogo();
   else if (/^\/tela(\s|$)/i.test(text)) comandoTela(text.slice(5).trim());
+  else if (/^\/jogos\s*$/i.test(text)) pcJogos.abrir();
   else if (text) socket.emit('chat', text);
   input.value = '';
   fecharSugestoes();
@@ -5505,7 +5531,10 @@ function telaLiberadaAqui() {
   try { return localStorage.getItem(TELA_LIBERADA) === '1'; } catch { return false; }
 }
 function reentrarAtendendoTela() {
-  if (telaLiberadaAqui()) socket.emit('tela-atender', true);
+  if (!telaLiberadaAqui()) return;
+  socket.emit('tela-atender', true);
+  catalogoEnviado = null;
+  setTimeout(() => publicarJogos(), 3000); // a extensão se apresenta logo depois de entrar
 }
 const avisoTela = (text) => addAviso({ text, t: Date.now() });
 
@@ -5517,6 +5546,8 @@ function comandoTela(resto) {
     try { on ? localStorage.setItem(TELA_LIBERADA, '1') : localStorage.removeItem(TELA_LIBERADA); } catch { /* sem armazenamento */ }
     socket.emit('tela-atender', on);
     if (!on) return avisoTela('Este PC não atende mais o /tela.');
+    catalogoEnviado = null;
+    publicarJogos();
     const falta = !controle.ext.ok ? ' Falta a extensão da Sala 3D neste Chrome (com este site liberado no ícone dela).'
       : !controle.ext.liberado ? ' Falta liberar este site no ícone da extensão.'
       : controle.ext.nativo?.ok === false ? ' Falta o ajudante do Windows (extensao\\nativo\\instalar.bat).' : '';
@@ -5540,7 +5571,7 @@ function comandoTela(resto) {
 // O botão "Compartilhar a tela inteira" (o ?compartilhar=tela e o /tela): o Chrome só abre o seletor
 // depois de um clique na página, e o UI Automation do Windows apertando o botão conta como clique.
 // Devolve a chave da tela quando ela entrar (ou null).
-function botaoTelaInteira({ auto = false } = {}) {
+function botaoTelaInteira({ auto = false, obs = false } = {}) {
   document.querySelector('#botao-tela-inteira')?.remove();
   const b = document.createElement('button');
   b.type = 'button';
@@ -5551,7 +5582,7 @@ function botaoTelaInteira({ auto = false } = {}) {
   return new Promise((resolve) => {
     b.addEventListener('click', async () => {
       b.remove();
-      resolve((await novaTela(undefined, { monitor: true, auto })) ?? null);
+      resolve((await novaTela(undefined, obs ? { obs: true, auto } : { monitor: true, auto })) ?? null);
     });
   });
 }
@@ -5590,30 +5621,117 @@ async function pedidoDeTela({ acao, de }) {
     if (!controle.ext.ok || !controle.ext.liberado) return responder(false, 'a extensão da Sala 3D não está liberada no Chrome de lá');
     if (shareBusy) return responder(false, 'já tem um compartilhamento começando lá');
     toast(`${de} pediu a sua tela pelo /tela.`, 'info', 6000);
-    await sairDaTelaCheiaParaOSeletor();
-    const entrou = botaoTelaInteira({ auto: true });
-    const r = await controle.pedir('tela-auto', undefined, undefined, 'Tela 1', 80_000);
-    if (r?.erro) {
-      document.querySelector('#botao-tela-inteira')?.remove();
-      const porque = r.erro === 'ajudante-ausente' ? 'o ajudante do Windows não está instalado lá'
+    const r = await compartilharSozinho();
+    if (r.erro) return responder(false, `não compartilhou: ${r.erro}`);
+    key = telaKey = r.key;
+  }
+  if (!(await liberarControle(key))) return responder(true, 'compartilhando a tela, mas sem controle (falta o ajudante do Windows)');
+  responder(true, 'compartilhando a Tela 1 com áudio, controle liberado');
+}
+
+// Ninguém na frente deste PC: põe o botão na sala e o ajudante aperta ele e o seletor do Chrome (a
+// Tela 1, com o áudio do sistema). obs: a imagem vem da câmera virtual do OBS (o seletor dá só o som).
+// Devolve { key } ou { erro } (o motivo, para quem pediu).
+async function compartilharSozinho({ obs = false } = {}) {
+  await sairDaTelaCheiaParaOSeletor();
+  const entrou = botaoTelaInteira({ auto: true, obs });
+  const r = await controle.pedir('tela-auto', undefined, undefined, 'Tela 1', 80_000);
+  if (r?.erro) {
+    document.querySelector('#botao-tela-inteira')?.remove();
+    return {
+      erro: r.erro === 'ajudante-ausente' ? 'o ajudante do Windows não está instalado lá'
         : r.erro === 'sem-resposta' || r.msg === 'demorou' ? 'o seletor do Chrome não respondeu (ajudante antigo? recarregue a extensão lá)'
         : r.msg === 'sem-script' ? 'falta o clicar-seletor.ps1 na pasta do ajudante'
-        : r.msg || r.erro;
-      return responder(false, `não compartilhou: ${porque}`);
-    }
-    key = await Promise.race([entrou, new Promise((ok) => setTimeout(() => ok(null), 15_000))]);
-    document.querySelector('#botao-tela-inteira')?.remove();
-    if (!key) return responder(false, 'o Chrome não começou a compartilhar');
-    telaKey = key;
+        : r.msg || r.erro,
+    };
   }
-  // controle liberado: quem pediu já mexe no mouse e no teclado de lá
+  const key = await Promise.race([entrou, new Promise((ok) => setTimeout(() => ok(null), obs ? 25_000 : 15_000))]);
+  document.querySelector('#botao-tela-inteira')?.remove();
+  return key ? { key } : { erro: obs ? 'o Chrome não começou a compartilhar pelo OBS' : 'o Chrome não começou a compartilhar' };
+}
+
+// controle liberado: quem pediu já mexe no mouse, no teclado e no controle de lá
+async function liberarControle(key) {
   const sh = self()?.shares.get(key);
-  if (sh && !sh.controle && sh.alvo) {
-    const r = await controle.retomarJanela();
-    if (r?.erro) return responder(true, 'compartilhando a tela, mas sem controle (falta o ajudante do Windows)');
-    socket.emit('controle-permitir', { key, on: true });
+  if (!sh || sh.controle || !sh.alvo) return true;
+  const r = await controle.retomarJanela();
+  if (r?.erro) return false;
+  socket.emit('controle-permitir', { key, on: true });
+  return true;
+}
+
+// ------------------------------------------------------------------ jogos do PC (o hub)
+// Este PC, liberado para o /tela, é o PC de jogos da sala: o ajudante do Windows (extensão 1.20+,
+// ajudante 1.14+) lista os atalhos da pasta "Jogos da Sala 3D" da área de trabalho e o catálogo vai
+// para o servidor (só o dono da sala vê, em pc-jogos.js). O dono escolhe um jogo: este PC fecha o de
+// antes, abre o OBS (com a câmera virtual), compartilha por ele com o som do PC, libera o controle e
+// abre o jogo. Escolher outro troca o jogo; o compartilhamento continua.
+let catalogoEnviado = null; // o último catálogo mandado (não manda igual de novo)
+let publicandoJogos = false;
+async function publicarJogos() {
+  if (!socket || !state.joined || !telaLiberadaAqui() || !controle.ext.ok || !controle.ext.liberado || publicandoJogos) return;
+  if (controle.ext.nativo?.ok === false) return;
+  publicandoJogos = true;
+  try {
+    const r = await controle.pedir('pc-jogos', undefined, undefined, undefined, 30_000);
+    if (!r?.ok || !Array.isArray(r.jogos)) return;
+    const jogos = r.jogos.map((j) => ({ id: j.id, nome: j.nome, icone: j.icone || null, capa: j.capa || null, steam: j.steam || null }));
+    // o servidor recebe até 1 MB por mensagem: passando disso, as capas próprias saem (fica o ícone)
+    for (const j of jogos) if (JSON.stringify(jogos).length > 850_000) j.capa = null;
+    const pacote = { jogos, atual: r.atual || null };
+    const assinatura = JSON.stringify(pacote);
+    if (assinatura === catalogoEnviado) return;
+    catalogoEnviado = assinatura;
+    socket.emit('hub-jogos', pacote);
+  } finally {
+    publicandoJogos = false;
   }
-  responder(true, 'compartilhando a Tela 1 com áudio, controle liberado');
+}
+// pega atalho novo na pasta e o jogo que fecharam aqui mesmo
+setInterval(() => publicarJogos(), 60_000);
+
+async function cameraLiberada() {
+  try {
+    return (await navigator.permissions.query({ name: 'camera' })).state === 'granted';
+  } catch {
+    return true; // sem como saber: tenta
+  }
+}
+
+const erroDoAjudante = (r) => (r?.erro === 'ajudante-ausente' ? 'o ajudante do Windows não está instalado lá'
+  : r?.erro === 'demorou' || r?.erro === 'sem-resposta' ? `o ajudante não respondeu (precisa do 1.14+: recarregue a extensão lá${r.versao ? `; está no ${r.versao}` : ''})`
+  : r?.msg || r?.erro || 'sem resposta');
+
+async function pedidoDeJogo({ acao, id, de }) {
+  const responder = (ok, texto) => socket.emit('tela-resposta', { ok, texto, jogo: true });
+  if (!telaLiberadaAqui()) return;
+  if (!controle.ext.ok || !controle.ext.liberado) return responder(false, 'a extensão da Sala 3D não está liberada no Chrome de lá');
+  if (acao === 'fechar') {
+    const r = await controle.pedir('pc-jogo-fechar', undefined, undefined, undefined, 30_000);
+    publicarJogos();
+    return responder(!!r?.ok, r?.ok ? r.msg : `não fechou: ${erroDoAjudante(r)}`);
+  }
+  // já compartilha pelo OBS? continua nele (trocar de jogo não mexe no compartilhamento)
+  const minhas = self()?.shares;
+  let key = [...(minhas?.values() || [])].find((s) => s.obs)?.key ?? null;
+  if (!key) {
+    if (shareBusy) return responder(false, 'já tem um compartilhamento começando lá');
+    if (!(await cameraLiberada())) return responder(false, 'o Chrome de lá ainda não deixou a sala usar a câmera (o OBS chega como câmera): na frente do PC, compartilhe uma vez pelo OBS e permita');
+    toast(`${de} escolheu um jogo: abrindo o OBS…`, 'info', 6000);
+    const o = await controle.pedir('pc-obs', undefined, undefined, undefined, 30_000);
+    if (!o?.ok) return responder(false, `não abriu o OBS: ${erroDoAjudante(o)}`);
+    // a Tela 1 do /tela sai: a imagem passa a vir do OBS
+    if (telaKey && minhas?.has(telaKey)) stopShare(telaKey, true);
+    telaKey = null;
+    const r = await compartilharSozinho({ obs: true });
+    if (r.erro) return responder(false, `não compartilhou: ${r.erro}`);
+    key = telaKey = r.key;
+  }
+  const controleOk = await liberarControle(key);
+  const j = await controle.pedir('pc-jogo-abrir', undefined, undefined, String(id || ''), 40_000);
+  publicarJogos();
+  if (!j?.ok) return responder(false, `não abriu o jogo: ${erroDoAjudante(j)}`);
+  responder(true, `${j.msg}${controleOk ? '' : ' (sem controle: falta o ajudante do Windows)'}. Abra a tela de ${settings.name} para jogar.`);
 }
 
 // /pix do dono e /tela: completam o comando, a ação e o nome de quem está na sala. Setas escolhem, Tab ou
@@ -5662,6 +5780,7 @@ function sugestoesDoPix(v) {
   if (!/\s/.test(v)) {
     const cmds = [];
     if (dono && '/pix'.startsWith(baixo)) cmds.push({ texto: '/pix ', rotulo: '/pix', extra: 'adicionar, remover ou ajustar moedas' });
+    if (dono && '/jogos'.startsWith(baixo)) cmds.push({ texto: '/jogos', rotulo: '/jogos', extra: 'os jogos do PC de jogos' });
     if ('/tela'.startsWith(baixo)) cmds.push({ texto: '/tela ', rotulo: '/tela', extra: dono ? 'o PC de alguém compartilha a tela' : 'liberar ou bloquear este PC para o /tela' });
     return cmds;
   }

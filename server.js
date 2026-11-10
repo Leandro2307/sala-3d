@@ -1847,6 +1847,10 @@ function attachSockets(io) {
     socket.on('tela-atender', (on, ack) => {
       if (!user) return;
       socket.data.tela = !!on;
+      if (!on && socket.data.hub) {
+        socket.data.hub = null;
+        io.to(room.id).emit('hub-mudou');
+      }
       if (typeof ack === 'function') ack({ ok: true });
     });
     socket.on('tela-pedir', async (msg, ack) => {
@@ -1869,7 +1873,58 @@ function attachSockets(io) {
     });
     socket.on('tela-resposta', (msg) => {
       if (!user || !socket.data.telaDe) return;
-      io.to(socket.data.telaDe).emit('tela-resposta', { de: user.name, ok: !!obj(msg).ok, texto: cleanText(obj(msg).texto, 300) });
+      const m = obj(msg);
+      io.to(socket.data.telaDe).emit('tela-resposta', { de: user.name, ok: !!m.ok, texto: cleanText(m.texto, 300), jogo: !!m.jogo });
+    });
+
+    // ------------------------------------------------------------ jogos do PC (o hub)
+    // O PC liberado para o /tela que tem a pasta "Jogos da Sala 3D" manda o catálogo (nome, ícone, capa
+    // e o número na Steam de cada atalho; nunca o caminho). O dono da sala vê o catálogo (/jogos) e
+    // escolhe: o PC fecha o jogo de antes, abre o escolhido e compartilha pelo OBS com o controle
+    // liberado. As respostas voltam pelo 'tela-resposta' (com jogo: true).
+    const imagem = (s, max) => (typeof s === 'string' && s.length <= max && /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(s) ? s : null);
+    socket.on('hub-jogos', (msg) => {
+      if (!user || !socket.data.tela) return;
+      const m = obj(msg);
+      const jogos = (Array.isArray(m.jogos) ? m.jogos : []).slice(0, 80).map((j) => {
+        const o = obj(j);
+        return {
+          id: cleanText(o.id, 120),
+          nome: cleanText(o.nome, 60),
+          icone: imagem(o.icone, 30_000),
+          capa: imagem(o.capa, 80_000),
+          steam: /^\d{1,10}$/.test(String(o.steam ?? '')) ? String(o.steam) : null,
+        };
+      }).filter((j) => j.id && j.nome);
+      socket.data.hub = { jogos, atual: cleanText(m.atual, 120) || null };
+      io.to(room.id).emit('hub-mudou');
+    });
+    socket.on('hub-lista', async (_, ack) => {
+      if (typeof ack !== 'function') return;
+      if (!user) return ack({ ok: false, erro: 'fora' });
+      if (!dono) return ack({ ok: false, erro: 'dono' });
+      const hubs = (await io.in(room.id).fetchSockets())
+        .filter((s) => s.data.tela && s.data.hub && room.users.has(s.id))
+        .map((s) => ({ nick: room.users.get(s.id).name, eu: s.id === socket.id, ...s.data.hub }));
+      ack({ ok: true, hubs });
+    });
+    socket.on('hub-jogo', async (msg, ack) => {
+      const r = typeof ack === 'function' ? ack : () => {};
+      if (!user) return r({ ok: false, erro: 'fora' });
+      if (!dono) return r({ ok: false, erro: 'dono' });
+      const m = obj(msg);
+      const nick = cleanText(m.nick, 20).toLowerCase();
+      const acao = m.acao === 'fechar' ? 'fechar' : 'abrir';
+      const id = cleanText(m.id, 120);
+      if (!nick || (acao === 'abrir' && !id)) return r({ ok: false, erro: 'pedido' });
+      const hubs = (await io.in(room.id).fetchSockets()).filter((s) => s.data.tela && s.data.hub
+        && room.users.get(s.id)?.name.toLowerCase() === nick);
+      if (!hubs.length) return r({ ok: false, erro: 'ninguem' });
+      for (const s of hubs) {
+        s.data.telaDe = socket.id;
+        s.emit('hub-pedido', { acao, id, de: user.name });
+      }
+      r({ ok: true });
     });
 
     // ------------------------------------------------------------ foto do rosto
@@ -2266,6 +2321,7 @@ function attachSockets(io) {
       room.mudou.delete(user.n);
       if (user.legado) room.legado--;
       io.to(room.id).emit('user-left', { id: user.id });
+      if (socket.data.hub) io.to(room.id).emit('hub-mudou'); // o PC de jogos saiu
       avisarGestores(room, user, 'saiu', `${user.name} saiu do sistema`);
       lobbyMudou();
       for (const mesa of levantarDeTudo(room, user.id)) io.to(room.id).emit('jogo', { mesa, ...jogoPublico(room.jogos[mesa]) });

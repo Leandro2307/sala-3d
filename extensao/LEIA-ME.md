@@ -133,6 +133,30 @@ Só o dono da sala consegue mandar, e só o PC marcado com `/tela liberar` atend
 para o chat dos outros. Quem clica no seletor é o `nativo\clicar-seletor.ps1` (o mesmo do
 `abrir-e-compartilhar.bat`), então o Chrome do PC de casa precisa estar em português.
 
+### Jogos do PC: o PC de casa como central de jogos
+
+O PC liberado para o `/tela` também pode ser a central de jogos da sala (extensão 1.20+, ajudante 1.14+):
+
+1. **No PC de jogos, uma vez:** ponha os atalhos dos jogos na pasta **Jogos da Sala 3D**, na área de
+   trabalho (atalhos `.lnk` e os `.url` da Steam/Epic; o nome do atalho é o nome no catálogo). Para
+   ter capa, deixe uma imagem com o mesmo nome do atalho na pasta (`ELDEN RING.jpg`); jogo da Steam
+   já vem com a capa da loja. Compartilhe uma vez **pelo OBS** na frente do PC e **permita a
+   câmera** para a sala (o OBS chega como câmera, e longe dali ninguém aperta o "Permitir").
+2. **Do celular ou de outro PC**, como dono da sala: `/jogos` no chat (ou **Jogos do PC** no
+   catálogo de jogos). Toque num jogo: o PC de jogos abre o OBS com a câmera virtual (se não estiver
+   aberto), compartilha por ele com o som do PC, libera o controle e abre o jogo. Abra a tela dele
+   na sala e jogue.
+3. **Trocar de jogo:** escolha outro; o de antes fecha sozinho e o compartilhamento continua.
+   **Fechar o jogo** fecha sem abrir outro.
+
+Fechar é fechar a janela dos programas que abriram depois do clique (o jogo e o lançador dele, se
+não estava aberto) e, se não fecharem em 8 s, encerrá-los. Windows, Chrome, OBS, Steam, Epic e
+Discord nunca são fechados. A sala só sabe o nome, o ícone e a capa de cada atalho, nunca o caminho,
+e só abre o que está na pasta.
+
+No OBS, para pegar qualquer jogo: **Captura de jogo** no modo "Capturar qualquer aplicativo em tela
+cheia" por cima de uma **Captura de monitor** (o jogo em janela aparece pela captura de monitor).
+
 ### Modo jogo
 
 No controle comum de janela, jogo tipo Minecraft não gira a câmera nem anda com WASD: o jogo lê

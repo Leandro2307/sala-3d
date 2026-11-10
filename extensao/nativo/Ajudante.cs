@@ -191,7 +191,7 @@ namespace Sala3d
             new Thread(VigiarAtalho) { IsBackground = true }.Start();
             new Thread(VigiarJogo) { IsBackground = true }.Start();
             new Thread(VigiarWifi) { IsBackground = true }.Start();
-            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.13.0" } });
+            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.14.0" } });
             var json = new JavaScriptSerializer();
             string txt;
             while ((txt = Ler(entrada)) != null)
@@ -235,6 +235,7 @@ namespace Sala3d
             // "parar"), só volta quando quem compartilha liberar de novo na sala
             if (tipo == "retomar") { parado = false; return; }
             if (tipo == "seletor") { Seletor(S(m, "tela")); return; }
+            if (tipo == "jogos" || tipo == "jogo-abrir" || tipo == "jogo-fechar" || tipo == "obs") { PedidoJogo(m); return; }
             if (tipo == "parar") { lock (travaEntrada) { parado = true; SoltarTudo(); } return; }
             if (tipo == "soltar") { jogo = false; vivoVisto = false; cursorEnviado = null; SoltarTudo(); temAlvo = false; rotuloAtual = null; qualEnviado = null; return; }
             if (tipo != "entrada" || !temAlvo || parado) return;
@@ -303,6 +304,342 @@ namespace Sala3d
                 if (msg.Length > 200) msg = msg.Substring(msg.Length - 200);
                 Escrever(new Dictionary<string, object> { { "tipo", "seletor" }, { "ok", ok }, { "msg", msg } });
             }) { IsBackground = true }.Start();
+        }
+
+        // ------------------------------------------------------------ jogos do PC (1.14+)
+        // Este PC é o "hub" de jogos da sala: o catálogo são os atalhos (.lnk e .url) da pasta
+        // "Jogos da Sala 3D" na área de trabalho. A sala só fica sabendo o nome do atalho, o ícone e a
+        // capa (nunca o caminho do jogo) e só consegue abrir um atalho que está nessa pasta.
+        // Pedidos (cada um com "pid", que volta na resposta):
+        //   { tipo: "jogos" }                -> { tipo: "jogos", jogos: [{ id, nome, icone, capa, steam }], atual }
+        //   { tipo: "jogo-abrir", id }       -> fecha o jogo de antes, abre este: { tipo: "jogo", ok, msg, nome, atual }
+        //   { tipo: "jogo-fechar" }          -> { tipo: "jogo", ok, msg, atual }
+        //   { tipo: "obs" }                  -> abre o OBS com a câmera virtual, se não estiver aberto: { tipo: "obs", ok, msg, ja }
+        // O jogo abre pelo explorer.exe (como um clique duplo no atalho), fora da árvore de processos
+        // do Chrome. "Fechar" fecha as janelas dos programas que abriram depois do clique (tirando
+        // o Windows, o Chrome, o OBS e os lançadores, ver NAO_FECHAR) e, se não fecharem, encerra.
+        static string PastaJogos()
+        {
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Jogos da Sala 3D");
+        }
+        static readonly object travaJogo = new object();
+        static string jogoAtual;        // o atalho aberto pela sala (null: nenhum)
+        static DateTime jogoDesde;      // quando abriu (hora local, como o StartTime dos processos)
+        static bool jogoLido;
+        static readonly Dictionary<string, Dictionary<string, object>> cacheJogos = new Dictionary<string, Dictionary<string, object>>();
+
+        static readonly HashSet<string> NAO_FECHAR = new HashSet<string>(StringComparer.OrdinalIgnoreCase) {
+            "chrome", "msedge", "obs64", "obs32", "obs-browser-page", "explorer", "powershell", "pwsh", "cmd", "conhost",
+            "WindowsTerminal", "OpenConsole", "Taskmgr", "steam", "steamwebhelper", "steamservice", "EpicGamesLauncher",
+            "EpicWebHelper", "Discord", "AnyDesk", "RvRvpnGui", "RvControlSvc", "MSIAfterburner", "RTSS", "LosslessScaling",
+            "NVIDIA App", "nvcontainer", "NVIDIA Overlay", "GameBar", "GameBarFTServer", "SearchHost", "StartMenuExperienceHost",
+            "ShellExperienceHost", "TextInputHost", "ApplicationFrameHost", "SystemSettings", "Code", "claude", "node",
+        };
+
+        static void PedidoJogo(Dictionary<string, object> m)
+        {
+            string tipo = S(m, "tipo"), pid = S(m, "pid"), id = S(m, "id");
+            var t = new Thread(() =>
+            {
+                Dictionary<string, object> r;
+                try
+                {
+                    lock (travaJogo)
+                    {
+                        LerJogoAtual();
+                        if (tipo == "jogos") r = ListarJogos();
+                        else if (tipo == "obs") r = GarantirObs();
+                        else if (tipo == "jogo-fechar") r = FecharJogo();
+                        else r = AbrirJogo(id);
+                    }
+                }
+                catch (Exception err) { r = new Dictionary<string, object> { { "ok", false }, { "msg", err.Message } }; }
+                if (!r.ContainsKey("tipo")) r["tipo"] = tipo == "obs" ? "obs" : tipo == "jogos" ? "jogos" : "jogo";
+                r["pid"] = pid;
+                Escrever(r);
+            }) { IsBackground = true };
+            t.SetApartmentState(ApartmentState.STA); // o WScript.Shell (ler os atalhos) gosta de STA
+            t.Start();
+        }
+
+        // o jogo aberto sobrevive ao ajudante fechar (o Chrome reabre ele): fica num arquivo
+        static string ArquivoJogoAtual() { return Path.Combine(Environment.GetEnvironmentVariable("LOCALAPPDATA") ?? "", "Sala3d", "jogo-atual.txt"); }
+        static void LerJogoAtual()
+        {
+            if (jogoLido) return;
+            jogoLido = true;
+            try
+            {
+                var l = File.ReadAllLines(ArquivoJogoAtual());
+                if (l.Length >= 2) { jogoAtual = l[0]; jogoDesde = new DateTime(long.Parse(l[1])); }
+            }
+            catch { }
+        }
+        static void GuardarJogoAtual()
+        {
+            try
+            {
+                if (jogoAtual == null) { File.Delete(ArquivoJogoAtual()); return; }
+                Directory.CreateDirectory(Path.GetDirectoryName(ArquivoJogoAtual()));
+                File.WriteAllLines(ArquivoJogoAtual(), new[] { jogoAtual, jogoDesde.Ticks.ToString() });
+            }
+            catch { }
+        }
+
+        static string[] Atalhos()
+        {
+            string pasta = PastaJogos();
+            if (!Directory.Exists(pasta)) return new string[0];
+            return Directory.GetFiles(pasta).Where(f => f.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase) || f.EndsWith(".url", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(f => Path.GetFileNameWithoutExtension(f), StringComparer.CurrentCultureIgnoreCase).ToArray();
+        }
+
+        // o jogo aberto ainda está aberto? Nos primeiros 2 minutos conta como aberto mesmo sem janela
+        // (o lançador da Steam/Epic/Hydra ainda está subindo o jogo)
+        static string AtualAinda()
+        {
+            if (jogoAtual == null) return null;
+            if ((DateTime.Now - jogoDesde).TotalSeconds < 120 || ProcessosDoJogo().Count > 0) return jogoAtual;
+            jogoAtual = null;
+            GuardarJogoAtual();
+            return null;
+        }
+
+        static Dictionary<string, object> ListarJogos()
+        {
+            var lista = new List<object>();
+            foreach (string f in Atalhos())
+            {
+                string chave = f + "|" + File.GetLastWriteTimeUtc(f).Ticks;
+                foreach (string ext in new[] { ".jpg", ".jpeg", ".png" })
+                {
+                    string capa = Path.ChangeExtension(f, ext);
+                    if (File.Exists(capa)) chave += "|" + File.GetLastWriteTimeUtc(capa).Ticks;
+                }
+                Dictionary<string, object> j;
+                if (!cacheJogos.TryGetValue(chave, out j))
+                {
+                    j = DescreverJogo(f);
+                    cacheJogos[chave] = j;
+                }
+                lista.Add(j);
+            }
+            return new Dictionary<string, object> { { "ok", true }, { "jogos", lista }, { "atual", AtualAinda() }, { "pasta", Directory.Exists(PastaJogos()) } };
+        }
+
+        static Dictionary<string, object> DescreverJogo(string f)
+        {
+            var j = new Dictionary<string, object> { { "id", Path.GetFileName(f) }, { "nome", Path.GetFileNameWithoutExtension(f) } };
+            string iconeArq = "", alvo = "", args = "", url = "";
+            int iconeIdx = 0;
+            try
+            {
+                if (f.EndsWith(".url", StringComparison.OrdinalIgnoreCase))
+                {
+                    foreach (string linha in File.ReadAllLines(f))
+                    {
+                        if (linha.StartsWith("URL=", StringComparison.OrdinalIgnoreCase)) url = linha.Substring(4);
+                        else if (linha.StartsWith("IconFile=", StringComparison.OrdinalIgnoreCase)) iconeArq = linha.Substring(9);
+                        else if (linha.StartsWith("IconIndex=", StringComparison.OrdinalIgnoreCase)) int.TryParse(linha.Substring(10), out iconeIdx);
+                    }
+                }
+                else
+                {
+                    var tipoShell = Type.GetTypeFromProgID("WScript.Shell");
+                    object shell = Activator.CreateInstance(tipoShell);
+                    object lnk = tipoShell.InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, shell, new object[] { f });
+                    var tl = lnk.GetType();
+                    alvo = Convert.ToString(tl.InvokeMember("TargetPath", BindingFlags.GetProperty, null, lnk, null));
+                    args = Convert.ToString(tl.InvokeMember("Arguments", BindingFlags.GetProperty, null, lnk, null));
+                    string loc = Convert.ToString(tl.InvokeMember("IconLocation", BindingFlags.GetProperty, null, lnk, null));
+                    int v = loc.LastIndexOf(',');
+                    iconeArq = v >= 0 ? loc.Substring(0, v) : loc;
+                    if (v >= 0) int.TryParse(loc.Substring(v + 1), out iconeIdx);
+                    if (iconeArq.Trim() == "") { iconeArq = alvo; iconeIdx = 0; }
+                }
+            }
+            catch { }
+            // jogo da Steam (steam://rungameid/N, ou pelo Hydra com shop=steam&objectId=N): a sala
+            // busca a capa na loja pelo número
+            var mSteam = System.Text.RegularExpressions.Regex.Match(url, @"^steam://(?:rungameid|run)/(\d+)");
+            if (!mSteam.Success) mSteam = System.Text.RegularExpressions.Regex.Match(args, @"shop=steam&objectId=(\d+)");
+            if (mSteam.Success) j["steam"] = mSteam.Groups[1].Value;
+            string icone = Icone(Environment.ExpandEnvironmentVariables(iconeArq), iconeIdx);
+            if (icone == null) icone = IconeAssociado(f);
+            if (icone != null) j["icone"] = icone;
+            // capa própria: uma imagem com o mesmo nome do atalho, na mesma pasta
+            foreach (string ext in new[] { ".jpg", ".jpeg", ".png" })
+            {
+                string capa = Path.ChangeExtension(f, ext);
+                if (!File.Exists(capa)) continue;
+                string c = Capa(capa);
+                if (c != null) { j["capa"] = c; break; }
+            }
+            return j;
+        }
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        static extern uint PrivateExtractIcons(string arquivo, int indice, int cx, int cy, IntPtr[] icones, uint[] ids, uint n, uint flags);
+        [DllImport("user32.dll")]
+        static extern bool DestroyIcon(IntPtr icone);
+
+        static string Icone(string arq, int idx)
+        {
+            if (string.IsNullOrEmpty(arq) || !File.Exists(arq)) return null;
+            try
+            {
+                if (arq.EndsWith(".ico", StringComparison.OrdinalIgnoreCase))
+                {
+                    foreach (int tam in new[] { 256, 128, 64, 48, 32 })
+                    {
+                        try { using (var ic = new System.Drawing.Icon(arq, tam, tam)) using (var b = ic.ToBitmap()) return Png(b); }
+                        catch { }
+                    }
+                    return null;
+                }
+                foreach (int tam in new[] { 128, 64, 48 })
+                {
+                    var hs = new IntPtr[1];
+                    var ids = new uint[1];
+                    if (PrivateExtractIcons(arq, idx, tam, tam, hs, ids, 1, 0) == 0 || hs[0] == IntPtr.Zero) continue;
+                    try { using (var ic = System.Drawing.Icon.FromHandle(hs[0])) using (var b = ic.ToBitmap()) return Png(b); }
+                    catch { }
+                    finally { DestroyIcon(hs[0]); }
+                }
+            }
+            catch { }
+            return null;
+        }
+        static string IconeAssociado(string arq)
+        {
+            try { using (var ic = System.Drawing.Icon.ExtractAssociatedIcon(arq)) using (var b = ic.ToBitmap()) return Png(b); }
+            catch { return null; }
+        }
+        // o ícone vai com 64 px (cabe uma porção deles na mensagem para o servidor)
+        static string Png(System.Drawing.Bitmap b)
+        {
+            using (var r = new System.Drawing.Bitmap(64, 64, System.Drawing.Imaging.PixelFormat.Format32bppArgb))
+            {
+                using (var g = System.Drawing.Graphics.FromImage(r))
+                {
+                    g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                    g.DrawImage(b, 0, 0, 64, 64);
+                }
+                using (var ms = new MemoryStream())
+                {
+                    r.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
+                    return "data:image/png;base64," + Convert.ToBase64String(ms.ToArray());
+                }
+            }
+        }
+        // a capa vai com até 200x300, em JPEG
+        static string Capa(string arq)
+        {
+            try
+            {
+                using (var img = System.Drawing.Image.FromFile(arq))
+                {
+                    double k = Math.Min(1, Math.Min(200.0 / img.Width, 300.0 / img.Height));
+                    int w = Math.Max(1, (int)(img.Width * k)), h = Math.Max(1, (int)(img.Height * k));
+                    using (var r = new System.Drawing.Bitmap(w, h))
+                    {
+                        using (var g = System.Drawing.Graphics.FromImage(r))
+                        {
+                            g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                            g.DrawImage(img, 0, 0, w, h);
+                        }
+                        var cod = System.Drawing.Imaging.ImageCodecInfo.GetImageEncoders().First(c => c.MimeType == "image/jpeg");
+                        var pars = new System.Drawing.Imaging.EncoderParameters(1);
+                        pars.Param[0] = new System.Drawing.Imaging.EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 80L);
+                        using (var ms = new MemoryStream())
+                        {
+                            r.Save(ms, cod, pars);
+                            return "data:image/jpeg;base64," + Convert.ToBase64String(ms.ToArray());
+                        }
+                    }
+                }
+            }
+            catch { return null; }
+        }
+
+        // os programas que abriram depois do clique no atalho e têm janela (o jogo, e o lançador
+        // dele, se não estava aberto antes)
+        static List<System.Diagnostics.Process> ProcessosDoJogo()
+        {
+            var lista = new List<System.Diagnostics.Process>();
+            if (jogoAtual == null) return lista;
+            string win = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+            var eu = System.Diagnostics.Process.GetCurrentProcess();
+            foreach (var p in System.Diagnostics.Process.GetProcesses())
+            {
+                try
+                {
+                    if (p.Id == eu.Id || p.SessionId != eu.SessionId || NAO_FECHAR.Contains(p.ProcessName)) continue;
+                    if (p.MainWindowHandle == IntPtr.Zero) continue;
+                    if (p.StartTime < jogoDesde.AddSeconds(-2)) continue;
+                    string exe = p.MainModule.FileName; // como administrador: dá erro (e nem daria para fechar)
+                    if (exe.StartsWith(win, StringComparison.OrdinalIgnoreCase)) continue;
+                    lista.Add(p);
+                }
+                catch { }
+            }
+            return lista;
+        }
+
+        static Dictionary<string, object> FecharJogo()
+        {
+            if (jogoAtual == null) return new Dictionary<string, object> { { "ok", true }, { "msg", "nenhum jogo aberto" }, { "atual", null } };
+            string nome = Path.GetFileNameWithoutExtension(jogoAtual);
+            var procs = ProcessosDoJogo();
+            foreach (var p in procs) { try { p.CloseMainWindow(); } catch { } }
+            // espera fechar sozinho (salvar, sair do jogo); depois encerra
+            var fim = DateTime.Now.AddSeconds(8);
+            while (DateTime.Now < fim && procs.Any(p => { try { return !p.HasExited; } catch { return false; } })) Thread.Sleep(250);
+            int encerrados = 0;
+            foreach (var p in procs.Concat(ProcessosDoJogo()))
+            {
+                try { if (!p.HasExited) { p.Kill(); encerrados++; } } catch { }
+            }
+            jogoAtual = null;
+            GuardarJogoAtual();
+            return new Dictionary<string, object> { { "ok", true }, { "msg", procs.Count == 0 ? nome + " já estava fechado" : "fechou " + nome }, { "atual", null } };
+        }
+
+        static Dictionary<string, object> AbrirJogo(string id)
+        {
+            string arq = Atalhos().FirstOrDefault(f => string.Equals(Path.GetFileName(f), id, StringComparison.OrdinalIgnoreCase));
+            if (arq == null) return new Dictionary<string, object> { { "ok", false }, { "msg", "esse jogo não está mais na pasta Jogos da Sala 3D" }, { "atual", AtualAinda() } };
+            string nome = Path.GetFileNameWithoutExtension(arq);
+            if (jogoAtual != null && string.Equals(jogoAtual, Path.GetFileName(arq), StringComparison.OrdinalIgnoreCase) && AtualAinda() != null)
+                return new Dictionary<string, object> { { "ok", true }, { "msg", nome + " já está aberto" }, { "nome", nome }, { "atual", jogoAtual } };
+            if (jogoAtual != null) FecharJogo();
+            jogoDesde = DateTime.Now;
+            jogoAtual = Path.GetFileName(arq);
+            GuardarJogoAtual();
+            // pelo explorer: o jogo não fica pendurado no Chrome (nem no job dele)
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", "\"" + arq + "\"") { UseShellExecute = false });
+            return new Dictionary<string, object> { { "ok", true }, { "msg", "abrindo " + nome }, { "nome", nome }, { "atual", jogoAtual } };
+        }
+
+        static Dictionary<string, object> GarantirObs()
+        {
+            if (System.Diagnostics.Process.GetProcessesByName("obs64").Length > 0)
+                return new Dictionary<string, object> { { "ok", true }, { "ja", true }, { "msg", "o OBS já estava aberto" } };
+            string exe = null;
+            foreach (string pf in new[] { Environment.GetEnvironmentVariable("ProgramW6432"), Environment.GetEnvironmentVariable("ProgramFiles") })
+            {
+                if (string.IsNullOrEmpty(pf)) continue;
+                string c = Path.Combine(pf, "obs-studio", "bin", "64bit", "obs64.exe");
+                if (File.Exists(c)) { exe = c; break; }
+            }
+            if (exe == null) return new Dictionary<string, object> { { "ok", false }, { "msg", "o OBS Studio não está instalado" } };
+            // a pasta de trabalho tem que ser a do obs64.exe (senão ele não acha os arquivos dele)
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(exe, "--startvirtualcam --minimize-to-tray --disable-shutdown-check")
+            { UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(exe) });
+            // a câmera virtual liga uns segundos depois de o OBS abrir
+            Thread.Sleep(7000);
+            bool aberto = System.Diagnostics.Process.GetProcessesByName("obs64").Length > 0;
+            return new Dictionary<string, object> { { "ok", aberto }, { "ja", false }, { "msg", aberto ? "abriu o OBS" : "o OBS não abriu" } };
         }
 
         // ------------------------------------------------------------ alvo
