@@ -191,7 +191,7 @@ namespace Sala3d
             new Thread(VigiarAtalho) { IsBackground = true }.Start();
             new Thread(VigiarJogo) { IsBackground = true }.Start();
             new Thread(VigiarWifi) { IsBackground = true }.Start();
-            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.14.0" } });
+            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.14.1" } });
             var json = new JavaScriptSerializer();
             string txt;
             while ((txt = Ler(entrada)) != null)
@@ -618,7 +618,52 @@ namespace Sala3d
             GuardarJogoAtual();
             // pelo explorer: o jogo não fica pendurado no Chrome (nem no job dele)
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", "\"" + arq + "\"") { UseShellExecute = false });
+            VigiarTelaCheia(jogoAtual);
             return new Dictionary<string, object> { { "ok", true }, { "msg", "abrindo " + nome }, { "nome", nome }, { "atual", jogoAtual } };
+        }
+
+        // Sempre em tela cheia: por 2 minutos depois de abrir, a janela da frente que for do jogo e
+        // ainda estiver em janela (com barra de título) vira tela cheia sem bordas no monitor dela.
+        // Jogo já em tela cheia não tem barra de título e fica como está. Os lançadores (Hydra) não.
+        [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] static extern IntPtr GetWindowLongPtr(IntPtr h, int i);
+        [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] static extern IntPtr SetWindowLongPtr(IntPtr h, int i, IntPtr v);
+        [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr h, IntPtr depois, int x, int y, int w, int hh, uint flags);
+        [DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr h, uint flags);
+        static readonly HashSet<string> LANCADORES = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Hydra", "TLauncher", "RobloxPlayerLauncher", "RobloxPlayerInstaller" };
+        static void VigiarTelaCheia(string jogo)
+        {
+            new Thread(() =>
+            {
+                var feitas = new HashSet<IntPtr>();
+                var fim = DateTime.Now.AddMinutes(2);
+                while (DateTime.Now < fim)
+                {
+                    Thread.Sleep(1000);
+                    try
+                    {
+                        if (jogoAtual != jogo) return; // fecharam ou trocaram de jogo
+                        IntPtr h = GetForegroundWindow();
+                        if (h == IntPtr.Zero || feitas.Contains(h) || !IsWindowVisible(h) || IsIconic(h)) continue;
+                        uint pid;
+                        GetWindowThreadProcessId(h, out pid);
+                        System.Diagnostics.Process p;
+                        lock (travaJogo) p = ProcessosDoJogo().FirstOrDefault(x => x.Id == pid);
+                        if (p == null || LANCADORES.Contains(p.ProcessName)) continue;
+                        const int GWL_STYLE = -16;
+                        const long WS_CAPTION = 0x00C00000, WS_THICKFRAME = 0x00040000, WS_POPUP = 0x80000000L;
+                        long estilo = GetWindowLongPtr(h, GWL_STYLE).ToInt64();
+                        feitas.Add(h);
+                        if ((estilo & WS_CAPTION) != WS_CAPTION) continue; // já sem bordas / tela cheia
+                        var mi = new MONITORINFOEX(); mi.cbSize = Marshal.SizeOf(mi);
+                        if (!GetMonitorInfo(MonitorFromWindow(h, 2), ref mi)) continue;
+                        SetWindowLongPtr(h, GWL_STYLE, new IntPtr((estilo & ~(WS_CAPTION | WS_THICKFRAME)) | WS_POPUP));
+                        var r = mi.rcMonitor;
+                        // SWP_FRAMECHANGED | SWP_SHOWWINDOW | SWP_NOOWNERZORDER
+                        SetWindowPos(h, IntPtr.Zero, r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top, 0x0020 | 0x0040 | 0x0200);
+                    }
+                    catch { }
+                }
+            }) { IsBackground = true }.Start();
         }
 
         static Dictionary<string, object> GarantirObs()

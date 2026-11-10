@@ -149,6 +149,11 @@ O PC liberado para o `/tela` também pode ser a central de jogos da sala (extens
 3. **Trocar de jogo:** escolha outro; o de antes fecha sozinho e o compartilhamento continua.
    **Fechar o jogo** fecha sem abrir outro.
 
+**Sempre em tela cheia:** nos 2 minutos depois de abrir, se o jogo vier em janela (com barra de
+título), o ajudante tira as bordas e estica a janela no monitor dela. Jogo que já abre em tela cheia
+fica como está. Emulador: ponha o jogo e a tela cheia no próprio atalho (no lichii,
+`--fullscreen --game "caminho do jogo"`); sem o `--game` ele abre só o emulador.
+
 Fechar é fechar a janela dos programas que abriram depois do clique (o jogo e o lançador dele, se
 não estava aberto) e, se não fecharem em 8 s, encerrá-los. Windows, Chrome, OBS, Steam, Epic e
 Discord nunca são fechados. A sala só sabe o nome, o ícone e a capa de cada atalho, nunca o caminho,
