@@ -3941,7 +3941,7 @@ function renderSala() {
   $('#sala-criar').hidden = cfg.temDono || state.donoDaSala;
   $('#sala-entrar').hidden = !cfg.temDono || state.donoDaSala;
   $('#sala-config').hidden = !state.donoDaSala;
-  $('#chat-input').placeholder = state.donoDaSala ? 'Mensagem, ou /pix para dar moedas' : 'Mensagem para todos';
+  $('#chat-input').placeholder = state.donoDaSala ? 'Mensagem, /pix para dar moedas ou /tela' : 'Mensagem para todos';
   $('#entrada-status').textContent = cfg.temSenha
     ? 'Ligada: quem chega pelo link precisa digitar a senha.'
     : 'Sala aberta: qualquer um com o link entra.';
@@ -5556,6 +5556,24 @@ function botaoTelaInteira({ auto = false } = {}) {
   });
 }
 
+// Com a sala em tela cheia (o painel em foco, o modo jogo) o botão acima fica por baixo dela — o
+// ajudante não acha o que apertar — e o seletor do Chrome não abre por cima. Sai da tela cheia (e
+// solta o ponteiro e o teclado) antes; ninguém está na frente deste PC mesmo.
+async function sairDaTelaCheiaParaOSeletor() {
+  try { navigator.keyboard?.unlock?.(); } catch { /* sem trava */ }
+  if (document.pointerLockElement) document.exitPointerLock?.();
+  const doc = document;
+  if (!(doc.fullscreenElement || doc.webkitFullscreenElement)) return;
+  const saiu = new Promise((ok) => {
+    const pronto = () => { doc.removeEventListener('fullscreenchange', pronto); ok(); };
+    doc.addEventListener('fullscreenchange', pronto);
+    setTimeout(pronto, 1500);
+  });
+  await (doc.exitFullscreen || doc.webkitExitFullscreen)?.call(doc)?.catch?.(() => {});
+  await saiu;
+  await new Promise((ok) => setTimeout(ok, 300)); // a janela do Chrome se acerta antes do clique
+}
+
 async function pedidoDeTela({ acao, de }) {
   const responder = (ok, texto) => socket.emit('tela-resposta', { ok, texto });
   if (!telaLiberadaAqui()) return; // o servidor já não manda, mas por garantia
@@ -5572,6 +5590,7 @@ async function pedidoDeTela({ acao, de }) {
     if (!controle.ext.ok || !controle.ext.liberado) return responder(false, 'a extensão da Sala 3D não está liberada no Chrome de lá');
     if (shareBusy) return responder(false, 'já tem um compartilhamento começando lá');
     toast(`${de} pediu a sua tela pelo /tela.`, 'info', 6000);
+    await sairDaTelaCheiaParaOSeletor();
     const entrou = botaoTelaInteira({ auto: true });
     const r = await controle.pedir('tela-auto', undefined, undefined, 'Tela 1', 80_000);
     if (r?.erro) {
@@ -5597,7 +5616,7 @@ async function pedidoDeTela({ acao, de }) {
   responder(true, 'compartilhando a Tela 1 com áudio, controle liberado');
 }
 
-// /pix do dono: completa o comando, a ação e o nome de quem está na sala. Setas escolhem, Tab ou
+// /pix do dono e /tela: completam o comando, a ação e o nome de quem está na sala. Setas escolhem, Tab ou
 // Enter põem no campo (o Enter só manda quando a lista está fechada), Esc fecha.
 const PIX_ACOES = [
   ['adicionar', 'soma ao saldo'],
@@ -5607,12 +5626,64 @@ const PIX_ACOES = [
 let sugestoes = []; // { texto: o campo inteiro depois de escolher, rotulo, extra, cor }
 let sugestaoAtiva = 0;
 
+// /tela: o dono escolhe o PC (pelo nick); "liberar"/"bloquear" servem a qualquer um, no PC de casa
+const TELA_ACOES = [
+  ['parar', 'para o compartilhamento de um PC', true],
+  ['liberar', 'este PC passa a atender o /tela', false],
+  ['bloquear', 'este PC deixa de atender o /tela', false],
+];
+
+// quem está na sala e tem "parte" no nome: quem começa com isso vem primeiro, depois quem só tem
+// no meio. Nome já completo (um só, igual): lista vazia, e o Enter manda.
+function sugestoesDeNomes(prefixo, digitado, { semEu = false, extra }) {
+  const parte = digitado.trim().toLowerCase();
+  const vistos = new Set();
+  const pessoas = [...state.users.values()].filter((u) => {
+    const k = u.name.toLowerCase();
+    if ((semEu && u.isSelf) || vistos.has(k) || !k.includes(parte)) return false;
+    vistos.add(k);
+    return true;
+  });
+  pessoas.sort((a, b) => (b.name.toLowerCase().startsWith(parte) - a.name.toLowerCase().startsWith(parte)) || a.name.localeCompare(b.name, 'pt-BR'));
+  if (pessoas.length === 1 && pessoas[0].name === digitado.trim()) return [];
+  return pessoas.map((u) => ({
+    texto: prefixo + u.name,
+    rotulo: u.isSelf ? `${u.name} (você)` : u.name,
+    extra: extra(u),
+    cor: u.color,
+  }));
+}
+
 function sugestoesDoPix(v) {
-  if (!state.donoDaSala || !v.startsWith('/')) return [];
-  if ('/pix'.startsWith(v.toLowerCase())) {
-    return [{ texto: '/pix ', rotulo: '/pix', extra: 'adicionar, remover ou ajustar moedas' }];
+  if (!v.startsWith('/')) return [];
+  const dono = state.donoDaSala;
+  const baixo = v.toLowerCase();
+  // o comando em si ("/", "/t", "/p"…)
+  if (!/\s/.test(v)) {
+    const cmds = [];
+    if (dono && '/pix'.startsWith(baixo)) cmds.push({ texto: '/pix ', rotulo: '/pix', extra: 'adicionar, remover ou ajustar moedas' });
+    if ('/tela'.startsWith(baixo)) cmds.push({ texto: '/tela ', rotulo: '/tela', extra: dono ? 'o PC de alguém compartilha a tela' : 'liberar ou bloquear este PC para o /tela' });
+    return cmds;
   }
-  let m = /^\/pix\s+(\S*)$/i.exec(v);
+
+  // /tela parar <nick>
+  let m = /^(\/tela\s+parar\s+)(.*)$/i.exec(v);
+  if (m) return dono ? sugestoesDeNomes(m[1], m[2], { semEu: true, extra: () => 'parar de compartilhar' }) : [];
+  // /tela <ação ou nick>
+  m = /^(\/tela\s+)(.*)$/i.exec(v);
+  if (m) {
+    const parte = m[2].toLowerCase();
+    const acoes = TELA_ACOES.filter(([a, , soDono]) => (dono || !soDono) && a.startsWith(parte) && a !== parte)
+      .map(([a, extra]) => ({ texto: `/tela ${a}${a === 'parar' ? ' ' : ''}`, rotulo: a, extra }));
+    if (TELA_ACOES.some(([a]) => a === parte.trim())) return [];
+    if (dono && [...state.users.values()].some((u) => !u.isSelf && u.name === m[2].trim())) return [];
+    const nomes = dono ? sugestoesDeNomes(m[1], m[2], { semEu: true, extra: () => 'compartilhar a tela deste PC' }) : [];
+    // digitou algo: os nomes primeiro (é o uso de todo dia); vazio: as ações primeiro
+    return parte ? [...nomes, ...acoes] : [...acoes, ...nomes];
+  }
+
+  if (!dono) return [];
+  m = /^\/pix\s+(\S*)$/i.exec(v);
   if (m) {
     const parte = m[1].toLowerCase();
     return PIX_ACOES.filter(([a]) => a.startsWith(parte) && a !== parte)
@@ -5620,24 +5691,7 @@ function sugestoesDoPix(v) {
   }
   m = /^(\/pix\s+(?:adicionar|remover|ajustar)\s+\d[\d.]*\s+)(.*)$/i.exec(v);
   if (!m) return [];
-  // quem começa com o que foi digitado vem primeiro; depois quem só tem isso no meio do nome
-  const parte = m[2].trim().toLowerCase();
-  const vistos = new Set();
-  const pessoas = [...state.users.values()].filter((u) => {
-    const k = u.name.toLowerCase();
-    if (vistos.has(k) || !k.includes(parte)) return false;
-    vistos.add(k);
-    return true;
-  });
-  pessoas.sort((a, b) => (b.name.toLowerCase().startsWith(parte) - a.name.toLowerCase().startsWith(parte)) || a.name.localeCompare(b.name, 'pt-BR'));
-  // nome já completo: some a lista, e o Enter manda
-  if (pessoas.length === 1 && pessoas[0].name === m[2].trim()) return [];
-  return pessoas.map((u) => ({
-    texto: m[1] + u.name,
-    rotulo: u.isSelf ? `${u.name} (você)` : u.name,
-    extra: `${u.moedas ?? 0} moedas`,
-    cor: u.color,
-  }));
+  return sugestoesDeNomes(m[1], m[2], { extra: (u) => `${u.moedas ?? 0} moedas` });
 }
 
 function mostrarSugestoes() {

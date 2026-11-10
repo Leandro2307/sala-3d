@@ -613,6 +613,8 @@ async function telaAuto(aba, tela) {
   const n = nativo;
   const w = await chrome.windows.get(aba.windowId).catch(() => null);
   if (w?.state === 'minimized') await chrome.windows.update(aba.windowId, { state: 'normal' }).catch(() => {});
+  // tela cheia (F11 ou a da página): o botão da sala e o seletor do Chrome não aparecem direito nela
+  else if (w?.state === 'fullscreen') await chrome.windows.update(aba.windowId, { state: 'maximized' }).catch(() => {});
   await chrome.tabs.update(aba.id, { active: true }).catch(() => {});
   await chrome.windows.update(aba.windowId, { focused: true }).catch(() => {});
   const r = await new Promise((resolve) => {
