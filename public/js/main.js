@@ -130,35 +130,30 @@ if (isTouch) {
   barraMais();
 }
 
-// Celular: a barra do topo tem mais ícones do que cabem (num iPhone em pé sobrava espaço para um
-// só, e o resto ficava escondido numa rolagem que ninguém percebia). Quando não cabem, aparece o
-// ⋯, que abre todos numa grade embaixo da barra.
+// Celular: todos os botões da barra do topo ficam guardados no ⋯ (a tela é pequena e o mundo vem
+// primeiro). Tocou no ⋯: os botões redondos (microfone, câmera, compartilhar...) aparecem na barra e
+// os ícones dos painéis numa grade embaixo dela. Escolheu um ou tocou fora, fecha.
 function barraMais() {
   const direita = $('.bar-right');
+  const centro = $('.bar-center');
   const btn = $('#btn-mais');
+  btn.hidden = false;
   const aberta = () => document.body.classList.contains('bar-mais');
-  const conferir = () => {
-    if (aberta()) return;
-    const cabe = direita.scrollWidth <= direita.clientWidth + 1;
-    // só quando muda: pôr hidden de novo (mesmo igual) gera outro aviso no MutationObserver lá
-    // embaixo, que chama o conferir de novo — um laço sem fim que travava a página no celular
-    if (btn.hidden !== cabe) btn.hidden = cabe;
-  };
   const abrir = (on) => {
     document.body.classList.toggle('bar-mais', on);
     btn.setAttribute('aria-expanded', String(on));
-    if (!on) requestAnimationFrame(conferir);
   };
   btn.addEventListener('click', () => abrir(!aberta()));
-  // escolheu um ícone ou tocou fora: fecha
+  // escolheu um ícone: fecha (o compartilhar e as reações abrem um balão: ficam até escolher)
   direita.addEventListener('click', () => abrir(false));
-  document.addEventListener('pointerdown', (e) => {
-    if (aberta() && !e.target.closest('.bar-right, #btn-mais')) abrir(false);
+  centro.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b || b === btn || b.closest('.pop-wrap')) return;
+    abrir(false);
   });
-  new ResizeObserver(conferir).observe(direita);
-  // botões que aparecem e somem (jogos ligados, sino) mudam o que cabe
-  new MutationObserver(conferir).observe($('#bar'), { attributes: true, attributeFilter: ['hidden'], subtree: true });
-  conferir();
+  document.addEventListener('pointerdown', (e) => {
+    if (aberta() && !e.target.closest('.bar-right, .bar-center, .popover')) abrir(false);
+  });
 }
 let touchPad = null; // controles de toque (só no celular)
 
@@ -852,6 +847,7 @@ const pcJogos = new PcJogos({
   },
 });
 $('#cj-pc').addEventListener('click', () => pcJogos.abrir());
+$('#btn-pc-jogos').addEventListener('click', () => (pcJogos.aberto ? pcJogos.fechar() : pcJogos.abrir()));
 // P abre o personagem dentro da sala (trocar de boneco, cor, camiseta e arma sem sair)
 window.addEventListener('keydown', (e) => {
   if (e.code !== 'KeyP' || !state.joined || state.focus || escolha.aberto || avisoSite.aberto || e.repeat) return;
@@ -3945,6 +3941,8 @@ function aplicarSala(cfg) {
 }
 
 function renderSala() {
+  // o botão dos jogos do PC é só do dono
+  $('#btn-pc-jogos').hidden = !state.donoDaSala;
   const cfg = state.sala;
   if (!cfg) return;
   const amb = modoEscritorio()

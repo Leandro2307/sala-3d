@@ -2963,6 +2963,10 @@ body.touch.bar-mais .bar-right {
   border: 1px solid var(--line-strong);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
 }
+/* menu fechado: só o ⋯ na barra (os botões redondos e os ícones dos painéis ficam guardados) */
+body.touch:not(.bar-mais) .bar-right { display: none; }
+body.touch:not(.bar-mais) .bar-center > :not(#btn-mais) { display: none; }
+body.touch:not(.bar-mais) #bar { background: none; }
 /* a dica de sentar tem botão próprio no celular (#tb-sit) */
 body.touch #sit-hint { display: none !important; }
 

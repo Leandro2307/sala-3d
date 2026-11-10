@@ -191,7 +191,7 @@ namespace Sala3d
             new Thread(VigiarAtalho) { IsBackground = true }.Start();
             new Thread(VigiarJogo) { IsBackground = true }.Start();
             new Thread(VigiarWifi) { IsBackground = true }.Start();
-            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.14.2" } });
+            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.14.3" } });
             var json = new JavaScriptSerializer();
             string txt;
             while ((txt = Ler(entrada)) != null)
@@ -611,7 +611,10 @@ namespace Sala3d
             if (arq == null) return new Dictionary<string, object> { { "ok", false }, { "msg", "esse jogo não está mais na pasta Jogos da Sala 3D" }, { "atual", AtualAinda() } };
             string nome = Path.GetFileNameWithoutExtension(arq);
             if (jogoAtual != null && string.Equals(jogoAtual, Path.GetFileName(arq), StringComparison.OrdinalIgnoreCase) && AtualAinda() != null)
-                return new Dictionary<string, object> { { "ok", true }, { "msg", nome + " já está aberto" }, { "nome", nome }, { "atual", jogoAtual } };
+            {
+                TrazerJogo(jogoAtual);
+                return new Dictionary<string, object> { { "ok", true }, { "msg", nome + " já estava aberto: veio para a frente" }, { "nome", nome }, { "atual", jogoAtual } };
+            }
             if (jogoAtual != null) FecharJogo();
             jogoDesde = DateTime.Now;
             jogoAtual = Path.GetFileName(arq);
@@ -634,28 +637,74 @@ namespace Sala3d
         // Ajustes), o mouse de quem joga vale no monitor onde a janela do jogo está — o jogo abre no
         // monitor principal, que pode não ser o dos Ajustes. Fechou o jogo, volta para o de antes.
         static RECT? telaAntesDoJogo;
+
+        // a janela do jogo: a maior janela visível dos programas dele (sem os lançadores).
+        // minimizada: vale também a minimizada (para trazer de volta)
+        static IntPtr JanelaDoJogo(bool minimizada = false)
+        {
+            IntPtr maior = IntPtr.Zero, mini = IntPtr.Zero; long area = 0;
+            List<System.Diagnostics.Process> procs;
+            lock (travaJogo) procs = ProcessosDoJogo();
+            foreach (var p in procs)
+            {
+                if (LANCADORES.Contains(p.ProcessName)) continue;
+                IntPtr h = p.MainWindowHandle;
+                RECT r;
+                if (!IsWindowVisible(h)) continue;
+                if (IsIconic(h)) { mini = h; continue; }
+                if (!GetWindowRect(h, out r)) continue;
+                long a = (long)(r.Right - r.Left) * (r.Bottom - r.Top);
+                if (a > area) { area = a; maior = h; }
+            }
+            return maior != IntPtr.Zero ? maior : minimizada ? mini : IntPtr.Zero;
+        }
+
+        // primeiro plano: o "Alt" destrava o SetForegroundWindow (o Windows recusa para quem não
+        // está na frente), como no Focar()
+        static void Frente(IntPtr h)
+        {
+            if (h == IntPtr.Zero) return;
+            if (IsIconic(h)) ShowWindow(h, 9);
+            if (GetForegroundWindow() == h) return;
+            Teclado((ushort)VK_MENU, false, false);
+            Teclado((ushort)VK_MENU, true, false);
+            SetForegroundWindow(h);
+        }
+
+        // o jogo que já estava aberto ficou atrás (a sala veio para a frente para compartilhar):
+        // traz de volta, tentando por uns segundos (o Chrome ainda pode estar se ajeitando)
+        static void TrazerJogo(string jogo)
+        {
+            new Thread(() =>
+            {
+                for (int i = 0; i < 6 && jogoAtual == jogo; i++)
+                {
+                    try
+                    {
+                        IntPtr h = JanelaDoJogo(true);
+                        if (h != IntPtr.Zero && GetForegroundWindow() == h && i >= 2) return;
+                        Frente(h);
+                    }
+                    catch { }
+                    Thread.Sleep(1000);
+                }
+            }) { IsBackground = true }.Start();
+        }
+
         static void SeguirJogo(string jogo)
         {
             new Thread(() =>
             {
+                bool trouxe = false;
                 try
                 {
                     while (jogoAtual == jogo)
                     {
                         Thread.Sleep(2000);
-                        IntPtr maior = IntPtr.Zero; long area = 0;
-                        List<System.Diagnostics.Process> procs;
-                        lock (travaJogo) procs = ProcessosDoJogo();
-                        foreach (var p in procs)
-                        {
-                            if (LANCADORES.Contains(p.ProcessName)) continue;
-                            IntPtr h = p.MainWindowHandle;
-                            RECT r;
-                            if (!IsWindowVisible(h) || IsIconic(h) || !GetWindowRect(h, out r)) continue;
-                            long a = (long)(r.Right - r.Left) * (r.Bottom - r.Top);
-                            if (a > area) { area = a; maior = h; }
-                        }
+                        IntPtr maior = JanelaDoJogo();
                         if (maior == IntPtr.Zero) continue;
+                        // a janela do jogo apareceu: vem para o primeiro plano (uma vez)
+                        if (!trouxe) { trouxe = true; Frente(maior); }
                         var mi = new MONITORINFOEX(); mi.cbSize = Marshal.SizeOf(mi);
                         if (!GetMonitorInfo(MonitorFromWindow(maior, 2), ref mi)) continue;
                         lock (travaEntrada)
