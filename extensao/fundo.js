@@ -701,6 +701,8 @@ async function tratar(m, sender) {
   if (m.tipo === 'pc-jogo-abrir') return pedidoNativo('jogo-abrir', { id: String(m.alvo || '').slice(0, 200) }, 40_000);
   if (m.tipo === 'pc-jogo-fechar') return pedidoNativo('jogo-fechar', {}, 30_000);
   if (m.tipo === 'pc-obs') return pedidoNativo('obs', {}, 30_000);
+  // 1.21+ (ajudante 1.15+): o PC não dorme nem bloqueia a tela enquanto compartilha
+  if (m.tipo === 'pc-acordado') return pedidoNativo('acordado', { on: !!m.alvo }, 10_000);
   if (m.tipo === 'janela') return janela(m.alvo, m.ev && typeof m.ev === 'object' ? m.ev : null, sender.tab.id);
   // quem compartilha ligou "permitir controle" (de novo): destrava depois de um Ctrl+Alt+End
   if (m.tipo === 'janela-retomar') {

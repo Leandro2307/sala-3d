@@ -84,6 +84,7 @@ namespace Sala3d
         delegate bool EnumMon(IntPtr m, IntPtr dc, ref RECT r, IntPtr l);
 
         [DllImport("user32.dll")] static extern bool SetProcessDpiAwarenessContext(IntPtr v);
+        [DllImport("kernel32.dll")] static extern uint SetThreadExecutionState(uint estado);
         [DllImport("wlanapi.dll")] static extern int WlanOpenHandle(uint versao, IntPtr r, out uint negociada, out IntPtr h);
         [DllImport("wlanapi.dll")] static extern int WlanCloseHandle(IntPtr h, IntPtr r);
         [DllImport("wlanapi.dll")] static extern int WlanEnumInterfaces(IntPtr h, IntPtr r, out IntPtr lista);
@@ -191,7 +192,7 @@ namespace Sala3d
             new Thread(VigiarAtalho) { IsBackground = true }.Start();
             new Thread(VigiarJogo) { IsBackground = true }.Start();
             new Thread(VigiarWifi) { IsBackground = true }.Start();
-            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.14.3" } });
+            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.15.0" } });
             var json = new JavaScriptSerializer();
             string txt;
             while ((txt = Ler(entrada)) != null)
@@ -235,6 +236,15 @@ namespace Sala3d
             // "parar"), só volta quando quem compartilha liberar de novo na sala
             if (tipo == "retomar") { parado = false; return; }
             if (tipo == "seletor") { Seletor(S(m, "tela")); return; }
+            // 1.15+: enquanto este PC compartilha, o Windows não dorme nem apaga/bloqueia a tela
+            // (bloqueada, a captura vira imagem parada e a conexão cai). Vale para esta linha, que é
+            // a que lê as mensagens e vive enquanto o Chrome tiver o ajudante aberto.
+            if (tipo == "acordado")
+            {
+                uint r = SetThreadExecutionState(B(m, "on") ? 0x80000003u : 0x80000000u); // CONTINUOUS (+ SYSTEM + DISPLAY)
+                Escrever(new Dictionary<string, object> { { "tipo", "acordado" }, { "pid", S(m, "pid") }, { "ok", r != 0 } });
+                return;
+            }
             if (tipo == "jogos" || tipo == "jogo-abrir" || tipo == "jogo-fechar" || tipo == "obs") { PedidoJogo(m); return; }
             if (tipo == "parar") { lock (travaEntrada) { parado = true; SoltarTudo(); } return; }
             if (tipo == "soltar") { jogo = false; vivoVisto = false; cursorEnviado = null; SoltarTudo(); temAlvo = false; rotuloAtual = null; qualEnviado = null; return; }

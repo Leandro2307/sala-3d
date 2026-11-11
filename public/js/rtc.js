@@ -1074,12 +1074,13 @@ export class RTC {
   }
 
   // tira uma tela do ar (key) ou todas
-  stopScreen(key = null) {
+  // manterTrilhas: tira a tela do envio sem desligar a captura (reconexão: ela volta com chave nova)
+  stopScreen(key = null, { manterTrilhas = false } = {}) {
     const keys = key == null ? [...this.screens.keys()] : [key];
     for (const k of keys) {
       const scr = this.screens.get(k);
       if (!scr) continue;
-      for (const t of scr.stream.getTracks()) t.stop();
+      if (!manterTrilhas) for (const t of scr.stream.getTracks()) t.stop();
       this.screens.delete(k);
       this.jogoTelas.delete(k);
       for (const peer of this.peers.values()) {

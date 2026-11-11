@@ -1380,14 +1380,27 @@ function bindSocket() {
     // servidor já tirou quem caiu, e sem o join de novo a pessoa ficava fantasma (ninguém a via)
     // com o "Reconectando" na tela. A troca de transporte do socket.io não passa por aqui.
     $('#reconnecting').hidden = true;
+    // As telas no ar NÃO param: a captura continua viva e volta para a sala com a chave nova
+    // (antes, qualquer piscada da internet ou reinício do servidor desligava tudo).
+    const guardadas = guardarTelas();
     pararTodasAsTelas(false);
     for (const id of [...state.users.keys()]) if (id !== state.selfId) removeUser(id, true);
     const data = await emitJoin();
-    if (data?.erro) return senhaRecusada();
-    // o servidor mudou de versão (deploy novo): recarrega já entrando, com o código que combina com ele
-    if (data?.versao && data.versao !== state.versao) return recarregarNaSala();
+    const largar = () => { for (const g of guardadas) for (const t of g.stream.getTracks()) t.stop(); };
+    if (data?.erro) {
+      largar();
+      return senhaRecusada();
+    }
+    // o servidor mudou de versão (deploy novo): recarrega já entrando, com o código que combina com ele.
+    // A captura não sobrevive à recarga: o PC do /tela compartilha de novo sozinho depois (telaParaVoltar).
+    if (data?.versao && data.versao !== state.versao) {
+      lembrarTelasParaVoltar(guardadas);
+      largar();
+      return recarregarNaSala();
+    }
     applyJoined(data);
     toast('Reconectado!');
+    devolverTelas(guardadas);
   });
 
   socket.on('user-joined', (u) => {
@@ -2337,12 +2350,16 @@ async function capturarAbaDaExtensao({ streamId, aba, site, titulo }) {
 // Reserva uma tela no servidor e manda o stream (captura ou arquivo) para todo mundo.
 // Devolve a chave da tela, ou null se não deu.
 // qps: o ritmo da captura quando passa de 60 (a tela pelo OBS)
-async function publishShare(stream, { file = false, height = 0, aba: abaConhecida = null, tela, qps = null } = {}) {
+// reconexao: a tela já estava no ar antes da queda (tenta a mesma tela da sala; ocupada, qualquer
+// outra) e o controle volta pelas mãos de quem chama.
+async function publishShare(stream, { file = false, height = 0, aba: abaConhecida = null, tela, qps = null, reconexao = false } = {}) {
   // no escritório, numa tela da sala onde a pessoa está
   const sala = world.salaEm(player.pos.x, player.pos.z);
   // a do OBS conta como tela inteira (modo jogo, controle pelo ajudante)
   const superficie = file ? null : qps ? 'monitor' : stream.getVideoTracks()[0]?.getSettings?.().displaySurface ?? null;
-  const res = await new Promise((resolve) => socket.emit('share-start', { streamId: stream.id, sala, tela, superficie }, resolve));
+  const pedir = (t) => new Promise((resolve) => socket.emit('share-start', { streamId: stream.id, sala, tela: t, superficie }, resolve));
+  let res = await pedir(tela);
+  if (!res?.ok && reconexao && tela != null) res = await pedir(undefined);
   if (!res?.ok) {
     if (!file) for (const t of stream.getTracks()) t.stop();
     toast(res?.error || 'Não foi possível compartilhar.', 'error');
@@ -2364,12 +2381,21 @@ async function publishShare(stream, { file = false, height = 0, aba: abaConhecid
   rtc.addScreen(res.key, stream, { file, height, qps });
   // captura: a trilha acaba quando a pessoa clica em "Parar" na barra do navegador.
   // Arquivo: acaba toda vez que o vídeo chega ao fim, e isso não é motivo para parar.
-  if (!file) stream.getVideoTracks()[0]?.addEventListener('ended', () => stopShare(res.key, true));
+  if (!file) {
+    stream.getVideoTracks()[0]?.addEventListener('ended', () => {
+      // a do /tela (ou do jogo) caiu sozinha neste PC sem ninguém na frente: compartilha de novo
+      const doTela = telaKey === res.key && self()?.shares.has(res.key);
+      const obs = !!self()?.shares.get(res.key)?.obs;
+      stopShare(res.key, true);
+      if (doTela) voltarTela({ obs, motivo: 'a captura caiu' });
+    });
+  }
   localAvatar.setStatus({ sharing: true });
   updateShareButton();
   refreshScreens();
   renderPeople();
-  if (!file) liberarAoCompartilhar(res.key);
+  if (!file && !reconexao) liberarAoCompartilhar(res.key);
+  manterAcordado();
   return res.key;
 }
 
@@ -2448,20 +2474,23 @@ function avisarAbas() {
   controle.informarAbas([...(self()?.shares.values() || [])].map((s) => s.aba).filter((a) => a != null));
 }
 
-function stopShare(key, notify) {
+// manter: só tira da sala (reconexão) — a captura, o som local e o controle seguem para a tela nova
+function stopShare(key, notify, { manter = false } = {}) {
   const me = self();
   const sh = me?.shares.get(key);
   if (!sh) return;
   clearTimeout(sh.semMarca);
   clearTimeout(turbos.get(key));
   turbos.delete(key);
-  rtc.stopScreen(key);
-  if (sh.escuta) {
+  rtc.stopScreen(key, { manterTrilhas: manter });
+  if (sh.escuta && !manter) {
     sh.escuta.pause();
     sh.escuta.srcObject = null;
   }
-  controle.soltar(sh.aba);
-  if (sh.alvo && sh.controle) controle.soltarJanela();
+  if (!manter) {
+    controle.soltar(sh.aba);
+    if (sh.alvo && sh.controle) controle.soltarJanela();
+  }
   if (sh.file) stopCastVideo();
   if (notify) socket.emit('share-stop', key);
   me.shares.delete(key);
@@ -2471,6 +2500,7 @@ function stopShare(key, notify) {
   updateShareButton();
   refreshScreens();
   renderPeople();
+  manterAcordado();
 }
 
 function pararTodasAsTelas(notify) {
@@ -5533,8 +5563,127 @@ function reentrarAtendendoTela() {
   socket.emit('tela-atender', true);
   catalogoEnviado = null;
   setTimeout(() => publicarJogos(), 3000); // a extensão se apresenta logo depois de entrar
+  // a página recarregou com a tela no ar (deploy novo, F5, o Chrome recarregou a aba): volta sozinha
+  let voltar = null;
+  try {
+    voltar = JSON.parse(sessionStorage.getItem(TELA_VOLTAR) || 'null');
+    sessionStorage.removeItem(TELA_VOLTAR);
+  } catch { /* sem armazenamento */ }
+  if (voltar && Date.now() - (voltar.t || 0) < 10 * 60_000) voltarTela({ obs: !!voltar.obs, motivo: 'a sala recarregou' });
 }
 const avisoTela = (text) => addAviso({ text, t: Date.now() });
+
+// ----- a tela não cai sozinha
+// Reconexão (a internet piscou, o servidor reiniciou): as capturas vivas saem da sala sem desligar e
+// voltam com a chave nova, na mesma tela da sala se ela continuar livre, com o controle como estava.
+function guardarTelas() {
+  const guardadas = [];
+  for (const sh of [...(self()?.shares.values() || [])]) {
+    const stream = rtc?.screens.get(sh.key)?.stream;
+    if (sh.file || !stream?.getVideoTracks().some((t) => t.readyState === 'live')) continue;
+    guardadas.push({
+      stream, slot: sh.slot, aba: sh.aba, obs: !!sh.obs, superficie: sh.superficie, controle: !!sh.controle,
+      escuta: sh.escuta || null, site: sh.site, titulo: sh.titulo, doTela: sh.key === telaKey,
+    });
+    sh.escuta = null; // o som da aba segue tocando aqui
+    stopShare(sh.key, false, { manter: true });
+  }
+  return guardadas;
+}
+async function devolverTelas(guardadas) {
+  let voltaram = 0;
+  let refazer = null; // a do PC do /tela que não deu para devolver: compartilha de novo do zero
+  for (const g of guardadas) {
+    const viva = g.stream.getVideoTracks().some((t) => t.readyState === 'live');
+    const key = viva ? await publishShare(g.stream, { aba: g.aba, tela: g.slot ?? undefined, qps: g.obs ? QPS_OBS : null, reconexao: true }) : null;
+    if (!key) {
+      for (const t of g.stream.getTracks()) t.stop();
+      g.escuta?.pause();
+      if (g.doTela || (telaLiberadaAqui() && (g.obs || g.superficie === 'monitor'))) refazer = { obs: g.obs };
+      continue;
+    }
+    voltaram++;
+    const sh = self().shares.get(key);
+    Object.assign(sh, { site: g.site, titulo: g.titulo, escuta: g.escuta });
+    if (g.doTela) telaKey = key;
+    if (g.controle) socket.emit('controle-permitir', { key, on: true });
+  }
+  if (voltaram) toast(voltaram > 1 ? `As suas ${voltaram} telas continuam no ar.` : 'A sua tela continua no ar.', 'success', 4000);
+  if (refazer) voltarTela({ ...refazer, motivo: 'a conexão caiu' });
+}
+// Antes de recarregar com a tela no ar (só no PC liberado para o /tela): lembra para voltar sozinha.
+const TELA_VOLTAR = 'sala3d-tela-voltar';
+function lembrarTelasParaVoltar(lista) {
+  if (!telaLiberadaAqui()) return;
+  const casa = lista.filter((g) => g.doTela || g.obs || g.superficie === 'monitor');
+  if (!casa.length) return;
+  try { sessionStorage.setItem(TELA_VOLTAR, JSON.stringify({ obs: casa.some((g) => g.obs), t: Date.now() })); } catch { /* sem armazenamento */ }
+}
+// recarregar a aba por qualquer outro motivo (F5, o Chrome recarregou a aba) também lembra
+window.addEventListener('pagehide', () => {
+  const lista = [...(self()?.shares.values() || [])].filter((sh) => !sh.file)
+    .map((sh) => ({ obs: !!sh.obs, superficie: sh.superficie, doTela: sh.key === telaKey }));
+  lembrarTelasParaVoltar(lista);
+});
+
+// O PC do /tela (ninguém na frente dele) perdeu a tela: compartilha de novo sozinho, pelo mesmo
+// caminho do /tela (ou pelo OBS, se era pelo OBS), e libera o controle. No máximo 4 vezes a cada
+// 15 min, para não brigar com um problema que não se resolve sozinho.
+const voltasDaTela = [];
+let voltandoTela = false;
+async function voltarTela({ obs = false, motivo = '' } = {}) {
+  if (!telaLiberadaAqui() || voltandoTela) return;
+  const agora = Date.now();
+  while (voltasDaTela.length && agora - voltasDaTela[0] > 15 * 60_000) voltasDaTela.shift();
+  if (voltasDaTela.length >= 4) return avisoTela('A tela caiu de novo e não volta mais sozinha por agora: mande /tela de novo.');
+  voltasDaTela.push(agora);
+  voltandoTela = true;
+  try {
+    // a sala acabou de entrar: espera a extensão se apresentar
+    for (let i = 0; i < 20 && (!state.joined || !controle.ext.ok || shareBusy); i++) await new Promise((ok) => setTimeout(ok, 1000));
+    if (!state.joined || !controle.ext.ok || !controle.ext.liberado) return;
+    const minhas = [...(self()?.shares.values() || [])];
+    if (minhas.some((sh) => (obs ? sh.obs : !sh.obs && sh.superficie === 'monitor'))) return; // já voltou
+    toast(`A tela está voltando sozinha (${motivo})…`, 'info', 5000);
+    if (obs) {
+      const o = await controle.pedir('pc-obs', undefined, undefined, undefined, 30_000);
+      if (!o?.ok) return avisoTela(`A tela caiu (${motivo}) e o OBS não abriu: ${erroDoAjudante(o)}`);
+    }
+    const r = await compartilharSozinho({ obs });
+    if (r.erro) return avisoTela(`A tela caiu (${motivo}) e não voltou: ${r.erro}`);
+    telaKey = r.key;
+    await liberarControle(r.key);
+    avisoTela(`A tela tinha caído (${motivo}) e voltou sozinha.`);
+  } finally {
+    voltandoTela = false;
+  }
+}
+
+// Enquanto compartilha, o PC não dorme nem apaga/bloqueia a tela (bloqueada, a captura congela e
+// quem estava jogando de longe fica sem imagem). Pelo ajudante do Windows (1.15+), que vale com o
+// jogo na frente; e pela trava de tela do navegador, que só vale com a sala visível.
+let acordado = { on: false, em: 0 };
+let travaTela = null;
+function manterAcordado() {
+  const on = [...(self()?.shares.values() || [])].some((sh) => !sh.file);
+  if (on && !travaTela && document.visibilityState === 'visible' && navigator.wakeLock?.request) {
+    travaTela = navigator.wakeLock.request('screen').then((l) => {
+      l.addEventListener('release', () => { travaTela = null; });
+      return l;
+    }).catch(() => { travaTela = null; return null; });
+  } else if (!on && travaTela) {
+    const t = travaTela;
+    travaTela = null;
+    t.then((l) => l?.release()).catch(() => {});
+  }
+  // o ajudante: liga, desliga só se ligou, e repete a cada 5 min (ele pode ter reaberto)
+  if (!controle.ext.ok || !controle.ext.liberado || controle.ext.nativo?.ok === false) return;
+  if (on === acordado.on && (!on || Date.now() - acordado.em < 5 * 60_000)) return;
+  acordado = { on, em: Date.now() };
+  controle.pedir('pc-acordado', undefined, undefined, on ? 1 : 0, 10_000);
+}
+document.addEventListener('visibilitychange', manterAcordado);
+setInterval(manterAcordado, 60_000);
 
 function comandoTela(resto) {
   const [palavra = '', ...mais] = resto.split(/\s+/).filter(Boolean);
@@ -5614,17 +5763,30 @@ async function pedidoDeTela({ acao, de }) {
     telaKey = null;
     return responder(true, 'parou de compartilhar');
   }
-  let key = telaKey && minhas?.has(telaKey) ? telaKey : null;
+  // já está na tela inteira (pelo /tela ou à mão)? fica nela. O OBS não conta: ele mostra só o jogo.
+  const telaInteira = (sh) => sh && !sh.obs && !sh.file && sh.superficie === 'monitor';
+  let key = telaKey && telaInteira(minhas?.get(telaKey)) ? telaKey
+    : [...(minhas?.values() || [])].find(telaInteira)?.key ?? null;
+  let trocouObs = false;
   if (!key) {
     if (!controle.ext.ok || !controle.ext.liberado) return responder(false, 'a extensão da Sala 3D não está liberada no Chrome de lá');
-    if (shareBusy) return responder(false, 'já tem um compartilhamento começando lá');
+    if (shareBusy || voltandoTela) return responder(false, 'já tem um compartilhamento começando lá');
     toast(`${de} pediu a sua tela pelo /tela.`, 'info', 6000);
+    // compartilhando pelo OBS (o jogo): a tela inteira entra no lugar dele, com o mesmo som do PC.
+    // Escolher um jogo de novo volta para o OBS.
+    for (const sh of [...(minhas?.values() || [])]) {
+      if (!sh.obs) continue;
+      stopShare(sh.key, true);
+      trocouObs = true;
+    }
     const r = await compartilharSozinho();
-    if (r.erro) return responder(false, `não compartilhou: ${r.erro}`);
-    key = telaKey = r.key;
+    if (r.erro) return responder(false, `não compartilhou: ${r.erro}${trocouObs ? ' (o OBS saiu do ar: escolha o jogo de novo para voltar a ele)' : ''}`);
+    key = r.key;
   }
-  if (!(await liberarControle(key))) return responder(true, 'compartilhando a tela, mas sem controle (falta o ajudante do Windows)');
-  responder(true, 'compartilhando a Tela 1 com áudio, controle liberado');
+  telaKey = key;
+  const onde = trocouObs ? 'trocou o OBS pela tela inteira (Tela 1, com áudio)' : 'compartilhando a Tela 1 com áudio';
+  if (!(await liberarControle(key))) return responder(true, `${onde}, mas sem controle (falta o ajudante do Windows)`);
+  responder(true, `${onde}, controle liberado`);
 }
 
 // Ninguém na frente deste PC: põe o botão na sala e o ajudante aperta ele e o seletor do Chrome (a
