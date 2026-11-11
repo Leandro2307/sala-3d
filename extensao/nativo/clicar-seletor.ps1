@@ -35,9 +35,31 @@ function Apertar($el) {
 # seletor depois de um clique na página, e o Invoke do UI Automation conta como clique. (A política
 # ScreenCaptureWithoutGestureAllowedForOrigins dispensaria o clique, mas com qualquer política o
 # Chrome passa a não carregar a extensão sem compactação.)
+# Jogo em tela cheia (F11) na frente: a janela da sala fica atrás dele, e janela do Chrome coberta não
+# mostra a página ao UI Automation (o botão da sala "some") nem deixa escolher a tela no seletor (o
+# Compartilhar fica cinza). Traz a janela para a frente (o Alt solto destrava o SetForegroundWindow).
+Add-Type -Namespace Sala3d -Name Win -MemberDefinition @'
+[DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+[DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c);
+[DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
+[DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte sc, uint f, UIntPtr x);
+[DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+[DllImport("user32.dll")] public static extern void mouse_event(uint f, uint x, uint y, uint d, UIntPtr e);
+'@
+function Frente($w) {
+  $h = [IntPtr]$w.Current.NativeWindowHandle
+  if ($h -eq [IntPtr]::Zero) { return }
+  if ([Sala3d.Win]::IsIconic($h)) { [Sala3d.Win]::ShowWindow($h, 9) | Out-Null } # SW_RESTORE
+  [Sala3d.Win]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero) # Alt
+  [Sala3d.Win]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero)
+  [Sala3d.Win]::SetForegroundWindow($h) | Out-Null
+  Start-Sleep -Milliseconds 400
+}
+
 $fim = (Get-Date).AddSeconds($Espera)
 $dialogo = $null
 $apertouSala = $false
+$volta = 0
 while (-not $dialogo -and (Get-Date) -lt $fim) {
   $pids = @((Get-Process chrome -ErrorAction SilentlyContinue).Id)
   foreach ($w in [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)) {
@@ -53,30 +75,20 @@ while (-not $dialogo -and (Get-Date) -lt $fim) {
     }
     if ($dialogo) { break }
   }
-  if (-not $dialogo) { Start-Sleep -Milliseconds 500 }
+  if (-not $dialogo) {
+    # o botão da sala não apareceu: a janela dela está coberta (jogo em tela cheia). Traz para a frente.
+    $volta++
+    if (-not $apertouSala -and ($volta % 4) -eq 2) {
+      foreach ($w in [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)) {
+        if ($pids -contains $w.Current.ProcessId -and $w.Current.Name -like '*Sala 3D*') { Frente $w; break }
+      }
+    }
+    Start-Sleep -Milliseconds 500
+  }
 }
 if (-not $dialogo) { Write-Host '  O seletor do Chrome nao apareceu.' -ForegroundColor Yellow; exit 1 }
 
-# Jogo em tela cheia na frente: o seletor abre atrás dele e a tela não recebe o foco (o Compartilhar
-# fica cinza). Traz a janela do Chrome para a frente (o Alt solto destrava o SetForegroundWindow).
-Add-Type -Namespace Sala3d -Name Win -MemberDefinition @'
-[DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
-[DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c);
-[DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
-[DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte sc, uint f, UIntPtr x);
-[DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
-[DllImport("user32.dll")] public static extern void mouse_event(uint f, uint x, uint y, uint d, UIntPtr e);
-'@
-function Frente {
-  $h = [IntPtr]$dialogo.Current.NativeWindowHandle
-  if ($h -eq [IntPtr]::Zero) { return }
-  if ([Sala3d.Win]::IsIconic($h)) { [Sala3d.Win]::ShowWindow($h, 9) | Out-Null } # SW_RESTORE
-  [Sala3d.Win]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero) # Alt
-  [Sala3d.Win]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero)
-  [Sala3d.Win]::SetForegroundWindow($h) | Out-Null
-  Start-Sleep -Milliseconds 300
-}
-Frente
+Frente $dialogo
 
 # a aba "Tela inteira" (a sala já pede com displaySurface: 'monitor', mas por garantia)
 $aba = Achar $dialogo 'Tela inteira' ([System.Windows.Automation.ControlType]::TabItem)
@@ -108,7 +120,7 @@ if ($fonte) { $Tela = $fonte.Current.Name }
 # traz a janela para a frente de novo e clica com o mouse no meio dela.
 function Escolher($vez) {
   if (-not $fonte) { return }
-  if ($vez -ge 2) { Frente }
+  if ($vez -ge 2) { Frente $dialogo }
   try { $fonte.SetFocus() } catch { }
   if ($vez -ge 3) {
     try {
