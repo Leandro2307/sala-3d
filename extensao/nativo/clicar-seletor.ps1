@@ -57,21 +57,70 @@ while (-not $dialogo -and (Get-Date) -lt $fim) {
 }
 if (-not $dialogo) { Write-Host '  O seletor do Chrome nao apareceu.' -ForegroundColor Yellow; exit 1 }
 
-# a aba "Tela inteira" (a sala já pede com displaySurface: 'monitor', mas por garantia)
-$aba = Achar $dialogo 'Tela inteira' ([System.Windows.Automation.ControlType]::TabItem)
-if ($aba) { Apertar $aba | Out-Null; Start-Sleep -Milliseconds 300 }
-
-# a tela; um monitor só: o Chrome já deixa escolhida (e o nome pode ser outro)
-$fonte = $null
-for ($i = 0; $i -lt 20 -and -not $fonte; $i++) {
-  $fonte = Achar $dialogo $Tela $Botao
-  if (-not $fonte) { Start-Sleep -Milliseconds 250 }
-}
-# (o Chrome escolhe a tela quando ela recebe o foco; o Invoke dela não escolhe)
-if ($fonte) {
-  $fonte.SetFocus()
+# Jogo em tela cheia na frente: o seletor abre atrás dele e a tela não recebe o foco (o Compartilhar
+# fica cinza). Traz a janela do Chrome para a frente (o Alt solto destrava o SetForegroundWindow).
+Add-Type -Namespace Sala3d -Name Win -MemberDefinition @'
+[DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+[DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c);
+[DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
+[DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte sc, uint f, UIntPtr x);
+[DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+[DllImport("user32.dll")] public static extern void mouse_event(uint f, uint x, uint y, uint d, UIntPtr e);
+'@
+function Frente {
+  $h = [IntPtr]$dialogo.Current.NativeWindowHandle
+  if ($h -eq [IntPtr]::Zero) { return }
+  if ([Sala3d.Win]::IsIconic($h)) { [Sala3d.Win]::ShowWindow($h, 9) | Out-Null } # SW_RESTORE
+  [Sala3d.Win]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero) # Alt
+  [Sala3d.Win]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero)
+  [Sala3d.Win]::SetForegroundWindow($h) | Out-Null
   Start-Sleep -Milliseconds 300
 }
+Frente
+
+# a aba "Tela inteira" (a sala já pede com displaySurface: 'monitor', mas por garantia)
+$aba = Achar $dialogo 'Tela inteira' ([System.Windows.Automation.ControlType]::TabItem)
+if (-not $aba) { $aba = Achar $dialogo 'Entire screen' ([System.Windows.Automation.ControlType]::TabItem) }
+if ($aba) { Apertar $aba | Out-Null; Start-Sleep -Milliseconds 300 }
+
+# A tela. O nome muda com o Chrome e o número de monitores: "Tela 1", "Tela 2"... com dois ou mais;
+# "Tela inteira" ou "Tela cheia" com um só (em inglês "Screen 1", "Entire screen"). Procura a pedida,
+# depois os nomes de monitor único e, por fim, qualquer botão com cara de tela.
+$nomes = @($Tela, 'Tela 1', 'Tela inteira', 'Tela cheia', 'Screen 1', 'Entire screen', 'Full screen') | Select-Object -Unique
+function AcharFonte {
+  $todos = @($dialogo.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition))
+  foreach ($n in $nomes) {
+    foreach ($e in $todos) { if ($e.Current.Name -eq $n -and $e.Current.ControlType -eq $Botao) { return $e } }
+  }
+  foreach ($e in $todos) {
+    if ($e.Current.ControlType -eq $Botao -and $e.Current.Name -match '^(Tela|Screen|Monitor)\s*\d*$|^Tela (inteira|cheia)$|^(Entire|Full) screen$') { return $e }
+  }
+  return $null
+}
+$fonte = $null
+for ($i = 0; $i -lt 20 -and -not $fonte; $i++) {
+  $fonte = AcharFonte
+  if (-not $fonte) { Start-Sleep -Milliseconds 250 }
+}
+if ($fonte) { $Tela = $fonte.Current.Name }
+
+# Escolhe a tela. O Chrome escolhe quando ela recebe o foco (o Invoke dela não escolhe); não deu,
+# traz a janela para a frente de novo e clica com o mouse no meio dela.
+function Escolher($vez) {
+  if (-not $fonte) { return }
+  if ($vez -ge 2) { Frente }
+  try { $fonte.SetFocus() } catch { }
+  if ($vez -ge 3) {
+    try {
+      $r = $fonte.Current.BoundingRectangle
+      [Sala3d.Win]::SetCursorPos([int]($r.X + $r.Width / 2), [int]($r.Y + $r.Height / 2)) | Out-Null
+      [Sala3d.Win]::mouse_event(0x2, 0, 0, 0, [UIntPtr]::Zero) # botão esquerdo
+      [Sala3d.Win]::mouse_event(0x4, 0, 0, 0, [UIntPtr]::Zero)
+    } catch { }
+  }
+  Start-Sleep -Milliseconds 300
+}
+Escolher 1
 
 # áudio do sistema ligado
 $audio = Achar $dialogo 'Compartilhar com áudio do sistema' $Botao
@@ -91,7 +140,14 @@ for ($i = 0; $i -lt 20 -and -not $ok; $i++) {
     if ($e.Current.ClassName -eq 'MdTextButton' -and ($e.Current.Name -like 'Compartilhar*' -or $e.Current.Name -like 'Share*')) { $b = $e; break }
   }
   if ($b -and $b.Current.IsEnabled) { $ok = Apertar $b }
-  if (-not $ok) { Start-Sleep -Milliseconds 250 }
+  if (-not $ok) {
+    # cinza: a tela não ficou escolhida (jogo na frente, nome novo): tenta de novo, mais forte
+    if ($i -eq 3 -or $i -eq 7 -or $i -eq 11) {
+      if (-not $fonte) { $fonte = AcharFonte }
+      Escolher ([Math]::Min(3, [int](($i + 1) / 4) + 1))
+    }
+    Start-Sleep -Milliseconds 250
+  }
 }
 if ($ok) { Write-Host "  Compartilhando: $Tela" -ForegroundColor Green; exit 0 }
 Write-Host '  Nao consegui apertar Compartilhar: escolha a tela no seletor.' -ForegroundColor Yellow
