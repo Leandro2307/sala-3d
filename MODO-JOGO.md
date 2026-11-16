@@ -842,3 +842,23 @@ sala em tela cheia:
 - O Lossless deste PC está em LSFG 3 **Adaptativo, alvo 60**: com o PS5 a 60 ele não gera nada (a sala
   avisa). Fixo ×2 ou alvo 120/144.
 - `instalar.ps1` compilava sem `System.Drawing` (falhava): corrigido.
+
+## Lossless para todos pelo OBS (2026-11-16, testado no PC do PS5)
+
+O pedido: o PS5 a 30 qps, o Lossless do PC do PS5 dobra para 60 e todos recebem (dentro do teto de 60
+do turbo). Botão **Lossless para todos** no painel do PS5 direto (`losslessParaTodos` no main.js):
+1. a sala abre a janela "PS5 · Lossless" (só a imagem do PS5, nada mais se mexe nela);
+2. **ajudante 1.18** (`{tipo:'obs-ps5', alvo}`; extensão 1.24, `pc-obs-ps5`): leva a janela maximizada
+   para o monitor em que a sala não está, garante o OBS aberto com a câmera virtual, monta pelo
+   **WebSocket do OBS** (senha do config.json do plugin) a cena "Sala 3D · PS5" com a captura daquele
+   monitor (achado pelo nome "… @ X,Y" do OBS, método WGC) e põe no ar; traz a janela para a frente e
+   aperta o atalho do Lossless só se ele não estiver escalando (janela de classe "LosslessScaling");
+3. a tela do PS5 passa a ser a câmera do OBS (turbo codifica, `replaceScreenTrack`); som e controle
+   continuam do PS5 direto. "Voltar à imagem direta" (ou fechar a janela) desfaz e devolve ao ar a cena de
+   antes (guardada em `%LOCALAPPDATA%\Sala3d\obs-cena-antes.txt`).
+
+Testes (página a 30 qps no lugar do PS5, Lossless Adaptativo 165, OBS a 60): câmera do OBS com **55
+quadros diferentes/s** (sem o Lossless, 30). Captura **DXGI dá 30** (não vê os quadros do Lossless): tem
+que ser WGC. O Lossless **pausa** quando outra janela ganha o foco (31) e **retoma sozinho** quando a
+janela do PS5 volta para a frente (55). O WebSocket do OBS foi ligado no config.json (cópia do original no
+scratchpad da sessão). Falta o teste com o PS5 de verdade pela sala.

@@ -563,8 +563,9 @@ export class Ps5Nativo {
   // compartilhar(fonte): põe a fonte numa tela da sala; devolve a chave ou null
   // pararTela(): tira a tela do PS5 da sala; onTremor(g, p); onEvento(texto, dados): relatório
   // jogarComLossless(key): a tela do PS5 em tela cheia no modo jogo, com o Lossless ligado (main.js)
-  constructor({ pedirPonte, compartilhar, pararTela, onTremor, onEvento, toast, aoAbrir, aoFechar, jogarComLossless }) {
-    Object.assign(this, { pedirPonte, compartilhar, pararTela, onTremor, onEvento, toast, aoAbrir, aoFechar, jogarComLossless });
+  // losslessTodos: { ligado(), alternar() } — o Lossless deste PC para todos, pela câmera do OBS
+  constructor({ pedirPonte, compartilhar, pararTela, onTremor, onEvento, toast, aoAbrir, aoFechar, jogarComLossless, losslessTodos }) {
+    Object.assign(this, { pedirPonte, compartilhar, pararTela, onTremor, onEvento, toast, aoAbrir, aoFechar, jogarComLossless, losslessTodos });
     this.ws = null;
     this.consoles = [];
     this.achados = null;
@@ -870,6 +871,7 @@ export class Ps5Nativo {
       else if (acao === 'registrar') this.registrar();
       else if (acao === 'tentar') this.abrir();
       else if (acao === 'ls-jogar') { this.fechar(); this.jogarComLossless?.(this.key); }
+      else if (acao === 'ls-todos') Promise.resolve(this.losslessTodos?.alternar()).finally(() => this.render());
     });
     this.raiz.addEventListener('change', (e) => {
       const n = e.target.name;
@@ -954,9 +956,12 @@ export class Ps5Nativo {
       <p class="p5-status">O PS5 sem o chiaki-ng aberto: a imagem que ele faz vai direto para quem joga, e o controle de quem joga chega nele como um controle de PS5 (sem o ViGEmBus). Feche o chiaki-ng antes: o PS5 só aceita um Remote Play por vez.</p>
       ${noAr ? `<div class="p5-item"><span><span class="p5-fase">${esc(fase)}</span>${c ? `<small>${this.fonte?.cfg ? `${this.fonte.cfg.w}×${this.fonte.cfg.h}` : `${c.largura}×${c.altura}`} · ${c.qps} qps · ${Math.round(c.kbps / 100) / 10} Mbps · ${c.codec === 'h265' ? 'H.265' : 'H.264'}${this.fonte?.cfg && (this.fonte.cfg.w < c.largura || this.fonte.cfg.h < c.altura) ? ` <span class="p5-fase">(pedido ${c.largura}×${c.altura}: o PS5 mandou menos)</span>` : ''}</small>` : ''}</span>
         <span class="p5-acoes"><button type="button" class="secondary small" data-p5="dormir"${c ? '' : ' disabled'}>Pôr em repouso</button><button type="button" class="small danger" data-p5="parar">Parar</button></span></div>` : ''}
-      ${noAr && this.key && this.jogarComLossless ? `<div class="p5-item"><span><b>Jogar com o Lossless</b>
-        <small>Abre o PS5 em tela cheia no modo jogo e liga o Lossless Scaling nele (o Lossless tem que estar aberto). Ctrl+Alt+S liga e desliga no meio do jogo. Quem joga de outro PC usa o Lossless de lá do mesmo jeito.</small></span>
-        <span class="p5-acoes"><button type="button" class="small" data-p5="ls-jogar">Jogar com o Lossless</button></span></div>` : ''}
+      ${noAr && this.key && this.losslessTodos ? `<div class="p5-item"><span><b>Lossless para todos</b>${this.losslessTodos.ligado() ? ' <span class="p5-fase">ligado</span>' : ''}
+        <small>Ponha o PS5 a 30 qps: o Lossless deste PC dobra para 60 e todo mundo recebe pelo OBS. A janela do PS5 vai para o outro monitor e precisa ficar na frente (clicando em outra janela o Lossless pausa e volta quando ela volta). Precisa do OBS com o WebSocket ligado e do Lossless aberto.</small></span>
+        <span class="p5-acoes"><button type="button" class="small" data-p5="ls-todos">${this.losslessTodos.ligado() ? 'Voltar à imagem direta' : 'Lossless para todos'}</button></span></div>` : ''}
+      ${noAr && this.key && this.jogarComLossless ? `<div class="p5-item"><span><b>Jogar com o Lossless (só neste PC)</b>
+        <small>Abre o PS5 em tela cheia no modo jogo e liga o Lossless Scaling nele, só para você. Ctrl+Alt+S liga e desliga. Quem joga de outro PC usa o Lossless de lá do mesmo jeito.</small></span>
+        <span class="p5-acoes"><button type="button" class="secondary small" data-p5="ls-jogar">Jogar com o Lossless</button></span></div>` : ''}
       <div class="p5-lista">${lista || '<p class="p5-vazio">Nenhum PS5 registrado aqui ainda. Se o chiaki-ng já joga neste PC, é só trazer o registro dele.</p>'}</div>
       <div class="p5-linha">
         <button type="button" class="secondary small" data-p5="procurar"${this.procurando ? ' disabled' : ''}>${this.procurando ? 'Procurando…' : 'Procurar na rede'}</button>

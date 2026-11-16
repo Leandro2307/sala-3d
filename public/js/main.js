@@ -2501,6 +2501,13 @@ function stopShare(key, notify, { manter = false } = {}) {
   me.shares.delete(key);
   // a tela do PS5 direto saiu: a sessão com o PS5 acaba junto
   if (sh.ps5 && !manter) ps5Nativo.telaSaiu(key);
+  // o Lossless para todos acaba com a tela: solta a câmera do OBS e fecha a janela do PS5
+  if (sh.losslessCam) {
+    for (const t of sh.losslessCam.getTracks()) t.stop();
+    sh.lossless = sh.losslessCam = null;
+    controle.pedir('pc-obs-ps5', undefined, undefined, '__parar__', 20_000).catch(() => {});
+    if (janelaLs && !janelaLs.closed) janelaLs.close();
+  }
   avisarAbas();
   soltarVideo(sh);
   localAvatar.setStatus({ sharing: me.shares.size > 0 });
@@ -2943,6 +2950,8 @@ const turboEnvio = new TurboEnvio({
   tela: (key) => {
     const sh = self()?.shares.get(key);
     const scr = rtc?.screens.get(key);
+    // Lossless para todos (losslessParaTodos): a câmera do OBS é codificada como uma tela comum
+    if (sh?.lossless && scr) return { stream: sh.lossless, controle: !!sh.controle, ps5: null };
     return sh && scr ? { stream: scr.stream, controle: !!sh.controle, ps5: sh.ps5 || null } : null;
   },
   onMudou: (id, key, ligado) => {
@@ -2975,7 +2984,137 @@ const ps5Nativo = new Ps5Nativo({
   },
   // "Jogar com o Lossless": a tela do PS5 em foco, modo jogo em tela cheia e o Lossless ligado nela
   jogarComLossless: (key) => jogarComLossless(key),
+  // "Lossless para todos": o Lossless deste PC dobra a imagem do PS5 e todos recebem pela câmera do OBS
+  losslessTodos: {
+    ligado: () => !!self()?.shares.get(ps5Nativo.key)?.lossless,
+    alternar: () => losslessParaTodos(!self()?.shares.get(ps5Nativo.key)?.lossless),
+  },
 });
+
+// ------------------------------------------------------------------ Lossless para todos (OBS)
+// O PS5 a 30 qps, o Lossless DESTE PC dobra e todo mundo recebe pela câmera do OBS (até 60: o teto do
+// turbo). A sala abre uma janela só com a imagem do PS5; o ajudante (1.18+) leva essa janela maximizada
+// para o monitor em que a sala não está, monta no OBS (pelo WebSocket dele) uma cena que captura aquele
+// monitor e liga o Lossless nela. A imagem da tela do PS5 vira a câmera do OBS: o turbo codifica ela e o
+// vídeo da conexão troca de trilha; o som e o controle continuam os do PS5 direto.
+// Testado em 2026-11-16 (página a 30 qps no lugar do PS5): a câmera do OBS deu 55 quadros diferentes por
+// segundo. O Lossless só escala a janela da frente: clicando em outra ele pausa (vão os 30) e retoma
+// sozinho quando a janela do PS5 volta para a frente.
+const TITULO_LS = 'PS5 · Lossless';
+let janelaLs = null;
+
+function abrirJanelaPs5(trilha) {
+  if (janelaLs && !janelaLs.closed) return janelaLs;
+  const w = window.open('', 'sala3d-ps5-lossless', 'popup,width=1280,height=720');
+  if (!w) return null;
+  w.document.title = TITULO_LS;
+  w.document.body.style.cssText = 'margin:0;background:#000;overflow:hidden;cursor:none';
+  const v = w.document.createElement('video');
+  v.muted = true; // o som já toca na sala
+  v.autoplay = true;
+  v.playsInline = true;
+  // nada mais se mexe nesta janela: o Lossless conta os redesenhos dela (só a imagem do PS5, a 30)
+  v.style.cssText = 'width:100vw;height:100vh;object-fit:contain;display:block;background:#000';
+  v.srcObject = new MediaStream([trilha]);
+  w.document.body.appendChild(v);
+  v.play().catch(() => {});
+  return w;
+}
+
+const MOTIVO_LS = {
+  'obs-websocket': 'o OBS não deixou a sala comandar. No OBS: Ferramentas → Configurações do servidor WebSocket → marque “Ativar servidor WebSocket”.',
+  'lossless-fechado': 'o Lossless Scaling está fechado. Abra o Lossless e tente de novo.',
+  'sem-janela': 'a janela do PS5 não abriu (libere os pop-ups deste site).',
+  'ajudante-ausente': 'o ajudante do Windows não respondeu (instale de novo pela extensão).',
+  demorou: 'o ajudante demorou demais (o OBS pode estar abrindo: tente de novo).',
+};
+
+async function losslessParaTodos(ligar) {
+  const key = ps5Nativo.key;
+  const sh = key && self()?.shares.get(key);
+  const scr = key && rtc?.screens.get(key);
+  if (!sh || !scr) return void toast('Ponha o PS5 numa tela antes.', 'warn', 5000);
+  if (ligar) {
+    if (sh.lossless) return;
+    if (versaoNum(controle.ext.versao) < versaoNum('1.24')) {
+      return void toast('Para o Lossless para todos, atualize a extensão: chrome://extensions → recarregar a da Sala 3D (versão 1.24).', 'warn', 10000);
+    }
+    const trilha = scr.stream.getVideoTracks()[0];
+    // a janela abre ainda no clique (depois de um await o navegador bloqueia)
+    const w = abrirJanelaPs5(trilha);
+    if (!w) return void toast('O navegador bloqueou a janela do PS5. Libere os pop-ups deste site e tente de novo.', 'warn', 8000);
+    janelaLs = w;
+    toast('Preparando: a janela do PS5 no outro monitor, o OBS e o Lossless…', 'info', 6000);
+    const r = await controle.pedir('pc-obs-ps5', undefined, undefined, TITULO_LS, 60_000).catch(() => null);
+    diagJogo.evento('Lossless para todos: ajudante', r || { erro: 'sem resposta' });
+    if (!r?.ok) {
+      const m = r?.msg || r?.erro;
+      toast(`Lossless para todos não ligou: ${MOTIVO_LS[m] || m || 'sem resposta do ajudante'}`, 'warn', 12000);
+      w.close();
+      return;
+    }
+    let cam;
+    try {
+      cam = await rtc.camObs();
+    } catch (err) {
+      controle.pedir('pc-obs-ps5', undefined, undefined, '__parar__', 20_000).catch(() => {});
+      w.close();
+      return void toast(err?.message || String(err), 'warn', 9000);
+    }
+    const nova = cam.getVideoTracks()[0];
+    // a imagem do OBS com o som do PS5 (é esse par que o turbo manda)
+    sh.lossless = new MediaStream([nova, ...scr.stream.getAudioTracks()]);
+    sh.losslessCam = cam;
+    nova.addEventListener('ended', () => losslessParaTodos(false), { once: true });
+    rtc.replaceScreenTrack(key, nova);
+    turboEnvio.trocarFonte(key);
+    mostrarNaMinhaTela(sh, new MediaStream([nova]));
+    ps5Nativo.render?.();
+    const semLs = r.lossless ? '' : ' O Lossless não ligou na janela: clique nela e aperte o atalho dele.';
+    toast(`Lossless para todos ligado: a janela do PS5 está ${r.umMonitor ? 'na tela' : 'no outro monitor'} e todos recebem a imagem do OBS.${semLs} Deixe a janela do PS5 na frente: clicando em outra, o Lossless pausa (vão os 30) e volta quando ela volta.`, semLs ? 'warn' : 'success', 14000);
+  } else {
+    if (!sh.lossless) return;
+    const cam = sh.losslessCam;
+    sh.lossless = null;
+    sh.losslessCam = null;
+    const direta = scr.stream.getVideoTracks()[0];
+    if (direta) rtc.replaceScreenTrack(key, direta);
+    turboEnvio.trocarFonte(key);
+    mostrarNaMinhaTela(sh, scr.stream);
+    for (const t of cam?.getTracks() || []) t.stop();
+    controle.pedir('pc-obs-ps5', undefined, undefined, '__parar__', 20_000).catch(() => {});
+    if (janelaLs && !janelaLs.closed) janelaLs.close(); // o Lossless para junto com a janela
+    janelaLs = null;
+    ps5Nativo.render?.();
+    diagJogo.evento('Lossless para todos: desligado');
+    toast('De volta à imagem direta do PS5.', 'info', 5000);
+  }
+}
+
+// a janela do PS5 fechada com o Lossless para todos ligado: volta para a imagem direta
+setInterval(() => {
+  if (!janelaLs?.closed) return;
+  janelaLs = null;
+  if (self()?.shares.get(ps5Nativo.key)?.lossless) {
+    losslessParaTodos(false);
+    toast('A janela do PS5 fechou: voltei para a imagem direta.', 'warn', 8000);
+  }
+}, 1000);
+
+// a minha tela na sala (e o foco, se estiver nela) mostra esta imagem: com o Lossless para todos, a do
+// OBS, que é o que todos recebem
+function mostrarNaMinhaTela(sh, stream) {
+  if (sh.video && sh.video.srcObject !== stream) {
+    sh.video.srcObject = stream;
+    sh.video.play().catch(() => {});
+  }
+  if (state.focus?.kind === 'share' && state.focus.key === sh.key) {
+    const fv = $('#focus-video');
+    fv.srcObject = stream;
+    fv.play().catch(() => {});
+  }
+  refreshScreens();
+}
 
 // ------------------------------------------------------------------ Lossless Scaling
 // O Lossless gera os quadros no PC de quem joga, em cima da sala em tela cheia: sem OBS, sem codificar

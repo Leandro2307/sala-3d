@@ -106,6 +106,7 @@ namespace Sala3d
         [DllImport("user32.dll")] static extern bool GetCursorInfo(ref CURSORINFO ci);
         [DllImport("user32.dll")] static extern bool GetClipCursor(out RECT r);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr h, StringBuilder s, int n);
         [DllImport("user32.dll")] static extern bool EnumWindows(EnumWin p, IntPtr l);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern bool EnumDisplayDevices(string dev, uint i, ref DISPLAY_DEVICE d, uint f);
         [DllImport("user32.dll")] static extern bool EnumDisplayMonitors(IntPtr dc, IntPtr clip, EnumMon p, IntPtr l);
@@ -192,7 +193,7 @@ namespace Sala3d
             new Thread(VigiarAtalho) { IsBackground = true }.Start();
             new Thread(VigiarJogo) { IsBackground = true }.Start();
             new Thread(VigiarWifi) { IsBackground = true }.Start();
-            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.17.0" } });
+            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.18.0" } });
             var json = new JavaScriptSerializer();
             string txt;
             while ((txt = Ler(entrada)) != null)
@@ -248,6 +249,7 @@ namespace Sala3d
             if (tipo == "jogos" || tipo == "jogo-abrir" || tipo == "jogo-fechar" || tipo == "obs") { PedidoJogo(m); return; }
             if (tipo == "ps5") { PedidoPs5(S(m, "pid")); return; }
             if (tipo == "lossless") { PedidoLossless(S(m, "pid")); return; }
+            if (tipo == "obs-ps5") { PedidoObsPs5(S(m, "pid"), S(m, "alvo")); return; }
             if (tipo == "parar") { lock (travaEntrada) { parado = true; SoltarTudo(); } return; }
             if (tipo == "soltar") { jogo = false; vivoVisto = false; cursorEnviado = null; SoltarTudo(); temAlvo = false; rotuloAtual = null; qualEnviado = null; return; }
             if (tipo != "entrada" || !temAlvo || parado) return;
@@ -363,60 +365,350 @@ namespace Sala3d
             new Thread(() =>
             {
                 var r = new Dictionary<string, object> { { "tipo", "lossless" }, { "pid", pid } };
-                try
-                {
-                    bool rodando = System.Diagnostics.Process.GetProcessesByName("LosslessScaling").Length > 0;
-                    r["rodando"] = rodando;
-                    string tecla = "S", mods = "Alt Control";
-                    string arq = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Lossless Scaling", "Settings.xml");
-                    if (File.Exists(arq))
-                    {
-                        string x = File.ReadAllText(arq);
-                        Func<string, string> campo = (n) =>
-                        {
-                            var mt = System.Text.RegularExpressions.Regex.Match(x, "<" + n + ">([^<]*)</" + n + ">");
-                            return mt.Success ? mt.Groups[1].Value.Trim() : null;
-                        };
-                        tecla = campo("Hotkey") ?? tecla;
-                        mods = campo("HotkeyModifierKeys") ?? mods;
-                        r["geracao"] = campo("FrameGeneration");
-                        r["modo"] = campo("LSFG3Mode1");
-                        r["multiplicador"] = campo("LSFG3Multiplier");
-                        r["alvo"] = campo("LSFG3Target");
-                    }
-                    var nomes = new List<string>();
-                    foreach (var md in new[] { "Control", "Alt", "Shift", "Windows" })
-                        if (mods.Contains(md)) nomes.Add(md == "Control" ? "Ctrl" : md == "Windows" ? "Win" : md);
-                    nomes.Add(tecla.StartsWith("D") && tecla.Length == 2 ? tecla.Substring(1) : tecla);
-                    r["atalho"] = string.Join("+", nomes);
-                    if (!rodando) { r["ok"] = false; r["msg"] = "fechado"; Escrever(r); return; }
-                    var vks = new List<ushort>();
-                    foreach (var md in mods.Split(new[] { ' ', ',' }, StringSplitOptions.RemoveEmptyEntries))
-                    {
-                        if (md == "Control") vks.Add(0x11);
-                        else if (md == "Alt") vks.Add(0x12);
-                        else if (md == "Shift") vks.Add(0x10);
-                        else if (md == "Windows") vks.Add(0x5B);
-                    }
-                    ushort vk;
-                    int nF;
-                    if (tecla.Length == 1) vk = (ushort)char.ToUpperInvariant(tecla[0]);
-                    else if (tecla.StartsWith("F") && int.TryParse(tecla.Substring(1), out nF) && nF >= 1 && nF <= 24) vk = (ushort)(0x70 + nF - 1);
-                    else if (tecla.StartsWith("D") && tecla.Length == 2 && char.IsDigit(tecla[1])) vk = (ushort)tecla[1];
-                    else { r["ok"] = false; r["msg"] = "atalho-desconhecido"; Escrever(r); return; }
-                    lock (travaEntrada)
-                    {
-                        foreach (var m in vks) Teclado(m, false, false);
-                        Teclado(vk, false, false);
-                        Thread.Sleep(40);
-                        Teclado(vk, true, false);
-                        for (int i = vks.Count - 1; i >= 0; i--) Teclado(vks[i], true, false);
-                    }
-                    r["ok"] = true;
-                }
+                try { AtalhoLossless(r); }
                 catch (Exception err) { r["ok"] = false; r["msg"] = err.Message; }
                 Escrever(r);
             }) { IsBackground = true }.Start();
+        }
+
+        // lê a configuração do Lossless em r e, se ele estiver aberto, aperta o atalho (r["ok"])
+        static bool AtalhoLossless(Dictionary<string, object> r)
+        {
+            bool rodando = System.Diagnostics.Process.GetProcessesByName("LosslessScaling").Length > 0;
+            r["rodando"] = rodando;
+            string tecla = "S", mods = "Alt Control";
+            string arq = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Lossless Scaling", "Settings.xml");
+            if (File.Exists(arq))
+            {
+                string x = File.ReadAllText(arq);
+                Func<string, string> campo = (n) =>
+                {
+                    var mt = System.Text.RegularExpressions.Regex.Match(x, "<" + n + ">([^<]*)</" + n + ">");
+                    return mt.Success ? mt.Groups[1].Value.Trim() : null;
+                };
+                tecla = campo("Hotkey") ?? tecla;
+                mods = campo("HotkeyModifierKeys") ?? mods;
+                r["geracao"] = campo("FrameGeneration");
+                r["modo"] = campo("LSFG3Mode1");
+                r["multiplicador"] = campo("LSFG3Multiplier");
+                r["alvo"] = campo("LSFG3Target");
+            }
+            var nomes = new List<string>();
+            foreach (var md in new[] { "Control", "Alt", "Shift", "Windows" })
+                if (mods.Contains(md)) nomes.Add(md == "Control" ? "Ctrl" : md == "Windows" ? "Win" : md);
+            nomes.Add(tecla.StartsWith("D") && tecla.Length == 2 ? tecla.Substring(1) : tecla);
+            r["atalho"] = string.Join("+", nomes);
+            if (!rodando) { r["ok"] = false; r["msg"] = "fechado"; return false; }
+            var vks = new List<ushort>();
+            foreach (var md in mods.Split(new[] { ' ', ',' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (md == "Control") vks.Add(0x11);
+                else if (md == "Alt") vks.Add(0x12);
+                else if (md == "Shift") vks.Add(0x10);
+                else if (md == "Windows") vks.Add(0x5B);
+            }
+            ushort vk;
+            int nF;
+            if (tecla.Length == 1) vk = (ushort)char.ToUpperInvariant(tecla[0]);
+            else if (tecla.StartsWith("F") && int.TryParse(tecla.Substring(1), out nF) && nF >= 1 && nF <= 24) vk = (ushort)(0x70 + nF - 1);
+            else if (tecla.StartsWith("D") && tecla.Length == 2 && char.IsDigit(tecla[1])) vk = (ushort)tecla[1];
+            else { r["ok"] = false; r["msg"] = "atalho-desconhecido"; return false; }
+            lock (travaEntrada)
+            {
+                foreach (var m in vks) Teclado(m, false, false);
+                Teclado(vk, false, false);
+                Thread.Sleep(40);
+                Teclado(vk, true, false);
+                for (int i = vks.Count - 1; i >= 0; i--) Teclado(vks[i], true, false);
+            }
+            r["ok"] = true;
+            return true;
+        }
+
+        // ------------------------------------------------------------ PS5 + Lossless para todos (1.18+)
+        // O PS5 a 30 qps, o Lossless dobra para 60 e todo mundo recebe os 60 pela câmera do OBS:
+        //   { tipo: "obs-ps5", alvo: "<título da janela do PS5>" } -> a janela do PS5 (aberta pela sala) vai
+        //     maximizada para o monitor em que a sala NÃO está; o OBS (aberto com a câmera virtual se
+        //     estiver fechado) ganha a cena CENA_PS5 com a captura desse monitor, no ar; o Lossless liga
+        //     na janela. { ok, msg, monitor, umMonitor, cenaAntes, + o que AtalhoLossless conta }
+        //   { tipo: "obs-ps5", alvo: "__parar__" } -> a cena de antes volta ao ar (a sala fecha a janela,
+        //     e o Lossless para sozinho com ela)
+        // O OBS é comandado pelo WebSocket dele (ligado em Ferramentas → Configurações do servidor
+        // WebSocket; a senha vem do config.json do plugin).
+        // Testado em 2026-11-16 (página a 30 qps, Lossless adaptativo 165, OBS a 60 pelo WGC): a câmera do
+        // OBS deu 55 quadros diferentes por segundo; pela Duplicação DXGI só 30 (ela não vê os quadros do
+        // Lossless). O Lossless só escala a janela da frente: outra janela ganhou o foco, ele pausou (31);
+        // a janela do PS5 voltou para a frente, ele retomou sozinho (55), sem apertar o atalho de novo.
+        const string CENA_PS5 = "Sala 3D · PS5";
+        const string FONTE_PS5 = "Sala 3D · monitor do PS5";
+        // a cena que estava no ar antes: num arquivo (o ajudante fecha junto com o Chrome, e o "parar"
+        // pode vir de um ajudante novo)
+        static string cenaAntesPs5
+        {
+            get
+            {
+                try { string f = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Sala3d", "obs-cena-antes.txt"); return File.Exists(f) ? File.ReadAllText(f).Trim() : null; }
+                catch { return null; }
+            }
+            set
+            {
+                try { string d = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Sala3d"); Directory.CreateDirectory(d); File.WriteAllText(Path.Combine(d, "obs-cena-antes.txt"), value ?? ""); }
+                catch { }
+            }
+        }
+
+        static void PedidoObsPs5(string pid, string alvo)
+        {
+            new Thread(() =>
+            {
+                var r = new Dictionary<string, object> { { "tipo", "obs-ps5" }, { "pid", pid } };
+                try
+                {
+                    if (alvo == "__parar__") ObsPs5Parar(r);
+                    else ObsPs5Ligar(string.IsNullOrEmpty(alvo) ? "PS5 · Lossless" : alvo, r);
+                }
+                catch (Exception err) { r["ok"] = false; if (!r.ContainsKey("msg")) r["msg"] = err.Message; }
+                Escrever(r);
+            }) { IsBackground = true }.Start();
+        }
+
+        static IntPtr JanelaComTitulo(string comeco, string evitar = null)
+        {
+            IntPtr achada = IntPtr.Zero;
+            EnumWindows((h, l) =>
+            {
+                if (!IsWindowVisible(h)) return true;
+                var sb = new StringBuilder(512);
+                GetWindowText(h, sb, 512);
+                string t = sb.ToString();
+                if (t.StartsWith(comeco) && (evitar == null || !t.StartsWith(evitar))) { achada = h; return false; }
+                return true;
+            }, IntPtr.Zero);
+            return achada;
+        }
+
+        static void ObsPs5Ligar(string titulo, Dictionary<string, object> r)
+        {
+            IntPtr janela = JanelaComTitulo(titulo);
+            if (janela == IntPtr.Zero) { r["ok"] = false; r["msg"] = "sem-janela"; return; }
+            // os monitores; o da sala é o da janela "Sala 3D" (a janela do PS5 vai para outro)
+            var monitores = new List<MONITORINFOEX>();
+            EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (IntPtr mon, IntPtr dc, ref RECT rr, IntPtr l) =>
+            {
+                var mi = new MONITORINFOEX(); mi.cbSize = Marshal.SizeOf(mi);
+                if (GetMonitorInfo(mon, ref mi)) monitores.Add(mi);
+                return true;
+            }, IntPtr.Zero);
+            IntPtr sala = JanelaComTitulo("Sala 3D", titulo);
+            string devSala = null;
+            if (sala != IntPtr.Zero)
+            {
+                var ms = new MONITORINFOEX(); ms.cbSize = Marshal.SizeOf(ms);
+                if (GetMonitorInfo(MonitorFromWindow(sala, 2), ref ms)) devSala = ms.szDevice;
+            }
+            var alvoMon = monitores.FirstOrDefault(m => m.szDevice != devSala);
+            if (alvoMon.cbSize == 0) alvoMon = monitores.First();
+            r["umMonitor"] = monitores.Count < 2;
+            var rc = alvoMon.rcMonitor;
+            r["monitor"] = alvoMon.szDevice + " @ " + rc.Left + "," + rc.Top;
+
+            // o OBS: aberto (com a câmera virtual), a cena do PS5 capturando aquele monitor, no ar
+            var obs = GarantirObs();
+            if (!(obs["ok"] is bool && (bool)obs["ok"])) { r["ok"] = false; r["msg"] = "obs: " + obs["msg"]; return; }
+            using (var ws = ObsWs.Abrir(r))
+            {
+                if (ws == null) return;
+                string noAr = Txt(ws.Pedir("GetCurrentProgramScene"), "currentProgramSceneName");
+                if (noAr != null && noAr != CENA_PS5) cenaAntesPs5 = noAr;
+                r["cenaAntes"] = cenaAntesPs5;
+                var cenas = Lista(ws.Pedir("GetSceneList"), "scenes").Select(c => Txt(c, "sceneName")).ToList();
+                if (!cenas.Contains(CENA_PS5)) ws.Pedir("CreateScene", new Dictionary<string, object> { { "sceneName", CENA_PS5 } });
+                var fontes = Lista(ws.Pedir("GetInputList", new Dictionary<string, object> { { "inputKind", "monitor_capture" } }), "inputs").Select(c => Txt(c, "inputName")).ToList();
+                if (!fontes.Contains(FONTE_PS5))
+                    ws.Pedir("CreateInput", new Dictionary<string, object> { { "sceneName", CENA_PS5 }, { "inputName", FONTE_PS5 }, { "inputKind", "monitor_capture" },
+                        { "inputSettings", new Dictionary<string, object> { { "capture_cursor", false } } }, { "sceneItemEnabled", true } });
+                // o monitor pelo nome que o OBS dá: "...: 1920x1080 @ -1920,0"
+                string pos = "@ " + rc.Left + "," + rc.Top;
+                string idMon = null;
+                foreach (var it in Lista(ws.Pedir("GetInputPropertiesListPropertyItems", new Dictionary<string, object> { { "inputName", FONTE_PS5 }, { "propertyName", "monitor_id" } }), "propertyItems"))
+                {
+                    string nome = Txt(it, "itemName") ?? "";
+                    if (nome.Contains(pos + " ") || nome.EndsWith(pos)) { idMon = Txt(it, "itemValue"); r["monitorObs"] = nome; break; }
+                }
+                if (idMon == null) { r["ok"] = false; r["msg"] = "obs: monitor " + pos + " não achado"; return; }
+                ws.Pedir("SetInputSettings", new Dictionary<string, object> { { "inputName", FONTE_PS5 },
+                    { "inputSettings", new Dictionary<string, object> { { "monitor_id", idMon }, { "method", 2 }, { "capture_cursor", false } } } });
+                ws.Pedir("SetCurrentProgramScene", new Dictionary<string, object> { { "sceneName", CENA_PS5 } });
+                var cam = ws.Pedir("GetVirtualCamStatus");
+                var dados = cam != null && cam.ContainsKey("responseData") ? cam["responseData"] as Dictionary<string, object> : null;
+                if (dados == null || !(dados["outputActive"] is bool && (bool)dados["outputActive"])) ws.Pedir("StartVirtualCam");
+                r["qpsObs"] = Txt(ws.Pedir("GetVideoSettings"), "fpsNumerator");
+            }
+
+            // a janela do PS5 maximizada no outro monitor, na frente, e o Lossless nela
+            ShowWindow(janela, 9);
+            SetWindowPos(janela, IntPtr.Zero, rc.Left + 40, rc.Top + 40, 1280, 720, 0x0040);
+            ShowWindow(janela, 3);
+            Thread.Sleep(500);
+            for (int t = 0; t < 5 && GetForegroundWindow() != janela; t++) { Frente(janela); Thread.Sleep(200); }
+            r["frente"] = GetForegroundWindow() == janela;
+            Thread.Sleep(300);
+            // só aperta o atalho se o Lossless ainda não estiver escalando (o atalho liga E desliga)
+            if (!LosslessEscalando()) AtalhoLossless(r);
+            else LerLossless(r);
+            for (int t = 0; t < 15 && !LosslessEscalando(); t++) Thread.Sleep(100);
+            r["lossless"] = LosslessEscalando();
+            if (r.ContainsKey("msg") && (r["msg"] as string) == "fechado") { r["ok"] = false; r["msg"] = "lossless-fechado"; return; }
+            r["ok"] = true; // a imagem do OBS já vale (30 sem o Lossless, mais com ele)
+        }
+
+        // o Lossless está escalando: a janela dele de classe "LosslessScaling" (a que cobre o monitor)
+        static bool LosslessEscalando()
+        {
+            var ps = System.Diagnostics.Process.GetProcessesByName("LosslessScaling");
+            if (ps.Length == 0) return false;
+            var pids = new HashSet<uint>(ps.Select(x => (uint)x.Id));
+            bool achou = false;
+            EnumWindows((h, l) =>
+            {
+                uint pid;
+                GetWindowThreadProcessId(h, out pid);
+                if (!pids.Contains(pid) || !IsWindowVisible(h)) return true;
+                var c = new StringBuilder(64);
+                GetClassName(h, c, 64);
+                if (c.ToString() == "LosslessScaling") { achou = true; return false; }
+                return true;
+            }, IntPtr.Zero);
+            return achou;
+        }
+
+        // só a configuração (sem apertar nada)
+        static void LerLossless(Dictionary<string, object> r)
+        {
+            string arq = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Lossless Scaling", "Settings.xml");
+            r["rodando"] = true;
+            if (!File.Exists(arq)) return;
+            string x = File.ReadAllText(arq);
+            foreach (var par in new[] { new[] { "geracao", "FrameGeneration" }, new[] { "modo", "LSFG3Mode1" }, new[] { "multiplicador", "LSFG3Multiplier" }, new[] { "alvo", "LSFG3Target" } })
+            {
+                var mt = System.Text.RegularExpressions.Regex.Match(x, "<" + par[1] + ">([^<]*)</" + par[1] + ">");
+                if (mt.Success) r[par[0]] = mt.Groups[1].Value.Trim();
+            }
+        }
+
+        static void ObsPs5Parar(Dictionary<string, object> r)
+        {
+            using (var ws = ObsWs.Abrir(r))
+            {
+                if (ws == null) return;
+                if (!string.IsNullOrEmpty(cenaAntesPs5) && Txt(ws.Pedir("GetCurrentProgramScene"), "currentProgramSceneName") == CENA_PS5)
+                    ws.Pedir("SetCurrentProgramScene", new Dictionary<string, object> { { "sceneName", cenaAntesPs5 } });
+                r["cenaAntes"] = cenaAntesPs5;
+                r["ok"] = true;
+            }
+        }
+
+        // um campo de texto da resposta (responseData) de um pedido ao OBS, ou de um item de lista
+        static string Txt(Dictionary<string, object> d, string k)
+        {
+            if (d == null) return null;
+            if (d.ContainsKey("responseData")) d = d["responseData"] as Dictionary<string, object>;
+            return d != null && d.ContainsKey(k) && d[k] != null ? Convert.ToString(d[k], System.Globalization.CultureInfo.InvariantCulture) : null;
+        }
+
+        static List<Dictionary<string, object>> Lista(Dictionary<string, object> resp, string k)
+        {
+            var d = resp != null && resp.ContainsKey("responseData") ? resp["responseData"] as Dictionary<string, object> : null;
+            var r = new List<Dictionary<string, object>>();
+            if (d == null || !d.ContainsKey(k) || !(d[k] is System.Collections.IEnumerable)) return r;
+            foreach (var o in (System.Collections.IEnumerable)d[k]) { var x = o as Dictionary<string, object>; if (x != null) r.Add(x); }
+            return r;
+        }
+
+        // O WebSocket do OBS (protocolo 5): conecta, autentica com a senha do config.json e faz pedidos
+        class ObsWs : IDisposable
+        {
+            System.Net.WebSockets.ClientWebSocket ws = new System.Net.WebSockets.ClientWebSocket();
+            static readonly JavaScriptSerializer json = new JavaScriptSerializer();
+
+            // null (com r["msg"]) quando não dá: o servidor desligado, a senha, o OBS ainda abrindo
+            public static ObsWs Abrir(Dictionary<string, object> r)
+            {
+                string arq = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "obs-studio", "plugin_config", "obs-websocket", "config.json");
+                if (!File.Exists(arq)) { r["ok"] = false; r["msg"] = "obs-websocket"; return null; }
+                var cfg = json.Deserialize<Dictionary<string, object>>(File.ReadAllText(arq));
+                if (!(cfg.ContainsKey("server_enabled") && cfg["server_enabled"] is bool && (bool)cfg["server_enabled"])) { r["ok"] = false; r["msg"] = "obs-websocket"; return null; }
+                int porta = cfg.ContainsKey("server_port") ? Convert.ToInt32(cfg["server_port"]) : 4455;
+                string senha = cfg.ContainsKey("server_password") ? Convert.ToString(cfg["server_password"]) : "";
+                // o OBS recém-aberto leva uns segundos para abrir o WebSocket
+                for (int t = 0; t < 10; t++)
+                {
+                    var o = new ObsWs();
+                    try { o.Conectar(porta, senha); return o; }
+                    catch (Exception err) { o.Dispose(); r["msg"] = "obs-websocket: " + err.Message; Thread.Sleep(1000); }
+                }
+                r["ok"] = false;
+                return null;
+            }
+
+            static string Sha(string s)
+            {
+                using (var h = System.Security.Cryptography.SHA256.Create()) return Convert.ToBase64String(h.ComputeHash(Encoding.UTF8.GetBytes(s)));
+            }
+
+            void Conectar(int porta, string senha)
+            {
+                ws.Options.AddSubProtocol("obswebsocket.json");
+                if (!ws.ConnectAsync(new Uri("ws://127.0.0.1:" + porta), CancellationToken.None).Wait(4000)) throw new Exception("não conectou");
+                var ola = Ler();
+                var d = ola["d"] as Dictionary<string, object>;
+                var ident = new Dictionary<string, object> { { "rpcVersion", 1 }, { "eventSubscriptions", 0 } };
+                var a = d != null && d.ContainsKey("authentication") ? d["authentication"] as Dictionary<string, object> : null;
+                if (a != null) ident["authentication"] = Sha(Sha(senha + a["salt"]) + a["challenge"]);
+                Mandar(new Dictionary<string, object> { { "op", 1 }, { "d", ident } });
+                var ok = Ler();
+                if (Convert.ToInt32(ok["op"]) != 2) throw new Exception("senha recusada");
+            }
+
+            void Mandar(object m)
+            {
+                var b = Encoding.UTF8.GetBytes(json.Serialize(m));
+                ws.SendAsync(new ArraySegment<byte>(b), System.Net.WebSockets.WebSocketMessageType.Text, true, CancellationToken.None).Wait(4000);
+            }
+
+            Dictionary<string, object> Ler()
+            {
+                var buf = new byte[65536];
+                var tudo = new MemoryStream();
+                while (true)
+                {
+                    var t = ws.ReceiveAsync(new ArraySegment<byte>(buf), CancellationToken.None);
+                    if (!t.Wait(6000)) throw new Exception("o OBS não respondeu");
+                    if (t.Result.MessageType == System.Net.WebSockets.WebSocketMessageType.Close) throw new Exception("o OBS fechou a conexão");
+                    tudo.Write(buf, 0, t.Result.Count);
+                    if (t.Result.EndOfMessage) break;
+                }
+                return json.Deserialize<Dictionary<string, object>>(Encoding.UTF8.GetString(tudo.ToArray()));
+            }
+
+            public Dictionary<string, object> Pedir(string tipo, Dictionary<string, object> dados = null)
+            {
+                string id = Guid.NewGuid().ToString();
+                Mandar(new Dictionary<string, object> { { "op", 6 }, { "d", new Dictionary<string, object> { { "requestType", tipo }, { "requestId", id }, { "requestData", dados ?? new Dictionary<string, object>() } } } });
+                for (int i = 0; i < 20; i++)
+                {
+                    var m = Ler();
+                    var d = m["d"] as Dictionary<string, object>;
+                    if (Convert.ToInt32(m["op"]) == 7 && d != null && Convert.ToString(d["requestId"]) == id) return d;
+                }
+                return null;
+            }
+
+            public void Dispose()
+            {
+                try { if (ws.State == System.Net.WebSockets.WebSocketState.Open) ws.CloseAsync(System.Net.WebSockets.WebSocketCloseStatus.NormalClosure, "", CancellationToken.None).Wait(1000); } catch { }
+                ws.Dispose();
+            }
         }
 
         static System.Diagnostics.Process ponte;

@@ -706,6 +706,9 @@ async function tratar(m, sender) {
   if (m.tipo === 'ps5-ponte') return pedidoNativo('ps5', {}, 20_000);
   // Lossless (1.23+, ajudante 1.17+): aperta o atalho do Lossless Scaling com a sala na frente
   if (m.tipo === 'pc-lossless') return pedidoNativo('lossless', {}, 10_000);
+  // Lossless para todos (1.24+, ajudante 1.18+): a janela do PS5 no outro monitor, o OBS capturando ela
+  // (cena montada pelo WebSocket do OBS) e o Lossless ligado; alvo: o título da janela, ou __parar__
+  if (m.tipo === 'pc-obs-ps5') return pedidoNativo('obs-ps5', { alvo: String(m.alvo || '').slice(0, 80) }, 60_000);
   if (m.tipo === 'pc-acordado') return pedidoNativo('acordado', { on: !!m.alvo }, 10_000);
   if (m.tipo === 'janela') return janela(m.alvo, m.ev && typeof m.ev === 'object' ? m.ev : null, sender.tab.id);
   // quem compartilha ligou "permitir controle" (de novo): destrava depois de um Ctrl+Alt+End
