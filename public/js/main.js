@@ -3678,7 +3678,9 @@ async function permitirControle(key) {
 // Dá para mexer nesta tela daqui? As dos outros, se o dono liberou. As suas, só se for aba: quem
 // clica nela é a extensão, sem tocar no mouse. Janela e tela inteira são o ajudante nativo
 // movendo o seu mouse de verdade — controladas de você para você, ele brigaria com ele mesmo.
-const podeControlar = ({ user: u, share: sh }) => !!sh.controle && (!u.isSelf || sh.aba != null);
+// a própria tela: só a aba (o resto já está na mão de quem compartilha) e o PS5 direto, que não
+// tem janela nenhuma no PC: a sala é o único lugar onde dá para jogar nele
+const podeControlar = ({ user: u, share: sh }) => !!sh.controle && (!u.isSelf || sh.aba != null || superficieDe(sh) === 'ps5');
 
 function porqueNaoControla({ user: u, share: sh }) {
   if (!u.isSelf) return 'só ver';
@@ -3760,10 +3762,11 @@ function updateFocusCtrl() {
   btn.classList.toggle('on', on);
   btn.innerHTML = `${icon(liberar || !on ? 'cursor' : 'eye', 16)}${liberar ? 'Permitir controle' : on ? 'Só assistir' : 'Controlar'}`;
   btn.title = on ? 'Parar de mexer nesta tela (continua vendo)' : '';
-  // Modo jogo: só em janela/tela inteira dos outros (o ajudante nativo é quem manda delta/scancode)
+  // Modo jogo: só em janela/tela inteira dos outros (o ajudante nativo é quem manda delta/scancode),
+  // e no PS5 direto também na própria (teclado, mouse e controle daqui viram o controle do PS5)
   const jb = $('#focus-jogo');
-  const janela = !!t && !t.user.isSelf
-    && ['window', 'monitor', 'ps5'].includes(superficieDe(t.share));
+  const sup = t ? superficieDe(t.share) : null;
+  const janela = !!t && (sup === 'ps5' || (!t.user.isSelf && ['window', 'monitor'].includes(sup)));
   if ((!on || !janela) && controle.jogoNo === fv) controle.desligarJogo();
   jb.hidden = !on || !janela;
   // as opções do modo jogo (no celular elas ficam no painel do controle de toque)
@@ -3901,7 +3904,8 @@ controle.onJogo = (video, key) => {
   if (!video) padVirtual.desligar(); // depois do toque e do controle: o último estado é tudo solto
   // o modo jogo desligou por fora do botão (a tela fechou, saiu do foco): sai da tela cheia também
   if (!video && !isTouch && document.body.classList.contains('jogo-pc')) jogoNoPc(false);
-  jogoLa(video, key);
+  // a própria tela (PS5 direto): a imagem já é daqui, sem turbo nem diagnóstico de quem joga longe
+  jogoLa(video && !acharTela(key)?.user.isSelf ? video : null, key);
 };
 // a aba sumiu (celular bloqueou, outro app): o que o toque e o controle seguravam sobe já
 controle.onEscondeu = () => {
