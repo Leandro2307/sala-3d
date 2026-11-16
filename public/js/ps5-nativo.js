@@ -22,8 +22,10 @@ const CHAVE_MS = 300; // intervalo mínimo entre pedidos de quadro-chave ao PS5
 // também. O PS5 não manda quadro-chave sozinho de tempos em tempos: sem pedir, a cópia ficaria parada.
 const CHAVE_LOCAL_MS = 2000;
 const PAD_SOLTA_MS = 1500; // sem notícia do controle de quem joga por tanto tempo: solta tudo
-const OPCOES = 'sala3d-ps5'; // localStorage: { altura, kbps, ultimo }
-const PADRAO = { altura: 720, kbps: 6000, ultimo: null };
+const OPCOES = 'sala3d-ps5'; // localStorage: { altura, qps, kbps, ultimo }
+const PADRAO = { altura: 720, qps: 60, kbps: 6000, ultimo: null };
+// as imagens que o Remote Play do PS5 aceita (a ponte escolhe o perfil mais perto)
+const IMAGENS = [[720, 60], [720, 30], [1080, 60], [1080, 30]];
 
 export const temPs5Nativo = () => typeof VideoDecoder === 'function' && typeof EncodedVideoChunk === 'function';
 
@@ -586,7 +588,7 @@ export class Ps5Nativo {
     this.fonte?.parar();
     this.fonte = new Ps5Fonte({ pedirChave: () => this.mandar({ tipo: 'chave' }), onEvento: this.onEvento });
     this.fase = 'procurando';
-    this.mandar({ tipo: 'conectar', id, altura: Number(this.opcoes.altura) || 720, qps: 60, kbps: Number(this.opcoes.kbps) || 6000, codec: 'h264' });
+    this.mandar({ tipo: 'conectar', id, altura: Number(this.opcoes.altura) || 720, qps: Number(this.opcoes.qps) === 30 ? 30 : 60, kbps: Number(this.opcoes.kbps) || 6000, codec: 'h264' });
     this.render();
   }
 
@@ -700,7 +702,11 @@ export class Ps5Nativo {
     });
     this.raiz.addEventListener('change', (e) => {
       const n = e.target.name;
-      if (n === 'p5-altura') this.opcoes.altura = Number(e.target.value);
+      if (n === 'p5-altura') {
+        const [altura, qps] = String(e.target.value).split('-').map(Number);
+        this.opcoes.altura = altura || 720;
+        this.opcoes.qps = qps === 30 ? 30 : 60;
+      }
       else if (n === 'p5-kbps') this.opcoes.kbps = Math.min(30000, Math.max(2000, Number(e.target.value) || 6000));
       else return;
       this.guardarOpcoes();
@@ -781,8 +787,7 @@ export class Ps5Nativo {
         <button type="button" class="secondary small" data-p5="procurar"${this.procurando ? ' disabled' : ''}>${this.procurando ? 'Procurando…' : 'Procurar na rede'}</button>
         <button type="button" class="secondary small" data-p5="importar">Trazer do chiaki-ng</button>
         <label>Imagem <select name="p5-altura">
-          <option value="720"${Number(this.opcoes.altura) === 720 ? ' selected' : ''}>720p · 60 qps</option>
-          <option value="1080"${Number(this.opcoes.altura) === 1080 ? ' selected' : ''}>1080p · 60 qps</option>
+          ${IMAGENS.map(([a, q]) => `<option value="${a}-${q}"${Number(this.opcoes.altura) === a && (Number(this.opcoes.qps) === 30 ? 30 : 60) === q ? ' selected' : ''}>${a}p · ${q} qps</option>`).join('')}
         </select></label>
         <label>Banda (kbps) <input name="p5-kbps" type="number" min="2000" max="30000" step="500" value="${Number(this.opcoes.kbps) || 6000}" style="width:96px"></label>
       </div>
