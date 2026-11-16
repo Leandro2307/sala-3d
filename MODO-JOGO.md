@@ -862,3 +862,14 @@ quadros diferentes/s** (sem o Lossless, 30). Captura **DXGI dá 30** (não vê o
 que ser WGC. O Lossless **pausa** quando outra janela ganha o foco (31) e **retoma sozinho** quando a
 janela do PS5 volta para a frente (55). O WebSocket do OBS foi ligado no config.json (cópia do original no
 scratchpad da sessão). Falta o teste com o PS5 de verdade pela sala.
+
+## PS5 direto: som picotado (2026-11-16)
+
+Causa: o Opus do PS5 era decodificado e escrito direto num `MediaStreamTrackGenerator` de áudio, com a
+hora de chegada, sem buffer. Pacotes em rajada (rede, ou a página ocupada com vídeo e 3D) deixavam buracos.
+Agora a `Ps5Fonte` usa o mesmo tocador do turbo (`SOM_WORKLET`, exportado como `criarTocadorSom` /
+`paraOTocador`) num AudioContext, começando com 60 ms (`{alvo}` novo na porta do worklet) e saindo por um
+`MediaStreamAudioDestinationNode`: a trilha que toca aqui e vai para quem joga pelo vídeo normal. Teste
+(`teste-som.mjs`, tom Opus de 10 ms, cada pacote com até 80 ms de atraso em 30% dos casos, saída tocada em
+tempo real num AudioContext): ~40 buracos em 6,5 s antes, 1 a 4 depois. `stats().tocador` traz o buffer, o
+alvo, as faltas e os descartes.

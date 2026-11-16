@@ -12,7 +12,7 @@
 //
 // Mensagens da ponte: ver o cabeçalho de ponte.c. Binário: [tipo, marcas, perdidos u16, seq u32] + dados.
 import { icon } from './icons.js';
-import { descricaoSemReordenar } from './turbo.js';
+import { descricaoSemReordenar, temTocadorSom, criarTocadorSom, paraOTocador } from './turbo.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const CAB = 8;
@@ -274,7 +274,33 @@ export class Ps5Fonte {
       this.ctx = this.canvas.getContext('2d');
       trilhas.push(...this.canvas.captureStream(60).getVideoTracks());
     }
-    if (typeof MediaStreamTrackGenerator === 'function' && typeof AudioDecoder === 'function') {
+    // O som: o Opus decodificado vai para o tocador com buffer do turbo (AudioWorklet: 30 ms que crescem
+    // até 120 se faltar som) e sai numa trilha estável — a que toca aqui e vai para quem joga. Antes cada
+    // pacote ia direto numa trilha gerada, com a hora de chegada: rajada da rede ou a página ocupada
+    // (vídeo, 3D) deixavam buracos e o som picotava.
+    if (typeof AudioDecoder === 'function' && temTocadorSom()) {
+      try {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        try { this.ctxSom = new AC({ latencyHint: 'interactive', sampleRate: 48000 }); } catch { this.ctxSom = new AC({ latencyHint: 'interactive' }); }
+        this.destSom = this.ctxSom.createMediaStreamDestination();
+        trilhas.push(...this.destSom.stream.getAudioTracks());
+        criarTocadorSom(this.ctxSom).then((no) => {
+          if (this.parada) return;
+          no.port.onmessage = (e) => { this.estadoSom = e.data; };
+          no.port.postMessage({ alvo: 0.06 }); // 60 ms de saída: a ponte e a rede de casa mandam em rajada
+          no.connect(this.destSom);
+          this.tocador = no;
+        }).catch((err) => console.warn('[ps5] tocador de som', err));
+        // o navegador pode abrir o AudioContext parado (sem clique ainda): o próximo clique ou tecla solta
+        this.destravarSom = () => { if (this.ctxSom?.state === 'suspended') this.ctxSom.resume().catch(() => {}); };
+        for (const ev of ['pointerdown', 'keydown']) addEventListener(ev, this.destravarSom, true);
+        this.destravarSom();
+      } catch (err) {
+        console.warn('[ps5] som', err);
+        this.ctxSom = null;
+      }
+    }
+    if (!this.ctxSom && typeof MediaStreamTrackGenerator === 'function' && typeof AudioDecoder === 'function') {
       this.gerSom = new MediaStreamTrackGenerator({ kind: 'audio' });
       this.escritorSom = this.gerSom.writable.getWriter();
       trilhas.push(this.gerSom);
@@ -487,14 +513,20 @@ export class Ps5Fonte {
   // ---------------------------------------------------------------- som
   somCabecalho({ hz, canais }) {
     this.somCfg = { hz: hz || 48000, canais: Math.min(2, canais || 2) };
-    if (!this.escritorSom) return;
+    if (!this.escritorSom && !this.ctxSom) return;
     try {
       if (this.decSom && this.decSom.state !== 'closed') this.decSom.close();
     } catch { /* já fechado */ }
     try {
       this.decSom = new AudioDecoder({
         output: (data) => {
-          if (this.parada || !this.escritorSom) { data.close(); return; }
+          if (this.parada) { data.close(); return; }
+          if (this.ctxSom) {
+            if (this.tocador) paraOTocador(this.tocador, data);
+            else data.close(); // o tocador ainda carregando (os primeiros ms)
+            return;
+          }
+          if (!this.escritorSom) { data.close(); return; }
           this.escritorSom.write(data).catch(() => {});
         },
         error: (err) => { console.warn('[ps5] som', err); this.decSom = null; },
@@ -519,7 +551,9 @@ export class Ps5Fonte {
   stats() {
     const c = this.conta;
     const o = [...c.decMs].sort((a, b) => a - b);
-    const r = { quadros: c.quadros, chaves: c.chaves, kbps: null, perdidos: c.perdidos, recuperados: c.recuperados, erros: c.erros, desenhados: c.desenhados, decMs: o.length ? Math.round(o[o.length >> 1] * 10) / 10 : null, codec: this.cfg?.codec ?? null, largura: this.cfg?.w ?? null, altura: this.cfg?.h ?? null, som: !!this.somCfg };
+    const r = { quadros: c.quadros, chaves: c.chaves, kbps: null, perdidos: c.perdidos, recuperados: c.recuperados, erros: c.erros, desenhados: c.desenhados, decMs: o.length ? Math.round(o[o.length >> 1] * 10) / 10 : null, codec: this.cfg?.codec ?? null, largura: this.cfg?.w ?? null, altura: this.cfg?.h ?? null, som: !!this.somCfg,
+      // o tocador do som: buffer agora, alvo, faltas (buracos) e descartes desde o começo
+      tocador: this.estadoSom ? { nivelMs: Math.round(this.estadoSom.nivelMs), alvoMs: Math.round(this.estadoSom.alvoMs), faltas: this.estadoSom.faltas, descartes: this.estadoSom.descartes, ctx: this.ctxSom?.state ?? null } : null };
     return r;
   }
 
@@ -532,6 +566,9 @@ export class Ps5Fonte {
     }
     for (const w of [this.escritorVideo, this.escritorSom]) w?.close().catch(() => {});
     for (const t of this.stream.getTracks()) t.stop();
+    if (this.destravarSom) for (const ev of ['pointerdown', 'keydown']) removeEventListener(ev, this.destravarSom, true);
+    try { this.tocador?.disconnect(); } catch { /* já solto */ }
+    this.ctxSom?.close().catch(() => {});
   }
 }
 

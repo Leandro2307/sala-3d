@@ -166,7 +166,8 @@ class TurboSom extends AudioWorkletProcessor {
     this.descartes = 0;
     this.semFalta = 0;
     this.aviso = 0;
-    this.port.onmessage = (e) => this.chegou(e.data);
+    // { alvo }: o buffer inicial (s); o resto são os pedaços de som
+    this.port.onmessage = (e) => (e.data.canais ? this.chegou(e.data) : e.data.alvo > 0 && (this.alvo = Math.min(0.12, e.data.alvo)));
   }
   chegou({ canais, hz }) {
     this.hz = hz;
@@ -230,6 +231,30 @@ class TurboSom extends AudioWorkletProcessor {
 registerProcessor('turbo-som', TurboSom);
 `;
 let urlWorklet = null;
+
+// O mesmo tocador com buffer para outra fonte de som: o PS5 direto (ps5-nativo.js), que escrevia cada
+// pacote decodificado direto numa trilha gerada, sem buffer — chegando em rajada, o som picotava.
+export const temTocadorSom = () => typeof AudioWorkletNode === 'function' && typeof (window.AudioContext || window.webkitAudioContext) === 'function';
+export async function criarTocadorSom(ctx) {
+  urlWorklet ??= URL.createObjectURL(new Blob([SOM_WORKLET], { type: 'text/javascript' }));
+  await ctx.audioWorklet.addModule(urlWorklet);
+  return new AudioWorkletNode(ctx, 'turbo-som', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2] });
+}
+// um AudioData decodificado para o tocador (e fecha o AudioData)
+export function paraOTocador(no, data) {
+  try {
+    const n = data.numberOfFrames;
+    const canais = [];
+    for (let i = 0; i < Math.min(2, data.numberOfChannels); i++) {
+      const p = new Float32Array(n);
+      data.copyTo(p, { planeIndex: i, format: 'f32-planar' });
+      canais.push(p);
+    }
+    no.port.postMessage({ canais, hz: data.sampleRate }, canais.map((p) => p.buffer));
+  } finally {
+    data.close();
+  }
+}
 
 const par = (n) => Math.max(2, Math.round(n / 2) * 2);
 const bandaDe = (h) => (h >= 1000 ? 10_000_000 : h >= 700 ? 6_000_000 : 3_500_000);
