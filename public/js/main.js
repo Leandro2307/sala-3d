@@ -2501,9 +2501,6 @@ function stopShare(key, notify, { manter = false } = {}) {
   me.shares.delete(key);
   // a tela do PS5 direto saiu: a sessão com o PS5 acaba junto
   if (sh.ps5 && !manter) ps5Nativo.telaSaiu(key);
-  // o Lossless pelo OBS (losslessPs5) acaba com a tela: solta a câmera virtual
-  for (const t of sh.losslessCam?.getTracks() || []) t.stop();
-  sh.lossless = sh.losslessCam = null;
   avisarAbas();
   soltarVideo(sh);
   localAvatar.setStatus({ sharing: me.shares.size > 0 });
@@ -2946,8 +2943,6 @@ const turboEnvio = new TurboEnvio({
   tela: (key) => {
     const sh = self()?.shares.get(key);
     const scr = rtc?.screens.get(key);
-    // PS5 direto com o Lossless (losslessPs5): a câmera do OBS é codificada como uma tela comum
-    if (sh?.lossless && scr) return { stream: sh.lossless, controle: !!sh.controle, ps5: null };
     return sh && scr ? { stream: scr.stream, controle: !!sh.controle, ps5: sh.ps5 || null } : null;
   },
   onMudou: (id, key, ligado) => {
@@ -2978,138 +2973,53 @@ const ps5Nativo = new Ps5Nativo({
   aoFechar: () => {
     if (state.joined) player.enabled = true;
   },
-  lossless: {
-    ligado: () => !!self()?.shares.get(ps5Nativo.key)?.lossless,
-    janela: () => janelaLossless(),
-    alternar: () => losslessPs5(!self()?.shares.get(ps5Nativo.key)?.lossless),
-  },
+  // "Jogar com o Lossless": a tela do PS5 em foco, modo jogo em tela cheia e o Lossless ligado nela
+  jogarComLossless: (key) => jogarComLossless(key),
 });
 
-// ------------------------------------------------------------------ Lossless Scaling no PC do PS5
-// No PS5 direto não há janela nenhuma no PC para o Lossless Scaling agir. Aqui: (1) uma janela só com
-// a imagem do PS5, onde a pessoa liga o Lossless; (2) o OBS captura o que o Lossless desenha (a 120,
-// câmera virtual); (3) a imagem da tela do PS5 passa a ser a câmera do OBS: o turbo deixa de repassar
-// os quadros do PS5 e codifica a câmera, e o vídeo da conexão troca de trilha. O som e o controle
-// continuam os do PS5 direto. "Voltar à imagem direta" desfaz.
-let janelaLs = null;
-function janelaLossless() {
-  const trilha = rtc?.screens.get(ps5Nativo.key)?.stream?.getVideoTracks()[0];
-  if (!trilha) return void toast('Ponha o PS5 numa tela antes.', 'warn', 5000);
-  if (janelaLs && !janelaLs.closed) return void janelaLs.focus();
-  const w = window.open('', 'sala3d-ps5-lossless', 'popup,width=1280,height=720');
-  if (!w) return void toast('O navegador bloqueou a janela. Libere os pop-ups deste site e tente de novo.', 'warn', 7000);
-  janelaLs = w;
-  w.document.title = 'PS5 · Lossless (não feche: o OBS captura esta janela)';
-  w.document.body.style.cssText = 'margin:0;background:#000;overflow:hidden';
-  const v = w.document.createElement('video');
-  v.muted = true; // o som já toca na sala
-  v.autoplay = true;
-  v.playsInline = true;
-  v.style.cssText = 'width:100vw;height:100vh;object-fit:contain;display:block;background:#000';
-  v.srcObject = new MediaStream([trilha]);
-  w.document.body.appendChild(v);
-  v.play().catch(() => {});
-  // tela cheia com um clique duplo
-  v.addEventListener('dblclick', () => (w.document.fullscreenElement ? w.document.exitFullscreen() : v.requestFullscreen()).catch(() => {}));
-  toast('Janela do PS5 aberta. Ligue o Lossless nela (e o OBS capturando a tela onde ele desenha); depois, “Mandar a imagem do OBS”.', 'info', 9000);
-}
-
-async function losslessPs5(ligar) {
-  const key = ps5Nativo.key;
-  const sh = key && self()?.shares.get(key);
-  const scr = key && rtc?.screens.get(key);
-  if (!sh || !scr) return void toast('Ponha o PS5 numa tela antes.', 'warn', 5000);
-  if (ligar) {
-    if (sh.lossless) return;
-    let cam;
-    try {
-      cam = await rtc.camObs();
-    } catch (err) {
-      return void toast(err?.message || String(err), 'warn', 9000);
-    }
-    const nova = cam.getVideoTracks()[0];
-    // a imagem do OBS com o som do PS5 (é esse par que o turbo manda)
-    sh.lossless = new MediaStream([nova, ...scr.stream.getAudioTracks()]);
-    sh.losslessCam = cam;
-    nova.addEventListener('ended', () => losslessPs5(false), { once: true });
-    rtc.replaceScreenTrack(key, nova);
-    turboEnvio.trocarFonte(key);
-    mostrarNaMinhaTela(sh, new MediaStream([nova]));
-    diagJogo.evento('PS5 direto: imagem do Lossless pelo OBS', { qps: nova.getSettings?.().frameRate ?? null });
-    toast('Quem joga agora recebe a imagem do OBS (com o Lossless). A sua tela na sala também mostra a imagem do OBS.', 'success', 7000);
-    vigiarObsPreto(nova);
+// ------------------------------------------------------------------ Lossless Scaling
+// O Lossless gera os quadros no PC de quem joga, em cima da sala em tela cheia: sem OBS, sem codificar
+// de novo e sem o teto de 60 do turbo. O ajudante (1.17+) aperta o atalho dele (o do Settings.xml do
+// Lossless). Testado em 2026-11-16 com o Lossless deste PC: o atalho pelo SendInput liga a escala no
+// Chrome em tela cheia, até com o teclado travado do modo jogo (página a 30 qps → "30 / 60" no
+// contador). O Lossless conta as vezes que a JANELA se redesenha: qualquer animação por cima da
+// imagem (no teste, a moldura de depuração da extensão) sobe a base para a taxa do monitor e ele não
+// gera nada — no modo jogo só a imagem do jogo se mexe.
+let losslessLigado = false;
+async function alternarLossless() {
+  if (isTouch) return;
+  const novo = versaoNum(controle.ext.versao) >= versaoNum('1.23');
+  const r = novo ? await controle.pedir('pc-lossless', undefined, undefined, undefined, 10_000).catch(() => null) : null;
+  diagJogo.evento('Lossless: atalho', r || { semAjudante: true });
+  if (r?.ok) {
+    losslessLigado = !losslessLigado;
+    if (!losslessLigado) return void toast('Lossless desligado.', 'info', 4000);
+    const mult = Number(r.multiplicador) || 2;
+    if (r.geracao && r.geracao !== 'OFF') opcoesJogo.set('lossless', r.modo === 'ADAPTIVE' ? 0 : mult);
+    // adaptativo com alvo até 60: com a imagem a 60 ele já está no alvo e não gera nada
+    const aviso = r.modo === 'ADAPTIVE' && Number(r.alvo) <= 60
+      ? ` Atenção: o Lossless está no modo Adaptativo com alvo ${r.alvo}; com o PS5 a 60 ele não gera nada. No Lossless, ponha Fixo ×2 (ou alvo 120/144).`
+      : '';
+    toast(`Lossless ligado (${r.atalho}).${aviso} O contador dele mostra base / gerados; ${r.atalho} desliga.`, aviso ? 'warn' : 'success', aviso ? 15000 : 7000);
+  } else if (r?.msg === 'fechado') {
+    toast('O Lossless Scaling está fechado. Abra o Lossless e tente de novo.', 'warn', 8000);
   } else {
-    if (!sh.lossless) return;
-    const cam = sh.losslessCam;
-    sh.lossless = null;
-    sh.losslessCam = null;
-    const direta = scr.stream.getVideoTracks()[0];
-    if (direta) rtc.replaceScreenTrack(key, direta);
-    turboEnvio.trocarFonte(key);
-    mostrarNaMinhaTela(sh, scr.stream);
-    for (const t of cam?.getTracks() || []) t.stop();
-    diagJogo.evento('PS5 direto: de volta à imagem direta');
-    toast('De volta à imagem direta do PS5.', 'info', 5000);
+    // sem o ajudante 1.17 (ou a extensão 1.23): a pessoa aperta o atalho (funciona no modo jogo)
+    toast(`Aperte o atalho do Lossless (Ctrl+Alt+S).${novo ? '' : ' Para a sala apertar sozinha, atualize a extensão (chrome://extensions → recarregar).'}`, 'info', 8000);
   }
 }
 
-// A janela do PS5 é o que o OBS captura: fechada com o Lossless ligado, o OBS passa a mandar preto e
-// quem joga ficava sem imagem. Volta sozinho para a imagem direta e avisa.
-setInterval(() => {
-  const sh = ps5Nativo.key && self()?.shares.get(ps5Nativo.key);
-  if (!sh?.lossless || !janelaLs?.closed) return;
-  janelaLs = null;
-  losslessPs5(false).then(() => {
-    ps5Nativo.render?.();
-    toast('A janela do PS5 fechou, e o OBS ficaria preto: voltei para a imagem direta. Para o Lossless, deixe a janela aberta (pode ficar atrás, mas não minimizada).', 'warn', 12000);
-  });
-}, 1000);
-
-// a minha tela na sala (e o foco, se estiver nela) passa a mostrar esta imagem: com o Lossless, a do
-// OBS — é o que quem joga recebe (antes ficava a direta aqui e parecia que nada tinha trocado)
-function mostrarNaMinhaTela(sh, stream) {
-  if (sh.video && sh.video.srcObject !== stream) {
-    sh.video.srcObject = stream;
-    sh.video.play().catch(() => {});
-  }
-  if (state.focus?.kind === 'share' && state.focus.key === sh.key) {
-    const fv = $('#focus-video');
-    fv.srcObject = stream;
-    fv.play().catch(() => {});
-  }
-  refreshScreens();
+// o botão do painel do PS5: foco na tela do PS5, modo jogo em tela cheia e o Lossless
+async function jogarComLossless(key) {
+  if (!key || !acharTela(key)) return void toast('Ponha o PS5 numa tela antes.', 'warn', 5000);
+  if (state.focus?.kind !== 'share' || state.focus.key !== key) enterFocus({ kind: 'share', key });
+  updateFocusCtrl();
+  if (controle.jogoNo !== $('#focus-video')) $('#focus-jogo').click(); // ainda no clique: a tela cheia é aceita
+  // o Lossless pega a janela da frente: espera a tela cheia assentar
+  await new Promise((ok) => setTimeout(ok, 900));
+  if (!losslessLigado) alternarLossless();
 }
 
-// A câmera do OBS mandando só preto (a cena vazia, ou a captura de janela do Chrome pelo BitBlt, que
-// sai preta): olha 4 s de quadros numa cópia da trilha e avisa com o que fazer no OBS.
-async function vigiarObsPreto(trilha) {
-  if (typeof MediaStreamTrackProcessor !== 'function') return;
-  const copia = trilha.clone();
-  const leitor = new MediaStreamTrackProcessor({ track: copia }).readable.getReader();
-  const c = new OffscreenCanvas(48, 27);
-  const g = c.getContext('2d', { willReadFrequently: true });
-  let quadros = 0;
-  let maisClaro = 0;
-  const t0 = performance.now();
-  try {
-    while (performance.now() - t0 < 4000) {
-      const { value: f, done } = await leitor.read();
-      if (done) break;
-      if (quadros++ % 10 === 0) {
-        g.drawImage(f, 0, 0, 48, 27);
-        const d = g.getImageData(0, 0, 48, 27).data;
-        for (let i = 0; i < d.length; i += 4) maisClaro = Math.max(maisClaro, d[i], d[i + 1], d[i + 2]);
-      }
-      f.close();
-    }
-  } catch { /* a trilha acabou */ }
-  leitor.cancel().catch(() => {});
-  copia.stop();
-  diagJogo.evento('PS5 direto: imagem do OBS conferida', { quadros, maisClaro });
-  if (quadros && maisClaro < 12) {
-    toast('O OBS está mandando imagem PRETA. No OBS: na cena, adicione “Captura de tela” (o monitor onde está a janela do PS5 com o Lossless), com o método “Windows 10 (1903 e acima)”. Captura de janela do Chrome costuma sair preta. Depois deixe a câmera virtual em “Programa”.', 'warn', 20000);
-  }
-}
 
 // qps de uma contagem que só sobe (quadros do PS5, quadros de uma trilha), entre uma leitura e outra
 function medidorQps() {
@@ -3125,20 +3035,17 @@ function medidorQps() {
     return q;
   };
 }
-const quadrosDaTrilha = (t) => t?.stats?.deliveredFrames ?? t?.stats?.totalFrames ?? null;
 const medePs5Manda = medidorQps();
 const medePs5Tela = medidorQps();
-const medeLossless = medidorQps();
 // o desempenho do PS5 direto deste PC, em qps (a última medida, a cada 1 s)
 let ps5Agora = { manda: null, tela: null, lossless: null };
 setInterval(() => {
   const st = ps5Nativo.key ? ps5Nativo.fonte?.stats?.() : null;
   const sh = ps5Nativo.key && self()?.shares.get(ps5Nativo.key);
-  const ls = sh?.lossless?.getVideoTracks()[0];
   ps5Agora = {
     manda: medePs5Manda(st ? st.quadros : null),
     tela: medePs5Tela(st ? st.desenhados : null),
-    lossless: medeLossless(ls ? quadrosDaTrilha(ls) : null),
+    lossless: null,
   };
   // o selo na própria tela do PS5 (modo jogo neste PC): o que o PS5 manda e o que aparece aqui
   const j = controle.jogo;
@@ -3153,7 +3060,6 @@ setInterval(() => {
   const q = (v) => (v != null ? Math.round(v) : '–');
   const lsx = Number(opcoesJogo.get('lossless')) || 0;
   el.innerHTML = `<b>PS5 direto</b> · PS5 manda ${q(m.manda)} qps · na tela <span class="${m.tela != null && m.tela < 50 ? 'ruim' : ''}">${q(m.tela)} qps</span>`
-    + (sh.lossless ? ` · Lossless (OBS) ${q(m.lossless)} qps` : '')
     + (lsx && m.tela != null ? ` · com o Lossless ×${lsx} ≈ ${Math.round(m.tela * lsx)} qps` : '');
 }, 1000);
 
@@ -3401,8 +3307,7 @@ async function amostrarJogo() {
         // no turbo, o que só se vê daqui (a banda do codificador, os quadros pulados, os quadros-chave)
         // vai junto: o relatório de quem joga explica sozinho uma queda de banda ou de quadros
         const tb = turbo && { bandaKbps: turbo.bandaKbps, pulados: turbo.pulados, puladosFila: turbo.puladosFila, trocasDeBanda: turbo.trocasDeBanda, filaLaMs: turbo.filaLaMs, chaves: turbo.chaves, chaveKB: turbo.chaveKB, chavesIgnoradas: turbo.chavesIgnoradas, som: turbo.som };
-        const minha = self()?.shares.get(key);
-        const ps5 = minha?.ps5 ? { manda: ps5Agora.manda, lossless: minha.lossless ? ps5Agora.lossless : null } : null;
+        const ps5 = self()?.shares.get(key)?.ps5 ? { manda: ps5Agora.manda, lossless: null } : null;
         controle.emitir('controle-volta', { key, para: id, ev: { t: 'jogo-envio', quando: t, captura, enviado, codificado, altura, kbps, limite, motivo, codificador, placa, imagemBaixa, codMs, filaMs, turbo: tb || null, ps5 } });
       }
     }
@@ -4044,6 +3949,10 @@ $('#focus-engasgo').addEventListener('click', (e) => {
   marcarEngasgo();
 });
 $('#jogo-lossless').value = String(Number(opcoesJogo.get('lossless')) || 0);
+$('#jogo-lossless-ligar').addEventListener('click', (e) => {
+  e.currentTarget.blur();
+  alternarLossless();
+});
 $('#jogo-lossless').addEventListener('change', (e) => {
   opcoesJogo.set('lossless', Number(e.target.value) || 0);
   e.target.blur();
@@ -4127,6 +4036,7 @@ controle.onJogo = (video, key) => {
   if (!video) padVirtual.desligar(); // depois do toque e do controle: o último estado é tudo solto
   // o modo jogo desligou por fora do botão (a tela fechou, saiu do foco): sai da tela cheia também
   if (!video && !isTouch && document.body.classList.contains('jogo-pc')) jogoNoPc(false);
+  if (!video && losslessLigado) alternarLossless();
   // a própria tela (PS5 direto): a imagem já é daqui, sem turbo nem diagnóstico de quem joga longe
   jogoLa(video && !acharTela(key)?.user.isSelf ? video : null, key);
 };
@@ -5061,6 +4971,12 @@ controle.atalho = (e, a) => {
   // F8 liga/desliga o modo jogo (com o ponteiro preso não dá para clicar no botão)
   if (e.code === 'F8' && !$('#focus-jogo').hidden) {
     if (a === 'down' && !e.repeat) $('#focus-jogo').click();
+    return true;
+  }
+  // Ctrl+Alt+S (o atalho do Lossless): com o Lossless aberto ele nem chega aqui (o Lossless pega o S);
+  // chegando, o Lossless está fechado ou com outro atalho, e o ajudante confere e avisa — não vai pro jogo
+  if (e.code === 'KeyS' && e.ctrlKey && e.altKey && controle.jogoNo && !isTouch) {
+    if (a === 'down' && !e.repeat) alternarLossless();
     return true;
   }
   // F9: "engasgou agora" (marca no relatório do modo jogo)

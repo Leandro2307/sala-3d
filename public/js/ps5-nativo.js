@@ -562,9 +562,9 @@ export class Ps5Nativo {
   // pedirPonte(): pede ao ajudante a porta e o token da ponte (via extensão)
   // compartilhar(fonte): põe a fonte numa tela da sala; devolve a chave ou null
   // pararTela(): tira a tela do PS5 da sala; onTremor(g, p); onEvento(texto, dados): relatório
-  // lossless: { ligado(), janela(), alternar() } — o Lossless Scaling no PC do PS5 (ver main.js)
-  constructor({ pedirPonte, compartilhar, pararTela, onTremor, onEvento, toast, aoAbrir, aoFechar, lossless }) {
-    Object.assign(this, { pedirPonte, compartilhar, pararTela, onTremor, onEvento, toast, aoAbrir, aoFechar, lossless });
+  // jogarComLossless(key): a tela do PS5 em tela cheia no modo jogo, com o Lossless ligado (main.js)
+  constructor({ pedirPonte, compartilhar, pararTela, onTremor, onEvento, toast, aoAbrir, aoFechar, jogarComLossless }) {
+    Object.assign(this, { pedirPonte, compartilhar, pararTela, onTremor, onEvento, toast, aoAbrir, aoFechar, jogarComLossless });
     this.ws = null;
     this.consoles = [];
     this.achados = null;
@@ -869,8 +869,7 @@ export class Ps5Nativo {
       else if (acao === 'usar-ip') { const ip = this.raiz.querySelector('[name="p5-ip"]'); if (ip) ip.value = b.dataset.ip; }
       else if (acao === 'registrar') this.registrar();
       else if (acao === 'tentar') this.abrir();
-      else if (acao === 'ls-janela') this.lossless?.janela();
-      else if (acao === 'ls-obs') Promise.resolve(this.lossless?.alternar()).finally(() => this.render());
+      else if (acao === 'ls-jogar') { this.fechar(); this.jogarComLossless?.(this.key); }
     });
     this.raiz.addEventListener('change', (e) => {
       const n = e.target.name;
@@ -955,9 +954,9 @@ export class Ps5Nativo {
       <p class="p5-status">O PS5 sem o chiaki-ng aberto: a imagem que ele faz vai direto para quem joga, e o controle de quem joga chega nele como um controle de PS5 (sem o ViGEmBus). Feche o chiaki-ng antes: o PS5 só aceita um Remote Play por vez.</p>
       ${noAr ? `<div class="p5-item"><span><span class="p5-fase">${esc(fase)}</span>${c ? `<small>${this.fonte?.cfg ? `${this.fonte.cfg.w}×${this.fonte.cfg.h}` : `${c.largura}×${c.altura}`} · ${c.qps} qps · ${Math.round(c.kbps / 100) / 10} Mbps · ${c.codec === 'h265' ? 'H.265' : 'H.264'}${this.fonte?.cfg && (this.fonte.cfg.w < c.largura || this.fonte.cfg.h < c.altura) ? ` <span class="p5-fase">(pedido ${c.largura}×${c.altura}: o PS5 mandou menos)</span>` : ''}</small>` : ''}</span>
         <span class="p5-acoes"><button type="button" class="secondary small" data-p5="dormir"${c ? '' : ' disabled'}>Pôr em repouso</button><button type="button" class="small danger" data-p5="parar">Parar</button></span></div>` : ''}
-      ${noAr && this.key && this.lossless ? `<div class="p5-item"><span><b>Lossless Scaling neste PC</b>${this.lossless.ligado() ? ' <span class="p5-fase">mandando a imagem do OBS</span>' : ''}
-        <small>1. Abra a janela do PS5 e ligue o Lossless nela. 2. No OBS (a 120 qps, com a câmera virtual ligada), capture a tela onde o Lossless desenha. 3. Mande a imagem do OBS: quem joga recebe os quadros que o Lossless gerou. Tem mais atraso que a imagem direta.</small></span>
-        <span class="p5-acoes"><button type="button" class="secondary small" data-p5="ls-janela">Abrir a janela</button><button type="button" class="secondary small" data-p5="ls-obs">${this.lossless.ligado() ? 'Voltar à imagem direta' : 'Mandar a imagem do OBS'}</button></span></div>` : ''}
+      ${noAr && this.key && this.jogarComLossless ? `<div class="p5-item"><span><b>Jogar com o Lossless</b>
+        <small>Abre o PS5 em tela cheia no modo jogo e liga o Lossless Scaling nele (o Lossless tem que estar aberto). Ctrl+Alt+S liga e desliga no meio do jogo. Quem joga de outro PC usa o Lossless de lá do mesmo jeito.</small></span>
+        <span class="p5-acoes"><button type="button" class="small" data-p5="ls-jogar">Jogar com o Lossless</button></span></div>` : ''}
       <div class="p5-lista">${lista || '<p class="p5-vazio">Nenhum PS5 registrado aqui ainda. Se o chiaki-ng já joga neste PC, é só trazer o registro dele.</p>'}</div>
       <div class="p5-linha">
         <button type="button" class="secondary small" data-p5="procurar"${this.procurando ? ' disabled' : ''}>${this.procurando ? 'Procurando…' : 'Procurar na rede'}</button>

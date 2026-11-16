@@ -822,3 +822,23 @@ fixos (o chiaki-ng usa 15 em 1080p), e o codec sempre H.264. Mudou:
 - **1440p e 4K (teste)**: a libchiaki só tem perfis até 1080p e o Remote Play oficial vai até 1080p; a
   ponte pede 2560×1440 / 3840×2160 sob medida. Se o PS5 recusar, a página tenta de novo em 1080p. O
   painel mostra a resolução que chegou de verdade (do SPS), e avisa se o PS5 mandou menos que o pedido.
+
+## Lossless sem OBS (2026-11-16, testado com o Lossless do PC do PS5)
+
+O caminho pelo OBS saiu. Não tinha como dar certo: a cena do OBS capturava a janela do Chrome, e os
+quadros gerados ficam numa janela à parte do Lossless; o perfil do OBS estava a 60; e o turbo manda no
+máximo 60 (`QPS_TURBO`), que o PS5 direto já manda. Agora o Lossless roda no PC de quem joga, em cima da
+sala em tela cheia:
+- Painel do PS5 → **Jogar com o Lossless**: foco na tela do PS5, modo jogo em tela cheia e o atalho.
+  Nas opções do modo jogo (qualquer um): **Ligar/desligar o Lossless**.
+- **Ajudante 1.17** (`{tipo:'lossless'}`): lê o atalho e a geração do `Settings.xml` do Lossless, confere
+  se ele está aberto e aperta o atalho pelo SendInput. **Extensão 1.23**: pedido `pc-lossless`.
+- Testes (Chrome deste PC, Lossless aberto): página a 30 qps + atalho pelo SendInput → contador
+  **"30 / 60"**; em tela cheia com `navigator.keyboard.lock()` o atalho **também** chega no Lossless (a
+  página só recebe Ctrl e Alt). O `PedidoLossless` chamado direto no ajudante compilado respondeu `ok` com a
+  configuração. **O Lossless conta os redesenhos da janela**: com a moldura animada da extensão por cima,
+  o contador foi a "165 / 60" (base na taxa do monitor, nada gerado) — no modo jogo nada pode se mexer
+  por cima da imagem.
+- O Lossless deste PC está em LSFG 3 **Adaptativo, alvo 60**: com o PS5 a 60 ele não gera nada (a sala
+  avisa). Fixo ×2 ou alvo 120/144.
+- `instalar.ps1` compilava sem `System.Drawing` (falhava): corrigido.

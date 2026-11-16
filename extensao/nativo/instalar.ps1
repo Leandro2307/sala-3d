@@ -18,7 +18,7 @@ $cs = Join-Path $PSScriptRoot 'Ajudante.cs'
 try {
   $dll = Join-Path $pasta ('ajudante-' + (Get-FileHash -LiteralPath $cs -Algorithm SHA256).Hash.Substring(0, 16) + '.dll')
   if (-not (Test-Path -LiteralPath $dll)) {
-    Add-Type -Path $cs -ReferencedAssemblies 'System.Web.Extensions' -OutputAssembly $dll -OutputType Library | Out-Null
+    Add-Type -Path $cs -ReferencedAssemblies 'System.Web.Extensions', 'System.Drawing' -OutputAssembly $dll -OutputType Library | Out-Null
   }
 } catch {
   Write-Host "  Nao consegui compilar o ajudante: $($_.Exception.Message)" -ForegroundColor Red

@@ -704,6 +704,8 @@ async function tratar(m, sender) {
   // 1.21+ (ajudante 1.15+): o PC não dorme nem bloqueia a tela enquanto compartilha
   // PS5 nativo (1.22+, ajudante 1.16+): abre a ponte do Remote Play e devolve a porta e o token dela
   if (m.tipo === 'ps5-ponte') return pedidoNativo('ps5', {}, 20_000);
+  // Lossless (1.23+, ajudante 1.17+): aperta o atalho do Lossless Scaling com a sala na frente
+  if (m.tipo === 'pc-lossless') return pedidoNativo('lossless', {}, 10_000);
   if (m.tipo === 'pc-acordado') return pedidoNativo('acordado', { on: !!m.alvo }, 10_000);
   if (m.tipo === 'janela') return janela(m.alvo, m.ev && typeof m.ev === 'object' ? m.ev : null, sender.tab.id);
   // quem compartilha ligou "permitir controle" (de novo): destrava depois de um Ctrl+Alt+End

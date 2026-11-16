@@ -192,7 +192,7 @@ namespace Sala3d
             new Thread(VigiarAtalho) { IsBackground = true }.Start();
             new Thread(VigiarJogo) { IsBackground = true }.Start();
             new Thread(VigiarWifi) { IsBackground = true }.Start();
-            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.16.0" } });
+            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.17.0" } });
             var json = new JavaScriptSerializer();
             string txt;
             while ((txt = Ler(entrada)) != null)
@@ -247,6 +247,7 @@ namespace Sala3d
             }
             if (tipo == "jogos" || tipo == "jogo-abrir" || tipo == "jogo-fechar" || tipo == "obs") { PedidoJogo(m); return; }
             if (tipo == "ps5") { PedidoPs5(S(m, "pid")); return; }
+            if (tipo == "lossless") { PedidoLossless(S(m, "pid")); return; }
             if (tipo == "parar") { lock (travaEntrada) { parado = true; SoltarTudo(); } return; }
             if (tipo == "soltar") { jogo = false; vivoVisto = false; cursorEnviado = null; SoltarTudo(); temAlvo = false; rotuloAtual = null; qualEnviado = null; return; }
             if (tipo != "entrada" || !temAlvo || parado) return;
@@ -353,6 +354,71 @@ namespace Sala3d
         // 127.0.0.1, na porta que ela escolheu, com um token aleatório que só a sala fica sabendo.
         //   { tipo: "ps5" } -> { tipo: "ps5", ok, porta, token, versao } ou { ok: false, msg }
         static readonly object travaPs5 = new object();
+        // Lossless Scaling (1.17+): aperta o atalho dele (o do Settings.xml do Lossless, Ctrl+Alt+S de
+        // fábrica), que liga ou desliga a escala na janela da frente — a sala em tela cheia. Devolve
+        // também como ele está configurado (geração, modo, multiplicador, alvo), para a sala explicar.
+        //   { tipo: "lossless" } -> { tipo: "lossless", ok, rodando, atalho, geracao, modo, multiplicador, alvo, msg }
+        static void PedidoLossless(string pid)
+        {
+            new Thread(() =>
+            {
+                var r = new Dictionary<string, object> { { "tipo", "lossless" }, { "pid", pid } };
+                try
+                {
+                    bool rodando = System.Diagnostics.Process.GetProcessesByName("LosslessScaling").Length > 0;
+                    r["rodando"] = rodando;
+                    string tecla = "S", mods = "Alt Control";
+                    string arq = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Lossless Scaling", "Settings.xml");
+                    if (File.Exists(arq))
+                    {
+                        string x = File.ReadAllText(arq);
+                        Func<string, string> campo = (n) =>
+                        {
+                            var mt = System.Text.RegularExpressions.Regex.Match(x, "<" + n + ">([^<]*)</" + n + ">");
+                            return mt.Success ? mt.Groups[1].Value.Trim() : null;
+                        };
+                        tecla = campo("Hotkey") ?? tecla;
+                        mods = campo("HotkeyModifierKeys") ?? mods;
+                        r["geracao"] = campo("FrameGeneration");
+                        r["modo"] = campo("LSFG3Mode1");
+                        r["multiplicador"] = campo("LSFG3Multiplier");
+                        r["alvo"] = campo("LSFG3Target");
+                    }
+                    var nomes = new List<string>();
+                    foreach (var md in new[] { "Control", "Alt", "Shift", "Windows" })
+                        if (mods.Contains(md)) nomes.Add(md == "Control" ? "Ctrl" : md == "Windows" ? "Win" : md);
+                    nomes.Add(tecla.StartsWith("D") && tecla.Length == 2 ? tecla.Substring(1) : tecla);
+                    r["atalho"] = string.Join("+", nomes);
+                    if (!rodando) { r["ok"] = false; r["msg"] = "fechado"; Escrever(r); return; }
+                    var vks = new List<ushort>();
+                    foreach (var md in mods.Split(new[] { ' ', ',' }, StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        if (md == "Control") vks.Add(0x11);
+                        else if (md == "Alt") vks.Add(0x12);
+                        else if (md == "Shift") vks.Add(0x10);
+                        else if (md == "Windows") vks.Add(0x5B);
+                    }
+                    ushort vk;
+                    int nF;
+                    if (tecla.Length == 1) vk = (ushort)char.ToUpperInvariant(tecla[0]);
+                    else if (tecla.StartsWith("F") && int.TryParse(tecla.Substring(1), out nF) && nF >= 1 && nF <= 24) vk = (ushort)(0x70 + nF - 1);
+                    else if (tecla.StartsWith("D") && tecla.Length == 2 && char.IsDigit(tecla[1])) vk = (ushort)tecla[1];
+                    else { r["ok"] = false; r["msg"] = "atalho-desconhecido"; Escrever(r); return; }
+                    lock (travaEntrada)
+                    {
+                        foreach (var m in vks) Teclado(m, false, false);
+                        Teclado(vk, false, false);
+                        Thread.Sleep(40);
+                        Teclado(vk, true, false);
+                        for (int i = vks.Count - 1; i >= 0; i--) Teclado(vks[i], true, false);
+                    }
+                    r["ok"] = true;
+                }
+                catch (Exception err) { r["ok"] = false; r["msg"] = err.Message; }
+                Escrever(r);
+            }) { IsBackground = true }.Start();
+        }
+
         static System.Diagnostics.Process ponte;
         static int portaPonte;
         static string tokenPonte, versaoPonte;
