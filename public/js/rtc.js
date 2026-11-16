@@ -1627,7 +1627,7 @@ const CAMPOS_ENTRADA = ['frameWidth', 'frameHeight', 'framesPerSecond', 'framesR
   'pliCount', 'firCount', 'qpSum', 'decoderImplementation', 'powerEfficientDecoder', 'codecId'];
 
 const CAMPOS_SOM = ['jitterBufferDelay', 'jitterBufferTargetDelay', 'jitterBufferMinimumDelay', 'jitterBufferEmittedCount',
-  'packetsLost', 'packetsReceived', 'concealedSamples', 'totalSamplesReceived'];
+  'packetsLost', 'packetsReceived', 'concealedSamples', 'totalSamplesReceived', 'audioLevel', 'bytesReceived', 'silentConcealedSamples'];
 
 // só os campos que vieram (cada versão do Chrome manda um pedaço)
 function pegar(s, campos) {

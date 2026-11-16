@@ -280,6 +280,13 @@ export class DiagJogo {
       la: la ? { captura: la.captura, enviado: la.enviado, altura: la.altura, kbps: la.kbps, limite: la.limite, motivo: la.motivo, codificador: la.codificador, placa: la.placa, imagemBaixa: la.imagemBaixa ?? null, codMs: la.codMs ?? null, filaMs: la.filaMs ?? null, turbo: la.turbo ?? null } : null,
       // o som da mesma tela: buffer maior que o do vídeo faz o vídeo esperar por ele (sincronia)
       somBufferMs: somEmitidos > 0 ? r1((1000 * dif(cru.som, antes?.som, 'jitterBufferDelay')) / somEmitidos) : null,
+      // o som da tela pelo vídeo normal: pacotes por segundo (0 = não está chegando), o nível (0 a 1) e
+      // a parte que o navegador inventou para tapar buraco (%)
+      somWebrtc: cru.som ? {
+        pps: r1(porSeg(cru.som, antes?.som, 'packetsReceived', dt)),
+        nivel: cru.som.audioLevel != null ? Math.round(cru.som.audioLevel * 1000) / 1000 : null,
+        inventadoPct: dif(cru.som, antes?.som, 'totalSamplesReceived') > 0 ? Math.round((100 * dif(cru.som, antes?.som, 'concealedSamples')) / dif(cru.som, antes?.som, 'totalSamplesReceived')) : null,
+      } : null,
       bufferMinimoMs: emitidos > 0 && i?.jitterBufferMinimumDelay != null ? r1((1000 * dif(i, ib, 'jitterBufferMinimumDelay')) / emitidos) : null,
       ...extra,
     };
