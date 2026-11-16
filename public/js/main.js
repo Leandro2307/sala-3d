@@ -3024,7 +3024,7 @@ function abrirJanelaPs5(trilha) {
 const MOTIVO_LS = {
   'obs-websocket': 'o OBS não deixou a sala comandar. No OBS: Ferramentas → Configurações do servidor WebSocket → marque “Ativar servidor WebSocket”.',
   'lossless-fechado': 'o Lossless Scaling está fechado. Abra o Lossless e tente de novo.',
-  'sem-janela': 'a janela do PS5 não abriu (libere os pop-ups deste site).',
+  'sem-janela': 'o ajudante não achou a janela do PS5 (ela fechou antes da hora?).',
   'ajudante-ausente': 'o ajudante do Windows não respondeu (instale de novo pela extensão).',
   demorou: 'o ajudante demorou demais (o OBS pode estar abrindo: tente de novo).',
 };

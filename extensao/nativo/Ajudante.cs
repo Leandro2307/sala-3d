@@ -472,7 +472,9 @@ namespace Sala3d
             }) { IsBackground = true }.Start();
         }
 
-        static IntPtr JanelaComTitulo(string comeco, string evitar = null)
+        // a janela visível cujo título CONTÉM o texto (na sala instalada o título vem com o nome do app
+        // na frente: "Sala 3D - PS5 · Lossless"), sem conter o "evitar"
+        static IntPtr JanelaComTitulo(string trecho, string evitar = null)
         {
             IntPtr achada = IntPtr.Zero;
             EnumWindows((h, l) =>
@@ -481,7 +483,7 @@ namespace Sala3d
                 var sb = new StringBuilder(512);
                 GetWindowText(h, sb, 512);
                 string t = sb.ToString();
-                if (t.StartsWith(comeco) && (evitar == null || !t.StartsWith(evitar))) { achada = h; return false; }
+                if (t.Contains(trecho) && (evitar == null || !t.Contains(evitar))) { achada = h; return false; }
                 return true;
             }, IntPtr.Zero);
             return achada;
@@ -489,8 +491,17 @@ namespace Sala3d
 
         static void ObsPs5Ligar(string titulo, Dictionary<string, object> r)
         {
-            IntPtr janela = JanelaComTitulo(titulo);
-            if (janela == IntPtr.Zero) { r["ok"] = false; r["msg"] = "sem-janela"; return; }
+            // a janela acabou de abrir: o título dela pode levar um instante para aparecer
+            IntPtr janela = IntPtr.Zero;
+            for (int t = 0; t < 20 && janela == IntPtr.Zero; t++) { janela = JanelaComTitulo(titulo); if (janela == IntPtr.Zero) Thread.Sleep(200); }
+            if (janela == IntPtr.Zero)
+            {
+                // para o relatório: os títulos das janelas do Chrome que existiam
+                var titulos = new List<string>();
+                EnumWindows((h, l) => { if (!IsWindowVisible(h)) return true; var sb = new StringBuilder(200); GetWindowText(h, sb, 200); if (sb.ToString().Contains("Sala") || sb.ToString().Contains("PS5")) titulos.Add(sb.ToString()); return true; }, IntPtr.Zero);
+                r["janelas"] = titulos;
+                r["ok"] = false; r["msg"] = "sem-janela"; return;
+            }
             // os monitores; o da sala é o da janela "Sala 3D" (a janela do PS5 vai para outro)
             var monitores = new List<MONITORINFOEX>();
             EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (IntPtr mon, IntPtr dc, ref RECT rr, IntPtr l) =>
