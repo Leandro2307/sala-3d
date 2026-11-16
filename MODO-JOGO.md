@@ -808,3 +808,17 @@ licença para falar com 127.0.0.1 (Local Network Access): sem ela, o painel most
 
 Testado aqui: sintaxe, `npm test`, a sala abrindo sem erro num Chrome sem janela, e a ponte nova achando o
 PS5. **Não testado com o PS5 e um DualSense de verdade**, nem o Lossless com o OBS.
+
+## PS5 direto: qualidade da imagem (2026-11-16)
+
+Análise (log da ponte, sessão real): `conectado: 1920x1080 a 60 qps, 6000 kbps` — a banda era 6 Mbps
+fixos (o chiaki-ng usa 15 em 1080p), e o codec sempre H.264. Mudou:
+- **Banda automática** pela resolução (`BANDA`: 720p 10, 1080p 15, 1440p 25, 4K 40 Mbps); à mão até
+  50 Mbps (o teto da ponte). Os 6000 gravados de antes viram automático (`opcoes.v` 2).
+- **H.265** (Codec: Automático usa se `VideoDecoder` decodifica `hvc1.1.6.L153.B0`). Vai em Annex B, sem
+  hvcC: `infoDoSpsHevc` tira tamanho e nome (`hev1.…`) do SPS; o quadro-chave leva VPS/SPS/PPS na frente.
+  O turbo repassa com `description` nula (quem joga já aceitava). Testado no Chrome com x265 1080p: 3/3
+  quadros, 0 erros. Quem joga sem decodificador H.265 cai do turbo para o vídeo normal.
+- **1440p e 4K (teste)**: a libchiaki só tem perfis até 1080p e o Remote Play oficial vai até 1080p; a
+  ponte pede 2560×1440 / 3840×2160 sob medida. Se o PS5 recusar, a página tenta de novo em 1080p. O
+  painel mostra a resolução que chegou de verdade (do SPS), e avisa se o PS5 mandou menos que o pedido.

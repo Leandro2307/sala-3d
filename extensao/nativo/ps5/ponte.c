@@ -951,6 +951,10 @@ static void conectar(const char *m)
 	chiaki_connect_video_profile_preset(&perfil,
 		altura >= 1080 ? CHIAKI_VIDEO_RESOLUTION_PRESET_1080p : altura >= 720 ? CHIAKI_VIDEO_RESOLUTION_PRESET_720p : CHIAKI_VIDEO_RESOLUTION_PRESET_540p,
 		json_num(m, "qps", 60) >= 60 ? CHIAKI_VIDEO_FPS_PRESET_60 : CHIAKI_VIDEO_FPS_PRESET_30);
+	// 1440p e 4K (teste): a biblioteca só tem perfis até 1080p, então vai sob medida. O Remote Play
+	// oficial vai até 1080p: se o PS5 recusar, a página tenta de novo em 1080p.
+	if(altura >= 2160) { perfil.width = 3840; perfil.height = 2160; perfil.bitrate = 40000; }
+	else if(altura >= 1440) { perfil.width = 2560; perfil.height = 1440; perfil.bitrate = 25000; }
 	p->largura = perfil.width;
 	p->altura = perfil.height;
 	p->qps = perfil.max_fps;

@@ -22,10 +22,30 @@ const CHAVE_MS = 300; // intervalo mínimo entre pedidos de quadro-chave ao PS5
 // também. O PS5 não manda quadro-chave sozinho de tempos em tempos: sem pedir, a cópia ficaria parada.
 const CHAVE_LOCAL_MS = 2000;
 const PAD_SOLTA_MS = 1500; // sem notícia do controle de quem joga por tanto tempo: solta tudo
-const OPCOES = 'sala3d-ps5'; // localStorage: { altura, qps, kbps, ultimo }
-const PADRAO = { altura: 720, qps: 60, kbps: 6000, ultimo: null };
-// as imagens que o Remote Play do PS5 aceita (a ponte escolhe o perfil mais perto)
-const IMAGENS = [[720, 60], [720, 30], [1080, 60], [1080, 30]];
+const OPCOES = 'sala3d-ps5'; // localStorage: { altura, qps, kbps, codec, ultimo, v }
+// kbps 0: automática pela resolução (BANDA). codec 'auto': H.265 se este navegador decodifica.
+const PADRAO = { altura: 1080, qps: 60, kbps: 0, codec: 'auto', ultimo: null, v: 2 };
+// A banda que o PS5 usa para cada resolução. Antes era 6 Mbps fixos (1080p a 60 ficava borrado no
+// movimento: o próprio chiaki-ng usa 15 em 1080p). Dá para pôr à mão até 50 Mbps.
+const BANDA = { 720: 10000, 1080: 15000, 1440: 25000, 2160: 40000 };
+export const bandaDaImagem = (altura) => BANDA[altura] || BANDA[1080];
+// 1440p e 4K: o Remote Play oficial vai até 1080p; a ponte pede o perfil sob medida e, se o PS5
+// recusar, a sala tenta de novo em 1080p (ver jogar)
+const IMAGENS = [[720, 60], [720, 30], [1080, 60], [1080, 30], [1440, 60], [2160, 60], [2160, 30]];
+const NOME_IMAGEM = { 720: '720p', 1080: '1080p', 1440: '1440p (teste)', 2160: '4K (teste)' };
+const HEVC_TESTE = 'hvc1.1.6.L153.B0';
+// este navegador decodifica H.265? (a resposta fica guardada: a pergunta leva uns ms)
+let hevcAqui = null;
+export async function decodificaHevc() {
+  if (hevcAqui != null) return hevcAqui;
+  try {
+    const r = await VideoDecoder.isConfigSupported({ codec: HEVC_TESTE, optimizeForLatency: true });
+    hevcAqui = !!r?.supported;
+  } catch {
+    hevcAqui = false;
+  }
+  return hevcAqui;
+}
 
 export const temPs5Nativo = () => typeof VideoDecoder === 'function' && typeof EncodedVideoChunk === 'function';
 
@@ -157,12 +177,75 @@ export function paraAvc(nals) {
   return r;
 }
 
+// ------------------------------------------------------------------ H.265 (fica em Annex B)
+// O H.265 vai sem descrição (hvcC): o decodificador lê o Annex B, com VPS/SPS/PPS na frente de cada
+// quadro-chave. Mais simples que montar o hvcC, e quem joga (turbo.js) já aceita config sem descrição.
+export const tipoHevc = (n) => (n[0] >> 1) & 0x3f;
+
+export function annexB(nals) {
+  const total = nals.reduce((s, n) => s + 4 + n.length, 0);
+  const r = new Uint8Array(total);
+  let o = 0;
+  for (const n of nals) {
+    r.set([0, 0, 0, 1], o);
+    r.set(n, o + 4);
+    o += 4 + n.length;
+  }
+  return r;
+}
+
+// largura, altura e o nome do codec (hev1.…) a partir do SPS do H.265
+export function infoDoSpsHevc(nal) {
+  const L = new Bits(rbspDe(nal));
+  L.u(16); // cabeçalho da NAL
+  L.u(4);
+  const maxSub = L.u(3);
+  L.u(1);
+  // profile_tier_level
+  const espaco = L.u(2);
+  const tier = L.u(1);
+  const perfil = L.u(5);
+  const compat = L.u(32);
+  const restricoes = [];
+  for (let i = 0; i < 6; i++) restricoes.push(L.u(8));
+  const nivel = L.u(8);
+  const subPerfil = [];
+  const subNivel = [];
+  for (let i = 0; i < maxSub; i++) { subPerfil.push(L.u(1)); subNivel.push(L.u(1)); }
+  if (maxSub > 0) for (let i = maxSub; i < 8; i++) L.u(2);
+  for (let i = 0; i < maxSub; i++) {
+    if (subPerfil[i]) { L.u(32); L.u(32); L.u(24); }
+    if (subNivel[i]) L.u(8);
+  }
+  L.ue(); // id do SPS
+  const croma = L.ue();
+  if (croma === 3) L.u(1);
+  let w = L.ue();
+  let h = L.ue();
+  if (L.u(1)) {
+    const sx = croma === 1 || croma === 2 ? 2 : 1;
+    const sy = croma === 1 ? 2 : 1;
+    const esq = L.ue(), dir = L.ue(), cima = L.ue(), baixo = L.ue();
+    w -= (esq + dir) * sx;
+    h -= (cima + baixo) * sy;
+  }
+  // as bandeiras de compatibilidade vão invertidas no nome (ISO 14496-15, anexo E)
+  let inv = 0;
+  for (let i = 0; i < 32; i++) inv = inv * 2 + (Math.floor(compat / 2 ** i) % 2);
+  const r = [...restricoes];
+  while (r.length && r[r.length - 1] === 0) r.pop();
+  const codec = `hev1.${['', 'A', 'B', 'C'][espaco]}${perfil}.${inv.toString(16).toUpperCase()}.${tier ? 'H' : 'L'}${nivel}${r.map((b) => `.${b.toString(16).toUpperCase()}`).join('')}`;
+  return { w, h, codec };
+}
+
 // ------------------------------------------------------------------ a fonte (vídeo e som do PS5)
 // Quem assina recebe { cfg }, { quadro, chave, ts, t0 } e { som, ts, hz, canais }. ts em µs.
 export class Ps5Fonte {
-  constructor({ pedirChave, onEvento }) {
+  constructor({ pedirChave, onEvento, hevc = false }) {
     this.pedirChaveDaPonte = pedirChave;
     this.onEvento = onEvento;
+    this.hevc = hevc; // H.265 (Annex B, ver infoDoSpsHevc) em vez do H.264 (avc)
+    this.vps = null;
     this.assinantes = new Set();
     this.cfg = null; // { codec, w, h, description (Uint8Array), b64 }
     this.sps = null;
@@ -241,7 +324,33 @@ export class Ps5Fonte {
     this.avisar({ cfg: this.cfg });
   }
 
+  // VPS/SPS/PPS do H.265: a configuração vai sem descrição (o decodificador lê o Annex B)
+  parametrosHevc(vps, sps, pps) {
+    if (vps) this.vps = vps;
+    if (sps) this.sps = sps;
+    if (pps) this.pps = pps;
+    if (!this.vps || !this.sps || !this.pps) return;
+    const chave = b64(annexB([this.vps, this.sps, this.pps]));
+    if (this.cfg?.chave === chave) return;
+    let info = { w: this.cfg?.w ?? 1920, h: this.cfg?.h ?? 1080, codec: HEVC_TESTE };
+    try { info = infoDoSpsHevc(this.sps); } catch (err) { console.warn('[ps5] sps h265', err); }
+    this.cfg = { codec: info.codec, w: info.w, h: info.h, description: undefined, b64: null, chave, hevc: true };
+    this.onEvento?.('ps5: configuração do vídeo', { codec: info.codec, w: info.w, h: info.h });
+    this.configurarDec();
+    this.avisar({ cfg: this.cfg });
+  }
+
   cabecalho(buf) {
+    if (this.hevc) {
+      let vps = null, sps = null, pps = null;
+      for (const n of nalsDe(buf)) {
+        const t = tipoHevc(n);
+        if (t === 32) vps = n.slice();
+        else if (t === 33) sps = n.slice();
+        else if (t === 34) pps = n.slice();
+      }
+      return this.parametrosHevc(vps, sps, pps);
+    }
     let sps = null, pps = null;
     for (const n of nalsDe(buf)) {
       const t = n[0] & 0x1f;
@@ -253,6 +362,7 @@ export class Ps5Fonte {
 
   quadro(buf, marcas, perdidos) {
     if (this.parada) return;
+    if (this.hevc) return this.quadroHevc(buf, marcas, perdidos);
     const t0 = performance.now();
     const imagem = [];
     let sps = null, pps = null, chave = false;
@@ -269,6 +379,35 @@ export class Ps5Fonte {
     if (sps || pps) this.parametros(sps, pps);
     if (!imagem.length || !this.cfg) return;
     const dados = paraAvc(imagem);
+    const ts = Math.round(t0 * 1000);
+    this.conta.quadros++;
+    this.conta.bytes += dados.length;
+    if (chave) this.conta.chaves++;
+    if (perdidos) this.conta.perdidos += perdidos;
+    if (marcas & 1) this.conta.recuperados++;
+    this.avisar({ quadro: dados, chave, ts, t0 });
+    this.decodificar(dados, chave, ts, t0);
+  }
+
+  quadroHevc(buf, marcas, perdidos) {
+    const t0 = performance.now();
+    const imagem = [];
+    let vps = null, sps = null, pps = null, chave = false;
+    for (const n of nalsDe(buf)) {
+      const t = tipoHevc(n);
+      if (t === 32) vps = n.slice();
+      else if (t === 33) sps = n.slice();
+      else if (t === 34) pps = n.slice();
+      else if (t === 35) continue; // delimitador
+      else {
+        if (t >= 16 && t <= 21) chave = true; // IRAP (IDR, CRA, BLA)
+        imagem.push(n);
+      }
+    }
+    if (vps || sps || pps) this.parametrosHevc(vps, sps, pps);
+    if (!imagem.length || !this.cfg) return;
+    // quadro-chave leva os parâmetros na frente: quem começa por ele (aqui e no turbo) decodifica
+    const dados = annexB(chave ? [this.vps, this.sps, this.pps, ...imagem] : imagem);
     const ts = Math.round(t0 * 1000);
     this.conta.quadros++;
     this.conta.bytes += dados.length;
@@ -297,7 +436,7 @@ export class Ps5Fonte {
           },
         });
       }
-      this.dec.configure({ codec: cfg.codec, description: cfg.description, optimizeForLatency: true });
+      this.dec.configure({ codec: cfg.codec, ...(cfg.description ? { description: cfg.description } : {}), optimizeForLatency: true });
       this.esperaChave = true;
     } catch (err) {
       console.warn('[ps5] configurar', err);
@@ -439,6 +578,12 @@ export class Ps5Nativo {
     this.ultimoPad = 0;
     this.padSolto = true;
     try { this.opcoes = { ...PADRAO, ...JSON.parse(localStorage.getItem(OPCOES) || '{}') }; } catch { this.opcoes = { ...PADRAO }; }
+    // antes da versão 2 a banda era 6 Mbps de fábrica (gravada junto): passa a ser automática
+    if (!(this.opcoes.v >= 2)) {
+      if (Number(this.opcoes.kbps) === 6000) this.opcoes.kbps = 0;
+      this.opcoes.v = 2;
+      this.guardarOpcoes();
+    }
     setInterval(() => this.vigiarPad(), 500);
   }
 
@@ -540,6 +685,9 @@ export class Ps5Nativo {
         break;
       case 'conectado':
         this.conectado = m;
+        this.pedidoAlto = null;
+        // a ponte só pede H.265 a um PS5: a fonte segue o que ficou combinado
+        if (this.fonte && this.fonte.hevc !== (m.codec === 'h265')) this.fonte.hevc = m.codec === 'h265';
         this.fase = 'jogando';
         this.onEvento?.('ps5 direto: conectado', m);
         this.porNaSala();
@@ -554,11 +702,21 @@ export class Ps5Nativo {
       case 'pin':
         this.pedirPinDeLogin(!!m.errado);
         break;
-      case 'saiu':
+      case 'saiu': {
         this.onEvento?.('ps5 direto: saiu', m);
+        const alto = this.pedidoAlto;
+        this.pedidoAlto = null;
+        if (m.erro && alto && !['nao-achou', 'dormindo', 'sem-registro'].includes(m.motivo)) {
+          // o PS5 não aceitou 1440p/4K: de novo em 1080p
+          this.toast?.('O PS5 não aceitou essa resolução no Remote Play. Tentando em 1080p…', 'warn', 7000);
+          this.terminar(null);
+          setTimeout(() => this.jogar(alto.id, 1080), 1500);
+          break;
+        }
         if (m.erro) this.toast?.(`PS5: ${this.motivo(m)}`, 'error', 9000);
         this.terminar(null);
         break;
+      }
       case 'aviso':
         // erros da biblioteca vão para o relatório (o console do navegador também)
         if (m.nivel === 'E') console.warn('[ps5]', m.texto);
@@ -580,16 +738,25 @@ export class Ps5Nativo {
   }
 
   // ---------------------------------------------------------------- jogar
-  async jogar(id) {
+  // alturaForcada: a volta para 1080p quando o PS5 recusou 1440p/4K
+  async jogar(id, alturaForcada = null) {
     if (this.noAr || (this.fase !== 'parado' && this.fase)) return;
     if (!(await this.ligarPonte())) { this.render(); return; }
     this.opcoes.ultimo = id;
     this.guardarOpcoes();
+    const altura = alturaForcada || Number(this.opcoes.altura) || 1080;
+    const qps = Number(this.opcoes.qps) === 30 ? 30 : 60;
+    // banda: a escrita à mão vale para a resolução escolhida; na volta para 1080p, a de 1080p
+    const kbps = !alturaForcada && Number(this.opcoes.kbps) >= 2000 ? Number(this.opcoes.kbps) : bandaDaImagem(altura);
+    const pedido = this.opcoes.codec === 'h264' ? 'h264' : this.opcoes.codec === 'h265' ? 'h265' : ((await decodificaHevc()) ? 'h265' : 'h264');
+    const codec = pedido === 'h265' && !(await decodificaHevc()) ? 'h264' : pedido; // sem decodificador aqui, não dá
+    this.pedidoAlto = altura > 1080 ? { id } : null;
     // a fonte nasce antes: o cabeçalho do vídeo chega logo depois do "conectado"
     this.fonte?.parar();
-    this.fonte = new Ps5Fonte({ pedirChave: () => this.mandar({ tipo: 'chave' }), onEvento: this.onEvento });
+    this.fonte = new Ps5Fonte({ pedirChave: () => this.mandar({ tipo: 'chave' }), onEvento: this.onEvento, hevc: codec === 'h265' });
     this.fase = 'procurando';
-    this.mandar({ tipo: 'conectar', id, altura: Number(this.opcoes.altura) || 720, qps: Number(this.opcoes.qps) === 30 ? 30 : 60, kbps: Number(this.opcoes.kbps) || 6000, codec: 'h264' });
+    this.onEvento?.('ps5 direto: pedido', { altura, qps, kbps, codec });
+    this.mandar({ tipo: 'conectar', id, altura, qps, kbps, codec });
     this.render();
   }
 
@@ -712,7 +879,8 @@ export class Ps5Nativo {
         this.opcoes.altura = altura || 720;
         this.opcoes.qps = qps === 30 ? 30 : 60;
       }
-      else if (n === 'p5-kbps') this.opcoes.kbps = Math.min(30000, Math.max(2000, Number(e.target.value) || 6000));
+      else if (n === 'p5-kbps') this.opcoes.kbps = Number(e.target.value) ? Math.min(50000, Math.max(2000, Number(e.target.value))) : 0;
+      else if (n === 'p5-codec') this.opcoes.codec = ['h264', 'h265'].includes(e.target.value) ? e.target.value : 'auto';
       else return;
       this.guardarOpcoes();
     });
@@ -785,7 +953,7 @@ export class Ps5Nativo {
     const c = this.conectado;
     corpo.innerHTML = `
       <p class="p5-status">O PS5 sem o chiaki-ng aberto: a imagem que ele faz vai direto para quem joga, e o controle de quem joga chega nele como um controle de PS5 (sem o ViGEmBus). Feche o chiaki-ng antes: o PS5 só aceita um Remote Play por vez.</p>
-      ${noAr ? `<div class="p5-item"><span><span class="p5-fase">${esc(fase)}</span>${c ? `<small>${c.largura}×${c.altura} · ${c.qps} qps · ${Math.round(c.kbps / 100) / 10} Mbps · ${esc(c.codec)}</small>` : ''}</span>
+      ${noAr ? `<div class="p5-item"><span><span class="p5-fase">${esc(fase)}</span>${c ? `<small>${this.fonte?.cfg ? `${this.fonte.cfg.w}×${this.fonte.cfg.h}` : `${c.largura}×${c.altura}`} · ${c.qps} qps · ${Math.round(c.kbps / 100) / 10} Mbps · ${c.codec === 'h265' ? 'H.265' : 'H.264'}${this.fonte?.cfg && (this.fonte.cfg.w < c.largura || this.fonte.cfg.h < c.altura) ? ` <span class="p5-fase">(pedido ${c.largura}×${c.altura}: o PS5 mandou menos)</span>` : ''}</small>` : ''}</span>
         <span class="p5-acoes"><button type="button" class="secondary small" data-p5="dormir"${c ? '' : ' disabled'}>Pôr em repouso</button><button type="button" class="small danger" data-p5="parar">Parar</button></span></div>` : ''}
       ${noAr && this.key && this.lossless ? `<div class="p5-item"><span><b>Lossless Scaling neste PC</b>${this.lossless.ligado() ? ' <span class="p5-fase">mandando a imagem do OBS</span>' : ''}
         <small>1. Abra a janela do PS5 e ligue o Lossless nela. 2. No OBS (a 120 qps, com a câmera virtual ligada), capture a tela onde o Lossless desenha. 3. Mande a imagem do OBS: quem joga recebe os quadros que o Lossless gerou. Tem mais atraso que a imagem direta.</small></span>
@@ -795,9 +963,12 @@ export class Ps5Nativo {
         <button type="button" class="secondary small" data-p5="procurar"${this.procurando ? ' disabled' : ''}>${this.procurando ? 'Procurando…' : 'Procurar na rede'}</button>
         <button type="button" class="secondary small" data-p5="importar">Trazer do chiaki-ng</button>
         <label>Imagem <select name="p5-altura">
-          ${IMAGENS.map(([a, q]) => `<option value="${a}-${q}"${Number(this.opcoes.altura) === a && (Number(this.opcoes.qps) === 30 ? 30 : 60) === q ? ' selected' : ''}>${a}p · ${q} qps</option>`).join('')}
+          ${IMAGENS.map(([a, q]) => `<option value="${a}-${q}"${Number(this.opcoes.altura) === a && (Number(this.opcoes.qps) === 30 ? 30 : 60) === q ? ' selected' : ''}>${NOME_IMAGEM[a]} · ${q} qps</option>`).join('')}
         </select></label>
-        <label>Banda (kbps) <input name="p5-kbps" type="number" min="2000" max="30000" step="500" value="${Number(this.opcoes.kbps) || 6000}" style="width:96px"></label>
+        <label>Banda (kbps) <input name="p5-kbps" type="number" min="2000" max="50000" step="1000" value="${Number(this.opcoes.kbps) >= 2000 ? Number(this.opcoes.kbps) : ''}" placeholder="auto ${bandaDaImagem(Number(this.opcoes.altura) || 1080)}" style="width:110px"></label>
+        <label>Codec <select name="p5-codec">
+          ${[['auto', 'Automático'], ['h265', 'H.265 (melhor imagem)'], ['h264', 'H.264 (mais compatível)']].map(([v, n]) => `<option value="${v}"${(this.opcoes.codec || 'auto') === v ? ' selected' : ''}>${n}</option>`).join('')}
+        </select></label>
       </div>
       ${novos.length ? `<p class="p5-dica">Na rede, sem registro: ${novos.map((a) => `<button type="button" class="secondary small" data-p5="usar-ip" data-ip="${esc(a.ip)}">${esc(a.nome || a.ip)} (${esc(a.ip)})</button>`).join(' ')}</p>` : ''}
       <details${this.consoles.length ? '' : ' open'}>
