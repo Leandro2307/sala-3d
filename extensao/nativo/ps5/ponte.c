@@ -22,6 +22,7 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
+#include <iphlpapi.h>
 #include <process.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -526,12 +527,49 @@ static void achou(ChiakiDiscoveryHost *h, void *user)
 	LeaveCriticalSection(&travaAchados);
 }
 
+// o broadcast de cada rede IPv4 ligada (sem a de loopback), em ordem de rede; devolve quantos
+static int broadcasts_locais(ULONG *out, int max)
+{
+	ULONG tam = 16384;
+	IP_ADAPTER_ADDRESSES *lista = NULL;
+	ULONG r = ERROR_BUFFER_OVERFLOW;
+	for(int t = 0; t < 3 && r == ERROR_BUFFER_OVERFLOW; t++)
+	{
+		free(lista);
+		lista = (IP_ADAPTER_ADDRESSES *)malloc(tam);
+		if(!lista) return 0;
+		r = GetAdaptersAddresses(AF_INET, GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER, NULL, lista, &tam);
+	}
+	int n = 0;
+	if(r == NO_ERROR)
+	{
+		for(IP_ADAPTER_ADDRESSES *ad = lista; ad && n < max; ad = ad->Next)
+		{
+			if(ad->OperStatus != IfOperStatusUp || ad->IfType == IF_TYPE_SOFTWARE_LOOPBACK) continue;
+			for(IP_ADAPTER_UNICAST_ADDRESS *u = ad->FirstUnicastAddress; u && n < max; u = u->Next)
+			{
+				if(u->Address.lpSockaddr->sa_family != AF_INET) continue;
+				UINT8 bits = u->OnLinkPrefixLength;
+				if(bits == 0 || bits >= 31) continue;
+				ULONG ip = ntohl(((struct sockaddr_in *)u->Address.lpSockaddr)->sin_addr.s_addr);
+				if((ip >> 16) == 0xA9FE) continue; // 169.254 (sem DHCP)
+				ULONG mascara = 0xFFFFFFFFu << (32 - bits);
+				out[n++] = htonl(ip | ~mascara);
+			}
+		}
+	}
+	free(lista);
+	return n;
+}
+
 // manda "SRCH" (PS5 e PS4) para o broadcast e, se houver, para um IP conhecido; espera ms
 static void descobrir(int ms, const char *ipConhecido)
 {
 	EnterCriticalSection(&travaAchados);
 	nAchados = 0;
 	LeaveCriticalSection(&travaAchados);
+	ULONG broadcasts[16];
+	int nBroadcasts = broadcasts_locais(broadcasts, 16);
 	ChiakiDiscovery d;
 	if(chiaki_discovery_init(&d, &logChiaki, AF_INET) != CHIAKI_ERR_SUCCESS) return;
 	ChiakiDiscoveryThread t;
@@ -550,6 +588,13 @@ static void descobrir(int ms, const char *ipConhecido)
 			a.sin_port = htons(ps5 ? CHIAKI_DISCOVERY_PORT_PS5 : CHIAKI_DISCOVERY_PORT_PS4);
 			a.sin_addr.s_addr = htonl(INADDR_BROADCAST);
 			chiaki_discovery_send(&d, &p, (struct sockaddr *)&a, sizeof(a));
+			// 255.255.255.255 sai só pela rota de menor métrica (com Radmin/Hamachi/VPN, a da VPN e
+			// não a de casa): manda também para o broadcast de cada rede ligada (192.168.1.255 etc.)
+			for(int b = 0; b < nBroadcasts; b++)
+			{
+				a.sin_addr.s_addr = broadcasts[b];
+				chiaki_discovery_send(&d, &p, (struct sockaddr *)&a, sizeof(a));
+			}
 			if(ipConhecido && ipConhecido[0] && inet_pton(AF_INET, ipConhecido, &a.sin_addr) == 1)
 				chiaki_discovery_send(&d, &p, (struct sockaddr *)&a, sizeof(a));
 		}
