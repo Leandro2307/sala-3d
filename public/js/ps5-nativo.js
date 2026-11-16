@@ -529,7 +529,15 @@ export class Ps5Fonte {
           if (!this.escritorSom) { data.close(); return; }
           this.escritorSom.write(data).catch(() => {});
         },
-        error: (err) => { console.warn('[ps5] som', err); this.decSom = null; },
+        // Um pacote ruim fecha o decodificador. Antes ele virava null e nunca mais voltava: o som daqui
+        // e o do vídeo normal sumiam de vez (o turbo seguia, porque repassa sem decodificar). Agora o
+        // próximo pacote cria outro (som()).
+        error: (err) => {
+          console.warn('[ps5] som', err);
+          this.decSom = null;
+          this.conta.errosSom = (this.conta.errosSom || 0) + 1;
+          this.onEvento?.('ps5: o decodificador de som falhou (cria outro)', { erro: String(err?.message || err).slice(0, 120), vezes: this.conta.errosSom });
+        },
       });
       this.decSom.configure({ codec: 'opus', sampleRate: this.somCfg.hz, numberOfChannels: this.somCfg.canais });
     } catch (err) {
@@ -543,6 +551,12 @@ export class Ps5Fonte {
     const ts = Math.round(performance.now() * 1000);
     const dados = buf.slice();
     this.avisar({ som: dados, ts, hz: this.somCfg.hz, canais: this.somCfg.canais });
+    this.conta.som = (this.conta.som || 0) + 1;
+    // o decodificador caiu (pacote ruim): outro, no máximo um por segundo
+    if ((!this.decSom || this.decSom.state === 'closed') && performance.now() - (this.recriouSom || 0) > 1000) {
+      this.recriouSom = performance.now();
+      this.somCabecalho({ hz: this.somCfg.hz, canais: this.somCfg.canais });
+    }
     if (this.decSom?.state === 'configured' && this.decSom.decodeQueueSize < 10) {
       try { this.decSom.decode(new EncodedAudioChunk({ type: 'key', timestamp: ts, data: dados })); } catch { /* pacote ruim */ }
     }
@@ -601,8 +615,9 @@ export class Ps5Nativo {
   // pararTela(): tira a tela do PS5 da sala; onTremor(g, p); onEvento(texto, dados): relatório
   // jogarComLossless(key): a tela do PS5 em tela cheia no modo jogo, com o Lossless ligado (main.js)
   // losslessTodos: { ligado(), alternar() } — o Lossless deste PC para todos, pela câmera do OBS
-  constructor({ pedirPonte, compartilhar, pararTela, onTremor, onEvento, toast, aoAbrir, aoFechar, jogarComLossless, losslessTodos }) {
-    Object.assign(this, { pedirPonte, compartilhar, pararTela, onTremor, onEvento, toast, aoAbrir, aoFechar, jogarComLossless, losslessTodos });
+  // somPc: { ligado(), alternar(), abafar(), alternarAbafar() } — o som do PC (Voz Universal) junto com o do PS5
+  constructor({ pedirPonte, compartilhar, pararTela, onTremor, onEvento, toast, aoAbrir, aoFechar, jogarComLossless, losslessTodos, somPc }) {
+    Object.assign(this, { pedirPonte, compartilhar, pararTela, onTremor, onEvento, toast, aoAbrir, aoFechar, jogarComLossless, losslessTodos, somPc });
     this.ws = null;
     this.consoles = [];
     this.achados = null;
@@ -755,11 +770,23 @@ export class Ps5Nativo {
         this.terminar(null);
         break;
       }
-      case 'aviso':
-        // erros da biblioteca vão para o relatório (o console do navegador também)
+      case 'aviso': {
+        // Erros da biblioteca: no console na hora; no relatório, juntos a cada 30 s (quadro corrompido
+        // vem às centenas e empurrava o resto dos 300 eventos para fora)
         if (m.nivel === 'E') console.warn('[ps5]', m.texto);
-        this.onEvento?.('ps5 direto: aviso', { nivel: m.nivel, texto: String(m.texto).slice(0, 200) });
+        const tipo = String(m.texto).replace(/[0-9]+/g, '#').slice(0, 80);
+        this.avisos ??= new Map();
+        this.avisos.set(tipo, (this.avisos.get(tipo) || 0) + 1);
+        if (!this.avisosTimer) {
+          this.avisosTimer = setTimeout(() => {
+            this.avisosTimer = 0;
+            const lista = [...this.avisos].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([t, n]) => `${n}x ${t}`);
+            this.avisos.clear();
+            this.onEvento?.('ps5 direto: avisos (30 s)', { avisos: lista });
+          }, 30_000);
+        }
         break;
+      }
       default:
     }
     this.render();
@@ -908,6 +935,8 @@ export class Ps5Nativo {
       else if (acao === 'registrar') this.registrar();
       else if (acao === 'tentar') this.abrir();
       else if (acao === 'ls-jogar') { this.fechar(); this.jogarComLossless?.(this.key); }
+      else if (acao === 'som-pc') Promise.resolve(this.somPc?.alternar()).finally(() => this.render());
+      else if (acao === 'som-pc-abafar') { this.somPc?.alternarAbafar(); this.render(); }
       else if (acao === 'ls-todos') Promise.resolve(this.losslessTodos?.alternar()).finally(() => this.render());
     });
     this.raiz.addEventListener('change', (e) => {
@@ -993,6 +1022,9 @@ export class Ps5Nativo {
       <p class="p5-status">O PS5 sem o chiaki-ng aberto: a imagem que ele faz vai direto para quem joga, e o controle de quem joga chega nele como um controle de PS5 (sem o ViGEmBus). Feche o chiaki-ng antes: o PS5 só aceita um Remote Play por vez.</p>
       ${noAr ? `<div class="p5-item"><span><span class="p5-fase">${esc(fase)}</span>${c ? `<small>${this.fonte?.cfg ? `${this.fonte.cfg.w}×${this.fonte.cfg.h}` : `${c.largura}×${c.altura}`} · ${c.qps} qps · ${Math.round(c.kbps / 100) / 10} Mbps · ${c.codec === 'h265' ? 'H.265' : 'H.264'}${this.fonte?.cfg && (this.fonte.cfg.w < c.largura || this.fonte.cfg.h < c.altura) ? ` <span class="p5-fase">(pedido ${c.largura}×${c.altura}: o PS5 mandou menos)</span>` : ''}</small>` : ''}</span>
         <span class="p5-acoes"><button type="button" class="secondary small" data-p5="dormir"${c ? '' : ' disabled'}>Pôr em repouso</button><button type="button" class="small danger" data-p5="parar">Parar</button></span></div>` : ''}
+      ${noAr && this.key && this.somPc ? `<div class="p5-item"><span><b>Levar o som do PC (Voz Universal)</b>${this.somPc.ligado() ? ' <span class="p5-fase">ligado</span>' : ''}
+        <small>Mistura no som do PS5 tudo o que toca no PC fora do Chrome (a voz do Voz Universal) e manda na mesma tela, sem abrir outra. No seletor, escolha <b>Tela inteira</b> e marque <b>Compartilhar áudio do sistema</b>. Feche o Spotify, o Discord e o que mais não deve ir junto.</small></span>
+        <span class="p5-acoes">${this.somPc.ligado() ? `<button type="button" class="secondary small" data-p5="som-pc-abafar" title="Enquanto a voz fala, o PS5 abaixa para quem recebe (como o abafar do Voz Universal faz aqui)">${this.somPc.abafar() ? 'Abaixar o PS5 na voz: sim' : 'Abaixar o PS5 na voz: não'}</button>` : ''}<button type="button" class="small" data-p5="som-pc">${this.somPc.ligado() ? 'Parar o som do PC' : 'Levar o som do PC'}</button></span></div>` : ''}
       ${noAr && this.key && this.losslessTodos ? `<div class="p5-item"><span><b>Lossless para todos</b>${this.losslessTodos.ligado() ? ' <span class="p5-fase">ligado</span>' : ''}
         <small>Ponha o PS5 a 30 qps: o Lossless deste PC dobra para 60 e todo mundo recebe pelo OBS. A janela do PS5 vai para o outro monitor e precisa ficar na frente (clicando em outra janela o Lossless pausa e volta quando ela volta). Precisa do OBS com o WebSocket ligado e do Lossless aberto.</small></span>
         <span class="p5-acoes"><button type="button" class="small" data-p5="ls-todos">${this.losslessTodos.ligado() ? 'Voltar à imagem direta' : 'Lossless para todos'}</button></span></div>` : ''}

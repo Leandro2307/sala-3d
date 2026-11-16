@@ -2487,6 +2487,8 @@ function stopShare(key, notify, { manter = false } = {}) {
   clearTimeout(sh.semMarca);
   clearTimeout(turbos.get(key));
   turbos.delete(key);
+  // o som do PC misturado no PS5: a tela volta com o som do PS5 antes de sair
+  if (sh.somPc) desligarSomPc(sh, rtc.screens.get(key));
   rtc.stopScreen(key, { manterTrilhas: manter });
   if (sh.escuta && !manter) {
     sh.escuta.pause();
@@ -2952,7 +2954,8 @@ const turboEnvio = new TurboEnvio({
     const scr = rtc?.screens.get(key);
     // Lossless para todos (losslessParaTodos): a câmera do OBS é codificada como uma tela comum
     if (sh?.lossless && scr) return { stream: sh.lossless, controle: !!sh.controle, ps5: null };
-    return sh && scr ? { stream: scr.stream, controle: !!sh.controle, ps5: sh.ps5 || null } : null;
+    // somMix: o som do PS5 com o do PC (somDoPcNoPs5); o turbo codifica a mistura em vez de repassar o do PS5
+    return sh && scr ? { stream: scr.stream, controle: !!sh.controle, ps5: sh.ps5 || null, somMix: sh.somPc ? new MediaStream([sh.somPc.mix]) : null } : null;
   },
   onMudou: (id, key, ligado) => {
     rtc?.turboPara(id, key, ligado);
@@ -2989,7 +2992,52 @@ const ps5Nativo = new Ps5Nativo({
     ligado: () => !!self()?.shares.get(ps5Nativo.key)?.lossless,
     alternar: () => losslessParaTodos(!self()?.shares.get(ps5Nativo.key)?.lossless),
   },
+  // "Levar o som do PC": o som do PC (a voz do Voz Universal) misturado no do PS5, na mesma tela
+  somPc: {
+    ligado: () => !!self()?.shares.get(ps5Nativo.key)?.somPc,
+    alternar: () => somDoPcNoPs5(!self()?.shares.get(ps5Nativo.key)?.somPc),
+    abafar: () => abafarPs5,
+    alternarAbafar: () => {
+      abafarPs5 = !abafarPs5;
+      try { localStorage.setItem('sala3d-ps5-abafar', abafarPs5 ? '1' : '0'); } catch { /* sem armazenamento */ }
+    },
+  },
 });
+
+// ------------------------------------------------------------------ o som do PS5 no relatório
+// A cada 2 s: os pacotes de som que chegam da ponte, o tocador (buffer, faltas), quantas vezes o
+// decodificador caiu e a trilha que vai para quem joga. "Parou de chegar"/"voltou" viram eventos.
+const medeSomPs5 = medidorQps();
+let somPs5Agora = null;
+let somPs5Parado = false;
+setInterval(() => {
+  const f = ps5Nativo.key ? ps5Nativo.fonte : null;
+  if (!f) { somPs5Agora = null; somPs5Parado = false; medeSomPs5(null); return; }
+  const st = f.stats();
+  const tr = f.stream?.getAudioTracks()[0];
+  const pps = medeSomPs5(f.conta.som ?? 0);
+  somPs5Agora = {
+    pps: pps != null ? Math.round(pps) : null,
+    errosDecodificador: f.conta.errosSom || 0,
+    tocador: st.tocador,
+    trilha: tr ? { estado: tr.readyState, muda: tr.muted, ligada: tr.enabled } : null,
+  };
+  if (pps == null || !diagJogo.ativo) return;
+  if (!somPs5Parado && pps < 1) { somPs5Parado = true; diagJogo.evento('PS5: o som parou de chegar da ponte', somPs5Agora); }
+  else if (somPs5Parado && pps >= 1) { somPs5Parado = false; diagJogo.evento('PS5: o som voltou a chegar', somPs5Agora); }
+}, 2000);
+
+// quem joga: o som sumiu (nem turbo nem vídeo normal) e voltou
+let somLaSumiu = false;
+function vigiarSomQueChega(resumo) {
+  if (!resumo) return;
+  const turboOk = resumo.turbo?.som?.ativo && resumo.turbo.som.pps > 0;
+  const webrtcOk = resumo.somWebrtc?.pps > 0;
+  const por = turboOk ? 'turbo' : webrtcOk ? 'vídeo normal' : 'nenhum';
+  resumo.somPor = por;
+  if (!somLaSumiu && por === 'nenhum') { somLaSumiu = true; diagJogo.evento('o som do jogo sumiu (nem turbo nem vídeo normal)', { turbo: resumo.turbo?.som ?? null, webrtc: resumo.somWebrtc }); }
+  else if (somLaSumiu && por !== 'nenhum') { somLaSumiu = false; diagJogo.evento(`o som do jogo voltou (${por})`); }
+}
 
 // ------------------------------------------------------------------ Lossless para todos (OBS)
 // O PS5 a 30 qps, o Lossless DESTE PC dobra e todo mundo recebe pela câmera do OBS (até 60: o teto do
@@ -3114,6 +3162,115 @@ function mostrarNaMinhaTela(sh, stream) {
     fv.play().catch(() => {});
   }
   refreshScreens();
+}
+
+// ------------------------------------------------------------------ som do PC junto com o PS5
+// O Voz Universal (dublagem das legendas) fala pelo alto-falante do PC, fora da tela do PS5. Em vez de
+// uma segunda tela só para o som, o som do sistema (o seletor do Chrome com "Tela inteira" e
+// "Compartilhar áudio do sistema"; a imagem é largada) é misturado no som do PS5 e vai na mesma tela:
+// pelo vídeo da conexão e pelo turbo. O áudio do sistema no Windows sai sem o próprio Chrome
+// (restrictOwnAudio: "loopbackWithoutChrome"), então o PS5, que toca no Chrome, não vai em dobro e a voz
+// dos amigos não volta para eles. Enquanto o PC fala, o PS5 abaixa na mistura (como o "abafar o jogo" do
+// Voz Universal faz só neste PC).
+const ABAFAR_PS5 = 0.3; // o volume do PS5 na mistura enquanto o PC fala
+const LIMIAR_FALA = 0.015; // RMS do som do PC que conta como fala
+let abafarPs5 = (() => {
+  try { return localStorage.getItem('sala3d-ps5-abafar') !== '0'; } catch { return true; }
+})();
+
+async function somDoPcNoPs5(ligar) {
+  const key = ps5Nativo.key;
+  const sh = key && self()?.shares.get(key);
+  const scr = key && rtc?.screens.get(key);
+  if (!sh || !scr) return void toast('Ponha o PS5 numa tela antes.', 'warn', 5000);
+  if (!ligar) return void desligarSomPc(sh, scr, true);
+  if (sh.somPc) return;
+  const ps5 = scr.stream.getAudioTracks()[0];
+  if (!ps5 || ps5.readyState !== 'live') return void toast('O som do PS5 não está tocando nesta tela (este navegador não decodifica o som dele).', 'warn', 8000);
+  // o AudioContext nasce ainda no clique (depois do seletor o navegador poderia abrir ele parado)
+  const AC = window.AudioContext || window.webkitAudioContext;
+  let ctx;
+  try { ctx = new AC({ latencyHint: 'interactive', sampleRate: 48000 }); } catch { ctx = new AC({ latencyHint: 'interactive' }); }
+  const pc = await rtc.somDoSistema();
+  if (!pc) {
+    ctx.close().catch(() => {});
+    return void toast('Sem o som do PC: no seletor, escolha "Tela inteira" e marque "Compartilhar áudio do sistema".', 'warn', 10000);
+  }
+  // a tela saiu (ou já ligou por outro clique) enquanto o seletor estava aberto
+  if (self()?.shares.get(key) !== sh || sh.somPc || ps5.readyState !== 'live') {
+    pc.stop();
+    ctx.close().catch(() => {});
+    return;
+  }
+  const dest = ctx.createMediaStreamDestination();
+  dest.channelCount = 2;
+  const gPs5 = ctx.createGain();
+  const gPc = ctx.createGain();
+  ctx.createMediaStreamSource(new MediaStream([ps5])).connect(gPs5).connect(dest);
+  const fontePc = ctx.createMediaStreamSource(new MediaStream([pc]));
+  fontePc.connect(gPc).connect(dest);
+  // o PS5 abaixa enquanto o PC fala e volta devagar depois da fala
+  const medidor = ctx.createAnalyser();
+  medidor.fftSize = 1024;
+  fontePc.connect(medidor);
+  const amostras = new Float32Array(medidor.fftSize);
+  let falouEm = -1e9;
+  let alvoAtual = 1;
+  const vigia = setInterval(() => {
+    medidor.getFloatTimeDomainData(amostras);
+    let soma = 0;
+    for (const x of amostras) soma += x * x;
+    const agora = performance.now();
+    if (Math.sqrt(soma / amostras.length) > LIMIAR_FALA) falouEm = agora;
+    const alvo = abafarPs5 && agora - falouEm < 400 ? ABAFAR_PS5 : 1;
+    if (alvo === alvoAtual) return;
+    alvoAtual = alvo;
+    gPs5.gain.setTargetAtTime(alvo, ctx.currentTime, alvo < 1 ? 0.03 : 0.25);
+  }, 40);
+  if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+  const mix = dest.stream.getAudioTracks()[0];
+  sh.somPc = { ctx, mix, ps5, pc, vigia, gPs5 };
+  // a mistura entra no lugar do som do PS5 na própria trilha da tela: quem entrar depois já recebe ela
+  scr.stream.removeTrack(ps5);
+  scr.stream.addTrack(mix);
+  rtc.replaceScreenTrack(key, mix);
+  if (sh.lossless) sh.lossless = new MediaStream([...sh.lossless.getVideoTracks(), mix]);
+  turboEnvio.trocarFonte(key);
+  // parou pela faixa do Chrome ("Parar compartilhamento"): volta só o som do PS5
+  pc.addEventListener('ended', () => {
+    if (sh.somPc?.pc !== pc) return;
+    desligarSomPc(sh, rtc.screens.get(key), true);
+    toast('O som do PC parou: a tela do PS5 segue só com o som do PS5.', 'info', 6000);
+  }, { once: true });
+  const disp = pc.getSettings?.().deviceId || '';
+  diagJogo.evento('PS5 direto: som do PC ligado', { dispositivo: disp, hz: ctx.sampleRate });
+  ps5Nativo.render?.();
+  // "loopback" sem o "WithoutChrome": o Chrome entra junto (o PS5 em dobro e a voz dos amigos de volta)
+  if (/^loopback$/i.test(disp)) toast('O som do PC está indo, mas este Chrome não separou o som dele mesmo: o PS5 pode ir em dobro. Atualize o Chrome.', 'warn', 12000);
+  else toast('O som do PC está indo junto com o PS5, na mesma tela. Deixe a tela do PS5 visível para o Voz Universal ler as legendas.', 'success', 9000);
+}
+
+// tira a mistura e devolve o som do PS5 à tela (aviso: atualiza o painel)
+function desligarSomPc(sh, scr, aviso = false) {
+  const m = sh?.somPc;
+  if (!m) return;
+  sh.somPc = null;
+  clearInterval(m.vigia);
+  const vivo = m.ps5.readyState === 'live';
+  if (scr) {
+    scr.stream.removeTrack(m.mix);
+    if (vivo) {
+      scr.stream.addTrack(m.ps5);
+      rtc.replaceScreenTrack(sh.key, m.ps5);
+    }
+  }
+  if (sh.lossless) sh.lossless = new MediaStream([...sh.lossless.getVideoTracks(), ...(vivo ? [m.ps5] : [])]);
+  turboEnvio.trocarFonte(sh.key);
+  m.pc.stop();
+  m.mix.stop();
+  m.ctx.close().catch(() => {});
+  diagJogo.evento('PS5 direto: som do PC desligado');
+  if (aviso) ps5Nativo.render?.();
 }
 
 // ------------------------------------------------------------------ Lossless Scaling
@@ -3434,6 +3591,11 @@ async function amostrarJogo() {
         // no turbo, os números da imagem dessa pessoa são os do canal turbo (o vídeo da conexão está parado)
         const turbo = turboEnvio.stats(id, key);
         const resumo = diagJogo.amostraEnvio(key, cru, id, sala, turbo, self()?.shares.get(key)?.titulo ?? null);
+        // o som do PS5 direto (pacotes chegando da ponte, o tocador, a trilha que vai para quem joga)
+        if (resumo && self()?.shares.get(key)?.ps5) {
+          const ultima = diagJogo.sessao?.amostras.at(-1);
+          if (ultima) ultima.somPs5 = somPs5Agora;
+        }
         if (!resumo) continue;
         // os ajustes do vídeo da conexão não valem para quem está no turbo
         if (!turbo) ajustarJogo(id, resumo);
@@ -3459,6 +3621,7 @@ async function amostrarJogo() {
       const som = jogandoLa.video.srcObject?.getAudioTracks()[0] || null;
       const extra = { preset: opcoesJogo.get('preset') || 0, turbo: turboRecebe.stats(), controleRttMs: pingDoJogo.rtt, controleIdaMs: pingDoJogo.ida, ajudanteMs: pingDoJogo.ajudante, movimentoCru: controle.movimentoCru, controleFisico: fisico.usado, cursorLivre: jogandoLa.cursorLivre };
       const resumo = trilha && diagJogo.amostraRecebe(await rtc.diagRecebe(trilha, som), sala, extra);
+      vigiarSomQueChega(resumo);
       mostrarSelo(resumo);
       // a mesma amostra vai para quem compartilha, que baixa o relatório dos dois lados de uma vez
       // (do celular não dá para tirar o arquivo fácil). Só pelo canal direto: sem ele, fica aqui.

@@ -447,7 +447,7 @@ export class TurboEnvio {
     const responder = (m) => { try { canal.send(JSON.stringify(m)); } catch { /* canal fechou */ } };
     if (!t?.controle) return responder({ erro: 'sem-controle' });
     // PS5 direto (ps5-nativo.js): os quadros já vêm codificados pelo PS5, só repassa
-    if (t.ps5) return this.ligarPs5(id, canal, key, t.ps5, { versao, som, codecs });
+    if (t.ps5) return this.ligarPs5(id, canal, key, t.ps5, { versao, som, codecs, somMix: t.somMix });
     if (!temTurboEnvio()) return responder({ erro: 'navegador' });
     const original = t.stream?.getVideoTracks()[0];
     if (!original || original.readyState !== 'live') return responder({ erro: 'sem-tela' });
@@ -479,7 +479,9 @@ export class TurboEnvio {
   // aqui. O que muda para quem joga: nada (a mesma configuração, os mesmos pedaços e cabeçalho).
   // Quadro de fora (fila cheia) quebra a cadeia de quadros: daí até o próximo quadro-chave nada vai, e
   // o quadro-chave é pedido ao PS5. A banda é a da sessão do PS5 (ajustarBanda não tem o que mexer).
-  ligarPs5(id, canal, key, fonte, { versao, som }) {
+  // somMix: o som do PS5 misturado com o do PC (main.js, "Levar o som do PC"). Com ele, o som não é o
+  // Opus do PS5 repassado: a mistura é codificada aqui, como numa tela comum.
+  ligarPs5(id, canal, key, fonte, { versao, som, somMix = null }) {
     const s = { id, key, canal, chave: true, quadro: 0, enc: null, cfg: null, config: null, banda: 0, trilha: null, parar: false, pulados: 0, enviados: 0,
       cfgEnviada: null, ajuste: { altas: 0, baixas: 0, mudou: 0, ultima: null }, chaveId: 0, chaveEm: 0, ps5: fonte,
       tempos: new Map(), conta: { enviados: 0, bytes: 0, pulados: 0, fila: 0, cod: [], chaves: 0, chaveMax: 0, ignorados: 0, ultimo: performance.now() },
@@ -487,7 +489,8 @@ export class TurboEnvio {
     this.sessoes.set(id, s);
     s.v2 = Number(versao) >= 2;
     s.altMax = 1080;
-    if (som) s.som = { ps5: true, seq: 0, cfg: null, conta: { enviados: 0, bytes: 0, pulados: 0 } };
+    if (som && somMix) this.ligarSom(s, somMix);
+    else if (som) s.som = { ps5: true, seq: 0, cfg: null, conta: { enviados: 0, bytes: 0, pulados: 0 } };
     s.cancelar = fonte.assinar((m) => {
       if (s.parar) return;
       if (m.cfg) {
@@ -496,7 +499,7 @@ export class TurboEnvio {
         s.banda = 0;
         s.chave = true; // configuração nova: só a partir de um quadro-chave
       } else if (m.quadro) this.quadroPs5(s, m);
-      else if (m.som && s.som) {
+      else if (m.som && s.som?.ps5) {
         s.som.cfg = { sampleRate: m.hz, numberOfChannels: m.canais };
         this.mandarSom(s, s.som, m.som, m.ts);
       }
@@ -600,7 +603,12 @@ export class TurboEnvio {
     if (canal.bufferedAmount > SOM_FILA_MAX) { som.conta.pulados++; return; }
     const msg = new Uint8Array(SOM_CAB + dados.byteLength);
     const v = new DataView(msg.buffer);
-    som.seq = (som.seq + 1) >>> 0;
+    // a numeração segue por pessoa, não por sessão: quando a fonte do som troca (trocarFonte: PS5 ↔
+    // Lossless, som do PC ligado/desligado) quem joga continua com o mesmo tocador e descartaria como
+    // "atrasado" todo pacote que recomeçasse do 1
+    if (!this.seqSom) this.seqSom = new Map();
+    som.seq = ((this.seqSom.get(s.id) || 0) + 1) >>> 0;
+    this.seqSom.set(s.id, som.seq);
     v.setUint32(0, som.seq);
     v.setUint32(4, som.cfg.sampleRate);
     v.setUint8(8, som.cfg.numberOfChannels);

@@ -873,3 +873,44 @@ Agora a `Ps5Fonte` usa o mesmo tocador do turbo (`SOM_WORKLET`, exportado como `
 (`teste-som.mjs`, tom Opus de 10 ms, cada pacote com até 80 ms de atraso em 30% dos casos, saída tocada em
 tempo real num AudioContext): ~40 buracos em 6,5 s antes, 1 a 4 depois. `stats().tocador` traz o buffer, o
 alvo, as faltas e os descartes.
+
+## PS5 direto + som do PC na mesma tela (2026-11-16, para o Voz Universal)
+
+O Voz Universal (dublagem das legendas, em `~/Desktop/VozUniversal`) fala pelo alto-falante do PC, fora
+da tela do PS5. Para não abrir uma segunda tela só para o som, o painel do PS5 direto tem **"Levar o som
+do PC"**: o seletor do Chrome com "Tela inteira" e "Compartilhar áudio do sistema" (`rtc.somDoSistema`,
+o mesmo do OBS; a imagem é largada), misturado no som do PS5 num AudioContext a 48 kHz.
+
+- A mistura entra no lugar do som do PS5 dentro da própria `scr.stream` (quem entra depois já recebe) e
+  no envio (`replaceScreenTrack`). Com o Lossless para todos ligado, `sh.lossless` é refeito com ela.
+- Turbo: `tela()` devolve `somMix`; com ele, `ligarPs5` codifica a mistura (`ligarSom`) em vez de
+  repassar o Opus do PS5. `trocarFonte` religa as sessões ao ligar/desligar.
+- O áudio do sistema no Windows sai sem o Chrome (`restrictOwnAudio` → `loopbackWithoutChrome`): o PS5,
+  que toca no Chrome, não vai em dobro e a voz dos amigos não volta. Se o dispositivo vier `loopback`
+  puro, a sala avisa. O `deviceId` fica no relatório ("PS5 direto: som do PC ligado").
+- "Abaixar o PS5 na voz" (padrão sim, `localStorage sala3d-ps5-abafar`): RMS do som do PC > 0,015 → o
+  PS5 vai a 0,3 na mistura em ~30 ms e volta 0,4 s depois do fim da fala. O "abafar" do Voz Universal
+  só abaixa o Chrome neste PC; quem recebe ouvia o PS5 cheio por baixo da voz.
+- Teste (Chrome sem janela, scratchpad `mix/`): tom de 440 Hz no lugar do PS5 e rajadas de 1 kHz no do
+  PC; os dois chegam na trilha misturada; o ganho do PS5 desce para 0,3 em 1 medição (40 ms) e volta a
+  0,99 ~1,4 s depois.
+- **Corrigido junto:** a numeração dos pacotes de som do turbo recomeçava do 1 a cada `trocarFonte`
+  (já valia para o Lossless para todos). Quem joga mantém o tocador e descartava tudo como "atrasado"
+  até a conta passar da antiga: som mudo por minutos. Agora a numeração segue por pessoa (`seqSom`).
+
+## PS5 direto: o som que parava de vez (2026-11-16) e o som no relatório
+
+Relatórios de 23:28–23:36 (Rollyud no PC, Hh no iPhone): às 23:28:59 o turbo foi a 0 pacotes de som e o
+som do vídeo normal sumiu (`somBufferMs` null); às 23:29:31 o turbo voltou a 100 pacotes/s, mas o som do
+vídeo normal nunca mais voltou. Causa achada no código e reproduzida (`teste-som-lixo.mjs`, um pacote de
+lixo no meio do Opus): o `error` do `AudioDecoder` da `Ps5Fonte` fazia `decSom = null` e nada criava outro —
+o som daqui e o do vídeo normal morriam (0 s de som depois do pacote); o turbo seguia porque repassa sem
+decodificar. Agora `som()` cria outro decodificador (no máximo 1/s) e o relatório marca a falha.
+
+O relatório passou a ter o som:
+- quem compartilha, em cada amostra, `somPs5`: pacotes/s que chegam da ponte, `errosDecodificador`, o
+  tocador (`nivelMs`, `alvoMs`, `faltas`, `descartes`, estado do AudioContext) e a trilha (estado, muda,
+  ligada); eventos "PS5: o som parou de chegar da ponte" / "voltou a chegar";
+- quem joga: `somWebrtc` (pacotes/s, nível, % inventado pelo navegador) e `somPor` (turbo, vídeo normal ou
+  nenhum); eventos "o som do jogo sumiu (nem turbo nem vídeo normal)" / "voltou";
+- os avisos da libchiaki (quadro corrompido às centenas, 272 de 300 eventos) viram um resumo a cada 30 s.
