@@ -990,6 +990,23 @@ static void pad(const char *m)
 	st.right_y = EIXO(json_num(m, "ry", 0));
 	st.l2_state = GATILHO(lt);
 	st.r2_state = GATILHO(rt);
+	// touchpad (DualSense de quem joga, pelo WebHID): t0x/t0y e t1x/t1y de 0 a 1, -1 sem dedo. O PS5
+	// segue cada dedo pelo id do toque: começa ao encostar, anda enquanto encostado, para ao soltar.
+	static ChiakiControllerState toque;
+	static int8_t idDedo[2] = { -1, -1 };
+	static bool toqueIniciado = false;
+	if(!toqueIniciado) { chiaki_controller_state_set_idle(&toque); toqueIniciado = true; }
+	for(int d = 0; d < 2; d++)
+	{
+		double x = json_num(m, d ? "t1x" : "t0x", -1), y = json_num(m, d ? "t1y" : "t0y", -1);
+		bool encostado = x >= 0 && y >= 0;
+		uint16_t px = (uint16_t)((x > 1 ? 1 : x) * 1919), py = (uint16_t)((y > 1 ? 1 : y) * 1079);
+		if(encostado && idDedo[d] < 0) idDedo[d] = chiaki_controller_state_start_touch(&toque, px, py);
+		else if(encostado) chiaki_controller_state_set_touch_pos(&toque, (uint8_t)idDedo[d], px, py);
+		else if(idDedo[d] >= 0) { chiaki_controller_state_stop_touch(&toque, (uint8_t)idDedo[d]); idDedo[d] = -1; }
+	}
+	st.touch_id_next = toque.touch_id_next;
+	memcpy(st.touches, toque.touches, sizeof(st.touches));
 	EnterCriticalSection(&travaSessao);
 	estadoPad = st;
 	if(sessao) chiaki_session_set_controller_state(sessao, &estadoPad);

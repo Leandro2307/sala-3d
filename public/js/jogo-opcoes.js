@@ -19,7 +19,7 @@ const CHAVE = 'sala3d-jogo-opcoes';
 // liso (o buffer de 40 ms do vídeo normal) ligado de fábrica desde 2026-11-05: no teste de presets o
 // "buffer mínimo" deu 401 ms de atraso e 43 travadas por minuto no iPhone, contra 160 ms e 6 com ele.
 // É o vídeo que entra quando o turbo não aguenta, então vale também com o turbo ligado.
-const PADRAO = { liso: true, menuAuto: true, selo: false, giro: false, rapido: true, turbo: true, turboLiso: true, vibrar: true, preencher: false };
+const PADRAO = { liso: true, menuAuto: true, selo: false, giro: false, rapido: true, turbo: true, turboLiso: true, vibrar: true, preencher: false, lossless: 0 };
 // Versão das opções: quem guardou as de antes passa uma vez para os padrões novos (v2: turbo e 720p;
 // v3: liso; v4: os modos de imagem definitivos, no 1); o que a pessoa mudar depois disso fica.
 const VERSAO = 4;

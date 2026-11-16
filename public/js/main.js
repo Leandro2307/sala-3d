@@ -7,6 +7,7 @@ import { EscolherPersonagem } from './escolher-personagem.js';
 import { CatalogoJogos } from './catalogo-jogos.js';
 import { PcJogos } from './pc-jogos.js';
 import { Ps5Nativo, temPs5Nativo } from './ps5-nativo.js';
+import { Ps5Touchpad, temTouchpadHid } from './ps5-touchpad.js';
 import { SalasLaterais } from './salas.js';
 import { AoVivo, cartaoDoSaguao, COR_STATUS } from './aovivo.js';
 import { Player } from './player.js';
@@ -2500,6 +2501,9 @@ function stopShare(key, notify, { manter = false } = {}) {
   me.shares.delete(key);
   // a tela do PS5 direto saiu: a sessão com o PS5 acaba junto
   if (sh.ps5 && !manter) ps5Nativo.telaSaiu(key);
+  // o Lossless pelo OBS (losslessPs5) acaba com a tela: solta a câmera virtual
+  for (const t of sh.losslessCam?.getTracks() || []) t.stop();
+  sh.lossless = sh.losslessCam = null;
   avisarAbas();
   soltarVideo(sh);
   localAvatar.setStatus({ sharing: me.shares.size > 0 });
@@ -2683,7 +2687,10 @@ function receberVolta({ key, ev, de } = {}) {
   if (ev.t === 'copia' && typeof ev.s === 'string' && controle.pediuCopia(key)) copiarDaTela(ev.s, de);
   else if (ev.t === 'dialogo' && (ev.fechou || controle.mexeuEm(key))) avisoSite.receber(key, ev, `Na tela de ${de || 'alguém'}`);
   else if (ev.t === 'jogo-envio') {
-    if (jogandoLa?.key === key) diagJogo.doOutroLado(ev);
+    if (jogandoLa?.key === key) {
+      jogandoLa.ps5 = ev.ps5 || null; // PS5 direto: o que o PS5 manda (e o Lossless de lá), para o selo
+      diagJogo.doOutroLado(ev);
+    }
   } else if (ev.t === 'tremor') {
     // o jogo do PS5 vibrou o controle: treme o celular (ou o controle ligado neste aparelho)
     if (jogandoLa?.key !== key) return;
@@ -2939,6 +2946,8 @@ const turboEnvio = new TurboEnvio({
   tela: (key) => {
     const sh = self()?.shares.get(key);
     const scr = rtc?.screens.get(key);
+    // PS5 direto com o Lossless (losslessPs5): a câmera do OBS é codificada como uma tela comum
+    if (sh?.lossless && scr) return { stream: sh.lossless, controle: !!sh.controle, ps5: null };
     return sh && scr ? { stream: scr.stream, controle: !!sh.controle, ps5: sh.ps5 || null } : null;
   },
   onMudou: (id, key, ligado) => {
@@ -2969,7 +2978,124 @@ const ps5Nativo = new Ps5Nativo({
   aoFechar: () => {
     if (state.joined) player.enabled = true;
   },
+  lossless: {
+    ligado: () => !!self()?.shares.get(ps5Nativo.key)?.lossless,
+    janela: () => janelaLossless(),
+    alternar: () => losslessPs5(!self()?.shares.get(ps5Nativo.key)?.lossless),
+  },
 });
+
+// ------------------------------------------------------------------ Lossless Scaling no PC do PS5
+// No PS5 direto não há janela nenhuma no PC para o Lossless Scaling agir. Aqui: (1) uma janela só com
+// a imagem do PS5, onde a pessoa liga o Lossless; (2) o OBS captura o que o Lossless desenha (a 120,
+// câmera virtual); (3) a imagem da tela do PS5 passa a ser a câmera do OBS: o turbo deixa de repassar
+// os quadros do PS5 e codifica a câmera, e o vídeo da conexão troca de trilha. O som e o controle
+// continuam os do PS5 direto. "Voltar à imagem direta" desfaz.
+let janelaLs = null;
+function janelaLossless() {
+  const trilha = rtc?.screens.get(ps5Nativo.key)?.stream?.getVideoTracks()[0];
+  if (!trilha) return void toast('Ponha o PS5 numa tela antes.', 'warn', 5000);
+  if (janelaLs && !janelaLs.closed) return void janelaLs.focus();
+  const w = window.open('', 'sala3d-ps5-lossless', 'popup,width=1280,height=720');
+  if (!w) return void toast('O navegador bloqueou a janela. Libere os pop-ups deste site e tente de novo.', 'warn', 7000);
+  janelaLs = w;
+  w.document.title = 'PS5 · Lossless';
+  w.document.body.style.cssText = 'margin:0;background:#000;overflow:hidden';
+  const v = w.document.createElement('video');
+  v.muted = true; // o som já toca na sala
+  v.autoplay = true;
+  v.playsInline = true;
+  v.style.cssText = 'width:100vw;height:100vh;object-fit:contain;display:block;background:#000';
+  v.srcObject = new MediaStream([trilha]);
+  w.document.body.appendChild(v);
+  v.play().catch(() => {});
+  // tela cheia com um clique duplo
+  v.addEventListener('dblclick', () => (w.document.fullscreenElement ? w.document.exitFullscreen() : v.requestFullscreen()).catch(() => {}));
+  toast('Janela do PS5 aberta. Ligue o Lossless nela (e o OBS capturando a tela onde ele desenha); depois, “Mandar a imagem do OBS”.', 'info', 9000);
+}
+
+async function losslessPs5(ligar) {
+  const key = ps5Nativo.key;
+  const sh = key && self()?.shares.get(key);
+  const scr = key && rtc?.screens.get(key);
+  if (!sh || !scr) return void toast('Ponha o PS5 numa tela antes.', 'warn', 5000);
+  if (ligar) {
+    if (sh.lossless) return;
+    let cam;
+    try {
+      cam = await rtc.camObs();
+    } catch (err) {
+      return void toast(err?.message || String(err), 'warn', 9000);
+    }
+    const nova = cam.getVideoTracks()[0];
+    // a imagem do OBS com o som do PS5 (é esse par que o turbo manda)
+    sh.lossless = new MediaStream([nova, ...scr.stream.getAudioTracks()]);
+    sh.losslessCam = cam;
+    nova.addEventListener('ended', () => losslessPs5(false), { once: true });
+    rtc.replaceScreenTrack(key, nova);
+    turboEnvio.trocarFonte(key);
+    diagJogo.evento('PS5 direto: imagem do Lossless pelo OBS', { qps: nova.getSettings?.().frameRate ?? null });
+    toast('Quem joga agora recebe a imagem do OBS (com o Lossless). O controle e o som continuam do PS5 direto.', 'success', 7000);
+  } else {
+    if (!sh.lossless) return;
+    const cam = sh.losslessCam;
+    sh.lossless = null;
+    sh.losslessCam = null;
+    const direta = scr.stream.getVideoTracks()[0];
+    if (direta) rtc.replaceScreenTrack(key, direta);
+    turboEnvio.trocarFonte(key);
+    for (const t of cam?.getTracks() || []) t.stop();
+    diagJogo.evento('PS5 direto: de volta à imagem direta');
+    toast('De volta à imagem direta do PS5.', 'info', 5000);
+  }
+}
+
+// qps de uma contagem que só sobe (quadros do PS5, quadros de uma trilha), entre uma leitura e outra
+function medidorQps() {
+  let antes = null;
+  return (n) => {
+    if (n == null) {
+      antes = null;
+      return null;
+    }
+    const t = performance.now();
+    const q = antes && n >= antes.n && t > antes.t ? ((n - antes.n) * 1000) / (t - antes.t) : null;
+    antes = { n, t };
+    return q;
+  };
+}
+const quadrosDaTrilha = (t) => t?.stats?.deliveredFrames ?? t?.stats?.totalFrames ?? null;
+const medePs5Manda = medidorQps();
+const medePs5Tela = medidorQps();
+const medeLossless = medidorQps();
+// o desempenho do PS5 direto deste PC, em qps (a última medida, a cada 1 s)
+let ps5Agora = { manda: null, tela: null, lossless: null };
+setInterval(() => {
+  const st = ps5Nativo.key ? ps5Nativo.fonte?.stats?.() : null;
+  const sh = ps5Nativo.key && self()?.shares.get(ps5Nativo.key);
+  const ls = sh?.lossless?.getVideoTracks()[0];
+  ps5Agora = {
+    manda: medePs5Manda(st ? st.quadros : null),
+    tela: medePs5Tela(st ? st.desenhados : null),
+    lossless: medeLossless(ls ? quadrosDaTrilha(ls) : null),
+  };
+  // o selo na própria tela do PS5 (modo jogo neste PC): o que o PS5 manda e o que aparece aqui
+  const j = controle.jogo;
+  const el = $('#jogo-selo');
+  if (!sh?.ps5 || j?.key !== ps5Nativo.key) {
+    if (!jogandoLa) el.hidden = true; // o selo de quem joga longe (mostrarSelo) não é deste
+    return;
+  }
+  el.hidden = !opcoesJogo.get('selo');
+  if (el.hidden) return;
+  const m = ps5Agora;
+  const q = (v) => (v != null ? Math.round(v) : '–');
+  const lsx = Number(opcoesJogo.get('lossless')) || 0;
+  el.innerHTML = `<b>PS5 direto</b> · PS5 manda ${q(m.manda)} qps · na tela <span class="${m.tela != null && m.tela < 50 ? 'ruim' : ''}">${q(m.tela)} qps</span>`
+    + (sh.lossless ? ` · Lossless (OBS) ${q(m.lossless)} qps` : '')
+    + (lsx && m.tela != null ? ` · com o Lossless ×${lsx} ≈ ${Math.round(m.tela * lsx)} qps` : '');
+}, 1000);
+
 controle.onPs5 = (sh, ev) => {
   if (ev?.t === 'pad') ps5Nativo.pad(ev);
   else if (ev?.t === 'vivo') ps5Nativo.vivo();
@@ -3137,7 +3263,14 @@ function mostrarSelo(r = null) {
   // trancos: quadros que ficaram 3 voltas da tela ou mais nos últimos 2 s (ritmo.js)
   const trancos = r.ritmo ? ` · <span class="${r.ritmo.trancos > 2 ? 'ruim' : ''}">${r.ritmo.trancos} trancos</span>` : '';
   const liso = r.turbo?.liso ? ` · liso ${Math.round(r.turbo.liso.alvoMs)} ms` : '';
-  el.innerHTML = (turboRecebe.ligado ? '<b>turbo</b> · ' : '') + `<span class="${r.fpsFinal != null && r.fpsFinal < 50 ? 'ruim' : ''}">${qps} qps</span>${trancos} · ${linhas} · ~${atraso}${imagem}${liso} · ${mbps} Mbps`
+  // PS5 direto: o que o PS5 manda (e, com o Lossless no PC de lá, o que sai do OBS) antes do que chega aqui
+  const p5 = jogandoLa.ps5;
+  const q = (v) => (v != null ? Math.round(v) : '–');
+  const origem = p5 ? `PS5 ${q(p5.manda)}${p5.lossless != null ? ` → Lossless (OBS) ${q(p5.lossless)}` : ''} → aqui ` : '';
+  // o Lossless deste PC: o navegador não vê os quadros que ele gera, então é a conta (qps × modo)
+  const lsx = Number(opcoesJogo.get('lossless')) || 0;
+  const comLs = lsx && r.fpsFinal != null ? ` · com o Lossless ×${lsx} ≈ ${Math.round(r.fpsFinal * lsx)} qps` : '';
+  el.innerHTML = (turboRecebe.ligado ? '<b>turbo</b> · ' : '') + `${origem}<span class="${r.fpsFinal != null && r.fpsFinal < 50 ? 'ruim' : ''}">${qps} qps</span>${comLs}${trancos} · ${linhas} · ~${atraso}${imagem}${liso} · ${mbps} Mbps`
     + (r.motivo ? ` · <span class="ruim">${r.motivo}</span>` : '');
 }
 
@@ -3207,7 +3340,9 @@ async function amostrarJogo() {
         // no turbo, o que só se vê daqui (a banda do codificador, os quadros pulados, os quadros-chave)
         // vai junto: o relatório de quem joga explica sozinho uma queda de banda ou de quadros
         const tb = turbo && { bandaKbps: turbo.bandaKbps, pulados: turbo.pulados, puladosFila: turbo.puladosFila, trocasDeBanda: turbo.trocasDeBanda, filaLaMs: turbo.filaLaMs, chaves: turbo.chaves, chaveKB: turbo.chaveKB, chavesIgnoradas: turbo.chavesIgnoradas, som: turbo.som };
-        controle.emitir('controle-volta', { key, para: id, ev: { t: 'jogo-envio', quando: t, captura, enviado, codificado, altura, kbps, limite, motivo, codificador, placa, imagemBaixa, codMs, filaMs, turbo: tb || null } });
+        const minha = self()?.shares.get(key);
+        const ps5 = minha?.ps5 ? { manda: ps5Agora.manda, lossless: minha.lossless ? ps5Agora.lossless : null } : null;
+        controle.emitir('controle-volta', { key, para: id, ev: { t: 'jogo-envio', quando: t, captura, enviado, codificado, altura, kbps, limite, motivo, codificador, placa, imagemBaixa, codMs, filaMs, turbo: tb || null, ps5 } });
       }
     }
     if (jogandoLa) {
@@ -3847,6 +3982,12 @@ $('#focus-engasgo').addEventListener('click', (e) => {
   e.currentTarget.blur();
   marcarEngasgo();
 });
+$('#jogo-lossless').value = String(Number(opcoesJogo.get('lossless')) || 0);
+$('#jogo-lossless').addEventListener('change', (e) => {
+  opcoesJogo.set('lossless', Number(e.target.value) || 0);
+  e.target.blur();
+  mostrarSelo();
+});
 $('#jogo-op-pop').addEventListener('change', (e) => {
   const k = e.target.dataset.op;
   if (k) opcoesJogo.set(k, e.target.checked);
@@ -3866,6 +4007,24 @@ const tecladoPad = new TecladoPad({ pad: padVirtual });
 const tremoresAqui = { n: 0, como: {}, primeiro: false, desde: 0 };
 padVirtual.onErroTremor = (erro) => diagJogo.evento('o controle não aceitou o tremor', { erro, ...padVirtual.comoVibra() });
 controle.paraPad = (ev) => tecladoPad.evento(ev);
+// Touchpad do DualSense (ps5-touchpad.js): no modo jogo numa tela de PS5, no PC. Com a permissão dada
+// uma vez, volta sozinho; antes disso, pelo botão nas opções do modo jogo.
+const touchpad = new Ps5Touchpad({ pad: padVirtual, onMudou: () => atualizarBotaoTouchpad() });
+function atualizarBotaoTouchpad() {
+  const b = $('#jogo-touchpad');
+  b.hidden = !touchpad.ativo || !temTouchpadHid();
+  b.textContent = touchpad.ligado ? 'Touchpad do DualSense: ligado ✓' : 'Usar o touchpad do DualSense';
+  b.disabled = touchpad.ligado;
+}
+$('#jogo-touchpad').addEventListener('click', async (e) => {
+  e.currentTarget.blur();
+  try {
+    if (await touchpad.pedir()) toast('Touchpad do DualSense ligado: os dedos e o clique vão para o PS5.', 'success', 5000);
+  } catch (err) {
+    toast(`Não deu para ler o touchpad: ${err?.message || err}`, 'warn', 7000);
+  }
+  atualizarBotaoTouchpad();
+});
 const fisico = new ControleFisico({
   controle,
   pad: padVirtual,
@@ -3896,6 +4055,9 @@ controle.onJogo = (video, key) => {
   // jogo de controle no PC (o celular faz isso no toque-jogo): o controle virtual já aparece lá, e o
   // teclado e o mouse daqui viram esse controle (o emulador e o chiaki-ng não escutam mouse)
   const layoutPc = video && !isTouch ? layoutDoTitulo(acharTela(key)?.share.titulo) : null;
+  if (layoutPc === 'ps5') touchpad.ligar().then(atualizarBotaoTouchpad);
+  else touchpad.desligar();
+  atualizarBotaoTouchpad();
   if (layoutPc && LAYOUTS[layoutPc]?.virtual) {
     padVirtual.acordar();
     tecladoPad.ligar();

@@ -67,7 +67,11 @@ export function eventoDeControle(e) {
   // controle virtual (PS5): o estado inteiro do controle — bits dos botões, analógicos e gatilhos
   else if (e.t === 'pad') {
     const r = (v, a) => Math.round(n(v, a, 1) * 1000) / 1000;
-    return { t: 'pad', b: n(e.b, 0, 0x1ffff) | 0, lx: r(e.lx, -1), ly: r(e.ly, -1), rx: r(e.rx, -1), ry: r(e.ry, -1), lt: r(e.lt, 0), rt: r(e.rt, 0) };
+    // b: bits 0-16 do mapa padrão e 17 o clique do touchpad; tp: os dois dedos no touchpad do
+    // DualSense, [x0, y0, x1, y1] de 0 a 1 (-1: sem dedo), só de quem tem um (ps5-touchpad.js)
+    const pad = { t: 'pad', b: n(e.b, 0, 0x3ffff) | 0, lx: r(e.lx, -1), ly: r(e.ly, -1), rx: r(e.rx, -1), ry: r(e.ry, -1), lt: r(e.lt, 0), rt: r(e.rt, 0) };
+    if (Array.isArray(e.tp) && e.tp.length === 4) pad.tp = e.tp.map((v) => r(v, -1));
+    return pad;
   } else if (e.t === 'wheel') ev = { t: 'wheel', x: n(e.x, 0, 1), y: n(e.y, 0, 1), dx: n(e.dx, -3000, 3000), dy: n(e.dy, -3000, 3000), mod };
   else if (e.t === 'tecla' && (e.a === 'down' || e.a === 'up')) {
     ev = { t: 'tecla', a: e.a, key: txt(e.key, 24), code: txt(e.code, 24).trim(), kc: n(e.kc, 0, 255) | 0, mod };

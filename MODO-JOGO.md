@@ -784,3 +784,27 @@ Chromium de teste o `VideoDecoder` com `prefer-hardware` não abre (sem placa): 
 recusa `key` sem IDR), o SPS do PS5 sem VUI segurar quadros no decodificador da placa (o `segurando`
 do turbo cobre quem joga; a cópia local não tem esse ajuste), e o Chrome no domínio público pedir
 licença para falar com 127.0.0.1 (Local Network Access): sem ela, o painel mostra o aviso.
+
+## PS5 direto: Lossless, desempenho e touchpad (2026-11-16)
+
+- **Lossless no PC do PS5** (painel PS5 direto → "Lossless Scaling neste PC"): "Abrir a janela" abre um
+  pop-up só com a imagem do PS5 (a trilha da tela da sala) para o Lossless agir; o OBS captura o que o
+  Lossless desenha (120 qps, câmera virtual). "Mandar a imagem do OBS" (`losslessPs5`) põe a câmera no
+  lugar: `rtc.replaceScreenTrack` no vídeo da conexão e `turboEnvio.trocarFonte` (cada sessão recomeça com
+  o mesmo pedido; `tela()` devolve a câmera + o som do PS5, sem `ps5`, então o turbo codifica). Controle e
+  som continuam do PS5 direto. Parar a tela solta a câmera.
+- **Lossless no PC de quem joga**: o Lossless liga na janela do Chrome com a sala em tela cheia. O
+  navegador não vê os quadros gerados: nas opções do modo jogo, "Lossless Scaling neste PC" (×2/×3/×4) só
+  faz o selo mostrar a conta (qps × modo).
+- **Desempenho**: o selo de quem joga ganha a origem (`PS5 N → Lossless (OBS) N → aqui N qps`, campo `ps5`
+  do `jogo-envio`); na própria tela do PS5 o selo mostra o que o PS5 manda e o que aparece aqui (medido a
+  cada 1 s dos contadores da `Ps5Fonte` e do `track.stats` da câmera).
+- **Modo jogo na própria tela do PS5**: teclado, mouse e controle deste PC viram o controle do PS5.
+- **Touchpad do DualSense** (`ps5-touchpad.js`): o clique vem do Gamepad (botão 17, agora aceito em
+  `pad-virtual.js` e nos filtros `0x3ffff`); os dedos vêm do WebHID (permissão uma vez pelo botão nas opções
+  do modo jogo, depois volta sozinho). Relatório 0x01 (cabo) / 0x31 (Bluetooth, depois do recurso 0x05),
+  dedos em 32-35 e 36-39. Vão no pad como `tp` e à ponte como `t0x/t0y/t1x/t1y`; a ponte segura o id de
+  cada toque (`chiaki_controller_state_start/set/stop_touch`).
+
+Testado aqui: sintaxe, `npm test`, a sala abrindo sem erro num Chrome sem janela, e a ponte nova achando o
+PS5. **Não testado com o PS5 e um DualSense de verdade**, nem o Lossless com o OBS.

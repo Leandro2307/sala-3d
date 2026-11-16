@@ -400,7 +400,23 @@ export class TurboEnvio {
     canal.onclose = () => this.desligar(id, canal);
   }
 
-  async ligar(id, canal, { ligar: key, codecs, altura, versao, som }) {
+  // guarda o pedido na sessão: trocarFonte liga de novo com ele quando a imagem da tela muda
+  ligar(id, canal, pedido) {
+    const feito = this.ligarSessao(id, canal, pedido);
+    const s = this.sessoes.get(id);
+    if (s) s.pedido = pedido;
+    return feito;
+  }
+
+  // A imagem da tela mudou de fonte (PS5 direto ↔ Lossless pelo OBS, ver main.js): cada sessão dessa
+  // tela recomeça com o mesmo pedido. Quem joga só recebe a configuração nova e um quadro-chave.
+  trocarFonte(key) {
+    for (const [id, s] of [...this.sessoes]) {
+      if (s.key === key && s.pedido) this.ligar(id, s.canal, s.pedido);
+    }
+  }
+
+  async ligarSessao(id, canal, { ligar: key, codecs, altura, versao, som }) {
     this.desligar(id);
     const t = typeof key === 'string' ? this.tela(key) : null;
     const responder = (m) => { try { canal.send(JSON.stringify(m)); } catch { /* canal fechou */ } };

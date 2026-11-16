@@ -10,7 +10,8 @@
 //
 // Vai o estado inteiro {t:'pad', b, lx, ly, rx, ry, lt, rt}, só quando muda e no máximo um a cada
 // ENVIO_MS (o último sempre sai). b: o bit i é o botão i do mapa padrão do navegador (0 ✕/A, 1 ○/B,
-// 2 □/X, 3 △/Y, 4 L1, 5 R1, 6 L2, 7 R2, 8 Create, 9 Options, 10 L3, 11 R3, 12-15 setas, 16 PS).
+// 2 □/X, 3 △/Y, 4 L1, 5 R1, 6 L2, 7 R2, 8 Create, 9 Options, 10 L3, 11 R3, 12-15 setas, 16 PS,
+// 17 clique do touchpad). tp: os dedos no touchpad do DualSense de quem tem um (ps5-touchpad.js).
 // O "vivo" do modo jogo (controle.js) segura o estado no ajudante: sem notícia, ele solta tudo.
 //
 // Na volta, a vibração (tremor): o jogo manda o controle tremer, o ajudante 1.10+ fica sabendo e a
@@ -45,6 +46,8 @@ export class PadVirtual {
     this.gpIndice = null; // o controle de videogame deste aparelho (para a vibração)
     this.tremendo = null; // { g, p, desde }
     this.tremorTimer = 0;
+    this.tp = null; // [x0, y0, x1, y1] (de 0 a 1, -1 sem dedo) ou null: ninguém lendo o touchpad
+    this.tpClique = false;
     opcoesJogo.ouvir((k, v) => { if (k === 'vibrar' && !v) this.pararTremor(); });
   }
 
@@ -69,8 +72,10 @@ export class PadVirtual {
     if (!this.key) return;
     // só solta se algo foi apertado: o "solto" mandado à toa criava um controle de Xbox no PC de lá
     // no fim de qualquer modo jogo, até no Minecraft
-    const apertado = this.enviado.b || EIXOS.some((k) => this.enviado[k]);
+    const apertado = this.enviado.b || EIXOS.some((k) => this.enviado[k]) || this.enviado.tp;
     this.fontes = this.neutras();
+    this.tp = null;
+    this.tpClique = false;
     if (apertado) this.enviar(true);
     this.key = null;
   }
@@ -108,7 +113,8 @@ export class PadVirtual {
   fisico(g) {
     const eixo = (v) => (Math.abs(v || 0) < 0.08 ? 0 : arred(v));
     let b = 0;
-    g.buttons.forEach((x, i) => { if (i < 17 && x.pressed) b |= 1 << i; });
+    // 17: o clique do touchpad (o Chrome dá esse botão a mais no DualSense e no DualShock 4)
+    g.buttons.forEach((x, i) => { if (i < 18 && x.pressed) b |= 1 << i; });
     this.gpIndice = g.index;
     const f = this.fontes.fisico;
     Object.assign(f, {
@@ -116,6 +122,15 @@ export class PadVirtual {
       lx: eixo(g.axes[0]), ly: eixo(g.axes[1]), rx: eixo(g.axes[2]), ry: eixo(g.axes[3]),
       lt: arred(g.buttons[6]?.value || 0), rt: arred(g.buttons[7]?.value || 0),
     });
+    this.mudou();
+  }
+
+  // ------------------------------------------------------------ touchpad do DualSense (WebHID)
+  // pontos: [x0, y0, x1, y1] de 0 a 1 (-1: sem dedo), ou null para parar; clique: o touchpad
+  // afundado (o mesmo botão 17 que o Gamepad dá, mas lido junto com os dedos)
+  touchpad(pontos, clique = false) {
+    this.tp = pontos ? pontos.map((v) => (v < 0 ? -1 : arred(v))) : null;
+    this.tpClique = !!clique;
     this.mudou();
   }
 
@@ -224,8 +239,9 @@ export class PadVirtual {
   // ------------------------------------------------------------ envio
   estado() {
     const fs = FONTES.map((k) => this.fontes[k]);
-    const e = { b: fs.reduce((b, f) => b | f.b, 0) };
+    const e = { b: fs.reduce((b, f) => b | f.b, 0) | (this.tpClique ? 1 << 17 : 0) };
     for (const k of EIXOS) e[k] = fs.reduce((v, f) => (Math.abs(f[k]) > Math.abs(v) ? f[k] : v), 0);
+    if (this.tp) e.tp = this.tp;
     return e;
   }
 
@@ -241,7 +257,8 @@ export class PadVirtual {
     this.timer = 0;
     if (!this.key) return;
     const e = this.estado();
-    if (!sempre && e.b === this.enviado.b && EIXOS.every((k) => e[k] === this.enviado[k])) return;
+    const mesmoTp = String(e.tp ?? '') === String(this.enviado.tp ?? '');
+    if (!sempre && mesmoTp && e.b === this.enviado.b && EIXOS.every((k) => e[k] === this.enviado[k])) return;
     this.enviado = e;
     this.ultimo = performance.now();
     this.controle.mandar(this.key, { t: 'pad', ...e });
