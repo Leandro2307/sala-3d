@@ -43,6 +43,10 @@ if (-not (Test-Path -LiteralPath $vigem)) {
     Write-Host "  (controle virtual do PS5 ficou de fora: nao consegui baixar a biblioteca - $($_.Exception.Message))" -ForegroundColor DarkYellow
   }
 }
+# PS5 direto (ajudante 1.16+): a ponte vem pronta na pasta ps5 (ver ps5\LEIA-ME.md)
+if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'ps5\sala3d-ps5.exe')) {
+  Write-Host '  PS5 direto (sem o chiaki-ng): pronto. Na sala: Ajustes -> PS5 direto.' -ForegroundColor Green
+}
 $driver = Get-Service -Name 'ViGEmBus' -ErrorAction SilentlyContinue
 if (Test-Path -LiteralPath $vigem) {
   if ($driver) { Write-Host '  Controle virtual (PS5): pronto.' -ForegroundColor Green }

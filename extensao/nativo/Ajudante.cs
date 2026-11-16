@@ -192,7 +192,7 @@ namespace Sala3d
             new Thread(VigiarAtalho) { IsBackground = true }.Start();
             new Thread(VigiarJogo) { IsBackground = true }.Start();
             new Thread(VigiarWifi) { IsBackground = true }.Start();
-            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.15.0" } });
+            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.16.0" } });
             var json = new JavaScriptSerializer();
             string txt;
             while ((txt = Ler(entrada)) != null)
@@ -246,6 +246,7 @@ namespace Sala3d
                 return;
             }
             if (tipo == "jogos" || tipo == "jogo-abrir" || tipo == "jogo-fechar" || tipo == "obs") { PedidoJogo(m); return; }
+            if (tipo == "ps5") { PedidoPs5(S(m, "pid")); return; }
             if (tipo == "parar") { lock (travaEntrada) { parado = true; SoltarTudo(); } return; }
             if (tipo == "soltar") { jogo = false; vivoVisto = false; cursorEnviado = null; SoltarTudo(); temAlvo = false; rotuloAtual = null; qualEnviado = null; return; }
             if (tipo != "entrada" || !temAlvo || parado) return;
@@ -345,6 +346,72 @@ namespace Sala3d
             "NVIDIA App", "nvcontainer", "NVIDIA Overlay", "GameBar", "GameBarFTServer", "SearchHost", "StartMenuExperienceHost",
             "ShellExperienceHost", "TextInputHost", "ApplicationFrameHost", "SystemSettings", "Code", "claude", "node",
         };
+
+        // PS5 nativo (1.16+): a ponte ps5\sala3d-ps5.exe (Remote Play pela biblioteca do chiaki-ng, ver
+        // ps5\ponte.c) abre na primeira vez que a sala pede e fica aberta enquanto este ajudante viver
+        // (ela sai sozinha quando ele sai: --pai). A sala fala com ela direto por um WebSocket em
+        // 127.0.0.1, na porta que ela escolheu, com um token aleatório que só a sala fica sabendo.
+        //   { tipo: "ps5" } -> { tipo: "ps5", ok, porta, token, versao } ou { ok: false, msg }
+        static readonly object travaPs5 = new object();
+        static System.Diagnostics.Process ponte;
+        static int portaPonte;
+        static string tokenPonte, versaoPonte;
+
+        static void PedidoPs5(string pid)
+        {
+            new Thread(() =>
+            {
+                Dictionary<string, object> r;
+                try { r = AbrirPonte(); }
+                catch (Exception err) { r = new Dictionary<string, object> { { "ok", false }, { "msg", err.Message } }; }
+                r["tipo"] = "ps5";
+                r["pid"] = pid;
+                Escrever(r);
+            }) { IsBackground = true }.Start();
+        }
+
+        static Dictionary<string, object> AbrirPonte()
+        {
+            lock (travaPs5)
+            {
+                if (ponte == null || ponte.HasExited)
+                {
+                    string pasta = Environment.GetEnvironmentVariable("SALA3D_NATIVO") ?? "";
+                    string exe = Path.Combine(pasta, "ps5", "sala3d-ps5.exe");
+                    if (!File.Exists(exe)) return new Dictionary<string, object> { { "ok", false }, { "msg", "sem-ponte" } };
+                    var rnd = new byte[18];
+                    using (var g = System.Security.Cryptography.RandomNumberGenerator.Create()) g.GetBytes(rnd);
+                    tokenPonte = BitConverter.ToString(rnd).Replace("-", "").ToLowerInvariant();
+                    var info = new System.Diagnostics.ProcessStartInfo(exe,
+                        "--porta 0 --token " + tokenPonte + " --pai " + System.Diagnostics.Process.GetCurrentProcess().Id)
+                    {
+                        UseShellExecute = false,
+                        RedirectStandardOutput = true,
+                        RedirectStandardInput = true, // não herda a entrada do Chrome (as mensagens são deste ajudante)
+                        RedirectStandardError = true,
+                        CreateNoWindow = true,
+                    };
+                    var p = System.Diagnostics.Process.Start(info);
+                    // a 1ª linha: {"porta":N,"versao":"..."} (ou {"erro":...})
+                    var linha = p.StandardOutput.ReadLineAsync();
+                    if (!linha.Wait(10000) || linha.Result == null)
+                    {
+                        try { p.Kill(); } catch { }
+                        return new Dictionary<string, object> { { "ok", false }, { "msg", "ponte-calada" } };
+                    }
+                    var m = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(linha.Result);
+                    if (!m.ContainsKey("porta"))
+                    {
+                        try { p.Kill(); } catch { }
+                        return new Dictionary<string, object> { { "ok", false }, { "msg", "ponte-" + S(m, "erro") } };
+                    }
+                    portaPonte = Convert.ToInt32(m["porta"]);
+                    versaoPonte = S(m, "versao");
+                    ponte = p;
+                }
+                return new Dictionary<string, object> { { "ok", true }, { "porta", portaPonte }, { "token", tokenPonte }, { "versao", versaoPonte } };
+            }
+        }
 
         static void PedidoJogo(Dictionary<string, object> m)
         {

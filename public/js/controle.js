@@ -358,6 +358,14 @@ export class Controle {
   // ---------------------------------------------------------------- quem compartilha
   // Chegou um clique/tecla de alguém para uma das minhas telas.
   async receber(sh, { ev, de, deId }) {
+    // PS5 direto (ps5-nativo.js): só o controle de PS5 e o modo jogo; nada de mouse e teclado
+    if (sh?.ps5) {
+      if (!sh.controle) return;
+      if (ev?.t === 'modo' && deId) this.onModo?.(sh, ev.jogo, deId, !!ev.rapido);
+      if (ev?.t === 'pad' && deId) this.ultimoPad = { key: sh.key, deId };
+      if (ev?.t === 'pad' || ev?.t === 'vivo') this.onPs5?.(sh, ev);
+      return;
+    }
     if (!sh?.controle || (sh.aba == null && !sh.alvo)) return;
     // o "estou aqui" do modo jogo só serve ao ajudante (janela/tela inteira)
     if (ev?.t === 'vivo' && sh.aba != null) return;

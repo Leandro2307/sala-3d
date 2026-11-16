@@ -6,6 +6,7 @@ import { PERSONAGENS } from './modelo.js';
 import { EscolherPersonagem } from './escolher-personagem.js';
 import { CatalogoJogos } from './catalogo-jogos.js';
 import { PcJogos } from './pc-jogos.js';
+import { Ps5Nativo, temPs5Nativo } from './ps5-nativo.js';
 import { SalasLaterais } from './salas.js';
 import { AoVivo, cartaoDoSaguao, COR_STATUS } from './aovivo.js';
 import { Player } from './player.js';
@@ -1156,6 +1157,8 @@ async function join() {
   }
   // o OBS chega como câmera: só no computador (o celular também tem câmera, mas não tem OBS)
   if (!navigator.mediaDevices?.getDisplayMedia || isTouch) $('#obs-row').hidden = true;
+  // PS5 direto: só no PC (a ponte roda no Windows, pelo ajudante)
+  $('#ps5-row').hidden = isTouch || !temPs5Nativo();
   // com um monitor só não há o que escolher (o screen:0)
   $('#obs-monitor-field').hidden = $('#obs-row').hidden || window.screen.isExtended === false;
   sfx.join();
@@ -2352,11 +2355,12 @@ async function capturarAbaDaExtensao({ streamId, aba, site, titulo }) {
 // qps: o ritmo da captura quando passa de 60 (a tela pelo OBS)
 // reconexao: a tela já estava no ar antes da queda (tenta a mesma tela da sala; ocupada, qualquer
 // outra) e o controle volta pelas mãos de quem chama.
-async function publishShare(stream, { file = false, height = 0, aba: abaConhecida = null, tela, qps = null, reconexao = false } = {}) {
+async function publishShare(stream, { file = false, height = 0, aba: abaConhecida = null, tela, qps = null, reconexao = false, superficie: superficieDada = null } = {}) {
   // no escritório, numa tela da sala onde a pessoa está
   const sala = world.salaEm(player.pos.x, player.pos.z);
   // a do OBS conta como tela inteira (modo jogo, controle pelo ajudante)
-  const superficie = file ? null : qps ? 'monitor' : stream.getVideoTracks()[0]?.getSettings?.().displaySurface ?? null;
+  // superficieDada: a do PS5 direto ('ps5'), que não é captura nenhuma
+  const superficie = superficieDada ?? (file ? null : qps ? 'monitor' : stream.getVideoTracks()[0]?.getSettings?.().displaySurface ?? null);
   const pedir = (t) => new Promise((resolve) => socket.emit('share-start', { streamId: stream.id, sala, tela: t, superficie }, resolve));
   let res = await pedir(tela);
   if (!res?.ok && reconexao && tela != null) res = await pedir(undefined);
@@ -2494,6 +2498,8 @@ function stopShare(key, notify, { manter = false } = {}) {
   if (sh.file) stopCastVideo();
   if (notify) socket.emit('share-stop', key);
   me.shares.delete(key);
+  // a tela do PS5 direto saiu: a sessão com o PS5 acaba junto
+  if (sh.ps5 && !manter) ps5Nativo.telaSaiu(key);
   avisarAbas();
   soltarVideo(sh);
   localAvatar.setStatus({ sharing: me.shares.size > 0 });
@@ -2528,8 +2534,9 @@ function superficieDe(sh) {
 function tipoDaTela(sh) {
   if (sh.file) return 'Vídeo do computador';
   if (sh.obs) return `OBS · ${QPS_OBS} qps`;
+  if (sh.ps5) return 'PS5 direto';
   const surf = superficieDe(sh);
-  return surf === 'browser' ? 'Aba' : surf === 'window' ? 'Janela' : surf === 'monitor' ? 'Tela inteira' : 'Tela';
+  return surf === 'browser' ? 'Aba' : surf === 'window' ? 'Janela' : surf === 'monitor' ? 'Tela inteira' : surf === 'ps5' ? 'PS5 direto' : 'Tela';
 }
 
 // menu do botão de compartilhar enquanto há telas no ar
@@ -2561,6 +2568,7 @@ function renderSharePop() {
       </div>`;
     }).join('')
     + `<button type="button" class="sp-add" data-act="add"${cabe ? '' : ' disabled'}>${icon('share', 16)}${!cabe ? 'Telas e telão ocupados' : vaiProTelao ? 'Compartilhar outra direto no telão' : 'Compartilhar outra aba ou janela'}</button>`
+    + (cabe && temPs5Nativo() && !ps5Nativo.noAr ? '<button type="button" class="sp-obs" data-act="add-ps5" title="O Remote Play do PS5 sem o chiaki-ng aberto: a imagem do PS5 vai direto para quem joga">Compartilhar o PS5 direto</button>' : '')
     + (cabe ? `<button type="button" class="sp-obs" data-act="add-obs" title="Pela câmera virtual do OBS (o OBS a ${QPS_OBS} qps, com a câmera virtual ligada)">Compartilhar pelo OBS (${QPS_OBS} qps)</button>` : '')
     + (telas.length > 1 ? '<button type="button" class="sp-stop-all" data-act="stop-all">Parar todas</button>' : '')
     + (controle.ext.ok ? `<label class="sp-auto"><input type="checkbox" data-act="ctrl-auto"${settings.controleAuto ? ' checked' : ''}>Já permitir controle ao compartilhar</label>` : '')
@@ -2611,6 +2619,10 @@ $('#share-pop').addEventListener('click', (e) => {
     case 'add-obs':
       $('#share-pop').hidden = true;
       novaTela(undefined, { obs: true });
+      return;
+    case 'add-ps5':
+      $('#share-pop').hidden = true;
+      ps5Nativo.abrir();
       return;
     case 'pin':
       togglePin(key);
@@ -2927,13 +2939,80 @@ const turboEnvio = new TurboEnvio({
   tela: (key) => {
     const sh = self()?.shares.get(key);
     const scr = rtc?.screens.get(key);
-    return sh && scr ? { stream: scr.stream, controle: !!sh.controle } : null;
+    return sh && scr ? { stream: scr.stream, controle: !!sh.controle, ps5: sh.ps5 || null } : null;
   },
   onMudou: (id, key, ligado) => {
     rtc?.turboPara(id, key, ligado);
     diagJogo.evento(ligado ? 'modo turbo: mandando a imagem por fora do vídeo' : 'modo turbo desligado: vídeo normal', { para: state.users.get(id)?.name ?? id });
   },
 });
+
+// PS5 direto (ps5-nativo.js): o Remote Play pela ponte do ajudante, sem a janela do chiaki-ng. A imagem
+// do PS5 entra numa tela da sala (uma cópia decodificada aqui) e vai do jeito que o PS5 fez para quem
+// joga no turbo. O controle de quem joga vai para a ponte (controle.onPs5) e chega como um DualSense.
+const ps5Nativo = new Ps5Nativo({
+  pedirPonte: () => controle.pedir('ps5-ponte', undefined, undefined, undefined, 25_000),
+  compartilhar: (fonte) => compartilharPs5(fonte),
+  pararTela: (key) => stopShare(key, true),
+  // vibração: para quem mandou o último estado do controle nessa tela (como a do ajudante)
+  onTremor: (g, p) => {
+    const u = controle.ultimoPad;
+    if (u && u.key === ps5Nativo.key) controle.onTremor?.(u, g, p);
+  },
+  onEvento: (texto, dados) => diagJogo.evento(texto, dados),
+  toast: (...a) => toast(...a),
+  aoAbrir: () => {
+    if (document.pointerLockElement) document.exitPointerLock();
+    player.enabled = false;
+    player.keys.clear();
+  },
+  aoFechar: () => {
+    if (state.joined) player.enabled = true;
+  },
+});
+controle.onPs5 = (sh, ev) => {
+  if (ev?.t === 'pad') ps5Nativo.pad(ev);
+  else if (ev?.t === 'vivo') ps5Nativo.vivo();
+};
+
+// a imagem do PS5 numa tela da sala, com o controle já liberado (é para jogar) e o som tocando aqui
+async function compartilharPs5(fonte) {
+  if (!state.joined) {
+    toast('Entre na sala antes de pôr o PS5 numa tela.', 'warn', 5000);
+    return null;
+  }
+  if (!cabeMaisUma()) {
+    toast('Todas as telas e o telão estão ocupados. Pare uma delas para pôr o PS5.', 'warn', 6000);
+    return null;
+  }
+  if (shareBusy) return null;
+  shareBusy = true;
+  let key;
+  try {
+    const tela = await escolherTela();
+    if (tela === null) return null;
+    key = await publishShare(fonte.stream, { tela, superficie: 'ps5' });
+  } finally {
+    shareBusy = false;
+  }
+  const sh = key && self()?.shares.get(key);
+  if (!sh) return null;
+  Object.assign(sh, { ps5: fonte, titulo: 'PS5', superficie: 'ps5' });
+  // o nome "PS5" põe o celular de quem joga nos botões do PS5 (toque-jogo.js)
+  socket.emit('share-info', { key, site: null, titulo: 'PS5' });
+  socket.emit('controle-permitir', { key, on: true });
+  // o som do PS5 sai aqui também (antes era a janela do chiaki-ng que tocava)
+  if (fonte.stream.getAudioTracks().length) {
+    sh.escuta = new Audio();
+    sh.escuta.srcObject = new MediaStream(fonte.stream.getAudioTracks());
+    sh.escuta.play().catch(() => {});
+  }
+  renderPeople();
+  renderSharePop();
+  toast(`O PS5 está no ${ondeEsta(sh) === 'Telão' ? 'telão' : ondeEsta(sh)}, com o controle liberado. Quem abrir a tela e ligar o modo jogo joga nele.`, 'success', 7000);
+  return key;
+}
+
 const MOTIVO_TURBO = {
   navegador: 'este navegador não tem o que o modo turbo precisa',
   'sem-controle': 'a tela não está com o controle liberado',
@@ -3411,6 +3490,10 @@ $('#set-obs-monitor').addEventListener('change', (e) => {
     if (sh.obs && sh.alvo) sh.alvo = { superficie: 'monitor', rotulo: `screen:${settings.obsMonitor - 1}:0` };
   }
 });
+$('#ps5-abrir').addEventListener('click', () => {
+  closePanel();
+  ps5Nativo.abrir();
+});
 $('#obs-compartilhar').addEventListener('click', () => {
   closePanel();
   novaTela(undefined, { obs: true });
@@ -3555,6 +3638,12 @@ controle.onDesligou = (aba, motivo, janela) => {
 async function permitirControle(key) {
   const sh = self()?.shares.get(key);
   if (!sh) return;
+  // PS5 direto: o controle vai para a ponte, sem extensão nem ajudante no meio
+  if (sh.ps5) {
+    socket.emit('controle-permitir', { key, on: !sh.controle });
+    toast(sh.controle ? 'Ninguém mais joga no PS5 por aqui.' : 'Pronto: quem abrir essa tela joga no PS5 com o controle dela.', 'success', 5000);
+    return;
+  }
   if (sh.controle) {
     socket.emit('controle-permitir', { key, on: false });
     controle.soltar(sh.aba);
@@ -3654,7 +3743,7 @@ function updateFocusCtrl() {
   if (t) {
     const dono = t.user.isSelf ? 'Sua tela' : `Tela de ${t.user.name}`;
     // janela ou tela inteira: o título é o jogo que o ajudante reconheceu nela (ver onQual)
-    const jogo = ['window', 'monitor'].includes(superficieDe(t.share)) && t.share.titulo ? ` · ${t.share.titulo}` : '';
+    const jogo = ['window', 'monitor', 'ps5'].includes(superficieDe(t.share)) && t.share.titulo ? ` · ${t.share.titulo}` : '';
     $('#focus-name').textContent = `${dono} · ${ondeEsta(t.share)}${!nav && t.share.site ? ` · ${t.share.site}` : ''}${jogo}`;
   }
   if (!pode) controle.remover(fv);
@@ -3674,7 +3763,7 @@ function updateFocusCtrl() {
   // Modo jogo: só em janela/tela inteira dos outros (o ajudante nativo é quem manda delta/scancode)
   const jb = $('#focus-jogo');
   const janela = !!t && !t.user.isSelf
-    && ['window', 'monitor'].includes(superficieDe(t.share));
+    && ['window', 'monitor', 'ps5'].includes(superficieDe(t.share));
   if ((!on || !janela) && controle.jogoNo === fv) controle.desligarJogo();
   jb.hidden = !on || !janela;
   // as opções do modo jogo (no celular elas ficam no painel do controle de toque)
@@ -5540,6 +5629,7 @@ $('#chat-form').addEventListener('submit', (e) => {
   } else if (/^\/cat[aá]logo\b/i.test(text)) criador.abrirCatalogo();
   else if (/^\/tela(\s|$)/i.test(text)) comandoTela(text.slice(5).trim());
   else if (/^\/jogos\s*$/i.test(text)) pcJogos.abrir();
+  else if (/^\/ps5\s*$/i.test(text)) ps5Nativo.abrir();
   else if (text) socket.emit('chat', text);
   input.value = '';
   fecharSugestoes();
@@ -5583,7 +5673,7 @@ function guardarTelas() {
     if (sh.file || !stream?.getVideoTracks().some((t) => t.readyState === 'live')) continue;
     guardadas.push({
       stream, slot: sh.slot, aba: sh.aba, obs: !!sh.obs, superficie: sh.superficie, controle: !!sh.controle,
-      escuta: sh.escuta || null, site: sh.site, titulo: sh.titulo, doTela: sh.key === telaKey,
+      escuta: sh.escuta || null, site: sh.site, titulo: sh.titulo, doTela: sh.key === telaKey, ps5: sh.ps5 || null,
     });
     sh.escuta = null; // o som da aba segue tocando aqui
     stopShare(sh.key, false, { manter: true });
@@ -5595,16 +5685,26 @@ async function devolverTelas(guardadas) {
   let refazer = null; // a do PC do /tela que não deu para devolver: compartilha de novo do zero
   for (const g of guardadas) {
     const viva = g.stream.getVideoTracks().some((t) => t.readyState === 'live');
-    const key = viva ? await publishShare(g.stream, { aba: g.aba, tela: g.slot ?? undefined, qps: g.obs ? QPS_OBS : null, reconexao: true }) : null;
+    const key = viva ? await publishShare(g.stream, { aba: g.aba, tela: g.slot ?? undefined, qps: g.obs ? QPS_OBS : null, reconexao: true, superficie: g.ps5 ? 'ps5' : null }) : null;
     if (!key) {
       for (const t of g.stream.getTracks()) t.stop();
       g.escuta?.pause();
+      if (g.ps5) {
+        ps5Nativo.key = null;
+        ps5Nativo.parar();
+      }
       if (g.doTela || (telaLiberadaAqui() && (g.obs || g.superficie === 'monitor'))) refazer = { obs: g.obs };
       continue;
     }
     voltaram++;
     const sh = self().shares.get(key);
     Object.assign(sh, { site: g.site, titulo: g.titulo, escuta: g.escuta });
+    // PS5 direto: a sessão com o PS5 seguiu no ar; a tela nova é dela (e o nome volta para o layout)
+    if (g.ps5) {
+      Object.assign(sh, { ps5: g.ps5 });
+      ps5Nativo.key = key;
+      socket.emit('share-info', { key, site: null, titulo: 'PS5' });
+    }
     if (g.doTela) telaKey = key;
     if (g.controle) socket.emit('controle-permitir', { key, on: true });
   }
@@ -5941,6 +6041,7 @@ function sugestoesDoPix(v) {
     const cmds = [];
     if (dono && '/pix'.startsWith(baixo)) cmds.push({ texto: '/pix ', rotulo: '/pix', extra: 'adicionar, remover ou ajustar moedas' });
     if (dono && '/jogos'.startsWith(baixo)) cmds.push({ texto: '/jogos', rotulo: '/jogos', extra: 'os jogos do PC de jogos' });
+    if (temPs5Nativo() && !isTouch && '/ps5'.startsWith(baixo)) cmds.push({ texto: '/ps5', rotulo: '/ps5', extra: 'jogar o PS5 deste PC direto na sala' });
     if ('/tela'.startsWith(baixo)) cmds.push({ texto: '/tela ', rotulo: '/tela', extra: dono ? 'o PC de alguém compartilha a tela' : 'liberar ou bloquear este PC para o /tela' });
     return cmds;
   }
@@ -8403,7 +8504,7 @@ if (params.get('debug') === '1') {
     toggleVeiculo, irParaLargada, jogos, irParaMesa, exitFocus, dados, quadras, jogosDoParque, pingue, queimada, sinuca, golfe, cartas, poker, gincana, fantasmas, kart, pinta,
     tocarTela, telasMudas, liberarSomDasTelas, makeVideo, mesa, controle, abrirMesa, fecharMesa, marcaDaAba,
     publishShare, stopShare, acharTela, telasNoAr, get rtc() { return rtc; }, diagJogo, clima, ligarLuneta, futebol, surf, criador, run,
-    enterFocus, get socket() { return socket; }, fisico, toqueJogo, opcoesJogo, turboRecebe, turboEnvio,
+    enterFocus, get socket() { return socket; }, fisico, toqueJogo, opcoesJogo, turboRecebe, turboEnvio, ps5Nativo,
   };
 }
 

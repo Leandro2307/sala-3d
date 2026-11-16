@@ -739,3 +739,48 @@ Agora `teclado-pad.js` (fonte `teclado` do `PadVirtual`, ligada no `controle.onJ
 clique direito/esquerdo ZL/ZR, Tab −, Esc +, H Home, setas = direcional. Gancho: `controle.paraPad` em
 `mandar` e `moverJogo`. Tecla fora da lista continua indo como tecla; o mouse vai todo para o controle. Toast
 com a lista ao ligar. Não testado de ponta a ponta com o lichii (só a conversão, em node).
+
+## PS5 direto, sem o chiaki-ng (2026-11-16)
+
+Pedido do usuário: o chiaki-ng "nativo no sistema". O caminho de antes era PS5 → codifica → chiaki-ng
+decodifica → janela → captura → codifica de novo (turbo) → quem joga. Agora a biblioteca do chiaki-ng
+roda numa ponte nossa e a imagem do PS5 vai **como ele fez** para quem joga:
+
+- **Ponte** `extensao/nativo/ps5/ponte.c` → `sala3d-ps5.exe` (C, libchiaki do chiaki-ng `43728af`
+  estática, compilada no MSYS2 UCRT64 com `compilar.sh`; o `.exe` vai no repositório, 6 MB, só DLLs do
+  Windows). Abre um WebSocket em 127.0.0.1 (porta escolhida por ela) e só aceita `GET /ps5?t=<token>`.
+  Faz descoberta (SRCH 9302/987), acordar (credencial = regist key em hexa), registro por PIN, importa os
+  registros do chiaki-ng (`HKCU\Software\Chiaki\Chiaki\registered_hosts\<n>`, bytes como
+  `@ByteArray(...)`), sessão com `enable_dualsense = false` (tremor simples) e `enable_idr_on_fec_failure`.
+  Binário para a página: `[tipo, marcas, perdidos u16, seq u32]` + dados; 1 = quadro Annex B, 2 = Opus,
+  3 = cabeçalho (o SPS/PPS que o chiaki passa sozinho pelo `video_sample_cb` na troca de perfil). Sai
+  quando o ajudante sai (`--pai`). Consoles em `%LOCALAPPDATA%\Sala3d\ps5.txt`, log `ps5-ponte.log`.
+- **Ajudante 1.16** (`{tipo:'ps5'}` → `AbrirPonte`): abre a ponte uma vez e devolve `{porta, token}`.
+  **Extensão 1.22**: pedido `ps5-ponte` (conteudo.js `PEDIDOS`, fundo.js `pedidoNativo('ps5')`).
+- **Página** `public/js/ps5-nativo.js`: `Ps5Nativo` (WebSocket com a ponte, painel `#ps5-nativo`, `/ps5`,
+  Ajustes → PS5 direto, "Compartilhar o PS5 direto" em Suas telas) e `Ps5Fonte` (Annex B → avc com
+  avcC montado do SPS/PPS, chave = NAL 5; uma cópia decodificada → `MediaStreamTrackGenerator` vira a
+  tela da sala, `superficie: 'ps5'`, título "PS5" = layout PS5; som Opus → `AudioDecoder` → trilha).
+  A tela entra com o controle liberado; `controle.receber` manda `pad`/`vivo` para `controle.onPs5`.
+  Botões: bits do mapa padrão → `ChiakiControllerButton` (8 Create, 9 Options, 16 PS). Sem notícia do
+  controle por 1,5 s com algo apertado → solta tudo.
+- **Turbo** (`TurboEnvio.ligarPs5`/`quadroPs5`): não codifica; repassa os quadros da fonte com o mesmo
+  cabeçalho e o mesmo `{cfg}` (descrição avcC). Fila no dobro da trava ou perda lá → espera o próximo
+  quadro-chave e pede ao PS5 (`chiaki_session_request_idr`, no máximo um a cada 300 ms; a cópia local,
+  um a cada 2 s — o PS5 não manda quadro-chave sozinho). Som do PS5 direto pelo `turbo-som`
+  (`mandarSom`). `ajustarBanda` não mexe em nada (a banda é a da sessão: 720p 6 Mbps de fábrica).
+- `server.js` aceita `superficie: 'ps5'`; o botão Modo jogo vale para `window`, `monitor` e `ps5`.
+  Reconexão da sala: a sessão do PS5 continua e a tela volta com `ps5` (guardarTelas/devolverTelas).
+
+Testado aqui (sem PS5 nesta rede): a ponte de verdade (token, importar do registro, sessão até o
+"connect failed", sair junto com o ajudante pelo protocolo do Chrome) e a sala de ponta a ponta com uma
+**ponte falsa** (scratchpad `teste-ps5/pw`: `gerar.mjs` grava H.264 High + Opus no Chromium,
+`ponte-falsa.mjs` fala o protocolo, `teste.mjs` com duas pessoas na cópia da 3100): tela da sala
+1280×720 pelo WebRTC, turbo a ~40 qps no Chromium de teste com `codecLa avc1.640020` (os quadros do
+"PS5"), som pelo turbo, ✕ e analógicos na ponte, tremor em quem joga, parar a tela para a sessão. No
+Chromium de teste o `VideoDecoder` com `prefer-hardware` não abre (sem placa): o teste tira a preferência.
+
+**Não testado com o PS5 de verdade.** Riscos: o PS5 mandar quadro-chave que não é NAL 5 (o Chrome
+recusa `key` sem IDR), o SPS do PS5 sem VUI segurar quadros no decodificador da placa (o `segurando`
+do turbo cobre quem joga; a cópia local não tem esse ajuste), e o Chrome no domínio público pedir
+licença para falar com 127.0.0.1 (Local Network Access): sem ela, o painel mostra o aviso.

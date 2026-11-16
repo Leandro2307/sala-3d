@@ -245,6 +245,24 @@ abre logada.
 
 ## Jogar no PS5 pela sala
 
+### PS5 direto (extensão 1.22 + ajudante 1.16, recomendado)
+
+Sem abrir o chiaki-ng nem instalar o ViGEmBus: o ajudante abre a ponte `nativo/ps5/sala3d-ps5.exe`,
+que faz o Remote Play pela biblioteca do chiaki-ng e manda a imagem do PS5, do jeito que ele fez, para
+quem joga (menos atraso: some a captura da janela e a segunda codificação). Ver `nativo/ps5/LEIA-ME.md`.
+
+1. Atualize a pasta da extensão, rode o `nativo/instalar.bat` de novo e clique em **Recarregar** em
+   `chrome://extensions`. Feche o chiaki-ng (o PS5 aceita um Remote Play por vez).
+2. Na sala: **Ajustes → PS5 direto → Abrir** (ou `/ps5` no chat, ou **Compartilhar o PS5 direto** em
+   "Suas telas"). Se o Chrome perguntar sobre acessar dispositivos/apps deste computador, **permita**: é
+   a sala falando com a ponte em 127.0.0.1.
+3. O PS5 que o chiaki-ng já usava aparece sozinho (o registro vem dele). Senão: **Registrar** com o IP,
+   o ID da conta PSN e o PIN de Configurações → Sistema → Remote Play → Vincular dispositivo.
+4. **Jogar**: o PS5 acorda se estiver em repouso, entra numa tela da sala com o controle liberado, e
+   quem abrir a tela e ligar o modo jogo joga nele (o turbo repassa os quadros do PS5).
+
+### Pelo chiaki-ng (o jeito de antes)
+
 O PS5 aparece no PC pelo **chiaki-ng** (Remote Play aberto, github.com/streetpea/chiaki-ng) e
 quem joga usa o controle de toque do celular (layout **PS5**) ou um controle ligado no aparelho dele.
 No PC de quem compartilha, além do ajudante:

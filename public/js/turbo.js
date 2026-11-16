@@ -405,6 +405,8 @@ export class TurboEnvio {
     const t = typeof key === 'string' ? this.tela(key) : null;
     const responder = (m) => { try { canal.send(JSON.stringify(m)); } catch { /* canal fechou */ } };
     if (!t?.controle) return responder({ erro: 'sem-controle' });
+    // PS5 direto (ps5-nativo.js): os quadros já vêm codificados pelo PS5, só repassa
+    if (t.ps5) return this.ligarPs5(id, canal, key, t.ps5, { versao, som, codecs });
     if (!temTurboEnvio()) return responder({ erro: 'navegador' });
     const original = t.stream?.getVideoTracks()[0];
     if (!original || original.readyState !== 'live') return responder({ erro: 'sem-tela' });
@@ -429,6 +431,71 @@ export class TurboEnvio {
     });
     // quem joga toca o som do turbo (versão nova, com o canal "turbo-som"): o som da tela vai junto
     if (som) this.ligarSom(s, t.stream);
+  }
+
+  // ---------------------------------------------------------------- PS5 direto
+  // A fonte (Ps5Fonte) entrega o H.264 do PS5 já no formato avc e o som em Opus: nada é codificado
+  // aqui. O que muda para quem joga: nada (a mesma configuração, os mesmos pedaços e cabeçalho).
+  // Quadro de fora (fila cheia) quebra a cadeia de quadros: daí até o próximo quadro-chave nada vai, e
+  // o quadro-chave é pedido ao PS5. A banda é a da sessão do PS5 (ajustarBanda não tem o que mexer).
+  ligarPs5(id, canal, key, fonte, { versao, som }) {
+    const s = { id, key, canal, chave: true, quadro: 0, enc: null, cfg: null, config: null, banda: 0, trilha: null, parar: false, pulados: 0, enviados: 0,
+      cfgEnviada: null, ajuste: { altas: 0, baixas: 0, mudou: 0, ultima: null }, chaveId: 0, chaveEm: 0, ps5: fonte,
+      tempos: new Map(), conta: { enviados: 0, bytes: 0, pulados: 0, fila: 0, cod: [], chaves: 0, chaveMax: 0, ignorados: 0, ultimo: performance.now() },
+      serie: { fila: [], pulados: [] }, rajada: 0, maiorRajada: 0 };
+    this.sessoes.set(id, s);
+    s.v2 = Number(versao) >= 2;
+    s.altMax = 1080;
+    if (som) s.som = { ps5: true, seq: 0, cfg: null, conta: { enviados: 0, bytes: 0, pulados: 0 } };
+    s.cancelar = fonte.assinar((m) => {
+      if (s.parar) return;
+      if (m.cfg) {
+        s.cfgPs5 = m.cfg;
+        s.cfg = { codec: m.cfg.codec, w: m.cfg.w, h: m.cfg.h, modo: 'ps5' };
+        s.banda = 0;
+        s.chave = true; // configuração nova: só a partir de um quadro-chave
+      } else if (m.quadro) this.quadroPs5(s, m);
+      else if (m.som && s.som) {
+        s.som.cfg = { sampleRate: m.hz, numberOfChannels: m.canais };
+        this.mandarSom(s, s.som, m.som, m.ts);
+      }
+    });
+    this.onMudou?.(id, key, true);
+    fonte.pedirChave();
+  }
+
+  quadroPs5(s, m) {
+    if (s.canal.readyState !== 'open' || !s.cfgPs5) return;
+    const agora = performance.now();
+    const b = Math.min(49, Math.floor((agora - s.conta.ultimo) / 100));
+    const sf = s.serie.fila;
+    while (sf.length <= b) { sf.push(0); s.serie.pulados.push(0); }
+    const fila = s.canal.bufferedAmount;
+    if (fila / 1024 > sf[b]) sf[b] = Math.round(fila / 102.4) / 10;
+    const pular = (porFila) => {
+      s.pulados++;
+      s.conta.pulados++;
+      s.serie.pulados[b]++;
+      if (porFila) s.conta.fila++;
+      if (++s.rajada > s.maiorRajada) s.maiorRajada = s.rajada;
+      s.chave = true;
+      s.ps5.pedirChave();
+    };
+    // esperando um quadro-chave (começo, perda lá ou fila cheia aqui): os de antes não servem
+    if (s.chave && !m.chave) return pular(false);
+    // a fila de envio no dobro da trava do turbo: este fica de fora (e os de depois, até a chave)
+    if (fila > this.limiteFila(s) * 2) return pular(true);
+    s.rajada = 0;
+    if (m.chave) {
+      const cfg = { codec: s.cfgPs5.codec, w: s.cfgPs5.w, h: s.cfgPs5.h, description: s.cfgPs5.b64 };
+      const ant = s.cfgEnviada;
+      if (!ant || ant.codec !== cfg.codec || ant.w !== cfg.w || ant.h !== cfg.h || ant.description !== cfg.description) {
+        s.cfgEnviada = cfg;
+        try { s.canal.send(JSON.stringify({ cfg })); } catch { return; }
+      }
+      s.chave = false;
+    }
+    this.mandar(s, m.quadro, m.chave, m.ts, 0, m.t0);
   }
 
   // ---------------------------------------------------------------- som
@@ -479,19 +546,26 @@ export class TurboEnvio {
   }
 
   enviarSom(s, som, chunk) {
+    const dados = new Uint8Array(chunk.byteLength);
+    chunk.copyTo(dados);
+    this.mandarSom(s, som, dados, chunk.timestamp);
+  }
+
+  // um pacote Opus (daqui ou do PS5 direto) para quem joga
+  mandarSom(s, som, dados, ts) {
     const canal = this.canaisSom.get(s.id);
-    if (s.som !== som || !canal || canal.readyState !== 'open') return;
+    if (s.som !== som || !canal || canal.readyState !== 'open' || !som.cfg) return;
     // som esperando na fila: mandar mais só atrasaria (o tocador de lá prefere uma falha curta)
     if (canal.bufferedAmount > SOM_FILA_MAX) { som.conta.pulados++; return; }
-    const msg = new Uint8Array(SOM_CAB + chunk.byteLength);
+    const msg = new Uint8Array(SOM_CAB + dados.byteLength);
     const v = new DataView(msg.buffer);
     som.seq = (som.seq + 1) >>> 0;
     v.setUint32(0, som.seq);
     v.setUint32(4, som.cfg.sampleRate);
     v.setUint8(8, som.cfg.numberOfChannels);
-    v.setFloat64(12, chunk.timestamp);
+    v.setFloat64(12, ts);
     v.setFloat64(20, performance.now());
-    chunk.copyTo(msg.subarray(SOM_CAB));
+    msg.set(dados, SOM_CAB);
     try {
       canal.send(msg);
       som.conta.enviados++;
@@ -505,7 +579,7 @@ export class TurboEnvio {
     if (!som) return;
     if (s.som === som) s.som = null;
     som.leitor?.cancel().catch(() => {});
-    som.trilha.stop();
+    som.trilha?.stop();
     try { if (som.enc && som.enc.state !== 'closed') som.enc.close(); } catch { /* já fechado */ }
   }
 
@@ -563,6 +637,7 @@ export class TurboEnvio {
       return;
     }
     s.chave = true;
+    s.ps5?.pedirChave(); // PS5 direto: o quadro-chave vem de lá
   }
 
   // Quem joga conta a cada FILA_AVISO_MS a viagem medida dos quadros (fila de envio + rede): o p90 e a
@@ -677,8 +752,13 @@ export class TurboEnvio {
     s.tempos.delete(chunk.timestamp);
     const cod = t0 != null ? performance.now() - t0 : 0;
     guardar(s.conta.cod, cod);
+    this.mandar(s, dados, chunk.type === 'key', chunk.timestamp, cod, t0);
+  }
+
+  // um quadro codificado em pedaços de PEDACO bytes (daqui ou do PS5 direto). t0: quando saiu da captura
+  mandar(s, dados, chave, timestamp, cod, t0) {
     const id = (s.quadro = (s.quadro + 1) >>> 0);
-    if (chunk.type === 'key') {
+    if (chave) {
       s.chaveId = id;
       s.chaveEm = performance.now();
       s.conta.chaves++;
@@ -694,9 +774,9 @@ export class TurboEnvio {
         v.setUint32(0, id);
         v.setUint16(4, i);
         v.setUint16(6, total);
-        v.setUint8(8, chunk.type === 'key' ? 1 : 0);
+        v.setUint8(8, chave ? 1 : 0);
         v.setUint16(10, Math.min(65535, Math.round(cod * 10)));
-        v.setFloat64(12, chunk.timestamp);
+        v.setFloat64(12, timestamp);
         if (s.v2) {
           v.setUint8(9, VERSAO);
           v.setFloat64(20, t0 ?? -1); // quando o quadro saiu da captura, no relógio daqui
@@ -718,7 +798,8 @@ export class TurboEnvio {
     this.sessoes.delete(id);
     s.parar = true;
     s.leitor?.cancel().catch(() => {});
-    s.trilha.stop();
+    s.trilha?.stop();
+    s.cancelar?.(); // PS5 direto: deixa de receber os quadros
     try { if (s.enc && s.enc.state !== 'closed') s.enc.close(); } catch { /* já fechado */ }
     this.pararSom(s);
     this.onMudou?.(id, s.key, false);

@@ -1629,7 +1629,7 @@ function attachSockets(io) {
       // site/titulo: em que página a aba compartilhada está (só o domínio, nunca o endereço inteiro)
       // superficie: aba, janela ou tela inteira — o vídeo que chega aos outros não diz (só o de quem
       // captura), e é por ela que eles sabem se dá para usar o modo jogo
-      const share = { key, slot, streamId: sid, controle: false, site: null, titulo: null, superficie: ['browser', 'window', 'monitor'].includes(superficie) ? superficie : null };
+      const share = { key, slot, streamId: sid, controle: false, site: null, titulo: null, superficie: ['browser', 'window', 'monitor', 'ps5'].includes(superficie) ? superficie : null };
       if (slot != null) room.slots[slot] = key;
       user.shares.set(key, share);
       // Telão vazio? Fixa a tela compartilhada nele automaticamente.
