@@ -2999,7 +2999,7 @@ function janelaLossless() {
   const w = window.open('', 'sala3d-ps5-lossless', 'popup,width=1280,height=720');
   if (!w) return void toast('O navegador bloqueou a janela. Libere os pop-ups deste site e tente de novo.', 'warn', 7000);
   janelaLs = w;
-  w.document.title = 'PS5 · Lossless';
+  w.document.title = 'PS5 · Lossless (não feche: o OBS captura esta janela)';
   w.document.body.style.cssText = 'margin:0;background:#000;overflow:hidden';
   const v = w.document.createElement('video');
   v.muted = true; // o som já toca na sala
@@ -3034,8 +3034,10 @@ async function losslessPs5(ligar) {
     nova.addEventListener('ended', () => losslessPs5(false), { once: true });
     rtc.replaceScreenTrack(key, nova);
     turboEnvio.trocarFonte(key);
+    mostrarNaMinhaTela(sh, new MediaStream([nova]));
     diagJogo.evento('PS5 direto: imagem do Lossless pelo OBS', { qps: nova.getSettings?.().frameRate ?? null });
-    toast('Quem joga agora recebe a imagem do OBS (com o Lossless). O controle e o som continuam do PS5 direto.', 'success', 7000);
+    toast('Quem joga agora recebe a imagem do OBS (com o Lossless). A sua tela na sala também mostra a imagem do OBS.', 'success', 7000);
+    vigiarObsPreto(nova);
   } else {
     if (!sh.lossless) return;
     const cam = sh.losslessCam;
@@ -3044,9 +3046,68 @@ async function losslessPs5(ligar) {
     const direta = scr.stream.getVideoTracks()[0];
     if (direta) rtc.replaceScreenTrack(key, direta);
     turboEnvio.trocarFonte(key);
+    mostrarNaMinhaTela(sh, scr.stream);
     for (const t of cam?.getTracks() || []) t.stop();
     diagJogo.evento('PS5 direto: de volta à imagem direta');
     toast('De volta à imagem direta do PS5.', 'info', 5000);
+  }
+}
+
+// A janela do PS5 é o que o OBS captura: fechada com o Lossless ligado, o OBS passa a mandar preto e
+// quem joga ficava sem imagem. Volta sozinho para a imagem direta e avisa.
+setInterval(() => {
+  const sh = ps5Nativo.key && self()?.shares.get(ps5Nativo.key);
+  if (!sh?.lossless || !janelaLs?.closed) return;
+  janelaLs = null;
+  losslessPs5(false).then(() => {
+    ps5Nativo.render?.();
+    toast('A janela do PS5 fechou, e o OBS ficaria preto: voltei para a imagem direta. Para o Lossless, deixe a janela aberta (pode ficar atrás, mas não minimizada).', 'warn', 12000);
+  });
+}, 1000);
+
+// a minha tela na sala (e o foco, se estiver nela) passa a mostrar esta imagem: com o Lossless, a do
+// OBS — é o que quem joga recebe (antes ficava a direta aqui e parecia que nada tinha trocado)
+function mostrarNaMinhaTela(sh, stream) {
+  if (sh.video && sh.video.srcObject !== stream) {
+    sh.video.srcObject = stream;
+    sh.video.play().catch(() => {});
+  }
+  if (state.focus?.kind === 'share' && state.focus.key === sh.key) {
+    const fv = $('#focus-video');
+    fv.srcObject = stream;
+    fv.play().catch(() => {});
+  }
+  refreshScreens();
+}
+
+// A câmera do OBS mandando só preto (a cena vazia, ou a captura de janela do Chrome pelo BitBlt, que
+// sai preta): olha 4 s de quadros numa cópia da trilha e avisa com o que fazer no OBS.
+async function vigiarObsPreto(trilha) {
+  if (typeof MediaStreamTrackProcessor !== 'function') return;
+  const copia = trilha.clone();
+  const leitor = new MediaStreamTrackProcessor({ track: copia }).readable.getReader();
+  const c = new OffscreenCanvas(48, 27);
+  const g = c.getContext('2d', { willReadFrequently: true });
+  let quadros = 0;
+  let maisClaro = 0;
+  const t0 = performance.now();
+  try {
+    while (performance.now() - t0 < 4000) {
+      const { value: f, done } = await leitor.read();
+      if (done) break;
+      if (quadros++ % 10 === 0) {
+        g.drawImage(f, 0, 0, 48, 27);
+        const d = g.getImageData(0, 0, 48, 27).data;
+        for (let i = 0; i < d.length; i += 4) maisClaro = Math.max(maisClaro, d[i], d[i + 1], d[i + 2]);
+      }
+      f.close();
+    }
+  } catch { /* a trilha acabou */ }
+  leitor.cancel().catch(() => {});
+  copia.stop();
+  diagJogo.evento('PS5 direto: imagem do OBS conferida', { quadros, maisClaro });
+  if (quadros && maisClaro < 12) {
+    toast('O OBS está mandando imagem PRETA. No OBS: na cena, adicione “Captura de tela” (o monitor onde está a janela do PS5 com o Lossless), com o método “Windows 10 (1903 e acima)”. Captura de janela do Chrome costuma sair preta. Depois deixe a câmera virtual em “Programa”.', 'warn', 20000);
   }
 }
 
