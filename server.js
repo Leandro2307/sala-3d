@@ -1612,6 +1612,20 @@ function attachSockets(io) {
       io.to(para).emit('chamado', { id: user.id, nome: user.name, cor: user.color });
     });
 
+    // lan house: o dono libera horas de graça para uma conta, a partir de agora (lanhouse.js liberar)
+    socket.on('lan-liberar', async (msg, ack) => {
+      const r = resposta(ack);
+      if (!room || !dono) return r({ ok: false, erro: 'Só o dono da sala libera horário.' });
+      if (!room.config?.lanhouse?.ligada) return r({ ok: false, erro: 'Ligue a lan house primeiro.' });
+      const { conta, maquina, horas } = obj(msg);
+      try {
+        r(await lan.liberar({ sala: room.id, conta, maquina, horas }));
+      } catch (err) {
+        console.warn('[lan] liberar', err.message);
+        r({ ok: false, erro: 'Não deu para liberar agora. Tente de novo.' });
+      }
+    });
+
     socket.on('sala-config', async (msg, ack) => {
       const r = resposta(ack);
       if (!room || !dono) return r({ ok: false, erro: 'Só o dono da sala muda isso.' });

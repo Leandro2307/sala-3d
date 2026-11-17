@@ -5275,6 +5275,17 @@ function fecharAluguel() {
   $('#lan-modal').hidden = true;
   $('#lan-frame').src = 'about:blank';
 }
+// dono: libera horas de graça para uma conta, a partir da hora cheia de agora (sem Stripe)
+$('#lan-liberar').addEventListener('click', () => {
+  const f = $('#sala-config').elements;
+  const conta = f.lanLiberarConta.value.trim();
+  if (!conta) return toast('Escreva o nome da conta.', 'error');
+  socket.emit('lan-liberar', { conta, maquina: f.lanLiberarMaquina.value, horas: Number(f.lanLiberarHoras.value) }, (r) => {
+    if (!r?.ok) return toast(r?.erro || 'Não deu para liberar.', 'error');
+    const horas = r.horas.map((h) => `${h}h`).join(', ');
+    toast(`${r.maquina} liberado para ${r.conta}${horas ? ` (${horas})` : ' (já estava)'}${r.pulou.length ? ` — ocupado por outra pessoa: ${r.pulou.map((h) => `${h}h`).join(', ')}` : ''}.`, 'success');
+  });
+});
 $('#lan-reservar').addEventListener('click', abrirAluguel);
 $('#lan-modal-fechar').addEventListener('click', fecharAluguel);
 $('#lan-modal').addEventListener('click', (e) => { if (e.target === e.currentTarget) fecharAluguel(); });

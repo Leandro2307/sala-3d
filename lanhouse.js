@@ -371,5 +371,38 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
     });
   }
 
-  return { iniciar, rotas, contaDoToken, jogadorAgora, MAQUINAS: Object.keys(MAQUINAS) };
+  // o dono libera horas de graça para uma conta (sem Stripe): a partir da hora cheia de agora,
+  // seguidas. Hora que já é de outra pessoa (paga ou no checkout) fica de fora.
+  async function liberar({ sala, maquina, conta, horas }) {
+    const nome = limparNome(conta);
+    if (!nomeValido(nome)) return { ok: false, erro: 'Nome de conta inválido.' };
+    const c = await banco.lerConta(nome).catch(() => null);
+    if (!c) return { ok: false, erro: `Não existe a conta "${nome}". Ela precisa entrar uma vez com nome e senha.` };
+    const m = maquinaDe(maquina);
+    const n = Math.min(MAX_HORAS, Math.max(1, Math.floor(Number(horas)) || 1));
+    const agora = Date.now();
+    const h0 = Math.floor(agora / HORA) * HORA;
+    const lista = [];
+    const pulou = [];
+    for (let i = 0; i < n; i++) {
+      const inicio = h0 + i * HORA;
+      const tem = daHora(sala, m, inicio);
+      if (tem && tem.conta !== nome) { pulou.push(horaDe(inicio)); continue; }
+      if (tem?.status === 'paga') continue; // já é dela
+      if (tem) { tem.status = 'cancelada'; await guardar(tem); } // o checkout dela mesma: vira cortesia
+      lista.push({
+        id: crypto.randomBytes(12).toString('hex'), sala, maquina: m, conta: nome, inicio, status: 'paga', sessao: 'cortesia', expira: inicio + HORA, criada: agora,
+        jogo: null, jogoNome: null,
+      });
+    }
+    for (const r of lista) {
+      reservas.set(r.id, r);
+      await guardar(r);
+      console.log(`[lan] ${sala} ${MAQUINAS[m]} ${diaDe(r.inicio)} ${horaDe(r.inicio)}h (${nome}): cortesia do dono`);
+    }
+    aoMudar?.(sala);
+    return { ok: true, conta: nome, maquina: MAQUINAS[m], horas: lista.map((r) => horaDe(r.inicio)), pulou };
+  }
+
+  return { iniciar, rotas, contaDoToken, jogadorAgora, liberar, MAQUINAS: Object.keys(MAQUINAS) };
 };
