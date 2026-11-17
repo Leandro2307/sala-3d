@@ -7048,7 +7048,7 @@ function perifericosEntrada(m) {
   else if (m.t === 'mouse') p.mouse(Number(m.dx) || 0, Number(m.dy) || 0);
   else if (m.t === 'clique') p.clique(!!m.desceu);
 }
-window.addEventListener('keydown', (e) => perifericosAtivos()?.tecla(e.target?.type === 'password' ? null : e.code, true), true);
+window.addEventListener('keydown', (e) => perifericosAtivos()?.tecla(e.target?.type === 'password' || e.target?.classList?.contains('senha-oculta') ? null : e.code, true), true);
 window.addEventListener('keyup', (e) => perifericosAtivos()?.tecla(e.code, false), true);
 window.addEventListener('blur', () => perifericosAtivos()?.soltarTudo());
 document.addEventListener('mousemove', (e) => perifericosAtivos()?.mouse(e.movementX || 0, e.movementY || 0));

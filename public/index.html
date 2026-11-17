@@ -1147,11 +1147,11 @@
       <!-- todo mundo entra com a conta: nome e senha (lanhouse.js). Com a conta guardada, a senha some -->
       <label class="field l-nome">
         <span>Nome</span>
-        <input id="in-name" maxlength="20" autocomplete="username" placeholder="Seu nome" required>
+        <input id="in-name" maxlength="20" autocomplete="off" placeholder="Seu nome" required>
       </label>
       <label class="field l-senha" id="campo-senha-conta">
         <span>Senha</span>
-        <input type="password" id="in-senha-conta" maxlength="100" autocomplete="current-password" placeholder="Primeira vez? Crie uma aqui">
+        <input type="text" class="senha-oculta" id="in-senha-conta" maxlength="100" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Primeira vez? Crie uma aqui">
       </label>
       <small class="hint erro conta-erro" id="conta-erro" hidden></small>
 
@@ -1172,7 +1172,7 @@
       <!-- aparece quando a sala pedida tem senha de entrada (ver /sala-acesso no server.js) -->
       <label class="field" id="campo-senha-sala" hidden>
         <span>Senha da sala</span>
-        <div class="input-prefix"><i data-icon="lock" data-size="16"></i><input type="password" id="in-senha-sala" maxlength="100" autocomplete="current-password" placeholder="Esta sala pede senha"></div>
+        <div class="input-prefix"><i data-icon="lock" data-size="16"></i><input type="text" class="senha-oculta" id="in-senha-sala" maxlength="100" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Esta sala pede senha"></div>
         <small class="hint erro" id="senha-sala-erro" hidden></small>
       </label>
 

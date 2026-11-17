@@ -4318,3 +4318,7 @@ body.modo-offline #bar, body.modo-offline #touch, body.modo-offline #hud > :not(
 @media (max-height: 520px) and (max-width: 640px) and (orientation: landscape) {
   .cj-offline .cj-grade { grid-template-columns: repeat(3, minmax(0, 1fr)); align-content: start; }
 }
+
+/* senha da entrada: campo de texto com bolinhas, para o Chrome não abrir "Salvar senha?" em cima
+   da tela compartilhada (o balão fica na frente e quem controla de longe não consegue mexer) */
+.senha-oculta { -webkit-text-security: disc; text-security: disc; }
