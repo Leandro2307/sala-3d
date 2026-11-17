@@ -3716,7 +3716,7 @@ function mostrarSelo(r = null) {
   const linhas = r.altura ? `${r.altura}p` : '';
   // turbo: da captura lá até desenhado aqui, medido quadro a quadro (turbo.js, pontaMs)
   const imagem = r.turbo?.pontaMs != null ? ` (imagem ${Math.round(r.turbo.pontaMs)} ms)` : '';
-  // trancos: quadros que ficaram 3 voltas da tela ou mais nos últimos 2 s (ritmo.js)
+  // trancos: quadros que ficaram 3 quadros da fonte ou mais nos últimos 2 s (ritmo.js)
   const trancos = r.ritmo ? ` · <span class="${r.ritmo.trancos > 2 ? 'ruim' : ''}">${r.ritmo.trancos} trancos</span>` : '';
   const liso = r.turbo?.liso ? ` · liso ${Math.round(r.turbo.liso.alvoMs)} ms` : '';
   // PS5 direto: o que o PS5 manda (e, com o Lossless no PC de lá, o que sai do OBS) antes do que chega aqui
@@ -4411,9 +4411,17 @@ $('#focus-jogo').addEventListener('click', () => {
     if (!document.fullscreenElement) $('#focus').requestFullscreen?.().then(() => screen.orientation?.lock?.('landscape')).catch(() => {});
   } else if (ligar) {
     jogoNoPc(true);
-    toast('Modo jogo ligado: tela cheia, o mouse gira a câmera e o teclado anda com o personagem (Ctrl+W e Esc vão para o jogo). Segure Esc para sair da tela cheia; F8 desliga o modo jogo.', 'info', 9000);
+    toast('Modo jogo ligado: tela cheia, o mouse gira a câmera e o teclado anda com o personagem (Ctrl+W e Esc vão para o jogo). Esc duas vezes (ou F8) desliga o modo jogo; segure Esc para sair da tela cheia.', 'info', 9000);
   } else if (!isTouch) jogoNoPc(false);
 });
+
+// Sai do modo jogo e fica na tela em foco (o Esc duas vezes): o mesmo que o botão "Desligar modo jogo"
+function desligarModoJogoNoFoco() {
+  controle.modoJogo($('#focus-video'), false);
+  updateFocusCtrl();
+  if (!isTouch) jogoNoPc(false);
+  toast('Modo jogo desligado. Esc de novo volta para a sala.', 'info', 3500);
+}
 
 // Modo jogo no PC: tela cheia da tela em foco, sem moldura, com o teclado travado (Keyboard Lock).
 // Sem a trava o Chrome fica com Ctrl+W, Ctrl+T e Ctrl+N — no Minecraft correr é Ctrl+W, e a aba
@@ -9143,6 +9151,9 @@ window.addEventListener('keydown', (e) => {
     else if (escolha.aberto) escolha.fechar();
     else if (catalogo.aberto) catalogo.fechar();
     else if (mesa.aberta) fecharMesa(true);
+    // Esc duas vezes seguidas no modo jogo (o primeiro foi para o jogo, ver controle.js): desliga o
+    // modo jogo e fica na tela em foco, com os botões — não volta direto para a sala
+    else if (state.focus && controle.jogoNo && controle.jogoNo === $('#focus-video')) desligarModoJogoNoFoco();
     else if (state.focus) sairDoFoco();
     else if (!$('#react-pop').hidden) $('#react-pop').hidden = true;
     else if (state.panel) closePanel();
