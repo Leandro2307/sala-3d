@@ -348,11 +348,12 @@ function texturaAgua(tamanho = 128) {
 }
 
 // ------------------------------------------------------------------ terreno
-function criarTerreno(scene, area) {
+function criarTerreno(scene, area, sala) {
   const cx = (area.minX + area.maxX) / 2;
   const cz = (area.minZ + area.maxZ) / 2;
   const tamanho = 3800;
   const seg = LEVE ? 150 : 250;
+  const passo = tamanho / seg;
   const geo = new THREE.PlaneGeometry(tamanho, tamanho, seg, seg);
   geo.rotateX(-Math.PI / 2);
   const pos = geo.attributes.position;
@@ -360,7 +361,12 @@ function criarTerreno(scene, area) {
     const x = pos.getX(i) + cx;
     const z = pos.getZ(i) + cz;
     const h = alturaTerreno(x, z, area);
-    pos.setXYZ(i, x, h > 0 || RELEVO.mar ? (foraDaArea(x, z, area) > 0 ? h : -0.03) : -0.03, z);
+    // o cinema encosta na cerca: um triângulo grande (15-25 m) com uma ponta lá fora, na praia ou
+    // no morro, subia por cima do piso e a grama aparecia dentro da sala, rente à parede. Os
+    // vértices de fora até uma célula e meia do cinema ficam abaixo do piso, como os de dentro.
+    const colado = sala && foraDaArea(x, z, sala) < passo * 1.5;
+    const fora = foraDaArea(x, z, area) > 0 && !colado;
+    pos.setXYZ(i, x, h > 0 || RELEVO.mar ? (fora ? h : -0.03) : -0.03, z);
   }
   geo.computeVertexNormals();
 
@@ -952,7 +958,7 @@ export function criarNatureza(scene, renderer, {
   scene.fog = new THREE.Fog(TEMA.nevoa.cor, TEMA.nevoa.perto, TEMA.nevoa.longe);
   if (RELEVO.mar) criarMar(grupo, renderer, ceu.mat, area, decorar);
 
-  criarTerreno(grupo, area);
+  criarTerreno(grupo, area, sala);
   criarCerca(grupo, area, sala);
 
   const meia = PISTA.largura / 2;
