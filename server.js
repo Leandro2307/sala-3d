@@ -778,11 +778,12 @@ async function vigiarJogoLan(room) {
   console.log(`[lan] ${room.id}: ${acao === 'abrir' ? `abrindo ${a.jogoNome || a.jogo} para ${a.conta}` : 'fechando o jogo (acabou a vez)'}`);
 }
 
-// pode mexer nas telas desta pessoa? (dono da tela sempre pode; fora da lan house, todo mundo)
+// pode mexer nas telas desta pessoa? (dono da tela sempre pode; fora da lan house, todo mundo; na
+// lan house, com a máquina sem ninguém alugado na hora, também todo mundo)
 function podeJogarLan(room, user, donoDaTela, tela) {
   if (!room.config?.lanhouse?.ligada || user === donoDaTela) return true;
   const atual = lan.jogadorAgora(room.id, maquinaDaTela(tela));
-  return !!atual && user.conta === atual.conta;
+  return !atual || user.conta === atual.conta;
 }
 
 // Prêmios. Cada um tem um intervalo mínimo por pessoa, para ninguém "farmar" repetindo.

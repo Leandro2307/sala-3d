@@ -2739,8 +2739,9 @@ const controle = new Controle({
 function receberControle(msg) {
   const sh = self()?.shares.get(msg.key);
   // lan house: fora quem compartilha, só quem tem o horário pago agora nesta máquina (PC ou PS5)
-  // mexe. O servidor também barra, mas o canal direto do WebRTC não passa por ele.
-  if (state.lan && msg.deId && msg.deId !== state.selfId && !idsDaVez(maquinaDaTela(sh)).includes(msg.deId)) return;
+  // mexe; sem ninguém alugado na hora, todo mundo. O servidor também barra, mas o canal direto do
+  // WebRTC não passa por ele.
+  if (msg.deId && msg.deId !== state.selfId && !podeJogarLan(maquinaDaTela(sh), msg.deId)) return;
   if (sh?.controle) turboDaTela(msg.key);
   controle.receber(sh, msg.deId === state.selfId ? { ...msg, deId: null } : msg);
 }
@@ -5240,22 +5241,25 @@ const MAQUINAS_LAN = { pc: 'PC', ps5: 'PS5' };
 // a tela do PS5 direto é o PS5; o resto (janela, tela inteira, aba) é o PC
 const maquinaDaTela = (sh) => (sh?.ps5 || sh?.superficie === 'ps5' || sh?.titulo === 'PS5' ? 'ps5' : 'pc');
 const idsDaVez = (m) => state.lan?.[m]?.ids || [];
+// lan house: a máquina sem ninguém alugado na hora fica livre para todos (igual ao servidor)
+const lanLivre = (m) => !state.lan?.[m]?.conta;
+const podeJogarLan = (m, id) => !state.lan || lanLivre(m) || idsDaVez(m).includes(id);
 const minhasMaquinas = () => Object.keys(MAQUINAS_LAN).filter((m) => idsDaVez(m).includes(state.selfId));
 let lanEraMinha = new Set();
 const horaCurta = (ms) => new Date(ms).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 function aplicarLan(e) {
-  const antes = state.lan;
   state.lan = e?.ligada ? e : null;
-  // a vez passou: quem jogava sai do modo jogo deste PC (a sala volta a ser desenhada normalmente)
-  for (const m of Object.keys(MAQUINAS_LAN)) {
-    for (const id of antes?.[m]?.ids || []) {
-      if (idsDaVez(m).includes(id)) continue;
-      for (const sh of self()?.shares.values() || []) if (sh.controle && maquinaDaTela(sh) === m) controle.receber(sh, { ev: { t: 'modo', jogo: false }, deId: id });
+  // a vez mudou: quem jogava numa tela minha e não pode mais (a hora passou, ou alguém alugou a
+  // máquina que estava livre) sai do modo jogo deste PC (a sala volta a ser desenhada normalmente)
+  for (const sh of self()?.shares.values() || []) {
+    if (!sh.controle) continue;
+    for (const id of [...(jogandoAqui.get(sh.key)?.keys() || [])]) {
+      if (!podeJogarLan(maquinaDaTela(sh), id)) controle.receber(sh, { ev: { t: 'modo', jogo: false }, deId: id });
     }
   }
   const agora = new Set(minhasMaquinas());
   for (const m of agora) if (!lanEraMinha.has(m)) toast(`Seu horário no ${MAQUINAS_LAN[m]} começou: você joga até ${horaCurta(state.lan[m].fim)}. Bom jogo!`, 'success', 8000);
-  for (const m of lanEraMinha) if (!agora.has(m)) toast(`Seu horário no ${MAQUINAS_LAN[m]} acabou. Para jogar mais, toque em "Alugar PC ou PS5".`, 'info', 10000);
+  for (const m of lanEraMinha) if (!agora.has(m)) toast(lanLivre(m) ? `Seu horário no ${MAQUINAS_LAN[m]} acabou. Ninguém alugou a próxima hora: a tela fica livre para todos.` : `Seu horário no ${MAQUINAS_LAN[m]} acabou. Para jogar mais, toque em "Alugar PC ou PS5".`, 'info', 10000);
   lanEraMinha = agora;
   mostrarLan();
 }
