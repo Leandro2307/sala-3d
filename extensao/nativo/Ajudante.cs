@@ -193,7 +193,7 @@ namespace Sala3d
             new Thread(VigiarAtalho) { IsBackground = true }.Start();
             new Thread(VigiarJogo) { IsBackground = true }.Start();
             new Thread(VigiarWifi) { IsBackground = true }.Start();
-            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.19.0" } });
+            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.20.0" } });
             var json = new JavaScriptSerializer();
             string txt;
             while ((txt = Ler(entrada)) != null)
@@ -1683,7 +1683,7 @@ namespace Sala3d
         }
 
         // ------------------------------------------------------------ Wi-Fi
-        const int WIFI_MS = 4000;
+        const int WIFI_MS = 2000; // o mesmo passo das amostras do relatório (2 s)
         static void VigiarWifi()
         {
             int ultimo = 0;
@@ -1700,6 +1700,9 @@ namespace Sala3d
                     catch { r = new Dictionary<string, object> { { "tipo", "wifi" }, { "conectado", false }, { "erro", "wlan" } }; } // sem wlanapi (Windows Server)
                     var pc = LerMemoria();
                     if (pc != null) r["pc"] = pc;
+                    // 1.20+: a carga deste PC (placa, processador, rede) e as placas de rede ligadas
+                    try { var c = LerCarga(); if (c != null) r["carga"] = c; } catch { }
+                    try { r["redes"] = LerRedes(); } catch { }
                     Escrever(r);
                 }
                 catch { /* a saída fechou */ }
@@ -1775,6 +1778,271 @@ namespace Sala3d
                 if (lista != IntPtr.Zero) WlanFreeMemory(lista);
                 WlanCloseHandle(h, IntPtr.Zero);
             }
+            return r;
+        }
+
+        // ------------------------------------------------------------ carga do PC (1.20+)
+        // Os engasgos de 2026-11-17 pioraram com o jogo rodando neste PC, e o relatório não tinha
+        // como mostrar isso. A cada WIFI_MS vai junto do Wi-Fi, em "carga":
+        // - cpu: uso total (%), dpc e interrupção (% do total e o pior núcleo). O Wi-Fi USB trabalha
+        //   em DPC: um núcleo preso nisso atrasa os pacotes mesmo com a média baixa.
+        // - gpu: uso por tipo de motor (3D, codificação, decodificação, cópia), pelos contadores do
+        //   Windows (vale para qualquer placa), a memória de vídeo e quem mais usa o 3D (o jogo?).
+        // - nv: da placa NVIDIA (nvml.dll, vem com o driver): uso, NVENC (uso, sessões, qps,
+        //   latência), temperatura, clock, consumo e por que o clock está segurado.
+        // - rede: por placa de rede, Mbps enviados/recebidos, fila de saída e pacotes descartados.
+        // Os contadores são lidos pelo nome em inglês (o .NET acha mesmo no Windows em português) e
+        // cada categoria sai de uma leitura só (ReadCategory, ~13 ms a do GPU Engine).
+        static readonly Dictionary<string, System.Diagnostics.CounterSample> contAntes = new Dictionary<string, System.Diagnostics.CounterSample>();
+        static readonly HashSet<string> contVistos = new HashSet<string>();
+
+        // a taxa entre esta leitura e a anterior do mesmo contador; NaN na primeira
+        static double Taxa(string chave, System.Diagnostics.CounterSample agora)
+        {
+            contVistos.Add(chave);
+            System.Diagnostics.CounterSample antes;
+            double v = double.NaN;
+            if (contAntes.TryGetValue(chave, out antes)) v = System.Diagnostics.CounterSample.Calculate(antes, agora);
+            contAntes[chave] = agora;
+            return v;
+        }
+
+        static object R1(double v) { if (double.IsNaN(v) || double.IsInfinity(v)) return null; return Math.Round(v, 1); }
+
+        static System.Diagnostics.InstanceDataCollectionCollection LerCategoria(string nome)
+        {
+            try { return new System.Diagnostics.PerformanceCounterCategory(nome).ReadCategory(); }
+            catch { return null; }
+        }
+
+        static System.Diagnostics.InstanceDataCollection Contador(System.Diagnostics.InstanceDataCollectionCollection cat, string nome)
+        {
+            if (cat == null) return null;
+            try { return cat.Contains(nome) ? cat[nome] : null; } catch { return null; }
+        }
+
+        static Dictionary<string, object> LerCarga()
+        {
+            contVistos.Clear();
+            var r = new Dictionary<string, object>();
+            try { r["cpu"] = LerCpu(); } catch { }
+            try { r["gpu"] = LerGpu(); } catch { }
+            try { var nv = LerNvidia(); if (nv != null) r["nv"] = nv; } catch { }
+            try { r["rede"] = LerRedeCarga(); } catch { }
+            // instâncias que sumiram (processos que fecharam) não ficam guardadas para sempre
+            foreach (var k in contAntes.Keys.Where(k => !contVistos.Contains(k)).ToList()) contAntes.Remove(k);
+            return r;
+        }
+
+        static Dictionary<string, object> LerCpu()
+        {
+            var cat = LerCategoria("Processor Information");
+            var r = new Dictionary<string, object>();
+            var util = Contador(cat, "% Processor Utility") ?? Contador(cat, "% Processor Time");
+            var dpc = Contador(cat, "% DPC Time");
+            var irq = Contador(cat, "% Interrupt Time");
+            var perf = Contador(cat, "% Processor Performance");
+            double piorDpc = double.NaN, piorIrq = double.NaN, piorUso = double.NaN;
+            if (util != null)
+                foreach (System.Diagnostics.InstanceData i in util.Values)
+                {
+                    double v = Taxa("cpu|" + i.InstanceName, i.Sample);
+                    if (i.InstanceName == "_Total") r["usoPct"] = R1(Math.Min(100, v));
+                    else if (!i.InstanceName.EndsWith("_Total") && !double.IsNaN(v)) piorUso = double.IsNaN(piorUso) ? v : Math.Max(piorUso, v);
+                }
+            if (dpc != null)
+                foreach (System.Diagnostics.InstanceData i in dpc.Values)
+                {
+                    double v = Taxa("dpc|" + i.InstanceName, i.Sample);
+                    if (i.InstanceName == "_Total") r["dpcPct"] = R1(v);
+                    else if (!i.InstanceName.EndsWith("_Total") && !double.IsNaN(v)) piorDpc = double.IsNaN(piorDpc) ? v : Math.Max(piorDpc, v);
+                }
+            if (irq != null)
+                foreach (System.Diagnostics.InstanceData i in irq.Values)
+                {
+                    double v = Taxa("irq|" + i.InstanceName, i.Sample);
+                    if (i.InstanceName == "_Total") r["interrupcaoPct"] = R1(v);
+                    else if (!i.InstanceName.EndsWith("_Total") && !double.IsNaN(v)) piorIrq = double.IsNaN(piorIrq) ? v : Math.Max(piorIrq, v);
+                }
+            if (perf != null)
+                foreach (System.Diagnostics.InstanceData i in perf.Values)
+                    if (i.InstanceName == "_Total") r["desempenhoPct"] = R1(Taxa("perf|_Total", i.Sample)); // abaixo de ~100: o processador está segurado (calor, energia)
+            r["piorNucleoPct"] = R1(Math.Min(100, piorUso));
+            r["piorNucleoDpcPct"] = R1(piorDpc);
+            r["piorNucleoInterrupcaoPct"] = R1(piorIrq);
+            return r;
+        }
+
+        // GPU Engine: uma instância por processo e motor ("pid_1234_luid_..._phys_0_eng_3_engtype_3D").
+        // O uso de um motor é a soma dos processos nele; o de um tipo, o motor mais usado desse tipo.
+        static Dictionary<string, object> LerGpu()
+        {
+            var r = new Dictionary<string, object>();
+            var uso = Contador(LerCategoria("GPU Engine"), "Utilization Percentage");
+            if (uso != null)
+            {
+                var porMotor = new Dictionary<string, double>();
+                var tipoDoMotor = new Dictionary<string, string>();
+                var porPid3d = new Dictionary<int, double>();
+                foreach (System.Diagnostics.InstanceData i in uso.Values)
+                {
+                    string n = i.InstanceName;
+                    double v = Taxa("gpu|" + n, i.Sample);
+                    if (double.IsNaN(v)) continue;
+                    int pe = n.IndexOf("_luid_"), te = n.IndexOf("_engtype_");
+                    if (pe < 0 || te < 0) continue;
+                    string motor = n.Substring(pe + 1, te - pe - 1); // luid_..._phys_0_eng_3
+                    string tipo = n.Substring(te + 9).ToLowerInvariant();
+                    double s; porMotor.TryGetValue(motor, out s); porMotor[motor] = s + v;
+                    tipoDoMotor[motor] = tipo;
+                    int pid;
+                    if (tipo == "3d" && n.StartsWith("pid_") && int.TryParse(n.Substring(4, n.IndexOf('_', 4) - 4), out pid))
+                    {
+                        double p; porPid3d.TryGetValue(pid, out p); porPid3d[pid] = p + v;
+                    }
+                }
+                var porTipo = new Dictionary<string, double>();
+                foreach (var kv in porMotor)
+                {
+                    string t = tipoDoMotor[kv.Key];
+                    double s; porTipo.TryGetValue(t, out s);
+                    porTipo[t] = Math.Max(s, Math.Min(100, kv.Value));
+                }
+                double x;
+                if (porTipo.TryGetValue("3d", out x)) r["tresDPct"] = R1(x);
+                if (porTipo.TryGetValue("videoencode", out x)) r["codificaPct"] = R1(x);
+                if (porTipo.TryGetValue("videodecode", out x)) r["decodificaPct"] = R1(x);
+                if (porTipo.TryGetValue("copy", out x)) r["copiaPct"] = R1(x);
+                // quem mais usa o 3D: o jogo, o Chrome (a sala desenhando), o OBS...
+                var top = new List<object>();
+                foreach (var kv in porPid3d.OrderByDescending(k => k.Value).Take(3))
+                {
+                    if (kv.Value < 1) break;
+                    string nome = "pid " + kv.Key;
+                    try { using (var p = System.Diagnostics.Process.GetProcessById(kv.Key)) nome = p.ProcessName; } catch { }
+                    top.Add(new Dictionary<string, object> { { "programa", nome }, { "pct", R1(Math.Min(100, kv.Value)) } });
+                }
+                r["quemUsa3d"] = top;
+            }
+            var mem = Contador(LerCategoria("GPU Adapter Memory"), "Dedicated Usage");
+            if (mem != null)
+            {
+                double maior = 0;
+                foreach (System.Diagnostics.InstanceData i in mem.Values) maior = Math.Max(maior, i.RawValue);
+                r["memoriaGb"] = Math.Round(maior / (1024.0 * 1024 * 1024), 2);
+            }
+            return r;
+        }
+
+        static Dictionary<string, object> LerRedeCarga()
+        {
+            var cat = LerCategoria("Network Interface");
+            var r = new Dictionary<string, object>();
+            var env = Contador(cat, "Bytes Sent/sec");
+            var rec = Contador(cat, "Bytes Received/sec");
+            var fila = Contador(cat, "Output Queue Length");
+            var descS = Contador(cat, "Packets Outbound Discarded");
+            var errS = Contador(cat, "Packets Outbound Errors");
+            var descE = Contador(cat, "Packets Received Discarded");
+            if (env == null) return r;
+            foreach (System.Diagnostics.InstanceData i in env.Values)
+            {
+                string n = i.InstanceName;
+                if (n.IndexOf("Teredo", StringComparison.OrdinalIgnoreCase) >= 0 || n.IndexOf("isatap", StringComparison.OrdinalIgnoreCase) >= 0 || n.IndexOf("Loopback", StringComparison.OrdinalIgnoreCase) >= 0) continue;
+                var d = new Dictionary<string, object>();
+                double e = Taxa("redeE|" + n, i.Sample);
+                d["enviaMbps"] = R1(e * 8 / 1e6);
+                if (rec != null && rec.Contains(n)) d["recebeMbps"] = R1(Taxa("redeR|" + n, rec[n].Sample) * 8 / 1e6);
+                if (fila != null && fila.Contains(n)) d["filaSaida"] = fila[n].RawValue;
+                // somas desde que o Windows ligou: a diferença desde a última leitura
+                if (descS != null && descS.Contains(n)) d["descartadosSaida"] = Diferenca("dS|" + n, descS[n].RawValue);
+                if (errS != null && errS.Contains(n)) d["errosSaida"] = Diferenca("eS|" + n, errS[n].RawValue);
+                if (descE != null && descE.Contains(n)) d["descartadosEntrada"] = Diferenca("dE|" + n, descE[n].RawValue);
+                r[n] = d;
+            }
+            return r;
+        }
+
+        static readonly Dictionary<string, long> brutoAntes = new Dictionary<string, long>();
+        static object Diferenca(string chave, long agora)
+        {
+            long antes;
+            object v = brutoAntes.TryGetValue(chave, out antes) ? (object)Math.Max(0, agora - antes) : null;
+            brutoAntes[chave] = agora;
+            return v;
+        }
+
+        // As placas de rede ligadas agora (cabo, Wi-Fi, VPN) e por qual sai a internet (a que tem gateway)
+        static List<object> LerRedes()
+        {
+            var lista = new List<object>();
+            foreach (var ni in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (ni.OperationalStatus != System.Net.NetworkInformation.OperationalStatus.Up) continue;
+                var t = ni.NetworkInterfaceType;
+                if (t == System.Net.NetworkInformation.NetworkInterfaceType.Loopback || t == System.Net.NetworkInformation.NetworkInterfaceType.Tunnel) continue;
+                bool gateway = false;
+                try { gateway = ni.GetIPProperties().GatewayAddresses.Any(g => g.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork && !g.Address.Equals(System.Net.IPAddress.Any)); } catch { }
+                lista.Add(new Dictionary<string, object> {
+                    { "nome", ni.Name }, { "placa", ni.Description },
+                    // a Radmin VPN e afins se dizem "Ethernet": não são o cabo
+                    { "tipo", (ni.Description + " " + ni.Name).IndexOf("VPN", StringComparison.OrdinalIgnoreCase) >= 0 || ni.Description.IndexOf("Virtual", StringComparison.OrdinalIgnoreCase) >= 0 ? "vpn"
+                        : t == System.Net.NetworkInformation.NetworkInterfaceType.Wireless80211 ? "wifi" : t == System.Net.NetworkInformation.NetworkInterfaceType.Ethernet ? "cabo" : t.ToString() },
+                    { "mbps", ni.Speed / 1000000 }, { "internet", gateway },
+                });
+            }
+            return lista;
+        }
+
+        // NVIDIA (nvml.dll, do driver). Sem placa NVIDIA ou sem a dll: null e não tenta de novo.
+        [StructLayout(LayoutKind.Sequential)] struct NvmlUso { public uint gpu, memoria; }
+        [DllImport("nvml.dll", EntryPoint = "nvmlInit_v2")] static extern int nvmlInit();
+        [DllImport("nvml.dll", EntryPoint = "nvmlDeviceGetHandleByIndex_v2")] static extern int nvmlDeviceGetHandleByIndex(uint i, out IntPtr d);
+        [DllImport("nvml.dll")] static extern int nvmlDeviceGetUtilizationRates(IntPtr d, out NvmlUso u);
+        [DllImport("nvml.dll")] static extern int nvmlDeviceGetEncoderUtilization(IntPtr d, out uint uso, out uint periodoUs);
+        [DllImport("nvml.dll")] static extern int nvmlDeviceGetDecoderUtilization(IntPtr d, out uint uso, out uint periodoUs);
+        [DllImport("nvml.dll")] static extern int nvmlDeviceGetEncoderStats(IntPtr d, out uint sessoes, out uint qps, out uint latenciaUs);
+        [DllImport("nvml.dll")] static extern int nvmlDeviceGetTemperature(IntPtr d, int sensor, out uint c);
+        [DllImport("nvml.dll")] static extern int nvmlDeviceGetClockInfo(IntPtr d, int tipo, out uint mhz);
+        [DllImport("nvml.dll")] static extern int nvmlDeviceGetPowerUsage(IntPtr d, out uint mw);
+        [DllImport("nvml.dll")] static extern int nvmlDeviceGetCurrentClocksThrottleReasons(IntPtr d, out ulong motivos);
+        static int nvEstado; // 0: não tentou; 1: ok; -1: sem NVIDIA
+        static IntPtr nvPlaca;
+
+        static Dictionary<string, object> LerNvidia()
+        {
+            if (nvEstado < 0) return null;
+            if (nvEstado == 0)
+            {
+                try { nvEstado = nvmlInit() == 0 && nvmlDeviceGetHandleByIndex(0, out nvPlaca) == 0 ? 1 : -1; }
+                catch { nvEstado = -1; } // DllNotFoundException: placa de outra marca
+                if (nvEstado < 0) return null;
+            }
+            var r = new Dictionary<string, object>();
+            NvmlUso u; uint a, b, c;
+            if (nvmlDeviceGetUtilizationRates(nvPlaca, out u) == 0) { r["usoPct"] = (int)u.gpu; r["memoriaUsoPct"] = (int)u.memoria; }
+            if (nvmlDeviceGetEncoderUtilization(nvPlaca, out a, out b) == 0) r["nvencPct"] = (int)a;
+            if (nvmlDeviceGetDecoderUtilization(nvPlaca, out a, out b) == 0) r["nvdecPct"] = (int)a;
+            if (nvmlDeviceGetEncoderStats(nvPlaca, out a, out b, out c) == 0) { r["nvencSessoes"] = (int)a; r["nvencQps"] = (int)b; r["nvencLatenciaMs"] = Math.Round(c / 1000.0, 1); }
+            if (nvmlDeviceGetTemperature(nvPlaca, 0, out a) == 0) r["tempC"] = (int)a;
+            if (nvmlDeviceGetClockInfo(nvPlaca, 0, out a) == 0) r["clockMhz"] = (int)a;
+            if (nvmlDeviceGetPowerUsage(nvPlaca, out a) == 0) r["watts"] = (int)Math.Round(a / 1000.0);
+            ulong m;
+            try
+            {
+                if (nvmlDeviceGetCurrentClocksThrottleReasons(nvPlaca, out m) == 0)
+                {
+                    var motivos = new List<string>();
+                    if ((m & 0x4) != 0) motivos.Add("limite de energia");
+                    if ((m & 0x8) != 0) motivos.Add("freio do hardware");
+                    if ((m & 0x20) != 0) motivos.Add("calor (driver)");
+                    if ((m & 0x40) != 0) motivos.Add("calor (hardware)");
+                    if ((m & 0x80) != 0) motivos.Add("freio de energia");
+                    if ((m & 0x100) != 0) motivos.Add("clock da tela");
+                    r["segurada"] = motivos;
+                }
+            }
+            catch (EntryPointNotFoundException) { }
             return r;
         }
 

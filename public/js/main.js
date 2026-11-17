@@ -1376,10 +1376,14 @@ function applyJoined(data) {
 }
 
 function bindSocket() {
-  socket.on('disconnect', () => {
+  // o relatório do modo jogo guarda as quedas (o modo jogo cai junto; a próxima sessão mostra o que
+  // houve antes dela: em 2026-11-17 tudo piorou depois de uma reconexão e o relatório não dizia)
+  socket.on('disconnect', (motivo) => {
+    diagJogo.marcar('caiu a conexão com o servidor', { motivo: String(motivo || '') });
     if (state.joined) $('#reconnecting').hidden = false;
   });
   socket.on('connect', async () => {
+    diagJogo.marcar('conectou ao servidor', { id: socket.id, transporte: socket.io?.engine?.transport?.name ?? null });
     // durante um join o próprio emitJoin manda de novo nesta conexão
     if (!state.joined || joinPromise) return;
     // Reconexão: refaz tudo do zero com o novo id. Sempre — mesmo logo depois de entrar: o
@@ -2800,9 +2804,12 @@ controle.onQual = (sh, q) => {
 const cursorDoJogo = new Map(); // tela -> último estado mandado
 // o Wi-Fi deste PC (ajudante do Windows), na resposta dos eventos de quem joga: vai no relatório de
 // envio. A memória do PC vem no mesmo pacote (ajudante 1.12+, em pc), que a extensão já repassa inteiro.
+// Ajudante 1.20+: no mesmo pacote, a carga do PC (placa, processador, rede: carga) e as placas de rede
+// ligadas (redes). Vão para cada amostra de envio do relatório (em pc).
 controle.onWifi = (w) => {
-  const { pc, ...wifi } = w || {};
+  const { pc, carga, redes, ...wifi } = w || {};
   diagJogo.wifiChegou(wifi);
+  diagJogo.pcChegou({ memoria: pc ?? null, carga: carga ?? null, redes: redes ?? null });
   memoriaDoPc(pc);
 };
 
@@ -2916,7 +2923,7 @@ function jogoAqui(key, deId, ligar, rapido = false) {
     desenharMesmoAssim = false;
     diagJogo.comecar('compartilha', {
       gl: world.renderer.getContext(),
-      extra: { extensao: controle.ext?.versao ?? null, preset: rtc?.shareMode ?? null, superficie: superficieDe(self()?.shares.get(key)), janelaDoJogo: self()?.shares.get(key)?.titulo ?? null, codecs: codecsTestados(), qpsCaptura: rtc?.qpsCaptura() ?? null },
+      extra: { extensao: controle.ext?.versao ?? null, ajudante: controle.ext?.nativo?.versao ?? null, preset: rtc?.shareMode ?? null, superficie: superficieDe(self()?.shares.get(key)), janelaDoJogo: self()?.shares.get(key)?.titulo ?? null, codecs: codecsTestados(), qpsCaptura: rtc?.qpsCaptura() ?? null },
     });
     avisarEmulador(self()?.shares.get(key));
     toast(`${nome} está jogando no seu PC. A sala ficou em pausa aqui, para o jogo e a transmissão terem a placa de vídeo toda.`, 'info', 12000, null, {

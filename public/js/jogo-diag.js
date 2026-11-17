@@ -51,6 +51,20 @@ export class DiagJogo {
     this.toast = toast;
     this.contexto = contexto;
     this.sessao = null;
+    // o que aconteceu fora das sessões (quedas do servidor, reconexões): a próxima sessão leva os
+    // últimos 20 min no ambiente (marcar)
+    this.historico = [];
+    // tarefas longas da página (> 50 ms com a página travada): somadas por amostra (pagina())
+    this.longas = { n: 0, totalMs: 0, maiorMs: 0 };
+    try {
+      new PerformanceObserver((lista) => {
+        for (const e of lista.getEntries()) {
+          this.longas.n++;
+          this.longas.totalMs += e.duration;
+          this.longas.maiorMs = Math.max(this.longas.maiorMs, e.duration);
+        }
+      }).observe({ type: 'longtask', buffered: false });
+    } catch { /* navegador sem longtask (Safari) */ }
     // aba fechando ou indo para o fundo (celular): manda o que tem
     addEventListener('pagehide', () => this.enviar(true));
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') this.enviar(true); });
@@ -66,7 +80,7 @@ export class DiagJogo {
       lado,
       id: idNovo(),
       inicio: new Date().toISOString(),
-      ambiente: { ...ambiente(info.gl), ...info.extra },
+      ambiente: { ...ambiente(info.gl), ...info.extra, antes: this.historico.filter((h) => Date.now() - Date.parse(h.quando) < 20 * 60_000).slice(-20) },
       eventos: [],
       amostras: [],
       antes: new Map(),
@@ -99,6 +113,56 @@ export class DiagJogo {
       this.toast(`Modo jogo encerrado${m != null ? ` — média de ${Math.round(m)} qps` : ''}. O relatório foi salvo no servidor${juntos}.`, 'info', 15000, null, { rotulo: 'Baixar relatório', fazer: () => this.baixar() });
     }
     return this.ultimo;
+  }
+
+  // Fora ou dentro de uma sessão: vai para o histórico (a próxima sessão leva) e, com sessão, é evento
+  marcar(texto, dados = null) {
+    this.historico.push({ quando: new Date().toISOString(), texto, ...(dados ? { dados } : {}) });
+    if (this.historico.length > 50) this.historico.shift();
+    if (this.sessao) this.evento(texto, dados);
+  }
+
+  // as tarefas longas desde a última amostra (e zera)
+  pagina() {
+    const l = this.longas;
+    this.longas = { n: 0, totalMs: 0, maiorMs: 0 };
+    return { tarefasLongas: l.n, travadaMs: Math.round(l.totalMs), maiorMs: Math.round(l.maiorMs), visivel: document.visibilityState === 'visible', foco: document.hasFocus() };
+  }
+
+  // A conexão com essa pessoa, de uma amostra: idade, reinícios, relay, e o que passou no par desde a
+  // anterior. Um par novo (o caminho trocou) vira evento.
+  conexao(chave, d) {
+    const s = this.sessao;
+    if (!s || !d) return null;
+    const rede = d.rede || {};
+    const ant = s.antes.get(`par:${chave}`);
+    const agora = { t: performance.now(), par: rede.par, env: rede.bytesEnviados, rec: rede.bytesRecebidos, desc: rede.pacotesDescartadosNoEnvio };
+    s.antes.set(`par:${chave}`, agora);
+    const dt = ant ? (agora.t - ant.t) / 1000 : 0;
+    const mesmo = ant && ant.par === agora.par;
+    if (ant && ant.par && agora.par && !mesmo) this.evento('o caminho da conexão trocou', { de: ant.par, para: agora.par, caminho: rede.local, relay: rede.relay });
+    const mbps = (a, b) => (mesmo && dt > 0 && a != null && b != null ? r1(((a - b) * 8) / dt / 1e6) : null);
+    return {
+      estado: d.conexao ?? null,
+      idadeS: d.idadeS ?? null,
+      reiniciosIce: d.reiniciosIce ?? null,
+      par: rede.par ?? null,
+      remoto: rede.remoto ?? null,
+      relay: rede.relay ?? null,
+      enviaMbps: mbps(agora.env, ant?.env),
+      recebeMbps: mbps(agora.rec, ant?.rec),
+      descartadosNoEnvio: mesmo && agora.desc != null && ant.desc != null ? agora.desc - ant.desc : null,
+      pingsSemResposta: rede.pingsSemResposta ?? null,
+    };
+  }
+
+  // a carga do PC de quem compartilha (ajudante 1.20+, main.js: controle.onWifi). Troca de placa de
+  // rede (o cabo entrou, o Wi-Fi caiu) vira evento.
+  pcChegou(info) {
+    const sai = (r) => (r || []).filter((x) => x.internet && x.tipo !== 'vpn').map((x) => `${x.tipo}:${x.placa}`).sort().join(' + ');
+    const antes = this.pc?.info?.redes;
+    if (antes && info?.redes && sai(antes) !== sai(info.redes)) this.evento('a placa de rede da internet mudou', { de: sai(antes), para: sai(info.redes) });
+    this.pc = { info, em: Date.now() };
   }
 
   evento(texto, dados = null) {
@@ -207,6 +271,12 @@ export class DiagJogo {
       codificadores: cru.envios.filter((e) => e.params?.active !== false && (e.saida?.framesPerSecond ?? 0) > 0).length,
       // o Wi-Fi deste PC (o ajudante do Windows lê: sinal, faixa, canal, velocidade); null sem ajudante
       wifi: this.wifi && Date.now() - this.wifi.em < 30_000 ? this.wifi.info : null,
+      // a carga deste PC (placa, processador, rede), as placas de rede e a memória (ajudante 1.20+)
+      pc: this.pc && Date.now() - this.pc.em < 10_000 ? this.pc.info : null,
+      // a conexão com quem joga: idade, reinícios do ICE, relay e o que passou nela
+      conexao: this.conexao(chave, env),
+      // esta página: tarefas longas (a página travada) desde a última amostra
+      pagina: this.pagina(),
     };
     resumo.fpsFinal = resumo.enviado;
     // modo turbo: a imagem dessa pessoa vai pelo canal turbo e o vídeo da conexão está parado de
@@ -288,6 +358,9 @@ export class DiagJogo {
         inventadoPct: dif(cru.som, antes?.som, 'totalSamplesReceived') > 0 ? Math.round((100 * dif(cru.som, antes?.som, 'concealedSamples')) / dif(cru.som, antes?.som, 'totalSamplesReceived')) : null,
       } : null,
       bufferMinimoMs: emitidos > 0 && i?.jitterBufferMinimumDelay != null ? r1((1000 * dif(i, ib, 'jitterBufferMinimumDelay')) / emitidos) : null,
+      conexao: this.conexao('recebe', cru),
+      pagina: this.pagina(),
+      redeAparelho: redeDoAparelho(),
       ...extra,
     };
     // o ritmo na tela: o do turbo quando ele desenha; senão o do <video>. A conta do <video> zera
@@ -522,11 +595,52 @@ function motivoRecebe(r, la) {
   return la ? 'perdas' : null;
 }
 
+// a rede do aparelho como o navegador vê (muda no meio: Wi-Fi → 4G no celular)
+function redeDoAparelho() {
+  const c = navigator.connection;
+  return c ? { tipo: c.type ?? null, efetivo: c.effectiveType ?? null, downlinkMbps: c.downlink ?? null, rttMs: c.rtt ?? null } : null;
+}
+
+// A carga do PC de quem compartilha na sessão (ajudante 1.20+): mediana e pior de cada número, e
+// em quantas amostras a placa passou de 90% (sem folga para a captura e o codificador)
+function resumoPc(amostras) {
+  const cs = amostras.map((a) => a.pc?.carga).filter(Boolean);
+  if (!cs.length) return null;
+  const med = (v) => {
+    const o = v.filter((x) => x != null).sort((x, y) => x - y);
+    return o.length ? o[o.length >> 1] : null;
+  };
+  const max = (v) => {
+    const o = v.filter((x) => x != null);
+    return o.length ? Math.max(...o) : null;
+  };
+  const par = (f) => ({ mediana: med(cs.map(f)), pior: max(cs.map(f)) });
+  const programas = {};
+  for (const c of cs) for (const q of c.gpu?.quemUsa3d || []) programas[q.programa] = (programas[q.programa] || 0) + 1;
+  const segurada = {};
+  for (const c of cs) for (const m of c.nv?.segurada || []) segurada[m] = (segurada[m] || 0) + 1;
+  const redes = new Set(amostras.map((a) => (a.pc?.redes || []).filter((x) => x.internet && x.tipo !== 'vpn').map((x) => x.tipo).join('+')).filter(Boolean));
+  return {
+    amostras: cs.length,
+    placa3dPct: par((c) => c.gpu?.tresDPct ?? c.nv?.usoPct),
+    placaAcimaDe90: cs.filter((c) => (c.gpu?.tresDPct ?? c.nv?.usoPct ?? 0) > 90).length,
+    codificadorPct: par((c) => c.nv?.nvencPct ?? c.gpu?.codificaPct),
+    nvencLatenciaMs: par((c) => c.nv?.nvencLatenciaMs),
+    tempC: par((c) => c.nv?.tempC),
+    processadorPct: par((c) => c.cpu?.usoPct),
+    piorNucleoDpcPct: par((c) => c.cpu?.piorNucleoDpcPct),
+    quemUsa3d: programas,
+    segurada,
+    internetPor: [...redes],
+  };
+}
+
 function resumoDe(amostras) {
   const fps = amostras.map((a) => a.fpsFinal).filter((v) => v != null);
   const motivos = {};
   for (const a of amostras) if (a.motivo) motivos[a.motivo] = (motivos[a.motivo] || 0) + 1;
   return {
+    pc: resumoPc(amostras),
     amostras: fps.length,
     mediaQps: r1(mediaDe(fps)),
     piorQps: fps.length ? Math.min(...fps) : null,

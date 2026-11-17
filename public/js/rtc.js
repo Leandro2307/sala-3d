@@ -439,6 +439,7 @@ export class RTC {
     const agora = performance.now();
     if (agora - peer.reinicioIce < 8000) return;
     peer.reinicioIce = agora;
+    peer.reiniciosIce = (peer.reiniciosIce || 0) + 1;
     try {
       peer.pc.restartIce();
     } catch { /* conexão fechada */ }
@@ -1156,6 +1157,8 @@ export class RTC {
       ofertaDesde: 0, // quando saiu a minha última oferta (o vigia desfaz a que nunca teve resposta)
       caiuDesde: 0, // desde quando o ICE está desconectado
       reinicioIce: 0,
+      criadaEm: Date.now(), // relatório do modo jogo: há quanto tempo esta conexão existe
+      reiniciosIce: 0, // e quantas vezes o ICE foi reiniciado nela
       banda: null, // banda inicial da conexão, em kbps (ver banda)
       bandaJogo: null, // { inicio, piso } em kbps: essa pessoa joga numa tela minha (atualizarBandaJogo)
       semPiso: false, // o piso de jogo saiu (soltarPisoJogo)
@@ -1547,7 +1550,7 @@ export class RTC {
       } catch {
         continue;
       }
-      const d = { id, nivel: peer.interesse.get(key) || null, conexao: peer.pc.connectionState };
+      const d = { id, nivel: peer.interesse.get(key) || null, conexao: peer.pc.connectionState, idadeS: Math.round((Date.now() - peer.criadaEm) / 1000), reiniciosIce: peer.reiniciosIce || 0 };
       if (peer.bandaJogo) d.bandaJogo = { ...peer.bandaJogo, semPiso: peer.semPiso, balanceado: peer.balanceado, linhas: peer.linhasJogo, recuoCodec: peer.recuoCodec, rapido: peer.rapido };
       try {
         const p = tr.sender.getParameters();
@@ -1587,7 +1590,7 @@ export class RTC {
       } catch {
         return null;
       }
-      const d = { conexao: peer.pc.connectionState, jitterBufferTarget: tr.receiver.jitterBufferTarget ?? null, playoutDelayHint: tr.receiver.playoutDelayHint ?? null };
+      const d = { conexao: peer.pc.connectionState, idadeS: Math.round((Date.now() - peer.criadaEm) / 1000), reiniciosIce: peer.reiniciosIce || 0, jitterBufferTarget: tr.receiver.jitterBufferTarget ?? null, playoutDelayHint: tr.receiver.playoutDelayHint ?? null };
       const codecs = new Map();
       let par = null;
       report.forEach((s) => {
@@ -1640,11 +1643,21 @@ function pegar(s, campos) {
 function caminhoDe(report, par) {
   const local = report.get(par.localCandidateId);
   const remoto = report.get(par.remoteCandidateId);
+  // o servidor TURN do caminho (o IP público do relay, da Cloudflare): o do meu lado, ou o do outro
+  const relay = local?.candidateType === 'relay' ? local : remoto?.candidateType === 'relay' ? remoto : null;
   return {
     rtt: par.currentRoundTripTime ?? null,
     saidaEstimada: par.availableOutgoingBitrate ?? null,
     entradaEstimada: par.availableIncomingBitrate ?? null,
     local: local ? `${local.candidateType}/${local.protocol}${local.relayProtocol ? `/${local.relayProtocol}` : ''}${local.networkType ? ` ${local.networkType}` : ''}` : null,
     remoto: remoto ? `${remoto.candidateType}/${remoto.protocol}` : null,
+    // qual par está em uso (trocou = o caminho mudou no meio) e por qual relay
+    par: par.id ?? null,
+    relay: relay ? { lado: relay === local ? 'aqui' : 'la', ip: relay.address ?? relay.ip ?? null, porta: relay.port ?? null, url: relay.url ?? null } : null,
+    // somas do par (quem lê faz a diferença): o que saiu, o que voltou e os pings de consentimento
+    bytesEnviados: par.bytesSent ?? null,
+    bytesRecebidos: par.bytesReceived ?? null,
+    pacotesDescartadosNoEnvio: par.packetsDiscardedOnSend ?? null,
+    pingsSemResposta: par.requestsSent != null && par.responsesReceived != null ? par.requestsSent - par.responsesReceived : null,
   };
 }
