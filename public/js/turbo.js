@@ -448,8 +448,13 @@ export class TurboEnvio {
     const t = typeof key === 'string' ? this.tela(key) : null;
     const responder = (m) => { try { canal.send(JSON.stringify(m)); } catch { /* canal fechou */ } };
     if (!t?.controle) return responder({ erro: 'sem-controle' });
-    // PS5 direto (ps5-nativo.js): os quadros já vêm codificados pelo PS5, só repassa
-    if (t.ps5) return this.ligarPs5(id, canal, key, t.ps5, { versao, som, codecs, somMix: t.somMix });
+    // PS5 direto (ps5-nativo.js): os quadros já vêm codificados pelo PS5, só repassa — no tamanho e na
+    // banda do PS5 (1080p, 15 Mbps). Quem pediu menos que isso (720p Turbo liso) recebia o 1080p do
+    // mesmo jeito (relatórios do lorrel, 2026-11-17 21:56–22:01: modo 13 e toda amostra em 1920×1080).
+    // Aí a imagem do PS5, que já sai decodificada aqui para o vídeo normal, é codificada de novo no
+    // tamanho pedido, como uma tela comum — e com a banda se ajustando à rede de quem joga (ajustarBanda).
+    const altPs5 = t.ps5?.cfg?.h || 1080;
+    if (t.ps5 && !(Number(altura) > 0 && Number(altura) < altPs5)) return this.ligarPs5(id, canal, key, t.ps5, { versao, som, codecs, somMix: t.somMix });
     if (!temTurboEnvio()) return responder({ erro: 'navegador' });
     const original = t.stream?.getVideoTracks()[0];
     if (!original || original.readyState !== 'live') return responder({ erro: 'sem-tela' });
@@ -473,7 +478,7 @@ export class TurboEnvio {
       this.desligar(id);
     });
     // quem joga toca o som do turbo (versão nova, com o canal "turbo-som"): o som da tela vai junto
-    if (som) this.ligarSom(s, t.stream);
+    if (som) this.ligarSom(s, (t.ps5 && t.somMix) || t.stream);
   }
 
   // ---------------------------------------------------------------- PS5 direto
