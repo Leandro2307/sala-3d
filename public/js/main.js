@@ -535,6 +535,22 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
   navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
 
+// Dentro da sala, fechar a aba pede confirmação: o Ctrl+W (Ctrl agachar + W andar, num jogo) fechava
+// a sala sem aviso. O Chrome não deixa a página segurar o Ctrl+W (só com o teclado travado da tela
+// cheia do modo jogo); o que dá é o "Sair do site?". As saídas do próprio site (trocar de sala, Sair,
+// Recarregar) passam por saidaLiberada antes, sem perguntar.
+let saidaLiberada = false;
+const liberarSaida = () => { saidaLiberada = true; };
+addEventListener('beforeunload', (e) => {
+  if (!state.joined || saidaLiberada) return;
+  e.preventDefault();
+  e.returnValue = '';
+});
+// com o teclado travado (tela cheia do modo jogo) o Ctrl+W chega à página: não deixa fechar
+addEventListener('keydown', (e) => {
+  if (e.ctrlKey && e.code === 'KeyW' && state.joined) e.preventDefault();
+}, true);
+
 // Modo ao vivo (só no localhost, com "npm run dev"): o servidor avisa quando um arquivo muda.
 // CSS troca na hora; o resto recarrega a página, volta para a sala e para o mesmo lugar.
 if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname) && window.EventSource) {
@@ -549,6 +565,7 @@ if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname) && window.EventSource) 
       url.searchParams.set('entrar', '1');
       try { sessionStorage.setItem(DEV_POS, JSON.stringify({ p: [player.pos.x, player.pos.y, player.pos.z], yaw: player.yaw })); } catch { /* sem storage */ }
     }
+    liberarSaida();
     location.href = url;
   };
   const dev = new EventSource('/dev-recarregar');
@@ -675,6 +692,7 @@ function senhaRecusada(erro) {
   else guardarPasse(idDaSala(state.roomRequested), null);
   const url = new URL(window.location.href);
   url.searchParams.set('sala', state.roomRequested);
+  liberarSaida();
   window.location.replace(url);
 }
 
@@ -957,6 +975,7 @@ function recarregarNaSala(id = state.room, mapa = null) {
   // quando é para montar outro mapa nesta (assim funciona até sem localStorage)
   if (mapa) url.searchParams.set('mapa', mapa);
   else if (id !== state.room) url.searchParams.delete('mapa');
+  liberarSaida();
   window.location.href = url;
 }
 // música da sala (musica.js): a fila do YouTube que todo mundo ouve junto, longe do telão
@@ -8844,6 +8863,7 @@ $('#btn-leave').addEventListener('click', () => {
   pararTodasAsTelas(true);
   socket?.disconnect();
   rtc?.closeAll();
+  liberarSaida();
   window.location.href = `${window.location.pathname}?sala=${encodeURIComponent(state.room || '')}`;
 });
 
@@ -8974,7 +8994,7 @@ $('#set-texturas').addEventListener('click', (e) => {
   renderTexturas();
   if (texturasQuer() !== texturasAgora) {
     toast(`As texturas ${texturasQuer() ? 'detalhadas' : 'simples'} entram ao recarregar a página.`, 'info', 8000, null,
-      { rotulo: 'Recarregar', fazer: () => location.reload() });
+      { rotulo: 'Recarregar', fazer: () => { liberarSaida(); location.reload(); } });
   }
 });
 
