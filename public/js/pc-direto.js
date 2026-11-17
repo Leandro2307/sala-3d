@@ -24,6 +24,7 @@ const bandaDe = (altura) => (altura && altura <= 720 ? 12000 : altura && altura 
 const ALTURAS = [[720, '720p'], [1080, '1080p'], [0, 'Do monitor']];
 const QPS = [30, 60, 120];
 const QPS_JOGO = 60; // Jogos do PC: sempre a 60 qps (no monitor de 144 Hz, ver monitorDoJogo)
+const HZ_JOGO = 144;
 const esperar = async (cond, ms) => {
   const fim = Date.now() + ms;
   while (!cond() && Date.now() < fim) await new Promise((ok) => setTimeout(ok, 100));
@@ -187,13 +188,19 @@ export class PcDireto {
     };
   }
 
-  // Jogos do PC: o monitor mais rápido (o de 144 Hz); empatados, o que não tem a sala, depois o principal
+  // Jogos do PC: o monitor de 144 Hz (o Windows pode dar 143 ou 144). Não o de mais Hz: neste PC o
+  // principal é de 165 Hz e os jogos vão no de 144. Sem nenhum de 144: o mais rápido. Empatados: o que
+  // não tem a sala, depois o principal.
   monitorDoJogo() {
     const m = this.monitores;
     if (!m.length) return null;
-    const hz = Math.max(...m.map((x) => Number(x.hz) || 0));
-    const rapidos = m.filter((x) => (Number(x.hz) || 0) === hz);
-    return rapidos.find((x) => !this.salaNoMonitor(x)) || rapidos.find((x) => x.principal) || rapidos[0];
+    const hzDe = (x) => Number(x.hz) || 0;
+    let candidatos = m.filter((x) => Math.abs(hzDe(x) - HZ_JOGO) <= 2);
+    if (!candidatos.length) {
+      const hz = Math.max(...m.map(hzDe));
+      candidatos = m.filter((x) => hzDe(x) === hz);
+    }
+    return candidatos.find((x) => !this.salaNoMonitor(x)) || candidatos.find((x) => x.principal) || candidatos[0];
   }
 
   // Jogos do PC (o dono escolheu um jogo neste hub): sempre o monitor de 144 Hz e sempre a 60 qps, sem
