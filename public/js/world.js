@@ -1607,39 +1607,59 @@ export class World {
     if (CINEMA_GTA) this.cartazesGta();
   }
 
-  // Cinema do mapa Vice: um cartaz grande em cima da parede de telas e cartazes em pé nas paredes
-  // oeste e do fundo, com moldura de neon. Os desenhos são próprios (pôr do sol, coqueiros, mar,
-  // estrada de neon); o grande dá lugar a public/img/cinema-gta/poster.jpg se a imagem existir.
+  // Cinema do mapa Vice: um cartaz grande em cima da parede de telas e cartazes nas paredes oeste e
+  // do fundo, com moldura de neon. Cada um tenta uma imagem de public/img/cinema-gta/ (o grande:
+  // poster.jpg; laterais: parede1.jpg a parede6.jpg; fundo: fundo1.jpg e fundo2.jpg); sem ela fica o desenho próprio (pôr do
+  // sol, coqueiros, mar, estrada de neon). A imagem entra no formato dela, dentro do espaço do cartaz.
   cartazesGta() {
     const S = SALA;
     const molduraMat = new THREE.MeshBasicMaterial({ color: 0xff4fa3, toneMapped: false });
-    const cartaz = (tex, w, h, x, y, z, giro) => {
+    const carregador = new THREE.TextureLoader();
+    // maxW × maxH: o espaço do cartaz na parede; w × h: o tamanho do desenho, até chegar a imagem
+    const cartaz = ({ tex, w, h, maxW = w, maxH = h, x, y, z, giro, arquivo }) => {
       const g = new THREE.Group();
       const mat = new THREE.MeshBasicMaterial({ map: tex, toneMapped: false, color: 0xdddddd });
-      const quadro = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
+      const quadro = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat);
       quadro.position.z = 0.06;
-      const moldura = new THREE.Mesh(new THREE.PlaneGeometry(w + 0.8, h + 0.8), molduraMat);
+      const moldura = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), molduraMat);
+      const medir = (lw, lh) => {
+        quadro.scale.set(lw, lh, 1);
+        moldura.scale.set(lw + 0.8, lh + 0.8, 1);
+      };
+      medir(w, h);
       g.add(moldura, quadro);
       g.position.set(x, y, z);
       g.rotation.y = giro;
       this.scene.add(g);
-      return mat;
+      carregador.load(`/img/cinema-gta/${arquivo}`, (t) => {
+        t.colorSpace = THREE.SRGBColorSpace;
+        t.anisotropy = 4;
+        const prop = t.image.width / t.image.height;
+        const lw = Math.min(maxW, maxH * prop);
+        medir(lw, lw / prop);
+        mat.map?.dispose();
+        mat.map = t;
+        mat.color.set(0xffffff);
+        mat.needsUpdate = true;
+      }, undefined, () => { /* sem imagem: fica o desenho */ });
     };
-    // o grande, em cima do telão e das telas (o topo delas fica em y ≈ 22)
-    const grande = cartaz(canvasTexture(1600, 900, (ctx, w, h) => desenharCartazVice(ctx, w, h, 0), ESCALA_TEXTURA),
-      40, 22.5, 0, 36, S.minZ + 0.3, 0);
-    new THREE.TextureLoader().load('/img/cinema-gta/poster.jpg', (t) => {
-      t.colorSpace = THREE.SRGBColorSpace;
-      t.anisotropy = 4;
-      grande.map?.dispose();
-      grande.map = t;
-      grande.needsUpdate = true;
-    }, undefined, () => { /* sem imagem própria: fica o desenhado */ });
-    // em pé: 3 na parede oeste (olhando para +x) e 2 no fundo (olhando para -z)
     const pe = (n) => canvasTexture(600, 900, (ctx, w, h) => desenharCartazVice(ctx, w, h, n), ESCALA_TEXTURA);
-    for (const [i, z] of [-12, 12, 36].entries()) cartaz(pe(i + 1), 12, 18, S.minX + 0.12, 24, z, Math.PI / 2);
-    // no fundo, abaixo do camarote
-    for (const [i, x] of [-30, 30].entries()) cartaz(pe(i + 4), 10, 15, x, 12.5, S.maxZ - 0.12, Math.PI);
+    // o grande (a capa), em cima do telão e das telas (o topo delas fica em y ≈ 22)
+    cartaz({
+      tex: canvasTexture(1600, 900, (ctx, w, h) => desenharCartazVice(ctx, w, h, 0), ESCALA_TEXTURA),
+      w: 40, h: 22.5, maxW: 44, maxH: 24, x: 0, y: 36, z: S.minZ + 0.3, giro: 0, arquivo: 'poster.jpg',
+    });
+    // 3 de cada lado, na mesma altura: parede1-3 na oeste (olhando para +x), parede4-6 na leste
+    // (olhando para -x). Na leste fica a porta com a placa de SAÍDA (até y ≈ 29): os cartazes vão
+    // acima dela, e os da oeste acompanham. Com imagem deitada, cabem 18 m de largura.
+    for (const [i, z] of [-12, 12, 36].entries()) {
+      cartaz({ tex: pe(i + 1), w: 12, h: 18, maxW: 18, maxH: 18, x: S.minX + 0.12, y: 39, z, giro: Math.PI / 2, arquivo: `parede${i + 1}.jpg` });
+      cartaz({ tex: pe(i + 3), w: 12, h: 18, maxW: 18, maxH: 18, x: S.maxX - 0.12, y: 39, z: 24 - z, giro: -Math.PI / 2, arquivo: `parede${i + 4}.jpg` });
+    }
+    // 2 no fundo (olhando para -z), abaixo do camarote: fundo1.jpg e fundo2.jpg
+    for (const [i, x] of [-30, 30].entries()) {
+      cartaz({ tex: pe(i + 4), w: 10, h: 15, maxW: 18, maxH: 15, x, y: 12.5, z: S.maxZ - 0.12, giro: Math.PI, arquivo: `fundo${i + 1}.jpg` });
+    }
   }
 
   // Por fora: contorno neon na porta, letreiro e frisos de LED. É o que se vê da pista.
