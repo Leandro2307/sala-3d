@@ -4,7 +4,12 @@
 // conta de quantas em quantas voltas eles vieram:
 //   emVsyncs[0]: quadros que ficaram 1 volta na tela (o ideal a 60 qps numa tela de 60 Hz)
 //   emVsyncs[1]: 2 voltas (um quadro repetido; com a captura a ~55 qps, ~5 por segundo são normais)
-//   emVsyncs[2..4]: 3, 4 e 5 ou mais voltas — os trancos que se veem
+//   emVsyncs[2..4]: 3, 4 e 5 ou mais voltas — numa tela de 60 Hz, os trancos que se veem
+// trancos: quadros que ficaram 3 "quadros da fonte" ou mais. Na tela de 60 Hz é o mesmo que 3 voltas;
+// nas de 100/144/165/240 Hz um vídeo de 60 qps liso fica 2 a 4 voltas por quadro, e contar voltas
+// dava 1300 a 3300 "trancos" por minuto num vídeo liso (relatórios de 2026-11-17: Rollyud a 144 Hz,
+// kazu a 240, lokao a 165). A unidade é a volta da tela ou o intervalo típico dos quadros (até 16,7
+// ms, um quadro de 60 qps), o que for maior: a 120 qps numa tela de 144 Hz ainda pega o tranco.
 // travadas: cada buraco de TRAVADA_MS ou mais sem quadro novo, com a causa quando quem marca sabe
 // (o turbo sabe: perda, fila lá, rede parada; ver TurboRecebe.causa).
 // invisiveis: quadros que chegaram mas foram trocados antes de a tela mostrar (dois na mesma volta).
@@ -26,16 +31,23 @@ export class Ritmo {
     this.desde = performance.now();
     this.ultimaVolta = 0;
     this.ultimo = 0; // quando apareceu o último quadro novo
+    this.recentes = []; // os últimos intervalos entre quadros (ms), para o intervalo típico
     this.zerar();
   }
 
   zerar() {
-    this.c = { emVsyncs: [0, 0, 0, 0, 0], intervalos: [], travadas: [], invisiveis: 0, quadros: 0 };
+    this.c = { emVsyncs: [0, 0, 0, 0, 0], trancos: 0, intervalos: [], travadas: [], invisiveis: 0, quadros: 0 };
   }
 
   // a duração de uma volta da tela, medida (60 Hz: 16,7; 120 Hz: 8,3)
   get vsyncMs() {
     return pct(this.voltas, 0.5) || 1000 / 60;
+  }
+
+  // a unidade do tranco (ver o cabeçalho): a volta da tela ou o intervalo típico até 16,7 ms
+  get quadroMs() {
+    const tipico = pct(this.recentes, 0.5) ?? 1000 / 60;
+    return Math.max(this.vsyncMs, Math.min(1000 / 60, tipico));
   }
 
   // uma volta da tela aconteceu em t (requestAnimationFrame): mede a duração da volta
@@ -76,6 +88,9 @@ export class Ritmo {
       if (d > 0 && d < 5000) {
         const n = Math.max(1, Math.round(d / this.vsyncMs));
         c.emVsyncs[Math.min(5, n) - 1]++;
+        if (Math.round(d / this.quadroMs) >= 3) c.trancos++;
+        this.recentes.push(d);
+        if (this.recentes.length > 60) this.recentes.shift();
         c.intervalos.push(d);
         if (c.intervalos.length > 400) c.intervalos.shift();
         if (d >= TRAVADA_MS && c.travadas.length < 20) {
@@ -114,8 +129,8 @@ export class Ritmo {
       p90Ms: r1(pct(iv, 0.9)),
       p99Ms: r1(pct(iv, 0.99)),
       maiorMs: iv.length ? r1(Math.max(...iv)) : null,
-      // trancos: quadros que ficaram 3 voltas ou mais (2 voltas é a captura abaixo da tela)
-      trancos: c.emVsyncs[2] + c.emVsyncs[3] + c.emVsyncs[4],
+      // trancos: quadros que ficaram 3 quadros da fonte ou mais (2 é a captura abaixo da tela)
+      trancos: c.trancos,
       invisiveis: c.invisiveis,
       travadas: c.travadas,
     };
