@@ -3915,10 +3915,61 @@ body.jogo-pc #focus:fullscreen .focus-bar { display: none; }
 }
 .jogo-op-pop[hidden] { display: none; }
 /* modo de imagem (jogo-opcoes.js): no menu do PC e no painel do celular */
-.jogo-presets { display: grid; gap: 8px; padding-bottom: 10px; border-bottom: 1px solid var(--line, rgba(255, 255, 255, 0.14)); }
-.jogo-presets label { display: grid !important; gap: 4px; cursor: default; }
-.jogo-presets select { width: 100%; min-height: 34px; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--line, rgba(255, 255, 255, 0.2)); background: rgba(255, 255, 255, 0.06); color: inherit; font: inherit; }
-.jogo-presets select option { color: #111; }
+/* grade 2×2 (720p / 1080p × vídeo normal / turbo liso) e o Manual; --jp-rgb: a cor de destaque */
+.jogo-presets { --jp-rgb: 110, 231, 200; display: grid; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--line, rgba(255, 255, 255, 0.14)); }
+#toque-jogo .jogo-presets { --jp-rgb: 56, 189, 248; }
+.jp-tit { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; opacity: 0.6; }
+.jp-grade { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.jogo-presets .jp-card, #toque-jogo .jogo-presets .jp-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 3px;
+  min-width: 0;
+  min-height: 54px;
+  padding: 8px 10px;
+  border: 1.5px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-shadow: none;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
+}
+.jogo-presets .jp-card b { font-size: 16px; font-weight: 800; letter-spacing: -0.01em; line-height: 1.1; }
+.jogo-presets .jp-card span { display: flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; opacity: 0.62; white-space: nowrap; }
+.jogo-presets .jp-card.turbo span::before { content: ''; flex: none; width: 6px; height: 6px; border-radius: 50%; background: rgb(var(--jp-rgb)); box-shadow: 0 0 6px rgba(var(--jp-rgb), 0.8); }
+.jogo-presets .jp-card em {
+  position: absolute;
+  top: -7px;
+  right: 8px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgb(var(--jp-rgb));
+  color: #06141c;
+  font-size: 8.5px;
+  line-height: 1.4;
+  font-style: normal;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.jogo-presets .jp-card:hover { border-color: rgba(255, 255, 255, 0.26); background: rgba(255, 255, 255, 0.07); }
+.jogo-presets .jp-card:focus-visible { outline: 2px solid rgb(var(--jp-rgb)); outline-offset: 2px; }
+.jogo-presets .jp-card.on, #toque-jogo .jogo-presets .jp-card.on {
+  border-color: rgb(var(--jp-rgb));
+  background: rgba(var(--jp-rgb), 0.13);
+  box-shadow: 0 0 0 3px rgba(var(--jp-rgb), 0.12);
+}
+.jogo-presets .jp-card.on span { opacity: 0.9; }
+.jogo-presets .jp-manual, #toque-jogo .jogo-presets .jp-manual { flex-direction: row; align-items: baseline; justify-content: space-between; gap: 8px; min-height: 36px; padding: 7px 10px; }
+.jogo-presets .jp-manual b { font-size: 13px; font-weight: 700; }
+.jogo-presets .jp-manual small, #toque-jogo .jogo-presets .jp-manual small { display: inline; font-size: 11px; font-weight: 500; opacity: 0.55; white-space: nowrap; }
 .jogo-op-pop label { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; }
 .jogo-op-pop input { margin: 2px 0 0; accent-color: var(--accent); }
 .jogo-op-pop small { display: block; opacity: 0.65; }

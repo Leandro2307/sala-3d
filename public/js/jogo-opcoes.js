@@ -14,46 +14,55 @@
 //             tela tem outro formato, como o celular deitado, mais comprido que 16:9)
 
 const CHAVE = 'sala3d-jogo-opcoes';
-// Turbo e 720p ligados de fábrica: nos testes (relatório de 2026-11-01 03:35, PS5 → iPhone) o turbo
+// Turbo ligado de fábrica (o 720p foi de fábrica até 2026-11-16; agora entra o 1080p Turbo liso): nos testes (relatório de 2026-11-01 03:35, PS5 → iPhone) o turbo
 // em 720p deu ~60 ms de atraso contra ~150 ms do vídeo normal, com metade da banda do turbo em 1080p.
 // liso (o buffer de 40 ms do vídeo normal) ligado de fábrica desde 2026-11-05: no teste de presets o
 // "buffer mínimo" deu 401 ms de atraso e 43 travadas por minuto no iPhone, contra 160 ms e 6 com ele.
 // É o vídeo que entra quando o turbo não aguenta, então vale também com o turbo ligado.
-const PADRAO = { liso: true, menuAuto: true, selo: false, giro: false, rapido: true, turbo: true, turboLiso: true, vibrar: true, preencher: false, lossless: 0 };
-// Versão das opções: quem guardou as de antes passa uma vez para os padrões novos (v2: turbo e 720p;
-// v3: liso; v4: os modos de imagem definitivos, no 1); o que a pessoa mudar depois disso fica.
-const VERSAO = 4;
+const PADRAO = { liso: true, menuAuto: true, selo: false, giro: false, rapido: false, turbo: true, turboLiso: true, vibrar: true, preencher: false, lossless: 0 };
+// Versão das opções (v2: turbo e 720p; v3: liso; v4: os modos de imagem de 2026-11-05; v5: os 4 modos
+// de 2026-11-16). O modo de imagem não fica guardado: toda vez que a página abre entra o PRESET_INICIAL.
+const VERSAO = 5;
 export const LISO_MS = 40;
 
-// Modos de imagem (definitivos desde 2026-11-05), do melhor para o pior, pelos testes de presets com o
-// PC no Wi-Fi e o iPhone (relatórios de 2026-11-05 00:40 a 01:35): cada um é um jeito completo de
-// receber a imagem, e cada amostra do relatório leva o número dele. vida: a vida dos pedaços no canal
-// do turbo (turbo.js, TTL_MS). h265: o turbo pede H.265 (cai no H.264 se a placa ou o aparelho não
-// tiverem). lisoPct: quanto do tremido a folga do liso cobre (padrão 0,95). Mudar uma opção à mão volta
-// para "Manual" (0). Nos de turbo o liso do vídeo normal fica ligado: é o vídeo que entra se o turbo cair.
-//   1: o mais regular nos dois testes (1,8 e 6,7 travadas por minuto, ~115 ms)
-//   2: o mesmo em H.265 — imagem mais nítida na mesma banda, um pouco mais sensível a perdas
-//   3: 1080p H.265 — o mais nítido, ~15 ms a mais; pode esquentar o iPhone em sessões longas
-//   4: 1080p em H.264 — sofreu mais com o Wi-Fi parando (30 travadas por minuto num teste)
-//   5: sem o liso — ~30 ms a menos, mas a imagem treme (538 quadros por minuto sem aparecer)
-//   6 e 7: sem turbo — 160 e 401 ms de atraso
+// Modos de imagem (desde 2026-11-16 só estes 4 e o Manual): a resolução (720p é o "rapido": quem
+// compartilha manda 720p fixo) e o jeito de receber — vídeo normal (WebRTC, com o buffer liso de 40 ms)
+// ou turbo liso (turbo.js, cada quadro na hora certa). Cada amostra do relatório leva o número do modo;
+// os números são novos (11–14) para não misturar com os presets de teste de antes (1–7). vida: a vida
+// dos pedaços no canal do turbo (TTL_MS). lisoPct: quanto do tremido a folga do liso cobre (padrão 0,95).
+// Mudar uma opção à mão volta para "Manual" (0). No turbo o liso do vídeo normal fica ligado: é o vídeo
+// que entra se o turbo cair. Os de antes (relatórios de 2026-11-05): o turbo 720p foi o mais regular
+// (~115 ms); sem turbo, 160 ms de atraso; o turbo sem liso treme.
 export const PRESETS = [
-  { id: 1, nome: 'Turbo 720p', desc: 'recomendado', opcoes: { turbo: true, turboLiso: true, rapido: true, liso: true }, vida: 250, lisoPct: 0.9 },
-  { id: 2, nome: 'Turbo 720p H.265', desc: 'imagem mais nítida', opcoes: { turbo: true, turboLiso: true, rapido: true, liso: true }, vida: 250, lisoPct: 0.9, h265: true },
-  { id: 3, nome: 'Turbo 1080p H.265', desc: 'a mais nítida, um pouco mais de atraso', opcoes: { turbo: true, turboLiso: true, rapido: false, liso: true }, vida: 250, h265: true },
-  { id: 4, nome: 'Turbo 1080p', desc: 'nítida, sofre mais com o Wi-Fi', opcoes: { turbo: true, turboLiso: true, rapido: false, liso: true }, vida: 250 },
-  { id: 5, nome: 'Turbo sem liso', desc: 'menos atraso, imagem treme', opcoes: { turbo: true, turboLiso: false, rapido: true, liso: true }, vida: 250 },
-  { id: 6, nome: 'Vídeo normal', desc: 'sem turbo, mais atraso', opcoes: { turbo: false, turboLiso: true, rapido: true, liso: true }, vida: 250 },
-  { id: 7, nome: 'Vídeo normal, buffer mínimo', desc: 'o pior no iPhone', opcoes: { turbo: false, turboLiso: true, rapido: true, liso: false }, vida: 250 },
+  { id: 11, nome: '720p', modo: 'Vídeo normal', desc: 'sem turbo, mais compatível', opcoes: { turbo: false, turboLiso: true, rapido: true, liso: true }, vida: 250 },
+  { id: 12, nome: '1080p', modo: 'Vídeo normal', desc: 'sem turbo, mais compatível', opcoes: { turbo: false, turboLiso: true, rapido: false, liso: true }, vida: 250 },
+  { id: 13, nome: '720p Turbo liso', modo: 'Turbo liso', desc: 'menos atraso, mais leve para o celular', opcoes: { turbo: true, turboLiso: true, rapido: true, liso: true }, vida: 250, lisoPct: 0.9 },
+  { id: 14, nome: '1080p Turbo liso', modo: 'Turbo liso', desc: 'menos atraso, imagem mais nítida', opcoes: { turbo: true, turboLiso: true, rapido: false, liso: true }, vida: 250 },
 ];
+export const PRESET_INICIAL = 14; // o modo em que a página sempre entra
 export const OPCOES_DO_PRESET = ['turbo', 'turboLiso', 'rapido', 'liso'];
+const presetInicial = () => PRESETS.find((p) => p.id === PRESET_INICIAL);
 
-// o seletor do modo de imagem, igual no menu do PC e no painel do celular (main.js ouve)
+// O seletor do modo de imagem, igual no menu do PC e no painel do celular (main.js ouve o clique em
+// [data-preset]): uma grade 2×2 — colunas 720p / 1080p, linhas vídeo normal / turbo liso — e o Manual.
 export function htmlPresets() {
-  const itens = PRESETS.map((p) => '<option value="' + p.id + '">' + p.id + '. ' + p.nome + ' (' + p.desc + ')</option>').join('');
-  return '<div class="jogo-presets">'
-    + '<label><span>Modo de imagem</span><select data-preset>' + itens + '<option value="0">Manual (as opções abaixo)</option></select></label>'
+  const cartao = (p) => '<button type="button" class="jp-card' + (p.opcoes.turbo ? ' turbo' : '') + '" role="radio" aria-checked="false" data-preset="' + p.id + '" title="' + p.nome + ': ' + p.desc + '">'
+    + '<b>' + p.nome.split(' ')[0] + '</b><span>' + p.modo + '</span>' + (p.id === PRESET_INICIAL ? '<em>padrão</em>' : '') + '</button>';
+  return '<div class="jogo-presets" role="radiogroup" aria-label="Modo de imagem">'
+    + '<span class="jp-tit">Modo de imagem</span>'
+    + '<div class="jp-grade">' + PRESETS.map(cartao).join('') + '</div>'
+    + '<button type="button" class="jp-card jp-manual" role="radio" aria-checked="false" data-preset="0"><b>Manual</b><small>as opções abaixo</small></button>'
     + '</div>';
+}
+
+// marca no seletor (em raiz) o modo de agora
+export function marcarPresets(raiz = document) {
+  const atual = String(valores.preset || 0);
+  raiz.querySelectorAll('[data-preset]').forEach((el) => {
+    const on = el.dataset.preset === atual;
+    el.classList.toggle('on', on);
+    el.setAttribute('aria-checked', String(on));
+  });
 }
 
 function ler() {
@@ -63,13 +72,11 @@ function ler() {
     const v0 = Number(o.v) || 0;
     if (v0 < 2) Object.assign(o, { turbo: PADRAO.turbo, rapido: PADRAO.rapido });
     if (v0 < 3) o.liso = true;
-    // os números dos presets de teste mudaram: todo mundo começa no modo 1 (o recomendado)
-    if (v0 < 4) Object.assign(o, { preset: 1 }, PRESETS[0].opcoes);
     o.v = VERSAO;
-    if (typeof o.preset !== 'number') o.preset = 1;
-    return o;
+    // toda vez que a página abre: o modo inicial, com as opções dele (o Manual dura até recarregar)
+    return Object.assign(o, { preset: PRESET_INICIAL }, presetInicial().opcoes);
   } catch {
-    return { ...PADRAO, ...PRESETS[0].opcoes, preset: 1, v: VERSAO };
+    return { ...PADRAO, ...presetInicial().opcoes, preset: PRESET_INICIAL, v: VERSAO };
   }
 }
 

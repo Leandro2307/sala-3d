@@ -25,7 +25,7 @@
 // por padrão (o Jogador 1 é um controle) e deixa o cursor do Windows à mostra, o que punha o
 // celular no "menu" e cada toque virava clique.
 
-import { opcoesJogo, htmlPresets } from './jogo-opcoes.js';
+import { opcoesJogo, htmlPresets, marcarPresets } from './jogo-opcoes.js';
 
 const DEAD = 0.25; // zona morta do analógico
 const CORRE = 0.95; // empurrar até a borda (para a frente) corre
@@ -665,7 +665,7 @@ export class ToqueJogo {
     p.querySelector('.tj-sens input').value = String(this.sens);
     this.mostrarSens();
     p.querySelectorAll('[data-op]').forEach((el) => { el.checked = !!opcoesJogo.get(el.dataset.op); });
-    p.querySelectorAll('[data-preset]').forEach((el) => { el.value = String(opcoesJogo.get('preset') || 0); });
+    marcarPresets(p);
     p.hidden = false;
   }
 

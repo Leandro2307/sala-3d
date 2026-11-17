@@ -860,7 +860,14 @@ export class TurboEnvio {
 
   // um quadro codificado em pedaços de PEDACO bytes (daqui ou do PS5 direto). t0: quando saiu da captura
   mandar(s, dados, chave, timestamp, cod, t0) {
-    const id = (s.quadro = (s.quadro + 1) >>> 0);
+    // A numeração segue por pessoa, não por sessão (como a do som em mandarSom): quando a fonte troca
+    // (trocarFonte: PS5 ↔ Lossless, som do PC ligado/desligado) quem joga continua com o mesmo receptor,
+    // e um id que recomeçasse do 1 seria descartado como "pedaço velho" até passar o último que ele viu.
+    // Relatório de 2026-11-16 21:41 (Hh, iPhone): ligou o som do PC e a imagem ficou parada ~30 s com os
+    // quadros chegando a 60 qps.
+    if (!this.seqQuadro) this.seqQuadro = new Map();
+    const id = (s.quadro = ((this.seqQuadro.get(s.id) || 0) + 1) >>> 0);
+    this.seqQuadro.set(s.id, id);
     if (chave) {
       s.chaveId = id;
       s.chaveEm = performance.now();

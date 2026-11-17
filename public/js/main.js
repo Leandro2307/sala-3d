@@ -29,7 +29,7 @@ import { ControleFisico } from './gamepad-jogo.js';
 import { PadVirtual } from './pad-virtual.js';
 import { TecladoPad, DICA_TECLADO } from './teclado-pad.js';
 import { TurboEnvio, TurboRecebe, TTL_MS, LISO_PCT } from './turbo.js';
-import { opcoesJogo, LISO_MS, PRESETS, OPCOES_DO_PRESET, htmlPresets } from './jogo-opcoes.js';
+import { opcoesJogo, LISO_MS, PRESETS, OPCOES_DO_PRESET, htmlPresets, marcarPresets } from './jogo-opcoes.js';
 import { Mesa } from './mesa.js';
 import { Qualidade, NIVEIS, nivelInicial } from './qualidade.js';
 import * as moduloQualidade from './qualidade.js';
@@ -3463,13 +3463,16 @@ function aplicarPreset(n, porque = 'escolhido') {
 
 // o seletor de modo de imagem (no menu do PC e no painel do celular) mostra o de agora
 function sincronizarPresets() {
-  $$('[data-preset]').forEach((el) => { el.value = String(opcoesJogo.get('preset') || 0); });
+  marcarPresets(document);
 }
 $('#jogo-op-pop').insertAdjacentHTML('afterbegin', htmlPresets());
-document.addEventListener('change', (e) => {
-  if (!e.target.matches?.('[data-preset]')) return;
-  aplicarPreset(Number(e.target.value) || 0);
-  e.target.blur();
+document.addEventListener('click', (e) => {
+  const el = e.target.closest?.('[data-preset]');
+  if (!el) return;
+  const n = Number(el.dataset.preset) || 0;
+  if (n !== (opcoesJogo.get('preset') || 0)) aplicarPreset(n);
+  else sincronizarPresets();
+  el.blur();
 });
 sincronizarPresets();
 
