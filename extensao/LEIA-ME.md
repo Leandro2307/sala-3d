@@ -143,13 +143,20 @@ O PC liberado para o `/tela` também pode ser a central de jogos da sala (extens
    já vem com a capa da loja. Compartilhe uma vez **pelo OBS** na frente do PC e **permita a
    câmera** para a sala (o OBS chega como câmera, e longe dali ninguém aperta o "Permitir").
 2. **Do celular ou de outro PC**, como dono da sala: `/jogos` no chat (ou **Jogos do PC** no
-   catálogo de jogos). Toque num jogo: o PC de jogos abre o OBS com a câmera virtual (se não estiver
-   aberto), compartilha por ele com o som do PC, libera o controle e abre o jogo. Abra a tela dele
-   na sala e jogue.
-3. **Trocar de jogo:** escolha outro; o de antes fecha sozinho e o compartilhamento continua.
-   **Fechar o jogo** fecha sem abrir outro.
+   catálogo de jogos). Toque num jogo: o PC de jogos põe o **monitor de 144 Hz** (o de mais Hz) na
+   sala pelo **PC direto** (a placa de vídeo, sempre a **60 qps**), libera o controle e abre o jogo
+   **nesse monitor**. Abra a tela dele na sala e jogue. Sem placa NVIDIA (ou com a ponte fora), vai
+   pelo OBS com a câmera virtual, como antes.
+3. **Trocar de jogo:** com um jogo aberto, o catálogo mostra **Jogando …** com o **Fechar o jogo**;
+   tocar em outro jogo (selo "trocar") fecha o de antes e abre o novo, sem mexer no compartilhamento.
 
-**Sempre em tela cheia:** nos 2 minutos depois de abrir, se o jogo vier em janela (com barra de
+**Sempre no monitor de 144 Hz (extensão 1.26+):** por 3 minutos depois de abrir, a janela do jogo
+que estiver noutro monitor vai para o do PC direto, em tela cheia sem bordas (o ponteiro vai para lá
+antes de abrir: muitos jogos abrem no monitor do ponteiro). Jogo em tela cheia exclusiva pode não
+aceitar ser movido: use "tela cheia sem bordas" nas opções dele. Deixe a janela da sala no outro
+monitor (no mesmo, o jogo cobre a sala e o Chrome desacelera a página).
+
+**Sempre em tela cheia:** nos 3 minutos depois de abrir, se o jogo vier em janela (com barra de
 título), o ajudante tira as bordas e estica a janela no monitor dela. Jogo que já abre em tela cheia
 fica como está. Emulador: ponha o jogo e a tela cheia no próprio atalho (no lichii,
 `--fullscreen --game "caminho do jogo"`); sem o `--game` ele abre só o emulador.

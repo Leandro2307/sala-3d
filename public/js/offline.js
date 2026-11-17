@@ -82,7 +82,7 @@ export async function criarSocketOffline({ mapa, nome, cor }) {
   await Promise.all([
     import('/js/cartas-regras.js'),
     import('/js/poker-regras.js'),
-    ...['tropical', 'neve', 'outono'].map((m) => import(`/js/parque-dados.js?mapa=${m}`)),
+    ...['tropical', 'neve', 'outono', 'vice'].map((m) => import(`/js/parque-dados.js?mapa=${m}`)),
   ]);
   await new Promise((pronto) => setTimeout(pronto, 0));
 

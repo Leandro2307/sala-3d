@@ -23,6 +23,12 @@ const PADRAO = { monitor: null, altura: 1080, qps: 60, kbps: 0, cursor: true, so
 const bandaDe = (altura) => (altura && altura <= 720 ? 12000 : altura && altura <= 1080 ? 20000 : 35000);
 const ALTURAS = [[720, '720p'], [1080, '1080p'], [0, 'Do monitor']];
 const QPS = [30, 60, 120];
+const QPS_JOGO = 60; // Jogos do PC: sempre a 60 qps (no monitor de 144 Hz, ver monitorDoJogo)
+const esperar = async (cond, ms) => {
+  const fim = Date.now() + ms;
+  while (!cond() && Date.now() < fim) await new Promise((ok) => setTimeout(ok, 100));
+  return !!cond();
+};
 
 export const temPcDireto = () => typeof VideoDecoder === 'function' && typeof EncodedVideoChunk === 'function' && typeof WebSocket === 'function';
 
@@ -148,6 +154,8 @@ export class PcDireto {
         break;
       case 'saiu':
         this.onEvento?.('pc direto: saiu', m);
+        // o "parou" da captura de antes chegando depois de recomeçar (Jogos do PC trocando de monitor)
+        if (m.motivo === 'parou' && this.fase === 'abrindo') break;
         if (m.erro) this.toast?.(`PC direto: ${ERROS[m.motivo] || m.motivo}`, 'error', 10000);
         this.terminar(null);
         break;
@@ -179,6 +187,43 @@ export class PcDireto {
     };
   }
 
+  // Jogos do PC: o monitor mais rápido (o de 144 Hz); empatados, o que não tem a sala, depois o principal
+  monitorDoJogo() {
+    const m = this.monitores;
+    if (!m.length) return null;
+    const hz = Math.max(...m.map((x) => Number(x.hz) || 0));
+    const rapidos = m.filter((x) => (Number(x.hz) || 0) === hz);
+    return rapidos.find((x) => !this.salaNoMonitor(x)) || rapidos.find((x) => x.principal) || rapidos[0];
+  }
+
+  // Jogos do PC (o dono escolheu um jogo neste hub): sempre o monitor de 144 Hz e sempre a 60 qps, sem
+  // perguntar a tela (ninguém está na frente deste PC). Já no ar noutro monitor ou noutro qps: recomeça.
+  // Devolve { key, monitor } quando a imagem já está numa tela da sala, ou { erro }.
+  async ligarParaJogo() {
+    if (!temPcDireto()) return { erro: 'este navegador não decodifica vídeo pela página (WebCodecs)' };
+    if (!(await this.ligarPonte())) return { erro: this.erro || 'a ponte do PC não abriu' };
+    this.monitores = [];
+    this.nvenc = null;
+    this.mandar({ tipo: 'monitores' });
+    await esperar(() => this.monitores.length && this.nvenc != null, 6000);
+    if (this.nvenc === false) return { erro: ERROS[this.erroNvenc] || ERROS['sem-nvenc'] };
+    const mon = this.monitorDoJogo();
+    if (!mon) return { erro: 'a ponte não achou nenhum monitor' };
+    const c = this.conectado;
+    if (this.noAr && this.key && c && c.monitor === mon.i && Number(c.qps) === QPS_JOGO) return { key: this.key, monitor: mon };
+    if (this.noAr || this.fase === 'abrindo') {
+      this.parar();
+      await new Promise((ok) => setTimeout(ok, 800)); // a ponte solta a captura e o codificador
+    }
+    this.paraJogo = true;
+    await this.iniciar(mon.i, { qps: QPS_JOGO, guardar: false });
+    await esperar(() => this.key || this.fase === 'parado', 30_000);
+    this.paraJogo = false;
+    if (this.key) return { key: this.key, monitor: mon };
+    if (this.fase !== 'parado') this.parar();
+    return { erro: this.erro || 'a placa não começou a mandar a imagem' };
+  }
+
   monitorEscolhido() {
     const m = this.monitores;
     return m.find((x) => x.nome === this.opcoes.monitor) || m.find((x) => !this.salaNoMonitor(x)) || m.find((x) => x.principal) || m[0] || null;
@@ -191,15 +236,18 @@ export class PcDireto {
     return cx >= mon.x && cx < mon.x + mon.w && cy >= mon.y && cy < mon.y + mon.h;
   }
 
-  async iniciar(i) {
+  // qps: o do jogo (senão o das opções); guardar: false não troca o monitor guardado nas opções
+  async iniciar(i, { qps: qpsFixo, guardar = true } = {}) {
     if (this.noAr || this.fase === 'abrindo') return;
     if (!(await this.ligarPonte())) { this.render(); return; }
     const mon = this.monitores.find((x) => x.i === Number(i)) || this.monitorEscolhido();
     if (!mon) return this.toast?.('A ponte não achou nenhum monitor.', 'error', 6000);
-    this.opcoes.monitor = mon.nome;
-    this.guardarOpcoes();
+    if (guardar) {
+      this.opcoes.monitor = mon.nome;
+      this.guardarOpcoes();
+    }
     const altura = Number(this.opcoes.altura) || 0;
-    const qps = QPS.includes(Number(this.opcoes.qps)) ? Number(this.opcoes.qps) : 60;
+    const qps = qpsFixo || (QPS.includes(Number(this.opcoes.qps)) ? Number(this.opcoes.qps) : 60);
     const alturaReal = altura && altura < mon.h ? altura : mon.h;
     const kbps = Number(this.opcoes.kbps) >= 2000 ? Number(this.opcoes.kbps) : Math.round(bandaDe(alturaReal) * (qps > 60 ? 1.5 : qps < 60 ? 0.7 : 1));
     this.novaFonte(kbps);
@@ -214,7 +262,7 @@ export class PcDireto {
     const fonte = this.fonte;
     this.pondo = true;
     let key;
-    try { key = await this.compartilhar(fonte, { rotulo: this.conectado?.rotulo || 'screen:0:0' }); } finally { this.pondo = false; }
+    try { key = await this.compartilhar(fonte, { rotulo: this.conectado?.rotulo || 'screen:0:0', auto: !!this.paraJogo }); } finally { this.pondo = false; }
     if (this.fonte !== fonte) return;
     if (!key) {
       this.toast?.('A sala não conseguiu pôr o PC numa tela. Desligando o PC direto.', 'error', 6000);

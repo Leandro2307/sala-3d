@@ -13,8 +13,9 @@
 import { TROPICAL } from './mapa-tropical.js';
 import { NEVE } from './mapa-neve.js';
 import { OUTONO } from './mapa-outono.js';
+import { VICE } from './mapa-vice.js';
 
-export const MAPAS = { tropical: TROPICAL, neve: NEVE, outono: OUTONO };
+export const MAPAS = { tropical: TROPICAL, neve: NEVE, outono: OUTONO, vice: VICE };
 export const IDS_MAPAS = Object.keys(MAPAS);
 export const MAPA_PADRAO = 'tropical';
 

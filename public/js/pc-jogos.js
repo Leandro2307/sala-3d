@@ -1,8 +1,9 @@
 // Jogos do PC: o catálogo dos jogos instalados no PC de jogos da sala (o "hub"). O hub é um PC
 // liberado para o /tela que tem a pasta "Jogos da Sala 3D" na área de trabalho: o ajudante do
 // Windows lista os atalhos dessa pasta. Só o dono da sala vê e escolhe; escolheu, o hub fecha o jogo
-// de antes, abre este e compartilha a tela pelo OBS com o controle liberado (ver pedidoDeJogo no
-// main.js). As capas vêm da imagem com o mesmo nome do atalho, da Steam (pelo número do jogo) ou,
+// de antes, abre este no monitor de 144 Hz e põe esse monitor na sala pelo PC direto (a placa de
+// vídeo, sempre a 60 qps), com o controle liberado; sem placa NVIDIA, pelo OBS (ver pedidoDeJogo no
+// main.js). Com um jogo aberto, escolher outro fecha esse e abre o novo. As capas vêm da imagem com o mesmo nome do atalho, da Steam (pelo número do jogo) ou,
 // sem nenhuma, o ícone do jogo.
 import { icon } from './icons.js';
 
@@ -12,7 +13,10 @@ const CORES = ['#38bdf8', '#f472b6', '#4ade80', '#f97316', '#a78bfa', '#facc15',
 const corDe = (nome) => CORES[[...String(nome)].reduce((a, c) => a + c.charCodeAt(0), 0) % CORES.length];
 
 const CSS = `
-#pc-jogos .pj-card { grid-template-rows: auto auto 1fr auto; grid-template-columns: minmax(0, 1fr); width: min(1000px, 100%); min-width: 0; }
+#pc-jogos .pj-card { grid-template-rows: auto auto auto 1fr auto; grid-template-columns: minmax(0, 1fr); width: min(1000px, 100%); min-width: 0; }
+/* linhas fixas: com o seletor de PC ou o "jogando" escondidos, a grade continua na linha que estica */
+#pc-jogos .pj-card > .guia-head { grid-row: 1; } #pc-jogos .pj-pcs { grid-row: 2; } #pc-jogos .pj-jogando { grid-row: 3; }
+#pc-jogos .pj-grade { grid-row: 4; } #pc-jogos .pj-rodape { grid-row: 5; }
 #pc-jogos .pj-pcs { display: flex; flex-wrap: wrap; gap: 8px; }
 #pc-jogos .pj-pcs[hidden] { display: none; }
 #pc-jogos .pj-grade { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); grid-auto-rows: max-content;
@@ -33,6 +37,12 @@ const CSS = `
 #pc-jogos .pj-selo { position: absolute; left: 8px; top: 8px; z-index: 1; padding: 3px 8px; border-radius: 999px; font-size: 10.5px;
   font-weight: 800; letter-spacing: .04em; text-transform: uppercase; background: #16a34a; color: #fff; box-shadow: 0 2px 10px rgba(0,0,0,.4); }
 #pc-jogos .pj-selo.abrindo { background: #2563eb; }
+#pc-jogos .pj-selo.trocar { background: #f59e0b; color: #111; opacity: 0; transition: opacity 140ms; }
+#pc-jogos .pj-item:hover .pj-selo.trocar, #pc-jogos .pj-item:focus-visible .pj-selo.trocar { opacity: 1; }
+#pc-jogos .pj-jogando { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px;
+  border: 1px solid rgba(34,197,94,.45); background: rgba(34,197,94,.08); font-size: 14px; }
+#pc-jogos .pj-jogando[hidden] { display: none; }
+#pc-jogos .pj-jogando b { flex: 1; min-width: 0; }
 #pc-jogos .pj-item.atual { border-color: #22c55e; box-shadow: 0 0 0 2px rgba(34,197,94,.45); }
 #pc-jogos .pj-rodape { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
 #pc-jogos .pj-status { color: var(--muted); font-size: 13px; }
@@ -74,10 +84,13 @@ export class PcJogos {
         <button type="button" class="icon-btn" data-pj="fechar" aria-label="Fechar">${icon('x')}</button>
       </header>
       <div class="pj-pcs" role="group" aria-label="Qual PC" hidden></div>
+      <div class="pj-jogando" hidden>
+        <b></b>
+        <button type="button" class="secondary small" data-pj="parar">${icon('x', 14)} Fechar o jogo</button>
+      </div>
       <div class="pj-grade"></div>
       <div class="pj-rodape">
         <span class="pj-status"></span>
-        <button type="button" class="secondary small" data-pj="parar" hidden>Fechar o jogo</button>
       </div>
     </div>`;
     document.body.appendChild(this.raiz);
@@ -141,11 +154,17 @@ export class PcJogos {
     const pcs = this.raiz.querySelector('.pj-pcs');
     const grade = this.raiz.querySelector('.pj-grade');
     const status = this.raiz.querySelector('.pj-status');
-    const parar = this.raiz.querySelector('[data-pj="parar"]');
+    const jogando = this.raiz.querySelector('.pj-jogando');
     const hub = this.hub();
     pcs.hidden = this.hubs.length < 2;
     pcs.innerHTML = this.hubs.map((h) => `<button type="button" class="cj-filtro${h === hub ? ' on' : ''}" data-pc="${esc(h.nick)}" style="--c:#6ee7c8" aria-pressed="${h === hub}">${esc(h.nick)}<small>${h.jogos.length}</small></button>`).join('');
-    parar.hidden = !hub?.atual;
+    const nomeAtual = hub?.jogos.find((j) => j.id === hub.atual)?.nome;
+    // o jogo aberto, com o fechar à mão (escolher outro abaixo também fecha este)
+    jogando.hidden = !nomeAtual;
+    if (nomeAtual) {
+      jogando.querySelector('b').textContent = `Jogando ${nomeAtual}`;
+      jogando.querySelector('[data-pj="parar"]').disabled = !!this.abrindo;
+    }
     if (this.erro || !hub) {
       grade.innerHTML = `<p class="pj-vazio">${this.erro ? esc(this.erro) : `Nenhum PC de jogos está na sala agora.<br>
         No PC de jogos: deixe a sala aberta no Chrome (extensão 1.20+ e o ajudante instalados), mande uma vez
@@ -166,16 +185,20 @@ export class PcJogos {
       // a capa própria vale mais; a da Steam, se não carregar, some e fica o ícone
       const capa = j.capa ? `<img class="capa" src="${j.capa}" alt="">`
         : j.steam ? `<img class="capa" src="${CAPA_STEAM(j.steam)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : '';
+      const selo = abrindo ? `<span class="pj-selo abrindo">${nomeAtual && !atual ? 'trocando…' : 'abrindo…'}</span>`
+        : atual ? '<span class="pj-selo">jogando</span>' : nomeAtual ? '<span class="pj-selo trocar">trocar</span>' : '';
       return `<button type="button" class="pj-item${atual ? ' atual' : ''}" data-jogo="${esc(j.id)}" style="--c:${corDe(j.nome)}" ${this.abrindo ? 'disabled' : ''}
-          title="${atual ? `${esc(j.nome)} está aberto` : `Abrir ${esc(j.nome)}`}">
-        <span class="pj-capa">${icone}${capa}${abrindo ? '<span class="pj-selo abrindo">abrindo…</span>' : atual ? '<span class="pj-selo">jogando</span>' : ''}</span>
+          title="${atual ? `${esc(j.nome)} está aberto (trazer para a frente)` : nomeAtual ? `Fechar ${esc(nomeAtual)} e abrir ${esc(j.nome)}` : `Abrir ${esc(j.nome)}`}">
+        <span class="pj-capa">${icone}${capa}${selo}</span>
         <span class="pj-nome">${esc(j.nome)}</span>
       </button>`;
     }).join('');
-    const nomeAtual = hub.jogos.find((j) => j.id === hub.atual)?.nome;
-    status.textContent = this.abrindo ? `Pedi ao PC de ${hub.nick}. O jogo e o OBS levam uns segundos para abrir…`
-      : nomeAtual ? `${nomeAtual} está aberto no PC de ${hub.nick}. Escolher outro fecha este.`
-      : `Escolha um jogo: o PC de ${hub.nick} abre e compartilha pelo OBS, com o controle liberado.`;
+    const novo = hub.jogos.find((j) => j.id === this.abrindo?.id)?.nome;
+    status.textContent = this.abrindo ? (!this.abrindo.id ? `Fechando ${nomeAtual || 'o jogo'} no PC de ${hub.nick}…`
+      : nomeAtual && novo && novo !== nomeAtual ? `Fechando ${nomeAtual} e abrindo ${novo} no PC de ${hub.nick}…`
+      : `Pedi ao PC de ${hub.nick}. O jogo e o PC direto levam uns segundos para abrir…`)
+      : nomeAtual ? `Escolha outro jogo para trocar: o PC de ${hub.nick} fecha ${nomeAtual} e abre o novo.`
+      : `Escolha um jogo: o PC de ${hub.nick} abre no monitor de 144 Hz e põe na sala pelo PC direto (60 qps), com o controle liberado.`;
   }
 
   pedir(acao, id) {

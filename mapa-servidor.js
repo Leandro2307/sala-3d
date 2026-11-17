@@ -8,7 +8,7 @@
 // passa pelas salas e a cada evento de socket (ver comMapa). O código dos jogos é síncrono (nenhum
 // setTimeout), então o mapa em uso é sempre o da sala que está sendo tratada.
 
-const MAPAS_SALA = ['tropical', 'neve', 'outono'];
+const MAPAS_SALA = ['tropical', 'neve', 'outono', 'vice'];
 const MAPA_PADRAO = 'tropical';
 const mapaDa = (room) => (MAPAS_SALA.includes(room?.config?.mapa) ? room.config.mapa : MAPA_PADRAO);
 

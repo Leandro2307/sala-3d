@@ -698,7 +698,11 @@ async function tratar(m, sender) {
   // visível) e o ajudante aperta o botão e o seletor do Chrome: a tela pedida, com áudio.
   if (m.tipo === 'tela-auto') return telaAuto(sender.tab, String(m.alvo || 'Tela 1').slice(0, 40));
   if (m.tipo === 'pc-jogos') return pedidoNativo('jogos', {}, 30_000);
-  if (m.tipo === 'pc-jogo-abrir') return pedidoNativo('jogo-abrir', { id: String(m.alvo || '').slice(0, 200) }, 40_000);
+  // 1.26+ (ajudante 1.20+): ev.monitor = o monitor do PC direto (o de 144 Hz): o jogo abre e fica nele
+  if (m.tipo === 'pc-jogo-abrir') {
+    const mon = Number.isInteger(m.ev?.monitor) && m.ev.monitor >= 0 && m.ev.monitor < 32 ? m.ev.monitor : -1;
+    return pedidoNativo('jogo-abrir', { id: String(m.alvo || '').slice(0, 200), monitor: mon }, 40_000);
+  }
   if (m.tipo === 'pc-jogo-fechar') return pedidoNativo('jogo-fechar', {}, 30_000);
   if (m.tipo === 'pc-obs') return pedidoNativo('obs', {}, 30_000);
   // 1.21+ (ajudante 1.15+): o PC não dorme nem bloqueia a tela enquanto compartilha

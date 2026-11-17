@@ -31,6 +31,7 @@ import { construirPortalFantasmas } from './fantasmas.js';
 import { construirKart } from './kart.js';
 import { construirPinta } from './pinta.js';
 import { PosProcesso } from './posprocesso.js';
+import { MAPAS, MAPA_DA_PAGINA } from './mapas-dados.js';
 
 // Área jogável inteira (cercada): a sala do cinema num canto, em volta da origem, o
 // autódromo ao ar livre a leste e, no norte, o parque (parque-dados.js), que levou a cerca de
@@ -46,6 +47,22 @@ export const SPAWN = { pos: [0, 0, -2], yaw: 0 };
 export const TETO_MUNDO = 130;
 
 const FONT = "'Plus Jakarta Sans', system-ui, sans-serif";
+// As cores do cinema. O mapa Vice (mapa-vice.js) põe o cinema no clima de GTA VI: roxo de noite,
+// neon rosa e laranja de pôr do sol, e cartazes nas paredes (ver cartazesGta).
+const CINEMA_GTA = MAPAS[MAPA_DA_PAGINA]?.cinema === 'gta';
+const COR_CINEMA = CINEMA_GTA
+  ? {
+    chao: '#1a0f26', grade: '#3a1d4f', parede: 0x24123a, frente: 0x150a22, fachada: 0x3b1c55, teto: 0x140a20,
+    faixaTeto: 0xffb38a, rodape: 0xff4fa3, pilar: 0x2a1640, brilhoPilar: 0xff8a3d,
+    neon: 0xff4fa3, rosa: 0xffa53d, luzTelas: 0xff5fa8, luzFundo: 0xff9a4d,
+    letreiro: 'VICE CINEMA', corLetreiro: '#ff4fa3',
+  }
+  : {
+    chao: '#171a22', grade: '#222736', parede: 0x151821, frente: 0x0d0f15, fachada: 0x232838, teto: 0x0e1016,
+    faixaTeto: 0xdfe7ff, rodape: 0x6ee7c8, pilar: 0x1b1f2a, brilhoPilar: 0xa78bfa,
+    neon: 0x6ee7c8, rosa: 0xff5d73, luzTelas: 0x7f9cff, luzFundo: 0xd08bff,
+    letreiro: 'CINEMA', corLetreiro: '#ff5d73',
+  };
 const _tmp = new THREE.Vector3();
 const _tmp2 = new THREE.Vector3();
 const _tmp3 = new THREE.Vector3();
@@ -217,6 +234,129 @@ function screenBackground(ctx, w, h) {
   ctx.lineWidth = 1;
   for (let x = 0; x < w; x += 32) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
   for (let y = 0; y < h; y += 32) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
+}
+
+// Cartaz do cinema Vice (desenho próprio): pôr do sol listrado, mar, estrada de neon e coqueiros em
+// silhueta. n escolhe o título e a variação (0: o grande, em paisagem).
+const CARTAZES_VICE = [
+  ['VICE', 'GTA VI · SESSÃO DE HOJE'],
+  ['VICE', 'BEM-VINDO À PRAIA'],
+  ['SUNSET', 'NOITES DE NEON'],
+  ['OCEAN', 'DRIVE'],
+  ['HEAT', 'NO CALOR DA CIDADE'],
+  ['PALMS', 'GTA VI · EM CARTAZ'],
+];
+function desenharCartazVice(ctx, w, h, n) {
+  const [titulo, sub] = CARTAZES_VICE[n % CARTAZES_VICE.length];
+  const horiz = h * (n === 0 ? 0.62 : 0.58);
+  // céu
+  const ceu = ctx.createLinearGradient(0, 0, 0, horiz);
+  ceu.addColorStop(0, '#1b0b3a');
+  ceu.addColorStop(0.45, '#7a1f6e');
+  ceu.addColorStop(0.75, '#ff4f7b');
+  ceu.addColorStop(1, '#ffb347');
+  ctx.fillStyle = ceu;
+  ctx.fillRect(0, 0, w, horiz);
+  // sol listrado
+  const r = Math.min(w, h) * (n === 0 ? 0.24 : 0.3);
+  const sx = w * (n === 0 ? 0.68 : 0.5);
+  const sy = horiz - r * 0.35;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(sx, sy, r, 0, Math.PI * 2);
+  ctx.clip();
+  const sol = ctx.createLinearGradient(0, sy - r, 0, sy + r);
+  sol.addColorStop(0, '#ffe66b');
+  sol.addColorStop(1, '#ff4fa3');
+  ctx.fillStyle = sol;
+  ctx.fillRect(sx - r, sy - r, 2 * r, 2 * r);
+  ctx.fillStyle = 'rgba(122,31,110,0.9)';
+  for (let i = 0; i < 6; i++) ctx.fillRect(sx - r, sy + i * r * 0.16, 2 * r, r * 0.03 + i * r * 0.012);
+  ctx.restore();
+  // mar com o reflexo do sol
+  const mar = ctx.createLinearGradient(0, horiz, 0, h);
+  mar.addColorStop(0, '#2a1458');
+  mar.addColorStop(1, '#0a0618');
+  ctx.fillStyle = mar;
+  ctx.fillRect(0, horiz, w, h - horiz);
+  ctx.fillStyle = 'rgba(255,140,90,0.55)';
+  for (let i = 0; i < 9; i++) {
+    const y = horiz + 8 + i * i * 4;
+    const lw = r * (1.4 - i * 0.12);
+    if (y < h && lw > 0) ctx.fillRect(sx - lw / 2, y, lw, 3 + i * 0.6);
+  }
+  // estrada de neon (grade em perspectiva)
+  ctx.strokeStyle = 'rgba(0,229,255,0.55)';
+  ctx.lineWidth = 2;
+  const topo = horiz + (h - horiz) * 0.35;
+  for (let i = -8; i <= 8; i++) {
+    ctx.beginPath();
+    ctx.moveTo(w / 2 + i * 6, topo);
+    ctx.lineTo(w / 2 + i * w * 0.12, h);
+    ctx.stroke();
+  }
+  for (let i = 0; i < 6; i++) {
+    const y = topo + (h - topo) * (i / 6) ** 1.8;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(w, y);
+    ctx.stroke();
+  }
+  // coqueiros em silhueta
+  const coqueiro = (x, base, alt, inclina) => {
+    ctx.strokeStyle = '#12061f';
+    ctx.lineCap = 'round';
+    const cx = x + inclina * alt;
+    const cy = base - alt;
+    ctx.lineWidth = alt * 0.045;
+    ctx.beginPath();
+    ctx.moveTo(x, base);
+    ctx.quadraticCurveTo(x + inclina * alt * 0.2, base - alt * 0.6, cx, cy);
+    ctx.stroke();
+    ctx.lineWidth = alt * 0.03;
+    const fl = alt * 0.42;
+    for (let f = 0; f < 7; f++) {
+      const a = -Math.PI * 0.95 + f * (Math.PI * 0.9 / 6) + (f > 3 ? 0.2 : 0);
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.quadraticCurveTo(cx + Math.cos(a) * fl * 0.6, cy + Math.sin(a) * fl * 0.6 - fl * 0.15, cx + Math.cos(a) * fl, cy + Math.sin(a) * fl * 0.4 + fl * 0.35);
+      ctx.stroke();
+    }
+  };
+  if (n === 0) {
+    coqueiro(w * 0.08, h, h * 0.75, 0.12);
+    coqueiro(w * 0.2, h, h * 0.55, -0.1);
+    coqueiro(w * 0.92, h, h * 0.7, -0.14);
+  } else {
+    coqueiro(w * (n % 2 ? 0.1 : 0.9), h, h * 0.62, n % 2 ? 0.14 : -0.14);
+    coqueiro(w * (n % 2 ? 0.85 : 0.18), h, h * 0.42, n % 2 ? -0.1 : 0.1);
+  }
+  // título em degradê com brilho de neon
+  ctx.textAlign = n === 0 ? 'left' : 'center';
+  ctx.textBaseline = 'alphabetic';
+  const tx = n === 0 ? w * 0.06 : w / 2;
+  const tam = n === 0 ? h * 0.3 : Math.min(h * 0.17, (w * 0.95) / (titulo.length * 0.62));
+  const ty = n === 0 ? h * 0.36 : h * 0.24;
+  ctx.font = `italic 800 ${tam}px ${FONT}`;
+  const letras = ctx.createLinearGradient(0, ty - tam, 0, ty);
+  letras.addColorStop(0, '#fff3b0');
+  letras.addColorStop(0.5, '#ff9a4d');
+  letras.addColorStop(1, '#ff3d8b');
+  ctx.shadowColor = '#ff4fa3';
+  ctx.shadowBlur = tam * 0.25;
+  ctx.fillStyle = letras;
+  ctx.fillText(titulo, tx, ty);
+  ctx.shadowBlur = 0;
+  ctx.lineWidth = Math.max(2, tam * 0.025);
+  ctx.strokeStyle = '#2b0a3d';
+  ctx.strokeText(titulo, tx, ty);
+  // subtítulo
+  ctx.font = `700 ${n === 0 ? h * 0.06 : h * 0.042}px ${FONT}`;
+  ctx.fillStyle = '#5ff2ff';
+  ctx.shadowColor = '#00e5ff';
+  ctx.shadowBlur = 14;
+  ctx.fillText(sub, tx + (n === 0 ? 6 : 0), ty + (n === 0 ? h * 0.1 : h * 0.07));
+  ctx.shadowBlur = 0;
 }
 
 export function textSprite(text, { color = '#ffffff', bg = 'rgba(12,14,20,0.72)', size = 1, accent = null } = {}) {
@@ -1264,11 +1404,11 @@ export class World {
     this.scene.add(sun, sun.target);
 
     // brilho azulado que "vem" da parede de telas
-    const screenGlow = new THREE.PointLight(0x7f9cff, 260, 70, 1.2);
+    const screenGlow = new THREE.PointLight(COR_CINEMA.luzTelas, 260, 70, 1.2);
     screenGlow.position.set(0, 12, ROOM.minZ + 8);
     this.scene.add(screenGlow);
 
-    const backGlow = new THREE.PointLight(0xd08bff, 180, 60, 1.2);
+    const backGlow = new THREE.PointLight(COR_CINEMA.luzFundo, 180, 60, 1.2);
     backGlow.position.set(0, 18, 26);
     this.scene.add(backGlow);
     this.luzesCinema = [screenGlow, backGlow]; // apagam junto com o cinema (modo escritório)
@@ -1365,9 +1505,9 @@ export class World {
 
     // chão com grade sutil (lá fora é grama)
     const gridTex = canvasTexture(256, 256, (ctx, w, h) => {
-      ctx.fillStyle = '#171a22';
+      ctx.fillStyle = COR_CINEMA.chao;
       ctx.fillRect(0, 0, w, h);
-      ctx.strokeStyle = '#222736';
+      ctx.strokeStyle = COR_CINEMA.grade;
       ctx.lineWidth = 3;
       ctx.strokeRect(0, 0, w, h);
     });
@@ -1385,9 +1525,9 @@ export class World {
     this.addBox({ min: [ROOM.minX - 5, -4, ROOM.minZ - 5], max: [ROOM.maxX + 5, 0, ROOM.maxZ + 5], data: { type: 'floor' } });
 
     // paredes: caixas finas — por dentro o material de sempre, por fora a fachada
-    const wallMat = new THREE.MeshStandardMaterial({ color: 0x151821, roughness: 0.9 });
-    const frontMat = new THREE.MeshStandardMaterial({ color: 0x0d0f15, roughness: 0.95 });
-    const fachadaMat = new THREE.MeshStandardMaterial({ color: 0x232838, roughness: 0.8, metalness: 0.2 });
+    const wallMat = new THREE.MeshStandardMaterial({ color: COR_CINEMA.parede, roughness: 0.9 });
+    const frontMat = new THREE.MeshStandardMaterial({ color: COR_CINEMA.frente, roughness: 0.95 });
+    const fachadaMat = new THREE.MeshStandardMaterial({ color: COR_CINEMA.fachada, roughness: 0.8, metalness: 0.2 });
     const esp = 0.6;
     // faces da BoxGeometry: 0 +x, 1 -x, 2 +y, 3 -y, 4 +z, 5 -z. A face de dentro leva o material
     // da sala e as outras cinco a fachada, juntas num grupo só: 2 desenhos por parede, não 6. Cada
@@ -1419,7 +1559,7 @@ export class World {
     this.addBox({ min: [R.maxX, -4, R.minZ - t], max: [R.maxX + t, TETO_MUNDO + 4, R.maxZ + t] });
 
     // teto (e a laje por cima, para quem olha de fora)
-    const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(W, D), new THREE.MeshStandardMaterial({ color: 0x0e1016, roughness: 1 }));
+    const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(W, D), new THREE.MeshStandardMaterial({ color: COR_CINEMA.teto, roughness: 1 }));
     ceiling.rotation.x = Math.PI / 2;
     ceiling.position.set(cx, height, cz);
     this.scene.add(ceiling);
@@ -1430,13 +1570,13 @@ export class World {
     this.addBox({ min: [S.minX, height, S.minZ], max: [S.maxX, height + 4, S.maxZ] });
 
     // faixas de luz no teto e rodapé neon
-    const stripMat = new THREE.MeshBasicMaterial({ color: 0xdfe7ff, toneMapped: false });
+    const stripMat = new THREE.MeshBasicMaterial({ color: COR_CINEMA.faixaTeto, toneMapped: false });
     for (const x of [-18, 0, 18]) {
       const s = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.15, D - 12), stripMat);
       s.position.set(x, height - 0.1, cz);
       this.scene.add(s);
     }
-    const baseMat = new THREE.MeshBasicMaterial({ color: 0x6ee7c8, toneMapped: false });
+    const baseMat = new THREE.MeshBasicMaterial({ color: COR_CINEMA.rodape, toneMapped: false });
     const baseboards = [
       { size: [W, 0.12, 0.12], pos: [cx, 0.3, S.maxZ - 0.06] },
       { size: [0.12, 0.12, D], pos: [S.minX + 0.06, 0.3, cz] },
@@ -1450,8 +1590,8 @@ export class World {
     }
 
     // pilares de luz nos cantos
-    const pillarMat = new THREE.MeshStandardMaterial({ color: 0x1b1f2a, roughness: 0.4, metalness: 0.4 });
-    const pillarGlow = new THREE.MeshBasicMaterial({ color: 0xa78bfa, toneMapped: false });
+    const pillarMat = new THREE.MeshStandardMaterial({ color: COR_CINEMA.pilar, roughness: 0.4, metalness: 0.4 });
+    const pillarGlow = new THREE.MeshBasicMaterial({ color: COR_CINEMA.brilhoPilar, toneMapped: false });
     for (const [x, z] of [[S.minX + 1.5, S.minZ + 1.5], [S.maxX - 1.5, S.minZ + 1.5], [S.minX + 1.5, S.maxZ - 1.5], [S.maxX - 1.5, S.maxZ - 1.5]]) {
       const p = new THREE.Mesh(new RoundedBoxGeometry(3, height, 3, 3, 0.4), pillarMat);
       p.position.set(x, height / 2, z);
@@ -1464,6 +1604,41 @@ export class World {
     }
 
     this.buildFachada();
+    if (CINEMA_GTA) this.cartazesGta();
+  }
+
+  // Cinema do mapa Vice: um cartaz grande em cima da parede de telas e cartazes em pé nas paredes
+  // oeste e do fundo, com moldura de neon. Os desenhos são próprios (pôr do sol, coqueiros, mar,
+  // estrada de neon); o grande dá lugar a public/img/cinema-gta/poster.jpg se a imagem existir.
+  cartazesGta() {
+    const S = SALA;
+    const molduraMat = new THREE.MeshBasicMaterial({ color: 0xff4fa3, toneMapped: false });
+    const cartaz = (tex, w, h, x, y, z, giro) => {
+      const g = new THREE.Group();
+      const mat = new THREE.MeshBasicMaterial({ map: tex, toneMapped: false, color: 0xdddddd });
+      const quadro = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
+      quadro.position.z = 0.06;
+      const moldura = new THREE.Mesh(new THREE.PlaneGeometry(w + 0.8, h + 0.8), molduraMat);
+      g.add(moldura, quadro);
+      g.position.set(x, y, z);
+      g.rotation.y = giro;
+      this.scene.add(g);
+      return mat;
+    };
+    // o grande, em cima do telão e das telas (o topo delas fica em y ≈ 22)
+    const grande = cartaz(canvasTexture(1600, 900, (ctx, w, h) => desenharCartazVice(ctx, w, h, 0), ESCALA_TEXTURA),
+      40, 22.5, 0, 36, S.minZ + 0.3, 0);
+    new THREE.TextureLoader().load('/img/cinema-gta/poster.jpg', (t) => {
+      t.colorSpace = THREE.SRGBColorSpace;
+      t.anisotropy = 4;
+      grande.map?.dispose();
+      grande.map = t;
+      grande.needsUpdate = true;
+    }, undefined, () => { /* sem imagem própria: fica o desenhado */ });
+    // em pé: 3 na parede oeste (olhando para +x) e 2 no fundo (olhando para -z)
+    const pe = (n) => canvasTexture(600, 900, (ctx, w, h) => desenharCartazVice(ctx, w, h, n), ESCALA_TEXTURA);
+    for (const [i, z] of [-12, 12, 36].entries()) cartaz(pe(i + 1), 12, 18, S.minX + 0.12, 24, z, Math.PI / 2);
+    for (const [i, x] of [-30, 30].entries()) cartaz(pe(i + 4), 12, 18, x, 24, S.maxZ - 0.12, Math.PI);
   }
 
   // Por fora: contorno neon na porta, letreiro e frisos de LED. É o que se vê da pista.
@@ -1471,8 +1646,8 @@ export class World {
     const S = SALA;
     const P = S.porta;
     const xFora = S.maxX + 0.65;
-    const neon = new THREE.MeshBasicMaterial({ color: 0x6ee7c8, toneMapped: false });
-    const rosa = new THREE.MeshBasicMaterial({ color: 0xff5d73, toneMapped: false });
+    const neon = new THREE.MeshBasicMaterial({ color: COR_CINEMA.neon, toneMapped: false });
+    const rosa = new THREE.MeshBasicMaterial({ color: COR_CINEMA.rosa, toneMapped: false });
     const largura = P.z1 - P.z0;
     const zc = (P.z0 + P.z1) / 2;
     // moldura da porta, dos dois lados da parede (a de dentro faz parte da sala)
@@ -1493,17 +1668,24 @@ export class World {
       ctx.fillStyle = '#0d1018';
       roundRect(ctx, 8, 8, w - 16, h - 16, 40);
       ctx.fill();
-      ctx.strokeStyle = '#ff5d73';
+      ctx.strokeStyle = COR_CINEMA.corLetreiro;
       ctx.lineWidth = 10;
       roundRect(ctx, 22, 22, w - 44, h - 44, 30);
       ctx.stroke();
-      ctx.fillStyle = '#ffffff';
-      ctx.font = `800 132px ${FONT}`;
+      if (CINEMA_GTA) {
+        // degradê de pôr do sol nas letras
+        const g = ctx.createLinearGradient(0, h * 0.25, 0, h * 0.75);
+        g.addColorStop(0, '#ffd36b');
+        g.addColorStop(0.5, '#ff8a3d');
+        g.addColorStop(1, '#ff4fa3');
+        ctx.fillStyle = g;
+      } else ctx.fillStyle = '#ffffff';
+      ctx.font = `800 ${CINEMA_GTA ? 112 : 132}px ${FONT}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.shadowColor = '#ff5d73';
+      ctx.shadowColor = COR_CINEMA.corLetreiro;
       ctx.shadowBlur = 30;
-      ctx.fillText('CINEMA', w / 2, h / 2 + 6);
+      ctx.fillText(COR_CINEMA.letreiro, w / 2, h / 2 + 6);
     });
     const placa = new THREE.Mesh(new THREE.PlaneGeometry(largura, largura / 4), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }));
     placa.position.set(xFora + 0.05, P.altura + 3 + largura / 8, zc);

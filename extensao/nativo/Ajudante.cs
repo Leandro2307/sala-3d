@@ -327,6 +327,8 @@ namespace Sala3d
         // Pedidos (cada um com "pid", que volta na resposta):
         //   { tipo: "jogos" }                -> { tipo: "jogos", jogos: [{ id, nome, icone, capa, steam }], atual }
         //   { tipo: "jogo-abrir", id }       -> fecha o jogo de antes, abre este: { tipo: "jogo", ok, msg, nome, atual }
+        //     (1.20+) com "monitor": N (o índice do EnumDisplayDevices, o do PC direto), o jogo abre
+        //     nesse monitor e a janela dele vai para lá em tela cheia sem bordas (ver VigiarTelaCheia)
         //   { tipo: "jogo-fechar" }          -> { tipo: "jogo", ok, msg, atual }
         //   { tipo: "obs" }                  -> abre o OBS com a câmera virtual, se não estiver aberto: { tipo: "obs", ok, msg, ja }
         // O jogo abre pelo explorer.exe (como um clique duplo no atalho), fora da árvore de processos
@@ -340,6 +342,7 @@ namespace Sala3d
         static string jogoAtual;        // o atalho aberto pela sala (null: nenhum)
         static DateTime jogoDesde;      // quando abriu (hora local, como o StartTime dos processos)
         static bool jogoLido;
+        static int monitorDoJogo = -1;  // o monitor onde o jogo tem que ficar (-1: o que ele escolher)
         static readonly Dictionary<string, Dictionary<string, object>> cacheJogos = new Dictionary<string, Dictionary<string, object>>();
 
         static readonly HashSet<string> NAO_FECHAR = new HashSet<string>(StringComparer.OrdinalIgnoreCase) {
@@ -788,6 +791,8 @@ namespace Sala3d
         static void PedidoJogo(Dictionary<string, object> m)
         {
             string tipo = S(m, "tipo"), pid = S(m, "pid"), id = S(m, "id");
+            int monitor;
+            if (!int.TryParse(S(m, "monitor"), out monitor)) monitor = -1;
             var t = new Thread(() =>
             {
                 Dictionary<string, object> r;
@@ -799,7 +804,7 @@ namespace Sala3d
                         if (tipo == "jogos") r = ListarJogos();
                         else if (tipo == "obs") r = GarantirObs();
                         else if (tipo == "jogo-fechar") r = FecharJogo();
-                        else r = AbrirJogo(id);
+                        else r = AbrirJogo(id, monitor);
                     }
                 }
                 catch (Exception err) { r = new Dictionary<string, object> { { "ok", false }, { "msg", err.Message } }; }
@@ -1054,20 +1059,26 @@ namespace Sala3d
             return new Dictionary<string, object> { { "ok", true }, { "msg", procs.Count == 0 ? nome + " já estava fechado" : "fechou " + nome }, { "atual", null } };
         }
 
-        static Dictionary<string, object> AbrirJogo(string id)
+        static Dictionary<string, object> AbrirJogo(string id, int monitor = -1)
         {
             string arq = Atalhos().FirstOrDefault(f => string.Equals(Path.GetFileName(f), id, StringComparison.OrdinalIgnoreCase));
             if (arq == null) return new Dictionary<string, object> { { "ok", false }, { "msg", "esse jogo não está mais na pasta Jogos da Sala 3D" }, { "atual", AtualAinda() } };
             string nome = Path.GetFileNameWithoutExtension(arq);
+            RECT alvo;
+            monitorDoJogo = monitor >= 0 && Monitor((uint)monitor, out alvo) ? monitor : -1;
             if (jogoAtual != null && string.Equals(jogoAtual, Path.GetFileName(arq), StringComparison.OrdinalIgnoreCase) && AtualAinda() != null)
             {
                 TrazerJogo(jogoAtual);
+                // aberto noutro monitor: vai para o do PC direto
+                if (monitorDoJogo >= 0) { IntPtr h = JanelaDoJogo(true); if (h != IntPtr.Zero) PorNoMonitor(h, monitorDoJogo); }
                 return new Dictionary<string, object> { { "ok", true }, { "msg", nome + " já estava aberto: veio para a frente" }, { "nome", nome }, { "atual", jogoAtual } };
             }
             if (jogoAtual != null) FecharJogo();
             jogoDesde = DateTime.Now;
             jogoAtual = Path.GetFileName(arq);
             GuardarJogoAtual();
+            // o mouse no monitor do jogo: muitos jogos abrem no monitor onde o ponteiro está
+            if (monitorDoJogo >= 0 && Monitor((uint)monitorDoJogo, out alvo)) SetCursorPos((alvo.Left + alvo.Right) / 2, (alvo.Top + alvo.Bottom) / 2);
             // pelo explorer: o jogo não fica pendurado no Chrome (nem no job dele)
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", "\"" + arq + "\"") { UseShellExecute = false });
             VigiarTelaCheia(jogoAtual);
@@ -1180,37 +1191,60 @@ namespace Sala3d
             }) { IsBackground = true }.Start();
         }
 
+        const int GWL_STYLE = -16;
+        const long WS_CAPTION = 0x00C00000, WS_THICKFRAME = 0x00040000, WS_POPUP = 0x80000000L;
+        [DllImport("user32.dll")] static extern bool IsZoomed(IntPtr h);
+
+        static bool MesmoRet(RECT a, RECT b) { return a.Left == b.Left && a.Top == b.Top && a.Right == b.Right && a.Bottom == b.Bottom; }
+
+        // a janela do jogo em tela cheia sem bordas no monitor indicado (-1: no monitor onde ela já está).
+        // Devolve false se não precisou mexer.
+        static bool PorNoMonitor(IntPtr h, int monitor)
+        {
+            RECT r;
+            var mi = new MONITORINFOEX(); mi.cbSize = Marshal.SizeOf(mi);
+            if (!GetMonitorInfo(MonitorFromWindow(h, 2), ref mi)) return false;
+            if (monitor < 0 || !Monitor((uint)monitor, out r)) r = mi.rcMonitor;
+            long estilo = GetWindowLongPtr(h, GWL_STYLE).ToInt64();
+            bool comBorda = (estilo & WS_CAPTION) == WS_CAPTION;
+            // já sem bordas / tela cheia no monitor certo: fica como está
+            if (!comBorda && MesmoRet(mi.rcMonitor, r)) return false;
+            if (IsZoomed(h)) ShowWindow(h, 9); // maximizada não muda de monitor: restaura antes
+            if (comBorda) SetWindowLongPtr(h, GWL_STYLE, new IntPtr((estilo & ~(WS_CAPTION | WS_THICKFRAME)) | WS_POPUP));
+            // SWP_FRAMECHANGED | SWP_SHOWWINDOW | SWP_NOOWNERZORDER
+            SetWindowPos(h, IntPtr.Zero, r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top, 0x0020 | 0x0040 | 0x0200);
+            return true;
+        }
+
         static void VigiarTelaCheia(string jogo)
         {
             SeguirJogo(jogo);
             new Thread(() =>
             {
-                var feitas = new HashSet<IntPtr>();
-                var fim = DateTime.Now.AddMinutes(2);
+                // cada janela: quantas vezes já foi acertada (o jogo que insiste em voltar para o outro
+                // monitor não fica num cabo de guerra)
+                var feitas = new Dictionary<IntPtr, int>();
+                var fim = DateTime.Now.AddMinutes(3);
                 while (DateTime.Now < fim)
                 {
                     Thread.Sleep(1000);
                     try
                     {
                         if (jogoAtual != jogo) return; // fecharam ou trocaram de jogo
+                        int monitor = monitorDoJogo;
                         IntPtr h = GetForegroundWindow();
-                        if (h == IntPtr.Zero || feitas.Contains(h) || !IsWindowVisible(h) || IsIconic(h)) continue;
+                        if (h == IntPtr.Zero || !IsWindowVisible(h) || IsIconic(h)) continue;
+                        int vezes;
+                        feitas.TryGetValue(h, out vezes);
+                        // sem monitor fixo, uma olhada basta; com o do PC direto, confere sempre
+                        if (vezes >= (monitor >= 0 ? 3 : 1)) continue;
                         uint pid;
                         GetWindowThreadProcessId(h, out pid);
                         System.Diagnostics.Process p;
                         lock (travaJogo) p = ProcessosDoJogo().FirstOrDefault(x => x.Id == pid);
                         if (p == null || LANCADORES.Contains(p.ProcessName)) continue;
-                        const int GWL_STYLE = -16;
-                        const long WS_CAPTION = 0x00C00000, WS_THICKFRAME = 0x00040000, WS_POPUP = 0x80000000L;
-                        long estilo = GetWindowLongPtr(h, GWL_STYLE).ToInt64();
-                        feitas.Add(h);
-                        if ((estilo & WS_CAPTION) != WS_CAPTION) continue; // já sem bordas / tela cheia
-                        var mi = new MONITORINFOEX(); mi.cbSize = Marshal.SizeOf(mi);
-                        if (!GetMonitorInfo(MonitorFromWindow(h, 2), ref mi)) continue;
-                        SetWindowLongPtr(h, GWL_STYLE, new IntPtr((estilo & ~(WS_CAPTION | WS_THICKFRAME)) | WS_POPUP));
-                        var r = mi.rcMonitor;
-                        // SWP_FRAMECHANGED | SWP_SHOWWINDOW | SWP_NOOWNERZORDER
-                        SetWindowPos(h, IntPtr.Zero, r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top, 0x0020 | 0x0040 | 0x0200);
+                        if (monitor < 0) feitas[h] = 1;
+                        if (PorNoMonitor(h, monitor) && monitor >= 0) feitas[h] = vezes + 1;
                     }
                     catch { }
                 }

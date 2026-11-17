@@ -3006,7 +3006,8 @@ const pcDireto = new PcDireto({
 
 // a imagem do PC direto numa tela da sala, com o controle liberado (é para jogar). O som não toca aqui:
 // é o próprio som deste PC (quem compartilha já está ouvindo).
-async function compartilharPcDireto(fonte, { rotulo }) {
+// auto: pedido dos Jogos do PC (ninguém na frente deste PC): não pergunta a tela
+async function compartilharPcDireto(fonte, { rotulo, auto = false }) {
   if (!state.joined) {
     toast('Entre na sala antes de pôr o PC numa tela.', 'warn', 5000);
     return null;
@@ -3019,7 +3020,7 @@ async function compartilharPcDireto(fonte, { rotulo }) {
   shareBusy = true;
   let key;
   try {
-    const tela = await escolherTela();
+    const tela = auto ? undefined : await escolherTela();
     if (tela === null) return null;
     key = await publishShare(fonte.stream, { tela, superficie: 'monitor', alvo: { superficie: 'monitor', rotulo } });
   } finally {
@@ -6527,8 +6528,9 @@ async function liberarControle(key) {
 // Este PC, liberado para o /tela, é o PC de jogos da sala: o ajudante do Windows (extensão 1.20+,
 // ajudante 1.14+) lista os atalhos da pasta "Jogos da Sala 3D" da área de trabalho e o catálogo vai
 // para o servidor (só o dono da sala vê, em pc-jogos.js). O dono escolhe um jogo: este PC fecha o de
-// antes, abre o OBS (com a câmera virtual), compartilha por ele com o som do PC, libera o controle e
-// abre o jogo. Escolher outro troca o jogo; o compartilhamento continua.
+// antes, põe o monitor de 144 Hz na sala pelo PC direto (a placa de vídeo, sempre a 60 qps), libera o
+// controle e abre o jogo nesse monitor. Sem o PC direto (placa sem NVENC, ponte fora): pelo OBS (com a
+// câmera virtual), como antes. Escolher outro troca o jogo; o compartilhamento continua.
 let catalogoEnviado = null; // o último catálogo mandado (não manda igual de novo)
 let publicandoJogos = false;
 async function publicarJogos() {
@@ -6574,15 +6576,39 @@ async function pedidoDeJogo({ acao, id, de }) {
     publicarJogos();
     return responder(!!r?.ok, r?.ok ? r.msg : `não fechou: ${erroDoAjudante(r)}`);
   }
-  // já compartilha pelo OBS? continua nele (trocar de jogo não mexe no compartilhamento)
   const minhas = self()?.shares;
-  let key = [...(minhas?.values() || [])].find((s) => s.obs)?.key ?? null;
+  // PC direto (a placa de vídeo) no lugar do OBS: sempre o monitor de 144 Hz, sempre a 60 qps. O jogo
+  // abre nesse monitor (o ajudante leva a janela para lá). Já no ar assim: trocar de jogo não mexe nele.
+  let key = null;
+  let monitor = null;
+  let semDireto = null;
+  if (temPcDireto() && !isTouch) {
+    const pronto = pcDireto.noAr && pcDireto.key && pcDireto.conectado?.monitor === pcDireto.monitorDoJogo()?.i;
+    if (!pronto) {
+      if (shareBusy) return responder(false, 'já tem um compartilhamento começando lá');
+      toast(`${de} escolheu um jogo: abrindo o PC direto…`, 'info', 6000);
+      // o OBS e a Tela 1 do /tela saem: a imagem passa a vir da placa
+      for (const sh of [...(minhas?.values() || [])]) if (sh.obs) stopShare(sh.key, true);
+      if (telaKey && minhas?.has(telaKey)) stopShare(telaKey, true);
+      telaKey = null;
+    }
+    const r = await pcDireto.ligarParaJogo();
+    if (r.key) {
+      key = r.key;
+      monitor = r.monitor;
+    } else {
+      semDireto = r.erro;
+      diagJogo.evento('jogos do pc: o PC direto não abriu, vai pelo OBS', { erro: String(r.erro).slice(0, 200) });
+    }
+  }
+  // sem o PC direto (outra placa, a ponte não abriu): pelo OBS, como antes. Já nele? continua.
+  if (!key) key = [...(minhas?.values() || [])].find((s) => s.obs)?.key ?? null;
   if (!key) {
     if (shareBusy) return responder(false, 'já tem um compartilhamento começando lá');
     if (!(await cameraLiberada())) return responder(false, 'o Chrome de lá ainda não deixou a sala usar a câmera (o OBS chega como câmera): na frente do PC, compartilhe uma vez pelo OBS e permita');
     toast(`${de} escolheu um jogo: abrindo o OBS…`, 'info', 6000);
     const o = await controle.pedir('pc-obs', undefined, undefined, undefined, 30_000);
-    if (!o?.ok) return responder(false, `não abriu o OBS: ${erroDoAjudante(o)}`);
+    if (!o?.ok) return responder(false, `${semDireto ? `o PC direto não abriu (${semDireto}) e ` : ''}não abriu o OBS: ${erroDoAjudante(o)}`);
     // a Tela 1 do /tela sai: a imagem passa a vir do OBS
     if (telaKey && minhas?.has(telaKey)) stopShare(telaKey, true);
     telaKey = null;
@@ -6591,10 +6617,12 @@ async function pedidoDeJogo({ acao, id, de }) {
     key = telaKey = r.key;
   }
   const controleOk = await liberarControle(key);
-  const j = await controle.pedir('pc-jogo-abrir', undefined, undefined, String(id || ''), 40_000);
+  // ev.monitor: o ajudante abre o jogo no monitor que a placa está mandando (extensão 1.26+)
+  const j = await controle.pedir('pc-jogo-abrir', undefined, monitor ? { monitor: monitor.i } : undefined, String(id || ''), 40_000);
   publicarJogos();
   if (!j?.ok) return responder(false, `não abriu o jogo: ${erroDoAjudante(j)}`);
-  responder(true, `${j.msg}${controleOk ? '' : ' (sem controle: falta o ajudante do Windows)'}. Abra a tela de ${settings.name} para jogar.`);
+  const como = monitor ? ` pelo PC direto (monitor ${monitor.i + 1}${monitor.hz ? ` de ${monitor.hz} Hz` : ''}, 60 qps)` : semDireto ? ` pelo OBS (o PC direto não abriu: ${semDireto})` : ' pelo OBS';
+  responder(true, `${j.msg}${como}${controleOk ? '' : ' (sem controle: falta o ajudante do Windows)'}. Abra a tela de ${settings.name} para jogar.`);
 }
 
 // /pix do dono e /tela: completam o comando, a ação e o nome de quem está na sala. Setas escolhem, Tab ou
