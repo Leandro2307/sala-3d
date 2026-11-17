@@ -3973,6 +3973,12 @@ body.jogo-pc #focus:fullscreen .focus-bar { display: none; }
 .jogo-op-pop label { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; }
 .jogo-op-pop input { margin: 2px 0 0; accent-color: var(--accent); }
 .jogo-op-pop small { display: block; opacity: 0.65; }
+.jogo-op-pop .jogo-op-vol { display: grid; gap: 6px; cursor: default; }
+.jogo-op-pop .jogo-op-vol[hidden] { display: none; }
+.jogo-op-vol small { display: inline; }
+.jogo-op-vol-linha { display: flex; align-items: center; gap: 10px; }
+.jogo-op-vol-linha input { flex: 1; min-width: 0; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.jogo-op-vol-linha output { min-width: 38px; text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
 /* selo de desempenho de quem joga */
 #jogo-selo {
   position: absolute;

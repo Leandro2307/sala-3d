@@ -2992,6 +2992,8 @@ const ps5Nativo = new Ps5Nativo({
     ligado: () => !!self()?.shares.get(ps5Nativo.key)?.lossless,
     alternar: () => losslessParaTodos(!self()?.shares.get(ps5Nativo.key)?.lossless),
   },
+  // o volume do som do PS5 aqui (só neste PC: quem joga usa o volume das telas)
+  volume: { get: () => volumePs5, set: (v) => mudarVolumePs5(v) },
   // "Levar o som do PC": o som do PC (a voz do Voz Universal) misturado no do PS5, na mesma tela
   somPc: {
     ligado: () => !!self()?.shares.get(ps5Nativo.key)?.somPc,
@@ -3394,12 +3396,33 @@ async function compartilharPs5(fonte) {
   if (fonte.stream.getAudioTracks().length) {
     sh.escuta = new Audio();
     sh.escuta.srcObject = new MediaStream(fonte.stream.getAudioTracks());
+    sh.escuta.volume = volumePs5 / 100;
     sh.escuta.play().catch(() => {});
   }
   renderPeople();
   renderSharePop();
   toast(`O PS5 está no ${ondeEsta(sh) === 'Telão' ? 'telão' : ondeEsta(sh)}, com o controle liberado. Quem abrir a tela e ligar o modo jogo joga nele.`, 'success', 7000);
   return key;
+}
+
+// O volume do som do PS5 neste PC (o sh.escuta das telas de PS5), de 0 a 100: na janela PS5 direto e
+// no menu Opções do modo jogo. Só muda o que se ouve aqui; quem joga ouve no volume das telas dele.
+let volumePs5 = (() => {
+  try {
+    const v = Number(localStorage.getItem('sala3d-ps5-volume'));
+    return localStorage.getItem('sala3d-ps5-volume') != null && Number.isFinite(v) ? Math.min(100, Math.max(0, v)) : 100;
+  } catch {
+    return 100;
+  }
+})();
+function mudarVolumePs5(v) {
+  volumePs5 = Math.min(100, Math.max(0, Math.round(Number(v) || 0)));
+  try { localStorage.setItem('sala3d-ps5-volume', String(volumePs5)); } catch { /* sem armazenamento */ }
+  for (const sh of self()?.shares.values() || []) if (sh.ps5 && sh.escuta) sh.escuta.volume = volumePs5 / 100;
+  const el = $('#jogo-ps5-vol');
+  if (el && Number(el.value) !== volumePs5) el.value = String(volumePs5);
+  const saida = $('#jogo-ps5-vol-n');
+  if (saida) saida.textContent = `${volumePs5}%`;
 }
 
 const MOTIVO_TURBO = {
@@ -4249,7 +4272,11 @@ $('#focus-jogo-op').addEventListener('click', (e) => {
   e.currentTarget.setAttribute('aria-expanded', String(!pop.hidden));
   e.currentTarget.blur();
   $$('#jogo-op-pop [data-op]').forEach((el) => { el.checked = !!opcoesJogo.get(el.dataset.op); });
+  // o volume do PS5 só aparece para quem tem o PS5 numa tela deste PC
+  $('#jogo-ps5-vol-row').hidden = ![...(self()?.shares.values() || [])].some((sh) => sh.ps5 && sh.escuta);
+  mudarVolumePs5(volumePs5);
 });
+$('#jogo-ps5-vol').addEventListener('input', (e) => mudarVolumePs5(e.target.value));
 $('#focus-engasgo').addEventListener('click', (e) => {
   e.currentTarget.blur();
   marcarEngasgo();

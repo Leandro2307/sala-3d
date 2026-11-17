@@ -619,6 +619,10 @@ const CSS = `
 #ps5-nativo .p5-pilula::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 #ps5-nativo .p5-pilula.vivo::before { box-shadow: 0 0 0 0 currentColor; animation: p5-pulso 1.6s ease-out infinite; }
 @keyframes p5-pulso { to { box-shadow: 0 0 0 7px transparent; } }
+#ps5-nativo .p5-vol { grid-template-columns: auto minmax(0, 1fr); }
+#ps5-nativo .p5-vol-linha { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
+#ps5-nativo .p5-vol-linha input { flex: 1; min-width: 0; margin: 0; accent-color: var(--p5, var(--accent)); cursor: pointer; }
+#ps5-nativo .p5-vol-linha output { min-width: 42px; text-align: right; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
 #ps5-nativo .p5-acoes { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
 #ps5-nativo .p5-linha { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 #ps5-nativo .p5-campos { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding: 12px 14px;
@@ -658,8 +662,8 @@ export class Ps5Nativo {
   // jogarComLossless(key): a tela do PS5 em tela cheia no modo jogo, com o Lossless ligado (main.js)
   // losslessTodos: { ligado(), alternar() } — o Lossless deste PC para todos, pela câmera do OBS
   // somPc: { ligado(), alternar(), abafar(), alternarAbafar() } — o som do PC (Voz Universal) junto com o do PS5
-  constructor({ pedirPonte, compartilhar, pararTela, onTremor, onEvento, toast, aoAbrir, aoFechar, jogarComLossless, losslessTodos, somPc }) {
-    Object.assign(this, { pedirPonte, compartilhar, pararTela, onTremor, onEvento, toast, aoAbrir, aoFechar, jogarComLossless, losslessTodos, somPc });
+  constructor({ pedirPonte, compartilhar, pararTela, onTremor, onEvento, toast, aoAbrir, aoFechar, jogarComLossless, losslessTodos, somPc, volume }) {
+    Object.assign(this, { pedirPonte, compartilhar, pararTela, onTremor, onEvento, toast, aoAbrir, aoFechar, jogarComLossless, losslessTodos, somPc, volume });
     this.ws = null;
     this.consoles = [];
     this.achados = null;
@@ -673,7 +677,9 @@ export class Ps5Nativo {
     this.ultimoPad = 0;
     this.padSolto = true;
     try { this.opcoes = { ...PADRAO, ...JSON.parse(localStorage.getItem(OPCOES) || '{}') }; } catch { this.opcoes = { ...PADRAO }; }
-    this.opcoes.altura = alturaValida(this.opcoes.altura); // quem tinha 1440p/4K guardado volta para 1080p
+    // toda vez que a página abre, a imagem do PS5 entra em 1080p · 60 qps (como o modo de imagem de quem
+    // joga entra no 1080p Turbo liso): o 720p ou os 30 qps escolhidos valem até recarregar
+    Object.assign(this.opcoes, { altura: PADRAO.altura, qps: PADRAO.qps });
     // antes da versão 2 a banda era 6 Mbps de fábrica (gravada junto): passa a ser automática
     if (!(this.opcoes.v >= 2)) {
       if (Number(this.opcoes.kbps) === 6000) this.opcoes.kbps = 0;
@@ -970,6 +976,21 @@ export class Ps5Nativo {
       else if (acao === 'som-pc-abafar') { this.somPc?.alternarAbafar(); this.render(); }
       else if (acao === 'ls-todos') Promise.resolve(this.losslessTodos?.alternar()).finally(() => this.render());
     });
+    // o volume muda enquanto arrasta (sem desenhar a janela de novo, que soltaria o controle)
+    this.raiz.addEventListener('pointerdown', (e) => {
+      if (e.target.name === 'p5-volume') this.arrastandoVolume = true;
+    });
+    addEventListener('pointerup', () => {
+      if (!this.arrastandoVolume) return;
+      this.arrastandoVolume = false;
+      if (this.renderDepois) { this.renderDepois = false; this.render(); }
+    });
+    this.raiz.addEventListener('input', (e) => {
+      if (e.target.name !== 'p5-volume') return;
+      this.volume?.set(e.target.value);
+      const saida = e.target.parentElement.querySelector('output');
+      if (saida) saida.textContent = `${this.volume?.get() ?? e.target.value}%`;
+    });
     this.raiz.addEventListener('change', (e) => {
       const n = e.target.name;
       if (n === 'p5-altura') {
@@ -1023,6 +1044,8 @@ export class Ps5Nativo {
 
   render() {
     if (!this.aberto) return;
+    // arrastando o volume: desenhar de novo soltaria o controle da mão — fica para quando soltar
+    if (this.arrastandoVolume) { this.renderDepois = true; return; }
     const corpo = this.raiz.querySelector('.p5-corpo');
     if (!temPs5Nativo()) {
       corpo.innerHTML = `<div class="p5-aviso">${icon('help', 16)}<span>Este navegador não decodifica vídeo pela página (WebCodecs). Use o Chrome ou o Edge no PC do PS5.</span></div>`;
@@ -1055,6 +1078,12 @@ export class Ps5Nativo {
     const fase = FASES[this.fase] ?? this.fase;
     const c = this.conectado;
     const extras = [];
+    if (noAr && this.key && this.volume) {
+      const v = this.volume.get();
+      extras.push(`<div class="p5-item p5-vol"><span class="p5-ic">${icon('volume', 18)}</span>
+        <span><b>Volume do PS5</b><small>Só o que você ouve neste PC. Quem joga ouve no volume das telas dele.</small>
+          <span class="p5-vol-linha"><input type="range" name="p5-volume" min="0" max="100" step="1" value="${v}" aria-label="Volume do PS5"><output>${v}%</output></span></span></div>`);
+    }
     if (noAr && this.key && this.somPc) {
       const on = this.somPc.ligado();
       extras.push(`<div class="p5-item"><span class="p5-ic">${icon('volume', 18)}</span>
