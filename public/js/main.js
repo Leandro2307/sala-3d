@@ -2918,7 +2918,14 @@ controle.onTremor = ({ key, deId }, g, p) => {
 // jogo e o codificador, e quem joga leva a banda de jogo (rtc.modoJogo). tela → Map(quem → desde)
 const jogandoAqui = new Map();
 let desenharMesmoAssim = false; // quem compartilha pediu a sala de volta (botão do aviso)
-const jogoNoMeuPc = () => jogandoAqui.size > 0 && !desenharMesmoAssim;
+// PS5 direto: o jogo roda no PS5 e a imagem chega pronta (o turbo só repassa), então a placa de vídeo
+// daqui não tem o que guardar e a sala continua desenhada. Com o Lossless Scaling dobrando a imagem
+// do PS5 a placa trabalha, e a pausa volta.
+const telaPesada = (key) => {
+  const sh = self()?.shares.get(key);
+  return !sh?.ps5 || !!sh.lossless;
+};
+const jogoNoMeuPc = () => !desenharMesmoAssim && [...jogandoAqui.keys()].some(telaPesada);
 // Eu jogo na tela de outra pessoa: { key, video }
 let jogandoLa = null;
 const diagJogo = new DiagJogo({ toast, contexto: () => ({ sala: state.room || null, nome: settings.name || null }) });
@@ -2969,7 +2976,7 @@ function jogoAqui(key, deId, ligar, rapido = false) {
       extra: { extensao: controle.ext?.versao ?? null, ajudante: controle.ext?.nativo?.versao ?? null, preset: rtc?.shareMode ?? null, superficie: superficieDe(self()?.shares.get(key)), janelaDoJogo: self()?.shares.get(key)?.titulo ?? null, codecs: codecsTestados(), qpsCaptura: rtc?.qpsCaptura() ?? null },
     });
     avisarEmulador(self()?.shares.get(key));
-    toast(`${nome} está jogando no seu PC. A sala ficou em pausa aqui, para o jogo e a transmissão terem a placa de vídeo toda.`, 'info', 12000, null, {
+    if (telaPesada(key)) toast(`${nome} está jogando no seu PC. A sala ficou em pausa aqui, para o jogo e a transmissão terem a placa de vídeo toda.`, 'info', 12000, null, {
       rotulo: 'Desenhar a sala',
       fazer: () => {
         desenharMesmoAssim = true;
