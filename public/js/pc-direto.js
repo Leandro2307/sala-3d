@@ -357,7 +357,7 @@ export class PcDireto {
     corpo.innerHTML = `
       ${semNvenc ? `<div class="p5-aviso">${icon('help', 16)}<span>${esc(ERROS[this.erroNvenc] || ERROS['sem-nvenc'])}</span></div>`
         : ocupado ? `<section class="p5-sec"><h3>Agora</h3><p class="p5-status">${this.fase === 'abrindo' ? '<span class="p5-fase">abrindo a captura e o codificador…</span>' : `<b>No ar:</b> ${agora}`}</p></section>`
-        : `<div class="p5-aviso">${icon('help', 16)}<span>O monitor escolhido vai para uma tela da sala e, no modo turbo, <b>a imagem que a placa fez vai direto para quem joga</b> (sem a captura do Chrome nem o processador). O mouse, o teclado e o controle de quem joga chegam como numa tela inteira. Ponha o jogo em <b>tela cheia sem borda</b> no monitor que não é o da sala.</span></div>`}
+        : `<div class="p5-aviso">${icon('help', 16)}<span>O monitor escolhido vai para uma tela da sala e, no modo turbo, <b>a imagem que a placa fez vai direto para quem joga</b> (sem a captura do Chrome nem o processador). O mouse, o teclado e o controle de quem joga chegam como numa tela inteira. Ponha o jogo em <b>tela cheia sem borda</b> no monitor que não é o da sala, e <b>deixe a janela da sala visível</b> (minimizada ou coberta, o Chrome desacelera a página e o turbo não entra).</span></div>`}
       <section class="p5-sec"><h3>Monitores</h3>
         <div class="p5-lista">${lista || `<div class="p5-vazio">${icon('monitores', 24)}<span>Nenhum monitor achado.</span><button type="button" class="secondary small" data-pc="atualizar">Procurar de novo</button></div>`}</div>
       </section>

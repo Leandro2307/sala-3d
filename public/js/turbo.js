@@ -519,6 +519,9 @@ export class TurboEnvio {
       s.espera.length = 0;
     };
     this.onMudou?.(id, key, true);
+    // PC direto: começa em 60% da banda e sobe pela fila (ajustarBanda). Em 20 Mbps de cara o Wi-Fi do
+    // celular engasgava os primeiros ~10 s (relatório de 2026-11-17 01:54: 16 qps, fila de 250 ms)
+    if (fonte.banda) fonte.banda.mudar(fonte.banda.max * 0.6);
     fonte.pedirChave();
   }
 

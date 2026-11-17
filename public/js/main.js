@@ -6363,6 +6363,19 @@ function manterAcordado() {
   controle.pedir('pc-acordado', undefined, undefined, on ? 1 : 0, 10_000);
 }
 document.addEventListener('visibilitychange', manterAcordado);
+// PC direto e PS5 direto: com a sala minimizada ou coberta, o Chrome desacelera a página e o turbo de
+// quem joga não entra (teste de 2026-11-17 01:44: "sem-imagem" quatro vezes, até a sala voltar à frente)
+let escondidaNoAr = false;
+document.addEventListener('visibilitychange', () => {
+  const noAr = pcDireto.noAr || ps5Nativo.noAr;
+  if (document.hidden && noAr) {
+    escondidaNoAr = true;
+    diagJogo.evento('a sala ficou escondida com a imagem direta no ar (o Chrome desacelera a página)');
+  } else if (!document.hidden && escondidaNoAr) {
+    escondidaNoAr = false;
+    if (noAr) toast(`Deixe a janela da sala aberta e visível enquanto o ${pcDireto.noAr ? 'PC' : 'PS5'} direto estiver no ar (no outro monitor, por exemplo): minimizada ou coberta, o Chrome desacelera a página e o modo turbo de quem joga não entra.`, 'warn', 12000);
+  }
+});
 setInterval(manterAcordado, 60_000);
 
 function comandoTela(resto) {
