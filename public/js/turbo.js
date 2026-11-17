@@ -78,6 +78,8 @@ const PEDIR_CHAVE_MS = 250; // intervalo mínimo entre pedidos de quadro-chave
 // Um quadro-chave que saiu há menos que isto e que quem joga ainda não viu está a caminho: outro
 // pedido por ele é ignorado (ver TurboEnvio.pedidoDeChave). Nos picos do Wi-Fi a viagem chegou a 250 ms.
 const CHAVE_A_CAMINHO_MS = 400;
+// PS5 direto: com a fila de envio cheia, os quadros esperam aqui até tanto (ver quadroPs5)
+const ESPERA_PS5_MS = 150;
 const PING_MS = 500;
 const SEGURANDO = 3; // quadros dentro do decodificador depois de ele já ter soltado algum...
 const SEGURANDO_QUADROS = 15; // ...em tantos quadros seguidos: ele está guardando (TurboRecebe.segurando)
@@ -477,21 +479,28 @@ export class TurboEnvio {
   // ---------------------------------------------------------------- PS5 direto
   // A fonte (Ps5Fonte) entrega o H.264 do PS5 já no formato avc e o som em Opus: nada é codificado
   // aqui. O que muda para quem joga: nada (a mesma configuração, os mesmos pedaços e cabeçalho).
-  // Quadro de fora (fila cheia) quebra a cadeia de quadros: daí até o próximo quadro-chave nada vai, e
-  // o quadro-chave é pedido ao PS5. A banda é a da sessão do PS5 (ajustarBanda não tem o que mexer).
+  // Quadro de fora quebra a cadeia de quadros: daí até o próximo quadro-chave nada vai, e o quadro-chave
+  // é pedido ao PS5 — que leva ~1 s para mandar. Por isso a fila cheia não tira quadro: eles esperam
+  // aqui até ESPERA_PS5_MS (esvaziarPs5); só passando disso a cadeia é quebrada. Nos relatórios de
+  // 2026-11-16 (21:19, PS5 → iPhone) 1 quadro pulado pela fila custava ~62 (raj 62–64): 42,7 qps de
+  // média contra 56 com o PC codificando. A banda é a da sessão do PS5 (ajustarBanda não tem o que mexer).
   // somMix: o som do PS5 misturado com o do PC (main.js, "Levar o som do PC"). Com ele, o som não é o
   // Opus do PS5 repassado: a mistura é codificada aqui, como numa tela comum.
   ligarPs5(id, canal, key, fonte, { versao, som, somMix = null }) {
     const s = { id, key, canal, chave: true, quadro: 0, enc: null, cfg: null, config: null, banda: 0, trilha: null, parar: false, pulados: 0, enviados: 0,
       cfgEnviada: null, ajuste: { altas: 0, baixas: 0, mudou: 0, ultima: null }, chaveId: 0, chaveEm: 0, ps5: fonte,
       tempos: new Map(), conta: { enviados: 0, bytes: 0, pulados: 0, fila: 0, cod: [], chaves: 0, chaveMax: 0, ignorados: 0, ultimo: performance.now() },
-      serie: { fila: [], pulados: [] }, rajada: 0, maiorRajada: 0 };
+      serie: { fila: [], pulados: [] }, rajada: 0, maiorRajada: 0, espera: [] };
     this.sessoes.set(id, s);
     s.v2 = Number(versao) >= 2;
     s.altMax = 1080;
+    // a fila andou: os quadros que esperavam saem sem precisar do próximo quadro do PS5
+    const andou = () => this.esvaziarPs5(s);
+    canal.bufferedAmountLowThreshold = this.limiteFila(s);
+    canal.addEventListener('bufferedamountlow', andou);
     if (som && somMix) this.ligarSom(s, somMix);
     else if (som) s.som = { ps5: true, seq: 0, cfg: null, conta: { enviados: 0, bytes: 0, pulados: 0 } };
-    s.cancelar = fonte.assinar((m) => {
+    const cancelarFonte = fonte.assinar((m) => {
       if (s.parar) return;
       if (m.cfg) {
         s.cfgPs5 = m.cfg;
@@ -504,8 +513,28 @@ export class TurboEnvio {
         this.mandarSom(s, s.som, m.som, m.ts);
       }
     });
+    s.cancelar = () => {
+      cancelarFonte();
+      canal.removeEventListener('bufferedamountlow', andou);
+      s.espera.length = 0;
+    };
     this.onMudou?.(id, key, true);
     fonte.pedirChave();
+  }
+
+  // um quadro do PS5 que não vai (contado no relatório). quebra: a cadeia se perdeu e só um quadro-chave
+  // recomeça (pedido ao PS5)
+  pularPs5(s, porFila, quebra = true) {
+    const b = Math.min(49, Math.floor((performance.now() - s.conta.ultimo) / 100));
+    while (s.serie.pulados.length <= b) { s.serie.fila.push(0); s.serie.pulados.push(0); }
+    s.pulados++;
+    s.conta.pulados++;
+    s.serie.pulados[b]++;
+    if (porFila) s.conta.fila++;
+    if (++s.rajada > s.maiorRajada) s.maiorRajada = s.rajada;
+    if (!quebra) return;
+    s.chave = true;
+    s.ps5.pedirChave();
   }
 
   quadroPs5(s, m) {
@@ -516,30 +545,55 @@ export class TurboEnvio {
     while (sf.length <= b) { sf.push(0); s.serie.pulados.push(0); }
     const fila = s.canal.bufferedAmount;
     if (fila / 1024 > sf[b]) sf[b] = Math.round(fila / 102.4) / 10;
-    const pular = (porFila) => {
-      s.pulados++;
-      s.conta.pulados++;
-      s.serie.pulados[b]++;
-      if (porFila) s.conta.fila++;
-      if (++s.rajada > s.maiorRajada) s.maiorRajada = s.rajada;
-      s.chave = true;
-      s.ps5.pedirChave();
-    };
-    // esperando um quadro-chave (começo, perda lá ou fila cheia aqui): os de antes não servem
-    if (s.chave && !m.chave) return pular(false);
-    // a fila de envio no dobro da trava do turbo: este fica de fora (e os de depois, até a chave)
-    if (fila > this.limiteFila(s) * 2) return pular(true);
-    s.rajada = 0;
+    // esperando um quadro-chave (começo, perda lá ou espera longa demais aqui): os de antes não servem
+    if (s.chave && !m.chave) return this.pularPs5(s, false);
+    // um quadro-chave recomeça a cadeia: os que ainda esperavam ficaram velhos e não fazem falta
     if (m.chave) {
-      const cfg = { codec: s.cfgPs5.codec, w: s.cfgPs5.w, h: s.cfgPs5.h, description: s.cfgPs5.b64 };
-      const ant = s.cfgEnviada;
-      if (!ant || ant.codec !== cfg.codec || ant.w !== cfg.w || ant.h !== cfg.h || ant.description !== cfg.description) {
-        s.cfgEnviada = cfg;
-        try { s.canal.send(JSON.stringify({ cfg })); } catch { return; }
-      }
-      s.chave = false;
+      for (const _ of s.espera) this.pularPs5(s, true, false);
+      s.espera.length = 0;
     }
-    this.mandar(s, m.quadro, m.chave, m.ts, 0, m.t0);
+    s.espera.push({ m, em: agora });
+    this.esvaziarPs5(s);
+  }
+
+  // Manda os quadros do PS5 que esperam, em ordem, enquanto a fila de envio estiver abaixo do dobro da
+  // trava do turbo. O mais velho esperando há mais de ESPERA_PS5_MS: a rede parou de verdade — todos
+  // ficam de fora e a cadeia recomeça no próximo quadro-chave (o jeito de antes).
+  esvaziarPs5(s) {
+    const limite = this.limiteFila(s) * 2;
+    while (s.espera.length && !s.parar && s.canal.readyState === 'open') {
+      // a cadeia se perdeu enquanto esperavam (quem joga pediu um quadro-chave, configuração nova)
+      if (s.chave && !s.espera[0].m.chave) {
+        s.espera.shift();
+        this.pularPs5(s, false);
+        continue;
+      }
+      if (s.canal.bufferedAmount > limite) {
+        if (performance.now() - s.espera[0].em <= ESPERA_PS5_MS) return; // a fila ainda pode andar
+        for (const _ of s.espera) this.pularPs5(s, true);
+        s.espera.length = 0;
+        return;
+      }
+      const { m } = s.espera.shift();
+      s.rajada = 0;
+      if (m.chave) {
+        const cfg = { codec: s.cfgPs5.codec, w: s.cfgPs5.w, h: s.cfgPs5.h, description: s.cfgPs5.b64 };
+        const ant = s.cfgEnviada;
+        if (!ant || ant.codec !== cfg.codec || ant.w !== cfg.w || ant.h !== cfg.h || ant.description !== cfg.description) {
+          s.cfgEnviada = cfg;
+          try { s.canal.send(JSON.stringify({ cfg })); } catch { return; }
+        }
+        s.chave = false;
+      }
+      this.mandar(s, m.quadro, m.chave, m.ts, 0, m.t0);
+      // não coube no canal (mandar marcou a chave): os que esperavam dependiam dele
+      if (s.chave) {
+        for (const _ of s.espera) this.pularPs5(s, true);
+        s.espera.length = 0;
+        s.ps5.pedirChave();
+        return;
+      }
+    }
   }
 
   // ---------------------------------------------------------------- som
