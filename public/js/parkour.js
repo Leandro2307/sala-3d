@@ -60,16 +60,18 @@ export const COURSE = [
   { type: 'pad', pos: [-25, 24.8, 19.5], size: [2.8, 2.8], color: C.pad, strength: 17 },
   { id: 'cp5', type: 'checkpoint', pos: [-29, 27.2, 23.5], size: [4, 4], color: C.checkpoint, label: 'CHECKPOINT 5' },
 
-  // F — Reta final até o camarote (descendo)
+  // F — Reta final até o camarote (descendo): vai até x = -13 e volta para o camarote, no canto
+  // oeste. O meio da parede do fundo fica livre (no mapa Vice tem o cartaz do chão ao teto).
   { pos: [-29, 27.2, 28], size: [2.2, 2.2], color: C.d },
-  { pos: [-24, 26.4, 31.5], size: [2.2, 2.2], color: C.moving, move: { axis: 'x', amp: 3.6, period: 4.6 } },
-  { pos: [-18, 25.6, 34], size: [2, 2], color: C.d },
-  { pos: [-12, 24.6, 36.5], size: [2, 2], color: C.d },
+  { pos: [-23, 26.4, 30], size: [2.2, 2.2], color: C.moving, move: { axis: 'x', amp: 3, period: 4.6 } },
+  { pos: [-17, 25.6, 33], size: [2, 2], color: C.d },
+  { pos: [-13, 24.8, 37.5], size: [2, 2], color: C.d },
+  { pos: [-18.5, 24, 39], size: [2, 2], color: C.d },
 
-  // Camarote VIP
-  { id: 'balcony', type: 'balcony', pos: [-4, 23, 36], size: [32, 8], h: 0.8, color: C.balcony },
-  { id: 'finish', type: 'finish', pos: [-4, 23.15, 36.5], size: [4, 4], h: 0.15, color: C.finish, label: 'CHEGADA' },
-  { type: 'teleport', pos: [-15, 23.15, 37.5], size: [2.6, 2.6], h: 0.15, color: C.teleport, target: [0, 0, -2], label: 'DESCER' },
+  // Camarote VIP (x de -45 a -22)
+  { id: 'balcony', type: 'balcony', pos: [-33.5, 23, 36], size: [23, 8], h: 0.8, color: C.balcony },
+  { id: 'finish', type: 'finish', pos: [-27, 23.15, 35.5], size: [4, 4], h: 0.15, color: C.finish, label: 'CHEGADA' },
+  { type: 'teleport', pos: [-42, 23.15, 35], size: [2.6, 2.6], h: 0.15, color: C.teleport, target: [0, 0, -2], label: 'DESCER' },
 ];
 
 // Quantos checkpoints o percurso tem (o HUD desenha um ponto para cada).
@@ -77,8 +79,8 @@ export const CHECKPOINT_COUNT = COURSE.filter((p) => p.type === 'checkpoint').le
 
 // Grade de proteção do camarote (deixa aberto o lado por onde se chega).
 export const RAILS = [
-  { pos: [-10, 24.1, 32.15], size: [20, 0.25], h: 1.1 },
-  { pos: [-19.9, 24.1, 36], size: [0.25, 8], h: 1.1 },
+  { pos: [-33.5, 24.1, 32.15], size: [23, 0.25], h: 1.1 },
+  { pos: [-44.9, 24.1, 36], size: [0.25, 8], h: 1.1 },
 ];
 
 // Camas elásticas de diversão na plateia (não fazem parte do percurso).

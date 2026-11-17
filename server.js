@@ -575,6 +575,7 @@ const JOGOS_SALA = ['parkour', 'ringue', 'corrida', 'futebol', 'volei', 'basquet
 const configPadrao = () => ({
   modulo: 'lazer',
   mapa: MAPA_PADRAO, // o mapa em volta do prédio (public/js/mapas-dados.js)
+  mapaV: 2, // 2: já passou pela troca do padrão para o Vice (ver carregarSala)
   departamentos: [],
   jogos: Object.fromEntries(JOGOS_SALA.map((j) => [j, true])),
   empresa: '',
@@ -621,6 +622,7 @@ function limparConfig(raw, base = configPadrao()) {
   return {
     modulo: antigo ? 'escritorio' : MODULOS.includes(c.modulo) ? c.modulo : base.modulo,
     mapa: MAPAS_SALA.includes(c.mapa) ? c.mapa : MAPAS_SALA.includes(base.mapa) ? base.mapa : MAPA_PADRAO,
+    mapaV: 2,
     departamentos: antigo ? [c.modulo] : c.departamentos === undefined ? base.departamentos : limpar(c.departamentos),
     jogos: Object.fromEntries(JOGOS_SALA.map((j) => [j, typeof jogos[j] === 'boolean' ? jogos[j] : base.jogos[j]])),
     empresa: typeof c.empresa === 'string' ? cleanText(c.empresa, 40) : base.empresa,
@@ -645,7 +647,10 @@ function limparConfig(raw, base = configPadrao()) {
 // lê a configuração uma vez por sala (várias pessoas entrando juntas esperam a mesma leitura)
 function carregarSala(room) {
   room.carregando ??= banco.lerSala(room.id).then((s) => {
-    room.config = limparConfig(s?.config || {});
+    // O padrão era o tropical e toda sala gravou o mapa junto: as gravadas antes da troca (sem
+    // mapaV) com o tropical passam para o Vice. Quem escolher o tropical de novo grava com mapaV.
+    const salvo = s?.config || {};
+    room.config = limparConfig(salvo.mapaV !== 2 && salvo.mapa === 'tropical' ? { ...salvo, mapa: 'vice' } : salvo);
     room.senhaHash = s?.senhaHash || null;
     room.entradaHash = s?.config?.entradaHash || null; // vem junto da config, mas não vai para ninguém
     room.gestorHash = s?.config?.gestorHash || null; // senha de gestor (alertas da equipe), idem

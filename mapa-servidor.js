@@ -9,7 +9,7 @@
 // setTimeout), então o mapa em uso é sempre o da sala que está sendo tratada.
 
 const MAPAS_SALA = ['tropical', 'neve', 'outono', 'vice'];
-const MAPA_PADRAO = 'tropical';
+const MAPA_PADRAO = 'vice'; // o GTA VI em toda sala que não escolheu outro
 const mapaDa = (room) => (MAPAS_SALA.includes(room?.config?.mapa) ? room.config.mapa : MAPA_PADRAO);
 
 function carregarPorMapa(arquivo) {

@@ -958,6 +958,7 @@ export class World {
       () => {
         this.area('plateia', () => this.buildAudience());
         this.buildScreens();
+        if (CINEMA_GTA) this.luzTelaoGta();
       },
       // A praça na porta do prédio e as ruas até cada área (cidade.js). Antes do autódromo (o
       // guard-rail abre passagem onde a rua chega) e da natureza (não planta em cima das ruas).
@@ -1609,7 +1610,7 @@ export class World {
 
   // Cinema do mapa Vice: um cartaz grande em cima da parede de telas e cartazes nas paredes oeste e
   // do fundo, com moldura de neon. Cada um tenta uma imagem de public/img/cinema-gta/ (o grande:
-  // poster.jpg; laterais: parede1.jpg a parede6.jpg; fundo: fundo1.jpg e fundo2.jpg); sem ela fica o desenho próprio (pôr do
+  // poster.jpg; laterais: parede1.jpg a parede6.jpg; fundo: fundo1.jpg e fundo2.jpg; o do meio do fundo, do chão ao teto: centro.jpg); sem ela fica o desenho próprio (pôr do
   // sol, coqueiros, mar, estrada de neon). A imagem entra no formato dela, dentro do espaço do cartaz.
   cartazesGta() {
     const S = SALA;
@@ -1649,17 +1650,78 @@ export class World {
       tex: canvasTexture(1600, 900, (ctx, w, h) => desenharCartazVice(ctx, w, h, 0), ESCALA_TEXTURA),
       w: 40, h: 22.5, maxW: 44, maxH: 24, x: 0, y: 36, z: S.minZ + 0.3, giro: 0, arquivo: 'poster.jpg',
     });
-    // 3 de cada lado, na mesma altura: parede1-3 na oeste (olhando para +x), parede4-6 na leste
-    // (olhando para -x). Na leste fica a porta com a placa de SAÍDA (até y ≈ 29): os cartazes vão
-    // acima dela, e os da oeste acompanham. Com imagem deitada, cabem 18 m de largura.
+    // 3 de cada lado, baixos (de y ≈ 1,5 a 10, na altura de quem anda pela sala): parede1-3 na oeste
+    // (olhando para +x), parede4-6 na leste (olhando para -x). Na leste a porta vai de z = 14 a 46,
+    // então os de lá ficam todos antes dela. Com imagem deitada, 15 m de largura.
     for (const [i, z] of [-12, 12, 36].entries()) {
-      cartaz({ tex: pe(i + 1), w: 12, h: 18, maxW: 18, maxH: 18, x: S.minX + 0.12, y: 39, z, giro: Math.PI / 2, arquivo: `parede${i + 1}.jpg` });
-      cartaz({ tex: pe(i + 3), w: 12, h: 18, maxW: 18, maxH: 18, x: S.maxX - 0.12, y: 39, z: 24 - z, giro: -Math.PI / 2, arquivo: `parede${i + 4}.jpg` });
+      cartaz({ tex: pe(i + 1), w: 8, h: 12, maxW: 15, maxH: 12, x: S.minX + 0.12, y: 6, z, giro: Math.PI / 2, arquivo: `parede${i + 1}.jpg` });
     }
-    // 2 no fundo (olhando para -z), abaixo do camarote: fundo1.jpg e fundo2.jpg
-    for (const [i, x] of [-30, 30].entries()) {
-      cartaz({ tex: pe(i + 4), w: 10, h: 15, maxW: 18, maxH: 15, x, y: 12.5, z: S.maxZ - 0.12, giro: Math.PI, arquivo: `fundo${i + 1}.jpg` });
+    for (const [i, z] of [4, -12.5, -29].entries()) {
+      cartaz({ tex: pe(i + 3), w: 8, h: 12, maxW: 15, maxH: 12, x: S.maxX - 0.12, y: 6, z, giro: -Math.PI / 2, arquivo: `parede${i + 4}.jpg` });
     }
+    // 2 no fundo (olhando para -z), embaixo, um de cada lado do cartaz do meio, ocupando o espaço
+    // até os pilares dos cantos (1,5 m de folga para o cartaz do meio e para o pilar):
+    // fundo1.jpg à esquerda de quem olha para o fundo (+x) e fundo2.jpg à direita (-x)
+    const xMeio = (S.minX + S.maxX) / 2;
+    for (const [i, x] of [xMeio + 33.3, xMeio - 33.3].entries()) {
+      cartaz({ tex: pe(i + 4), w: 13, h: 19.6, maxW: 35, maxH: 19.6, x, y: 11.2, z: S.maxZ - 0.25, giro: Math.PI, arquivo: `fundo${i + 1}.jpg` });
+    }
+    // o do meio do fundo, do chão ao teto, logo atrás do camarote do parkour: centro.jpg (em pé).
+    // Um pouco à frente da parede, para a moldura não brigar com o rodapé neon.
+    cartaz({ tex: pe(6), w: 27, h: 58.6, maxW: 40, maxH: 58.6, x: xMeio, y: 29.8, z: S.maxZ - 0.25, giro: Math.PI, arquivo: 'centro.jpg' });
+  }
+
+  // Cinema do mapa Vice: uma faixa de LED em volta do telão, com luzes correndo em volta sem parar.
+  // A faixa é uma tira só, com u = a distância andada no contorno; a textura (cometas rosa e
+  // laranja sobre a faixa apagada) desliza nela. Fica no grupo do telão: some junto com ele.
+  luzTelaoGta() {
+    const tela = this.mainScreen;
+    const a = tela.w / 2 + 0.4; // por fora da moldura (que tem 0,35 m de cada lado)
+    const b = tela.h / 2 + 0.4;
+    const e = 0.4; // largura da faixa
+    const cantos = [[-a, -b], [a, -b], [a, b], [-a, b], [-a, -b]];
+    const perim = 4 * (a + b);
+    const pos = [];
+    const uv = [];
+    let andado = 0;
+    cantos.forEach(([x, y], i) => {
+      if (i) andado += Math.hypot(x - cantos[i - 1][0], y - cantos[i - 1][1]);
+      const u = andado / perim;
+      pos.push(x, y, 0, x + Math.sign(x) * e, y + Math.sign(y) * e, 0);
+      uv.push(u, 0, u, 1);
+    });
+    const idx = [];
+    for (let i = 0; i < 4; i++) {
+      const p = i * 2;
+      idx.push(p, p + 2, p + 1, p + 1, p + 2, p + 3);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    geo.setIndex(idx);
+    // um cometa por repetição: cauda rosa crescendo até a cabeça quase branca
+    const tex = canvasTexture(512, 4, (ctx, w, h) => {
+      ctx.fillStyle = '#3a0d2a';
+      ctx.fillRect(0, 0, w, h);
+      const g = ctx.createLinearGradient(0, 0, w, 0);
+      g.addColorStop(0, 'rgba(255,79,163,0)');
+      g.addColorStop(0.55, 'rgba(255,79,163,0.9)');
+      g.addColorStop(0.85, 'rgba(255,165,61,1)');
+      g.addColorStop(0.97, 'rgba(255,240,220,1)');
+      g.addColorStop(1, 'rgba(255,240,220,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(w * 0.45, 0, w * 0.55, h);
+    });
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.repeat.x = 4; // 4 cometas no contorno
+    const faixa = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: tex, toneMapped: false, side: THREE.DoubleSide }));
+    faixa.position.z = 0.02;
+    tela.group.add(faixa);
+    // uma volta inteira a cada 10 s; a cabeça vai na frente (u crescendo: anti-horário para quem olha o telão)
+    this.decorAnimated.push((t) => {
+      if (!tela.group.visible) return;
+      tex.offset.x = -((t / 10) % 1) * tex.repeat.x;
+    });
   }
 
   // Por fora: contorno neon na porta, letreiro e frisos de LED. É o que se vê da pista.
@@ -1870,28 +1932,32 @@ export class World {
     });
     for (const [mat, geos] of pecas) this.scene.add(fundir(geos, mat, { sombra: true, recebe: true }));
 
-    // pufes lisinhos na frente
+    // pufes lisinhos na frente da 1ª fileira (z = -25, de -26,1 a -23,9): em z = -26 eles ficavam
+    // enfiados no sofá. Baixos como o sofá novo (topo a 0,8 m).
     const puffColors = [0x6ee7c8, 0xf472b6, 0x60a5fa, 0xfbbf24];
     puffColors.forEach((color, i) => {
       const x = -9 + i * 6;
       // a reta de baixo do circuito passa em z = -33: os pufes recuam para não
       // ficarem no meio da pista
-      const z = -26;
+      const z = -29;
       const puff = new THREE.Mesh(
-        new THREE.SphereGeometry(1.1, 32, 24),
+        new THREE.SphereGeometry(1.05, 32, 24),
         new THREE.MeshStandardMaterial({ color, roughness: 0.55 }),
       );
-      puff.scale.set(1, 0.62, 1);
-      puff.position.set(x, 0.62, z);
+      puff.scale.set(1, 0.45, 1);
+      puff.position.set(x, 0.33, z);
       puff.castShadow = true;
       puff.receiveShadow = true;
       this.scene.add(puff);
-      this.addBox({ min: [x - 0.85, 0, z - 0.85], max: [x + 0.85, 1.05, z + 0.85], data: { type: 'puff' }, mesh: puff });
+      this.addBox({ min: [x - 0.85, 0, z - 0.85], max: [x + 0.85, 0.75, z + 0.85], data: { type: 'puff' }, mesh: puff });
     });
   }
 
   // pecas: Map material → geometrias já no lugar (buildAudience funde tudo no fim)
   addSofa(x, z, mat, cushion, pecas) {
+    // k: a altura do sofá. Com 1 o assento ficava a 1 m e o encosto a 2,1 m, alto demais para os
+    // bonecos; com 0,6 o assento fica a 0,6 m e o encosto a 1,26 m (largura e fundo os mesmos)
+    const k = 0.6;
     const parts = [
       { size: [7, 0.8, 2.2], pos: [0, 0.4, 0], mat },
       { size: [6.2, 0.25, 1.9], pos: [0, 0.88, -0.05], mat: cushion },
@@ -1899,11 +1965,15 @@ export class World {
       { size: [0.55, 0.7, 2.2], pos: [-3.25, 1.05, 0], mat },
       { size: [0.55, 0.7, 2.2], pos: [3.25, 1.05, 0], mat },
     ];
-    for (const p of parts) pecas.get(p.mat).push(new RoundedBoxGeometry(...p.size, 3, 0.18).translate(x + p.pos[0], p.pos[1], z + p.pos[2]));
-    this.addBox({ min: [x - 3.5, 0, z - 1.1], max: [x + 3.5, 1.0, z + 1.1], data: { type: 'sofa' } });
-    this.addBox({ min: [x - 3.5, 0, z + 0.55], max: [x + 3.5, 2.1, z + 1.15], data: { type: 'sofa' } });
-    this.addBox({ min: [x - 3.5, 0, z - 1.1], max: [x - 2.97, 1.4, z + 1.1], data: { type: 'sofa' } });
-    this.addBox({ min: [x + 2.97, 0, z - 1.1], max: [x + 3.5, 1.4, z + 1.1], data: { type: 'sofa' } });
+    for (const p of parts) {
+      const [w, h, d] = [p.size[0], p.size[1] * k, p.size[2]];
+      const raio = Math.min(0.18, h / 2 - 0.01);
+      pecas.get(p.mat).push(new RoundedBoxGeometry(w, h, d, 3, raio).translate(x + p.pos[0], p.pos[1] * k, z + p.pos[2]));
+    }
+    this.addBox({ min: [x - 3.5, 0, z - 1.1], max: [x + 3.5, 1.0 * k, z + 1.1], data: { type: 'sofa' } });
+    this.addBox({ min: [x - 3.5, 0, z + 0.55], max: [x + 3.5, 2.1 * k, z + 1.15], data: { type: 'sofa' } });
+    this.addBox({ min: [x - 3.5, 0, z - 1.1], max: [x - 2.97, 1.4 * k, z + 1.1], data: { type: 'sofa' } });
+    this.addBox({ min: [x + 2.97, 0, z - 1.1], max: [x + 3.5, 1.4 * k, z + 1.1], data: { type: 'sofa' } });
   }
 
   buildScreens() {
@@ -2833,13 +2903,13 @@ export class World {
     // sofá VIP no camarote
     const vipMat = new THREE.MeshStandardMaterial({ color: 0x7c3aed, roughness: 0.7 });
     const vip = new THREE.Mesh(new RoundedBoxGeometry(8, 0.8, 2, 3, 0.2), vipMat);
-    vip.position.set(5.5, 23.4, 38.4);
+    vip.position.set(-35, 23.4, 38.4);
     vip.castShadow = true;
     const vipBack = new THREE.Mesh(new RoundedBoxGeometry(8, 1.4, 0.5, 3, 0.2), vipMat);
-    vipBack.position.set(5.5, 24.2, 39.4);
+    vipBack.position.set(-35, 24.2, 39.4);
     this.scene.add(vip, vipBack);
-    this.addBox({ min: [1.5, 23, 37.4], max: [9.5, 23.8, 39.4], data: { type: 'sofa' } });
-    this.addBox({ min: [1.5, 23, 39.15], max: [9.5, 24.9, 39.65], data: { type: 'sofa' } });
+    this.addBox({ min: [-39, 23, 37.4], max: [-31, 23.8, 39.4], data: { type: 'sofa' } });
+    this.addBox({ min: [-39, 23, 39.15], max: [-31, 24.9, 39.65], data: { type: 'sofa' } });
   }
 
   decoratePad(mesh, w, d, h) {

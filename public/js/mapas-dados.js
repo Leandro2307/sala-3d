@@ -17,7 +17,7 @@ import { VICE } from './mapa-vice.js';
 
 export const MAPAS = { tropical: TROPICAL, neve: NEVE, outono: OUTONO, vice: VICE };
 export const IDS_MAPAS = Object.keys(MAPAS);
-export const MAPA_PADRAO = 'tropical';
+export const MAPA_PADRAO = 'vice'; // o GTA VI (igual ao mapa-servidor.js)
 
 // O centro de cada atração no desenho original: o deslocamento de um mapa é o centro dele menos este
 export const CENTRO_ORIGINAL = {
