@@ -47,6 +47,10 @@ if (-not (Test-Path -LiteralPath $vigem)) {
 if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'ps5\sala3d-ps5.exe')) {
   Write-Host '  PS5 direto (sem o chiaki-ng): pronto. Na sala: Ajustes -> PS5 direto.' -ForegroundColor Green
 }
+# PC direto (ajudante 1.19+): a ponte que codifica a tela deste PC na placa (ver pc\LEIA-ME.md)
+if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'pc\sala3d-pc.exe')) {
+  Write-Host '  PC direto (placa de video, como o Remote Play): pronto. Na sala: /pc.' -ForegroundColor Green
+}
 $driver = Get-Service -Name 'ViGEmBus' -ErrorAction SilentlyContinue
 if (Test-Path -LiteralPath $vigem) {
   if ($driver) { Write-Host '  Controle virtual (PS5): pronto.' -ForegroundColor Green }

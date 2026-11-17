@@ -914,3 +914,39 @@ O relatório passou a ter o som:
 - quem joga: `somWebrtc` (pacotes/s, nível, % inventado pelo navegador) e `somPor` (turbo, vídeo normal ou
   nenhum); eventos "o som do jogo sumiu (nem turbo nem vídeo normal)" / "voltou";
 - os avisos da libchiaki (quadro corrompido às centenas, 272 de 300 eventos) viram um resumo a cada 30 s.
+
+## PC direto: este PC como o Remote Play (2026-11-16)
+
+Pedido do usuário: "o PS5 tem o Remote Play que fica muito liso, não teria um para o PC?". O caminho da
+tela inteira era captura do Chrome (~54 qps no máximo, memória do projeto) → OpenH264 no processador.
+Agora há uma ponte igual à do PS5, só que a imagem vem da placa deste PC:
+
+- **Ponte** `extensao/nativo/pc/ponte-pc.c` → `sala3d-pc.exe` (C, MSYS2 UCRT64, `compilar.sh`, 480 KB,
+  só libopus estática): Desktop Duplication → cópia (com o cursor por GDI) → processador de vídeo D3D11
+  (BGRA → NV12 BT.709 limitado, escala para 720p/1080p) → NVENC H.264 High (P3, ULTRA_LOW_LATENCY, CBR,
+  VBV de 2 quadros, GOP infinito, 1 referência, VUI com cores e `bitstream_restriction` reorder 0 /
+  max_dec 1). Ritmo: relógio na cadência com folga de 1/4 de quadro; tela parada → um quadro igual a
+  cada 100 ms. `ACCESS_LOST` (tela cheia, UAC) reabre a duplicação; resolução nova reabre tudo.
+  Som: captura por processo (`VAD\Process_Loopback`, EXCLUDE da árvore do navegador acima da ponte),
+  PCM 48 kHz → Opus 10 ms 128 kbps; sem Windows 2004+, o som inteiro do PC (com aviso de eco). Silêncio
+  vira pacotes de silêncio a cada 10 ms. Mesmo protocolo da ponte do PS5 (`GET /pc?t=`), mais as
+  mensagens `monitores`, `iniciar {monitor, altura, qps, kbps, cursor, som}` e `banda {kbps}`.
+- **Ajudante 1.19**: `{tipo:'pc-ponte'}` (o `AbrirPonte` virou genérico: `pontes[nome]`).
+  **Extensão 1.25**: pedido `pc-ponte`.
+- **Página** `public/js/pc-direto.js`: `PcDireto` (painel `#pc-direto` no visual do PS5 direto,
+  `/pc`, "Compartilhar o PC direto" em Suas telas) com a mesma `Ps5Fonte`. A tela entra como
+  `superficie: 'monitor'` com o `alvo` `screen:N:0` que a ponte dá (índice do EnumDisplayDevices, como
+  o ajudante procura), então o mouse, o teclado e o controle de Xbox são os de uma tela inteira; o
+  controle é liberado na hora (`permitirControle`). O som não toca aqui (é o próprio PC).
+- **Turbo**: `sh.pcDireto` vai como a fonte do PS5 (repasse, sem codificar). `ajustarBanda` agora mexe
+  na banda da ponte quando a fonte tem `banda` (o PS5 não tem): 0,85× com a fila alta, 1,1× com ela baixa.
+
+Testado aqui (RTX 3060 Ti, driver 610.88, monitor 1080p 165 Hz), ponte de verdade + sala na cópia da
+3100 com duas pessoas no Chrome headless: a ponte manda 601 quadros em 10 s a 60 qps (codificar
+~5 ms) e 1197 a 120 qps; quem joga recebe pelo turbo 1920×1080 a ~60 qps, ~18 Mbps, 0 perdidos,
+~19 ms da captura ao desenhado. A 120 qps o Chrome headless (decodificando sem placa) não acompanhou.
+O som sem o navegador abriu ("som: processo") com `--excluir <pid do Chrome>`.
+
+**Não testado pelo ajudante de verdade** (precisa recarregar a extensão e reabrir o Chrome) nem com
+o controle de quem joga no monitor capturado. Só NVIDIA por enquanto: AMD/Intel pediriam o
+codificador do Media Foundation.

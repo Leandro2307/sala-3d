@@ -762,6 +762,15 @@ export class TurboEnvio {
     // deixava juntar 4 seguidos — no relatório de 2026-11-03 16:13, 22 de 82 avisos caíram entre 24 e
     // 30 ms (Wi-Fi), e a imagem recebida foi de ~6,9 para ~4,8 Mbps sem voltar.
     a.baixas = fila < FILA_BAIXA ? a.baixas + 1 : fila > FILA_ALTA ? 0 : a.baixas;
+    // PC direto (pc-direto.js): os quadros vêm da placa pela ponte; a banda muda lá (fonte.banda, em kbps)
+    if (!s.enc && s.ps5?.banda) {
+      const b = s.ps5.banda;
+      let nova = b.atual;
+      if (a.altas >= 2) { nova = Math.max(b.max * BANDA_MIN, b.atual * 0.85); a.altas = 0; }
+      else if (a.baixas >= 4 && b.atual < b.max) { nova = Math.min(b.max, b.atual * 1.1); a.baixas = 0; }
+      if (Math.abs(nova - b.atual) >= b.atual * 0.03) { b.mudar(nova); a.mudou++; }
+      return;
+    }
     if (!s.enc || s.enc.state !== 'configured' || !s.config) return;
     const max = bandaDe(s.cfg.h);
     let nova = s.banda;

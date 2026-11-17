@@ -704,6 +704,8 @@ async function tratar(m, sender) {
   // 1.21+ (ajudante 1.15+): o PC não dorme nem bloqueia a tela enquanto compartilha
   // PS5 nativo (1.22+, ajudante 1.16+): abre a ponte do Remote Play e devolve a porta e o token dela
   if (m.tipo === 'ps5-ponte') return pedidoNativo('ps5', {}, 20_000);
+  // PC direto (1.25+, ajudante 1.19+): a ponte que codifica a tela deste PC na placa de vídeo
+  if (m.tipo === 'pc-ponte') return pedidoNativo('pc-ponte', {}, 20_000);
   // Lossless (1.23+, ajudante 1.17+): aperta o atalho do Lossless Scaling com a sala na frente
   if (m.tipo === 'pc-lossless') return pedidoNativo('lossless', {}, 10_000);
   // Lossless para todos (1.24+, ajudante 1.18+): a janela do PS5 no outro monitor, o OBS capturando ela

@@ -64,6 +64,7 @@ const P = {
   baixar: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/>',
   esq: '<path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>',
   dir: '<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
+  pc: '<rect width="20" height="13" x="2" y="3" rx="2"/><path d="M8 21h8"/><path d="M12 16v5"/>',
   monitores: '<rect width="9" height="7" x="2" y="5" rx="1.5"/><rect width="9" height="7" x="13" y="5" rx="1.5"/><path d="M6.5 12v4"/><path d="M17.5 12v4"/><path d="M4 16h5"/><path d="M15 16h5"/>',
   grade: '<rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/>',
   teclado: '<rect width="20" height="16" x="2" y="4" rx="2"/><path d="M6 8h.01"/><path d="M10 8h.01"/><path d="M14 8h.01"/><path d="M18 8h.01"/><path d="M8 12h.01"/><path d="M12 12h.01"/><path d="M16 12h.01"/><path d="M7 16h10"/>',

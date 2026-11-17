@@ -652,6 +652,8 @@ const CSS = `
 }
 `;
 
+export const CSS_PAINEL = CSS; // o PC direto (pc-direto.js) usa o mesmo visual
+
 const FASES = { procurando: 'procurando o PS5 na rede…', acordando: 'acordando o PS5 (uns 20 s)…', conectando: 'conectando…', jogando: 'no ar', parado: '' };
 const ERROS_REGISTRO = { conta: 'o ID da conta PSN não está certo (8 bytes em base64, como o chiaki-ng mostra)', pin: 'o PIN tem 8 números', ocupado: 'já tem um registro em andamento', falhou: 'o PS5 recusou (PIN vencido ou errado? o IP está certo?)', cancelado: 'cancelado' };
 

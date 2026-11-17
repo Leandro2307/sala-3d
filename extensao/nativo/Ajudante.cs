@@ -193,7 +193,7 @@ namespace Sala3d
             new Thread(VigiarAtalho) { IsBackground = true }.Start();
             new Thread(VigiarJogo) { IsBackground = true }.Start();
             new Thread(VigiarWifi) { IsBackground = true }.Start();
-            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.18.0" } });
+            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.19.0" } });
             var json = new JavaScriptSerializer();
             string txt;
             while ((txt = Ler(entrada)) != null)
@@ -247,7 +247,7 @@ namespace Sala3d
                 return;
             }
             if (tipo == "jogos" || tipo == "jogo-abrir" || tipo == "jogo-fechar" || tipo == "obs") { PedidoJogo(m); return; }
-            if (tipo == "ps5") { PedidoPs5(S(m, "pid")); return; }
+            if (tipo == "ps5" || tipo == "pc-ponte") { PedidoPs5(S(m, "pid"), tipo); return; }
             if (tipo == "lossless") { PedidoLossless(S(m, "pid")); return; }
             if (tipo == "obs-ps5") { PedidoObsPs5(S(m, "pid"), S(m, "alvo")); return; }
             if (tipo == "parar") { lock (travaEntrada) { parado = true; SoltarTudo(); } return; }
@@ -355,6 +355,7 @@ namespace Sala3d
         // (ela sai sozinha quando ele sai: --pai). A sala fala com ela direto por um WebSocket em
         // 127.0.0.1, na porta que ela escolheu, com um token aleatório que só a sala fica sabendo.
         //   { tipo: "ps5" } -> { tipo: "ps5", ok, porta, token, versao } ou { ok: false, msg }
+        // PC direto (1.19+): { tipo: "pc-ponte" } abre pc\sala3d-pc.exe do mesmo jeito (ver pc\ponte-pc.c)
         static readonly object travaPs5 = new object();
         // Lossless Scaling (1.17+): aperta o atalho dele (o do Settings.xml do Lossless, Ctrl+Alt+S de
         // fábrica), que liga ou desliga a escala na janela da frente — a sala em tela cheia. Devolve
@@ -722,37 +723,40 @@ namespace Sala3d
             }
         }
 
-        static System.Diagnostics.Process ponte;
-        static int portaPonte;
-        static string tokenPonte, versaoPonte;
+        // uma ponte aberta por este ajudante: a do PS5 (ps5\sala3d-ps5.exe) ou a do PC (pc\sala3d-pc.exe)
+        class Ponte { public System.Diagnostics.Process p; public int porta; public string token, versao; }
+        static readonly Dictionary<string, Ponte> pontes = new Dictionary<string, Ponte>();
 
-        static void PedidoPs5(string pid)
+        // tipo "ps5" ou "pc-ponte" (1.19+: o PC direto, a tela deste PC codificada pela placa)
+        static void PedidoPs5(string pid, string tipo = "ps5")
         {
             new Thread(() =>
             {
                 Dictionary<string, object> r;
-                try { r = AbrirPonte(); }
+                try { r = tipo == "pc-ponte" ? AbrirPonte("pc", "sala3d-pc.exe") : AbrirPonte("ps5", "sala3d-ps5.exe"); }
                 catch (Exception err) { r = new Dictionary<string, object> { { "ok", false }, { "msg", err.Message } }; }
-                r["tipo"] = "ps5";
+                r["tipo"] = tipo;
                 r["pid"] = pid;
                 Escrever(r);
             }) { IsBackground = true }.Start();
         }
 
-        static Dictionary<string, object> AbrirPonte()
+        static Dictionary<string, object> AbrirPonte(string nome, string arquivo)
         {
             lock (travaPs5)
             {
-                if (ponte == null || ponte.HasExited)
+                Ponte ponte;
+                pontes.TryGetValue(nome, out ponte);
+                if (ponte == null || ponte.p.HasExited)
                 {
                     string pasta = Environment.GetEnvironmentVariable("SALA3D_NATIVO") ?? "";
-                    string exe = Path.Combine(pasta, "ps5", "sala3d-ps5.exe");
+                    string exe = Path.Combine(pasta, nome, arquivo);
                     if (!File.Exists(exe)) return new Dictionary<string, object> { { "ok", false }, { "msg", "sem-ponte" } };
                     var rnd = new byte[18];
                     using (var g = System.Security.Cryptography.RandomNumberGenerator.Create()) g.GetBytes(rnd);
-                    tokenPonte = BitConverter.ToString(rnd).Replace("-", "").ToLowerInvariant();
+                    string token = BitConverter.ToString(rnd).Replace("-", "").ToLowerInvariant();
                     var info = new System.Diagnostics.ProcessStartInfo(exe,
-                        "--porta 0 --token " + tokenPonte + " --pai " + System.Diagnostics.Process.GetCurrentProcess().Id)
+                        "--porta 0 --token " + token + " --pai " + System.Diagnostics.Process.GetCurrentProcess().Id)
                     {
                         UseShellExecute = false,
                         RedirectStandardOutput = true,
@@ -774,11 +778,10 @@ namespace Sala3d
                         try { p.Kill(); } catch { }
                         return new Dictionary<string, object> { { "ok", false }, { "msg", "ponte-" + S(m, "erro") } };
                     }
-                    portaPonte = Convert.ToInt32(m["porta"]);
-                    versaoPonte = S(m, "versao");
-                    ponte = p;
+                    ponte = new Ponte { p = p, porta = Convert.ToInt32(m["porta"]), token = token, versao = S(m, "versao") };
+                    pontes[nome] = ponte;
                 }
-                return new Dictionary<string, object> { { "ok", true }, { "porta", portaPonte }, { "token", tokenPonte }, { "versao", versaoPonte } };
+                return new Dictionary<string, object> { { "ok", true }, { "porta", ponte.porta }, { "token", ponte.token }, { "versao", ponte.versao } };
             }
         }
 
