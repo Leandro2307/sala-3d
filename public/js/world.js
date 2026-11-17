@@ -1638,7 +1638,8 @@ export class World {
     // em pé: 3 na parede oeste (olhando para +x) e 2 no fundo (olhando para -z)
     const pe = (n) => canvasTexture(600, 900, (ctx, w, h) => desenharCartazVice(ctx, w, h, n), ESCALA_TEXTURA);
     for (const [i, z] of [-12, 12, 36].entries()) cartaz(pe(i + 1), 12, 18, S.minX + 0.12, 24, z, Math.PI / 2);
-    for (const [i, x] of [-30, 30].entries()) cartaz(pe(i + 4), 12, 18, x, 24, S.maxZ - 0.12, Math.PI);
+    // no fundo, abaixo do camarote
+    for (const [i, x] of [-30, 30].entries()) cartaz(pe(i + 4), 10, 15, x, 12.5, S.maxZ - 0.12, Math.PI);
   }
 
   // Por fora: contorno neon na porta, letreiro e frisos de LED. É o que se vê da pista.
