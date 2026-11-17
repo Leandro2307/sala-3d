@@ -3494,7 +3494,8 @@ async function compartilharPs5(fonte) {
   shareBusy = true;
   let key;
   try {
-    const tela = await escolherTela();
+    // ligado pela lan house (ninguém na frente deste PC): não pergunta a tela
+    const tela = ps5SemPerguntar ? undefined : await escolherTela();
     if (tela === null) return null;
     key = await publishShare(fonte.stream, { tela, superficie: 'ps5' });
   } finally {
@@ -5247,8 +5248,64 @@ const podeJogarLan = (m, id) => !state.lan || lanLivre(m) || idsDaVez(m).include
 const minhasMaquinas = () => Object.keys(MAQUINAS_LAN).filter((m) => idsDaVez(m).includes(state.selfId));
 let lanEraMinha = new Set();
 const horaCurta = (ms) => new Date(ms).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+// quanto falta para o fim da vez, pelo relógio do servidor (dif: a hora de lá menos a daqui)
+let lanDif = 0;
+const avisouFimLan = new Set(); // "pc|fim|5": o aviso de 5 min (e o de 1 min) só uma vez por vez
+function faltaLan(fim) {
+  const s = Math.max(0, Math.round((fim - (Date.now() + lanDif)) / 1000));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = String(s % 60).padStart(2, '0');
+  return { s, texto: h ? `${h}h${String(m).padStart(2, '0')}min` : `${m}:${ss}` };
+}
+function textoVezLan(m) {
+  const v = state.lan?.[m];
+  if (!v?.conta) return { texto: `${MAQUINAS_LAN[m]} livre: todos podem jogar`, livre: true };
+  const f = faltaLan(v.fim);
+  const minha = idsDaVez(m).includes(state.selfId);
+  return { texto: `${minha ? 'Sua vez' : `Vez de ${v.conta}`} no ${MAQUINAS_LAN[m]} · faltam ${f.texto}`, minha, acabando: f.s <= 300, s: f.s };
+}
+// De quem é a vez e quanto falta: no topo da sala (as duas máquinas) e por cima da tela aberta do PC
+// ou do PS5. Quem está jogando recebe aviso a 5 min e a 1 min do fim.
+function mostrarVezLan() {
+  for (const m of Object.keys(MAQUINAS_LAN)) {
+    const el = $(`#lan-vez-${m}`);
+    if (!el) continue;
+    el.hidden = !state.lan;
+    if (!state.lan) continue;
+    const v = textoVezLan(m);
+    el.textContent = v.texto;
+    el.classList.toggle('minha', !!v.minha);
+    el.classList.toggle('livre', !!v.livre);
+    el.classList.toggle('acabando', !!v.acabando);
+    if (v.minha) {
+      const fim = state.lan[m].fim;
+      for (const lim of [300, 60]) {
+        const k = `${m}|${fim}|${lim}`;
+        if (v.s <= lim && v.s > 0 && !avisouFimLan.has(k)) {
+          avisouFimLan.add(k);
+          toast(`Falta${lim === 60 ? '' : 'm'} ${lim / 60} min do seu horário no ${MAQUINAS_LAN[m]}. Para continuar, toque em "Alugar PC ou PS5".`, 'warn', 8000);
+        }
+      }
+    }
+  }
+  const foco = $('#lan-vez-foco');
+  if (!foco) return;
+  const k = state.focus?.kind === 'share' ? state.focus.key : null;
+  const sh = k ? state.users.get(k.split('~')[0])?.shares.get(k) : null;
+  // só nas telas que se jogam (com o controle liberado, ou a do PS5)
+  const vale = state.lan && sh && (sh.controle || maquinaDaTela(sh) === 'ps5');
+  foco.hidden = !vale;
+  if (!vale) return;
+  const v = textoVezLan(maquinaDaTela(sh));
+  foco.textContent = v.texto;
+  foco.classList.toggle('minha', !!v.minha);
+  foco.classList.toggle('acabando', !!v.acabando);
+}
+setInterval(() => { if (state.lan || !$('#lan-vez-foco')?.hidden) mostrarVezLan(); }, 1000);
 function aplicarLan(e) {
   state.lan = e?.ligada ? e : null;
+  if (typeof e?.agora === 'number') lanDif = e.agora - Date.now();
   // a vez mudou: quem jogava numa tela minha e não pode mais (a hora passou, ou alguém alugou a
   // máquina que estava livre) sai do modo jogo deste PC (a sala volta a ser desenhada normalmente)
   for (const sh of self()?.shares.values() || []) {
@@ -5262,6 +5319,7 @@ function aplicarLan(e) {
   for (const m of lanEraMinha) if (!agora.has(m)) toast(lanLivre(m) ? `Seu horário no ${MAQUINAS_LAN[m]} acabou. Ninguém alugou a próxima hora: a tela fica livre para todos.` : `Seu horário no ${MAQUINAS_LAN[m]} acabou. Para jogar mais, toque em "Alugar PC ou PS5".`, 'info', 10000);
   lanEraMinha = agora;
   mostrarLan();
+  mostrarVezLan();
 }
 // o botão "Alugar PC ou PS5" no topo, à esquerda: só com a lan house ligada (o começo e o fim da
 // vez de cada um chegam como aviso, ver aplicarLan)
@@ -6691,16 +6749,61 @@ const erroDoAjudante = (r) => (r?.erro === 'ajudante-ausente' ? 'o ajudante do W
   : r?.erro === 'demorou' || r?.erro === 'sem-resposta' ? `o ajudante não respondeu (precisa do 1.14+: recarregue a extensão lá${r.versao ? `; está no ${r.versao}` : ''})`
   : r?.msg || r?.erro || 'sem resposta');
 
-async function pedidoDeJogo({ acao, id, de }) {
+// Lan house: o que a vez de alguém pôs na sala (a tela do PC, o PS5). Acabou a vez e ninguém pegou a
+// seguinte, sai da sala; o que já estava na sala antes da vez fica.
+const lanAbriu = { pc: null, jogo: null, ps5: false };
+let ps5SemPerguntar = false;
+const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
+// a vez no PS5: liga o PS5 direto no último console usado (ou no primeiro registrado) e põe na sala
+async function pedidoPs5Lan(acao, de, responder) {
+  if (acao === 'fechar') {
+    const abriu = lanAbriu.ps5;
+    lanAbriu.ps5 = false;
+    if (!abriu || !ps5Nativo.noAr) return responder(true, 'Acabou a vez no PS5.');
+    ps5Nativo.parar();
+    return responder(true, 'O PS5 saiu da sala: acabou a vez.');
+  }
+  if (ps5Nativo.noAr) {
+    if (ps5Nativo.key) socket.emit('controle-permitir', { key: ps5Nativo.key, on: true });
+    return responder(true, `O PS5 já está na sala. Abra a tela de ${settings.name} para jogar.`);
+  }
+  if (!temPs5Nativo()) return responder(false, 'o navegador do PC da casa não abre o PS5 direto (use o Chrome)');
+  toast(`Vez de ${de} no PS5: ligando o PS5…`, 'info', 6000);
+  if (!(await ps5Nativo.ligarPonte())) return responder(false, `o PS5 não ligou: ${ps5Nativo.erro || 'a ponte não abriu'}`);
+  ps5Nativo.mandar({ tipo: 'consoles' });
+  for (let i = 0; i < 25 && !ps5Nativo.consoles.length; i++) await esperar(200);
+  const lista = ps5Nativo.consoles;
+  const console_ = lista.find((c) => c.id === ps5Nativo.opcoes.ultimo) || lista[0];
+  if (!console_) return responder(false, 'nenhum PS5 registrado no PC da casa (registre em PS5 direto)');
+  ps5SemPerguntar = true;
+  try {
+    await ps5Nativo.jogar(console_.id);
+    // conecta (e acorda o PS5 do repouso): até 90 s até a tela entrar na sala
+    for (let i = 0; i < 180 && !ps5Nativo.key && ps5Nativo.fase !== 'parado'; i++) await esperar(500);
+  } finally {
+    ps5SemPerguntar = false;
+  }
+  if (!ps5Nativo.key) return responder(false, 'o PS5 não conectou (ligado ou em repouso, no mesmo Wi-Fi do PC?)');
+  lanAbriu.ps5 = true;
+  responder(true, `O PS5 está na sala. Abra a tela de ${settings.name} para jogar.`);
+}
+async function pedidoDeJogo({ acao, id, de, maquina, lan: daLan }) {
   const responder = (ok, texto) => socket.emit('tela-resposta', { ok, texto, jogo: true });
   if (!telaLiberadaAqui()) return;
+  if (maquina === 'ps5') return pedidoPs5Lan(acao, de, responder);
   if (!controle.ext.ok || !controle.ext.liberado) return responder(false, 'a extensão da Sala 3D não está liberada no Chrome de lá');
   if (acao === 'fechar') {
-    const r = await controle.pedir('pc-jogo-fechar', undefined, undefined, undefined, 30_000);
+    // a vez acabou sem jogo aberto por ela: não há o que fechar no Windows, só a tela sai
+    const r = !daLan || lanAbriu.jogo ? await controle.pedir('pc-jogo-fechar', undefined, undefined, undefined, 30_000) : { ok: true, msg: '' };
     publicarJogos();
-    return responder(!!r?.ok, r?.ok ? r.msg : `não fechou: ${erroDoAjudante(r)}`);
+    const key = lanAbriu.pc;
+    lanAbriu.pc = null;
+    lanAbriu.jogo = null;
+    if (daLan && key && self()?.shares.has(key)) stopShare(key, true);
+    return responder(!!r?.ok, r?.ok ? r.msg || 'O PC saiu da sala: acabou a vez.' : `não fechou: ${erroDoAjudante(r)}`);
   }
   const minhas = self()?.shares;
+  const antes = new Set(minhas?.keys() || []);
   // PC direto (a placa de vídeo) no lugar do OBS: sempre o monitor de 144 Hz, sempre a 60 qps. O jogo
   // abre nesse monitor (o ajudante leva a janela para lá). Já no ar assim: trocar de jogo não mexe nele.
   let key = null;
@@ -6741,12 +6844,21 @@ async function pedidoDeJogo({ acao, id, de }) {
     key = telaKey = r.key;
   }
   const controleOk = await liberarControle(key);
+  // a vez da lan house pôs o PC na sala agora: sai quando ela acabar
+  if (daLan) {
+    if (!antes.has(key)) lanAbriu.pc = key;
+    else if (lanAbriu.pc !== key) lanAbriu.pc = null;
+  }
+  const como = monitor ? ` pelo PC direto (monitor ${monitor.i + 1}${monitor.hz ? ` de ${monitor.hz} Hz` : ''}, 60 qps)` : semDireto ? ` pelo OBS (o PC direto não abriu: ${semDireto})` : ' pelo OBS';
+  const semControle = controleOk ? '' : ' (sem controle: falta o ajudante do Windows)';
+  // alugou o PC sem escolher jogo: só a tela do PC na sala, a pessoa abre o que quiser
+  if (!id) return responder(true, `O PC está na sala${como}${semControle}. Abra a tela de ${settings.name} para jogar.`);
   // ev.monitor: o ajudante abre o jogo no monitor que a placa está mandando (extensão 1.26+)
   const j = await controle.pedir('pc-jogo-abrir', undefined, monitor ? { monitor: monitor.i } : undefined, String(id || ''), 40_000);
   publicarJogos();
   if (!j?.ok) return responder(false, `não abriu o jogo: ${erroDoAjudante(j)}`);
-  const como = monitor ? ` pelo PC direto (monitor ${monitor.i + 1}${monitor.hz ? ` de ${monitor.hz} Hz` : ''}, 60 qps)` : semDireto ? ` pelo OBS (o PC direto não abriu: ${semDireto})` : ' pelo OBS';
-  responder(true, `${j.msg}${como}${controleOk ? '' : ' (sem controle: falta o ajudante do Windows)'}. Abra a tela de ${settings.name} para jogar.`);
+  if (daLan) lanAbriu.jogo = true;
+  responder(true, `${j.msg}${como}${semControle}. Abra a tela de ${settings.name} para jogar.`);
 }
 
 // /pix do dono e /tela: completam o comando, a ação e o nome de quem está na sala. Setas escolhem, Tab ou

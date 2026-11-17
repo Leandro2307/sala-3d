@@ -742,6 +742,8 @@ function estadoLan(room) {
     const ids = atual ? [...room.users.values()].filter((u) => u.conta === atual.conta).map((u) => u.id) : [];
     e[m] = { conta: atual?.conta ?? null, fim: atual?.fim ?? null, ids };
   }
+  // a hora do servidor: a página conta quanto falta para o fim da vez pelo relógio daqui, não o dela
+  e.agora = Date.now();
   return e;
 }
 // a máquina de uma tela compartilhada: a do PS5 direto é o PS5, o resto é o PC
@@ -750,7 +752,7 @@ let ioLan = null;
 function avisarLan(room, forcar = false) {
   if (!ioLan) return;
   const e = estadoLan(room);
-  const chave = JSON.stringify(e);
+  const chave = JSON.stringify({ ...e, agora: 0 });
   if (!forcar && chave === room.lanChave) return;
   room.lanChave = chave;
   ioLan.to(room.id).emit('lan', e);
@@ -758,24 +760,32 @@ function avisarLan(room, forcar = false) {
 // Lan house no PC: na virada da vez, o PC da casa (o hub, ver 'hub-jogos') abre o jogo que a pessoa
 // escolheu ao reservar; acabou a vez e ninguém reservou a seguinte, fecha o que tinha aberto. Sem o
 // hub na sala, tenta de novo a cada 5 s (vigiarLan).
+// O mesmo com o PS5: na vez de alguém, o PC da casa liga o PS5 direto e põe na sala; acabou a vez e
+// ninguém pegou a seguinte, tira. O PC entra na sala na vez mesmo sem jogo escolhido.
 async function vigiarJogoLan(room) {
   if (!ioLan || !room.config?.lanhouse?.ligada) return;
-  const a = lan.jogadorAgora(room.id, 'pc');
-  const chave = a ? `${a.conta}|${a.jogo || ''}` : null;
-  if (chave === room.lanJogoChave) return;
-  const hubs = (await ioLan.in(room.id).fetchSockets()).filter((s) => s.data.tela && s.data.hub);
-  if (!hubs.length) return;
-  const acao = a?.jogo ? 'abrir' : room.lanJogoAberto ? 'fechar' : null;
-  room.lanJogoChave = chave;
-  if (!acao) return;
-  room.lanJogoAberto = acao === 'abrir';
-  // a resposta (abriu ou não) vai para quem alugou, se estiver na sala
-  const quem = a ? [...room.users.values()].find((u) => u.conta === a.conta) : null;
-  for (const s of hubs) {
-    s.data.telaDe = quem?.id || null;
-    s.emit('hub-pedido', { acao, id: a?.jogo || '', de: a ? `${a.conta} (lan house)` : 'Lan house' });
+  room.lanMaquinas ??= {};
+  let hubs = null;
+  for (const m of lan.MAQUINAS) {
+    const a = lan.jogadorAgora(room.id, m);
+    const chave = a ? `${a.conta}|${m === 'pc' ? a.jogo || '' : ''}` : null;
+    const st = (room.lanMaquinas[m] ??= { chave: undefined, aberto: false });
+    if (chave === st.chave) continue;
+    hubs ??= (await ioLan.in(room.id).fetchSockets()).filter((s) => s.data.tela && s.data.hub);
+    if (!hubs.length) return;
+    const acao = a ? 'abrir' : st.aberto ? 'fechar' : null;
+    st.chave = chave;
+    if (!acao) continue;
+    st.aberto = acao === 'abrir';
+    // a resposta (abriu ou não) vai para quem alugou, se estiver na sala
+    const quem = a ? [...room.users.values()].find((u) => u.conta === a.conta) : null;
+    for (const s of hubs) {
+      s.data.telaDe = quem?.id || null;
+      s.emit('hub-pedido', { maquina: m, lan: true, acao, id: m === 'pc' ? a?.jogo || '' : '', de: a ? `${a.conta} (lan house)` : 'Lan house' });
+    }
+    const nome = m === 'pc' ? 'PC' : 'PS5';
+    console.log(`[lan] ${room.id}: ${acao === 'abrir' ? `${nome} na sala para ${a.conta}${a.jogo && m === 'pc' ? ` (${a.jogoNome || a.jogo})` : ''}` : `${nome} sai da sala (acabou a vez)`}`);
   }
-  console.log(`[lan] ${room.id}: ${acao === 'abrir' ? `abrindo ${a.jogoNome || a.jogo} para ${a.conta}` : 'fechando o jogo (acabou a vez)'}`);
 }
 
 // pode mexer nas telas desta pessoa? (dono da tela sempre pode; fora da lan house, todo mundo; na

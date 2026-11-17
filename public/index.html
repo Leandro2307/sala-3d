@@ -66,6 +66,9 @@
       <!-- lan house: alugar uma hora no PC ou no PS5 (ver abrirAluguel no main.js) -->
       <span class="sep lan-sep" hidden>·</span>
       <button id="lan-reservar" class="chip-btn chip-destaque" type="button" hidden><i data-icon="gamepad" data-size="15"></i><b>Alugar PC ou PS5</b></button>
+      <!-- lan house: de quem é a vez em cada máquina e quanto falta (ver mostrarVezLan no main.js) -->
+      <span class="lan-vez" id="lan-vez-pc" hidden></span>
+      <span class="lan-vez" id="lan-vez-ps5" hidden></span>
     </div>
 
     <!-- bussola suave em canvas 60fps -->
@@ -911,6 +914,8 @@
     <div id="toque-jogo" hidden></div>
     <!-- modo jogo: o selo de desempenho de quem joga (qps, atraso, banda; ver jogoSelo no main.js) -->
     <div id="jogo-selo" hidden></div>
+    <!-- lan house: de quem é a vez na máquina desta tela e quanto falta (ver mostrarVezLan) -->
+    <div id="lan-vez-foco" hidden></div>
     <div class="focus-bar">
       <div class="focus-name"><span class="live-dot"></span><span id="focus-name">Tela</span><small class="focus-qualidade" id="focus-qualidade"></small></div>
       <!-- navegação da aba controlada (a mesa tem uma igual em cada monitor) -->
