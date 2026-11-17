@@ -19,8 +19,9 @@ const CHAVE = 'sala3d-jogo-opcoes';
 // liso (o buffer de 40 ms do vídeo normal) ligado de fábrica desde 2026-11-05: no teste de presets o
 // "buffer mínimo" deu 401 ms de atraso e 43 travadas por minuto no iPhone, contra 160 ms e 6 com ele.
 // É o vídeo que entra quando o turbo não aguenta, então vale também com o turbo ligado.
-const PADRAO = { liso: true, menuAuto: true, selo: false, giro: false, rapido: false, turbo: true, turboLiso: true, vibrar: true, preencher: false, lossless: 0 };
-// Versão das opções (v2: turbo e 720p; v3: liso; v4: os modos de imagem de 2026-11-05; v5: os 4 modos
+const PADRAO = { liso: true, menuAuto: true, selo: false, giro: false, rapido: false, turbo: true, turboLiso: true, vibrar: true, preencher: false, lossless: 0, mouseSens: 1 };
+// mouseSens: no PC, num jogo de controle (PS5, Switch), quanto o mouse empurra o analógico direito
+// (teclado-pad.js): 2× chega ao fim do analógico com metade do movimento// Versão das opções (v2: turbo e 720p; v3: liso; v4: os modos de imagem de 2026-11-05; v5: os 4 modos
 // de 2026-11-16). O modo de imagem não fica guardado: toda vez que a página abre entra o PRESET_INICIAL.
 const VERSAO = 5;
 export const LISO_MS = 40;

@@ -4426,6 +4426,17 @@ $('#focus-jogo-op').addEventListener('click', (e) => {
   mudarVolumePs5(volumePs5);
 });
 $('#jogo-ps5-vol').addEventListener('input', (e) => mudarVolumePs5(e.target.value));
+// sensibilidade do mouse num jogo de controle (teclado-pad.js), guardada neste aparelho
+const mostrarMouseSens = () => {
+  const v = Number(opcoesJogo.get('mouseSens')) || 1;
+  $('#jogo-mouse-sens').value = String(v);
+  $('#jogo-mouse-sens-n').textContent = `${v.toFixed(1)}×`;
+};
+mostrarMouseSens();
+$('#jogo-mouse-sens').addEventListener('input', (e) => {
+  opcoesJogo.set('mouseSens', Math.min(3, Math.max(0.3, Number(e.target.value) || 1)));
+  mostrarMouseSens();
+});
 $('#focus-engasgo').addEventListener('click', (e) => {
   e.currentTarget.blur();
   marcarEngasgo();
@@ -4454,7 +4465,7 @@ document.addEventListener('pointerdown', (e) => {
 // Controle virtual (pad-virtual.js): no layout PS5 o toque e o controle de videogame viram um
 // controle de Xbox no PC de quem compartilha, em vez de teclado e mouse
 const padVirtual = new PadVirtual({ controle });
-const tecladoPad = new TecladoPad({ pad: padVirtual });
+const tecladoPad = new TecladoPad({ pad: padVirtual, sens: () => opcoesJogo.get('mouseSens') });
 // tremores que chegaram aqui (quem joga), para o relatório (ver receberVolta)
 const tremoresAqui = { n: 0, como: {}, primeiro: false, desde: 0 };
 padVirtual.onErroTremor = (erro) => diagJogo.evento('o controle não aceitou o tremor', { erro, ...padVirtual.comoVibra() });

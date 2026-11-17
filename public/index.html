@@ -939,6 +939,8 @@
             <label><input type="checkbox" data-op="preencher"><span>Preencher a tela <small>(sem faixas pretas: corta um pouco das bordas)</small></span></label>
             <label><input type="checkbox" data-op="selo"><span>Mostrar desempenho</span></label>
             <label><input type="checkbox" data-op="vibrar"><span>Vibrar com o jogo <small>(PS5: o controle ligado neste PC treme)</small></span></label>
+            <label class="jogo-op-vol"><span>Sensibilidade do mouse <small>(PS5 e Switch: o mouse vira o analógico)</small></span>
+              <span class="jogo-op-vol-linha"><input type="range" id="jogo-mouse-sens" min="0.3" max="3" step="0.1" value="1" aria-label="Sensibilidade do mouse"><output id="jogo-mouse-sens-n">1.0×</output></span></label>
             <label class="jogo-op-vol" id="jogo-ps5-vol-row" hidden><span>Volume do PS5 <small>(só neste PC)</small></span>
               <span class="jogo-op-vol-linha"><input type="range" id="jogo-ps5-vol" min="0" max="100" step="1" value="100" aria-label="Volume do PS5"><output id="jogo-ps5-vol-n">100%</output></span></label>
             <button type="button" class="secondary small" id="jogo-lossless-ligar">Ligar/desligar o Lossless <kbd>Ctrl+Alt+S</kbd></button>

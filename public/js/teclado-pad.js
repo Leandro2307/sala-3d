@@ -36,8 +36,10 @@ export const DICA_TECLADO = {
 };
 
 export class TecladoPad {
-  constructor({ pad }) {
+  // sens(): a sensibilidade do mouse escolhida nas opções do modo jogo (1 = VEL_CHEIA)
+  constructor({ pad, sens = () => 1 }) {
     this.pad = pad;
+    this.sens = sens;
     this.ativo = false;
     this.zerar();
   }
@@ -142,8 +144,9 @@ export class TecladoPad {
     let sx = 0;
     let sy = 0;
     for (const [, dx, dy] of this.mov) { sx += dx; sy += dy; }
+    const cheia = VEL_CHEIA / (Number(this.sens()) || 1);
     const curva = (v) => {
-      const a = Math.min(1, Math.abs(v / JANELA_MS) / VEL_CHEIA);
+      const a = Math.min(1, Math.abs(v / JANELA_MS) / cheia);
       return Math.sign(v) * Math.round(Math.sqrt(a) * 100) / 100;
     };
     this.rx = curva(sx);
