@@ -950,3 +950,11 @@ O som sem o navegador abriu ("som: processo") com `--excluir <pid do Chrome>`.
 **Não testado pelo ajudante de verdade** (precisa recarregar a extensão e reabrir o Chrome) nem com
 o controle de quem joga no monitor capturado. Só NVIDIA por enquanto: AMD/Intel pediriam o
 codificador do Media Foundation.
+
+## Mouse "com muito delay" no PS5 pelo TURN (2026-11-17)
+
+Relatórios do kazu (02:07–02:11, God of War no PS5 direto, PC dele, este PC pelo TURN): o controle
+chegava em ~28 ms (ajudante 1 ms), mas o automático trocou o turbo pelo 1080p normal ("conexão pelo
+TURN") e o buffer do vídeo subiu até 300 ms (atraso de 250–470 ms). O turbo no mesmo caminho: ~106 ms
+a 57 qps. Agora o TURN só põe o vídeo normal no celular (`PRESET_TURN`); no PC fica o 1080p Turbo liso.
+E o mouse → analógico direito (`teclado-pad.js`) mede a velocidade em 24 ms (eram 40).

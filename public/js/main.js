@@ -3557,8 +3557,11 @@ $('#jogo-op-pop').insertAdjacentHTML('afterbegin', htmlPresets());
 // iPhone, PC pelo TURN): o turbo deu 35 qps e ~25 travadas por minuto (a fila do canal parava mais que
 // a espera de 150 ms e a imagem do PS5 esperava o quadro-chave); o 1080p, 55 qps e ~4.
 // Duas amostras seguidas com o mesmo caminho antes de trocar (a conexão se acertando no começo).
+// Só no celular: no PC, teste de 2026-11-17 02:07–02:11 (kazu, PC pelo TURN do lado de cá, God of
+// War no PS5 direto) o 1080p normal deixou o buffer do vídeo subir até 300 ms (atraso de 250–470 ms,
+// "mouse com muito delay"), e o turbo no mesmo caminho ficou em ~106 ms a 57 qps.
 const PRESET_DIRETO = 14;
-const PRESET_TURN = 12;
+const PRESET_TURN = isTouch ? 12 : 14;
 const presetRede = { auto: true, turn: null, seguidas: 0, avisado: false };
 function presetPelaRede(rede) {
   if (!presetRede.auto || !jogandoLa || !rede?.local) return;

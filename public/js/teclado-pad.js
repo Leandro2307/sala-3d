@@ -21,7 +21,9 @@ const STICK = { KeyW: ['ly', -1], KeyS: ['ly', 1], KeyA: ['lx', -1], KeyD: ['lx'
 
 // O mouse vira o analógico pela velocidade: soma o que andou na última JANELA_MS e, a VEL_CHEIA
 // px/ms, o analógico vai até o fim. Raiz na curva: mirar devagar ainda mexe a câmera.
-const JANELA_MS = 40;
+// 24 ms (eram 40): o analógico parava/arrancava 40 ms depois do mouse. 24 ainda pega 3 relatórios de
+// um mouse sem fio de 125 Hz, sem a câmera tremer.
+const JANELA_MS = 24;
 const TICK_MS = 8;
 const VEL_CHEIA = 1.6;
 // Toque rápido numa tecla (ou o Esc que solta o ponteiro, que desce e sobe junto): o botão fica
