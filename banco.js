@@ -67,6 +67,28 @@ const TABELAS = [
     PRIMARY KEY (id),
     KEY (mudou_em)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  // lan house (lanhouse.js): a conta de cada jogador e os horários reservados
+  `CREATE TABLE IF NOT EXISTS sala3d_contas (
+    nome        VARCHAR(20)  NOT NULL,
+    senha_hash  VARCHAR(200) NOT NULL,
+    criada_em   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (nome)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  `CREATE TABLE IF NOT EXISTS sala3d_reservas (
+    id        VARCHAR(32)  NOT NULL,
+    sala      VARCHAR(40)  NOT NULL,
+    conta     VARCHAR(20)  NOT NULL,
+    maquina   VARCHAR(8)   NOT NULL DEFAULT 'pc',
+    jogo      VARCHAR(120) NULL,
+    jogo_nome VARCHAR(60)  NULL,
+    inicio    BIGINT       NOT NULL,
+    status    VARCHAR(12)  NOT NULL,
+    sessao    VARCHAR(255) NULL,
+    expira    BIGINT       NOT NULL DEFAULT 0,
+    criada    BIGINT       NOT NULL,
+    PRIMARY KEY (id),
+    KEY (sala, inicio)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 ];
 
 // relatórios guardados por no máximo tantos dias (e, sem MySQL, no máximo tantos arquivos)
@@ -75,6 +97,8 @@ const RELATORIOS_MAX = 300;
 
 const salasArq = arquivo('salas.json');
 const moedasArq = arquivo('moedas.json');
+const contasArq = arquivo('contas.json');
+const reservasArq = arquivo('reservas.json');
 let pool = null;
 
 async function iniciar() {
@@ -100,6 +124,11 @@ async function iniciar() {
     for (const sql of TABELAS) await pool.query(sql);
     // tabela criada antes do logo da empresa: TEXT (64 kB) não cabe a config com o logo
     await pool.query('ALTER TABLE sala3d_salas MODIFY config MEDIUMTEXT NOT NULL').catch(() => {});
+    // reservas de antes de separar PC e PS5: todas eram do PC
+    await pool.query("ALTER TABLE sala3d_reservas ADD COLUMN maquina VARCHAR(8) NOT NULL DEFAULT 'pc' AFTER conta").catch(() => {});
+    // o jogo escolhido ao alugar o PC (abre sozinho no horário)
+    await pool.query('ALTER TABLE sala3d_reservas ADD COLUMN jogo VARCHAR(120) NULL AFTER maquina').catch(() => {});
+    await pool.query('ALTER TABLE sala3d_reservas ADD COLUMN jogo_nome VARCHAR(60) NULL AFTER jogo').catch(() => {});
     await pool.query('SELECT 1 FROM sala3d_salas LIMIT 1');
     await pool.query('SELECT 1 FROM sala3d_moedas LIMIT 1');
     console.log(`  Dados:         MySQL em ${DB_HOST}`);
@@ -234,15 +263,68 @@ async function lerRelatorio(id) {
   return linhas[0]?.dados ?? null;
 }
 
+// ---------------------------------------------------------- lan house (ver lanhouse.js)
+// { nome, senhaHash } ou null
+async function lerConta(nome) {
+  if (!pool) return contasArq.mapa[nome] ? { nome, senhaHash: contasArq.mapa[nome] } : null;
+  const [linhas] = await pool.query('SELECT senha_hash FROM sala3d_contas WHERE nome = ?', [nome]);
+  return linhas.length ? { nome, senhaHash: linhas[0].senha_hash } : null;
+}
+
+// false se o nome já existe
+async function criarConta(nome, senhaHash) {
+  if (!pool) {
+    if (contasArq.mapa[nome]) return false;
+    contasArq.mapa[nome] = senhaHash;
+    contasArq.salvar();
+    return true;
+  }
+  const [r] = await pool.query('INSERT IGNORE INTO sala3d_contas (nome, senha_hash) VALUES (?, ?)', [nome, senhaHash]);
+  return r.affectedRows === 1;
+}
+
+async function trocarSenhaConta(nome, senhaHash) {
+  if (!pool) {
+    contasArq.mapa[nome] = senhaHash;
+    contasArq.salvar();
+    return;
+  }
+  await pool.query('UPDATE sala3d_contas SET senha_hash = ? WHERE nome = ?', [senhaHash, nome]);
+}
+
+// as reservas que começam a partir de "desde" (ms)
+async function lerReservas(desde) {
+  if (!pool) return Object.values(reservasArq.mapa).filter((r) => r.inicio >= desde);
+  const [linhas] = await pool.query('SELECT id, sala, conta, maquina, jogo, jogo_nome AS jogoNome, inicio, status, sessao, expira, criada FROM sala3d_reservas WHERE inicio >= ?', [desde]);
+  return linhas.map((l) => ({ ...l, inicio: Number(l.inicio), expira: Number(l.expira), criada: Number(l.criada) }));
+}
+
+async function salvarReserva(r) {
+  if (!pool) {
+    reservasArq.mapa[r.id] = { ...r };
+    // as de mais de 90 dias saem do arquivo
+    for (const [id, v] of Object.entries(reservasArq.mapa)) if (v.inicio < Date.now() - 90 * 86400_000) delete reservasArq.mapa[id];
+    reservasArq.salvar();
+    return;
+  }
+  await pool.query(
+    `INSERT INTO sala3d_reservas (id, sala, conta, maquina, jogo, jogo_nome, inicio, status, sessao, expira, criada) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE status = VALUES(status), sessao = VALUES(sessao), expira = VALUES(expira)`,
+    [r.id, r.sala, r.conta, r.maquina || 'pc', r.jogo || null, r.jogoNome || null, r.inicio, r.status, r.sessao || null, r.expira || 0, r.criada],
+  );
+}
+
 // Servidor saindo (deploy, Ctrl+C): o que esperava o atraso vai para o banco antes do fim.
 async function encerrar() {
   salasArq.agora();
   moedasArq.agora();
   relatoriosArq.agora();
+  contasArq.agora();
+  reservasArq.agora();
   if (!pool) return;
   clearTimeout(timerSaldos);
   await gravarSaldos();
   await pool.end().catch(() => {});
 }
 
-module.exports = { iniciar, lerSala, salvarSala, lerSaldo, guardarSaldo, guardarRelatorio, listarRelatorios, lerRelatorio, encerrar };
+module.exports = { iniciar, lerSala, salvarSala, lerSaldo, guardarSaldo, guardarRelatorio, listarRelatorios, lerRelatorio, lerConta, criarConta, trocarSenhaConta, lerReservas, salvarReserva, encerrar };

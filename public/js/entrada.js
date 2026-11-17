@@ -54,8 +54,6 @@ hydrateIcons($('#lobby'));
 hydrateIcons($('#escolher-personagem'));
 if (isTouch) {
   document.body.classList.add('touch');
-  $('#lobby-note').hidden = true;
-  $('#lobby-note-touch').hidden = false;
 }
 nameInput.value = aj.name;
 roomInput.value = params.get('sala') || '';
@@ -67,11 +65,10 @@ ouvir($('#in-mic'), 'change', (e) => salvar({ mic: e.target.checked }));
 
 function renderCores() {
   const html = CORES.map((c) => `<button type="button" role="radio" aria-label="Cor ${c}" aria-checked="${c === aj.color}" style="--c:${c}" data-color="${c}"></button>`).join('');
-  $('#swatches').innerHTML = html;
   $('#ep-cores').innerHTML = html;
 }
 renderCores();
-for (const sel of ['#swatches', '#ep-cores']) {
+for (const sel of ['#ep-cores']) {
   ouvir($(sel), 'click', (e) => {
     const b = e.target.closest('[data-color]');
     if (!b || b.dataset.color === aj.color) return;
@@ -86,7 +83,7 @@ function renderCamiseta() {
   $$('#in-shirt button, #ep-camiseta button').forEach((b) => b.classList.toggle('on', b.dataset.shirt === aj.shirt));
 }
 renderCamiseta();
-for (const sel of ['#in-shirt', '#ep-camiseta']) {
+for (const sel of ['#ep-camiseta']) {
   ouvir($(sel), 'click', (e) => {
     const b = e.target.closest('[data-shirt]');
     if (!b || b.dataset.shirt === aj.shirt) return;
@@ -125,6 +122,7 @@ ouvir($('#photo-file'), 'change', async (e) => {
     mudarFoto(await photoFromFile(file));
   } catch (err) {
     $('#lobby-note').textContent = err.message;
+    $('#lobby-note').hidden = false;
   }
 });
 ouvir($('#photo-clear'), 'click', () => mudarFoto(null));
@@ -135,13 +133,8 @@ function renderPersonagem() {
   $('#char-mini').src = def.miniatura;
   $('#char-nome').textContent = def.label;
   $('#char-resumo').textContent = def.resumo || '';
-  // camiseta e foto só existem no boneco padrão: o modelo 3D tem o corpo dele
-  $('#campo-camiseta').hidden = !!def.url;
+  // a foto só existe no boneco padrão: o modelo 3D tem o corpo dele
   $('#campo-foto').hidden = !!def.url;
-  const linha = [];
-  if (def.aviso) linha.push(def.aviso);
-  if (def.credito) linha.push('Modelo: ' + def.credito);
-  $('#char-credito').textContent = linha.join(' · ');
 }
 renderPersonagem();
 // O modal é o mesmo de dentro da sala: o main.js fica com esta instância e troca as funções dela
@@ -158,12 +151,16 @@ const escolha = new EscolherPersonagem({
 });
 ouvir($('#in-char'), 'click', () => escolha.abrir(aj.char));
 
-// No celular camiseta e foto ficam recolhidas (style.css, "entrada no celular"). Fica ligado mesmo
-// depois do soltar(): o main.js não mexe nisto.
-$('#lobby-mais').addEventListener('click', (e) => {
-  const aberto = $('#lobby-form').classList.toggle('mais-aberto');
-  e.currentTarget.setAttribute('aria-expanded', String(aberto));
-});
+// Conta: com o login guardado neste aparelho e o mesmo nome, a senha não é pedida de novo; outro
+// nome pede a senha (e o "criar conta"). Fica ligado depois do soltar(): o main.js não mexe nisto.
+function camposDaConta() {
+  let conta = null;
+  try { conta = JSON.parse(localStorage.getItem('sala3d-lan') || 'null'); } catch { /* sem storage */ }
+  const guardada = !!conta?.token && conta.nome?.toLowerCase() === nameInput.value.trim().replace(/\s+/g, ' ').toLowerCase();
+  $('#campo-senha-conta').hidden = guardada;
+}
+camposDaConta();
+nameInput.addEventListener('input', camposDaConta);
 
 // ---------------------------------------------------------------- sala e senha
 ouvir(roomInput, 'input', () => {
@@ -293,7 +290,7 @@ async function prepararOffline() {
   if (typeof caches === 'undefined' || !('serviceWorker' in navigator) || !window.isSecureContext) return;
   const versao = await versaoBaixada();
   if (!versao && !navigator.onLine) return;
-  caixaOffline.hidden = false;
+  $('#lobby-offline').hidden = false;
   caixaOffline.classList.toggle('sem-rede', !navigator.onLine);
   mostrarJogosOffline(!!versao);
   textoOffline(!navigator.onLine ? 'Sem internet: escolha um jogo' : versao ? 'Pronto: funciona sem internet' : 'Truco, Uno, 21, Cacheta e Poker contra robôs');
@@ -317,6 +314,7 @@ async function prepararOffline() {
 $('#btn-offline-atualizar').addEventListener('click', () => baixarOffline(false, listaNova));
 // id: o jogo, ou 'catalogo' (abre o catálogo dos jogos offline)
 function abrirOffline(id) {
+  $('#offline-modal').hidden = true;
   if (!nameInput.value.trim()) nameInput.value = 'Jogador';
   salvar({ name: nameInput.value.trim() });
   if (id === 'catalogo') {
@@ -332,6 +330,10 @@ function abrirOffline(id) {
   progresso(Number(barra.dataset.f || 0));
 }
 $('#btn-offline-baixar').addEventListener('click', () => baixarOffline(false));
+// "Jogar sem internet" é só uma linha na entrada: o resto fica neste modal
+$('#abrir-offline').addEventListener('click', () => { $('#offline-modal').hidden = false; });
+$('#offline-fechar').addEventListener('click', () => { $('#offline-modal').hidden = true; });
+$('#offline-modal').addEventListener('click', (e) => { if (e.target === e.currentTarget) e.currentTarget.hidden = true; });
 $('#offline-jogos').addEventListener('click', (e) => {
   const b = e.target.closest('[data-offline]');
   if (b) abrirOffline(b.dataset.offline);

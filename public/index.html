@@ -63,9 +63,9 @@
       <span class="sep">·</span>
       <span class="moedas-chip" id="moedas-chip" data-tip="Suas moedas"><i data-icon="moeda" data-size="15"></i><b id="moedas-n">0</b></span>
       <button id="copy-invite" class="chip-btn" type="button"><i data-icon="link" data-size="15"></i>Copiar convite</button>
-      <span class="sep">·</span>
-      <button id="hud-btn-jogos" class="chip-btn chip-destaque" type="button" title="Abrir catálogo com 20+ jogos e teleporte"><i data-icon="gamepad" data-size="15"></i><b>Jogos & Teleporte</b></button>
-      <button id="hud-btn-galera" class="chip-btn chip-social" type="button" title="Teleportar até seus amigos" hidden><i data-icon="goto" data-size="15"></i><b>Ir até amigos</b></button>
+      <!-- lan house: alugar uma hora no PC ou no PS5 (ver abrirAluguel no main.js) -->
+      <span class="sep lan-sep" hidden>·</span>
+      <button id="lan-reservar" class="chip-btn chip-destaque" type="button" hidden><i data-icon="gamepad" data-size="15"></i><b>Alugar PC ou PS5</b></button>
     </div>
 
     <!-- bussola suave em canvas 60fps -->
@@ -712,6 +712,16 @@
             <input type="checkbox" name="privacidade" class="switch">
           </label>
         </div>
+        <div class="field">
+          <label class="toggle-row compact">
+            <span><b>Lan house (aluguel por hora)</b><small>Só quem reservou e pagou o horário joga nas telas com controle liberado. Reservas em <a href="/lan" target="_blank" rel="noopener">/lan</a></small></span>
+            <input type="checkbox" name="lanLigada" class="switch">
+          </label>
+          <div class="lan-horas">
+            <label><small>Abre às</small><select name="lanAbre"></select></label>
+            <label><small>Fecha às</small><select name="lanFecha"></select></label>
+          </div>
+        </div>
         <label class="toggle-row compact">
           <span><b>Aparecer nas salas ao vivo</b><small>Mostra a sala e quem está nela na tela de entrada (com senha, só a quantidade)</small></span>
           <input type="checkbox" name="listada" class="switch">
@@ -986,6 +996,39 @@
   </div>
 
   <!-- ============================================================ escolher personagem (ver escolher-personagem.js) -->
+  <!-- lan house: a reserva (/lan) dentro da sala -->
+  <div id="lan-modal" class="ep-fundo" hidden>
+    <div class="ep-card lan-card" role="dialog" aria-modal="true" aria-labelledby="lan-modal-titulo">
+      <header class="guia-head">
+        <h2 id="lan-modal-titulo">Alugar PC ou PS5</h2>
+        <button type="button" class="icon-btn" id="lan-modal-fechar" aria-label="Fechar"><i data-icon="x"></i></button>
+      </header>
+      <iframe id="lan-frame" title="Reservar horário"></iframe>
+    </div>
+  </div>
+  <!-- jogos de cartas sem internet: o pacote fica no aparelho (ver offline-pacote.js e offline.js) -->
+  <div id="offline-modal" class="ep-fundo" hidden>
+    <div class="ep-card offline-modal-card" role="dialog" aria-modal="true" aria-labelledby="offline-titulo">
+      <header class="guia-head">
+        <h2 id="offline-titulo">Jogar sem internet</h2>
+        <button type="button" class="icon-btn" id="offline-fechar" aria-label="Fechar"><i data-icon="x"></i></button>
+      </header>
+            <div class="offline-card" id="offline">
+        <div class="offline-topo"><b>Jogar sem internet</b><small id="offline-status"></small></div>
+        <div class="offline-jogos" id="offline-jogos" hidden>
+          <button type="button" data-offline="truco">Truco</button>
+          <button type="button" data-offline="uno">Uno</button>
+          <button type="button" data-offline="vinteum">21</button>
+          <button type="button" data-offline="cacheta">Cacheta</button>
+          <button type="button" data-offline="poker">Poker</button>
+        </div>
+        <button type="button" class="primary block" id="btn-offline-atualizar" hidden><i data-icon="sync" data-size="18"></i><span>Atualizar o que falta</span></button>
+        <button type="button" class="secondary block" id="btn-offline-baixar" hidden><i data-icon="baixar" data-size="18"></i>Baixar os jogos de cartas (~35 MB)</button>
+        <div class="lobby-carga" id="offline-carga" hidden><span class="lc-trilho"><i id="offline-barra"></i></span><small id="offline-texto"></small></div>
+      </div>
+    </div>
+  </div>
+
   <div id="escolher-personagem" class="ep-fundo" hidden>
     <div class="ep-card" role="dialog" aria-modal="true" aria-labelledby="ep-titulo">
       <header class="guia-head">
@@ -1020,6 +1063,17 @@
                 <button type="button" data-shirt="bolsonaro">22</button>
               </div>
             </div>
+            <div class="ep-linha ep-foto" id="campo-foto">
+        <span>Foto</span>
+        <div class="photo-row">
+          <div class="photo-prev" id="photo-prev"><i data-icon="user" data-size="22"></i></div>
+          <div class="photo-acts">
+            <button type="button" class="secondary small" id="photo-pick"><i data-icon="camera" data-size="16"></i>Escolher foto</button>
+            <button type="button" class="ghost-btn small" id="photo-clear" hidden>Remover</button>
+          </div>
+          <input type="file" id="photo-file" accept="image/*" hidden>
+        </div>
+      </div>
             <div class="ep-linha" id="ep-linha-arma" hidden><span>Arma</span><div class="segmented armas" id="ep-arma"></div></div>
           </div>
           <button type="button" class="primary block" id="ep-usar">Usar</button>
@@ -1083,18 +1137,17 @@
         <span>Sala 3D</span>
       </div>
       <h1>Assista junto. <br>Fale junto. <br><em>Pule junto.</em></h1>
-      <p class="lobby-sub">Compartilhe a tela com som, ponha YouTube, Twitch, Kick ou um filme do seu PC no telão e ande pela sala — tem parkour até o camarote.</p>
-
       <!-- as classes l-* dão a ordem e o lugar de cada campo no celular (style.css, "entrada no celular") -->
+      <!-- todo mundo entra com a conta: nome e senha (lanhouse.js). Com a conta guardada, a senha some -->
       <label class="field l-nome">
-        <span>Seu nome</span>
-        <input id="in-name" maxlength="20" placeholder="Como te chamam?" required>
+        <span>Nome</span>
+        <input id="in-name" maxlength="20" autocomplete="username" placeholder="Seu nome" required>
       </label>
-
-      <div class="field l-cor">
-        <span>Cor do boneco</span>
-        <div class="swatches" id="swatches" role="radiogroup" aria-label="Cor do boneco"></div>
-      </div>
+      <label class="field l-senha" id="campo-senha-conta">
+        <span>Senha</span>
+        <input type="password" id="in-senha-conta" maxlength="100" autocomplete="current-password" placeholder="Primeira vez? Crie uma aqui">
+      </label>
+      <small class="hint erro conta-erro" id="conta-erro" hidden></small>
 
       <div class="field l-char">
         <span>Personagem</span>
@@ -1103,35 +1156,6 @@
           <span class="char-txt"><b id="char-nome">Boneco</b><small id="char-resumo"></small></span>
           <span class="char-trocar">Trocar</span>
         </button>
-        <small class="hint" id="char-credito"></small>
-      </div>
-
-      <!-- só no celular: camiseta e foto ficam recolhidas atrás deste botão (ver entrada.js) -->
-      <button type="button" class="lobby-mais" id="lobby-mais" aria-expanded="false" aria-controls="campo-camiseta campo-foto">
-        <span>Camiseta e foto <small class="opt">(opcional)</small></span><i data-icon="chevron" data-size="16"></i>
-      </button>
-
-      <div class="field" id="campo-camiseta">
-        <span>Camiseta <small class="opt">(opcional)</small></span>
-        <div class="segmented shirts" id="in-shirt">
-          <button type="button" data-shirt="none">Nenhuma</button>
-          <button type="button" data-shirt="lula">PT · 13</button>
-          <button type="button" data-shirt="bolsonaro">22</button>
-        </div>
-        <small class="hint l-dica">Quem veste a 22 entra armado (<kbd>X</kbd> atira).</small>
-      </div>
-
-      <div class="field" id="campo-foto">
-        <span>Sua foto no boneco <small class="opt">(opcional)</small></span>
-        <div class="photo-row">
-          <div class="photo-prev" id="photo-prev"><i data-icon="user" data-size="22"></i></div>
-          <div class="photo-acts">
-            <button type="button" class="secondary small" id="photo-pick"><i data-icon="camera" data-size="16"></i>Escolher foto</button>
-            <button type="button" class="ghost-btn small" id="photo-clear" hidden>Remover</button>
-          </div>
-          <input type="file" id="photo-file" accept="image/*" hidden>
-        </div>
-        <small class="hint l-dica">Fica no rosto do seu boneco. Ela é reduzida para 128px e só vai para quem está na sala.</small>
       </div>
 
       <label class="field l-sala">
@@ -1158,22 +1182,8 @@
       </div>
       <!-- aparece quando o navegador deixa instalar (Chrome/Edge/Android); ver "app" no main.js -->
       <button type="button" class="secondary block" id="btn-instalar" hidden><i data-icon="instalar" data-size="18"></i>Instalar o app</button>
-      <!-- jogos de cartas sem internet: o pacote fica no aparelho (ver offline-pacote.js e offline.js) -->
-      <div class="offline-card" id="offline" hidden>
-        <div class="offline-topo"><b>Jogar sem internet</b><small id="offline-status"></small></div>
-        <div class="offline-jogos" id="offline-jogos" hidden>
-          <button type="button" data-offline="truco">Truco</button>
-          <button type="button" data-offline="uno">Uno</button>
-          <button type="button" data-offline="vinteum">21</button>
-          <button type="button" data-offline="cacheta">Cacheta</button>
-          <button type="button" data-offline="poker">Poker</button>
-        </div>
-        <button type="button" class="primary block" id="btn-offline-atualizar" hidden><i data-icon="sync" data-size="18"></i><span>Atualizar o que falta</span></button>
-        <button type="button" class="secondary block" id="btn-offline-baixar" hidden><i data-icon="baixar" data-size="18"></i>Baixar os jogos de cartas (~35 MB)</button>
-        <div class="lobby-carga" id="offline-carga" hidden><span class="lc-trilho"><i id="offline-barra"></i></span><small id="offline-texto"></small></div>
-      </div>
-      <p class="lobby-note" id="lobby-note">Para mandar o som da tela, marque <b>“Compartilhar áudio”</b> quando o navegador perguntar.</p>
-      <p class="lobby-note" id="lobby-note-touch" hidden>No celular você anda com o <b>analógico</b>, olha <b>arrastando o dedo</b> e fala pelo microfone. Só o <b>compartilhar tela</b> exige um computador.</p>
+      <p class="lobby-offline" id="lobby-offline" hidden><button type="button" class="ghost-btn" id="abrir-offline">Jogar sem internet</button></p>
+      <p class="lobby-note" id="lobby-note" hidden></p>
     </form>
 
     <!-- salas com gente agora, em tempo real (ver /ao-vivo no server.js e aovivo.js) -->

@@ -344,7 +344,7 @@ app.post('/sala-acesso', express.json({ limit: '2kb' }), async (req, res) => {
   if (!rooms.has(id)) setTimeout(() => { if (rooms.get(id)?.users.size === 0) rooms.delete(id); }, 30 * 60 * 1000);
   const sala = getRoom(id);
   await carregarSala(sala);
-  const responder = (r) => res.json({ ...r, mapa: sala.config?.mapa || MAPA_PADRAO });
+  const responder = (r) => res.json({ ...r, mapa: sala.config?.mapa || MAPA_PADRAO, lan: !!sala.config?.lanhouse?.ligada });
   if (!sala.entradaHash) return responder({ ok: true, protegida: false });
   if (b.passe && passeValido(sala, b.passe)) return responder({ ok: true, protegida: true, passe: passeDa(sala) });
   if (!b.senha) return responder({ ok: false, protegida: true });
@@ -584,7 +584,18 @@ const configPadrao = () => ({
   listada: true, // aparece na lista de salas ao vivo do saguão
   logo: '', // logo da empresa (data URL)
   paginas: {}, // página fixa por tela: { "ti:4": "https://..." } (ver chaveDaTela em escritorio.js)
+  lanhouse: { ligada: false, abre: 8, fecha: 24 }, // aluguel por hora (lanhouse.js): horas de Brasília
 });
+
+// lan house: ligada ou não e de que hora a que hora dá para reservar
+function limparLanhouse(raw, base) {
+  const l = obj(raw);
+  const b = base || configPadrao().lanhouse;
+  const hora = (v, min, max, padrao) => (Number.isInteger(v) && v >= min && v <= max ? v : padrao);
+  const abre = hora(l.abre, 0, 23, b.abre);
+  const fecha = hora(l.fecha, 1, 24, b.fecha);
+  return { ligada: typeof l.ligada === 'boolean' ? l.ligada : !!b.ligada, abre, fecha: fecha > abre ? fecha : Math.min(24, abre + 1) };
+}
 
 // Páginas fixas: só endereço http(s), em chave de tela válida, até 24 telas
 function limparPaginas(raw) {
@@ -619,6 +630,7 @@ function limparConfig(raw, base = configPadrao()) {
     // logo da empresa (data URL de imagem já reduzida no navegador); '' tira
     logo: c.logo === '' ? '' : typeof c.logo === 'string' ? cleanLogo(c.logo) ?? base.logo ?? '' : base.logo ?? '',
     paginas: c.paginas === undefined ? base.paginas ?? {} : limparPaginas(c.paginas),
+    lanhouse: c.lanhouse === undefined ? limparLanhouse(base.lanhouse) : limparLanhouse(c.lanhouse, base.lanhouse),
     placar: c.placar === undefined ? base.placar : {
       titulo: cleanText(placar.titulo, 40) || 'Metas do mês',
       itens: (Array.isArray(placar.itens) ? placar.itens : []).slice(0, 12).map((it) => ({
@@ -637,6 +649,7 @@ function carregarSala(room) {
     room.senhaHash = s?.senhaHash || null;
     room.entradaHash = s?.config?.entradaHash || null; // vem junto da config, mas não vai para ninguém
     room.gestorHash = s?.config?.gestorHash || null; // senha de gestor (alertas da equipe), idem
+    room.catalogoPc = Array.isArray(s?.config?.catalogoPc) ? s.config.catalogoPc : []; // jogos do PC da casa (lan house), idem
     ajustarTelas(room); // cada departamento do escritório tem as suas telas
   }).catch((err) => {
     console.warn('[banco] lendo sala', room.id, err.code || err.message);
@@ -651,7 +664,7 @@ function carregarSala(room) {
 
 const salaPublica = (room) => ({ ...room.config, temDono: !!room.senhaHash, temSenha: !!room.entradaHash, temGestor: !!room.gestorHash });
 // a senha de entrada viaja dentro do JSON da config (sem mudar a tabela); a pública não a leva
-const guardarSala = (room) => banco.salvarSala(room.id, { ...room.config, entradaHash: room.entradaHash || undefined, gestorHash: room.gestorHash || undefined }, room.senhaHash);
+const guardarSala = (room) => banco.salvarSala(room.id, { ...room.config, entradaHash: room.entradaHash || undefined, gestorHash: room.gestorHash || undefined, catalogoPc: room.catalogoPc?.length ? room.catalogoPc : undefined }, room.senhaHash);
 const idDaSala = (raw) => cleanText(raw, 40).toLowerCase().replace(/[^a-z0-9-_]/g, '') || 'principal';
 
 // Senha de entrada (opcional). Quem acerta recebe um "passe" — o HMAC da sala com a senha atual —
@@ -688,6 +701,83 @@ function podeTentar(ip) {
   lista.push(agora);
   tentativas.set(ip, lista);
   return lista.length <= 6;
+}
+
+// ------------------------------------------------------------------ lan house (lanhouse.js)
+// Na sala com a lan house ligada, quem tem o horário pago da hora é o único que mexe nas telas com
+// controle liberado. A vez muda sozinha na virada da hora (ver vigiarLan).
+const lan = require('./lanhouse')({
+  banco, hashSenha, confereSenha, podeTentar, bloqueado,
+  configDaSala: async (id) => {
+    const r = rooms.get(id);
+    if (r?.config) return r.config;
+    const s = await banco.lerSala(id).catch(() => null);
+    return limparConfig(s?.config || {});
+  },
+  // o catálogo guardado (fica mesmo com o PC da casa desligado) com os ícones de quando ele está na sala
+  jogosDaSala: async (id) => {
+    const r = rooms.get(id);
+    const lista = r?.config ? r.catalogoPc : (await banco.lerSala(id).catch(() => null))?.config?.catalogoPc;
+    const icones = new Map();
+    for (const h of r?.hubs?.values() || []) for (const j of h) if (j.icone) icones.set(j.id, j.icone);
+    return (Array.isArray(lista) ? lista : []).map((j) => ({ ...j, icone: icones.get(j.id) || null }));
+  },
+  aoMudar: (id) => { const r = rooms.get(id); if (r) avisarLan(r, true); },
+});
+lan.rotas(app);
+app.get('/lan', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'lan.html')));
+
+// o que cada um na sala sabe: se está ligada e, em cada máquina (PC, PS5), de quem é a vez, até
+// quando e os ids dessa pessoa na sala
+function estadoLan(room) {
+  if (!room.config?.lanhouse?.ligada) return { ligada: false };
+  const e = { ligada: true };
+  for (const m of lan.MAQUINAS) {
+    const atual = lan.jogadorAgora(room.id, m);
+    const ids = atual ? [...room.users.values()].filter((u) => u.conta === atual.conta).map((u) => u.id) : [];
+    e[m] = { conta: atual?.conta ?? null, fim: atual?.fim ?? null, ids };
+  }
+  return e;
+}
+// a máquina de uma tela compartilhada: a do PS5 direto é o PS5, o resto é o PC
+const maquinaDaTela = (sh) => (sh?.superficie === 'ps5' || sh?.titulo === 'PS5' ? 'ps5' : 'pc');
+let ioLan = null;
+function avisarLan(room, forcar = false) {
+  if (!ioLan) return;
+  const e = estadoLan(room);
+  const chave = JSON.stringify(e);
+  if (!forcar && chave === room.lanChave) return;
+  room.lanChave = chave;
+  ioLan.to(room.id).emit('lan', e);
+}
+// Lan house no PC: na virada da vez, o PC da casa (o hub, ver 'hub-jogos') abre o jogo que a pessoa
+// escolheu ao reservar; acabou a vez e ninguém reservou a seguinte, fecha o que tinha aberto. Sem o
+// hub na sala, tenta de novo a cada 5 s (vigiarLan).
+async function vigiarJogoLan(room) {
+  if (!ioLan || !room.config?.lanhouse?.ligada) return;
+  const a = lan.jogadorAgora(room.id, 'pc');
+  const chave = a ? `${a.conta}|${a.jogo || ''}` : null;
+  if (chave === room.lanJogoChave) return;
+  const hubs = (await ioLan.in(room.id).fetchSockets()).filter((s) => s.data.tela && s.data.hub);
+  if (!hubs.length) return;
+  const acao = a?.jogo ? 'abrir' : room.lanJogoAberto ? 'fechar' : null;
+  room.lanJogoChave = chave;
+  if (!acao) return;
+  room.lanJogoAberto = acao === 'abrir';
+  // a resposta (abriu ou não) vai para quem alugou, se estiver na sala
+  const quem = a ? [...room.users.values()].find((u) => u.conta === a.conta) : null;
+  for (const s of hubs) {
+    s.data.telaDe = quem?.id || null;
+    s.emit('hub-pedido', { acao, id: a?.jogo || '', de: a ? `${a.conta} (lan house)` : 'Lan house' });
+  }
+  console.log(`[lan] ${room.id}: ${acao === 'abrir' ? `abrindo ${a.jogoNome || a.jogo} para ${a.conta}` : 'fechando o jogo (acabou a vez)'}`);
+}
+
+// pode mexer nas telas desta pessoa? (dono da tela sempre pode; fora da lan house, todo mundo)
+function podeJogarLan(room, user, donoDaTela, tela) {
+  if (!room.config?.lanhouse?.ligada || user === donoDaTela) return true;
+  const atual = lan.jogadorAgora(room.id, maquinaDaTela(tela));
+  return !!atual && user.conta === atual.conta;
 }
 
 // Prêmios. Cada um tem um intervalo mínimo por pessoa, para ninguém "farmar" repetindo.
@@ -1324,7 +1414,15 @@ function attachSockets(io) {
       if (room || entrando) return;
       entrando = true;
       const roomId = idDaSala(data?.room);
-      const nome = cleanText(data?.name, 20) || 'Visitante';
+      // todo mundo entra com a conta (nome e senha, ver lanhouse.js); o nome na sala é o dela, do
+      // jeito que a pessoa escreveu (só muda maiúscula/minúscula)
+      const contaLan = data?.lan ? lan.contaDoToken(data.lan) : null;
+      if (!contaLan) {
+        entrando = false;
+        return ack?.({ erro: 'conta' });
+      }
+      const escrito = cleanText(data?.name, 20).replace(/\s+/g, ' ').trim();
+      const nome = escrito.toLowerCase() === contaLan ? escrito : contaLan;
       // configuração da sala e carteira vêm do banco: espera antes de entrar
       const sala = getRoom(roomId);
       await Promise.all([carregarSala(sala), carregarCarteira(nome)]);
@@ -1357,6 +1455,7 @@ function attachSockets(io) {
         statusDesde: Date.now(),
         gestor: false, // provou a senha de gestor (ou de dono): recebe os alertas da equipe
         ultimoChamado: 0,
+        conta: contaLan, // a conta com que entrou (lanhouse.js): é ela que joga no horário reservado
         p: [0, 0, -4], r: Math.PI, a: 0, s: 0,
       };
       user.moedas = saldoDe(user.name);
@@ -1385,10 +1484,26 @@ function attachSockets(io) {
         sala: salaPublica(room),
         passe: room.entradaHash ? passeDa(room) : null,
         versao: VERSAO,
+        lan: estadoLan(room),
       });
       socket.to(roomId).emit('user-joined', publicUser(user));
+      if (user.conta) avisarLan(room);
       avisarGestores(room, user, 'entrou', `${user.name} entrou no sistema`);
       lobbyMudou();
+    });
+
+    // ---------------------------------------------------------- lan house
+    // A página guarda o token da conta (login em /lan) e manda aqui ao entrar: daí em diante o
+    // servidor sabe de quem é esta conexão, e ela joga quando for o horário dela.
+    socket.on('lan-entrar', (msg, ack) => {
+      const r = resposta(ack);
+      if (!room) return r({ ok: false });
+      const conta = msg?.token ? lan.contaDoToken(msg.token) : null;
+      if (msg?.token && !conta) return r({ ok: false, erro: 'login' });
+      if (user.conta === conta) return r({ ok: true, conta, lan: estadoLan(room) });
+      user.conta = conta;
+      avisarLan(room);
+      r({ ok: true, conta, lan: estadoLan(room) });
     });
 
     // ---------------------------------------------------------- dono da sala
@@ -1511,6 +1626,7 @@ function attachSockets(io) {
       }
       r({ ok: true });
       io.to(room.id).emit('sala', { ...salaPublica(room), por: user.name });
+      avisarLan(room);
       lobbyMudou();
       // outro modo ou outros departamentos, outras telas: quem mudou de tela fica sabendo
       const postos = new Map([...room.users.values()].map((u) => [u.id, u.posto]));
@@ -1698,6 +1814,7 @@ function attachSockets(io) {
       if (!user || typeof msg?.key !== 'string') return;
       const dono = room.users.get(donoDaChave(msg.key));
       if (!dono?.shares.get(msg.key)?.controle) return;
+      if (!podeJogarLan(room, user, dono, dono.shares.get(msg.key))) return;
       const agora = Date.now();
       if (agora - ctrlJanela > 1000) { ctrlJanela = agora; ctrlConta = 0; }
       // Mais de 120 eventos por segundo é abuso. Movimento e roda caem primeiro (o próximo corrige
@@ -1904,6 +2021,13 @@ function attachSockets(io) {
       }).filter((j) => j.id && j.nome);
       socket.data.hub = { jogos, atual: cleanText(m.atual, 120) || null };
       io.to(room.id).emit('hub-mudou');
+      // lan house: o catálogo fica guardado (sem as imagens) para escolher o jogo ao alugar o PC
+      (room.hubs ??= new Map()).set(socket.id, jogos);
+      const catalogo = jogos.map((j) => ({ id: j.id, nome: j.nome, steam: j.steam }));
+      if (jogos.length && JSON.stringify(catalogo) !== JSON.stringify(room.catalogoPc)) {
+        room.catalogoPc = catalogo;
+        guardarSala(room).catch((err) => console.warn('[banco] catálogo do PC', err.code || err.message));
+      }
     });
     socket.on('hub-lista', async (_, ack) => {
       if (typeof ack !== 'function') return;
@@ -2321,6 +2445,7 @@ function attachSockets(io) {
     });
 
     socket.on('disconnect', () => {
+      room?.hubs?.delete(socket.id); // os ícones dos jogos desse PC (lan house)
       if (!room || !user) return;
       const hadSlot = freeShares(room, user).length > 0;
       room.users.delete(user.id);
@@ -2394,6 +2519,16 @@ async function main() {
     },
   });
   attachSockets(io);
+  // lan house: as reservas na memória, e a vez de jogar conferida a cada 5 s (vira na hora certa)
+  await lan.iniciar();
+  ioLan = io;
+  setInterval(() => {
+    for (const room of rooms.values()) {
+      if (!room.users.size) continue;
+      avisarLan(room);
+      vigiarJogoLan(room).catch((err) => console.warn('[lan] jogo', err.message));
+    }
+  }, 5000).unref();
 
   const httpServer = http.createServer(app);
   io.attach(httpServer);

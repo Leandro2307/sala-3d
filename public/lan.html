@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alugar PC ou PS5</title>
+<meta name="theme-color" content="#0b0d12">
+<style>
+  :root {
+    --bg: #0b0d12; --card: #12151d; --line: rgba(255,255,255,.09); --text: #eef1f7; --muted: #8f97ab;
+    --accent: #6ee7c8; --accent-ink: #062a22; --warn: #fbbf24; --danger: #f2555a; --mine: #7c9cff;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, 'Segoe UI', sans-serif; }
+  main { max-width: 720px; margin: 0 auto; padding: 24px 16px 60px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  main > * { min-width: 0; }
+  h1 { font-size: 22px; margin: 0; }
+  h2 { font-size: 15px; margin: 0 0 10px; }
+  .sub { color: var(--muted); margin: 2px 0 0; font-size: 13.5px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .spread { justify-content: space-between; }
+  label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); flex: 1 1 180px; }
+  input { background: #0b0d12; color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font: inherit; }
+  input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  button, .btn { cursor: pointer; border: 1px solid var(--line); background: #1a1e29; color: var(--text); border-radius: 10px; padding: 10px 14px; font: inherit; font-weight: 600; text-decoration: none; display: inline-block; }
+  button.primary, .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.link { background: none; border: 0; color: var(--muted); padding: 4px 6px; font-weight: 500; text-decoration: underline; }
+  .msg { padding: 10px 12px; border-radius: 10px; font-size: 14px; }
+  .msg.ok { background: rgba(110,231,200,.12); color: var(--accent); }
+  .msg.erro { background: rgba(242,85,90,.12); color: #ff9a9d; }
+  .msg.info { background: rgba(251,191,36,.12); color: var(--warn); }
+  .dias { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
+  .dia { flex: none; min-width: 64px; text-align: center; padding: 8px 6px; font-weight: 500; }
+  .dia b { display: block; font-size: 17px; }
+  .dia small { color: var(--muted); font-size: 11.5px; text-transform: capitalize; }
+  .dia[aria-pressed="true"] { border-color: var(--accent); background: rgba(110,231,200,.1); }
+  .horas { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+  .hora { padding: 10px 6px; text-align: center; font-weight: 600; }
+  .hora small { display: block; font-weight: 500; font-size: 11.5px; color: var(--muted); }
+  .hora.livre:hover { border-color: var(--accent); }
+  .hora[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+  .hora[aria-pressed="true"] small { color: var(--accent-ink); }
+  .hora.ocupado, .hora.passado { opacity: .4; cursor: default; text-decoration: line-through; }
+  .hora.passado { text-decoration: none; }
+  .hora.meu { border-color: var(--mine); color: var(--mine); cursor: default; }
+  .hora.esperando { border-color: var(--warn); color: var(--warn); }
+  .lista { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+  .lista li { display: flex; justify-content: space-between; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; font-size: 14px; }
+  .tag { font-size: 12px; font-weight: 600; color: var(--accent); }
+  .tag.esperando { color: var(--warn); }
+  .agora { font-size: 14px; color: var(--muted); }
+  .maquinas { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .maquina { padding: 18px 10px; text-align: center; font-size: 18px; }
+  .maquina small { display: block; font-size: 12.5px; font-weight: 500; color: var(--muted); margin-top: 4px; }
+  .maquina[aria-pressed="true"] { border-color: var(--accent); background: rgba(110,231,200,.1); color: var(--accent); }
+  .jogos { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 10px; }
+  .jogo { position: relative; display: grid; padding: 0; overflow: hidden; text-align: left; font-weight: 600; }
+  .jogo .capa { position: relative; display: grid; place-items: center; aspect-ratio: 2 / 3; background: linear-gradient(160deg, #1d2333, #0d1017); font-size: 34px; color: var(--muted); }
+  .jogo .capa img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .jogo .capa img.icone { position: static; width: 56%; height: auto; object-fit: contain; }
+  .jogo span { padding: 6px 8px 8px; font-size: 12.5px; line-height: 1.25; }
+  .jogo[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+  .jogo[aria-pressed="true"]::after { content: '✓'; position: absolute; top: 6px; right: 6px; width: 24px; height: 24px; display: grid; place-items: center;
+    border-radius: 50%; background: var(--accent); color: var(--accent-ink); font-weight: 800; }
+  body.embed main { padding-top: 4px; }
+  body.embed header { display: none; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <header class="row spread">
+    <div>
+      <h1>Alugar PC ou PS5</h1>
+      <p class="sub" id="sub">Sala —</p>
+    </div>
+    <a class="btn" id="ir-sala" href="/">Ir para a sala</a>
+  </header>
+
+  <div class="msg" id="aviso" hidden></div>
+
+  <section class="card" id="login">
+    <h2>Sua conta</h2>
+    <p class="sub" style="margin:-4px 0 12px">Seu nome e senha da sala. Primeira vez? A senha que você digitar vira a da sua conta.</p>
+    <form id="form-login" class="row" autocomplete="on">
+      <label>Nome <input name="nome" autocomplete="username" maxlength="20" placeholder="Seu nome" required></label>
+      <label>Senha <input name="senha" type="password" autocomplete="current-password" maxlength="100" placeholder="6 caracteres ou mais" required></label>
+      <div class="row" style="flex-basis:100%">
+        <button type="submit" class="primary">Entrar</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="card" id="conta" hidden>
+    <div class="row spread">
+      <div>Logado como <b id="conta-nome"></b></div>
+      <div class="row">
+        <button type="button" class="link" id="trocar-senha">Trocar senha</button>
+        <button type="button" class="link" id="sair">Sair</button>
+      </div>
+    </div>
+    <form id="form-senha" class="row" hidden style="margin-top:10px">
+      <label>Senha atual <input name="atual" type="password" autocomplete="current-password" required></label>
+      <label>Senha nova <input name="nova" type="password" autocomplete="new-password" minlength="6" required></label>
+      <div class="row" style="flex-basis:100%"><button type="submit" class="primary">Salvar senha</button></div>
+    </form>
+  </section>
+
+  <section class="card" id="passo-maquina">
+    <h2>O que você quer alugar?</h2>
+    <div class="maquinas" id="maquinas">
+      <button type="button" class="maquina" data-maquina="pc" aria-pressed="false">PC<small id="agora-pc">livre agora</small></button>
+      <button type="button" class="maquina" data-maquina="ps5" aria-pressed="false">PS5<small id="agora-ps5">livre agora</small></button>
+    </div>
+  </section>
+
+  <section class="card" id="passo-jogo" hidden>
+    <h2>Qual jogo?</h2>
+    <p class="sub" style="margin:-4px 0 12px">No seu horário, o PC já abre esse jogo para você.</p>
+    <div class="jogos" id="jogos"></div>
+  </section>
+
+  <section class="card" id="agenda" hidden>
+    <div class="row spread" style="margin-bottom:10px">
+      <h2 style="margin:0">Dia e horas <span id="maquina-nome"></span></h2>
+      <span class="agora" id="agora"></span>
+    </div>
+    <div class="dias" id="dias"></div>
+    <p class="sub" style="margin:10px 0">Horário de Brasília. Toque nas horas livres (até <span id="max-horas">8</span> por vez).</p>
+    <div class="horas" id="horas"></div>
+    <div class="row spread" style="margin-top:14px">
+      <span id="resumo" class="sub"></span>
+      <button type="button" class="primary" id="pagar" disabled>Pagar</button>
+    </div>
+  </section>
+
+  <section class="card" id="minhas" hidden>
+    <h2>Minhas reservas</h2>
+    <ul class="lista" id="minhas-lista"></ul>
+  </section>
+</main>
+<script>
+(() => {
+  const $ = (s) => document.querySelector(s);
+  const CHAVE = 'sala3d-lan';
+  const params = new URLSearchParams(location.search);
+  const sala = (params.get('sala') || '').trim().slice(0, 40).toLowerCase().replace(/[^a-z0-9-_]/g, '') || 'principal';
+  let conta = null;
+  try { conta = JSON.parse(localStorage.getItem(CHAVE) || 'null'); } catch { /* sem storage */ }
+  let dia = null;
+  let dados = null;
+  let maquina = ['pc', 'ps5'].includes(params.get('maquina')) ? params.get('maquina') : null;
+  const NOMES = { pc: 'PC', ps5: 'PS5' };
+  const embed = params.get('embed') === '1'; // dentro da sala (janela do main.js)
+  if (embed) document.body.classList.add('embed');
+  const escolhidas = new Set();
+  let jogos = []; // os jogos do PC da casa
+  let jogo = null; // o escolhido (id)
+  const CAPA_STEAM = (id) => `https://cdn.cloudflare.steamstatic.com/steam/apps/${id}/library_600x900.jpg`;
+  const esc = (t) => String(t ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  $('#sub').textContent = `Sala ${sala}`;
+  $('#ir-sala').href = `/?sala=${encodeURIComponent(sala)}`;
+
+  const post = (url, corpo) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corpo) })
+    .then((r) => r.json()).catch(() => ({ ok: false, erro: 'Sem conexão com a sala. Tente de novo.' }));
+  const aviso = (txt, tipo = 'info') => {
+    const a = $('#aviso');
+    a.hidden = !txt;
+    a.textContent = txt || '';
+    a.className = `msg ${tipo}`;
+    if (txt) a.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  };
+  const dinheiro = (centavos, moeda) => (centavos / 100).toLocaleString('pt-BR', { style: 'currency', currency: (moeda || 'brl').toUpperCase() });
+  const dataBr = (d) => d.split('-').reverse().join('/');
+  const somaDias = (d, n) => {
+    const t = new Date(`${d}T12:00:00Z`);
+    t.setUTCDate(t.getUTCDate() + n);
+    return t.toISOString().slice(0, 10);
+  };
+  const hh = (h) => `${String(h).padStart(2, '0')}:00`;
+
+  function guardarConta(c) {
+    conta = c;
+    try { c ? localStorage.setItem(CHAVE, JSON.stringify(c)) : localStorage.removeItem(CHAVE); } catch { /* sem storage */ }
+    mostrarConta();
+  }
+  function mostrarConta() {
+    $('#login').hidden = !!conta;
+    $('#conta').hidden = !conta;
+    $('#minhas').hidden = !conta;
+    if (conta) $('#conta-nome').textContent = conta.nome;
+    resumo();
+  }
+  function sairPorLogin(r) {
+    if (r?.erro !== 'login') return false;
+    guardarConta(null);
+    aviso('Sua sessão expirou. Entre de novo.', 'info');
+    return true;
+  }
+
+  // ------------------------------------------------ login
+  $('#form-login').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = e.currentTarget.elements;
+    const r = await post('/lan/conta', { nome: f.nome.value, senha: f.senha.value });
+    if (!r.ok) return aviso(r.erro, 'erro');
+    f.senha.value = '';
+    guardarConta({ nome: f.nome.value.trim(), token: r.token });
+    aviso(r.criou ? 'Conta criada. Agora escolha o horário.' : '', 'ok');
+    carregar();
+  });
+  $('#sair').addEventListener('click', () => { guardarConta(null); escolhidas.clear(); carregar(); });
+  $('#trocar-senha').addEventListener('click', () => { $('#form-senha').hidden = !$('#form-senha').hidden; });
+  $('#form-senha').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = e.currentTarget.elements;
+    const r = await post('/lan/senha', { token: conta?.token, atual: f.atual.value, nova: f.nova.value });
+    if (sairPorLogin(r)) return;
+    if (!r.ok) return aviso(r.erro, 'erro');
+    guardarConta({ ...conta, token: r.token });
+    e.currentTarget.reset();
+    e.currentTarget.hidden = true;
+    aviso('Senha trocada.', 'ok');
+  });
+
+  // ------------------------------------------------ dias e horas
+  function desenharDias() {
+    if (!dados?.hoje) return;
+    const nomes = [];
+    for (let d = dados.hoje; d <= dados.ultimo; d = somaDias(d, 1)) nomes.push(d);
+    $('#dias').innerHTML = nomes.map((d, i) => {
+      const sem = i === 0 ? 'hoje' : i === 1 ? 'amanhã' : new Date(`${d}T12:00:00Z`).toLocaleDateString('pt-BR', { weekday: 'short', timeZone: 'UTC' }).replace('.', '');
+      return `<button type="button" class="dia" data-dia="${d}" aria-pressed="${d === dia}"><small>${sem}</small><b>${d.slice(8)}</b><small>${d.slice(5, 7)}</small></button>`;
+    }).join('');
+  }
+  function desenharHoras() {
+    const txt = { livre: 'livre', ocupado: 'ocupado', meu: 'seu', esperando: 'pagando', passado: 'passou' };
+    $('#horas').innerHTML = dados.horas.map((h) => {
+      const sel = escolhidas.has(h.inicio);
+      return `<button type="button" class="hora ${h.estado}" data-inicio="${h.inicio}" aria-pressed="${sel}" ${h.estado === 'livre' || h.estado === 'esperando' ? '' : 'disabled'}>${hh(h.hora)}<small>${sel ? 'escolhida' : txt[h.estado]}</small></button>`;
+    }).join('') || '<p class="sub">Nenhum horário neste dia.</p>';
+    const a = dados.agora;
+    $('#agora').textContent = a ? `Jogando agora: ${a.conta}` : '';
+  }
+  function resumo() {
+    const n = escolhidas.size;
+    const p = dados?.preco;
+    $('#resumo').textContent = n ? `${n} hora${n > 1 ? 's' : ''}${p ? ` · ${dinheiro(p.valor * n, p.moeda)}` : ''}` : p ? `${dinheiro(p.valor, p.moeda)} por hora` : '';
+    const faltaJogo = maquina === 'pc' && jogos.length && !jogo;
+    $('#pagar').disabled = !n || faltaJogo;
+    $('#pagar').textContent = !conta ? 'Entre para pagar' : faltaJogo ? 'Escolha o jogo' : n && p ? `Pagar ${dinheiro(p.valor * n, p.moeda)}` : 'Pagar';
+  }
+
+  // quem joga agora em cada máquina (aparece nos dois botões)
+  async function carregarAgora() {
+    for (const m of ['pc', 'ps5']) {
+      const r = m === maquina ? dados : await post('/lan/horarios', { sala, maquina: m });
+      if (r?.ok && !r.ligada) {
+        $('#passo-maquina').hidden = true;
+        return aviso('Esta sala não está alugando horários agora.', 'info');
+      }
+      if (r?.ligada) $(`#agora-${m}`).textContent = r.agora ? `${r.agora.conta} jogando agora` : 'livre agora';
+    }
+  }
+  function escolherMaquina(m) {
+    if (m !== maquina) escolhidas.clear();
+    maquina = m;
+    for (const b of document.querySelectorAll('[data-maquina]')) b.setAttribute('aria-pressed', String(b.dataset.maquina === m));
+    $('#maquina-nome').textContent = `— ${NOMES[m]}`;
+    $('#agenda').hidden = false;
+    $('#passo-jogo').hidden = true;
+    if (m === 'pc') carregarJogos();
+    carregar();
+  }
+  // PC: os jogos instalados no PC da casa (a capa da Steam, o ícone ou a inicial)
+  async function carregarJogos() {
+    const r = await post('/lan/jogos', { sala });
+    jogos = r.ok ? r.jogos : [];
+    if (!jogos.some((j) => j.id === jogo)) jogo = null;
+    $('#passo-jogo').hidden = maquina !== 'pc' || !jogos.length;
+    $('#jogos').innerHTML = jogos.map((j) => {
+      const capa = j.steam ? `<img src="${CAPA_STEAM(j.steam)}" alt="" loading="lazy" onerror="this.remove()">` : '';
+      const icone = j.icone ? `<img class="icone" src="${j.icone}" alt="">` : esc(j.nome.trim()[0] || '?');
+      return `<button type="button" class="jogo" data-jogo="${esc(j.id)}" aria-pressed="${j.id === jogo}"><div class="capa">${icone}${capa}</div><span>${esc(j.nome)}</span></button>`;
+    }).join('');
+    resumo();
+  }
+  $('#jogos').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-jogo]');
+    if (!b) return;
+    jogo = b.dataset.jogo;
+    for (const x of document.querySelectorAll('[data-jogo]')) x.setAttribute('aria-pressed', String(x.dataset.jogo === jogo));
+    resumo();
+    // próximo passo: o dia e as horas
+    $('#agenda').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+  $('#maquinas').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-maquina]');
+    if (b) escolherMaquina(b.dataset.maquina);
+  });
+
+  async function carregar() {
+    if (!maquina) return carregarAgora();
+    const r = await post('/lan/horarios', { sala, dia, maquina, token: conta?.token });
+    if (!r.ok) return aviso(r.erro || 'Não deu para carregar os horários.', 'erro');
+    if (!r.ligada) {
+      $('#agenda').hidden = true;
+      $('#passo-maquina').hidden = true;
+      return aviso('Esta sala não está alugando horários agora.', 'info');
+    }
+    dados = r;
+    dia = r.dia;
+    $('#max-horas').textContent = r.maxHoras;
+    // as escolhidas que deixaram de estar livres saem
+    const livres = new Set(r.horas.filter((h) => h.estado === 'livre').map((h) => h.inicio));
+    for (const h of r.horas) if (h.estado === 'esperando') livres.add(h.inicio);
+    for (const i of [...escolhidas]) if (!livres.has(i) && r.horas.some((h) => h.inicio === i)) escolhidas.delete(i);
+    if (!r.pagar) aviso('O pagamento ainda não foi configurado no servidor (STRIPE_KEY).', 'info');
+    desenharDias();
+    desenharHoras();
+    resumo();
+    carregarMinhas();
+    carregarAgora();
+  }
+  async function carregarMinhas() {
+    if (!conta) return;
+    const r = await post('/lan/minhas', { token: conta.token });
+    if (sairPorLogin(r)) return;
+    if (!r.ok) return;
+    $('#minhas-lista').innerHTML = r.lista.length
+      ? r.lista.map((m) => `<li><span><b>${m.maquina}</b>${m.jogo ? ` · ${esc(m.jogo)}` : ''} · ${dataBr(m.dia)} · ${hh(m.hora)}–${hh((m.hora + 1) % 24)}${m.sala !== sala ? ` · sala ${m.sala}` : ''}</span><span class="tag ${m.status === 'paga' ? '' : 'esperando'}">${m.status === 'paga' ? 'pago' : 'aguardando pagamento'}</span></li>`).join('')
+      : '<li><span class="sub">Nenhuma reserva ainda.</span></li>';
+  }
+
+  $('#dias').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-dia]');
+    if (!b || b.dataset.dia === dia) return;
+    dia = b.dataset.dia;
+    carregar();
+  });
+  $('#horas').addEventListener('click', (e) => {
+    const b = e.target.closest('.hora.livre, .hora.esperando');
+    if (!b) return;
+    const i = Number(b.dataset.inicio);
+    if (escolhidas.has(i)) escolhidas.delete(i);
+    else if (escolhidas.size >= (dados?.maxHoras || 8)) return aviso(`No máximo ${dados?.maxHoras || 8} horas por vez.`, 'info');
+    else escolhidas.add(i);
+    desenharHoras();
+    resumo();
+  });
+  $('#pagar').addEventListener('click', async () => {
+    if (!conta) {
+      $('#form-login').elements.nome.focus();
+      return aviso('Entre ou crie sua conta para reservar.', 'info');
+    }
+    $('#pagar').disabled = true;
+    // dentro da sala o checkout da Stripe abre numa aba nova (ele não abre dentro de uma janela da
+    // página); a aba é aberta já no toque, senão o navegador bloqueia
+    const aba = embed ? window.open('', '_blank') : null;
+    const r = await post('/lan/reservar', { token: conta.token, sala, maquina, jogo: maquina === 'pc' ? jogo : null, inicios: [...escolhidas] });
+    if (sairPorLogin(r) || !r.ok) {
+      aba?.close();
+      if (r.ok === false && r.erro !== 'login') aviso(r.erro, 'erro');
+      return carregar();
+    }
+    if (!aba) return void (location.href = r.url);
+    aba.location.href = r.url;
+    escolhidas.clear();
+    aviso('O pagamento abriu numa aba nova. Depois de pagar, o horário aparece aqui em "Minhas reservas".', 'info');
+    carregar();
+  });
+
+  // ------------------------------------------------ volta do checkout
+  async function confirmar(sessao, tentativa = 0) {
+    aviso('Conferindo o pagamento…', 'info');
+    const r = await post('/lan/confirmar', { sessao });
+    if (r.ok && r.status === 'paga') {
+      const quando = r.horas.map((h) => `${dataBr(h.dia)} às ${hh(h.hora)}`).join(', ');
+      const h0 = r.horas[0] || {};
+      aviso(`Pagamento confirmado! ${h0.maquina || ''}${h0.jogo ? ` (${h0.jogo})` : ''}: ${quando}. Na hora, entre na sala com a sua conta${h0.jogo ? ': o jogo já vai estar abrindo' : ' para jogar'}. Pode fechar esta aba.`, 'ok');
+    } else if (tentativa < 5) {
+      return setTimeout(() => confirmar(sessao, tentativa + 1), 3000);
+    } else {
+      aviso(r.erro || 'O pagamento ainda não foi confirmado. Assim que a Stripe confirmar, o horário fica seu — veja em "Minhas reservas".', 'info');
+    }
+    history.replaceState(null, '', `/lan?sala=${encodeURIComponent(sala)}`);
+    carregar();
+  }
+  mostrarConta();
+  if (params.get('pago')) confirmar(params.get('pago'));
+  else if (params.get('cancelado')) {
+    aviso('Pagamento cancelado. O horário fica separado para você por até 30 minutos: escolha de novo e pague para garantir.', 'info');
+    history.replaceState(null, '', `/lan?sala=${encodeURIComponent(sala)}`);
+  }
+  if (maquina) escolherMaquina(maquina);
+  else carregar();
+  setInterval(carregar, 60_000);
+  // voltou para esta janela depois de pagar na outra aba: atualiza na hora
+  window.addEventListener('focus', () => carregar());
+})();
+</script>
+</body>
+</html>

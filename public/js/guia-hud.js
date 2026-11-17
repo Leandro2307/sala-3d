@@ -19,7 +19,6 @@ const semMovimento = matchMedia('(prefers-reduced-motion: reduce)');
 const ICONES = {
   salas: { alvo: '#salas', nome: 'Suas salas', texto: 'As salas por onde você passou ficam nesta coluna, como no Discord. O + leva você para outra sala.' },
   jogosTopo: { alvo: '#hud-btn-jogos, #btn-jogos', nome: 'Jogos & Teleporte', texto: 'Mais de 20 jogos — futebol, kart, truco, xadrez… — e atalhos para ir direto até cada um.' },
-  galera: { alvo: '#hud-btn-galera', nome: 'Ir até amigos', texto: 'Leva você para perto de quem está na sala.' },
   moedas: { alvo: '#moedas-chip', nome: 'Moedas', texto: 'Você ganha moedas no parkour, na pista e nos jogos de tabuleiro, e pode apostar na mesa de dados.' },
   bussola: {
     alvo: '#hud-bussola', nome: 'Bússola',
@@ -73,7 +72,7 @@ const ICONES = {
 
 // na ordem em que aparecem na tela: no computador, de cima para baixo e da esquerda para a direita
 const PASSOS_PC = [
-  'salas', 'jogosTopo', 'galera', 'moedas', 'bussola',
+  'salas', 'jogosTopo', 'moedas', 'bussola',
   'mic', 'cam', 'share', 'react', 'view', 'sino', 'sair',
   'mapa', 'mesa', 'empresa', 'telao', 'musica', 'pessoas', 'chat', 'personagem', 'ajustes', 'telaCheia',
 ];

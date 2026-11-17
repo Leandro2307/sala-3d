@@ -128,8 +128,6 @@ dicasAoPassar();
 const tutorialHud = new TutorialHud({ toque: isTouch });
 if (isTouch) {
   document.body.classList.add('touch');
-  $('#lobby-note').hidden = true;
-  $('#lobby-note-touch').hidden = false;
   barraMais();
 }
 
@@ -670,18 +668,59 @@ if (params.get('sala') && !entrada) {
     if (r.protegida && !r.ok) pedirSenhaDaSala();
   }).catch(() => {});
 }
-// o servidor recusou o passe (senha trocada no meio do caminho): volta ao saguão desta sala
-function senhaRecusada() {
-  guardarPasse(idDaSala(state.roomRequested), null);
+// o servidor recusou o passe (senha trocada no meio do caminho) ou a conta da lan house: volta ao
+// saguão desta sala
+function senhaRecusada(erro) {
+  if (erro === 'conta') try { localStorage.removeItem('sala3d-lan'); } catch { /* sem storage */ }
+  else guardarPasse(idDaSala(state.roomRequested), null);
   const url = new URL(window.location.href);
   url.searchParams.set('sala', state.roomRequested);
   window.location.replace(url);
 }
 
+// ----- conta (nome e senha) na entrada: todo mundo entra com uma (lanhouse.js guarda as contas)
+function erroConta(txt) {
+  $('#conta-erro').hidden = !txt;
+  $('#conta-erro').textContent = txt || '';
+}
+// já logado com este nome: segue; senão faz o login (ou cria a conta) com o nome e a senha
+async function contaParaEntrar(nome) {
+  let guardada = null;
+  try { guardada = JSON.parse(localStorage.getItem('sala3d-lan') || 'null'); } catch { /* sem storage */ }
+  const chave = (t) => String(t || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  if (guardada?.token && chave(guardada.nome) === chave(nome)) return true;
+  const senha = $('#in-senha-conta').value;
+  if (!senha) {
+    $('#campo-senha-conta').hidden = false;
+    erroConta('Digite sua senha. Primeira vez? A senha que você digitar vira a da sua conta.');
+    $('#in-senha-conta').focus();
+    return false;
+  }
+  let r;
+  try {
+    r = await (await fetch('/lan/conta', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nome, senha }),
+    })).json();
+  } catch {
+    r = { ok: false, erro: 'Sem conexão. Tente de novo.' };
+  }
+  if (!r.ok) {
+    erroConta(r.erro);
+    return false;
+  }
+  try { localStorage.setItem('sala3d-lan', JSON.stringify({ nome, token: r.token })); } catch { /* sem storage */ }
+  $('#in-senha-conta').value = '';
+  erroConta('');
+  if (r.criou) toast(`Conta criada: na próxima vez, entre com o nome ${nome} e essa senha.`, 'success', 6000);
+  return true;
+}
+$('#in-senha-conta').addEventListener('input', () => erroConta(''));
+
 // cores: no formulário de entrada e no modal do personagem (que também abre dentro da sala)
 function renderSwatches() {
   const html = COLORS.map((c) => `<button type="button" role="radio" aria-label="Cor ${c}" aria-checked="${c === settings.color}" style="--c:${c}" data-color="${c}"></button>`).join('');
-  $('#swatches').innerHTML = html;
   $('#ep-cores').innerHTML = html;
 }
 renderSwatches();
@@ -698,7 +737,7 @@ function mudarCor(cor) {
     renderPeople();
   }
 }
-for (const sel of ['#swatches', '#ep-cores']) {
+for (const sel of ['#ep-cores']) {
   $(sel).addEventListener('click', (e) => {
     const b = e.target.closest('[data-color]');
     if (b) mudarCor(b.dataset.color);
@@ -741,14 +780,8 @@ async function aplicarPersonagem({ carregar = true } = {}) {
   $('#char-mini').src = def.miniatura;
   $('#char-nome').textContent = def.label;
   $('#char-resumo').textContent = def.resumo || '';
-  // camiseta e foto só existem no boneco padrão: o modelo 3D tem o corpo dele
-  const ehPadrao = !def.url;
-  $('#campo-camiseta').hidden = !ehPadrao;
-  $('#campo-foto').hidden = !ehPadrao;
-  const linha = [];
-  if (def.aviso) linha.push(def.aviso);
-  if (def.credito) linha.push('Modelo: ' + def.credito);
-  $('#char-credito').textContent = linha.join(' · ');
+  // a foto só existe no boneco padrão: o modelo 3D tem o corpo dele
+  $('#campo-foto').hidden = !!def.url;
   if (!carregar) return;
   const r = await localAvatar.setPersonagem(def);
   if (r && r.ok === false) toast('Não consegui carregar esse personagem.', 'error');
@@ -874,7 +907,7 @@ function mudarCamiseta(kind) {
   if (state.joined) poderesMudaram();
   if (socket && state.joined) socket.emit('shirt', settings.shirt);
 }
-for (const sel of ['#in-shirt', '#ep-camiseta']) {
+for (const sel of ['#ep-camiseta']) {
   $(sel).addEventListener('click', (e) => {
     const b = e.target.closest('[data-shirt]');
     if (b) mudarCamiseta(b.dataset.shirt);
@@ -895,7 +928,8 @@ $('#photo-clear').addEventListener('click', () => applyPhoto(null));
 
 if (!window.isSecureContext || !navigator.mediaDevices) {
   // o aviso tem que cair na nota que está visível (a do celular é outra)
-  const note = isTouch ? $('#lobby-note-touch') : $('#lobby-note');
+  const note = $('#lobby-note');
+  note.hidden = false;
   note.classList.add('warn');
   note.innerHTML = 'Este endereço não é seguro (http). Microfone e compartilhamento de tela só funcionam em <b>https</b> ou <b>localhost</b>. Use o link do túnel (npm run tunnel) ou <b>npm run https</b>.';
 }
@@ -1032,7 +1066,8 @@ async function join() {
 
   const sala = idDaSala(state.roomRequested);
   const acesso = offlineJogo ? {} : await liberarSala(sala, $('#in-senha-sala').value);
-  if (!acesso) {
+  // todo mundo entra com a conta: faz o login (ou cria a conta) com o nome e a senha digitados
+  if (!acesso || (!offlineJogo && !(await contaParaEntrar(name)))) {
     btn.disabled = false;
     btn.textContent = 'Entrar na sala';
     return;
@@ -1126,7 +1161,7 @@ async function join() {
   bindSocket();
 
   const data = await emitJoin();
-  if (data?.erro) return senhaRecusada();
+  if (data?.erro) return senhaRecusada(data.erro);
   applyJoined(data);
   // pede o microfone sem travar a entrada; a voz entra nas conexões assim que liberada
   if (state.micOn) {
@@ -1301,6 +1336,7 @@ function emitJoin() {
         arma: settings.arma,
         status: settings.status,
         passe: state.passe,
+        lan: tokenLan(),
         proto: 2, // recebe as posições em lote ('states'); aba antiga continua no 'state' de cada um
       }, (data) => {
         if (feito) return;
@@ -1333,6 +1369,8 @@ function applyJoined(data) {
   futebol.verPartida(); // numa reconexão, quem estava jogando volta a pé (o servidor esqueceu)
   state.room = data.room;
   state.passe = data.passe || null;
+  aplicarLan(data.lan);
+  entrarLan();
   // versão do servidor na primeira entrada: numa reconexão, outra versão = deploy novo (ver 'connect')
   state.versao ??= data.versao;
   guardarPasse(data.room, data.passe);
@@ -1399,7 +1437,7 @@ function bindSocket() {
     const largar = () => { for (const g of guardadas) for (const t of g.stream.getTracks()) t.stop(); };
     if (data?.erro) {
       largar();
-      return senhaRecusada();
+      return senhaRecusada(data.erro);
     }
     // o servidor mudou de versão (deploy novo): recarrega já entrando, com o código que combina com ele.
     // A captura não sobrevive à recarga: o PC do /tela compartilha de novo sozinho depois (telaParaVoltar).
@@ -1656,6 +1694,7 @@ function bindSocket() {
     state.passe = passe;
     guardarPasse(state.room, passe);
   });
+  socket.on('lan', aplicarLan);
   socket.on('sala', (cfg) => {
     aplicarSala(cfg);
     if (cfg.por && cfg.por !== settings.name) toast(`${cfg.por} atualizou a sala`, 'info', 3500);
@@ -2699,6 +2738,9 @@ const controle = new Controle({
 // Mexendo na própria aba: sem o aviso de "fulano está mexendo na sua aba".
 function receberControle(msg) {
   const sh = self()?.shares.get(msg.key);
+  // lan house: fora quem compartilha, só quem tem o horário pago agora nesta máquina (PC ou PS5)
+  // mexe. O servidor também barra, mas o canal direto do WebRTC não passa por ele.
+  if (state.lan && msg.deId && msg.deId !== state.selfId && !idsDaVez(maquinaDaTela(sh)).includes(msg.deId)) return;
   if (sh?.controle) turboDaTela(msg.key);
   controle.receber(sh, msg.deId === state.selfId ? { ...msg, deId: null } : msg);
 }
@@ -4677,6 +4719,10 @@ function preencherConfig(forcar = false) {
   f.aviso.value = cfg.aviso || '';
   f.privacidade.checked = cfg.privacidade !== false;
   f.listada.checked = cfg.listada !== false;
+  const lanCfg = cfg.lanhouse || { ligada: false, abre: 8, fecha: 24 };
+  f.lanLigada.checked = !!lanCfg.ligada;
+  f.lanAbre.innerHTML = Array.from({ length: 24 }, (_, h) => `<option value="${h}"${h === lanCfg.abre ? ' selected' : ''}>${String(h).padStart(2, '0')}:00</option>`).join('');
+  f.lanFecha.innerHTML = Array.from({ length: 24 }, (_, i) => i + 1).map((h) => `<option value="${h}"${h === lanCfg.fecha ? ' selected' : ''}>${h === 24 ? '00:00 (meia-noite)' : `${String(h).padStart(2, '0')}:00`}</option>`).join('');
   $('#sala-mapas').innerHTML = Object.entries(MAPAS).map(([id, m]) => `<label class="modulo mapa-op" style="--c:${m.cor}">
       <input type="radio" name="mapa" value="${id}"${(cfg.mapa || MAPA_DA_PAGINA) === id ? ' checked' : ''}>
       <b>${m.nome}</b><small>${m.desc}</small>
@@ -5175,6 +5221,64 @@ $('#aviso-fechar').addEventListener('click', () => {
   mostrarAviso();
 });
 
+// ----- lan house (lanhouse.js no servidor, /lan para reservar): na sala com ela ligada, só quem tem
+// o horário pago agora joga. O login feito em /lan fica guardado aqui e vai junto ao entrar.
+const LAN_CHAVE = 'sala3d-lan';
+const tokenLan = () => {
+  try { return JSON.parse(localStorage.getItem(LAN_CHAVE) || 'null')?.token || null; } catch { return null; }
+};
+function entrarLan() {
+  const token = tokenLan();
+  if (!token) return;
+  socket.emit('lan-entrar', { token }, (r) => {
+    if (r?.erro === 'login') try { localStorage.removeItem(LAN_CHAVE); } catch { /* sem storage */ }
+    state.lanConta = r?.conta || null;
+    if (r?.lan) aplicarLan(r.lan);
+  });
+}
+const MAQUINAS_LAN = { pc: 'PC', ps5: 'PS5' };
+// a tela do PS5 direto é o PS5; o resto (janela, tela inteira, aba) é o PC
+const maquinaDaTela = (sh) => (sh?.ps5 || sh?.superficie === 'ps5' || sh?.titulo === 'PS5' ? 'ps5' : 'pc');
+const idsDaVez = (m) => state.lan?.[m]?.ids || [];
+const minhasMaquinas = () => Object.keys(MAQUINAS_LAN).filter((m) => idsDaVez(m).includes(state.selfId));
+let lanEraMinha = new Set();
+const horaCurta = (ms) => new Date(ms).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+function aplicarLan(e) {
+  const antes = state.lan;
+  state.lan = e?.ligada ? e : null;
+  // a vez passou: quem jogava sai do modo jogo deste PC (a sala volta a ser desenhada normalmente)
+  for (const m of Object.keys(MAQUINAS_LAN)) {
+    for (const id of antes?.[m]?.ids || []) {
+      if (idsDaVez(m).includes(id)) continue;
+      for (const sh of self()?.shares.values() || []) if (sh.controle && maquinaDaTela(sh) === m) controle.receber(sh, { ev: { t: 'modo', jogo: false }, deId: id });
+    }
+  }
+  const agora = new Set(minhasMaquinas());
+  for (const m of agora) if (!lanEraMinha.has(m)) toast(`Seu horário no ${MAQUINAS_LAN[m]} começou: você joga até ${horaCurta(state.lan[m].fim)}. Bom jogo!`, 'success', 8000);
+  for (const m of lanEraMinha) if (!agora.has(m)) toast(`Seu horário no ${MAQUINAS_LAN[m]} acabou. Para jogar mais, toque em "Alugar PC ou PS5".`, 'info', 10000);
+  lanEraMinha = agora;
+  mostrarLan();
+}
+// o botão "Alugar PC ou PS5" no topo, à esquerda: só com a lan house ligada (o começo e o fim da
+// vez de cada um chegam como aviso, ver aplicarLan)
+function mostrarLan() {
+  $('#lan-reservar').hidden = !state.lan;
+  $('.lan-sep').hidden = !state.lan;
+}
+// a reserva (/lan) abre numa janela dentro da sala; o pagamento abre numa aba nova
+function abrirAluguel() {
+  if (document.pointerLockElement) document.exitPointerLock();
+  $('#lan-frame').src = `/lan?sala=${encodeURIComponent(state.room || '')}&embed=1`;
+  $('#lan-modal').hidden = false;
+}
+function fecharAluguel() {
+  $('#lan-modal').hidden = true;
+  $('#lan-frame').src = 'about:blank';
+}
+$('#lan-reservar').addEventListener('click', abrirAluguel);
+$('#lan-modal-fechar').addEventListener('click', fecharAluguel);
+$('#lan-modal').addEventListener('click', (e) => { if (e.target === e.currentTarget) fecharAluguel(); });
+
 // ----- ir para (atalho para cada sala do escritório, com quantas pessoas há nela)
 function renderIrPara() {
   const box = $('#sala-irpara');
@@ -5331,6 +5435,11 @@ $('#sala-config').addEventListener('submit', (e) => {
     ...(logoNovo !== undefined ? { logo: logoNovo } : {}),
     privacidade: form.elements.privacidade.checked,
     listada: form.elements.listada.checked,
+    lanhouse: {
+      ligada: form.elements.lanLigada.checked,
+      abre: Number(form.elements.lanAbre.value),
+      fecha: Number(form.elements.lanFecha.value),
+    },
   };
   socket.emit('sala-config', cfg, (r) => {
     if (!r?.ok) return toast(r?.erro || 'Não deu para salvar.', 'error');

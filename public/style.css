@@ -3386,6 +3386,22 @@ body.com-luneta #controls-help, body.com-luneta #salas, body.com-luneta .room-ch
 .aviso-txt { display: grid; gap: 1px; min-width: 0; font-size: 13px; font-weight: 600; line-height: 1.35; }
 .aviso-txt small { color: var(--accent); font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
 .chamado { border-color: rgba(110, 231, 200, 0.45); }
+/* entrada: o erro da conta logo embaixo da senha; "Jogar sem internet" é só uma linha pequena */
+.conta-erro { display: block; margin: -8px 0 14px; color: var(--danger); font-size: 12.5px; }
+.conta-erro[hidden] { display: none; }
+.lobby-offline { margin: 12px 0 0; text-align: center; }
+.lobby-offline .ghost-btn { font-size: 12px; }
+.offline-modal-card { width: min(460px, 100%); grid-template-rows: auto; align-content: start; }
+.offline-modal-card .offline-topo b { display: none; }
+.offline-modal-card .offline-card { margin-top: 0; }
+.ep-foto .photo-prev { width: 44px; height: 44px; }
+.lan-card { width: min(760px, 100%); height: calc(100dvh - 32px); }
+.lan-card iframe { width: 100%; height: 100%; border: 0; border-radius: 12px; background: #0b0d12; }
+#lan-reservar { display: inline-flex; align-items: center; gap: 6px; }
+.lan-horas { display: flex; gap: 10px; margin-top: 6px; }
+.lan-horas label { display: grid; gap: 3px; flex: 1; }
+.lan-horas small { color: var(--muted); font-size: 11px; }
+.lan-horas select { width: 100%; }
 .chamado .avatar-dot { width: 32px; height: 32px; flex: none; }
 .chamado-txt { display: grid; gap: 1px; min-width: 0; font-size: 13px; }
 .chamado-txt small { color: var(--muted); }
@@ -3758,9 +3774,9 @@ body.touch .mu-estilos button { flex: none; }
   .lobby-card h1 { order: 1; font-size: 28px; line-height: 1.1; }
   .lobby-card h1 br { display: none; }
   .lobby-sub, .l-dica { display: none; }
-  .l-char { order: 2; }
-  .l-cor { order: 3; }
-  .l-nome { order: 4; }
+  .l-nome { order: 2; }
+  .l-senha, .conta-erro { order: 3; }
+  .l-char { order: 4; }
   .l-sala { order: 5; }
   #campo-senha-sala { order: 6; }
   .l-mic { order: 7; padding: 2px 0; }
@@ -3769,7 +3785,8 @@ body.touch .mu-estilos button { flex: none; }
   #campo-foto { order: 10; }
   .lobby-acao { order: 11; }
   #btn-instalar { order: 12; }
-  .lobby-note { order: 13; }
+  .lobby-offline { order: 13; }
+  .lobby-note { order: 14; }
   .field { gap: 6px; }
 
   /* o personagem é o destaque: miniatura maior */
@@ -3822,7 +3839,7 @@ body.touch .mu-estilos button { flex: none; }
   #lobby { flex-direction: row; align-items: flex-start; padding-top: calc(12px + env(safe-area-inset-top)); }
   .lobby-card { flex: 1; width: auto; max-width: 600px; margin: 0; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
   .lobby-card h1 { display: none; }
-  .lobby-card > :is(.brand, #campo-senha-sala, #campo-camiseta, #campo-foto, .lobby-acao, #btn-instalar, .lobby-note) { grid-column: 1 / -1; }
+  .lobby-card > :is(.brand, #campo-senha-sala, .conta-erro, .lobby-acao, #btn-instalar, .lobby-offline, .lobby-note) { grid-column: 1 / -1; }
   /* meia largura: as cores em duas linhas de cinco */
   .lobby-card .swatches { flex-wrap: wrap; justify-content: flex-start; }
   .lobby-card .swatches button { flex: none; width: 30px; height: 30px; }

@@ -113,6 +113,25 @@ Quem acerta a senha não precisa digitá-la de novo naquele navegador. Para isso
 depois de um reinício do servidor, crie no Render a variável `PASSE_SECRET` com um texto
 aleatório longo (sem ela, depois de cada reinício a senha é pedida mais uma vez).
 
+## Lan house: horário pago por hora (opcional)
+
+O dono liga em **Configurar a sala → Lan house (aluguel por hora)** e escolhe de que hora a que hora
+a sala aluga. Todo mundo entra no sistema com nome e senha (em qualquer sala): nome novo cria a
+conta na hora com a senha digitada; nome que já existe confere a senha. Isso vale também para o PC da
+casa. Com a lan house ligada, o botão **Alugar PC ou PS5** (canto de cima, à direita) abre a reserva: escolhe a máquina, o dia e as horas (até 8 por vez) e paga no checkout da
+Stripe, que abre numa aba nova. PC e PS5 têm agendas separadas: na hora reservada, só a conta que
+pagou mexe naquela máquina (a tela do PS5 direto é o PS5; as outras telas com controle são o PC).
+A reserva também funciona fora da sala, em `https://<seu-endereço>/lan?sala=<sala>`.
+
+No Render, em **Environment**:
+- `STRIPE_KEY`: chave restrita da Stripe com **Checkout Sessions: escrita** e **Products/Prices: leitura**.
+- `STRIPE_PRODUTO`: o produto da hora (`prod_Ve7zvIChkAKvic`, R$ 10,00); o preço usado é o padrão dele.
+- `LAN_SEGREDO` (opcional): qualquer texto longo; assina o login dos jogadores.
+
+Não precisa de webhook: a volta do checkout confere o pagamento na hora, e o servidor pergunta à
+Stripe a cada minuto pelas reservas que ainda esperam. As contas e reservas ficam no MySQL
+(`sala3d_contas`, `sala3d_reservas`, criadas sozinhas).
+
 ## Enquanto isso: link na hora, sem deploy
 
 ```bash
