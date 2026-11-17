@@ -3489,9 +3489,32 @@ function sincronizarPresets() {
   marcarPresets(document);
 }
 $('#jogo-op-pop').insertAdjacentHTML('afterbegin', htmlPresets());
+// Modo pela conexão (enquanto a pessoa não escolher um à mão): direta → 1080p Turbo liso; pelo TURN
+// (o servidor no meio, de um dos lados) → 1080p, o vídeo normal. Teste de 2026-11-16 21:55 (Emilly,
+// iPhone, PC pelo TURN): o turbo deu 35 qps e ~25 travadas por minuto (a fila do canal parava mais que
+// a espera de 150 ms e a imagem do PS5 esperava o quadro-chave); o 1080p, 55 qps e ~4.
+// Duas amostras seguidas com o mesmo caminho antes de trocar (a conexão se acertando no começo).
+const PRESET_DIRETO = 14;
+const PRESET_TURN = 12;
+const presetRede = { auto: true, turn: null, seguidas: 0, avisado: false };
+function presetPelaRede(rede) {
+  if (!presetRede.auto || !jogandoLa || !rede?.local) return;
+  const turn = /^relay/.test(rede.local) || /^relay/.test(rede.remoto || '');
+  presetRede.seguidas = turn === presetRede.turn ? presetRede.seguidas + 1 : 1;
+  presetRede.turn = turn;
+  const quero = turn ? PRESET_TURN : PRESET_DIRETO;
+  if (presetRede.seguidas < 2 || opcoesJogo.get('preset') === quero) return;
+  aplicarPreset(quero, turn ? 'automático: conexão pelo TURN' : 'automático: conexão direta');
+  if (turn && !presetRede.avisado) {
+    presetRede.avisado = true;
+    toast('A conexão passa por um servidor no meio: modo 1080p (mais estável que o turbo nesse caminho).', 'info', 6000);
+  }
+}
+
 document.addEventListener('click', (e) => {
   const el = e.target.closest?.('[data-preset]');
   if (!el) return;
+  presetRede.auto = false; // escolheu à mão: a conexão não troca mais o modo (até recarregar)
   const n = Number(el.dataset.preset) || 0;
   if (n !== (opcoesJogo.get('preset') || 0)) aplicarPreset(n);
   else sincronizarPresets();
@@ -3565,6 +3588,7 @@ function mostrarSelo(r = null) {
 
 opcoesJogo.ouvir((k, v) => {
   // mudou à mão uma opção que faz parte dos presets: agora é "Manual"
+  if (!aplicandoPreset && OPCOES_DO_PRESET.includes(k)) presetRede.auto = false;
   if (!aplicandoPreset && OPCOES_DO_PRESET.includes(k) && opcoesJogo.get('preset')) {
     aplicandoPreset = true;
     try { opcoesJogo.setVarios({ preset: 0 }); } finally { aplicandoPreset = false; }
@@ -3646,7 +3670,9 @@ async function amostrarJogo() {
       const trilha = jogandoLa.video.srcObject?.getVideoTracks()[0];
       const som = jogandoLa.video.srcObject?.getAudioTracks()[0] || null;
       const extra = { preset: opcoesJogo.get('preset') || 0, turbo: turboRecebe.stats(), controleRttMs: pingDoJogo.rtt, controleIdaMs: pingDoJogo.ida, ajudanteMs: pingDoJogo.ajudante, movimentoCru: controle.movimentoCru, controleFisico: fisico.usado, cursorLivre: jogandoLa.cursorLivre };
-      const resumo = trilha && diagJogo.amostraRecebe(await rtc.diagRecebe(trilha, som), sala, extra);
+      const cru = trilha ? await rtc.diagRecebe(trilha, som) : null;
+      const resumo = trilha && diagJogo.amostraRecebe(cru, sala, extra);
+      presetPelaRede(cru?.rede);
       vigiarSomQueChega(resumo);
       mostrarSelo(resumo);
       // a mesma amostra vai para quem compartilha, que baixa o relatório dos dois lados de uma vez
