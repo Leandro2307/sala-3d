@@ -28,6 +28,8 @@ const P = {
   pin: '<path d="M12 17v5"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/>',
   copy: '<rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
   play: '<path d="M6 3l14 9-14 9V3z"/>',
+  // o PS5 de pé: as duas placas e a base
+  console: '<path d="M10.5 2C8 2.6 7 4 7 6.5v11c0 1.6.9 2.5 2.2 2.5h1.3z"/><path d="M13.5 2c2.5.6 3.5 2 3.5 4.5v11c0 1.6-.9 2.5-2.2 2.5h-1.3z"/><path d="M8 22h8"/>',
   pause: '<rect x="14" y="4" width="4" height="16" rx="1"/><rect x="6" y="4" width="4" height="16" rx="1"/>',
   back: '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>',
   fwd: '<path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/>',

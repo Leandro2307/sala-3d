@@ -27,12 +27,12 @@ const OPCOES = 'sala3d-ps5'; // localStorage: { altura, qps, kbps, codec, ultimo
 const PADRAO = { altura: 1080, qps: 60, kbps: 0, codec: 'auto', ultimo: null, v: 2 };
 // A banda que o PS5 usa para cada resolução. Antes era 6 Mbps fixos (1080p a 60 ficava borrado no
 // movimento: o próprio chiaki-ng usa 15 em 1080p). Dá para pôr à mão até 50 Mbps.
-const BANDA = { 720: 10000, 1080: 15000, 1440: 25000, 2160: 40000 };
+const BANDA = { 720: 10000, 1080: 15000 };
 export const bandaDaImagem = (altura) => BANDA[altura] || BANDA[1080];
-// 1440p e 4K: o Remote Play oficial vai até 1080p; a ponte pede o perfil sob medida e, se o PS5
-// recusar, a sala tenta de novo em 1080p (ver jogar)
-const IMAGENS = [[720, 60], [720, 30], [1080, 60], [1080, 30], [1440, 60], [2160, 60], [2160, 30]];
-const NOME_IMAGEM = { 720: '720p', 1080: '1080p', 1440: '1440p (teste)', 2160: '4K (teste)' };
+// o Remote Play vai até 1080p (os testes de 1440p e 4K saíram: o PS5 recusava)
+const IMAGENS = [[720, 60], [720, 30], [1080, 60], [1080, 30]];
+const NOME_IMAGEM = { 720: '720p', 1080: '1080p' };
+const alturaValida = (a) => (Number(a) === 720 ? 720 : 1080);
 const HEVC_TESTE = 'hvc1.1.6.L153.B0';
 // este navegador decodifica H.265? (a resposta fica guardada: a pergunta leva uns ms)
 let hevcAqui = null;
@@ -588,22 +588,64 @@ export class Ps5Fonte {
 
 // ------------------------------------------------------------------ a ponte + o painel
 const CSS = `
-#ps5-nativo .p5-card { width: min(640px, 100%); grid-template-columns: minmax(0, 1fr); gap: 14px; }
-#ps5-nativo .p5-status { font-size: 13px; color: var(--muted); line-height: 1.5; }
-#ps5-nativo .p5-status b { color: var(--text); }
+#ps5-nativo { --p5: #3b82f6; }
+#ps5-nativo .p5-card { width: min(680px, 100%); grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); gap: 16px; }
+#ps5-nativo .p5-cab { display: flex; align-items: center; gap: 12px; min-width: 0; }
+#ps5-nativo .p5-cab h2 { margin: 0; font-size: 18px; }
+#ps5-nativo .p5-cab small { display: block; color: var(--muted); font-size: 12.5px; margin-top: 1px; }
+#ps5-nativo .p5-selo { display: grid; place-items: center; flex: none; width: 40px; height: 40px; border-radius: 12px; color: #fff;
+  background: linear-gradient(150deg, #60a5fa, #1d4ed8); box-shadow: 0 6px 18px rgba(37,99,235,.35); }
+#ps5-nativo .p5-corpo { display: grid; align-content: start; gap: 16px; min-height: 0; overflow-y: auto; margin-right: -8px; padding-right: 8px; }
+#ps5-nativo .p5-aviso { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 12px; font-size: 12.5px; line-height: 1.5;
+  color: var(--muted); background: color-mix(in srgb, var(--p5) 9%, transparent); border: 1px solid color-mix(in srgb, var(--p5) 22%, transparent); }
+#ps5-nativo .p5-aviso .ic { flex: none; color: #93c5fd; margin-top: 1px; }
+#ps5-nativo .p5-status { font-size: 13px; color: var(--muted); line-height: 1.5; margin: 0; }
+#ps5-nativo .p5-status b, #ps5-nativo .p5-aviso b { color: var(--text); }
+#ps5-nativo .p5-sec { display: grid; gap: 8px; }
+#ps5-nativo .p5-sec > h3 { margin: 0; font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
 #ps5-nativo .p5-lista { display: grid; gap: 8px; }
-#ps5-nativo .p5-item { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; padding: 10px 12px;
-  border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,.03); }
-#ps5-nativo .p5-item small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+#ps5-nativo .p5-item { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 12px 14px;
+  border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.035); transition: border-color 140ms, background 140ms; }
+#ps5-nativo .p5-item:hover { border-color: var(--line-strong); background: rgba(255,255,255,.05); }
+#ps5-nativo .p5-item.sem-ic { grid-template-columns: minmax(0, 1fr) auto; }
+#ps5-nativo .p5-item b { font-size: 14px; }
+#ps5-nativo .p5-item small { display: block; color: var(--muted); font-size: 12px; line-height: 1.45; margin-top: 3px; }
+#ps5-nativo .p5-ic { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 11px; color: #bfdbfe;
+  background: color-mix(in srgb, var(--p5) 16%, transparent); }
+#ps5-nativo .p5-item.ar { border-color: color-mix(in srgb, var(--p5) 60%, transparent);
+  background: linear-gradient(120deg, color-mix(in srgb, var(--p5) 16%, transparent), rgba(255,255,255,.03)); }
+#ps5-nativo .p5-pilula { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 800;
+  letter-spacing: .03em; vertical-align: 1px; margin-left: 6px; color: var(--c, #93c5fd); background: color-mix(in srgb, var(--c, #93c5fd) 15%, transparent); }
+#ps5-nativo .p5-pilula::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+#ps5-nativo .p5-pilula.vivo::before { box-shadow: 0 0 0 0 currentColor; animation: p5-pulso 1.6s ease-out infinite; }
+@keyframes p5-pulso { to { box-shadow: 0 0 0 7px transparent; } }
 #ps5-nativo .p5-acoes { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
 #ps5-nativo .p5-linha { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-#ps5-nativo .p5-linha label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
-#ps5-nativo .p5-linha input, #ps5-nativo .p5-linha select { min-width: 0; }
-#ps5-nativo details { border-top: 1px solid var(--line); padding-top: 10px; }
-#ps5-nativo summary { cursor: pointer; font-weight: 700; font-size: 14px; }
-#ps5-nativo .p5-dica { font-size: 12.5px; color: var(--muted); line-height: 1.55; margin: 8px 0; }
-#ps5-nativo .p5-vazio { font-size: 13px; color: var(--muted); }
-#ps5-nativo .p5-fase { font-weight: 700; color: #38bdf8; }
+#ps5-nativo .p5-campos { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding: 12px 14px;
+  border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.035); }
+#ps5-nativo .p5-campos label, #ps5-nativo .p5-registro label { display: grid; gap: 5px; font-size: 12px; font-weight: 600; color: var(--muted); min-width: 0; }
+#ps5-nativo .p5-campos input, #ps5-nativo .p5-campos select, #ps5-nativo .p5-registro input { width: 100%; min-width: 0; }
+#ps5-nativo details { border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.035); }
+#ps5-nativo summary { display: flex; align-items: center; gap: 10px; padding: 12px 14px; cursor: pointer; font-weight: 700; font-size: 14px; list-style: none; }
+#ps5-nativo summary::-webkit-details-marker { display: none; }
+#ps5-nativo summary .p5-seta { margin-left: auto; color: var(--muted); transition: transform 160ms var(--ease); }
+#ps5-nativo details[open] summary .p5-seta { transform: rotate(180deg); }
+#ps5-nativo .p5-registro { display: grid; gap: 10px; padding: 0 14px 14px; }
+#ps5-nativo .p5-registro .p5-campos { padding: 0; border: 0; background: none; grid-template-columns: 1.2fr 1.2fr .9fr auto; align-items: end; }
+#ps5-nativo .p5-dica { font-size: 12.5px; color: var(--muted); line-height: 1.55; margin: 0; }
+#ps5-nativo .p5-vazio { display: grid; place-items: center; gap: 6px; padding: 18px 14px; text-align: center; font-size: 13px; color: var(--muted);
+  border: 1px dashed var(--line-strong); border-radius: 14px; }
+#ps5-nativo .p5-vazio .ic { color: #93c5fd; }
+#ps5-nativo .p5-fase { font-weight: 700; color: #60a5fa; }
+#ps5-nativo .p5-parar { background: var(--danger); color: #fff; }
+#ps5-nativo .p5-parar:hover { background: #f4797d; }
+#ps5-nativo .p5-campos > button { height: 44px; }
+#ps5-nativo .p5-item small b { font-size: inherit; }
+@media (max-width: 600px) {
+  #ps5-nativo .p5-campos, #ps5-nativo .p5-registro .p5-campos { grid-template-columns: minmax(0, 1fr); }
+  #ps5-nativo .p5-item { grid-template-columns: auto minmax(0, 1fr); }
+  #ps5-nativo .p5-item > .p5-acoes { grid-column: 1 / -1; justify-content: flex-start; }
+}
 `;
 
 const FASES = { procurando: 'procurando o PS5 na rede…', acordando: 'acordando o PS5 (uns 20 s)…', conectando: 'conectando…', jogando: 'no ar', parado: '' };
@@ -631,6 +673,7 @@ export class Ps5Nativo {
     this.ultimoPad = 0;
     this.padSolto = true;
     try { this.opcoes = { ...PADRAO, ...JSON.parse(localStorage.getItem(OPCOES) || '{}') }; } catch { this.opcoes = { ...PADRAO }; }
+    this.opcoes.altura = alturaValida(this.opcoes.altura); // quem tinha 1440p/4K guardado volta para 1080p
     // antes da versão 2 a banda era 6 Mbps de fábrica (gravada junto): passa a ser automática
     if (!(this.opcoes.v >= 2)) {
       if (Number(this.opcoes.kbps) === 6000) this.opcoes.kbps = 0;
@@ -738,7 +781,6 @@ export class Ps5Nativo {
         break;
       case 'conectado':
         this.conectado = m;
-        this.pedidoAlto = null;
         // a ponte só pede H.265 a um PS5: a fonte segue o que ficou combinado
         if (this.fonte && this.fonte.hevc !== (m.codec === 'h265')) this.fonte.hevc = m.codec === 'h265';
         this.fase = 'jogando';
@@ -757,15 +799,6 @@ export class Ps5Nativo {
         break;
       case 'saiu': {
         this.onEvento?.('ps5 direto: saiu', m);
-        const alto = this.pedidoAlto;
-        this.pedidoAlto = null;
-        if (m.erro && alto && !['nao-achou', 'dormindo', 'sem-registro'].includes(m.motivo)) {
-          // o PS5 não aceitou 1440p/4K: de novo em 1080p
-          this.toast?.('O PS5 não aceitou essa resolução no Remote Play. Tentando em 1080p…', 'warn', 7000);
-          this.terminar(null);
-          setTimeout(() => this.jogar(alto.id, 1080), 1500);
-          break;
-        }
         if (m.erro) this.toast?.(`PS5: ${this.motivo(m)}`, 'error', 9000);
         this.terminar(null);
         break;
@@ -803,19 +836,16 @@ export class Ps5Nativo {
   }
 
   // ---------------------------------------------------------------- jogar
-  // alturaForcada: a volta para 1080p quando o PS5 recusou 1440p/4K
-  async jogar(id, alturaForcada = null) {
+  async jogar(id) {
     if (this.noAr || (this.fase !== 'parado' && this.fase)) return;
     if (!(await this.ligarPonte())) { this.render(); return; }
     this.opcoes.ultimo = id;
     this.guardarOpcoes();
-    const altura = alturaForcada || Number(this.opcoes.altura) || 1080;
+    const altura = alturaValida(this.opcoes.altura);
     const qps = Number(this.opcoes.qps) === 30 ? 30 : 60;
-    // banda: a escrita à mão vale para a resolução escolhida; na volta para 1080p, a de 1080p
-    const kbps = !alturaForcada && Number(this.opcoes.kbps) >= 2000 ? Number(this.opcoes.kbps) : bandaDaImagem(altura);
+    const kbps = Number(this.opcoes.kbps) >= 2000 ? Number(this.opcoes.kbps) : bandaDaImagem(altura);
     const pedido = this.opcoes.codec === 'h264' ? 'h264' : this.opcoes.codec === 'h265' ? 'h265' : ((await decodificaHevc()) ? 'h265' : 'h264');
     const codec = pedido === 'h265' && !(await decodificaHevc()) ? 'h264' : pedido; // sem decodificador aqui, não dá
-    this.pedidoAlto = altura > 1080 ? { id } : null;
     // a fonte nasce antes: o cabeçalho do vídeo chega logo depois do "conectado"
     this.fonte?.parar();
     this.fonte = new Ps5Fonte({ pedirChave: () => this.mandar({ tipo: 'chave' }), onEvento: this.onEvento, hevc: codec === 'h265' });
@@ -913,7 +943,8 @@ export class Ps5Nativo {
     this.raiz.hidden = true;
     this.raiz.innerHTML = `<div class="ep-card p5-card" role="dialog" aria-modal="true" aria-labelledby="p5-titulo">
       <header class="guia-head">
-        <h2 id="p5-titulo">PS5 direto</h2>
+        <div class="p5-cab"><span class="p5-selo">${icon('console', 22)}</span>
+          <div><h2 id="p5-titulo">PS5 direto</h2><small>Remote Play na sala, sem o chiaki-ng</small></div></div>
         <button type="button" class="icon-btn" data-p5="fechar" aria-label="Fechar">${icon('x')}</button>
       </header>
       <div class="p5-corpo"></div>
@@ -943,7 +974,7 @@ export class Ps5Nativo {
       const n = e.target.name;
       if (n === 'p5-altura') {
         const [altura, qps] = String(e.target.value).split('-').map(Number);
-        this.opcoes.altura = altura || 720;
+        this.opcoes.altura = alturaValida(altura);
         this.opcoes.qps = qps === 30 ? 30 : 60;
       }
       else if (n === 'p5-kbps') this.opcoes.kbps = Number(e.target.value) ? Math.min(50000, Math.max(2000, Number(e.target.value))) : 0;
@@ -994,64 +1025,92 @@ export class Ps5Nativo {
     if (!this.aberto) return;
     const corpo = this.raiz.querySelector('.p5-corpo');
     if (!temPs5Nativo()) {
-      corpo.innerHTML = '<p class="p5-status">Este navegador não decodifica vídeo pela página (WebCodecs). Use o Chrome ou o Edge no PC do PS5.</p>';
+      corpo.innerHTML = `<div class="p5-aviso">${icon('help', 16)}<span>Este navegador não decodifica vídeo pela página (WebCodecs). Use o Chrome ou o Edge no PC do PS5.</span></div>`;
       return;
     }
     if (!this.ws) {
-      corpo.innerHTML = `<p class="p5-status">${this.erro ? esc(this.erro) : 'Abrindo a ponte do PS5…'}</p>
-        ${this.erro ? '<div class="p5-linha"><button type="button" class="secondary small" data-p5="tentar">Tentar de novo</button></div>' : ''}`;
+      corpo.innerHTML = `<div class="p5-vazio">${icon(this.erro ? 'help' : 'sync', 22)}<span>${this.erro ? esc(this.erro) : 'Abrindo a ponte do PS5…'}</span>
+        ${this.erro ? '<button type="button" class="secondary small" data-p5="tentar">Tentar de novo</button>' : ''}</div>`;
       return;
     }
     const noAr = this.noAr || (this.fase && this.fase !== 'parado');
     const achado = (c) => this.achados?.find((a) => a.id && a.id.toUpperCase() === c.id.toUpperCase());
+    const pilula = (txt, cor, vivo = false) => `<span class="p5-pilula${vivo ? ' vivo' : ''}" style="--c:${cor}">${txt}</span>`;
     const lista = this.consoles.map((c) => {
       const a = achado(c);
-      const estado = a ? (a.estado === 'pronto' ? `ligado${a.app ? ` · ${esc(a.app)}` : ''}` : a.estado === 'dormindo' ? 'em repouso (acorda sozinho)' : a.estado) : this.achados ? 'não respondeu na rede' : '';
+      const estado = !a ? (this.achados ? pilula('fora da rede', '#94a3b8') : '')
+        : a.estado === 'pronto' ? pilula('ligado', '#4ade80')
+          : a.estado === 'dormindo' ? pilula('em repouso', '#fbbf24') : pilula(esc(a.estado), '#94a3b8');
+      const meta = [esc(a?.ip || c.ip || 'IP ainda não visto'), a?.estado === 'pronto' && a.app ? esc(a.app) : '', a?.estado === 'dormindo' ? 'acorda sozinho' : ''].filter(Boolean).join(' · ');
       return `<div class="p5-item">
-        <span><b>${esc(c.nome)}</b><small>${esc(a?.ip || c.ip || 'IP ainda não visto')}${estado ? ` · ${estado}` : ''}</small></span>
+        <span class="p5-ic">${icon('console', 20)}</span>
+        <span><b>${esc(c.nome)}</b>${estado}<small>${meta}</small></span>
         <span class="p5-acoes">
-          <button type="button" class="small" data-p5="jogar" data-id="${esc(c.id)}"${noAr ? ' disabled' : ''}>Jogar</button>
-          <button type="button" class="secondary small" data-p5="esquecer" data-id="${esc(c.id)}"${noAr ? ' disabled' : ''}>Esquecer</button>
+          <button type="button" class="primary small" data-p5="jogar" data-id="${esc(c.id)}"${noAr ? ' disabled' : ''}>${icon('play', 14)} Jogar</button>
+          <button type="button" class="secondary small" data-p5="esquecer" data-id="${esc(c.id)}"${noAr ? ' disabled' : ''} title="Esquecer este PS5">${icon('lixo', 14)}</button>
         </span>
       </div>`;
     }).join('');
     const novos = (this.achados || []).filter((a) => a.ps5 && !a.registrado);
     const fase = FASES[this.fase] ?? this.fase;
     const c = this.conectado;
+    const extras = [];
+    if (noAr && this.key && this.somPc) {
+      const on = this.somPc.ligado();
+      extras.push(`<div class="p5-item"><span class="p5-ic">${icon('volume', 18)}</span>
+        <span><b>Som do PC (Voz Universal)</b>${on ? pilula('ligado', '#4ade80') : ''}
+        <small>Mistura no som do PS5 tudo o que toca no PC fora do Chrome e manda na mesma tela. No seletor, escolha <b>Tela inteira</b> e marque <b>Compartilhar áudio do sistema</b>. Feche o Spotify, o Discord e o que mais não deve ir junto.</small></span>
+        <span class="p5-acoes">${on ? `<button type="button" class="secondary small" data-p5="som-pc-abafar" title="Enquanto a voz fala, o PS5 abaixa para quem recebe (como o abafar do Voz Universal faz aqui)">${this.somPc.abafar() ? 'Abaixar na voz: sim' : 'Abaixar na voz: não'}</button>` : ''}<button type="button" class="${on ? 'secondary' : 'primary'} small" data-p5="som-pc">${on ? 'Parar' : 'Levar o som'}</button></span></div>`);
+    }
+    if (noAr && this.key && this.losslessTodos) {
+      const on = this.losslessTodos.ligado();
+      extras.push(`<div class="p5-item"><span class="p5-ic">${icon('monitores', 18)}</span>
+        <span><b>Lossless para todos</b>${on ? pilula('ligado', '#4ade80') : ''}
+        <small>Ponha o PS5 a 30 qps: o Lossless deste PC dobra para 60 e todo mundo recebe pelo OBS. A janela do PS5 vai para o outro monitor e precisa ficar na frente. Precisa do OBS com o WebSocket ligado e do Lossless aberto.</small></span>
+        <span class="p5-acoes"><button type="button" class="${on ? 'secondary' : 'primary'} small" data-p5="ls-todos">${on ? 'Voltar à imagem direta' : 'Ligar'}</button></span></div>`);
+    }
+    if (noAr && this.key && this.jogarComLossless) {
+      extras.push(`<div class="p5-item"><span class="p5-ic">${icon('maximize', 18)}</span>
+        <span><b>Jogar com o Lossless (só neste PC)</b>
+        <small>Abre o PS5 em tela cheia no modo jogo e liga o Lossless Scaling nele, só para você. Ctrl+Alt+S liga e desliga.</small></span>
+        <span class="p5-acoes"><button type="button" class="secondary small" data-p5="ls-jogar">Jogar</button></span></div>`);
+    }
+    const resolucao = c ? `${this.fonte?.cfg ? `${this.fonte.cfg.w}×${this.fonte.cfg.h}` : `${c.largura}×${c.altura}`} · ${c.qps} qps · ${Math.round(c.kbps / 100) / 10} Mbps · ${c.codec === 'h265' ? 'H.265' : 'H.264'}${this.fonte?.cfg && (this.fonte.cfg.w < c.largura || this.fonte.cfg.h < c.altura) ? ` <span class="p5-fase">(pedido ${c.largura}×${c.altura}: o PS5 mandou menos)</span>` : ''}` : '';
     corpo.innerHTML = `
-      <p class="p5-status">O PS5 sem o chiaki-ng aberto: a imagem que ele faz vai direto para quem joga, e o controle de quem joga chega nele como um controle de PS5 (sem o ViGEmBus). Feche o chiaki-ng antes: o PS5 só aceita um Remote Play por vez.</p>
-      ${noAr ? `<div class="p5-item"><span><span class="p5-fase">${esc(fase)}</span>${c ? `<small>${this.fonte?.cfg ? `${this.fonte.cfg.w}×${this.fonte.cfg.h}` : `${c.largura}×${c.altura}`} · ${c.qps} qps · ${Math.round(c.kbps / 100) / 10} Mbps · ${c.codec === 'h265' ? 'H.265' : 'H.264'}${this.fonte?.cfg && (this.fonte.cfg.w < c.largura || this.fonte.cfg.h < c.altura) ? ` <span class="p5-fase">(pedido ${c.largura}×${c.altura}: o PS5 mandou menos)</span>` : ''}</small>` : ''}</span>
-        <span class="p5-acoes"><button type="button" class="secondary small" data-p5="dormir"${c ? '' : ' disabled'}>Pôr em repouso</button><button type="button" class="small danger" data-p5="parar">Parar</button></span></div>` : ''}
-      ${noAr && this.key && this.somPc ? `<div class="p5-item"><span><b>Levar o som do PC (Voz Universal)</b>${this.somPc.ligado() ? ' <span class="p5-fase">ligado</span>' : ''}
-        <small>Mistura no som do PS5 tudo o que toca no PC fora do Chrome (a voz do Voz Universal) e manda na mesma tela, sem abrir outra. No seletor, escolha <b>Tela inteira</b> e marque <b>Compartilhar áudio do sistema</b>. Feche o Spotify, o Discord e o que mais não deve ir junto.</small></span>
-        <span class="p5-acoes">${this.somPc.ligado() ? `<button type="button" class="secondary small" data-p5="som-pc-abafar" title="Enquanto a voz fala, o PS5 abaixa para quem recebe (como o abafar do Voz Universal faz aqui)">${this.somPc.abafar() ? 'Abaixar o PS5 na voz: sim' : 'Abaixar o PS5 na voz: não'}</button>` : ''}<button type="button" class="small" data-p5="som-pc">${this.somPc.ligado() ? 'Parar o som do PC' : 'Levar o som do PC'}</button></span></div>` : ''}
-      ${noAr && this.key && this.losslessTodos ? `<div class="p5-item"><span><b>Lossless para todos</b>${this.losslessTodos.ligado() ? ' <span class="p5-fase">ligado</span>' : ''}
-        <small>Ponha o PS5 a 30 qps: o Lossless deste PC dobra para 60 e todo mundo recebe pelo OBS. A janela do PS5 vai para o outro monitor e precisa ficar na frente (clicando em outra janela o Lossless pausa e volta quando ela volta). Precisa do OBS com o WebSocket ligado e do Lossless aberto.</small></span>
-        <span class="p5-acoes"><button type="button" class="small" data-p5="ls-todos">${this.losslessTodos.ligado() ? 'Voltar à imagem direta' : 'Lossless para todos'}</button></span></div>` : ''}
-      ${noAr && this.key && this.jogarComLossless ? `<div class="p5-item"><span><b>Jogar com o Lossless (só neste PC)</b>
-        <small>Abre o PS5 em tela cheia no modo jogo e liga o Lossless Scaling nele, só para você. Ctrl+Alt+S liga e desliga. Quem joga de outro PC usa o Lossless de lá do mesmo jeito.</small></span>
-        <span class="p5-acoes"><button type="button" class="secondary small" data-p5="ls-jogar">Jogar com o Lossless</button></span></div>` : ''}
-      <div class="p5-lista">${lista || '<p class="p5-vazio">Nenhum PS5 registrado aqui ainda. Se o chiaki-ng já joga neste PC, é só trazer o registro dele.</p>'}</div>
-      <div class="p5-linha">
-        <button type="button" class="secondary small" data-p5="procurar"${this.procurando ? ' disabled' : ''}>${this.procurando ? 'Procurando…' : 'Procurar na rede'}</button>
-        <button type="button" class="secondary small" data-p5="importar">Trazer do chiaki-ng</button>
-        <label>Imagem <select name="p5-altura">
-          ${IMAGENS.map(([a, q]) => `<option value="${a}-${q}"${Number(this.opcoes.altura) === a && (Number(this.opcoes.qps) === 30 ? 30 : 60) === q ? ' selected' : ''}>${NOME_IMAGEM[a]} · ${q} qps</option>`).join('')}
-        </select></label>
-        <label>Banda (kbps) <input name="p5-kbps" type="number" min="2000" max="50000" step="1000" value="${Number(this.opcoes.kbps) >= 2000 ? Number(this.opcoes.kbps) : ''}" placeholder="auto ${bandaDaImagem(Number(this.opcoes.altura) || 1080)}" style="width:110px"></label>
-        <label>Codec <select name="p5-codec">
-          ${[['auto', 'Automático'], ['h265', 'H.265 (melhor imagem)'], ['h264', 'H.264 (mais compatível)']].map(([v, n]) => `<option value="${v}"${(this.opcoes.codec || 'auto') === v ? ' selected' : ''}>${n}</option>`).join('')}
-        </select></label>
-      </div>
-      ${novos.length ? `<p class="p5-dica">Na rede, sem registro: ${novos.map((a) => `<button type="button" class="secondary small" data-p5="usar-ip" data-ip="${esc(a.ip)}">${esc(a.nome || a.ip)} (${esc(a.ip)})</button>`).join(' ')}</p>` : ''}
-      <details${this.consoles.length ? '' : ' open'}>
-        <summary>Registrar um PS5</summary>
-        <p class="p5-dica">No PS5: Configurações → Sistema → Remote Play → <b>Vincular dispositivo</b> (mostra o PIN de 8 números). O ID da conta PSN é o mesmo que o chiaki-ng pede (8 bytes em base64, termina em “=”).</p>
+      ${noAr ? `<section class="p5-sec"><h3>Agora</h3>
+        <div class="p5-item ar"><span class="p5-ic">${icon('console', 20)}</span>
+          <span><b>PS5</b>${pilula(esc(fase || 'no ar'), this.fase === 'jogando' ? '#4ade80' : '#60a5fa', true)}${resolucao ? `<small>${resolucao}</small>` : ''}</span>
+          <span class="p5-acoes"><button type="button" class="secondary small" data-p5="dormir"${c ? '' : ' disabled'}>Pôr em repouso</button><button type="button" class="primary small p5-parar" data-p5="parar">${icon('stop', 14)} Parar</button></span></div>
+        ${extras.join('')}</section>` : `<div class="p5-aviso">${icon('help', 16)}<span>A imagem que o PS5 faz vai direto para quem joga, e o controle de quem joga chega nele como um controle de PS5 (sem o ViGEmBus). <b>Feche o chiaki-ng antes:</b> o PS5 só aceita um Remote Play por vez.</span></div>`}
+      <section class="p5-sec"><h3>Consoles</h3>
+        <div class="p5-lista">${lista || `<div class="p5-vazio">${icon('console', 24)}<span>Nenhum PS5 registrado aqui ainda. Se o chiaki-ng já joga neste PC, é só trazer o registro dele.</span></div>`}</div>
+        ${novos.length ? `<p class="p5-dica">Na rede, sem registro: ${novos.map((a) => `<button type="button" class="secondary small" data-p5="usar-ip" data-ip="${esc(a.ip)}">${esc(a.nome || a.ip)} (${esc(a.ip)})</button>`).join(' ')}</p>` : ''}
         <div class="p5-linha">
-          <label>IP do PS5 <input name="p5-ip" placeholder="192.168.0.20" style="width:130px"></label>
-          <label>ID da conta PSN <input name="p5-conta" placeholder="AbCdEfGhIjk=" style="width:140px"></label>
-          <label>PIN <input name="p5-pin" inputmode="numeric" maxlength="9" placeholder="12345678" style="width:96px"></label>
-          <button type="button" class="small" data-p5="registrar"${this.registrando ? ' disabled' : ''}>${this.registrando ? 'Registrando…' : 'Registrar'}</button>
+          <button type="button" class="secondary small" data-p5="procurar"${this.procurando ? ' disabled' : ''}>${icon('sync', 14)} ${this.procurando ? 'Procurando…' : 'Procurar na rede'}</button>
+          <button type="button" class="secondary small" data-p5="importar">${icon('baixar', 14)} Trazer do chiaki-ng</button>
+        </div>
+      </section>
+      <section class="p5-sec"><h3>Imagem</h3>
+        <div class="p5-campos">
+          <label>Resolução <select name="p5-altura">
+            ${IMAGENS.map(([a, q]) => `<option value="${a}-${q}"${alturaValida(this.opcoes.altura) === a && (Number(this.opcoes.qps) === 30 ? 30 : 60) === q ? ' selected' : ''}>${NOME_IMAGEM[a]} · ${q} qps</option>`).join('')}
+          </select></label>
+          <label>Banda (kbps) <input name="p5-kbps" type="number" min="2000" max="50000" step="1000" value="${Number(this.opcoes.kbps) >= 2000 ? Number(this.opcoes.kbps) : ''}" placeholder="auto ${bandaDaImagem(alturaValida(this.opcoes.altura))}"></label>
+          <label>Codec <select name="p5-codec">
+            ${[['auto', 'Automático'], ['h265', 'H.265 (melhor imagem)'], ['h264', 'H.264 (mais compatível)']].map(([v, n]) => `<option value="${v}"${(this.opcoes.codec || 'auto') === v ? ' selected' : ''}>${n}</option>`).join('')}
+          </select></label>
+        </div>
+      </section>
+      <details${this.consoles.length ? '' : ' open'}>
+        <summary>${icon('mais', 16)} Registrar um PS5 <span class="p5-seta">${icon('chevron', 16)}</span></summary>
+        <div class="p5-registro">
+          <p class="p5-dica">No PS5: Configurações → Sistema → Remote Play → <b>Vincular dispositivo</b> (mostra o PIN de 8 números). O ID da conta PSN é o mesmo que o chiaki-ng pede (8 bytes em base64, termina em “=”).</p>
+          <div class="p5-campos">
+            <label>IP do PS5 <input name="p5-ip" placeholder="192.168.0.20"></label>
+            <label>ID da conta PSN <input name="p5-conta" placeholder="AbCdEfGhIjk="></label>
+            <label>PIN <input name="p5-pin" inputmode="numeric" maxlength="9" placeholder="12345678"></label>
+            <button type="button" class="primary small" data-p5="registrar"${this.registrando ? ' disabled' : ''}>${this.registrando ? 'Registrando…' : 'Registrar'}</button>
+          </div>
         </div>
       </details>`;
   }

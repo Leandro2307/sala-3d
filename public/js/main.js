@@ -1159,7 +1159,7 @@ async function join() {
   // o OBS chega como câmera: só no computador (o celular também tem câmera, mas não tem OBS)
   if (!navigator.mediaDevices?.getDisplayMedia || isTouch) $('#obs-row').hidden = true;
   // PS5 direto: só no PC (a ponte roda no Windows, pelo ajudante)
-  $('#ps5-row').hidden = isTouch || !temPs5Nativo();
+  $('#btn-ps5').hidden = isTouch || !temPs5Nativo();
   // com um monitor só não há o que escolher (o screen:0)
   $('#obs-monitor-field').hidden = $('#obs-row').hidden || window.screen.isExtended === false;
   sfx.join();
@@ -3893,7 +3893,8 @@ $('#set-obs-monitor').addEventListener('change', (e) => {
     if (sh.obs && sh.alvo) sh.alvo = { superficie: 'monitor', rotulo: `screen:${settings.obsMonitor - 1}:0` };
   }
 });
-$('#ps5-abrir').addEventListener('click', () => {
+$('#btn-ps5').addEventListener('click', () => {
+  if (ps5Nativo.aberto) return ps5Nativo.fechar();
   closePanel();
   ps5Nativo.abrir();
 });
