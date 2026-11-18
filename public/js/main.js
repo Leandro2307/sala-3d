@@ -6348,6 +6348,8 @@ function atualizarPartidas() {
 // ouço a voz dessa pessoa: mesma sala (escritório) e, com a voz separada por jogo, mesma partida
 const ouco = (u) => mesmoAmbiente(u) && partidas.get(u.id) === partidas.get(state.selfId);
 
+// com o celular travado, o pausar da tela de bloqueio cala a sala (ver 'ouvir com o celular travado')
+const travado = { silencio: null, destravado: false, telas: new Map(), calado: false }; // telas: video -> { a, src }
 function updateVolumes() {
   const me = self();
   atualizarPartidas();
@@ -6364,7 +6366,7 @@ function updateVolumes() {
       }
       u.audioEl.volume = THREE.MathUtils.clamp(v, 0, 1);
       // no iPhone o volume é só leitura (fica sempre 1): calar de verdade é pelo muted
-      const mudo = v <= 0;
+      const mudo = v <= 0 || travado.calado;
       if (u.audioEl.muted !== mudo) {
         u.audioEl.muted = mudo;
         if (!mudo) tocarVoz(u);
@@ -6453,6 +6455,120 @@ async function vigiarVozes() {
   }
 }
 setInterval(vigiarVozes, 1000);
+
+// ------------------------------------------------------------------ ouvir com o celular travado
+// Travou o celular (ou trocou de app) com a sala aberta: continua ouvindo as vozes e o som das telas.
+// 1) Um <audio> silencioso em loop com a Media Session: o Android põe o Chrome como "tocando mídia"
+//    (notificação e controle na tela de bloqueio) e não congela a página; o iPhone mantém o áudio.
+//    Ele é destravado no primeiro toque e só toca enquanto a sala está escondida.
+// 2) O som das telas sai pelo <video>, que com a página escondida fica sem quadro (nível 'off') e
+//    o celular pode pausar: enquanto escondida, a trilha de som vai para um <audio> só dela.
+function audioDoSilencio() {
+  if (travado.silencio) return travado.silencio;
+  // 10 s de silêncio (WAV 8 kHz, 8 bits): menos de 5 s o Android não trata como mídia
+  const n = 8000 * 10;
+  const buf = new ArrayBuffer(44 + n);
+  const d = new DataView(buf);
+  const txt = (o, s) => [...s].forEach((c, i) => d.setUint8(o + i, c.charCodeAt(0)));
+  txt(0, 'RIFF'); d.setUint32(4, 36 + n, true); txt(8, 'WAVE'); txt(12, 'fmt ');
+  d.setUint32(16, 16, true); d.setUint16(20, 1, true); d.setUint16(22, 1, true);
+  d.setUint32(24, 8000, true); d.setUint32(28, 8000, true); d.setUint16(32, 1, true); d.setUint16(34, 8, true);
+  txt(36, 'data'); d.setUint32(40, n, true);
+  new Uint8Array(buf, 44).fill(128);
+  const a = document.createElement('audio');
+  a.loop = true;
+  a.src = URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+  sink.appendChild(a);
+  travado.silencio = a;
+  return a;
+}
+// no toque: toca e pausa, para depois o play() em segundo plano não ser barrado (iPhone)
+function destravarSilencio() {
+  if (!isTouch || travado.destravado || !state.joined) return;
+  travado.destravado = true;
+  const a = audioDoSilencio();
+  a.play().then(() => { if (!document.hidden) a.pause(); }).catch(() => { travado.destravado = false; });
+}
+function calarSala(calar) {
+  travado.calado = calar;
+  for (const u of state.users.values()) if (!u.isSelf && u.audioEl) u.audioEl.muted = calar || u.audioEl.volume <= 0;
+  for (const { a } of travado.telas.values()) a.muted = calar;
+  if ('mediaSession' in navigator) navigator.mediaSession.playbackState = calar ? 'paused' : 'playing';
+  if (!calar) updateVolumes();
+}
+function somDasTelasNoAudio(ligar) {
+  if (!ligar) {
+    for (const [v, { a }] of travado.telas) {
+      a.pause();
+      a.srcObject = null;
+      a.remove();
+      if (v.srcObject && !telasMudas.has(v)) {
+        v.muted = false;
+        v.play().catch(() => {});
+      }
+    }
+    travado.telas.clear();
+    return;
+  }
+  for (const u of state.users.values()) {
+    if (u.isSelf) continue;
+    for (const sh of u.shares.values()) {
+      const v = sh.video;
+      const src = v?.srcObject;
+      const antes = travado.telas.get(v);
+      if (antes?.src === src) {
+        v.muted = true; // o routeStreams pode ter religado o som do vídeo
+        continue;
+      }
+      if (antes) {
+        antes.a.srcObject = null;
+        antes.a.remove();
+        travado.telas.delete(v);
+      }
+      const trilhas = src?.getAudioTracks?.() || [];
+      if (!trilhas.length) continue;
+      const a = document.createElement('audio');
+      a.srcObject = new MediaStream(trilhas);
+      a.volume = THREE.MathUtils.clamp(settings.screen / 100, 0, 1);
+      a.muted = travado.calado;
+      sink.appendChild(a);
+      a.play().catch(() => {});
+      v.muted = true;
+      travado.telas.set(v, { a, src });
+    }
+  }
+}
+function salaEscondida() {
+  if (!isTouch) return;
+  const esconder = document.hidden && state.joined;
+  if (esconder) {
+    const a = audioDoSilencio();
+    a.play().catch(() => {});
+    if ('mediaSession' in navigator) {
+      try {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: state.room && state.room !== 'principal' ? `Sala 3D · ${state.room}` : 'Sala 3D',
+          artist: 'Ouvindo a sala',
+          artwork: [{ src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' }],
+        });
+        navigator.mediaSession.playbackState = travado.calado ? 'paused' : 'playing';
+        // o pausar da tela de bloqueio cala a sala (sem ele, o Chrome pausaria só o silêncio)
+        navigator.mediaSession.setActionHandler('pause', () => calarSala(true));
+        navigator.mediaSession.setActionHandler('play', () => calarSala(false));
+      } catch { /* sem Media Session */ }
+    }
+    somDasTelasNoAudio(true);
+  } else {
+    travado.silencio?.pause();
+    somDasTelasNoAudio(false);
+    if (travado.calado) calarSala(false);
+    if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'none';
+  }
+}
+document.addEventListener('visibilitychange', salaEscondida);
+for (const ev of ['pointerdown', 'touchend']) document.addEventListener(ev, destravarSilencio, { capture: true, passive: true });
+// com a sala escondida, uma tela nova (ou que voltou) também passa para o <audio>
+setInterval(() => { if (isTouch && document.hidden && state.joined) somDasTelasNoAudio(true); }, 2000);
 
 // O sistema encerrou o meu microfone (fone Bluetooth trocado, ligação no celular, app que ficou
 // em segundo plano): pega de novo, senão eu falava e ninguém ouvia. Com a página escondida o
@@ -9702,6 +9818,7 @@ if (params.get('debug') === '1') {
     tocarTela, telasMudas, liberarSomDasTelas, makeVideo, mesa, controle, abrirMesa, fecharMesa, marcaDaAba,
     publishShare, stopShare, acharTela, telasNoAr, get rtc() { return rtc; }, diagJogo, clima, ligarLuneta, futebol, surf, criador, run,
     enterFocus, get socket() { return socket; }, fisico, toqueJogo, opcoesJogo, turboRecebe, turboEnvio, ps5Nativo, pcDireto,
+    travado, salaEscondida,
   };
 }
 
