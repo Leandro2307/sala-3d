@@ -4607,13 +4607,13 @@ padVirtual.hid = touchpad; // com o DualSense aberto pelo WebHID, a vibração v
 function atualizarBotaoTouchpad() {
   const b = $('#jogo-touchpad');
   b.hidden = !touchpad.ativo || !temTouchpadHid();
-  b.textContent = touchpad.ligado ? 'Touchpad do DualSense: ligado ✓' : 'Usar o touchpad do DualSense';
+  b.textContent = touchpad.ligado ? 'DualSense ligado ✓ (gatilhos, vibração e touchpad)' : 'Usar o DualSense (gatilhos, vibração e touchpad)';
   b.disabled = touchpad.ligado;
 }
 $('#jogo-touchpad').addEventListener('click', async (e) => {
   e.currentTarget.blur();
   try {
-    if (await touchpad.pedir()) toast('Touchpad do DualSense ligado: os dedos e o clique vão para o PS5.', 'success', 5000);
+    if (await touchpad.pedir()) toast('DualSense ligado: botões, gatilhos adaptativos, vibração e touchpad vão direto entre ele e o PS5.', 'success', 5000);
   } catch (err) {
     toast(`Não deu para ler o touchpad: ${err?.message || err}`, 'warn', 7000);
   }
