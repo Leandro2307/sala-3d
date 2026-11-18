@@ -5382,6 +5382,11 @@ function textoVezLan(m) {
   if (!v?.conta) return { texto: `${MAQUINAS_LAN[m]} livre: todos podem jogar`, livre: true };
   const f = faltaLan(v.fim);
   const minha = idsDaVez(m).includes(state.selfId);
+  // o PC sendo preparado (o jogo abrindo) no minuto antes da vez: conta até a vez começar
+  if (v.preparando && v.inicio) {
+    const c = faltaLan(v.inicio);
+    if (c.s > 0) return { texto: `${minha ? 'Sua vez' : `Vez de ${v.conta}`} no ${MAQUINAS_LAN[m]} começa em ${c.texto} · preparando o PC`, minha, s: f.s };
+  }
   return { texto: `${minha ? 'Sua vez' : `Vez de ${v.conta}`} no ${MAQUINAS_LAN[m]} · faltam ${f.texto}`, minha, acabando: f.s <= 300, s: f.s };
 }
 // De quem é a vez e quanto falta: no topo da sala (as duas máquinas) e por cima da tela aberta do PC
@@ -5434,7 +5439,13 @@ function aplicarLan(e) {
     }
   }
   const agora = new Set(minhasMaquinas());
-  for (const m of agora) if (!lanEraMinha.has(m)) toast(`Seu horário no ${MAQUINAS_LAN[m]} começou: você joga até ${horaCurta(state.lan[m].fim)}. Bom jogo!`, 'success', 8000);
+  for (const m of agora) {
+    if (lanEraMinha.has(m)) continue;
+    const v = state.lan[m];
+    toast(v.preparando
+      ? `Seu horário no ${MAQUINAS_LAN[m]} começa às ${horaCurta(v.inicio)}: o ${MAQUINAS_LAN[m]} já está sendo preparado e você já pode entrar. Joga até ${horaCurta(v.fim)}.`
+      : `Seu horário no ${MAQUINAS_LAN[m]} começou: você joga até ${horaCurta(v.fim)}. Bom jogo!`, 'success', 8000);
+  }
   for (const m of lanEraMinha) if (!agora.has(m)) toast(lanLivre(m) ? `Seu horário no ${MAQUINAS_LAN[m]} acabou. Ninguém alugou a próxima hora: a tela fica livre para todos.` : `Seu horário no ${MAQUINAS_LAN[m]} acabou. Para jogar mais, toque em "Alugar PC ou PS5".`, 'info', 10000);
   lanEraMinha = agora;
   mostrarLan();

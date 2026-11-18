@@ -734,13 +734,23 @@ app.get('/lan', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'lan.
 
 // o que cada um na sala sabe: se está ligada e, em cada máquina (PC, PS5), de quem é a vez, até
 // quando e os ids dessa pessoa na sala
+// A vez numa máquina. O PC começa a ser preparado 1 min antes (abrir o jogo leva quase isso: o God
+// of War levou uns 50 s): com ele livre agora e alguém na hora seguinte, a vez já é dessa pessoa
+// (preparando: o jogo abre e só ela mexe), e o tempo dela não se perde esperando o jogo abrir.
+const ANTECIPA_PC_MS = 60_000;
+function vezLan(room, m) {
+  const a = lan.jogadorAgora(room.id, m);
+  if (a || m !== 'pc') return a;
+  const prox = lan.jogadorAgora(room.id, m, Date.now() + ANTECIPA_PC_MS);
+  return prox ? { ...prox, preparando: true } : null;
+}
 function estadoLan(room) {
   if (!room.config?.lanhouse?.ligada) return { ligada: false };
   const e = { ligada: true };
   for (const m of lan.MAQUINAS) {
-    const atual = lan.jogadorAgora(room.id, m);
+    const atual = vezLan(room, m);
     const ids = atual ? [...room.users.values()].filter((u) => u.conta === atual.conta).map((u) => u.id) : [];
-    e[m] = { conta: atual?.conta ?? null, fim: atual?.fim ?? null, ids };
+    e[m] = { conta: atual?.conta ?? null, inicio: atual?.inicio ?? null, fim: atual?.fim ?? null, preparando: !!atual?.preparando, ids };
   }
   // a hora do servidor: a página conta quanto falta para o fim da vez pelo relógio daqui, não o dela
   e.agora = Date.now();
@@ -767,7 +777,7 @@ async function vigiarJogoLan(room) {
   room.lanMaquinas ??= {};
   let hubs = null;
   for (const m of lan.MAQUINAS) {
-    const a = lan.jogadorAgora(room.id, m);
+    const a = vezLan(room, m);
     const chave = a ? `${a.conta}|${m === 'pc' ? a.jogo || '' : ''}` : null;
     const st = (room.lanMaquinas[m] ??= { chave: undefined, aberto: false, hubs: [] });
     // a vez continua, mas o PC da casa que recebeu o pedido não está mais na sala (a página dele
@@ -796,7 +806,7 @@ async function vigiarJogoLan(room) {
 // lan house, com a máquina sem ninguém alugado na hora, também todo mundo)
 function podeJogarLan(room, user, donoDaTela, tela) {
   if (!room.config?.lanhouse?.ligada || user === donoDaTela) return true;
-  const atual = lan.jogadorAgora(room.id, maquinaDaTela(tela));
+  const atual = vezLan(room, maquinaDaTela(tela));
   return !atual || user.conta === atual.conta;
 }
 
