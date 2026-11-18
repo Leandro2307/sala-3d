@@ -6574,13 +6574,11 @@ function reentrarAtendendoTela() {
   socket.emit('tela-atender', true);
   catalogoEnviado = null;
   setTimeout(() => publicarJogos(), 3000); // a extensão se apresenta logo depois de entrar
-  // a página recarregou com a tela no ar (deploy novo, F5, o Chrome recarregou a aba): volta sozinha
-  let voltar = null;
-  try {
-    voltar = JSON.parse(sessionStorage.getItem(TELA_VOLTAR) || 'null');
-    sessionStorage.removeItem(TELA_VOLTAR);
-  } catch { /* sem armazenamento */ }
-  if (voltar && Date.now() - (voltar.t || 0) < 10 * 60_000) voltarTela({ obs: !!voltar.obs, motivo: 'a sala recarregou' });
+  // A página recarregou com a tela no ar: NÃO compartilha a Tela 1 de novo sozinha. Ela entrava pela
+  // captura do Chrome, que pega o monitor da própria sala (a sala aparecia em espelho no lugar do
+  // jogo). Quem põe o PC e o PS5 de volta é a vez da lan house (o servidor repete o pedido para a
+  // página nova, pelo PC direto) ou o dono, à mão.
+  try { sessionStorage.removeItem(TELA_VOLTAR); } catch { /* sem armazenamento */ }
 }
 const avisoTela = (text) => addAviso({ text, t: Date.now() });
 
@@ -6619,7 +6617,9 @@ async function devolverTelas(guardadas) {
         pcDireto.key = null;
         pcDireto.parar();
       }
-      if (g.doTela || (telaLiberadaAqui() && (g.obs || g.superficie === 'monitor'))) refazer = { obs: g.obs };
+      // a do PC direto e a do PS5 não voltam pela captura do Chrome (pegaria o monitor da sala): a vez
+      // da lan house as põe de novo
+      if (!g.pcDireto && !g.ps5 && (g.doTela || (telaLiberadaAqui() && g.obs))) refazer = { obs: g.obs };
       continue;
     }
     voltaram++;
@@ -6935,9 +6935,19 @@ async function pedidoPs5Lan(acao, de, responder) {
   if (!console_) return responder(false, 'nenhum PS5 registrado no PC da casa (registre em PS5 direto)');
   ps5SemPerguntar = true;
   try {
-    await ps5Nativo.jogar(console_.id);
-    // conecta (e acorda o PS5 do repouso): até 90 s até a tela entrar na sala
-    for (let i = 0; i < 180 && !ps5Nativo.key && ps5Nativo.fase !== 'parado'; i++) await esperar(500);
+    // Até 6 tentativas: logo depois de a sessão de antes cair (a ponte reiniciou com a página), o PS5
+    // ainda a acha aberta e recusa ("Remote Play já em uso") por alguns segundos.
+    for (let tentativa = 0; tentativa < 6 && !ps5Nativo.key; tentativa++) {
+      if (tentativa) {
+        diagJogo.evento('lan house: PS5 recusou, tentando de novo', { tentativa });
+        await esperar(10_000);
+        if (ps5Nativo.key || ps5Nativo.noAr) break;
+      }
+      await ps5Nativo.jogar(console_.id);
+      // conecta (e acorda o PS5 do repouso): até 90 s até a tela entrar na sala
+      for (let i = 0; i < 180 && !ps5Nativo.key && ps5Nativo.fase !== 'parado'; i++) await esperar(500);
+    }
+    for (let i = 0; i < 20 && !ps5Nativo.key && ps5Nativo.noAr; i++) await esperar(500);
   } finally {
     ps5SemPerguntar = false;
   }
