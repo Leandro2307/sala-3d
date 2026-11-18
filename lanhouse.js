@@ -100,6 +100,8 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
     const h = Math.floor(agora / HORA) * HORA;
     const r = daHora(sala, maquina, h);
     if (!r || r.status !== 'paga') return null;
+    // liberação curta (teste do dono, ver liberar com minutos): acaba antes da hora cheia
+    if (r.fimCedo) return agora >= r.fimCedo ? null : { conta: r.conta, inicio: h, fim: r.fimCedo, jogo: r.jogo || null, jogoNome: r.jogoNome || null };
     let fim = h + HORA;
     while (daHora(sala, maquina, fim)?.conta === r.conta && daHora(sala, maquina, fim).status === 'paga') fim += HORA;
     // jogo: o que a pessoa escolheu para esta hora (o PC da casa abre sozinho, ver vigiarJogoLan)
@@ -373,12 +375,33 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
 
   // o dono libera horas de graça para uma conta (sem Stripe): a partir da hora cheia de agora,
   // seguidas. Hora que já é de outra pessoa (paga ou no checkout) fica de fora.
-  async function liberar({ sala, maquina, conta, horas }) {
+  async function liberar({ sala, maquina, conta, horas, minutos }) {
     const nome = limparNome(conta);
     if (!nomeValido(nome)) return { ok: false, erro: 'Nome de conta inválido.' };
     const c = await banco.lerConta(nome).catch(() => null);
     if (!c) return { ok: false, erro: `Não existe a conta "${nome}". Ela precisa entrar uma vez com nome e senha.` };
     const m = maquinaDe(maquina);
+    // Teste do dono: alguns minutos a partir de agora (a vez começa e acaba sem esperar a hora cheia).
+    // O fim curto fica só na memória; quando chega, a reserva vira cancelada (também no banco).
+    const min = Math.floor(Number(minutos)) || 0;
+    if (min > 0) {
+      const agora = Date.now();
+      const h0 = Math.floor(agora / HORA) * HORA;
+      const fimCedo = Math.min(agora + Math.min(min, 59) * 60_000, h0 + HORA);
+      let r = daHora(sala, m, h0);
+      if (r && r.conta !== nome) return { ok: false, erro: `O ${MAQUINAS[m]} já é de ${r.conta} nesta hora.` };
+      if (!r) {
+        r = { id: crypto.randomBytes(12).toString('hex'), sala, maquina: m, conta: nome, inicio: h0, status: 'paga', sessao: 'cortesia', expira: h0 + HORA, criada: agora, jogo: null, jogoNome: null };
+        reservas.set(r.id, r);
+      }
+      r.status = 'paga';
+      r.fimCedo = fimCedo;
+      await guardar(r);
+      setTimeout(() => { if (r.fimCedo === fimCedo) mudarStatus([r], 'cancelada').catch(() => {}); }, fimCedo - agora + 500).unref?.();
+      console.log(`[lan] ${sala} ${MAQUINAS[m]} (${nome}): teste de ${min} min, até ${new Date(fimCedo).toISOString()}`);
+      aoMudar?.(sala);
+      return { ok: true, conta: nome, maquina: MAQUINAS[m], horas: [], minutos: min, pulou: [] };
+    }
     const n = Math.min(MAX_HORAS, Math.max(1, Math.floor(Number(horas)) || 1));
     const agora = Date.now();
     const h0 = Math.floor(agora / HORA) * HORA;
@@ -404,5 +427,20 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
     return { ok: true, conta: nome, maquina: MAQUINAS[m], horas: lista.map((r) => horaDe(r.inicio)), pulou };
   }
 
-  return { iniciar, rotas, contaDoToken, jogadorAgora, liberar, MAQUINAS: Object.keys(MAQUINAS) };
+  // o dono encerra a vez de agora nesta máquina (a hora atual e as seguidas da mesma conta): a máquina
+  // fica livre na hora. Não devolve dinheiro de hora paga pela Stripe (isso é com o dono, no painel dela).
+  async function encerrar({ sala, maquina }) {
+    const m = maquinaDe(maquina);
+    const atual = jogadorAgora(sala, m);
+    if (!atual) return { ok: false, erro: `Ninguém está com a vez no ${MAQUINAS[m]} agora.` };
+    const lista = [];
+    for (let h = atual.inicio; h < atual.fim; h += HORA) {
+      const r = daHora(sala, m, h);
+      if (r && r.conta === atual.conta && r.status === 'paga') lista.push(r);
+    }
+    await mudarStatus(lista, 'cancelada');
+    return { ok: true, conta: atual.conta, maquina: MAQUINAS[m] };
+  }
+
+  return { iniciar, rotas, contaDoToken, jogadorAgora, liberar, encerrar, MAQUINAS: Object.keys(MAQUINAS) };
 };

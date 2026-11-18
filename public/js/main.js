@@ -5461,10 +5461,22 @@ $('#lan-liberar').addEventListener('click', () => {
   const f = $('#sala-config').elements;
   const conta = f.lanLiberarConta.value.trim();
   if (!conta) return toast('Escreva o nome da conta.', 'error');
-  socket.emit('lan-liberar', { conta, maquina: f.lanLiberarMaquina.value, horas: Number(f.lanLiberarHoras.value) }, (r) => {
+  // "2m": teste de 2 minutos (a vez começa e acaba sem esperar a hora cheia)
+  const v = f.lanLiberarHoras.value;
+  const minutos = /m$/.test(v) ? parseInt(v, 10) : 0;
+  socket.emit('lan-liberar', { conta, maquina: f.lanLiberarMaquina.value, horas: minutos ? 0 : Number(v), minutos }, (r) => {
     if (!r?.ok) return toast(r?.erro || 'Não deu para liberar.', 'error');
+    if (r.minutos) return toast(`${r.maquina} liberado para ${r.conta} por ${r.minutos} minutos (teste).`, 'success');
     const horas = r.horas.map((h) => `${h}h`).join(', ');
     toast(`${r.maquina} liberado para ${r.conta}${horas ? ` (${horas})` : ' (já estava)'}${r.pulou.length ? ` — ocupado por outra pessoa: ${r.pulou.map((h) => `${h}h`).join(', ')}` : ''}.`, 'success');
+  });
+});
+// dono: encerra a vez de agora na máquina escolhida acima (a máquina fica livre e sai da sala)
+$('#lan-encerrar').addEventListener('click', () => {
+  const f = $('#sala-config').elements;
+  socket.emit('lan-encerrar', { maquina: f.lanLiberarMaquina.value }, (r) => {
+    if (!r?.ok) return toast(r?.erro || 'Não deu para encerrar.', 'error');
+    toast(`Vez de ${r.conta} no ${r.maquina} encerrada: a máquina ficou livre.`, 'success');
   });
 });
 $('#lan-reservar').addEventListener('click', abrirAluguel);
