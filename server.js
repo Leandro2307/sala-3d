@@ -769,12 +769,16 @@ async function vigiarJogoLan(room) {
   for (const m of lan.MAQUINAS) {
     const a = lan.jogadorAgora(room.id, m);
     const chave = a ? `${a.conta}|${m === 'pc' ? a.jogo || '' : ''}` : null;
-    const st = (room.lanMaquinas[m] ??= { chave: undefined, aberto: false });
-    if (chave === st.chave) continue;
+    const st = (room.lanMaquinas[m] ??= { chave: undefined, aberto: false, hubs: [] });
+    // a vez continua, mas o PC da casa que recebeu o pedido não está mais na sala (a página dele
+    // recarregou: é outra conexão): repete o pedido para a página nova, que não o conhece
+    if (chave === st.chave && !(a && st.aberto)) continue;
     hubs ??= (await ioLan.in(room.id).fetchSockets()).filter((s) => s.data.tela && s.data.hub);
     if (!hubs.length) return;
+    if (chave === st.chave && hubs.some((s) => st.hubs.includes(s.id))) continue;
     const acao = a ? 'abrir' : st.aberto ? 'fechar' : null;
     st.chave = chave;
+    st.hubs = hubs.map((s) => s.id);
     if (!acao) continue;
     st.aberto = acao === 'abrir';
     // a resposta (abriu ou não) vai para quem alugou, se estiver na sala
@@ -2063,9 +2067,6 @@ function attachSockets(io) {
           steam: /^\d{1,10}$/.test(String(o.steam ?? '')) ? String(o.steam) : null,
         };
       }).filter((j) => j.id && j.nome);
-      // o PC da casa chegou (ou a página dele recarregou no meio de uma vez): a lan house repete para
-      // ele o pedido da vez de agora (pôr o PS5 / o PC na sala), que a página nova não conhece
-      if (!socket.data.hub) room.lanMaquinas = {};
       socket.data.hub = { jogos, atual: cleanText(m.atual, 120) || null };
       io.to(room.id).emit('hub-mudou');
       // lan house: o catálogo fica guardado (sem as imagens) para escolher o jogo ao alugar o PC

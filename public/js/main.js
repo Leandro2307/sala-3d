@@ -6919,7 +6919,17 @@ async function pedidoPs5Lan(acao, de, responder) {
   lanAbriu.ps5 = true;
   responder(true, `O PS5 está na sala. Abra a tela de ${settings.name} para jogar.`);
 }
-async function pedidoDeJogo({ acao, id, de, maquina, lan: daLan }) {
+// um pedido de cada vez por máquina, em fila: o segundo, chegando no meio do primeiro, derrubava a
+// ponte que estava abrindo e deixava a tela dela sobrando na sala (o PC em duas telas). Na fila, um
+// "abrir" repetido acha a máquina já na sala, e um "fechar" no meio de um "abrir" não se perde.
+const filaDePedidos = { pc: Promise.resolve(), ps5: Promise.resolve() };
+function pedidoDeJogo(m) {
+  const qual = m?.maquina === 'ps5' ? 'ps5' : 'pc';
+  const vez = filaDePedidos[qual].then(() => pedidoDeJogoJa(m));
+  filaDePedidos[qual] = vez.catch(() => {});
+  return vez;
+}
+async function pedidoDeJogoJa({ acao, id, de, maquina, lan: daLan }) {
   const responder = (ok, texto) => socket.emit('tela-resposta', { ok, texto, jogo: true });
   if (!telaLiberadaAqui()) return;
   if (maquina === 'ps5') return pedidoPs5Lan(acao, de, responder);
@@ -6945,7 +6955,7 @@ async function pedidoDeJogo({ acao, id, de, maquina, lan: daLan }) {
     const pronto = pcDireto.noAr && pcDireto.key && pcDireto.conectado?.monitor === pcDireto.monitorDoJogo()?.i;
     if (!pronto) {
       if (shareBusy) return responder(false, 'já tem um compartilhamento começando lá');
-      toast(`${de} escolheu um jogo: abrindo o PC direto…`, 'info', 6000);
+      toast(id ? `${de} escolheu um jogo: abrindo o PC direto…` : `Vez de ${de} no PC: pondo o PC na sala…`, 'info', 6000);
       // o OBS e a Tela 1 do /tela saem: a imagem passa a vir da placa
       for (const sh of [...(minhas?.values() || [])]) if (sh.obs) stopShare(sh.key, true);
       if (telaKey && minhas?.has(telaKey)) stopShare(telaKey, true);
@@ -6965,7 +6975,7 @@ async function pedidoDeJogo({ acao, id, de, maquina, lan: daLan }) {
   if (!key) {
     if (shareBusy) return responder(false, 'já tem um compartilhamento começando lá');
     if (!(await cameraLiberada())) return responder(false, 'o Chrome de lá ainda não deixou a sala usar a câmera (o OBS chega como câmera): na frente do PC, compartilhe uma vez pelo OBS e permita');
-    toast(`${de} escolheu um jogo: abrindo o OBS…`, 'info', 6000);
+    toast(id ? `${de} escolheu um jogo: abrindo o OBS…` : `Vez de ${de} no PC: pondo o PC na sala pelo OBS…`, 'info', 6000);
     const o = await controle.pedir('pc-obs', undefined, undefined, undefined, 30_000);
     if (!o?.ok) return responder(false, `${semDireto ? `o PC direto não abriu (${semDireto}) e ` : ''}não abriu o OBS: ${erroDoAjudante(o)}`);
     // a Tela 1 do /tela sai: a imagem passa a vir do OBS
