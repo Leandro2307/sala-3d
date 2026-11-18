@@ -33,7 +33,8 @@ export const NEVE = {
   cidade: {
     hub: { x: 100, z: 30, r: 28, nome: 'Praça do Pinheirão' },
     ruas: [
-      { nome: 'Alameda do Prédio', pontos: [[62, 30], [74, 30]], largura: 12 },
+      // a alameda começa colada na parede do prédio (x = 60): sem faixa de grama entre a porta e a praça
+      { nome: 'Alameda do Prédio', pontos: [[60.4, 30], [74, 30]], largura: 12 },
       { nome: 'Rua do Estádio', pontos: [[96, 56], [86, 90]], largura: 10 },
       // a curva suave (curva: true) só segue reta com pontos no meio dos trechos retos: com só os cantos
       // ela abaulava 23 m para o oeste e passava por dentro do pórtico do lago
@@ -151,7 +152,8 @@ export const NEVE = {
       },
     ],
     mapasAqui: [
-      { x: 72, z: 14, giro: -Math.PI / 2 },
+      // na saída do prédio, à direita da alameda (o guia de destinos fica do outro lado, ver world.js)
+      { x: 66.5, z: 20.5, giro: -Math.PI / 2 },
       { x: 341, z: 698, giro: Math.PI },
     ],
     bosques: [

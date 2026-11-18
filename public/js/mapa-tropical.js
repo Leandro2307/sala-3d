@@ -28,7 +28,8 @@ export const TROPICAL = {
   cidade: {
     hub: { x: 100, z: 30, r: 28, nome: 'Praça do Farol' },
     ruas: [
-      { nome: 'Alameda do Prédio', pontos: [[62, 30], [74, 30]], largura: 12 },
+      // a alameda começa colada na parede do prédio (x = 60): sem faixa de grama entre a porta e a praça
+      { nome: 'Alameda do Prédio', pontos: [[60.4, 30], [74, 30]], largura: 12 },
       { nome: 'Calçadão', pontos: [[AV, 56], [AV, 684]], largura: 12 },
       { nome: 'Rua do Kart', pontos: [[126, 32], [188, 40]], largura: 10 },
       { nome: 'Rua do Estádio', pontos: [[AV, 214], [80, 214]], largura: 8 },
@@ -138,7 +139,8 @@ export const TROPICAL = {
       },
     ],
     mapasAqui: [
-      { x: 72, z: 14, giro: -Math.PI / 2 },
+      // na saída do prédio, à direita da alameda (o guia de destinos fica do outro lado, ver world.js)
+      { x: 66.5, z: 20.5, giro: -Math.PI / 2 },
       { x: 79, z: 684, giro: Math.PI },
     ],
     // onde nasce mata dentro da cerca (coqueiral)

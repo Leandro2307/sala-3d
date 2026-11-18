@@ -27,7 +27,8 @@ export const OUTONO = {
   cidade: {
     hub: { x: 100, z: 30, r: 28, nome: 'Praça do Pagode' },
     ruas: [
-      { nome: 'Alameda do Prédio', pontos: [[62, 30], [74, 30]], largura: 12 },
+      // a alameda começa colada na parede do prédio (x = 60): sem faixa de grama entre a porta e a praça
+      { nome: 'Alameda do Prédio', pontos: [[60.4, 30], [74, 30]], largura: 12 },
       {
         nome: 'Trilha do Jardim',
         pontos: [[100, 56], [93, 95], [90, 140], [89, 200], [90, 250], [100, 282], [104, 320], [98, 360], [80, 392], [46, 410], [36, 440], [36, 520], [37, 600], [36, 680], [37, 760], [36, 846]],
@@ -121,7 +122,8 @@ export const OUTONO = {
       },
     ],
     mapasAqui: [
-      { x: 72, z: 14, giro: -Math.PI / 2 },
+      // na saída do prédio, à direita da alameda (o guia de destinos fica do outro lado, ver world.js)
+      { x: 66.5, z: 20.5, giro: -Math.PI / 2 },
       { x: 30, z: 441, giro: Math.PI },
     ],
     bosques: [

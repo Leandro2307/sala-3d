@@ -32,6 +32,7 @@ const ICONES = {
   view: { alvo: '#btn-view, #tb-view', nome: 'Visão', tecla: 'V', texto: 'Troca entre ver pelos olhos do boneco (1ª pessoa) e por trás dele (3ª pessoa).' },
   sino: { alvo: '#sino', nome: 'Sino da venda', tecla: 'B', texto: 'Fechou uma venda? Toque o sino para a sala inteira ouvir.' },
   sair: { alvo: '#btn-leave', nome: 'Sair da sala', texto: 'Desliga a voz e as telas e volta para a tela de entrada.' },
+  menu: { alvo: '#btn-menu', nome: 'Menu', texto: 'Mapa, salas, telão, música, pessoas, chat, jogos e personagem: tudo num lugar só.' },
   mais: { alvo: '#btn-mais', nome: 'Mais botões', texto: 'Os ícones que não couberam na barra abrem todos aqui, numa grade.' },
   mapa: {
     alvo: '#btn-mapa', nome: 'Mapa', tecla: 'L',
@@ -73,8 +74,8 @@ const ICONES = {
 // na ordem em que aparecem na tela: no computador, de cima para baixo e da esquerda para a direita
 const PASSOS_PC = [
   'salas', 'jogosTopo', 'moedas', 'bussola',
-  'mic', 'cam', 'share', 'react', 'view', 'sino', 'sair',
-  'mapa', 'mesa', 'empresa', 'telao', 'musica', 'pessoas', 'chat', 'personagem', 'ajustes', 'telaCheia',
+  'mic', 'cam', 'share', 'view', 'sino', 'sair',
+  'menu', 'ajustes', 'telaCheia',
 ];
 // no celular: primeiro andar (embaixo), depois a barra de cima
 const PASSOS_TOQUE = [
@@ -444,7 +445,9 @@ export function dicasAoPassar() {
 
   document.addEventListener('pointerover', (e) => {
     if (e.pointerType !== 'mouse') return;
-    const el = e.target.closest?.(COM_DICA) || null;
+    let el = e.target.closest?.(COM_DICA) || null;
+    // no menu da barra cada ícone já tem o nome embaixo
+    if (el?.closest('#bar-menu')) el = null;
     if (el === alvo) return;
     if (!el) return esconder();
     clearTimeout(timer);

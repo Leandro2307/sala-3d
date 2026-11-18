@@ -204,7 +204,7 @@ export function materiaisCoqueiro() {
   ];
 }
 
-function geoCoqueiro(altura = 9, folhas = 8, seed = 3) {
+export function geoCoqueiro(altura = 9, folhas = 8, seed = 3) {
   const rnd = semente(seed);
   const tronco = [];
   const copa = [];
@@ -710,8 +710,10 @@ export function pecaDaPraca(g, L, world, x, z, decor) {
       const r1 = 2.6 - ((i + 1) / faixas) * 0.9;
       L.cores.push(pintar(new THREE.CylinderGeometry(r1, r0, alt / faixas, 18).translate(x, alt / faixas / 2 + (i * alt) / faixas, z), i % 2 ? '#f8fafc' : '#dc2626'));
     }
+    // base de pedra em dois degraus (a de baixo mais larga)
     L.cores.push(
-      pintar(new THREE.CylinderGeometry(3.4, 3.8, 0.9, 18).translate(x, 0.45, z), '#9ca3af'),
+      pintar(new THREE.CylinderGeometry(4.0, 4.3, 0.45, 28).translate(x, 0.225, z), '#d6c9ab'),
+      pintar(new THREE.CylinderGeometry(3.2, 3.45, 0.5, 28).translate(x, 0.7, z), '#bfae8a'),
       pintar(new THREE.CylinderGeometry(2.3, 2.3, 0.3, 18).translate(x, alt + 0.15, z), '#1f2937'),
       pintar(new THREE.CylinderGeometry(1.25, 1.25, 0.2, 14).translate(x, alt + 2.25, z), '#1f2937'),
       pintar(new THREE.ConeGeometry(1.45, 1.4, 14).translate(x, alt + 3.05, z), '#dc2626'),
@@ -725,6 +727,16 @@ export function pecaDaPraca(g, L, world, x, z, decor) {
     const luz = new THREE.Mesh(new THREE.CylinderGeometry(1.05, 1.05, 1.9, 14), new THREE.MeshBasicMaterial({ color: 0xfff1b8, toneMapped: false }));
     luz.position.set(x, alt + 1.25, z);
     g.add(luz);
+    // a porta (virada para o cinema, a oeste) e as janelinhas subindo em espiral
+    const raioEm = (y) => 2.6 - (y / alt) * 0.9;
+    const naParede = (geo, y, a, cor) => L.cores.push(pintar(
+      geo.rotateY(-a + Math.PI / 2).translate(x + Math.cos(a) * raioEm(y), y, z + Math.sin(a) * raioEm(y)), cor));
+    naParede(new THREE.BoxGeometry(1.25, 2.3, 0.3), 2.1, Math.PI, '#7c2d12');
+    naParede(new THREE.BoxGeometry(1.55, 0.25, 0.32), 3.3, Math.PI, '#f8fafc');
+    for (const [y, a] of [[5.2, Math.PI * 0.75], [8.4, Math.PI * 1.35], [11.4, Math.PI * 0.9], [13.6, Math.PI * 0.2]]) {
+      naParede(new THREE.BoxGeometry(0.62, 0.95, 0.3), y, a, '#1e293b');
+      naParede(new THREE.BoxGeometry(0.8, 0.12, 0.34), y - 0.55, a, '#f8fafc');
+    }
     colisor(3.8, alt);
     return;
   }
@@ -932,24 +944,47 @@ export function texturaPracaCentral(R) {
       ctx.stroke();
     };
     if (TEMA.id === 'tropical') {
-      // calçadão de ondas pretas e brancas, na areia clara
-      ctx.fillStyle = '#efe6d0';
+      // Praça de praia: pedra clara (granilite com pontinhos), raios de sol em coral na faixa de
+      // fora, uma rosa dos ventos em volta do espelho d'água e anéis verde-água separando as faixas.
+      // As medidas batem com a praça montada no cidade.js (espelho d'água até 8,8 m, canteiros em 15).
+      ctx.fillStyle = '#f3ead8';
       ctx.fillRect(0, 0, w, w);
-      const onda = (raio, amp, n, larg, cor) => {
+      const rnd = semente(11);
+      for (let i = 0; i < 9000; i++) {
+        ctx.fillStyle = ['rgba(180,150,120,0.35)', 'rgba(255,255,255,0.6)', 'rgba(20,184,166,0.25)', 'rgba(242,139,107,0.3)'][i % 4];
+        ctx.fillRect(rnd() * w, rnd() * w, 1.6, 1.6);
+      }
+      // raios de sol: cunhas alternadas entre 18 e 25,5 m
+      const raios = 48;
+      for (let i = 0; i < raios; i += 2) {
+        const a0 = (i / raios) * Math.PI * 2;
+        const a1 = ((i + 1) / raios) * Math.PI * 2;
         ctx.beginPath();
-        for (let i = 0; i <= 720; i++) {
-          const a = (i / 720) * Math.PI * 2;
-          const r = m(raio + amp * Math.sin(a * n));
-          if (i) ctx.lineTo(c + Math.cos(a) * r, c + Math.sin(a) * r);
-          else ctx.moveTo(c + Math.cos(a) * r, c + Math.sin(a) * r);
-        }
-        ctx.lineWidth = m(larg);
-        ctx.strokeStyle = cor;
-        ctx.stroke();
+        ctx.arc(c, c, m(25.5), a0, a1);
+        ctx.arc(c, c, m(18.2), a1, a0, true);
+        ctx.closePath();
+        ctx.fillStyle = '#f6c9ae';
+        ctx.fill();
+      }
+      // rosa dos ventos: 8 pontas (as 4 grandes em verde-água, as 4 pequenas em coral)
+      const ponta = (a, r0, r1, larg, cor) => {
+        ctx.beginPath();
+        ctx.moveTo(c + Math.cos(a) * m(r1), c + Math.sin(a) * m(r1));
+        ctx.lineTo(c + Math.cos(a + larg) * m(r0), c + Math.sin(a + larg) * m(r0));
+        ctx.lineTo(c + Math.cos(a - larg) * m(r0), c + Math.sin(a - larg) * m(r0));
+        ctx.closePath();
+        ctx.fillStyle = cor;
+        ctx.fill();
       };
-      anel(R - 1, 1.6, '#1f2a33');
-      for (const f of [0.82, 0.7, 0.58, 0.46]) onda(R * f, 1.4, 18, 1.4, '#1f2a33');
-      anel(5.2, 0.6, '#b45309');
+      for (let k = 0; k < 8; k++) {
+        const a = (k / 8) * Math.PI * 2;
+        if (k % 2) ponta(a, 9, 12.4, 0.16, '#f28b6b');
+        else ponta(a, 9, 17.4, 0.13, '#14b8a6');
+      }
+      anel(9.4, 0.5, '#0f766e');
+      anel(17.9, 0.45, '#14b8a6');
+      anel(25.9, 0.45, '#14b8a6');
+      anel(R - 0.7, 1.3, '#d9cbb0');
       return;
     }
     if (TEMA.id === 'neve') {

@@ -3395,8 +3395,9 @@ body.com-luneta #controls-help, body.com-luneta #salas, body.com-luneta .room-ch
 .offline-modal-card .offline-topo b { display: none; }
 .offline-modal-card .offline-card { margin-top: 0; }
 .ep-foto .photo-prev { width: 44px; height: 44px; }
-.lan-card { width: min(760px, 100%); height: calc(100dvh - 32px); }
-.lan-card iframe { width: 100%; height: 100%; border: 0; border-radius: 12px; background: #0b0d12; }
+.lan-card { width: min(640px, 100%); grid-template-rows: auto auto; }
+/* a altura vem do lan.html (postMessage 'lan-altura'): a janela fica do tamanho do conteúdo */
+.lan-card iframe { display: block; width: 100%; height: 320px; max-height: calc(100dvh - 32px - 88px); border: 0; background: transparent; color-scheme: dark; transition: height 220ms var(--ease); }
 #lan-reservar { display: inline-flex; align-items: center; gap: 6px; }
 .lan-horas { display: flex; gap: 10px; margin-top: 6px; }
 .lan-horas label { display: grid; gap: 3px; flex: 1; }
@@ -4479,3 +4480,163 @@ body.modo-offline #bar, body.modo-offline #touch, body.modo-offline #hud > :not(
 @media (prefers-reduced-motion: reduce) {
   .tut-card, .tut-seta, .tut-m-bt.on, .tut-m-roda.on, .tut-m-seta, .tut-stick i, .tut-tp i, #toque-jogo .tut-alvo, #toque-jogo.tut-olhar .tj-olhar::after { animation: none; }
 }
+
+/* ------------------------------------------------------------ HUD enxuto (computador)
+   Topo: só as moedas, o convite (só o ícone; o texto abre ao passar o mouse) e o aluguel da lan.
+   Embaixo à esquerda: só os controles, encostados no canto (sem relógio nem nome da sala).
+   Barra da direita: menu, ajustes e tela cheia — o resto mora no menu. */
+body:not(.touch) .room-chip :is(.live-dot, #room-name, #room-count, .sep:not(.lan-sep), .onde, .room-logo) { display: none !important; }
+body:not(.touch) .room-chip { gap: 6px; padding: 4px 4px 4px 12px; }
+.convite-btn { gap: 0; padding: 0 7px; }
+.convite-txt {
+  display: inline-block;
+  max-width: 0;
+  opacity: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  transition: max-width 260ms var(--ease), opacity 180ms ease, margin-left 260ms var(--ease);
+}
+.convite-btn:is(:hover, :focus-visible) { padding-right: 10px; }
+.convite-btn:is(:hover, :focus-visible) .convite-txt { max-width: 110px; opacity: 1; margin-left: 6px; }
+@media (prefers-reduced-motion: reduce) { .convite-txt { transition: none; } }
+
+body:not(.touch) .bar-left { visibility: hidden; }
+body:not(.touch) #controls-help {
+  left: max(14px, env(safe-area-inset-left));
+  bottom: calc(12px + env(safe-area-inset-bottom));
+  z-index: 6;
+}
+/* com a coluna das salas aberta, ficam ao lado dela (left: 88px, regra da coluna) */
+body:not(.sem-salas):not(.touch) #controls-help { left: 88px; }
+
+/* reações saem da barra no computador (as teclas 1–6 continuam) */
+body:not(.touch) .pop-wrap:has(#btn-react) { display: none; }
+
+/* menu dos ícones: no celular o wrapper não existe para o layout (a grade do ⋯ continua igual) */
+.bar-menu-wrap, .bar-menu { display: contents; }
+#btn-menu { display: none; }
+body:not(.touch) .bar-menu-wrap { display: block; position: relative; }
+body:not(.touch) #btn-menu { display: grid; }
+body:not(.touch) .bar-menu-wrap.aberto #btn-menu { background: rgba(110, 231, 200, 0.16); color: var(--accent); }
+/* mensagem nova no chat com o menu fechado: a bolinha vai para o botão do menu */
+body:not(.touch) .bar-menu-wrap:not(.aberto):has(#chat-dot:not([hidden])) #btn-menu::after {
+  content: '';
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--bg);
+}
+body:not(.touch) .bar-menu {
+  position: absolute;
+  right: -6px;
+  bottom: calc(100% + 12px);
+  display: grid;
+  grid-template-columns: repeat(4, 78px);
+  gap: 4px;
+  padding: 8px;
+  border-radius: 18px;
+  background: var(--glass-strong);
+  border: 1px solid var(--line);
+  backdrop-filter: var(--vidro);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.45);
+  transform-origin: bottom right;
+  opacity: 0;
+  transform: translateY(6px) scale(0.97);
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 140ms ease, transform 180ms var(--ease), visibility 0s linear 180ms;
+}
+body:not(.touch) .bar-menu-wrap.aberto .bar-menu {
+  opacity: 1;
+  transform: none;
+  visibility: visible;
+  pointer-events: auto;
+  transition: opacity 160ms ease, transform 220ms var(--ease);
+}
+body:not(.touch) .bar-menu .ghost {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: auto;
+  height: 66px;
+  border-radius: 12px;
+}
+body:not(.touch) #bar .bar-menu .ghost .ic { width: 20px; height: 20px; }
+body:not(.touch) .bar-menu .ghost::after {
+  content: attr(data-nome);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+}
+body:not(.touch) .bar-menu .ghost:hover::after,
+body:not(.touch) .bar-menu .ghost.on::after { color: inherit; }
+body:not(.touch) .bar-menu .ghost .badge { top: 6px; right: 18px; }
+body:not(.touch) .bar-menu .ghost .dot { top: 8px; right: 22px; }
+@media (prefers-reduced-motion: reduce) { body:not(.touch) .bar-menu { transition: none; } }
+
+/* ------------------------------------------------------------ Ajustes em seções
+   Cada seção é um <details name="ajustes">: abre uma de cada vez e todas começam fechadas. */
+.aj-sec { border: 1px solid var(--line); border-radius: 14px; background: rgba(255, 255, 255, 0.025); margin-bottom: 8px; flex: none; }
+.aj-sec[open] { background: rgba(255, 255, 255, 0.04); border-color: var(--line-strong); }
+.aj-sec > summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  cursor: pointer;
+  list-style: none;
+  border-radius: 14px;
+  user-select: none;
+}
+.aj-sec > summary::-webkit-details-marker { display: none; }
+.aj-sec > summary:hover { background: rgba(255, 255, 255, 0.04); }
+.aj-sec > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.aj-ic { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: rgba(110, 231, 200, 0.1); color: var(--accent); flex: none; }
+.aj-tit { flex: 1; display: grid; gap: 1px; min-width: 0; }
+.aj-tit b { font-size: 14px; font-weight: 700; }
+.aj-tit small { font-size: 12px; color: var(--muted); }
+.aj-seta { display: grid; color: var(--muted); transform: rotate(-90deg); transition: transform 220ms var(--ease); }
+.aj-sec[open] .aj-seta { transform: none; }
+.aj-corpo { padding: 2px 14px 10px; }
+.aj-sec[open] .aj-corpo { animation: aj-abre 220ms var(--ease) both; }
+@keyframes aj-abre { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.aj-corpo > :first-child { border-top: 0; }
+.aj-corpo > .field:last-child { margin-bottom: 6px; }
+@media (prefers-reduced-motion: reduce) { .aj-seta { transition: none; } .aj-sec[open] .aj-corpo { animation: none; } }
+
+/* ------------------------------------------------------------ Controles (computador)
+   Uma linha por atalho: o nome à esquerda e as teclas alinhadas à direita; os extras em grupos. */
+body:not(.touch) #controls-help { width: 272px; }
+.hk-lista, .hk-grupo { display: grid; gap: 2px; }
+.hk {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 24px;
+  padding: 1px 6px;
+  margin: 0 -6px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #c5cbd8;
+}
+.hk:hover { background: rgba(255, 255, 255, 0.05); color: var(--text); }
+.hk > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hk-k { display: inline-flex; align-items: center; gap: 3px; flex: none; color: var(--muted); font-size: 11px; }
+.hk-k kbd { font-size: 10.5px; padding: 0 5px; }
+.hk-grupo + .hk-grupo { margin-top: 10px; }
+.hk-tit { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); opacity: 0.85; margin-bottom: 2px; }
+.hk-grupo:not(:has(> .hk:not([hidden]))) { display: none; }
+.hk-nota { display: block; margin-top: 8px; font-size: 11px; color: var(--muted); }
+.hk-nota b { color: var(--accent); font-weight: 600; }
+/* os extras abertos rolam por dentro em vez de passar do topo da tela */
+#help-extra { max-height: min(46vh, 360px); overflow: hidden auto; scrollbar-width: thin; padding: 8px 6px 0; margin: 8px -6px 0; }
+#help-extra .hk { margin: 0; }
+body.touch :is(.hk-lista, #help-extra, #help-mais-btn) { display: none !important; }

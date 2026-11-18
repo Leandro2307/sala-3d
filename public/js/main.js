@@ -1047,7 +1047,8 @@ if (pedidoDaEntrada.offline) {
   // apertou Entrar enquanto a sala carregava
   setTimeout(join, 0);
 }
-document.body.classList.toggle('sem-salas', !isTouch && !!settings.salasOcultas);
+// a coluna das salas começa escondida toda vez que entra; o botão Salas do menu mostra
+document.body.classList.toggle('sem-salas', !isTouch);
 function abrirSalas(abrir) {
   document.body.classList.toggle('salas-abertas', abrir);
   $('#btn-salas').classList.toggle('on', abrir);
@@ -1056,9 +1057,8 @@ function abrirSalas(abrir) {
 }
 $('#btn-salas').addEventListener('click', () => {
   if (isTouch) return abrirSalas(!document.body.classList.contains('salas-abertas'));
-  settings.salasOcultas = !settings.salasOcultas;
-  saveSettings();
-  document.body.classList.toggle('sem-salas', settings.salasOcultas);
+  const oculta = document.body.classList.toggle('sem-salas');
+  $('#btn-salas').classList.toggle('on', !oculta);
 });
 // no toque, tocar fora da gaveta fecha
 document.addEventListener('pointerdown', (e) => {
@@ -1199,7 +1199,6 @@ async function join() {
   document.body.classList.add('na-sala'); // celular em pé: o aviso de girar (style.css)
   $('#lobby').hidden = true;
   // primeira visita: o tutorial da interface vem antes do aviso de boas-vindas
-  if (!offlineJogo && !tutorialHud.precisa()) iniciarGuiaBoasVindas();
   $('#hud').hidden = false;
   $('#bar').hidden = false;
   avisarExtensaoVelha();
@@ -1277,7 +1276,7 @@ async function join() {
     botaoTelaInteira();
   }
   // com a barra e os botões de toque já no lugar (e um respiro para a sala aparecer)
-  if (tutorialHud.precisa()) setTimeout(() => tutorialHud.iniciar(iniciarGuiaBoasVindas), 900);
+  if (tutorialHud.precisa()) setTimeout(() => tutorialHud.iniciar(), 900);
 }
 
 // Offline: o catálogo (só com os jogos de cartas, os únicos ligados) é a página inicial e é para
@@ -5416,7 +5415,7 @@ function faltaLan(fim) {
 }
 function textoVezLan(m) {
   const v = state.lan?.[m];
-  if (!v?.conta) return { texto: `${MAQUINAS_LAN[m]} livre: todos podem jogar`, livre: true };
+  if (!v?.conta) return { texto: `${MAQUINAS_LAN[m]} livre`, livre: true };
   const f = faltaLan(v.fim);
   const minha = idsDaVez(m).includes(state.selfId);
   // o PC sendo preparado (o jogo abrindo) no minuto antes da vez: conta até a vez começar
@@ -5544,6 +5543,13 @@ $('#lan-encerrar').addEventListener('click', () => {
 });
 $('#lan-reservar').addEventListener('click', abrirAluguel);
 $('#lan-modal-fechar').addEventListener('click', fecharAluguel);
+// o lan.html avisa a altura do conteúdo: a janela cresce e encolhe junto (passou do limite, rola por dentro)
+window.addEventListener('message', (e) => {
+  if (e.origin !== location.origin || e.data?.tipo !== 'lan-altura') return;
+  const fr = $('#lan-frame');
+  if (e.source !== fr.contentWindow) return;
+  fr.style.height = `${Math.max(120, Number(e.data.altura) || 0)}px`;
+});
 $('#lan-modal').addEventListener('click', (e) => { if (e.target === e.currentTarget) fecharAluguel(); });
 
 // ----- ir para (atalho para cada sala do escritório, com quantas pessoas há nela)
@@ -7845,9 +7851,10 @@ elMunicao.addEventListener('pointerdown', (e) => {
 let municaoAntes = '';
 function mostrarMunicao() {
   const arma = armaAtual();
-  const ver = temArma() && state.joined && !player.veiculo;
+  // o pente só aparece no mata-mata (e no mata-mata em times): passeando com a arma, não
+  const ver = temArma() && state.joined && !player.veiculo && (mataMata.ativo || batalha.ativo);
   const r = isTouch ? ' · toque para recarregar' : ' · R recarrega';
-  const txt = !ver ? '' : recarga ? `…|${defArma(arma).nome} · recarregando` : `${balasDe(arma)} / ${pente(arma)}|${defArma(arma).nome}${mataMata.ativo || batalha.ativo ? r : ''}`;
+  const txt = !ver ? '' : recarga ? `…|${defArma(arma).nome} · recarregando` : `${balasDe(arma)} / ${pente(arma)}|${defArma(arma).nome}${r}`;
   if (txt === municaoAntes) return;
   municaoAntes = txt;
   elMunicao.hidden = !txt;
@@ -8662,7 +8669,11 @@ function openPanel(name) {
     renderIrPara();
     renderEquipe();
   }
-  if (name === 'settings') populateDevices();
+  if (name === 'settings') {
+    populateDevices();
+    // as seções dos ajustes abrem fechadas: cada um abre só a que procura
+    for (const d of document.querySelectorAll('#panel .aj-sec')) d.open = false;
+  }
   syncTouchVisibility();
 }
 
@@ -8993,26 +9004,6 @@ bussolaCanvas?.addEventListener('click', (e) => {
   }
 });
 
-function iniciarGuiaBoasVindas() {
-  const g = $('#guia-inicio');
-  if (!g) return;
-  g.hidden = false;
-  const fechar = () => { g.hidden = true; };
-  $('#guia-inicio-fechar')?.addEventListener('click', fechar, { once: true });
-  $('#guia-inicio-jogos')?.addEventListener('click', () => {
-    fechar();
-    catalogo.abrir();
-  }, { once: true });
-  setTimeout(fechar, 16000);
-  const posOrig = localAvatar.group.position.clone();
-  const checarMov = setInterval(() => {
-    if (g.hidden) return clearInterval(checarMov);
-    if (localAvatar.group.position.distanceTo(posOrig) > 5) {
-      fechar();
-      clearInterval(checarMov);
-    }
-  }, 1000);
-}
 helpBtn.addEventListener('click', () => {
   settings.helpCollapsed = !settings.helpCollapsed;
   saveSettings();
@@ -9040,6 +9031,25 @@ document.addEventListener('click', (e) => {
     if (!caminho.includes(pop.parentElement)) pop.hidden = true;
   }
 });
+// computador: os ícones dos painéis ficam num menu só, ao lado de Ajustes e Tela cheia (no
+// celular o menu não existe: eles continuam na grade do ⋯). Escolheu um, clicou fora ou Esc: fecha.
+{
+  const wrap = $('.bar-menu-wrap');
+  const btn = $('#btn-menu');
+  const aberto = () => wrap.classList.contains('aberto');
+  const abrir = (on) => {
+    wrap.classList.toggle('aberto', on);
+    btn.setAttribute('aria-expanded', String(on));
+  };
+  btn.addEventListener('click', () => abrir(!aberto()));
+  $('#bar-menu').addEventListener('click', (e) => { if (e.target.closest('button')) abrir(false); });
+  document.addEventListener('pointerdown', (e) => { if (aberto() && !wrap.contains(e.target)) abrir(false); }, true);
+  window.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || !aberto()) return;
+    e.stopImmediatePropagation();
+    abrir(false);
+  }, true);
+}
 $('#btn-leave').addEventListener('click', () => {
   pararTodasAsTelas(true);
   socket?.disconnect();

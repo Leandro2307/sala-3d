@@ -5,59 +5,101 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Alugar PC ou PS5</title>
 <meta name="theme-color" content="#0b0d12">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
+  /* as mesmas cores, fonte e cantos da sala (style.css) */
   :root {
-    --bg: #0b0d12; --card: #12151d; --line: rgba(255,255,255,.09); --text: #eef1f7; --muted: #8f97ab;
-    --accent: #6ee7c8; --accent-ink: #062a22; --warn: #fbbf24; --danger: #f2555a; --mine: #7c9cff;
+    --bg: #0b0d12; --card: rgba(255,255,255,.03); --card-hover: rgba(255,255,255,.06);
+    --line: rgba(255,255,255,.08); --line-strong: rgba(255,255,255,.14);
+    --text: #eef1f7; --muted: #8f97ab; --accent: #6ee7c8; --accent-ink: #062a22; --accent-soft: rgba(110,231,200,.12);
+    --warn: #fbbf24; --danger: #f2555a; --mine: #7c9cff;
+    --ease: cubic-bezier(.22,1,.36,1);
     color-scheme: dark;
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, 'Segoe UI', sans-serif; }
-  main { max-width: 720px; margin: 0 auto; padding: 24px 16px 60px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', sans-serif; -webkit-font-smoothing: antialiased; }
+  main { max-width: 720px; margin: 0 auto; padding: 24px 16px 60px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
   main > * { min-width: 0; }
-  h1 { font-size: 22px; margin: 0; }
-  h2 { font-size: 15px; margin: 0 0 10px; }
-  .sub { color: var(--muted); margin: 2px 0 0; font-size: 13.5px; }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+  h1 { font-size: 22px; margin: 0; font-weight: 800; letter-spacing: -.01em; }
+  h2 { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; margin: 0 0 10px; }
+  h2 .passo { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 800; }
+  .sub { color: var(--muted); margin: 2px 0 0; font-size: 13px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 14px; animation: entra 260ms var(--ease) both; }
+  @keyframes entra { from { opacity: 0; transform: translateY(4px); } }
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .spread { justify-content: space-between; }
-  label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); flex: 1 1 180px; }
-  input { background: #0b0d12; color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font: inherit; }
-  input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
-  button, .btn { cursor: pointer; border: 1px solid var(--line); background: #1a1e29; color: var(--text); border-radius: 10px; padding: 10px 14px; font: inherit; font-weight: 600; text-decoration: none; display: inline-block; }
+  label { display: grid; gap: 6px; font-size: 12px; font-weight: 600; color: var(--muted); flex: 1 1 180px; }
+  input { background: rgba(0,0,0,.25); color: var(--text); border: 1px solid var(--line-strong); border-radius: 12px; padding: 10px 12px; font: inherit; transition: border-color 160ms, box-shadow 160ms; }
+  input:focus { outline: 0; border-color: rgba(110,231,200,.6); box-shadow: 0 0 0 3px rgba(110,231,200,.15); }
+  button, .btn { cursor: pointer; border: 1px solid var(--line-strong); background: rgba(255,255,255,.06); color: var(--text); border-radius: 12px; padding: 10px 16px;
+    font: inherit; font-weight: 600; text-decoration: none; display: inline-block; transition: background-color 160ms, border-color 160ms, color 160ms, transform 160ms var(--ease); }
+  button:hover:not(:disabled), .btn:hover { background: var(--card-hover); }
+  button:active:not(:disabled) { transform: scale(.98); }
   button.primary, .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+  button.primary:hover:not(:disabled) { background: #8ff0d6; }
   button:disabled { opacity: .45; cursor: default; }
-  button.link { background: none; border: 0; color: var(--muted); padding: 4px 6px; font-weight: 500; text-decoration: underline; }
-  .msg { padding: 10px 12px; border-radius: 10px; font-size: 14px; }
-  .msg.ok { background: rgba(110,231,200,.12); color: var(--accent); }
-  .msg.erro { background: rgba(242,85,90,.12); color: #ff9a9d; }
-  .msg.info { background: rgba(251,191,36,.12); color: var(--warn); }
-  .dias { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
-  .dia { flex: none; min-width: 64px; text-align: center; padding: 8px 6px; font-weight: 500; }
-  .dia b { display: block; font-size: 17px; }
-  .dia small { color: var(--muted); font-size: 11.5px; text-transform: capitalize; }
-  .dia[aria-pressed="true"] { border-color: var(--accent); background: rgba(110,231,200,.1); }
-  .horas { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
-  .hora { padding: 10px 6px; text-align: center; font-weight: 600; }
-  .hora small { display: block; font-weight: 500; font-size: 11.5px; color: var(--muted); }
+  button.link { background: none; border: 1px solid transparent; color: var(--muted); padding: 5px 10px; border-radius: 999px; font-size: 12.5px; font-weight: 600; }
+  button.link:hover:not(:disabled) { background: rgba(255,255,255,.06); color: var(--text); }
+  button.link.perigo:hover:not(:disabled) { color: #ff9a9d; background: rgba(242,85,90,.1); }
+  .msg { padding: 10px 14px; border-radius: 12px; font-size: 13.5px; border: 1px solid transparent; }
+  .msg.ok { background: rgba(110,231,200,.1); border-color: rgba(110,231,200,.25); color: var(--accent); }
+  .msg.erro { background: rgba(242,85,90,.1); border-color: rgba(242,85,90,.25); color: #ff9a9d; }
+  .msg.info { background: rgba(251,191,36,.08); border-color: rgba(251,191,36,.22); color: var(--warn); }
+
+  /* conta: avatar com a inicial, o nome e as ações discretas */
+  .conta { padding: 8px 8px 8px 10px; }
+  .quem { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .avatar { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: linear-gradient(135deg, #6ee7c8, #38bdf8); color: var(--accent-ink); font-weight: 800; font-size: 14px; text-transform: uppercase; flex: none; }
+  .quem small { display: block; color: var(--muted); font-size: 11.5px; }
+  .quem b { font-size: 14px; }
+
+  /* máquinas: ícone, nome e se está livre (bolinha verde) ou com alguém (amarela) */
+  .maquinas { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .maquina { display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; column-gap: 12px; align-items: center; text-align: left; padding: 12px 14px; border-radius: 14px; background: rgba(255,255,255,.03); font-size: 16px; font-weight: 700; line-height: 1.2; }
+  .maquina svg { grid-row: 1 / 3; width: 30px; height: 30px; color: var(--muted); transition: color 160ms, transform 260ms var(--ease); }
+  .maquina:hover svg { color: var(--text); transform: translateY(-2px); }
+  .maquina small { grid-column: 2; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--accent); }
+  .maquina small::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 3px rgba(110,231,200,.15); }
+  .maquina.ocupada small { color: var(--warn); }
+  .maquina.ocupada small::before { box-shadow: 0 0 0 3px rgba(251,191,36,.15); }
+  .maquina[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+  .maquina[aria-pressed="true"] svg { color: var(--accent); }
+
+  .dias { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; }
+  .dia { flex: none; min-width: 54px; text-align: center; padding: 5px 6px; font-weight: 500; border-radius: 12px; line-height: 1.25; }
+  .dia b { display: block; font-size: 16px; font-weight: 800; }
+  .dia small { color: var(--muted); font-size: 11px; text-transform: capitalize; }
+  .dia[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+  .horas { display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 6px; }
+  .hora { padding: 6px 4px; text-align: center; font-weight: 700; border-radius: 10px; line-height: 1.25; }
+  .hora small { display: block; font-weight: 500; font-size: 10.5px; color: var(--muted); }
+  /* com uma hora escolhida, passar o mouse mostra a faixa que o próximo clique vai pegar */
+  .hora.previa { border-color: var(--accent); background: var(--accent-soft); }
+  .hora.previa.invalida { border-color: var(--danger); background: rgba(242,85,90,.1); }
   .hora.livre:hover { border-color: var(--accent); }
   .hora[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
   .hora[aria-pressed="true"] small { color: var(--accent-ink); }
-  .hora.ocupado, .hora.passado { opacity: .4; cursor: default; text-decoration: line-through; }
+  /* o hover geral dos botões (cinza) não pode apagar o que está escolhido */
+  .hora[aria-pressed="true"]:hover:not(:disabled) { background: #8ff0d6; }
+  .maquina[aria-pressed="true"]:hover:not(:disabled), .dia[aria-pressed="true"]:hover:not(:disabled) { background: rgba(110,231,200,.18); }
+  .hora.ocupado, .hora.passado { opacity: .35; cursor: default; text-decoration: line-through; }
   .hora.passado { text-decoration: none; }
   .hora.meu { border-color: var(--mine); color: var(--mine); cursor: default; }
   .hora.esperando { border-color: var(--warn); color: var(--warn); }
+  .rodape { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+  .rodape button { padding: 8px 16px; }
+  .dica { color: var(--muted); font-size: 12px; margin: 8px 0; }
+  .dica b { color: var(--text); font-weight: 600; }
   .lista { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
-  .lista li { display: flex; justify-content: space-between; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; font-size: 14px; }
-  .tag { font-size: 12px; font-weight: 600; color: var(--accent); }
-  .tag.esperando { color: var(--warn); }
-  .agora { font-size: 14px; color: var(--muted); }
-  .maquinas { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .maquina { padding: 18px 10px; text-align: center; font-size: 18px; }
-  .maquina small { display: block; font-size: 12.5px; font-weight: 500; color: var(--muted); margin-top: 4px; }
-  .maquina[aria-pressed="true"] { border-color: var(--accent); background: rgba(110,231,200,.1); color: var(--accent); }
+  .lista li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,.02); font-size: 13.5px; }
+  .lista li.vazia { justify-content: center; border-style: dashed; color: var(--muted); padding: 16px; text-align: center; }
+  .tag { flex: none; font-size: 11.5px; font-weight: 700; color: var(--accent); background: var(--accent-soft); padding: 2px 8px; border-radius: 999px; }
+  .tag.esperando { color: var(--warn); background: rgba(251,191,36,.1); }
+  .agora { font-size: 12.5px; color: var(--muted); }
   .jogos { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 10px; }
-  .jogo { position: relative; display: grid; padding: 0; overflow: hidden; text-align: left; font-weight: 600; }
+  .jogo { position: relative; display: grid; padding: 0; overflow: hidden; text-align: left; font-weight: 600; border-radius: 12px; }
   .jogo .capa { position: relative; display: grid; place-items: center; aspect-ratio: 2 / 3; background: linear-gradient(160deg, #1d2333, #0d1017); font-size: 34px; color: var(--muted); }
   .jogo .capa img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
   .jogo .capa img.icone { position: static; width: 56%; height: auto; object-fit: contain; }
@@ -65,9 +107,12 @@
   .jogo[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
   .jogo[aria-pressed="true"]::after { content: '✓'; position: absolute; top: 6px; right: 6px; width: 24px; height: 24px; display: grid; place-items: center;
     border-radius: 50%; background: var(--accent); color: var(--accent-ink); font-weight: 800; }
-  body.embed main { padding-top: 4px; }
+  /* dentro da sala: o fundo é o da janela da sala e não tem cabeçalho (a janela já tem título) */
+  body.embed { background: transparent; }
+  body.embed main { padding: 0 0 4px; }
   body.embed header { display: none; }
   [hidden] { display: none !important; }
+  @media (prefers-reduced-motion: reduce) { .card { animation: none; } * { transition: none !important; } }
 </style>
 </head>
 <body>
@@ -94,12 +139,12 @@
     </form>
   </section>
 
-  <section class="card" id="conta" hidden>
+  <section class="card conta" id="conta" hidden>
     <div class="row spread">
-      <div>Logado como <b id="conta-nome"></b></div>
-      <div class="row">
+      <div class="quem"><span class="avatar" id="conta-avatar"></span><span><small>Logado como</small><b id="conta-nome"></b></span></div>
+      <div class="row" style="gap:2px">
         <button type="button" class="link" id="trocar-senha">Trocar senha</button>
-        <button type="button" class="link" id="sair">Sair</button>
+        <button type="button" class="link perigo" id="sair">Sair</button>
       </div>
     </div>
     <form id="form-senha" class="row" hidden style="margin-top:10px">
@@ -110,28 +155,28 @@
   </section>
 
   <section class="card" id="passo-maquina">
-    <h2>O que você quer alugar?</h2>
+    <h2><span class="passo">1</span>O que você quer alugar?</h2>
     <div class="maquinas" id="maquinas">
-      <button type="button" class="maquina" data-maquina="pc" aria-pressed="false">PC<small id="agora-pc">livre agora</small></button>
-      <button type="button" class="maquina" data-maquina="ps5" aria-pressed="false">PS5<small id="agora-ps5">livre agora</small></button>
+      <button type="button" class="maquina" data-maquina="pc" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>PC<small id="agora-pc">livre agora</small></button>
+      <button type="button" class="maquina" data-maquina="ps5" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 11h4M8 9v4M15 12h.01M18 10h.01"/><path d="M17.32 5H6.68a4 4 0 0 0-3.98 3.59l-.6 6.01A3 3 0 0 0 5.08 18c1 0 1.6-.55 2.12-1.2l.98-1.3A2 2 0 0 1 9.78 15h4.44a2 2 0 0 1 1.6.8l.98 1.3c.52.65 1.12 1.2 2.12 1.2a3 3 0 0 0 2.98-3.4l-.6-6.01A4 4 0 0 0 17.32 5z"/></svg>PS5<small id="agora-ps5">livre agora</small></button>
     </div>
   </section>
 
   <section class="card" id="passo-jogo" hidden>
-    <h2>Qual jogo?</h2>
+    <h2><span class="passo">2</span>Qual jogo?</h2>
     <p class="sub" style="margin:-4px 0 12px">No seu horário, o PC já abre esse jogo para você.</p>
     <div class="jogos" id="jogos"></div>
   </section>
 
   <section class="card" id="agenda" hidden>
     <div class="row spread" style="margin-bottom:10px">
-      <h2 style="margin:0">Dia e horas <span id="maquina-nome"></span></h2>
+      <h2 style="margin:0"><span class="passo" id="passo-agenda">2</span>Dia e horas <span id="maquina-nome"></span></h2>
       <span class="agora" id="agora"></span>
     </div>
     <div class="dias" id="dias"></div>
-    <p class="sub" style="margin:10px 0">Horário de Brasília. Toque nas horas livres (até <span id="max-horas">8</span> por vez).</p>
+    <p class="dica" id="dica-horas">Clique na <b>primeira</b> e na <b>última</b> hora para pegar o intervalo (até 8 horas). Horário de Brasília.</p>
     <div class="horas" id="horas"></div>
-    <div class="row spread" style="margin-top:14px">
+    <div class="row spread rodape">
       <span id="resumo" class="sub"></span>
       <button type="button" class="primary" id="pagar" disabled>Pagar</button>
     </div>
@@ -156,6 +201,12 @@
   const NOMES = { pc: 'PC', ps5: 'PS5' };
   const embed = params.get('embed') === '1'; // dentro da sala (janela do main.js)
   if (embed) document.body.classList.add('embed');
+  // dentro da sala a janela tem a altura do conteúdo (sem sobrar um vazio embaixo)
+  if (embed && window.parent !== window) {
+    const corpo = document.querySelector('main');
+    const avisar = () => window.parent.postMessage({ tipo: 'lan-altura', altura: Math.ceil(corpo.getBoundingClientRect().height) }, location.origin);
+    new ResizeObserver(avisar).observe(corpo);
+  }
   const escolhidas = new Set();
   let jogos = []; // os jogos do PC da casa
   let jogo = null; // o escolhido (id)
@@ -192,7 +243,10 @@
     $('#login').hidden = !!conta;
     $('#conta').hidden = !conta;
     $('#minhas').hidden = !conta;
-    if (conta) $('#conta-nome').textContent = conta.nome;
+    if (conta) {
+      $('#conta-nome').textContent = conta.nome;
+      $('#conta-avatar').textContent = (conta.nome || '?').trim()[0] || '?';
+    }
     resumo();
   }
   function sairPorLogin(r) {
@@ -239,10 +293,12 @@
   }
   function desenharHoras() {
     const txt = { livre: 'livre', ocupado: 'ocupado', meu: 'seu', esperando: 'pagando', passado: 'passou' };
-    $('#horas').innerHTML = dados.horas.map((h) => {
+    // as horas que já passaram nem aparecem: a grade fica menor e cabe sem rolar
+    $('#horas').innerHTML = dados.horas.filter((h) => h.estado !== 'passado').map((h) => {
       const sel = escolhidas.has(h.inicio);
       return `<button type="button" class="hora ${h.estado}" data-inicio="${h.inicio}" aria-pressed="${sel}" ${h.estado === 'livre' || h.estado === 'esperando' ? '' : 'disabled'}>${hh(h.hora)}<small>${sel ? 'escolhida' : txt[h.estado]}</small></button>`;
-    }).join('') || '<p class="sub">Nenhum horário neste dia.</p>';
+    }).join('') || '<p class="sub">Nenhum horário livre neste dia.</p>';
+    dicaHoras();
     const a = dados.agora;
     $('#agora').textContent = a ? `Jogando agora: ${a.conta}` : '';
   }
@@ -263,7 +319,10 @@
         $('#passo-maquina').hidden = true;
         return aviso('Esta sala não está alugando horários agora.', 'info');
       }
-      if (r?.ligada) $(`#agora-${m}`).textContent = r.agora ? `${r.agora.conta} jogando agora` : 'livre agora';
+      if (r?.ligada) {
+        $(`#agora-${m}`).textContent = r.agora ? `${r.agora.conta} jogando agora` : 'livre agora';
+        $(`[data-maquina="${m}"]`).classList.toggle('ocupada', !!r.agora);
+      }
     }
   }
   function escolherMaquina(m) {
@@ -273,6 +332,7 @@
     $('#maquina-nome').textContent = `— ${NOMES[m]}`;
     $('#agenda').hidden = false;
     $('#passo-jogo').hidden = true;
+    $('#passo-agenda').textContent = '2';
     if (m === 'pc') carregarJogos();
     carregar();
   }
@@ -282,6 +342,7 @@
     jogos = r.ok ? r.jogos : [];
     if (!jogos.some((j) => j.id === jogo)) jogo = null;
     $('#passo-jogo').hidden = maquina !== 'pc' || !jogos.length;
+    $('#passo-agenda').textContent = $('#passo-jogo').hidden ? '2' : '3';
     $('#jogos').innerHTML = jogos.map((j) => {
       const capa = j.steam ? `<img src="${CAPA_STEAM(j.steam)}" alt="" loading="lazy" onerror="this.remove()">` : '';
       const icone = j.icone ? `<img class="icone" src="${j.icone}" alt="">` : esc(j.nome.trim()[0] || '?');
@@ -314,7 +375,6 @@
     }
     dados = r;
     dia = r.dia;
-    $('#max-horas').textContent = r.maxHoras;
     // as escolhidas que deixaram de estar livres saem
     const livres = new Set(r.horas.filter((h) => h.estado === 'livre').map((h) => h.inicio));
     for (const h of r.horas) if (h.estado === 'esperando') livres.add(h.inicio);
@@ -333,7 +393,7 @@
     if (!r.ok) return;
     $('#minhas-lista').innerHTML = r.lista.length
       ? r.lista.map((m) => `<li><span><b>${m.maquina}</b>${m.jogo ? ` · ${esc(m.jogo)}` : ''} · ${dataBr(m.dia)} · ${hh(m.hora)}–${hh((m.hora + 1) % 24)}${m.sala !== sala ? ` · sala ${m.sala}` : ''}</span><span class="tag ${m.status === 'paga' ? '' : 'esperando'}">${m.status === 'paga' ? 'pago' : 'aguardando pagamento'}</span></li>`).join('')
-      : '<li><span class="sub">Nenhuma reserva ainda.</span></li>';
+      : '<li class="vazia">Nenhuma reserva ainda. Escolha a máquina e o horário acima.</li>';
   }
 
   $('#dias').addEventListener('click', (e) => {
@@ -342,15 +402,71 @@
     dia = b.dataset.dia;
     carregar();
   });
+  // Escolher as horas: o primeiro clique marca o começo; o segundo, numa outra hora do mesmo dia,
+  // pega tudo de uma até a outra (17h e depois 23h = 17h às 23h). Com a faixa pronta, clicar numa
+  // hora fora dela começa outra; clicar numa escolhida tira só ela.
+  const pode = (h) => h && (h.estado === 'livre' || h.estado === 'esperando');
+  const maxHoras = () => dados?.maxHoras || 8;
+  let avisoDaFaixa = false;
+  // a faixa entre a hora já escolhida (sozinha) e a hora i: null se não dá para usar
+  function faixaAte(i) {
+    if (escolhidas.size !== 1 || !dados) return null;
+    const [ini] = escolhidas;
+    const a = dados.horas.findIndex((h) => h.inicio === ini);
+    const b = dados.horas.findIndex((h) => h.inicio === i);
+    if (a < 0 || b < 0 || a === b) return null;
+    const trecho = dados.horas.slice(Math.min(a, b), Math.max(a, b) + 1);
+    if (!trecho.every(pode)) return { trecho, erro: 'Tem hora ocupada no meio: escolha um intervalo todo livre.' };
+    if (trecho.length > maxHoras()) return { trecho, erro: `No máximo ${maxHoras()} horas por vez.` };
+    return { trecho };
+  }
+  function dicaHoras() {
+    const d = $('#dica-horas');
+    if (!d) return;
+    const n = escolhidas.size;
+    d.innerHTML = n === 1
+      ? 'Agora clique na <b>última</b> hora (ou pague só esta).'
+      : n > 1
+        ? 'Clique numa hora fora da faixa para começar outra, ou numa escolhida para tirar.'
+        : `Clique na <b>primeira</b> e na <b>última</b> hora para pegar o intervalo (até ${maxHoras()} horas). Horário de Brasília.`;
+  }
   $('#horas').addEventListener('click', (e) => {
     const b = e.target.closest('.hora.livre, .hora.esperando');
     if (!b) return;
     const i = Number(b.dataset.inicio);
-    if (escolhidas.has(i)) escolhidas.delete(i);
-    else if (escolhidas.size >= (dados?.maxHoras || 8)) return aviso(`No máximo ${dados?.maxHoras || 8} horas por vez.`, 'info');
-    else escolhidas.add(i);
+    const f = faixaAte(i);
+    if (f?.erro) {
+      avisoDaFaixa = true;
+      return aviso(f.erro, 'info');
+    }
+    // o aviso de faixa inválida sai no próximo clique certo (os outros avisos ficam)
+    if (avisoDaFaixa) aviso('');
+    avisoDaFaixa = false;
+    if (f) for (const h of f.trecho) escolhidas.add(h.inicio);
+    else if (escolhidas.has(i)) escolhidas.delete(i);
+    else {
+      escolhidas.clear();
+      escolhidas.add(i);
+    }
     desenharHoras();
     resumo();
+  });
+  // a prévia da faixa ao passar o mouse
+  $('#horas').addEventListener('pointerover', (e) => {
+    const b = e.target.closest('.hora');
+    for (const x of document.querySelectorAll('.hora.previa')) x.classList.remove('previa', 'invalida');
+    if (!b || e.pointerType !== 'mouse') return;
+    const f = faixaAte(Number(b.dataset.inicio));
+    if (!f) return;
+    const dentro = new Set(f.trecho.map((h) => String(h.inicio)));
+    for (const x of document.querySelectorAll('.hora')) {
+      if (!dentro.has(x.dataset.inicio) || x.getAttribute('aria-pressed') === 'true') continue;
+      x.classList.add('previa');
+      x.classList.toggle('invalida', !!f.erro);
+    }
+  });
+  $('#horas').addEventListener('pointerleave', () => {
+    for (const x of document.querySelectorAll('.hora.previa')) x.classList.remove('previa', 'invalida');
   });
   $('#pagar').addEventListener('click', async () => {
     if (!conta) {

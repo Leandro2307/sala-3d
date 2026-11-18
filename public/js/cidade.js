@@ -10,13 +10,15 @@
 // natureza, que as desenha junto com as outras.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import {
-  PRACA, RUAS, PRACAS, PISOS, AGUA, AREAS, PORTICOS, PLACAS, QUADROS, MAPAS_AQUI, COM_LETRAS, BOSQUES, MESAS_NOVO, TORIIS,
+  PRACA, RUAS, PRACAS, PISOS, AGUA, AREAS, PORTICOS, PLACAS, QUADROS, MAPAS_AQUI, COM_LETRAS, BOSQUES, MESAS_NOVO, TORIIS, ROTULOS,
 } from './cidade-dados.js';
 import { desenharMapa, LIM } from './mapa.js';
 import { PISTA, pontoEm, projetar } from './pista.js';
 import {
   TEMA, textura, texturaRua, relevoRua, relevoFoto, texturaPiso, texturaPracaCentral, poste as posteDoTema, estruturaPortico, pecaDaPraca, ARVORE_DA_RUA,
+  geoCoqueiro, materiaisCoqueiro,
 } from './temas3d.js';
 
 const FONTE = (px, peso = 800) => `${peso} ${px}px 'Plus Jakarta Sans', system-ui, sans-serif`;
@@ -311,6 +313,7 @@ const naSaida = (saidas, a, raio, folga) => saidas.some((s) => {
 });
 
 function construirPraca(g, world, decor, L, saidas, luzes) {
+  if (TEMA.id === 'tropical') return construirPracaPraia(g, world, decor, L, saidas, luzes);
   const { x, z, r } = PRACA;
   // o desenho da praça e, por cima, o relevo das pedrinhas (uma repetição a cada 0,9 m)
   const pedras = relevoFoto('pedras');
@@ -395,6 +398,182 @@ function construirPraca(g, world, decor, L, saidas, luzes) {
   g.add(fundir(beirada, new THREE.MeshStandardMaterial({ color: corBeirada, roughness: 0.95 }), { sombra: true, recebe: true }));
 
   // postes em volta, na beirada de dentro
+  for (let k = 0; k < 12; k++) {
+    const a = (k / 12) * Math.PI * 2 + Math.PI / 12;
+    if (naSaida(saidas, a, r - 3, 1)) continue;
+    posteDoTema(L, luzes, x + Math.cos(a) * (r - 3), z + Math.sin(a) * (r - 3));
+  }
+}
+
+// ------------------------------------------------------------------ a praça da praia (Vice e tropical)
+// Do centro para fora: o farol numa ilha dentro de um espelho d'água (borda de pedra, friso neon
+// rosa por baixo e jatinhos subindo para o farol); a rosa dos ventos no chão; canteiros redondos
+// elevados com um coqueiro e flores entre uma entrada e a seguinte; os bancos olhando para o farol;
+// os postes e, na beirada, cerca viva baixa e arredondada com flores por cima.
+const AGUA_R0 = 4.6; // a ilha do farol
+const AGUA_R1 = 8.2; // a borda de dentro do espelho d'água
+function construirPracaPraia(g, world, decor, L, saidas, luzes) {
+  const { x, z, r } = PRACA;
+  const rnd = (() => {
+    let t = 97;
+    return () => {
+      t = (t * 16807) % 2147483647;
+      return (t - 1) / 2147483646;
+    };
+  })();
+  const pedras = relevoFoto('pedras');
+  pedras?.repeat.setScalar((r * 2) / 1.2);
+  const piso = new THREE.Mesh(new THREE.CircleGeometry(r, 128).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({
+    map: texturaPracaCentral(r), normalMap: pedras, normalScale: new THREE.Vector2(0.45, 0.45), roughness: 0.75,
+  }));
+  piso.position.set(x, Y_PRACA, z);
+  piso.receiveShadow = true;
+  g.add(piso);
+  pecaDaPraca(g, L, world, x, z, decor);
+
+  // ---- espelho d'água em volta do farol
+  const ondas = textura(256, 256, (ctx, w, h) => {
+    ctx.fillStyle = '#1aa7b8';
+    ctx.fillRect(0, 0, w, h);
+    ctx.strokeStyle = 'rgba(220,255,255,0.35)';
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 26; i++) {
+      const y0 = (i / 26) * h;
+      ctx.beginPath();
+      for (let px = 0; px <= w; px += 8) ctx.lineTo(px, y0 + Math.sin((px / w) * Math.PI * 4 + i) * 3);
+      ctx.stroke();
+    }
+  }, { repetir: true });
+  ondas.repeat.set(3, 3);
+  const agua = new THREE.Mesh(
+    new THREE.RingGeometry(AGUA_R0, AGUA_R1 + 0.1, 64).rotateX(-Math.PI / 2),
+    new THREE.MeshStandardMaterial({ map: ondas, color: 0xbff6ff, roughness: 0.12, metalness: 0.25, transparent: true, opacity: 0.92 }),
+  );
+  agua.position.set(x, 0.42, z);
+  g.add(agua);
+  // o fundo (azul mais escuro) aparece pela água
+  const fundo = new THREE.Mesh(new THREE.RingGeometry(AGUA_R0, AGUA_R1 + 0.1, 64).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x0e5f73, roughness: 0.9 }));
+  fundo.position.set(x, 0.12, z);
+  g.add(fundo);
+  // a borda: um anel de pedra largo, por fora, e a ilha do farol por dentro
+  const borda = [
+    new THREE.CylinderGeometry(AGUA_R1 + 0.75, AGUA_R1 + 0.8, 0.62, 64, 1, true).translate(x, 0.31, z),
+    new THREE.CylinderGeometry(AGUA_R1, AGUA_R1, 0.62, 64, 1, true).translate(x, 0.31, z),
+    new THREE.RingGeometry(AGUA_R1, AGUA_R1 + 0.78, 64).rotateX(-Math.PI / 2).translate(x, 0.62, z),
+    new THREE.CylinderGeometry(AGUA_R0, AGUA_R0, 0.62, 48, 1, true).translate(x, 0.31, z),
+  ];
+  g.add(fundir(borda, new THREE.MeshStandardMaterial({ color: 0xece2cc, roughness: 0.7, side: THREE.DoubleSide }), { sombra: true, recebe: true }));
+  // friso neon rosa rente ao chão, em volta da borda (o toque Vice)
+  const friso = new THREE.Mesh(new THREE.TorusGeometry(AGUA_R1 + 0.85, 0.06, 6, 96).rotateX(Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xff4fa3, toneMapped: false }));
+  friso.position.set(x, 0.14, z);
+  g.add(friso);
+  // ninguém entra na água: a borda de pedra é colisor (caixas em volta)
+  for (let i = 0; i < 24; i++) {
+    const a = (i / 24) * Math.PI * 2;
+    const bx = x + Math.cos(a) * (AGUA_R1 + 0.4);
+    const bz = z + Math.sin(a) * (AGUA_R1 + 0.4);
+    world.addBox({ min: [bx - 1.15, 0, bz - 1.15], max: [bx + 1.15, 0.62, bz + 1.15] });
+  }
+  // jatinhos saindo da borda e caindo na água, perto do farol
+  const jatoMat = new THREE.MeshBasicMaterial({ color: 0xe8fdff, transparent: true, opacity: 0.55, depthWrite: false, toneMapped: false });
+  const jatos = [];
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * Math.PI * 2;
+    // um arco: da borda (r 8,2, y 0,6) até a água perto da ilha (r 5,2)
+    const pts = [];
+    for (let k = 0; k <= 12; k++) {
+      const t = k / 12;
+      const rr = AGUA_R1 - t * (AGUA_R1 - 5.2);
+      pts.push(new THREE.Vector3(x + Math.cos(a) * rr, 0.6 + Math.sin(t * Math.PI) * 1.7 - t * 0.2, z + Math.sin(a) * rr));
+    }
+    jatos.push(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 16, 0.05, 5, false));
+  }
+  const malhaJatos = new THREE.Mesh(mergeGeometries(jatos), jatoMat);
+  g.add(malhaJatos);
+  decor.push((t) => {
+    ondas.offset.set(t * 0.03, t * 0.018);
+    jatoMat.opacity = 0.5 + Math.sin(t * 2.4) * 0.08;
+  });
+
+  // ---- canteiros redondos com coqueiro, no meio de cada vão entre duas entradas
+  const ordem = [...saidas].sort((p, q) => p.a - q.a);
+  const R_CANT = 15;
+  const RAIO_CANT = 2.4;
+  const canteiros = [];
+  ordem.forEach((s, i) => {
+    const prox = ordem[(i + 1) % ordem.length];
+    const de = s.a + Math.asin(Math.min(1, (s.meia + RAIO_CANT + 1.5) / R_CANT));
+    let ate = prox.a - Math.asin(Math.min(1, (prox.meia + RAIO_CANT + 1.5) / R_CANT));
+    while (ate <= de) ate += Math.PI * 2;
+    const vao = ate - de;
+    // vão largo ganha dois canteiros
+    const n = vao > Math.PI * 0.75 ? 2 : vao > 0.25 ? 1 : 0;
+    for (let k = 0; k < n; k++) canteiros.push(de + (vao * (k + 1)) / (n + 1));
+  });
+  if (!ordem.length) for (let k = 0; k < 4; k++) canteiros.push((k / 4) * Math.PI * 2 + Math.PI / 4);
+  const muros = [];
+  const terra = [];
+  const flores = [];
+  const coresFlor = ['#f43f5e', '#fb923c', '#facc15', '#ec4899', '#ffffff', '#f472b6'];
+  const mats = materiaisCoqueiro();
+  canteiros.forEach((a, i) => {
+    const cx = x + Math.cos(a) * R_CANT;
+    const cz = z + Math.sin(a) * R_CANT;
+    muros.push(new THREE.CylinderGeometry(RAIO_CANT, RAIO_CANT + 0.1, 0.7, 32).translate(cx, 0.35, cz));
+    terra.push(new THREE.CylinderGeometry(RAIO_CANT - 0.22, RAIO_CANT - 0.22, 0.1, 32).translate(cx, 0.7, cz));
+    for (let f = 0; f < 34; f++) {
+      const fa = rnd() * Math.PI * 2;
+      const fr = 0.9 + rnd() * (RAIO_CANT - 1.25);
+      flores.push({ x: cx + Math.cos(fa) * fr, z: cz + Math.sin(fa) * fr, cor: coresFlor[Math.floor(rnd() * coresFlor.length)] });
+    }
+    const coq = new THREE.Mesh(geoCoqueiro(7.5 + (i % 3) * 0.9, 9, 4 + i), mats);
+    coq.position.set(cx, 0.7, cz);
+    coq.rotation.y = rnd() * Math.PI * 2;
+    coq.castShadow = true;
+    g.add(coq);
+    world.addBox({ min: [cx - RAIO_CANT, 0, cz - RAIO_CANT], max: [cx + RAIO_CANT, 0.7, cz + RAIO_CANT] });
+  });
+  if (muros.length) {
+    g.add(fundir(muros, new THREE.MeshStandardMaterial({ color: 0xf28b6b, roughness: 0.8 }), { sombra: true, recebe: true }));
+    g.add(fundir(terra, new THREE.MeshStandardMaterial({ color: 0x5b4632, roughness: 1 }), { recebe: true }));
+    plantarFlores(g, flores, 0.9);
+  }
+
+  // ---- bancos olhando para o farol, em volta, fora das entradas e dos canteiros
+  const bancos = [];
+  for (let k = 0; k < 16; k++) {
+    const a = (k / 16) * Math.PI * 2 + Math.PI / 16;
+    if (naSaida(saidas, a, 21.5, 2)) continue;
+    bancos.push({ x: x + Math.cos(a) * 21.5, z: z + Math.sin(a) * 21.5, giro: Math.atan2(-Math.cos(a), -Math.sin(a)) });
+  }
+  construirBancos(L, world, bancos);
+
+  // ---- beirada: cerca viva baixa e arredondada, com flores por cima, aberta nas entradas
+  const passos = Math.round((Math.PI * 2 * r) / 3.3);
+  const beirada = [];
+  const floresCerca = [];
+  const alt = 0.85;
+  for (let i = 0; i < passos; i++) {
+    const a = (i / passos) * Math.PI * 2;
+    if (naSaida(saidas, a, r, 3)) continue;
+    const ax = x + Math.cos(a) * (r - 0.4);
+    const az = z + Math.sin(a) * (r - 0.4);
+    const comp = ((Math.PI * 2 * (r - 0.4)) / passos) * 1.08;
+    const giro = Math.atan2(-Math.sin(a), Math.cos(a));
+    beirada.push(no(new RoundedBoxGeometry(1.3, alt, comp + 0.25, 2, 0.34), ax, alt / 2, az, giro));
+    for (let f = 0; f < 3; f++) {
+      const fa = a + (rnd() - 0.5) * ((Math.PI * 2) / passos);
+      const fr = r - 0.4 + (rnd() - 0.5) * 0.7;
+      floresCerca.push({ x: x + Math.cos(fa) * fr, z: z + Math.sin(fa) * fr, cor: ['#f43f5e', '#ec4899', '#fb923c'][Math.floor(rnd() * 3)] });
+    }
+    const hx = Math.abs(Math.cos(giro)) * 0.65 + Math.abs(Math.sin(giro)) * comp / 2;
+    const hz = Math.abs(Math.sin(giro)) * 0.65 + Math.abs(Math.cos(giro)) * comp / 2;
+    world.addBox({ min: [ax - hx, 0, az - hz], max: [ax + hx, alt, az + hz] });
+  }
+  g.add(fundir(beirada, new THREE.MeshStandardMaterial({ color: 0x3f8a3a, roughness: 0.95 }), { sombra: true, recebe: true }));
+  if (floresCerca.length) plantarFlores(g, floresCerca, alt + 0.1);
+
+  // ---- postes em volta, na beirada de dentro
   for (let k = 0; k < 12; k++) {
     const a = (k / 12) * Math.PI * 2 + Math.PI / 12;
     if (naSaida(saidas, a, r - 3, 1)) continue;
@@ -788,7 +967,39 @@ export function totemMapa(g, L, world, { x, z, giro }) {
   }
   const base = 0.8;
   const onde = new THREE.Matrix4().compose(_p.set(x, 0, z), _q.setFromAxisAngle(CIMA, giro), _s.set(1, 1, 1));
-  g.add(new THREE.Mesh(new THREE.PlaneGeometry(w, h).translate(0, base + h / 2, 0.08).applyMatrix4(onde), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false })));
+  // até a foto de satélite ficar pronta, o mapa desenhado
+  const painel = new THREE.Mesh(new THREE.PlaneGeometry(w, h).translate(0, base + h / 2, 0.08).applyMatrix4(onde), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }));
+  g.add(painel);
+  // Vista de satélite em 3D: o World fotografa o mundo de cima, inclinado, olhando para onde quem lê
+  // olha (world.fotografarSatelite) e devolve a foto já recortada na proporção da área do mapa.
+  // Ela vai num plano só dela (a foto está em sRGB: um shader sem conversão de cor) e, na frente,
+  // um plano transparente com os nomes das áreas, o "você está aqui" e a faixa de baixo.
+  (world.mapasSatelite ||= []).push({
+    olha,
+    aspecto: W / H_mapa,
+    pronto: (foto, projetar) => {
+      const hMapa = h * (H_mapa / H);
+      if (!painel.userData.foto) {
+        const plano = new THREE.Mesh(
+          new THREE.PlaneGeometry(w, hMapa).translate(0, base + h - hMapa / 2, 0.08).applyMatrix4(onde),
+          new THREE.ShaderMaterial({
+            uniforms: { foto: { value: foto } },
+            vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+            fragmentShader: 'uniform sampler2D foto; varying vec2 vUv; void main() { gl_FragColor = vec4(texture2D(foto, vUv).rgb, 1.0); }',
+          }),
+        );
+        g.add(plano);
+        painel.userData.foto = plano;
+        painel.material.transparent = true;
+        painel.position.addScaledVector(new THREE.Vector3(Math.sin(giro), 0, Math.cos(giro)), 0.012);
+      } else {
+        painel.userData.foto.material.uniforms.foto.value = foto;
+      }
+      painel.material.map?.dispose();
+      painel.material.map = texturaSobreFoto({ W, H, H_mapa, projetar, aqui: { x, z } });
+      painel.material.needsUpdate = true;
+    },
+  });
   L.escuro.push(new THREE.BoxGeometry(w + 0.3, h + 0.3, 0.14).translate(0, base + h / 2, 0).applyMatrix4(onde));
   for (const lx of [-w / 2 + 0.5, w / 2 - 0.5]) L.escuro.push(new THREE.BoxGeometry(0.25, base, 0.25).translate(lx, base / 2, 0).applyMatrix4(onde));
   const hx = Math.abs(Math.cos(giro)) * (w / 2 + 0.2) + 0.3;
@@ -797,10 +1008,136 @@ export function totemMapa(g, L, world, { x, z, giro }) {
 }
 
 
+// Por cima da foto de satélite: o nome de cada área (etiqueta escura com a bolinha na cor dela), o
+// pino "você está aqui" e, embaixo, a faixa com a legenda. O resto da textura é transparente.
+function texturaSobreFoto({ W, H, H_mapa, projetar, aqui }) {
+  return textura(W, H, (ctx) => {
+    // um leve escurecido nas bordas: a foto fica com cara de tela de mapa
+    const v = ctx.createRadialGradient(W / 2, H_mapa / 2, H_mapa * 0.3, W / 2, H_mapa / 2, W * 0.75);
+    v.addColorStop(0, 'rgba(0,0,0,0)');
+    v.addColorStop(1, 'rgba(0,0,0,0.35)');
+    ctx.fillStyle = v;
+    ctx.fillRect(0, 0, W, H_mapa);
+    const dentro = ([u, t]) => u > 0.03 && u < 0.97 && t > 0.04 && t < 0.97;
+    ctx.textBaseline = 'middle';
+    // Nomes sem encavalar: cada etiqueta tenta o lugar dela e, se bater numa já posta (ou no pino),
+    // tenta logo acima, abaixo, à direita e à esquerda, cada vez mais longe, ligada ao ponto por
+    // um risquinho. Sem lugar livre, fica de fora. Os pontos mais embaixo (mais perto de quem lê)
+    // são postos primeiro.
+    const uv = projetar(aqui.x, 0, aqui.z);
+    const ocupado = uv ? [{ x0: uv[0] * W - 16, x1: uv[0] * W + 16, y0: uv[1] * H_mapa - 46, y1: uv[1] * H_mapa + 6 }] : [];
+    const bate = (b) => ocupado.some((o) => b.x0 < o.x1 + 4 && b.x1 > o.x0 - 4 && b.y0 < o.y1 + 3 && b.y1 > o.y0 - 3);
+    const itens = [];
+    for (const [id, a] of Object.entries(AREAS)) {
+      const pos = ROTULOS[id];
+      if (!pos) continue;
+      const p = projetar(pos[0], id === 'catedral' ? 40 : 2, pos[1]);
+      if (p && dentro(p)) itens.push({ a, qx: p[0] * W, qy: p[1] * H_mapa });
+    }
+    itens.sort((p, q) => q.qy - p.qy);
+    const tam = 18;
+    for (const { a, qx, qy } of itens) {
+      ctx.font = FONTE(tam, 800);
+      const pw = ctx.measureText(a.nome).width + 34;
+      const ph = tam + 12;
+      const tentativas = [[0, 0]];
+      for (let k = 1; k <= 4; k++) tentativas.push([0, -k * (ph + 2)], [0, k * (ph + 2)], [k * (pw / 2 + 6), 0], [-k * (pw / 2 + 6), 0]);
+      let lugar = null;
+      for (const [dx, dy] of tentativas) {
+        const b = { x0: qx + dx - pw / 2, x1: qx + dx + pw / 2, y0: qy + dy - ph / 2, y1: qy + dy + ph / 2 };
+        if (b.x0 < 4 || b.x1 > W - 4 || b.y0 < 4 || b.y1 > H_mapa - 4 || bate(b)) continue;
+        lugar = { b, dx, dy };
+        break;
+      }
+      if (!lugar) continue;
+      ocupado.push(lugar.b);
+      const { b } = lugar;
+      const ey = (b.y0 + b.y1) / 2;
+      if (lugar.dx || lugar.dy) {
+        // saiu do lugar: um risquinho e uma bolinha marcam o ponto de verdade
+        ctx.strokeStyle = 'rgba(10,12,20,0.75)';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(qx, qy);
+        ctx.lineTo(Math.max(b.x0, Math.min(b.x1, qx)), Math.max(b.y0, Math.min(b.y1, qy)));
+        ctx.stroke();
+        ctx.fillStyle = a.cor || '#ffffff';
+        ctx.beginPath();
+        ctx.arc(qx, qy, 4.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.fillStyle = 'rgba(10,12,20,0.8)';
+      roundRect(ctx, b.x0, b.y0, pw, ph, ph / 2);
+      ctx.fill();
+      ctx.fillStyle = a.cor || '#ffffff';
+      ctx.beginPath();
+      ctx.arc(b.x0 + 14, ey, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'left';
+      ctx.fillText(a.nome, b.x0 + 25, ey + 1);
+    }
+    // você está aqui: o pino vermelho com a sombra no chão
+    if (uv) {
+      const qx = uv[0] * W;
+      const qy = uv[1] * H_mapa;
+      ctx.fillStyle = 'rgba(0,0,0,0.35)';
+      ctx.beginPath();
+      ctx.ellipse(qx, qy, 12, 5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#ef4444';
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(qx, qy);
+      ctx.bezierCurveTo(qx - 14, qy - 18, qx - 16, qy - 30, qx, qy - 42);
+      ctx.bezierCurveTo(qx + 16, qy - 30, qx + 14, qy - 18, qx, qy);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(qx, qy - 28, 5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // a faixa de baixo
+    const FAIXA = H - H_mapa;
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(0, H_mapa, W, FAIXA);
+    ctx.fillStyle = '#ef4444';
+    ctx.beginPath();
+    ctx.arc(52, H - FAIXA / 2, 16, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#f8fafc';
+    ctx.font = FONTE(40);
+    ctx.textAlign = 'left';
+    ctx.fillText('Você está aqui', 82, H - FAIXA / 2);
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = FONTE(28, 600);
+    ctx.textAlign = 'right';
+    ctx.fillText('Mapa na tela: botão do mapa ou L', W - 30, H - FAIXA / 2);
+  });
+}
+
 // ------------------------------------------------------------------ árvores em fileira
 // dos dois lados das ruas (não das trilhas curtas), longe das esquinas, das praças e da pista (a
 // natureza desenha, com a árvore da rua do tema)
 let RUAS_PRONTAS = [];
+// um coqueiro de cada lado de cada rua que chega na praça, logo fora da beirada: a entrada fica marcada
+function arvoresDasEntradas(saidas) {
+  if (TEMA.id !== 'tropical') return [];
+  const { x, z, r } = PRACA;
+  const raio = r + 5.5; // fora da reserva da praça (r + 4), onde a natureza não planta
+  const arvores = [];
+  for (const s of saidas) {
+    const da = Math.asin(Math.min(1, (s.meia + 3.2) / raio));
+    for (const lado of [-1, 1]) {
+      const a = s.a + lado * da;
+      arvores.push({ x: x + Math.cos(a) * raio, z: z + Math.sin(a) * raio, tipo: 'palmeira' });
+    }
+  }
+  return arvores;
+}
+
 function arvoresEmFileira(ruas, ocupado) {
   const arvores = [];
   const longe = (x, z) => Math.hypot(x - PRACA.x, z - PRACA.z) > PRACA.r + 4
@@ -868,7 +1205,7 @@ export function construirCidade(world) {
   return {
     grupo: g,
     // para a natureza: a água no lugar certo, bosques só nas áreas de bosque e as fileiras das ruas
-    natureza: { agua: AGUA, bosques: BOSQUES, fileiras: arvoresEmFileira(ruas, world.reservas) },
+    natureza: { agua: AGUA, bosques: BOSQUES, fileiras: [...arvoresEmFileira(ruas, world.reservas), ...arvoresDasEntradas(saidas)] },
     mesas: MESAS_NOVO,
   };
 }

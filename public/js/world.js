@@ -132,6 +132,133 @@ function canvasTexture(w, h, draw, esc = 1) {
   return tex;
 }
 
+// Telas livres no cinema Vice: o mesmo pôr do sol dos cartazes, mais escuro para o texto aparecer.
+// semente muda onde fica o sol e de que lado ficam os coqueiros (cada tela fica um pouco diferente).
+function fundoTelaVice(ctx, w, h, semente = 0) {
+  const horiz = h * 0.8;
+  const ceu = ctx.createLinearGradient(0, 0, 0, horiz);
+  ceu.addColorStop(0, '#0d0420');
+  ceu.addColorStop(0.5, '#2d0c45');
+  ceu.addColorStop(0.82, '#8a1f5e');
+  ceu.addColorStop(1, '#ff7a45');
+  ctx.fillStyle = ceu;
+  ctx.fillRect(0, 0, w, horiz);
+  // estrelas
+  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  for (let i = 0; i < 40; i++) {
+    const x = ((i * 977 + semente * 131) % 1000) / 1000 * w;
+    const y = ((i * 613 + semente * 71) % 1000) / 1000 * horiz * 0.5;
+    ctx.fillRect(x, y, 1.6, 1.6);
+  }
+  // sol listrado nascendo no horizonte
+  const r = h * 0.24;
+  const sx = w * [0.5, 0.3, 0.7, 0.42, 0.6][semente % 5];
+  const sy = horiz;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, w, horiz);
+  ctx.clip();
+  ctx.shadowColor = '#ff4fa3';
+  ctx.shadowBlur = r * 0.5;
+  const sol = ctx.createLinearGradient(0, sy - r, 0, sy);
+  sol.addColorStop(0, '#ffe66b');
+  sol.addColorStop(1, '#ff4fa3');
+  ctx.fillStyle = sol;
+  ctx.beginPath();
+  ctx.arc(sx, sy, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = '#8a1f5e';
+  for (let i = 0; i < 5; i++) ctx.fillRect(sx - r, sy - r * 0.62 + i * r * 0.15, 2 * r, r * 0.025 + i * r * 0.014);
+  ctx.restore();
+  // chão: mar escuro com a grade de neon em perspectiva
+  const chao = ctx.createLinearGradient(0, horiz, 0, h);
+  chao.addColorStop(0, '#24093f');
+  chao.addColorStop(1, '#07030f');
+  ctx.fillStyle = chao;
+  ctx.fillRect(0, horiz, w, h - horiz);
+  ctx.strokeStyle = 'rgba(0,229,255,0.35)';
+  ctx.lineWidth = 1.5;
+  for (let i = -12; i <= 12; i++) {
+    ctx.beginPath();
+    ctx.moveTo(w / 2 + i * w * 0.02, horiz);
+    ctx.lineTo(w / 2 + i * w * 0.16, h);
+    ctx.stroke();
+  }
+  for (let i = 1; i < 6; i++) {
+    const y = horiz + (h - horiz) * (i / 6) ** 1.7;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(w, y);
+    ctx.stroke();
+  }
+  ctx.strokeStyle = 'rgba(255,122,69,0.9)';
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(0, horiz);
+  ctx.lineTo(w, horiz);
+  ctx.stroke();
+  // coqueiros em silhueta nos cantos
+  const coqueiro = (x, alt, inclina) => {
+    const base = h;
+    const cx = x + inclina * alt;
+    const cy = base - alt;
+    ctx.strokeStyle = '#0a0315';
+    ctx.lineCap = 'round';
+    ctx.lineWidth = alt * 0.05;
+    ctx.beginPath();
+    ctx.moveTo(x, base);
+    ctx.quadraticCurveTo(x + inclina * alt * 0.2, base - alt * 0.6, cx, cy);
+    ctx.stroke();
+    ctx.lineWidth = alt * 0.032;
+    const fl = alt * 0.45;
+    for (let f = 0; f < 7; f++) {
+      const a = -Math.PI * 0.95 + f * (Math.PI * 0.9 / 6) + (f > 3 ? 0.2 : 0);
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.quadraticCurveTo(cx + Math.cos(a) * fl * 0.6, cy + Math.sin(a) * fl * 0.6 - fl * 0.15, cx + Math.cos(a) * fl, cy + Math.sin(a) * fl * 0.4 + fl * 0.35);
+      ctx.stroke();
+    }
+  };
+  const lado = semente % 2;
+  coqueiro(w * (lado ? 0.06 : 0.94), h * 0.62, lado ? 0.14 : -0.14);
+  coqueiro(w * (lado ? 0.92 : 0.1), h * 0.44, lado ? -0.12 : 0.12);
+  // sombra suave atrás do texto (o laranja do horizonte apagava as letras)
+  const v = ctx.createRadialGradient(w / 2, h * 0.6, 0, w / 2, h * 0.6, w * 0.45);
+  v.addColorStop(0, 'rgba(8,3,18,0.55)');
+  v.addColorStop(1, 'rgba(8,3,18,0)');
+  ctx.fillStyle = v;
+  ctx.fillRect(0, 0, w, h);
+}
+// o (+) e o play no estilo neon do cinema Vice
+function neonVice(ctx, desenho, cor = '#ff4fa3') {
+  ctx.save();
+  ctx.shadowColor = cor;
+  ctx.shadowBlur = 28;
+  desenho();
+  ctx.shadowBlur = 10;
+  desenho();
+  ctx.restore();
+}
+// só o nome da tela (Telão, Tela 1...): sem a legenda de instrução embaixo
+// sozinho (sem ícone em cima), o nome fica maior e no meio da tela
+function textoTelaVice(ctx, cw, ch, t, sozinho = false) {
+  const tam = ch * (sozinho ? 0.15 : 0.12);
+  const y = sozinho ? ch / 2 : ch * 0.66;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = `italic 800 ${Math.round(tam)}px ${FONT}`;
+  const g = ctx.createLinearGradient(0, y - tam / 2, 0, y + tam / 2);
+  g.addColorStop(0, '#ffe66b');
+  g.addColorStop(1, '#ff4fa3');
+  ctx.save();
+  ctx.shadowColor = 'rgba(255,79,163,0.85)';
+  ctx.shadowBlur = 22;
+  ctx.fillStyle = g;
+  ctx.fillText(t, cw / 2, y, cw * 0.9);
+  ctx.restore();
+}
+
 // ------------------------------------------------------------------ utilitários de geometria
 // Junta peças paradas que dividem o material numa malha só: um desenho (e um na sombra) no lugar
 // de um por peça. As geometrias chegam já posicionadas no mundo e saem da memória depois.
@@ -209,12 +336,12 @@ function drawMonitorIcon(ctx, cx, cy, s, color) {
   ctx.restore();
 }
 
-function drawPlayIcon(ctx, cx, cy, s, color) {
+function drawPlayIcon(ctx, cx, cy, s, color, seta = '#0f1219') {
   ctx.save();
   ctx.fillStyle = color;
   roundRect(ctx, cx - s * 0.62, cy - s * 0.44, s * 1.24, s * 0.88, s * 0.22);
   ctx.fill();
-  ctx.fillStyle = '#0f1219';
+  ctx.fillStyle = seta;
   ctx.beginPath();
   ctx.moveTo(cx - s * 0.16, cy - s * 0.22);
   ctx.lineTo(cx + s * 0.26, cy);
@@ -557,7 +684,17 @@ class ScreenDisplay {
     this.group.add(this.surface);
 
     // mais: tela livre que aceita o (+) (compartilhar ali ou abrir o navegador)
+    // no cinema Vice cada tela livre ganha o pôr do sol (a semente vem do título: Tela 1, 2...)
+    const semente = [...String(title)].reduce((n, c) => n + c.charCodeAt(0), 0);
     this.placeholderTex = leve || painel ? null : canvasTexture(1024, Math.round((1024 * h) / w), (ctx, cw, ch, t = title, s = subtitle, mais = false) => {
+      if (CINEMA_GTA && !logoDasTelas) {
+        fundoTelaVice(ctx, cw, ch, semente);
+        if (icon === 'play') neonVice(ctx, () => drawPlayIcon(ctx, cw / 2, ch * 0.36, ch * 0.24, '#ff4f7b', '#ffffff'));
+        // tela livre: sem ícone, só o nome (clicar em qualquer parte dela abre o compartilhar)
+        else if (!mais) neonVice(ctx, () => drawMonitorIcon(ctx, cw / 2, ch * 0.36, ch * 0.24, 'rgba(255,214,235,0.9)'));
+        textoTelaVice(ctx, cw, ch, t, icon !== 'play' && mais);
+        return;
+      }
       screenBackground(ctx, cw, ch);
       if (icon === 'play') drawPlayIcon(ctx, cw / 2, ch * 0.4, ch * 0.24, '#ff4d5e');
       else if (mais) {
@@ -958,7 +1095,11 @@ export class World {
       () => {
         this.area('plateia', () => this.buildAudience());
         this.buildScreens();
-        if (CINEMA_GTA) this.luzTelaoGta();
+        if (CINEMA_GTA) {
+          // borda neon com cometas no telão e, mais fina, em cada tela (cada uma numa fase)
+          this.luzTelaoGta(this.mainScreen);
+          this.slotsCinema.forEach((s, i) => this.luzTelaoGta(s, { e: 0.18, cometas: 3, fase: 0.17 + i * 0.29 }));
+        }
       },
       // A praça na porta do prédio e as ruas até cada área (cidade.js). Antes do autódromo (o
       // guard-rail abre passagem onde a rua chega) e da natureza (não planta em cima das ruas).
@@ -1127,6 +1268,102 @@ export class World {
         if (s.grupo) s.grupo.visible = antes[i];
         s.caixa.visible = antes[i];
       });
+    }
+  }
+
+  // Vista de satélite 3D para os mapas dos totens (cidade.js, totemMapa): a cena desenhada na própria
+  // tela por uma câmera alta e inclinada (55° para baixo), virada para onde quem lê o totem olha, e
+  // copiada para uma textura. Na tela e não num alvo: num alvo todo material recompilaria (o three só
+  // faz tone mapping no desenho da tela). O quadro normal vem logo depois e cobre o desenho.
+  // A distância é a menor em que o mapa todo cabe no recorte (na proporção do totem) dentro da tela.
+  fotografarSatelite() {
+    const r = this.renderer;
+    const tam = r.getDrawingBufferSize(new THREE.Vector2());
+    const fog = this.scene.fog;
+    const nevoa = fog && [fog.near, fog.far];
+    const sombra = r.shadowMap.autoUpdate;
+    // o mapa todo, até a cerca
+    const cantos = [[ROOM.minX, ROOM.minZ], [ROOM.maxX, ROOM.minZ], [ROOM.maxX, ROOM.maxZ], [ROOM.minX, ROOM.maxZ]];
+    const cx = (ROOM.minX + ROOM.maxX) / 2;
+    const cz = (ROOM.minZ + ROOM.maxZ) / 2;
+    const v = new THREE.Vector3();
+    if (fog) { fog.near = 1e5; fog.far = 2e5; }
+    r.shadowMap.autoUpdate = false;
+    try {
+      for (const m of this.mapasSatelite) {
+        const cam = new THREE.PerspectiveCamera(32, tam.x / tam.y, 5, 6000);
+        const [fx, fz] = m.olha;
+        const incl = THREE.MathUtils.degToRad(55);
+        const posicionar = (d) => {
+          cam.position.set(cx - fx * d * Math.cos(incl), d * Math.sin(incl), cz - fz * d * Math.cos(incl));
+          cam.lookAt(cx, 0, cz);
+          cam.updateMatrixWorld();
+        };
+        // o recorte em pixels (origem embaixo à esquerda) com a proporção do totem, em volta do mapa
+        const recorte = () => {
+          let x0 = Infinity; let x1 = -Infinity; let y0 = Infinity; let y1 = -Infinity;
+          for (const [px, pz] of cantos) {
+            v.set(px, 0, pz).project(cam);
+            const sx = ((v.x + 1) / 2) * tam.x;
+            const sy = ((v.y + 1) / 2) * tam.y;
+            x0 = Math.min(x0, sx); x1 = Math.max(x1, sx); y0 = Math.min(y0, sy); y1 = Math.max(y1, sy);
+          }
+          let cw = x1 - x0;
+          let ch = y1 - y0;
+          if (cw / ch > m.aspecto) ch = cw / m.aspecto; else cw = ch * m.aspecto;
+          const mx = (x0 + x1) / 2;
+          const my = (y0 + y1) / 2;
+          return { x: Math.round(mx - cw / 2), y: Math.round(my - ch / 2), w: Math.round(cw), h: Math.round(ch) };
+        };
+        const cabe = (c) => c.x >= 0 && c.y >= 0 && c.x + c.w <= tam.x && c.y + c.h <= tam.y;
+        let perto = 100;
+        let longe = 8000;
+        for (let i = 0; i < 24; i++) {
+          const meio = (perto + longe) / 2;
+          posicionar(meio);
+          if (cabe(recorte())) longe = meio; else perto = meio;
+        }
+        posicionar(longe);
+        const c = recorte();
+        if (!cabe(c) || c.w < 8 || c.h < 8) continue;
+        // o que fica no céu (surf, mata-mata, nuvens: tudo acima de 60 m) sai da foto: de cima, inclinado,
+        // apareceria por cima do mapa, longe do lugar de verdade
+        this.comTudoVisivel(() => {
+          const escondidos = [];
+          const caixa = new THREE.Box3();
+          for (const o of [...this.scene.children, ...this.fora.children]) {
+            if (o === this.fora || !o.visible || o.isLight || o.isCamera) continue;
+            caixa.setFromObject(o);
+            if (!caixa.isEmpty() && caixa.min.y > 60) {
+              o.visible = false;
+              escondidos.push(o);
+            }
+          }
+          try {
+            r.setRenderTarget(null);
+            r.render(this.scene, cam);
+          } finally {
+            for (const o of escondidos) o.visible = true;
+          }
+        });
+        if (!m.foto || m.foto.image.width !== c.w || m.foto.image.height !== c.h) {
+          m.foto?.dispose();
+          m.foto = new THREE.FramebufferTexture(c.w, c.h);
+        }
+        r.copyFramebufferToTexture(m.foto, new THREE.Vector2(c.x, c.y));
+        // do mundo para o recorte: [u da esquerda, v de cima], de 0 a 1 (null atrás da câmera)
+        const projetar = (px, py, pz) => {
+          v.set(px, py, pz).project(cam);
+          if (v.z > 1) return null;
+          const sx = ((v.x + 1) / 2) * tam.x;
+          const sy = ((v.y + 1) / 2) * tam.y;
+          return [(sx - c.x) / c.w, 1 - (sy - c.y) / c.h];
+        };
+        m.pronto(m.foto, projetar);
+      }
+    } finally {
+      if (fog) [fog.near, fog.far] = nevoa;
+      r.shadowMap.autoUpdate = sombra;
     }
   }
 
@@ -1572,11 +1809,12 @@ export class World {
 
     // faixas de luz no teto e rodapé neon
     const stripMat = new THREE.MeshBasicMaterial({ color: COR_CINEMA.faixaTeto, toneMapped: false });
-    for (const x of [-18, 0, 18]) {
-      const s = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.15, D - 12), stripMat);
-      s.position.set(x, height - 0.1, cz);
-      this.scene.add(s);
+    // de 18 em 18 m a partir do meio, até perto das paredes (o teto todo, não só as 3 do meio)
+    const faixas = [];
+    for (let k = 0; Math.abs(k * 18) <= W / 2 - 4; k = k > 0 ? -k : -k + 1) {
+      faixas.push(new THREE.BoxGeometry(0.5, 0.15, D - 12).translate(cx + k * 18, height - 0.1, cz));
     }
+    this.scene.add(fundir(faixas, stripMat));
     const baseMat = new THREE.MeshBasicMaterial({ color: COR_CINEMA.rodape, toneMapped: false });
     const baseboards = [
       { size: [W, 0.12, 0.12], pos: [cx, 0.3, S.maxZ - 0.06] },
@@ -1674,11 +1912,9 @@ export class World {
   // Cinema do mapa Vice: uma faixa de LED em volta do telão, com luzes correndo em volta sem parar.
   // A faixa é uma tira só, com u = a distância andada no contorno; a textura (cometas rosa e
   // laranja sobre a faixa apagada) desliza nela. Fica no grupo do telão: some junto com ele.
-  luzTelaoGta() {
-    const tela = this.mainScreen;
+  luzTelaoGta(tela, { e = 0.4, cometas = 4, fase = 0 } = {}) {
     const a = tela.w / 2 + 0.4; // por fora da moldura (que tem 0,35 m de cada lado)
     const b = tela.h / 2 + 0.4;
-    const e = 0.4; // largura da faixa
     const cantos = [[-a, -b], [a, -b], [a, b], [-a, b], [-a, -b]];
     const perim = 4 * (a + b);
     const pos = [];
@@ -1713,14 +1949,14 @@ export class World {
       ctx.fillRect(w * 0.45, 0, w * 0.55, h);
     });
     tex.wrapS = THREE.RepeatWrapping;
-    tex.repeat.x = 4; // 4 cometas no contorno
+    tex.repeat.x = cometas; // cometas no contorno
     const faixa = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: tex, toneMapped: false, side: THREE.DoubleSide }));
     faixa.position.z = 0.02;
     tela.group.add(faixa);
     // uma volta inteira a cada 10 s; a cabeça vai na frente (u crescendo: anti-horário para quem olha o telão)
     this.decorAnimated.push((t) => {
       if (!tela.group.visible) return;
-      tex.offset.x = -((t / 10) % 1) * tex.repeat.x;
+      tex.offset.x = -((t / 10 + fase) % 1) * tex.repeat.x;
     });
   }
 
@@ -1787,31 +2023,80 @@ export class World {
     faixa2.position.set((S.minX + S.maxX) / 2, S.height - 3, S.maxZ + 0.65);
     this.fora.add(faixa1, faixa2);
 
-    // 1. Placa de SAÍDA pelo lado de dentro do cinema (acima da porta)
+    // 1. Placa de SAÍDA pelo lado de dentro do cinema (acima da porta): letreiro neon nas cores do
+    // cinema (no Vice, rosa e laranja), "SAÍDA" grande, o destino embaixo e uma seta desenhada
+    // (emoji não: o 🚪 virava um bloco e a ➔ saía cortada)
+    const vice = CINEMA_GTA;
+    const c1 = vice ? '#ff4fa3' : '#34d399';
+    const c2 = vice ? '#ffb347' : '#6ee7c8';
     const texDentro = canvasTexture(1024, 256, (ctx, w, h) => {
-      ctx.fillStyle = '#0d1018';
-      roundRect(ctx, 8, 8, w - 16, h - 16, 40);
+      // fundo escuro com borda dupla de neon
+      ctx.fillStyle = vice ? 'rgba(18,6,30,0.92)' : 'rgba(10,14,22,0.92)';
+      roundRect(ctx, 14, 14, w - 28, h - 28, 44);
       ctx.fill();
-      ctx.strokeStyle = '#34d399';
-      ctx.lineWidth = 10;
-      roundRect(ctx, 22, 22, w - 44, h - 44, 30);
+      ctx.save();
+      ctx.shadowColor = c1;
+      ctx.shadowBlur = 26;
+      ctx.strokeStyle = c1;
+      ctx.lineWidth = 7;
+      roundRect(ctx, 24, 24, w - 48, h - 48, 36);
       ctx.stroke();
-      ctx.fillStyle = '#6ee7b7';
-      ctx.font = `800 70px ${FONT}`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.shadowColor = '#10b981';
-      ctx.shadowBlur = 24;
-      ctx.fillText('🚪 SAÍDA · CIDADE & JOGOS ➔', w / 2, h / 2 + 4);
+      ctx.restore();
+      ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+      ctx.lineWidth = 2;
+      roundRect(ctx, 38, 38, w - 76, h - 76, 26);
+      ctx.stroke();
+      // "SAÍDA" em degradê com brilho
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'alphabetic';
+      ctx.font = `italic 800 112px ${FONT}`;
+      const g = ctx.createLinearGradient(0, 60, 0, 160);
+      g.addColorStop(0, vice ? '#ffe66b' : '#d1fae5');
+      g.addColorStop(1, c1);
+      ctx.save();
+      ctx.shadowColor = c1;
+      ctx.shadowBlur = 22;
+      ctx.fillStyle = g;
+      ctx.fillText('SAÍDA', 84, 150);
+      ctx.restore();
+      // o destino, pequeno e espaçado
+      ctx.fillStyle = 'rgba(255,240,248,0.82)';
+      ctx.font = `700 34px ${FONT}`;
+      if ('letterSpacing' in ctx) ctx.letterSpacing = '6px';
+      ctx.fillText('CIDADE & JOGOS', 90, 200);
+      if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
+      // seta num círculo, à direita
+      const ax = w - 150;
+      const ay = h / 2;
+      ctx.save();
+      ctx.shadowColor = c2;
+      ctx.shadowBlur = 20;
+      ctx.strokeStyle = c2;
+      ctx.lineWidth = 8;
+      ctx.beginPath();
+      ctx.arc(ax, ay, 66, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.lineWidth = 12;
+      ctx.beginPath();
+      ctx.moveTo(ax - 30, ay);
+      ctx.lineTo(ax + 28, ay);
+      ctx.moveTo(ax + 6, ay - 24);
+      ctx.lineTo(ax + 30, ay);
+      ctx.lineTo(ax + 6, ay + 24);
+      ctx.stroke();
+      ctx.restore();
     });
-    const placaDentro = new THREE.Mesh(new THREE.PlaneGeometry(largura, largura / 4), new THREE.MeshBasicMaterial({ map: texDentro, toneMapped: false }));
+    const placaDentro = new THREE.Mesh(new THREE.PlaneGeometry(largura, largura / 4), new THREE.MeshBasicMaterial({ map: texDentro, toneMapped: false, transparent: true }));
     placaDentro.position.set(S.maxX - 0.1, P.altura + 3 + largura / 8, zc);
     placaDentro.rotation.y = -Math.PI / 2;
     this.scene.add(placaDentro);
 
-    // Placa direcional na saída do cinema (ao lado da calçada, sem obstruir a passagem)
-    const tx = 65;
-    const tz = 22;
+    // Placa direcional na saída do cinema, à esquerda da alameda (z de 24 a 36); o mapa "você está
+    // aqui" fica do outro lado, na mesma distância da porta (mapasAqui no mapa-*.js)
+    const tx = 66.5;
+    const tz = 39.5;
     const totemGroup = new THREE.Group();
     totemGroup.position.set(tx, 0, tz);
 
@@ -3745,6 +4030,16 @@ export class World {
     const dt = Math.min(0.1, (agora - this.ultimoPos) / 1000);
     this.ultimoPos = agora;
     this.acertarLuzFora(false, dt);
+    // os mapas "você está aqui" em vista de satélite: uma foto 12 s depois de abrir (o mapa já
+    // subiu) e outra aos 45 s (a catedral chega pela rede). Antes do desenho do quadro: ele cobre.
+    if (this.mapasSatelite?.length && (this._fotosSatelite ?? 0) < 2) {
+      this._proximaFoto ??= agora + 12000;
+      if (agora >= this._proximaFoto) {
+        this.fotografarSatelite();
+        this._fotosSatelite = (this._fotosSatelite ?? 0) + 1;
+        this._proximaFoto = agora + 33000;
+      }
+    }
     const medindo = this.medirGpu && this.comecarGpu();
     try {
       this.renderer.render(this.scene, this.camera);
