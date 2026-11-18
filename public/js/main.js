@@ -3591,8 +3591,9 @@ async function compartilharPs5(fonte) {
   shareBusy = true;
   let key;
   try {
-    // ligado pela lan house (ninguém na frente deste PC): não pergunta a tela
-    const tela = ps5SemPerguntar ? undefined : await escolherTela();
+    // ligado pela lan house, ou a sessão que voltou depois de a página recarregar (ninguém na frente
+    // deste PC): não pergunta a tela
+    const tela = ps5SemPerguntar || ps5Nativo.retomada ? undefined : await escolherTela();
     if (tela === null) return null;
     key = await publishShare(fonte.stream, { tela, superficie: 'ps5' });
   } finally {
@@ -6874,10 +6875,11 @@ let ps5SemPerguntar = false;
 const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
 // a vez no PS5: liga o PS5 direto no último console usado (ou no primeiro registrado) e põe na sala
 async function pedidoPs5Lan(acao, de, responder) {
+  // acabou a vez e ninguém pegou a seguinte: o PS5 sai da sala (mesmo que a página tenha recarregado
+  // no meio da vez e não lembre quem o ligou)
   if (acao === 'fechar') {
-    const abriu = lanAbriu.ps5;
     lanAbriu.ps5 = false;
-    if (!abriu || !ps5Nativo.noAr) return responder(true, 'Acabou a vez no PS5.');
+    if (!ps5Nativo.noAr && !ps5Nativo.conectado) return responder(true, 'Acabou a vez no PS5.');
     ps5Nativo.parar();
     return responder(true, 'O PS5 saiu da sala: acabou a vez.');
   }

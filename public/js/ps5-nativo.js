@@ -797,6 +797,14 @@ export class Ps5Nativo {
         break;
       case 'conectado':
         this.conectado = m;
+        // a sessão continuou na ponte enquanto a página recarregava (ela repete o "conectado", os
+        // cabeçalhos e pede um quadro inteiro): sem a fonte, a imagem não tinha para onde ir e o PS5
+        // ficava ligado fora da sala. A fonte nasce aqui e a tela volta para a sala sem perguntar.
+        if (!this.fonte) {
+          this.fonte = new Ps5Fonte({ pedirChave: () => this.mandar({ tipo: 'chave' }), onEvento: this.onEvento, hevc: m.codec === 'h265' });
+          this.retomada = true;
+          this.onEvento?.('ps5 direto: sessão retomada (a página recarregou)', m);
+        }
         // a ponte só pede H.265 a um PS5: a fonte segue o que ficou combinado
         if (this.fonte && this.fonte.hevc !== (m.codec === 'h265')) this.fonte.hevc = m.codec === 'h265';
         this.fase = 'jogando';
@@ -874,7 +882,12 @@ export class Ps5Nativo {
   async porNaSala() {
     if (!this.fonte || this.key) return;
     const fonte = this.fonte;
-    const key = await this.compartilhar(fonte);
+    let key;
+    try {
+      key = await this.compartilhar(fonte);
+    } finally {
+      this.retomada = false;
+    }
     if (this.fonte !== fonte) return;
     if (!key) {
       this.toast?.('A sala não conseguiu pôr o PS5 numa tela. Desligando o PS5.', 'error', 6000);
