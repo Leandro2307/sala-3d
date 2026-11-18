@@ -1343,7 +1343,10 @@ namespace Sala3d
                     {
                         if (jogoAtual != jogo) return; // fecharam ou trocaram de jogo
                         int monitor = monitorDoJogo;
-                        IntPtr h = GetForegroundWindow();
+                        // com o monitor do PC direto: a janela do jogo, esteja ou não na frente (aberto
+                        // pela lan house, ninguém clica nele, e a janela na frente é a da sala); sem
+                        // monitor fixo: a que está na frente, como antes
+                        IntPtr h = monitor >= 0 ? JanelaDoJogo() : GetForegroundWindow();
                         if (h == IntPtr.Zero || !IsWindowVisible(h) || IsIconic(h)) continue;
                         int vezes;
                         feitas.TryGetValue(h, out vezes);
