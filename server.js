@@ -2063,6 +2063,9 @@ function attachSockets(io) {
           steam: /^\d{1,10}$/.test(String(o.steam ?? '')) ? String(o.steam) : null,
         };
       }).filter((j) => j.id && j.nome);
+      // o PC da casa chegou (ou a página dele recarregou no meio de uma vez): a lan house repete para
+      // ele o pedido da vez de agora (pôr o PS5 / o PC na sala), que a página nova não conhece
+      if (!socket.data.hub) room.lanMaquinas = {};
       socket.data.hub = { jogos, atual: cleanText(m.atual, 120) || null };
       io.to(room.id).emit('hub-mudou');
       // lan house: o catálogo fica guardado (sem as imagens) para escolher o jogo ao alugar o PC
