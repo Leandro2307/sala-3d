@@ -192,17 +192,24 @@ export function loadYouTubeApi() {
   ytApi = new Promise((resolve, reject) => {
     if (window.YT?.Player) return resolve(window.YT);
     const prev = window.onYouTubeIframeAPIReady;
+    // o iframe_api carregou e o resto dele não (rede piscou): sem prazo, a música e o telão ficavam
+    // esperando para sempre; com ele, a próxima tentativa baixa de novo
+    const prazo = setTimeout(() => falhou(), 20000);
     window.onYouTubeIframeAPIReady = () => {
+      clearTimeout(prazo);
       prev?.();
       resolve(window.YT);
     };
     const s = document.createElement('script');
     s.src = 'https://www.youtube.com/iframe_api';
-    s.onerror = () => {
+    const falhou = () => {
+      clearTimeout(prazo);
+      if (window.YT?.Player) return resolve(window.YT);
       ytApi = null;
       s.remove();
       reject(new Error('Não consegui carregar o player do YouTube. Algum bloqueador de anúncios pode estar impedindo.'));
     };
+    s.onerror = falhou;
     document.head.appendChild(s);
   });
   return ytApi;

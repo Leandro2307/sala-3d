@@ -460,17 +460,20 @@ export class RTC {
       scr.tamanho = tamanho;
     }
     if (mudou) this.retuneAll();
-    for (const peer of this.peers.values()) {
+    for (const peer of [...this.peers.values()]) { // cópia: refazer troca a conexão no meio
       const { pc } = peer;
       if (pc.connectionState === 'closed') continue;
       this.ajustarMic(peer);
       if (pc.signalingState === 'have-local-offer' && !peer.makingOffer && agora - peer.ofertaDesde > 6000) {
         peer.ofertaDesde = agora;
+        // a segunda oferta seguida sem resposta: o outro lado não está negociando, refaz do zero
+        if (++peer.ofertasPerdidas >= 2 && this.refazer(peer.id, 'ofertas sem resposta')) continue;
         pc.setLocalDescription({ type: 'rollback' })
           .then(() => { peer.reinicioIce = 0; this.restartIce(peer); }) // força uma oferta nova
           .catch((err) => console.warn('[rtc] oferta sem resposta', err));
         continue;
       }
+      if (pc.signalingState === 'stable') peer.ofertasPerdidas = 0;
       if (peer.renegociar) this.renegociar(peer);
       const ice = pc.iceConnectionState;
       if (ice === 'disconnected' || ice === 'failed') {
@@ -478,6 +481,15 @@ export class RTC {
         if (agora - peer.caiuDesde > 3000) this.restartIce(peer);
       } else {
         peer.caiuDesde = 0;
+      }
+      // Negociada e sem ligar (ou caída) há 15 s, mesmo com o reinício de ICE: refaz do zero. Antes
+      // ficava assim até alguém sair e entrar na sala (a voz do amigo não chegava).
+      const ligada = ice === 'connected' || ice === 'completed';
+      if (ligada || !pc.remoteDescription) {
+        peer.semLigarDesde = 0;
+      } else {
+        peer.semLigarDesde ||= agora;
+        if (agora - peer.semLigarDesde > 15000 && this.refazer(peer.id, `ICE ${ice} há 15 s`)) continue;
       }
     }
   }
@@ -1139,7 +1151,8 @@ export class RTC {
   }
 
   // -------------------------------------------------------------- conexões
-  getPeer(id) {
+  // herdar: o que vem da conexão anterior quando ela é refeita do zero (ver refazer)
+  getPeer(id, herdar = null) {
     let peer = this.peers.get(id);
     if (peer) return peer;
 
@@ -1176,6 +1189,11 @@ export class RTC {
       screenTransceivers: new Map(), // key da tela -> transceivers (vídeo e áudio)
       interesse: new Map(), // key da tela -> quanto essa pessoa precisa dela (ver NIVEIS)
       pending: [],
+      epoca: 0, // quantas vezes a conexão com essa pessoa foi refeita do zero (ver refazer)
+      refeitaEm: 0, // quando foi refeita pela última vez (performance.now)
+      semLigarDesde: 0, // desde quando a conexão negociada não liga (ver vigiar)
+      ofertasPerdidas: 0, // ofertas seguidas que ficaram sem resposta (ver vigiar)
+      ...herdar,
     };
     this.peers.set(id, peer);
     // quem joga e reconectou já volta com a banda de jogo
@@ -1191,7 +1209,7 @@ export class RTC {
         if (pc.signalingState !== 'stable') return;
         await pc.setLocalDescription(comEstereo(comBandaInicial(oferta, ...this.bandaSdp(peer)), null));
         peer.ofertaDesde = performance.now();
-        this.send(id, { description: trocarPerfil(pc.localDescription, this.midsDeJogo(peer), '42001f', '42e01f') });
+        this.send(id, { description: trocarPerfil(pc.localDescription, this.midsDeJogo(peer), '42001f', '42e01f'), e: peer.epoca });
       } catch (err) {
         console.warn('[rtc] offer', err);
       } finally {
@@ -1200,15 +1218,17 @@ export class RTC {
     };
     pc.onnegotiationneeded = () => peer.negociar();
     pc.onicecandidate = ({ candidate }) => {
-      if (candidate) this.send(id, { candidate });
+      if (candidate) this.send(id, { candidate, e: peer.epoca });
     };
     pc.oniceconnectionstatechange = () => {
       if (pc.iceConnectionState === 'failed') this.restartIce(peer);
     };
     // Redes diferentes atrás de CGNAT (comum em fibra e 4G) não fecham conexão direta: sem TURN
-    // a tela fica preta e a voz muda. Avisa em vez de deixar a pessoa adivinhando.
+    // a tela fica preta e a voz muda. Primeiro refaz a conexão do zero (o mesmo que sair e entrar);
+    // só avisa se nem assim ligar.
     pc.onconnectionstatechange = () => {
-      if (pc.connectionState === 'failed') this.onFalha?.(id, this.temTurn);
+      if (pc.connectionState !== 'failed' || this.peers.get(id) !== peer) return;
+      if (!this.refazer(id, 'a conexão falhou') && peer.epoca >= 2) this.onFalha?.(id, this.temTurn);
     };
     // canal do controle remoto: quem controla abre (ver canalControle); aqui chega o de quem me controla
     pc.ondatachannel = ({ channel }) => {
@@ -1370,10 +1390,58 @@ export class RTC {
     this.socket.emit('signal', { to, data: JSON.parse(JSON.stringify(data)) });
   }
 
-  async handleSignal(from, { description, candidate, interesse, interesse2, hz, voz }) {
+  // Refaz a conexão com essa pessoa do zero: fecha a RTCPeerConnection, abre outra e avisa o outro
+  // lado para fazer o mesmo. É o que sair e entrar na sala fazia — e era o único jeito de a voz
+  // voltar quando o reinício de ICE não bastava (conexão que nunca ligou, credencial do TURN que
+  // venceu no meio, negociação que travou). Os dois lados podem pedir ao mesmo tempo: a "época"
+  // (número de vezes refeita) acerta, e quem já está na época pedida não refaz de novo.
+  // No máximo uma vez a cada 20 s por pessoa. Devolve se refez.
+  refazer(id, motivo = '', epoca = null) {
+    const velho = this.peers.get(id);
+    if (!velho) return false;
+    const agora = performance.now();
+    const pedido = epoca != null; // o outro lado refez e pediu que eu refaça também
+    if (pedido ? epoca <= velho.epoca : agora - velho.refeitaEm < 20000) return false;
+    console.warn(`[rtc] refazendo a conexão com ${id}${motivo ? `: ${motivo}` : ''}`);
+    const nova = pedido ? epoca : velho.epoca + 1;
+    // o que a outra pessoa já tinha dito (o que ela quer das minhas telas, se ouve a minha voz…)
+    const herdar = {
+      epoca: nova,
+      refeitaEm: agora,
+      ouveMic: velho.ouveMic,
+      interesse: velho.interesse,
+      hz: velho.hz,
+      semPiso: velho.semPiso,
+      balanceado: velho.balanceado,
+      linhasJogo: velho.linhasJogo,
+      rapido: velho.rapido,
+      recuoCodec: velho.recuoCodec,
+      reiniciosIce: velho.reiniciosIce,
+    };
+    // primeiro o aviso (os sinais chegam na ordem: o outro lado refaz antes da minha oferta nova)
+    if (!pedido) this.send(id, { refazer: nova });
+    this.peers.delete(id);
+    try { velho.pc.close(); } catch { /* já fechada */ }
+    this.getPeer(id, herdar);
+    this.onRefeita?.(id);
+    return true;
+  }
+
+  async handleSignal(from, { description, candidate, interesse, interesse2, hz, voz, refazer, e }) {
+    if (refazer) {
+      this.refazer(from, 'o outro lado pediu', Number(refazer) || 0);
+      return;
+    }
     const peer = this.getPeer(from);
     if (interesse2 || interesse) return this.receberInteresse(peer, interesse2 || interesse, hz);
     if (voz) return this.reforcarVoz(peer);
+    // oferta, resposta ou candidato da conexão anterior (ainda a caminho quando ela foi refeita)
+    if (e != null && e !== peer.epoca) {
+      if (e < peer.epoca) return;
+      // a outra pessoa já refez e o aviso se perdeu: refaz também e segue com a conexão nova
+      this.refazer(from, 'época nova', e);
+      return this.handleSignal(from, { description, candidate, e });
+    }
     const { pc } = peer;
     try {
       if (description) {
@@ -1396,7 +1464,7 @@ export class RTC {
         }
         if (description.type === 'offer') {
           await pc.setLocalDescription(comEstereo(comBandaInicial(await pc.createAnswer(), ...this.bandaSdp(peer)), null));
-          this.send(from, { description: trocarPerfil(pc.localDescription, this.midsDeJogo(peer), '42001f', '42e01f') });
+          this.send(from, { description: trocarPerfil(pc.localDescription, this.midsDeJogo(peer), '42001f', '42e01f'), e: peer.epoca });
         }
       } else if (candidate) {
         try {

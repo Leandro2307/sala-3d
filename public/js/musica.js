@@ -202,7 +202,8 @@ export class Musica {
       if (this.criando) return this.criando;
       this.criando = this.criarPlayer().finally(() => { this.criando = null; });
       await this.criando;
-      return this.acompanhar();
+      // não abriu: o tique tenta de novo daqui a 3 s (antes chamava de novo na hora, em laço)
+      return this.player ? this.acompanhar() : undefined;
     }
     const chave = `${this.seq}:${a.v}`;
     const p = this.player;
@@ -224,24 +225,37 @@ export class Musica {
       if (st === 0) return; // acabou aqui: o servidor já vai mandar a próxima
       if (Math.abs(p.getCurrentTime() - this.posicaoDaSala()) > DESVIO) p.seekTo(this.posicaoDaSala(), true);
       if (st !== 1 && st !== 3) p.playVideo();
+      if (p.isMuted?.()) p.unMute(); // o YouTube às vezes abre mudo (autoplay)
     } catch { /* player ainda carregando */ }
   }
 
   async criarPlayer() {
     let YT;
     try { YT = await loadYouTubeApi(); } catch (err) {
-      this.toast(err.message, 'error', 6000);
+      // um aviso só (o tique tenta de novo a cada 3 s)
+      if (!this.avisouApi) this.toast(err.message, 'error', 6000);
+      this.avisouApi = true;
       return;
     }
     const el = document.createElement('div');
     $('#musica-sink').appendChild(el);
     await new Promise((resolve) => {
+      // o player que não fica pronto em 20 s é jogado fora (sem isso, a música da sala nunca mais
+      // tocava nesta página: só saindo e entrando)
+      const prazo = setTimeout(() => {
+        console.warn('[música] o player do YouTube não abriu: tentando de novo');
+        try { p.destroy(); } catch { /* nem abriu */ }
+        el.remove();
+        resolve();
+      }, 20000);
       const p = new YT.Player(el, {
         width: 200,
         height: 200,
         playerVars: { autoplay: 0, controls: 0, rel: 0, playsinline: 1, iv_load_policy: 3, enablejsapi: 1, origin: window.location.origin },
         events: {
           onReady: () => {
+            clearTimeout(prazo);
+            this.avisouApi = false;
             p.getIframe().setAttribute('allow', 'autoplay; encrypted-media');
             this.player = p;
             this.volAplicado = null;
@@ -285,6 +299,7 @@ export class Musica {
     if (performance.now() - (this.abafouEm || 0) > 1000) this.abafar(false, 0.5);
     // conferência de vez em quando: player que travou no buffering ou ficou para trás volta ao ponto
     if (this.tocando && ++this.conta % 6 === 0) this.acompanhar();
+    this.vigiar();
     if (this.painelAberto()) this.desenharTempo();
     // no telão o fim da faixa e o rádio são com o servidor (o telão avisa quando acaba)
     if (this.telao) return;
@@ -301,6 +316,43 @@ export class Musica {
       this.radioSeq = this.seq;
       this.socket()?.emit('mu-radio', { seq: this.seq });
     }
+  }
+
+  // A sala está tocando e o player daqui não anda há 12 s (travou carregando, o iframe do YouTube
+  // morreu, ficou preso numa faixa): joga o player fora e cria outro no ponto da sala — o mesmo que
+  // sair e entrar fazia. Se é o navegador barrando o som (ninguém tocou na página ainda), não
+  // adianta recriar: avisa para tocar na tela (o pointerdown lá em cima solta a música).
+  vigiar() {
+    const agora = performance.now();
+    const a = this.atual();
+    const chave = a ? `${this.seq}:${a.v}` : null;
+    if (!this.tocando || this.telao || !a || document.hidden) {
+      this.andouEm = agora;
+      return;
+    }
+    let t = null;
+    if (this.player && this.carregado === chave) {
+      try { t = this.player.getCurrentTime(); } catch { /* sumiu */ }
+    }
+    if (this.estadoPlayer() === 1 && t != null && t !== this.tempoVisto) this.andouEm = agora;
+    this.tempoVisto = t;
+    if (this.estadoPlayer() === 0) this.andouEm = agora; // acabou: o servidor manda a próxima
+    if (agora - (this.andouEm ?? agora) < 12000) return;
+    this.andouEm = agora;
+    // na primeira vez só avisa; se continuar parado, recria também (pode não ser o navegador)
+    if (navigator.userActivation && !navigator.userActivation.hasBeenActive && !this.avisouToque) {
+      this.toast('Toque na tela para ouvir a música da sala.', 'info', 6000, '#f472b6');
+      this.avisouToque = true;
+      return;
+    }
+    if (this.criando) return;
+    console.warn('[música] o player parou de tocar: criando outro');
+    const p = this.player;
+    this.player = null;
+    this.carregado = null;
+    try { p?.destroy(); } catch { /* já foi */ }
+    $('#musica-sink').replaceChildren();
+    this.acompanhar();
   }
 
   async adicionar(texto, modo) {

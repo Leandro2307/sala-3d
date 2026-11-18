@@ -1161,6 +1161,15 @@ async function join() {
   setInterval(() => {
     fetch('/config').then((r) => r.json()).then((c) => rtc.trocarIce(c.iceServers)).catch(() => {});
   }, 6 * 3600_000);
+  // Entrou sem TURN (o /config falhou ou veio só com STUN, servidor acordando): busca de novo a
+  // cada 10 s até vir. Sem ele, quem está em outra rede (4G, CGNAT) não ouvia ninguém até
+  // recarregar a página; as conexões que não ligaram são refeitas com o TURN novo (rtc.vigiar).
+  if (!offlineJogo && !rtc.temTurn) {
+    const semTurn = setInterval(() => {
+      if (rtc.temTurn) return clearInterval(semTurn);
+      fetch('/config').then((r) => r.json()).then((c) => rtc.trocarIce(c.iceServers)).catch(() => {});
+    }, 10_000);
+  }
   rtc.shareMode = settings.shareMode;
   preloadYouTube();
   $('#browser-block').hidden = !config.browser;
@@ -6090,7 +6099,8 @@ function handleTrack(peerId, stream) {
     streamsSemDono.get(peerId).set(stream.id, stream);
     return;
   }
-  if (!u.streams.has(stream.id)) {
+  // mesmo id e outro objeto: a conexão foi refeita (rtc.refazer) e o stream antigo morreu
+  if (u.streams.get(stream.id) !== stream) {
     u.streams.set(stream.id, stream);
     stream.addEventListener('removetrack', () => routeStreams(u));
   }
@@ -6445,12 +6455,18 @@ async function vigiarVozes() {
       u.semVoz = 0;
       continue;
     }
-    // 3 s de fala sem nenhum pacote: pede a voz de novo (e repete a cada 5 s enquanto faltar)
+    // 3 s de fala sem nenhum pacote: pede a voz de novo (e repete a cada 5 s enquanto faltar).
+    // Dois pedidos não bastaram (13 s): refaz a conexão com ela do zero, o mesmo que sair e entrar
+    // na sala (antes era o único jeito: a voz do amigo só chegava depois que ele saía e voltava).
     u.semVoz = (u.semVoz || 0) + 1;
     if (u.semVoz >= 3 && u.semVoz % 5 === 3) {
-      console.warn(`[voz] ${u.name} está falando e a voz não chega: pedindo de novo`);
       if (n == null) routeStreams(u);
-      rtc.pedirVoz(u.id);
+      if (u.semVoz >= 13 && rtc.refazer(u.id, `${u.name} fala e a voz não chega`)) {
+        u.pacotesVoz = null;
+      } else {
+        console.warn(`[voz] ${u.name} está falando e a voz não chega: pedindo de novo`);
+        rtc.pedirVoz(u.id);
+      }
     }
   }
 }
@@ -9818,7 +9834,7 @@ if (params.get('debug') === '1') {
     tocarTela, telasMudas, liberarSomDasTelas, makeVideo, mesa, controle, abrirMesa, fecharMesa, marcaDaAba,
     publishShare, stopShare, acharTela, telasNoAr, get rtc() { return rtc; }, diagJogo, clima, ligarLuneta, futebol, surf, criador, run,
     enterFocus, get socket() { return socket; }, fisico, toqueJogo, opcoesJogo, turboRecebe, turboEnvio, ps5Nativo, pcDireto,
-    travado, salaEscondida,
+    travado, salaEscondida, musica,
   };
 }
 
