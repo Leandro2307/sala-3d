@@ -1637,9 +1637,9 @@ function attachSockets(io) {
       const r = resposta(ack);
       if (!room || !dono) return r({ ok: false, erro: 'Só o dono da sala libera horário.' });
       if (!room.config?.lanhouse?.ligada) return r({ ok: false, erro: 'Ligue a lan house primeiro.' });
-      const { conta, maquina, horas, minutos } = obj(msg);
+      const { conta, maquina, horas, minutos, jogo } = obj(msg);
       try {
-        r(await lan.liberar({ sala: room.id, conta, maquina, horas, minutos }));
+        r(await lan.liberar({ sala: room.id, conta, maquina, horas, minutos, jogo }));
       } catch (err) {
         console.warn('[lan] liberar', err.message);
         r({ ok: false, erro: 'Não deu para liberar agora. Tente de novo.' });

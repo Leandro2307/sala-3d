@@ -727,7 +727,9 @@
           <div class="lan-horas">
             <label><small>Liberar de graça para a conta</small><input name="lanLiberarConta" maxlength="20" placeholder="nome da conta"></label>
             <label><small>Máquina</small><select name="lanLiberarMaquina"><option value="ps5">PS5</option><option value="pc">PC</option></select></label>
-            <label><small>Horas a partir de agora</small><select name="lanLiberarHoras"><option value="2m">2 minutos (teste)</option><option selected>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option></select></label>
+            <!-- PC: o jogo que abre sozinho na vez (a lista do PC da casa, ver carregarJogosLiberar) -->
+            <label><small>Jogo (PC)</small><select name="lanLiberarJogo"><option value="">Nenhum: só a tela do PC</option></select></label>
+            <label><small>Horas a partir de agora</small><select name="lanLiberarHoras"><option value="2m">2 minutos (teste)</option><option value="5m">5 minutos (teste)</option><option selected>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option></select></label>
           </div>
           <button type="button" class="chip-btn" id="lan-liberar">Liberar agora (sem pagar)</button>
           <!-- encerra a vez de agora na máquina escolhida acima (ver lan-encerrar no main.js) -->

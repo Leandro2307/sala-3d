@@ -5464,13 +5464,28 @@ $('#lan-liberar').addEventListener('click', () => {
   // "2m": teste de 2 minutos (a vez começa e acaba sem esperar a hora cheia)
   const v = f.lanLiberarHoras.value;
   const minutos = /m$/.test(v) ? parseInt(v, 10) : 0;
-  socket.emit('lan-liberar', { conta, maquina: f.lanLiberarMaquina.value, horas: minutos ? 0 : Number(v), minutos }, (r) => {
+  const maquina = f.lanLiberarMaquina.value;
+  const jogo = maquina === 'pc' ? f.lanLiberarJogo.value : '';
+  socket.emit('lan-liberar', { conta, maquina, horas: minutos ? 0 : Number(v), minutos, jogo }, (r) => {
     if (!r?.ok) return toast(r?.erro || 'Não deu para liberar.', 'error');
-    if (r.minutos) return toast(`${r.maquina} liberado para ${r.conta} por ${r.minutos} minutos (teste).`, 'success');
+    const comJogo = r.jogoNome ? `, com ${r.jogoNome}` : '';
+    if (r.minutos) return toast(`${r.maquina} liberado para ${r.conta} por ${r.minutos} minutos${comJogo} (teste).`, 'success');
     const horas = r.horas.map((h) => `${h}h`).join(', ');
     toast(`${r.maquina} liberado para ${r.conta}${horas ? ` (${horas})` : ' (já estava)'}${r.pulou.length ? ` — ocupado por outra pessoa: ${r.pulou.map((h) => `${h}h`).join(', ')}` : ''}.`, 'success');
   });
 });
+// a lista de jogos do PC da casa no "Jogo (PC)" do Liberar: carrega ao abrir a lista
+async function carregarJogosLiberar() {
+  const sel = $('#sala-config').elements.lanLiberarJogo;
+  try {
+    const r = await fetch('/lan/jogos', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sala: state.room }) }).then((x) => x.json());
+    const antes = sel.value;
+    sel.innerHTML = '<option value="">Nenhum: só a tela do PC</option>'
+      + (r.jogos || []).map((j) => `<option value="${esc(j.id)}">${esc(j.nome)}</option>`).join('');
+    sel.value = antes;
+  } catch { /* fica a lista que já tinha */ }
+}
+$('#sala-config').elements.lanLiberarJogo.addEventListener('focus', carregarJogosLiberar);
 // dono: encerra a vez de agora na máquina escolhida acima (a máquina fica livre e sai da sala)
 $('#lan-encerrar').addEventListener('click', () => {
   const f = $('#sala-config').elements;

@@ -375,12 +375,19 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
 
   // o dono libera horas de graça para uma conta (sem Stripe): a partir da hora cheia de agora,
   // seguidas. Hora que já é de outra pessoa (paga ou no checkout) fica de fora.
-  async function liberar({ sala, maquina, conta, horas, minutos }) {
+  async function liberar({ sala, maquina, conta, horas, minutos, jogo: jogoId }) {
     const nome = limparNome(conta);
     if (!nomeValido(nome)) return { ok: false, erro: 'Nome de conta inválido.' };
     const c = await banco.lerConta(nome).catch(() => null);
     if (!c) return { ok: false, erro: `Não existe a conta "${nome}". Ela precisa entrar uma vez com nome e senha.` };
     const m = maquinaDe(maquina);
+    // PC: o jogo que abre sozinho na vez (do catálogo do PC da casa); sem ele, só a tela do PC
+    let jogo = null;
+    if (m === 'pc' && jogoId) {
+      jogo = (await jogosDaSala(sala).catch(() => [])).find((j) => j.id === String(jogoId)) || null;
+      if (!jogo) return { ok: false, erro: 'Esse jogo não está na lista do PC da casa.' };
+    }
+    const doJogo = { jogo: jogo?.id || null, jogoNome: jogo?.nome || null };
     // Teste do dono: alguns minutos a partir de agora (a vez começa e acaba sem esperar a hora cheia).
     // O fim curto fica só na memória; quando chega, a reserva vira cancelada (também no banco).
     const min = Math.floor(Number(minutos)) || 0;
@@ -391,16 +398,17 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
       let r = daHora(sala, m, h0);
       if (r && r.conta !== nome) return { ok: false, erro: `O ${MAQUINAS[m]} já é de ${r.conta} nesta hora.` };
       if (!r) {
-        r = { id: crypto.randomBytes(12).toString('hex'), sala, maquina: m, conta: nome, inicio: h0, status: 'paga', sessao: 'cortesia', expira: h0 + HORA, criada: agora, jogo: null, jogoNome: null };
+        r = { id: crypto.randomBytes(12).toString('hex'), sala, maquina: m, conta: nome, inicio: h0, status: 'paga', sessao: 'cortesia', expira: h0 + HORA, criada: agora, ...doJogo };
         reservas.set(r.id, r);
       }
       r.status = 'paga';
+      if (m === 'pc') Object.assign(r, doJogo);
       r.fimCedo = fimCedo;
       await guardar(r);
       setTimeout(() => { if (r.fimCedo === fimCedo) mudarStatus([r], 'cancelada').catch(() => {}); }, fimCedo - agora + 500).unref?.();
       console.log(`[lan] ${sala} ${MAQUINAS[m]} (${nome}): teste de ${min} min, até ${new Date(fimCedo).toISOString()}`);
       aoMudar?.(sala);
-      return { ok: true, conta: nome, maquina: MAQUINAS[m], horas: [], minutos: min, pulou: [] };
+      return { ok: true, conta: nome, maquina: MAQUINAS[m], horas: [], minutos: min, pulou: [], jogoNome: doJogo.jogoNome };
     }
     const n = Math.min(MAX_HORAS, Math.max(1, Math.floor(Number(horas)) || 1));
     const agora = Date.now();
@@ -415,7 +423,7 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
       if (tem) { tem.status = 'cancelada'; await guardar(tem); } // o checkout dela mesma: vira cortesia
       lista.push({
         id: crypto.randomBytes(12).toString('hex'), sala, maquina: m, conta: nome, inicio, status: 'paga', sessao: 'cortesia', expira: inicio + HORA, criada: agora,
-        jogo: null, jogoNome: null,
+        ...doJogo,
       });
     }
     for (const r of lista) {
@@ -424,7 +432,7 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
       console.log(`[lan] ${sala} ${MAQUINAS[m]} ${diaDe(r.inicio)} ${horaDe(r.inicio)}h (${nome}): cortesia do dono`);
     }
     aoMudar?.(sala);
-    return { ok: true, conta: nome, maquina: MAQUINAS[m], horas: lista.map((r) => horaDe(r.inicio)), pulou };
+    return { ok: true, conta: nome, maquina: MAQUINAS[m], horas: lista.map((r) => horaDe(r.inicio)), pulou, jogoNome: doJogo.jogoNome };
   }
 
   // o dono encerra a vez de agora nesta máquina (a hora atual e as seguidas da mesma conta): a máquina
