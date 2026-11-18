@@ -1,0 +1,251 @@
+// Tutorial do controle do PS5 no modo jogo: na primeira vez que a pessoa joga uma tela de PS5, um
+// passo a passo pede cada ação (clicar, rolar, apertar, arrastar) e só anda quando ela faz. No PC
+// ensina o teclado e o mouse (teclado-pad.js); no celular, os botões da tela (toque-jogo.js), com o
+// botão da vez piscando.
+//
+// Enquanto o tutorial está aberto o controle virtual fica em treino (pad-virtual.js, treinar): o
+// estado vem para cá e nada vai para o PS5 — dá para apertar à vontade sem mexer no jogo. Ao fechar,
+// o estado de verdade volta a sair.
+//
+// Uma vez por aparelho (localStorage), separado para o PC e para o toque. ?tutorial-controle=1 na
+// URL força. As opções do modo jogo (PC) e o painel do toque (celular) têm "Tutorial do controle".
+
+const CHAVE = 'sala3d-tutorial-ps5-';
+const OK_MS = 650; // o "Isso!" antes do próximo passo
+
+// botões no mapa padrão do navegador (o bit i do estado do controle)
+const B = { xis: 0, bol: 1, qua: 2, tri: 3, l1: 4, r1: 5, l2: 6, r2: 7 };
+
+const GLIFO = {
+  xis: '<span class="tut-g tut-xis">✕</span>',
+  bol: '<span class="tut-g tut-bol">○</span>',
+  qua: '<span class="tut-g tut-qua">□</span>',
+  tri: '<span class="tut-g tut-tri">△</span>',
+  l1: '<span class="tut-pill">L1</span>', r1: '<span class="tut-pill">R1</span>',
+  l2: '<span class="tut-pill">L2</span>', r2: '<span class="tut-pill">R2</span>',
+  stickE: '<span class="tut-stick"><i></i></span><small>analógico esquerdo</small>',
+  stickD: '<span class="tut-stick"><i></i></span><small>analógico direito (câmera)</small>',
+  touchpad: '<span class="tut-tp"><i></i></span><small>touchpad</small>',
+};
+
+// o mouse desenhado; parte: a que acende (esq, dir, baixo, cima, mover)
+const mouse = (parte) => `<svg class="tut-mouse" viewBox="0 0 64 96" aria-hidden="true">
+  <rect x="7" y="5" width="50" height="84" rx="25" class="tut-m-corpo${parte === 'mover' ? ' on' : ''}"/>
+  <path d="M7 40 V30 A25 25 0 0 1 32 5 V40 Z" class="tut-m-bt${parte === 'esq' ? ' on' : ''}"/>
+  <path d="M57 40 V30 A25 25 0 0 0 32 5 V40 Z" class="tut-m-bt${parte === 'dir' ? ' on' : ''}"/>
+  <rect x="27" y="13" width="10" height="20" rx="5" class="tut-m-roda${parte === 'baixo' || parte === 'cima' ? ' on' : ''}"/>
+  ${parte === 'baixo' ? '<path d="M24 52 L32 62 L40 52 Z" class="tut-m-seta"/>' : ''}
+  ${parte === 'cima' ? '<path d="M24 62 L32 52 L40 62 Z" class="tut-m-seta"/>' : ''}
+  ${parte === 'mover' ? '<path d="M2 66 h10 M52 66 h10 M32 92 v4" class="tut-m-traco"/>' : ''}
+</svg>`;
+const teclas = (...t) => t.map((k) => `<kbd class="tut-k">${k}</kbd>`).join('<span class="tut-mais">+</span>');
+
+// cada passo: o que mostra e quando está feito. feito(e, novos, passo): e é o estado do controle,
+// novos os botões que acabaram de descer; passo.visto guarda o que já foi feito nos passos de dois.
+const apertou = (...nomes) => (e, novos, p) => {
+  for (const n of nomes) if (novos & (1 << B[n])) p.visto.add(n);
+  return nomes.every((n) => p.visto.has(n));
+};
+const PASSOS_PC = [
+  {
+    tit: 'Prenda o mouse no jogo',
+    txt: 'Clique na imagem do jogo. O mouse some e passa a ser o controle (o Esc solta).',
+    de: mouse('esq'), para: '<span class="tut-pill">jogo</span>',
+    preso: true,
+  },
+  { tit: 'Clique esquerdo = ✕', txt: 'Clique com o botão <b>esquerdo</b> do mouse.', de: mouse('esq'), para: GLIFO.xis, feito: apertou('xis') },
+  { tit: 'Clique direito = ○', txt: 'Agora o botão <b>direito</b> do mouse.', de: mouse('dir'), para: GLIFO.bol, feito: apertou('bol') },
+  {
+    tit: 'Rodinha para baixo = □',
+    txt: 'Role a rodinha <b>para baixo</b>. Rolando sem parar, o □ fica segurado.',
+    de: mouse('baixo'), para: GLIFO.qua, feito: apertou('qua'),
+  },
+  { tit: 'Rodinha para cima = △', txt: 'Role a rodinha <b>para cima</b>.', de: mouse('cima'), para: GLIFO.tri, feito: apertou('tri') },
+  { tit: 'Q = L2 · E = R2', txt: 'Aperte <b>Q</b> e depois <b>E</b> (os gatilhos de trás).', de: teclas('Q', 'E'), para: GLIFO.l2 + GLIFO.r2, feito: apertou('l2', 'r2') },
+  { tit: 'Shift = L1 · Ctrl = R1', txt: 'Aperte <b>Shift</b> e depois <b>Ctrl</b>.', de: teclas('Shift', 'Ctrl'), para: GLIFO.l1 + GLIFO.r1, feito: apertou('l1', 'r1') },
+  {
+    tit: 'W A S D = andar',
+    txt: 'Ande com <b>W A S D</b>, como num jogo de PC.',
+    de: teclas('W', 'A', 'S', 'D'), para: GLIFO.stickE,
+    feito: (e) => Math.hypot(e.lx || 0, e.ly || 0) > 0.5,
+  },
+  {
+    tit: 'Mexer o mouse = câmera',
+    txt: '<b>Mexa o mouse</b> para olhar em volta.',
+    de: mouse('mover'), para: GLIFO.stickD,
+    feito: (e) => Math.hypot(e.rx || 0, e.ry || 0) > 0.35,
+  },
+  {
+    tit: 'Alt + mouse = touchpad',
+    txt: '<b>Segure Alt</b> e mexa o mouse: é o dedo no touchpad. Alt + clique afunda o touchpad.',
+    de: teclas('Alt') + '<span class="tut-mais">+</span>' + mouse('mover'), para: GLIFO.touchpad,
+    feito: (e) => !!e.tp && e.tp[0] >= 0 && Math.hypot(e.tp[0] - 0.5, e.tp[1] - 0.5) > 0.12,
+  },
+  {
+    tit: 'Pronto!',
+    txt: 'Mais: <b>Tab</b> Create · <b>Esc</b> Options · <b>H</b> PS · <b>setas</b> direcional · <b>V</b> L3 · <b>clique do meio</b> R3.<br>Clique (✕) para começar a jogar.',
+    de: mouse('esq'), para: GLIFO.xis,
+    fim: true,
+  },
+];
+const PASSOS_TOQUE = [
+  { tit: 'Toque no ✕', txt: 'Toque no botão que está <b>piscando</b>.', para: GLIFO.xis, alvos: ['xis'], feito: apertou('xis') },
+  { tit: 'Toque no ○', txt: 'Agora o ○.', para: GLIFO.bol, alvos: ['bol'], feito: apertou('bol') },
+  { tit: 'Toque no □', txt: 'Agora o □.', para: GLIFO.qua, alvos: ['qua'], feito: apertou('qua') },
+  { tit: 'Toque no △', txt: 'Agora o △.', para: GLIFO.tri, alvos: ['tri'], feito: apertou('tri') },
+  { tit: 'L1 e R1', txt: 'Toque no <b>L1</b> e no <b>R1</b>.', para: GLIFO.l1 + GLIFO.r1, alvos: ['l1', 'r1'], feito: apertou('l1', 'r1') },
+  { tit: 'L2 e R2', txt: 'Toque no <b>L2</b> e no <b>R2</b> (os gatilhos).', para: GLIFO.l2 + GLIFO.r2, alvos: ['l2', 'r2'], feito: apertou('l2', 'r2') },
+  {
+    tit: 'Andar',
+    txt: '<b>Arraste o polegar</b> no lado esquerdo da tela: o analógico vem para baixo do dedo.',
+    para: GLIFO.stickE, alvos: ['stick'],
+    feito: (e) => Math.hypot(e.lx || 0, e.ly || 0) > 0.5,
+  },
+  {
+    tit: 'Câmera',
+    txt: '<b>Arraste o dedo</b> no lado direito da tela, longe dos botões, para olhar em volta.',
+    para: GLIFO.stickD, alvos: ['olhar'],
+    feito: (e) => Math.hypot(e.rx || 0, e.ry || 0) > 0.4,
+  },
+  {
+    tit: 'Pronto!',
+    txt: 'Em cima ficam as setas, Create, Options, PS, L3 e R3. Toque no <b>✕</b> para começar a jogar.',
+    para: GLIFO.xis, alvos: ['xis'],
+    fim: true,
+  },
+];
+
+const lerVisto = (modo) => {
+  try { return localStorage.getItem(CHAVE + modo) === '1'; } catch { return false; }
+};
+const marcarVisto = (modo) => {
+  try { localStorage.setItem(CHAVE + modo, '1'); } catch { /* sem armazenamento: aparece de novo */ }
+};
+
+export class TutorialControle {
+  // raiz: a camada do tutorial (dentro do #focus, que é o que vai para a tela cheia)
+  // pad: o controle virtual; toqueRaiz: o controle de toque (para acender o botão da vez)
+  constructor({ raiz, pad, toqueRaiz, onFechou }) {
+    this.raiz = raiz;
+    this.pad = pad;
+    this.toqueRaiz = toqueRaiz;
+    this.onFechou = onFechou;
+    this.modo = null;
+    this.i = 0;
+    this.antes = 0;
+    this.esperando = 0; // timer do "Isso!"
+    this.forcado = /[?&]tutorial-controle=1\b/.test(location.search);
+    document.addEventListener('pointerlockchange', () => this.conferirPreso());
+  }
+
+  get ativo() { return !!this.modo; }
+
+  precisa(modo) {
+    return this.forcado || !lerVisto(modo);
+  }
+
+  // modo: 'pc' (teclado e mouse) ou 'toque' (botões da tela)
+  abrir(modo) {
+    if (this.modo === modo) return;
+    if (this.modo) this.fechar(false);
+    this.modo = modo;
+    this.forcado = false; // forçado pela URL: uma vez só
+    this.passos = (modo === 'pc' ? PASSOS_PC : PASSOS_TOQUE).map((p) => ({ ...p, visto: new Set() }));
+    this.i = 0;
+    this.antes = 0;
+    this.fimDesceu = false;
+    this.pad.treinar((e) => this.estado(e));
+    this.raiz.hidden = false;
+    this.raiz.dataset.modo = modo;
+    this.mostrar();
+  }
+
+  // concluiu: terminou ou pulou (não aparece mais); false: o modo jogo acabou no meio
+  fechar(concluiu) {
+    if (!this.modo) return;
+    if (concluiu) marcarVisto(this.modo);
+    clearTimeout(this.esperando);
+    this.esperando = 0;
+    this.modo = null;
+    this.acender([]);
+    this.raiz.hidden = true;
+    this.raiz.innerHTML = '';
+    this.pad.treinar(null);
+    this.onFechou?.(concluiu);
+  }
+
+  // PC: P pula (o ponteiro preso não deixa clicar no botão). true: a tecla foi usada aqui
+  tecla(ev) {
+    if (!this.modo || ev.t !== 'tecla' || ev.code !== 'KeyP') return false;
+    if (ev.a === 'down') this.fechar(true);
+    return true;
+  }
+
+  get passo() { return this.passos?.[this.i]; }
+
+  mostrar() {
+    const p = this.passo;
+    const total = this.passos.length;
+    const toque = this.modo === 'toque';
+    this.raiz.innerHTML = `<div class="tut-card" role="dialog" aria-live="polite" aria-label="Tutorial do controle">
+      <div class="tut-topo"><span class="tut-n">${this.i + 1} de ${total}</span>
+        <button type="button" class="tut-pular">Pular tutorial${toque ? '' : ' <kbd>P</kbd>'}</button></div>
+      <p class="tut-tit">${p.tit}</p>
+      <div class="tut-visual">${p.de ? `<span class="tut-de">${p.de}</span><span class="tut-seta" aria-hidden="true">→</span>` : ''}<span class="tut-para">${p.para}</span></div>
+      <p class="tut-txt">${p.txt}</p>
+      <div class="tut-barra"><i style="width:${(this.i / total) * 100}%"></i></div>
+    </div>`;
+    this.raiz.querySelector('.tut-pular').addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.fechar(true);
+    });
+    this.acender(p.alvos || []);
+    if (p.preso) this.conferirPreso();
+  }
+
+  // celular: o botão da vez pisca (o lugar dele pode ter sido mudado pela pessoa)
+  acender(alvos) {
+    const r = this.toqueRaiz;
+    if (!r) return;
+    r.querySelectorAll('.tut-alvo').forEach((el) => el.classList.remove('tut-alvo'));
+    for (const a of alvos) {
+      const el = a === 'stick' ? r.querySelector('.tj-stick') : a === 'olhar' ? null : r.querySelector(`.tj-acoes button[data-a="${a}"]`);
+      el?.classList.add('tut-alvo');
+    }
+    r.classList.toggle('tut-olhar', alvos.includes('olhar'));
+  }
+
+  conferirPreso() {
+    if (this.modo === 'pc' && this.passo?.preso && !this.esperando && document.pointerLockElement) this.feito();
+  }
+
+  // o estado do controle (em treino: não foi para o PS5)
+  estado(e) {
+    const b = e.b || 0;
+    const novos = b & ~this.antes;
+    this.antes = b;
+    const p = this.passo;
+    if (!p || this.esperando) return;
+    if (p.fim) {
+      // fecha ao soltar o ✕: fechando ao descer, o PS5 receberia o ✕ apertado na volta
+      if (novos & 1) this.fimDesceu = true;
+      if (this.fimDesceu && !(b & 1)) this.fechar(true);
+      return;
+    }
+    if (p.feito?.(e, novos, p)) this.feito();
+  }
+
+  feito() {
+    const card = this.raiz.querySelector('.tut-card');
+    card?.classList.add('tut-ok');
+    const tit = card?.querySelector('.tut-tit');
+    if (tit) tit.textContent = 'Isso! ✓';
+    this.acender([]);
+    this.esperando = setTimeout(() => {
+      this.esperando = 0;
+      if (!this.modo) return;
+      this.i++;
+      this.mostrar();
+    }, OK_MS);
+  }
+}

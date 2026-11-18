@@ -298,13 +298,15 @@ function lerPosicoes() {
 
 export class ToqueJogo {
   // onEngasgo: quem joga tocou em "Engasgou" (marca no relatório do modo jogo)
-  constructor({ raiz, controle, pad, toast, onSair, onEngasgo }) {
+  // onTutorial: "Tutorial do controle" no painel (layout PS5; ver tutorial-controle.js)
+  constructor({ raiz, controle, pad, toast, onSair, onEngasgo, onTutorial }) {
     this.raiz = raiz;
     this.controle = controle;
     this.pad = pad; // controle virtual (layout PS5, ver pad-virtual.js)
     this.toast = toast || (() => {});
     this.onSair = onSair;
     this.onEngasgo = onEngasgo;
+    this.onTutorial = onTutorial;
     this.key = null;
     // tecla ou botão ("KeyW", "mouse:left") -> quantos botões da tela seguram agora: só sobe
     // quando o último solta (a Fúria aperta Shift com o analógico já correndo no Shift)
@@ -349,6 +351,7 @@ export class ToqueJogo {
           <label><input type="checkbox" data-op="giro"><span>Mirar virando o celular</span></label>
           <label><input type="checkbox" data-op="vibrar"><span>Vibrar com o jogo <small>(Android ou controle ligado)</small></span></label>
         </div>
+        <button type="button" class="tj-tutorial" hidden>Tutorial do controle</button>
         <div class="tj-edicao">
           <button type="button" class="tj-mover">Mover botões</button>
           <button type="button" class="tj-restaurar">Lugar original</button>
@@ -418,6 +421,10 @@ export class ToqueJogo {
       opcoesJogo.set(k, v);
     });
     r.querySelector('.tj-mover').addEventListener('click', () => this.editar(true));
+    r.querySelector('.tj-tutorial').addEventListener('click', () => {
+      this.fecharPainel();
+      this.onTutorial?.();
+    });
     r.querySelector('.tj-fim-edicao').addEventListener('click', () => this.editar(false));
     r.querySelector('.tj-restaurar').addEventListener('click', () => {
       if (!this.layoutId) return;
@@ -556,6 +563,7 @@ export class ToqueJogo {
     this.menu = false;
     this.slot = null;
     this.raiz.dataset.layout = id;
+    this.raiz.querySelector('.tj-tutorial').hidden = this.layoutId !== 'ps5';
     this.desenhar();
     // o controle virtual já aparece no PC de lá: o emulador só deixa escolher o controle que existe
     if (L.virtual && this.key) this.pad?.acordar();

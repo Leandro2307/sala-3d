@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Teste do controle</title>
+<style>
+  :root { --fundo:#0f1115; --card:#181b22; --linha:#2a2f3a; --texto:#e8eaf0; --fraco:#8a90a0; --aceso:#3dd68c; --azul:#4c8dff; --verm:#ff5c6c; --rosa:#ff7ad9; --verde:#3ddcb0; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--fundo); color:var(--texto); font:15px/1.4 system-ui, sans-serif; padding:16px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .sub { color:var(--fraco); margin:0 0 16px; }
+  #area { display:block; width:100%; padding:18px; border-radius:14px; border:2px dashed var(--azul); background:#121a2b; color:var(--texto); font:600 16px system-ui; cursor:pointer; margin-bottom:16px; text-align:center; }
+  #area.preso { border-style:solid; border-color:var(--aceso); background:#10291d; color:var(--aceso); cursor:none; }
+  .grade { display:grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap:16px; }
+  .card { background:var(--card); border:1px solid var(--linha); border-radius:14px; padding:16px; }
+  .card h2 { font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--fraco); margin:0 0 12px; }
+  .pad { position:relative; height:300px; width:460px; max-width:100%; margin:0 auto; }
+  .bt, .seta, .meio { position:absolute; display:grid; place-items:center; border:2px solid var(--linha); background:#11141a; transition: background .04s, transform .04s; }
+  .bt { width:58px; height:58px; border-radius:50%; font-size:26px; }
+  .bt.on, .seta.on, .meio.on, .ombro.on { background:var(--aceso); color:#000 !important; border-color:var(--aceso); transform:scale(.92); }
+  .tri { color:var(--verde); } .bol { color:var(--verm); } .xis { color:var(--azul); } .qua { color:var(--rosa); }
+  .seta { width:36px; height:36px; border-radius:6px; font-size:14px; color:var(--fraco); }
+  .meio { height:26px; padding:0 8px; border-radius:13px; font-size:11px; color:var(--fraco); }
+  .ombro { position:absolute; width:76px; height:30px; border-radius:9px; border:2px solid var(--linha); display:grid; place-items:center; font-size:13px; background:#11141a; color:var(--fraco); }
+  .stick { position:absolute; width:84px; height:84px; border-radius:50%; border:2px solid var(--linha); background:#0c0e13; }
+  .stick i { position:absolute; left:50%; top:50%; width:30px; height:30px; margin:-15px; border-radius:50%; background:var(--fraco); }
+  .stick.on i { background:var(--aceso); }
+  .stick b { position:absolute; top:88px; width:100%; text-align:center; font-size:11px; color:var(--fraco); font-weight:400; }
+  #tp { position:absolute; left:50%; top:66px; width:150px; height:76px; margin-left:-75px; border:2px solid var(--linha); border-radius:10px; background:#0c0e13; overflow:hidden; }
+  #tp.on { border-color:var(--aceso); background:#163525; }
+  #tp.vivo { border-color:var(--azul); }
+  #tp em { position:absolute; bottom:2px; width:100%; text-align:center; font-size:10px; color:var(--fraco); font-style:normal; }
+  #dedo { position:absolute; width:16px; height:16px; margin:-8px; border-radius:50%; background:var(--azul); display:none; box-shadow:0 0 10px var(--azul); }
+  #ultimo { font-size:28px; font-weight:700; text-align:center; min-height:44px; margin-top:4px; }
+  #log { font:12px/1.5 ui-monospace, Consolas, monospace; height:230px; overflow:auto; background:#0b0d11; border-radius:10px; padding:8px; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  td { padding:5px 4px; border-bottom:1px solid var(--linha); }
+  td:last-child { text-align:right; font-weight:600; }
+  .contas { display:flex; justify-content:space-around; margin-top:10px; text-align:center; }
+  .contas b { display:block; font-size:24px; }
+  .contas span { font-size:12px; color:var(--fraco); }
+</style>
+</head>
+<body>
+<h1>Teste: teclado e mouse viram controle de PS5</h1>
+<p class="sub">Quem joga só tem teclado e mouse; o ajudante cria o controle no PC. Esta página usa o mesmo conversor do modo jogo (teclado-pad.js) e mostra o controle que sairia. Nada é enviado.</p>
+<button id="area" type="button">Clique aqui para prender o mouse e começar (Esc solta)</button>
+
+<div class="grade">
+  <div class="card" style="grid-column:1/-1">
+    <h2>Controle que o PC recebe</h2>
+    <div class="pad">
+      <div class="ombro" data-b="6" style="left:8px;top:0">L2</div>
+      <div class="ombro" data-b="4" style="left:8px;top:36px">L1</div>
+      <div class="ombro" data-b="7" style="right:8px;top:0">R2</div>
+      <div class="ombro" data-b="5" style="right:8px;top:36px">R1</div>
+      <div class="seta" data-b="12" style="left:52px;top:84px">▲</div>
+      <div class="seta" data-b="14" style="left:14px;top:122px">◀</div>
+      <div class="seta" data-b="15" style="left:90px;top:122px">▶</div>
+      <div class="seta" data-b="13" style="left:52px;top:160px">▼</div>
+      <div class="meio" data-b="8" style="left:96px;top:40px">Create</div>
+      <div class="meio" data-b="9" style="right:96px;top:40px">Options</div>
+      <div class="meio" data-b="16" style="left:50%;top:150px;transform:translateX(-50%)">PS</div>
+      <div id="tp" data-b="17"><span id="dedo"></span><em>touchpad</em></div>
+      <div class="bt tri" data-b="3" style="right:70px;top:80px">△</div>
+      <div class="bt qua" data-b="2" style="right:134px;top:140px">□</div>
+      <div class="bt bol" data-b="1" style="right:6px;top:140px">○</div>
+      <div class="bt xis" data-b="0" style="right:70px;top:200px">✕</div>
+      <div class="stick" id="stickE" data-b="10" style="left:110px;top:196px"><i></i><b>WASD (L3: V)</b></div>
+      <div class="stick" id="stickD" data-b="11" style="right:160px;top:196px"><i></i><b>mouse (R3: meio)</b></div>
+    </div>
+    <div id="ultimo"></div>
+  </div>
+
+  <div class="card">
+    <h2>Mouse → controle</h2>
+    <table>
+      <tr><td>Clique esquerdo</td><td class="xis">✕</td></tr>
+      <tr><td>Clique direito</td><td class="bol">○</td></tr>
+      <tr><td>Roda para baixo</td><td class="qua">□</td></tr>
+      <tr><td>Roda para cima</td><td class="tri">△</td></tr>
+      <tr><td>Mexer o mouse</td><td>analógico direito</td></tr>
+      <tr><td>Clique do meio</td><td>R3</td></tr>
+      <tr><td>Botões laterais</td><td>L1 / R1</td></tr>
+    </table>
+    <h2 style="margin-top:14px">Teclado → controle</h2>
+    <table>
+      <tr><td>W A S D</td><td>analógico esquerdo</td></tr>
+      <tr><td>Q · E</td><td>L2 · R2</td></tr>
+      <tr><td>Shift · Ctrl</td><td>L1 · R1</td></tr>
+      <tr><td>Alt + mexer o mouse</td><td>dedo no touchpad</td></tr>
+      <tr><td>Alt + clique esquerdo</td><td>afunda o touchpad</td></tr>
+      <tr><td>Espaço · Enter · F</td><td>✕ · ○ · △</td></tr>
+      <tr><td>Tab · Esc · H</td><td>Create · Options · PS</td></tr>
+      <tr><td>Setas</td><td>direcional</td></tr>
+    </table>
+    <div class="contas">
+      <div><b id="n0">0</b><span>✕</span></div>
+      <div><b id="n1">0</b><span>○</span></div>
+      <div><b id="n2">0</b><span>□</span></div>
+      <div><b id="n3">0</b><span>△</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>O que o controle apertou</h2>
+    <div id="log"></div>
+  </div>
+</div>
+
+<script type="module">
+import { TecladoPad } from './js/teclado-pad.js';
+
+const $ = (s) => document.querySelector(s);
+const NOMES = ['✕', '○', '□', '△', 'L1', 'R1', 'L2', 'R2', 'Create', 'Options', 'L3', 'R3', '▲', '▼', '◀', '▶', 'PS', 'Clique do touchpad'];
+const conta = [0, 0, 0, 0];
+const log = (txt) => {
+  const l = $('#log');
+  const d = document.createElement('div');
+  d.textContent = `${new Date().toLocaleTimeString()}.${String(Date.now() % 1000).padStart(3, '0')}  ${txt}`;
+  l.prepend(d);
+  while (l.childElementCount > 100) l.lastChild.remove();
+};
+
+// controle virtual falso: em vez de ir para o ajudante, desenha
+let antes = 0;
+const pad = {
+  definir(_fonte, e) {
+    document.querySelectorAll('[data-b]').forEach((el) => el.classList.toggle('on', !!(e.b & (1 << +el.dataset.b))));
+    for (let i = 0; i < 18; i++) {
+      const bit = 1 << i;
+      if ((e.b & bit) && !(antes & bit)) {
+        log(`${NOMES[i]} apertou`);
+        $('#ultimo').textContent = NOMES[i];
+        if (i < 4) $(`#n${i}`).textContent = ++conta[i];
+      } else if (!(e.b & bit) && (antes & bit)) log(`${NOMES[i]} soltou`);
+    }
+    antes = e.b;
+    $('#stickE i').style.transform = `translate(${e.lx * 26}px, ${e.ly * 26}px)`;
+    $('#stickD i').style.transform = `translate(${e.rx * 26}px, ${e.ry * 26}px)`;
+  },
+  soltar() { this.definir('teclado', { b: 0, lx: 0, ly: 0, rx: 0, ry: 0 }); },
+  touchpad(tp) {
+    const d = $('#dedo');
+    $('#tp').classList.toggle('vivo', !!tp);
+    if (!tp) {
+      if (d.style.display === 'block') log('touchpad: tirou o dedo');
+      d.style.display = 'none';
+      return;
+    }
+    if (d.style.display !== 'block') log('touchpad: encostou o dedo');
+    d.style.display = 'block';
+    d.style.left = `${tp[0] * 100}%`;
+    d.style.top = `${tp[1] * 100}%`;
+  },
+};
+const tp = new TecladoPad({ pad });
+tp.ligar();
+
+const area = $('#area');
+area.addEventListener('click', () => { if (!document.pointerLockElement) area.requestPointerLock(); });
+document.addEventListener('pointerlockchange', () => {
+  const preso = document.pointerLockElement === area;
+  area.classList.toggle('preso', preso);
+  area.textContent = preso ? 'Mouse preso: clique, role e mexa. Esc solta.' : 'Clique aqui para prender o mouse e começar (Esc solta)';
+  if (!preso) tp.soltarTudo();
+});
+
+// como o controle.js monta os eventos do modo jogo
+const BOTOES = ['left', 'middle', 'right', 'x1', 'x2'];
+document.addEventListener('mousedown', (e) => tp.evento({ t: 'mouse', a: 'down', b: BOTOES[e.button] }));
+document.addEventListener('mouseup', (e) => tp.evento({ t: 'mouse', a: 'up', b: BOTOES[e.button] }));
+document.addEventListener('mousemove', (e) => {
+  if (document.pointerLockElement && (e.movementX || e.movementY)) tp.evento({ t: 'mouse', a: 'move', dx: e.movementX, dy: e.movementY });
+});
+document.addEventListener('contextmenu', (e) => e.preventDefault());
+let dentes = 0;
+document.addEventListener('wheel', (e) => {
+  if (!document.pointerLockElement) return;
+  e.preventDefault();
+  const f = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? 800 : 1;
+  if (!e.deltaY) return;
+  dentes += e.wheelDeltaY ? Math.sign(e.deltaY) * Math.abs(e.wheelDeltaY) : e.deltaY * f * 1.2;
+  while (Math.abs(dentes) >= 120) {
+    const lado = Math.sign(dentes);
+    dentes -= lado * 120;
+    tp.evento({ t: 'wheel', x: 0.5, y: 0.5, dx: 0, dy: lado * 100 });
+  }
+}, { passive: false });
+const tecla = (a) => (e) => {
+  if (!document.pointerLockElement || e.repeat) return;
+  if (tp.evento({ t: 'tecla', a, key: e.key, code: e.code })) e.preventDefault();
+};
+document.addEventListener('keydown', tecla('down'));
+document.addEventListener('keyup', tecla('up'));
+</script>
+</body>
+</html>

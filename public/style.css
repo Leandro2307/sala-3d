@@ -4357,3 +4357,122 @@ body.modo-offline #bar, body.modo-offline #touch, body.modo-offline #hud > :not(
 /* senha da entrada: campo de texto com bolinhas, para o Chrome não abrir "Salvar senha?" em cima
    da tela compartilhada (o balão fica na frente e quem controla de longe não consegue mexer) */
 .senha-oculta { -webkit-text-security: disc; text-security: disc; }
+
+/* ============================================================ tutorial do controle do PS5 (tutorial-controle.js) */
+/* por cima do jogo e do controle de toque; só o "Pular" pega clique (os botões de toque continuam vivos) */
+#tut-controle {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  pointer-events: none;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: max(9vh, 56px);
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+}
+#tut-controle[hidden] { display: none; }
+.tut-card {
+  width: min(430px, calc(100vw - 32px));
+  background: rgba(12, 14, 20, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 18px;
+  padding: 16px 18px 14px;
+  color: #f1f3f8;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(6px);
+  animation: tutEntra 0.22s ease-out;
+  transition: border-color 0.15s, background 0.15s;
+}
+.tut-card.tut-ok { border-color: #34d399; background: rgba(9, 38, 27, 0.94); }
+.tut-card.tut-ok .tut-tit { color: #34d399; }
+@keyframes tutEntra { from { opacity: 0; transform: translateY(-8px) scale(0.98); } }
+.tut-topo { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.tut-n { font-size: 12px; color: #9aa3b5; font-weight: 600; }
+.tut-pular {
+  pointer-events: auto;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #cfd5e2;
+  border-radius: 999px;
+  padding: 5px 12px;
+  font: 600 12px 'Plus Jakarta Sans', system-ui, sans-serif;
+  cursor: pointer;
+}
+.tut-pular:hover { background: rgba(255, 255, 255, 0.16); }
+.tut-pular kbd { font: 700 10px 'JetBrains Mono', monospace; background: rgba(255, 255, 255, 0.14); border-radius: 4px; padding: 1px 5px; margin-left: 4px; }
+.tut-tit { margin: 0 0 10px; font-size: 21px; font-weight: 800; letter-spacing: -0.01em; text-align: center; }
+.tut-visual { display: flex; align-items: center; justify-content: center; gap: 14px; min-height: 92px; margin-bottom: 8px; }
+.tut-de, .tut-para { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.tut-para small, .tut-de small { width: 100%; text-align: center; font-size: 11px; color: #9aa3b5; font-weight: 600; }
+.tut-seta { font-size: 26px; color: #fbbf24; animation: tutSeta 1s ease-in-out infinite; }
+@keyframes tutSeta { 50% { transform: translateX(5px); } }
+.tut-txt { margin: 0 0 12px; font-size: 14px; line-height: 1.45; text-align: center; color: #d6dbe6; }
+.tut-txt b { color: #fff; }
+.tut-barra { height: 4px; border-radius: 4px; background: rgba(255, 255, 255, 0.1); overflow: hidden; }
+.tut-barra i { display: block; height: 100%; background: #34d399; transition: width 0.3s ease-out; }
+/* mouse desenhado */
+.tut-mouse { width: 56px; height: 84px; overflow: visible; }
+.tut-m-corpo { fill: #1b1f2a; stroke: #59627a; stroke-width: 3; }
+.tut-m-corpo.on { stroke: #fbbf24; }
+.tut-m-bt { fill: #232838; stroke: #59627a; stroke-width: 3; }
+.tut-m-bt.on, .tut-m-roda.on { fill: #fbbf24; stroke: #fbbf24; animation: tutPisca 0.9s ease-in-out infinite; }
+.tut-m-roda { fill: #10131b; stroke: #59627a; stroke-width: 2.5; }
+.tut-m-seta { fill: #fbbf24; animation: tutPisca 0.9s ease-in-out infinite; }
+.tut-m-traco { stroke: #fbbf24; stroke-width: 3; stroke-linecap: round; fill: none; }
+@keyframes tutPisca { 50% { opacity: 0.45; } }
+/* teclas */
+.tut-k {
+  min-width: 40px; height: 40px; padding: 0 10px; display: inline-grid; place-items: center;
+  background: linear-gradient(#2a3042, #1d2230); border: 1px solid #59627a; border-bottom-width: 4px;
+  border-radius: 8px; font: 700 15px 'JetBrains Mono', monospace; color: #fff;
+}
+.tut-mais { color: #9aa3b5; font-weight: 700; }
+/* botões do PS5 */
+.tut-g {
+  width: 54px; height: 54px; border-radius: 50%; display: inline-grid; place-items: center;
+  font-size: 28px; line-height: 1; background: #10131b; border: 2px solid currentColor;
+}
+.tut-xis { color: #93c5fd; } .tut-bol { color: #fca5a5; } .tut-qua { color: #f9a8d4; } .tut-tri { color: #6ee7b7; }
+.tut-pill { min-width: 52px; height: 34px; padding: 0 10px; border-radius: 10px; display: inline-grid; place-items: center; background: #10131b; border: 2px solid #8b93a7; font-weight: 800; font-size: 15px; }
+.tut-stick { width: 54px; height: 54px; border-radius: 50%; border: 2px solid #8b93a7; background: #10131b; position: relative; }
+.tut-stick i { position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; margin: -11px; border-radius: 50%; background: #8b93a7; animation: tutStick 1.6s ease-in-out infinite; }
+@keyframes tutStick { 25% { transform: translate(9px, -6px); } 50% { transform: translate(-8px, 7px); } 75% { transform: translate(7px, 8px); } }
+.tut-tp { width: 96px; height: 50px; border-radius: 9px; border: 2px solid #8b93a7; background: #10131b; position: relative; }
+.tut-tp i { position: absolute; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px; border-radius: 50%; background: #93c5fd; box-shadow: 0 0 10px #93c5fd; animation: tutStick 1.6s ease-in-out infinite; }
+/* celular: o botão da vez pisca; no passo da câmera, o lado direito ganha um dedo arrastando */
+#toque-jogo .tut-alvo { outline: 3px solid #fbbf24; outline-offset: 3px; animation: tutAlvo 0.9s ease-in-out infinite; }
+@keyframes tutAlvo { 50% { outline-color: rgba(251, 191, 36, 0.25); box-shadow: 0 0 0 8px rgba(251, 191, 36, 0.18); } }
+#toque-jogo.tut-olhar .tj-olhar::after {
+  content: ''; position: absolute; right: 26%; top: 44%; width: 34px; height: 34px; border-radius: 50%;
+  background: rgba(251, 191, 36, 0.55); box-shadow: 0 0 0 6px rgba(251, 191, 36, 0.2);
+  animation: tutArrasta 1.4s ease-in-out infinite; pointer-events: none;
+}
+@keyframes tutArrasta { 0%, 100% { transform: translate(0, 0); } 50% { transform: translate(-56px, -16px); } }
+/* celular deitado: cartão menor no meio de cima, entre o analógico e os botões */
+/* deitado: no espaço entre a esquerda e a grade de botões (3 botões grandes + folga), sem tampar nenhum */
+#tut-controle[data-modo="toque"] { padding: calc(max(10px, env(safe-area-inset-top)) + 44px) calc(max(12px, env(safe-area-inset-right)) + 222px) 0 max(12px, env(safe-area-inset-left)); }
+#tut-controle[data-modo="toque"] .tut-card { width: min(320px, 100%); padding: 10px 12px; border-radius: 14px; }
+#tut-controle[data-modo="toque"] .tut-tit { font-size: 17px; margin-bottom: 6px; }
+#tut-controle[data-modo="toque"] .tut-visual { min-height: 0; margin-bottom: 4px; }
+#tut-controle[data-modo="toque"] .tut-txt { font-size: 12.5px; margin-bottom: 8px; }
+#tut-controle[data-modo="toque"] .tut-g { width: 42px; height: 42px; font-size: 22px; }
+#tut-controle[data-modo="toque"] .tut-pill { min-width: 42px; height: 28px; font-size: 13px; }
+#tut-controle[data-modo="toque"] .tut-stick { width: 42px; height: 42px; }
+/* deitado e baixo: sem o desenho (o botão da vez já pisca na tela), o cartão não chega no analógico */
+@media (orientation: landscape) and (max-height: 380px) {
+  #tut-controle[data-modo="toque"] .tut-visual { display: none; }
+}
+@media (orientation: landscape) and (max-height: 359px) {
+  #tut-controle[data-modo="toque"] { padding-top: calc(max(6px, env(safe-area-inset-top)) + 38px); }
+  #tut-controle[data-modo="toque"] .tut-tit { font-size: 15px; margin-bottom: 4px; }
+  #tut-controle[data-modo="toque"] .tut-txt { font-size: 12px; margin-bottom: 6px; }
+}
+/* celular em pé */
+@media (orientation: portrait) {
+  #tut-controle[data-modo="toque"] { padding-left: 12px; padding-right: 12px; }
+  #tut-controle[data-modo="toque"] .tut-card { width: min(340px, 100%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tut-card, .tut-seta, .tut-m-bt.on, .tut-m-roda.on, .tut-m-seta, .tut-stick i, .tut-tp i, #toque-jogo .tut-alvo, #toque-jogo.tut-olhar .tj-olhar::after { animation: none; }
+}

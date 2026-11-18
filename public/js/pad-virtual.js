@@ -48,6 +48,7 @@ export class PadVirtual {
     this.tremorTimer = 0;
     this.tp = null; // [x0, y0, x1, y1] (de 0 a 1, -1 sem dedo) ou null: ninguém lendo o touchpad
     this.tpClique = false;
+    this.treino = null; // (estado) => …: tutorial aberto (tutorial-controle.js); nada vai para o PC
     opcoesJogo.ouvir((k, v) => { if (k === 'vibrar' && !v) this.pararTremor(); });
   }
 
@@ -245,7 +246,15 @@ export class PadVirtual {
     return e;
   }
 
+  // Tutorial do controle: o estado vai só para fn, e o PC recebe o controle solto. null: volta a
+  // mandar, já com o estado de agora (o que estiver segurado ao fechar vai junto).
+  treinar(fn) {
+    this.treino = fn;
+    this.enviar(true);
+  }
+
   mudou() {
+    if (this.treino) return void this.treino(this.estado());
     if (!this.key || this.timer) return;
     const falta = this.ultimo + ENVIO_MS - performance.now();
     if (falta <= 0) this.enviar();
@@ -256,7 +265,7 @@ export class PadVirtual {
     clearTimeout(this.timer);
     this.timer = 0;
     if (!this.key) return;
-    const e = this.estado();
+    const e = this.treino ? { ...NEUTRO } : this.estado();
     const mesmoTp = String(e.tp ?? '') === String(this.enviado.tp ?? '');
     if (!sempre && mesmoTp && e.b === this.enviado.b && EIXOS.every((k) => e[k] === this.enviado[k])) return;
     this.enviado = e;

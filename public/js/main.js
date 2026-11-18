@@ -30,6 +30,7 @@ import { ToqueJogo, jogoDaJanela, LAYOUTS, layoutDoTitulo } from './toque-jogo.j
 import { ControleFisico } from './gamepad-jogo.js';
 import { PadVirtual } from './pad-virtual.js';
 import { TecladoPad, DICA_TECLADO } from './teclado-pad.js';
+import { TutorialControle } from './tutorial-controle.js';
 import { TurboEnvio, TurboRecebe, TTL_MS, LISO_PCT } from './turbo.js';
 import { opcoesJogo, LISO_MS, PRESETS, OPCOES_DO_PRESET, htmlPresets, marcarPresets } from './jogo-opcoes.js';
 import { Mesa } from './mesa.js';
@@ -1652,6 +1653,7 @@ function bindSocket() {
       // reconheceu o jogo da janela agora: o controle de toque passa para os botões dele
       toqueJogo.jogoDaTela(key, tinha.titulo);
       fisico.jogoDaTela(key, tinha.titulo);
+      if (controle.jogo?.key === key) tutorialDoPs5(key);
     } else if (u.isSelf) {
       return;
     } else if (gone) {
@@ -4577,7 +4579,14 @@ const tecladoPad = new TecladoPad({ pad: padVirtual, sens: () => opcoesJogo.get(
 // tremores que chegaram aqui (quem joga), para o relatório (ver receberVolta)
 const tremoresAqui = { n: 0, como: {}, primeiro: false, desde: 0 };
 padVirtual.onErroTremor = (erro) => diagJogo.evento('o controle não aceitou o tremor', { erro, ...padVirtual.comoVibra() });
-controle.paraPad = (ev) => tecladoPad.evento(ev);
+// Tutorial do controle (tutorial-controle.js): na primeira vez numa tela de PS5. Aberto, o teclado e
+// o mouse ficam todos com ele: o que o teclado-pad não usa também não vai para o jogo (P pula).
+const tutorialControle = new TutorialControle({ raiz: $('#tut-controle'), pad: padVirtual, toqueRaiz: $('#toque-jogo') });
+controle.paraPad = (ev) => {
+  if (!tutorialControle.ativo) return tecladoPad.evento(ev);
+  if (!tutorialControle.tecla(ev)) tecladoPad.evento(ev);
+  return true;
+};
 // Touchpad do DualSense (ps5-touchpad.js): no modo jogo numa tela de PS5, no PC. Com a permissão dada
 // uma vez, volta sozinho; antes disso, pelo botão nas opções do modo jogo.
 const touchpad = new Ps5Touchpad({ pad: padVirtual, onMudou: () => atualizarBotaoTouchpad() });
@@ -4609,6 +4618,7 @@ const toqueJogo = new ToqueJogo({
   pad: padVirtual,
   toast,
   onEngasgo: () => marcarEngasgo(),
+  onTutorial: () => tutorialControle.abrir('toque'),
   onSair: () => {
     controle.desligarJogo();
     updateFocusCtrl();
@@ -4632,8 +4642,11 @@ controle.onJogo = (video, key) => {
   if (layoutPc && LAYOUTS[layoutPc]?.virtual) {
     padVirtual.acordar();
     tecladoPad.ligar();
-    if (DICA_TECLADO[layoutPc]) toast(`Teclado e mouse viram o controle. ${DICA_TECLADO[layoutPc]}`, 'info', 12000);
+    if (DICA_TECLADO[layoutPc] && !tutorialDoPs5(key)) toast(`Teclado e mouse viram o controle. ${DICA_TECLADO[layoutPc]}`, 'info', 12000);
   } else tecladoPad.desligar();
+  $('#jogo-tutorial').hidden = layoutPc !== 'ps5';
+  if (!video) tutorialControle.fechar(false);
+  else if (isTouch) tutorialDoPs5(key);
   if (!video) padVirtual.desligar(); // depois do toque e do controle: o último estado é tudo solto
   // o modo jogo desligou por fora do botão (a tela fechou, saiu do foco): sai da tela cheia também
   if (!video && !isTouch && document.body.classList.contains('jogo-pc')) jogoNoPc(false);
@@ -4641,6 +4654,28 @@ controle.onJogo = (video, key) => {
   // a própria tela (PS5 direto): a imagem já é daqui, sem turbo nem diagnóstico de quem joga longe
   jogoLa(video && !acharTela(key)?.user.isSelf ? video : null, key);
 };
+// Tutorial do controle na primeira vez que joga uma tela de PS5 (no PC, só sem controle de verdade
+// ligado: quem tem um não precisa do teclado). true: abriu (ou vai abrir). Saiu do PS5: fecha.
+function tutorialDoPs5(key) {
+  const ps5 = isTouch ? toqueJogo.layoutId === 'ps5' && toqueJogo.key === key
+    : layoutDoTitulo(acharTela(key)?.share.titulo) === 'ps5';
+  if (!ps5) {
+    tutorialControle.fechar(false);
+    return false;
+  }
+  const modo = isTouch ? 'toque' : 'pc';
+  if (tutorialControle.ativo || !tutorialControle.precisa(modo) || (!isTouch && fisico.pad())) return false;
+  // um instante para a tela cheia e o controle de toque montarem
+  setTimeout(() => {
+    if (controle.jogo?.key === key) tutorialControle.abrir(modo);
+  }, 900);
+  return true;
+}
+$('#jogo-tutorial').addEventListener('click', (e) => {
+  e.currentTarget.blur();
+  $('#jogo-op-pop').hidden = true;
+  tutorialControle.abrir('pc');
+});
 // a aba sumiu (celular bloqueou, outro app): o que o toque e o controle seguravam sobe já
 controle.onEscondeu = () => {
   toqueJogo.soltarTudo();

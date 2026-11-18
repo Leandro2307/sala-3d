@@ -916,6 +916,8 @@
     <video id="focus-video" playsinline autoplay muted></video>
     <!-- modo jogo no celular: analógico e botões por cima da tela (ver toque-jogo.js) -->
     <div id="toque-jogo" hidden></div>
+    <!-- modo jogo no PS5: o tutorial do controle na primeira vez (ver tutorial-controle.js) -->
+    <div id="tut-controle" hidden></div>
     <!-- modo jogo: o selo de desempenho de quem joga (qps, atraso, banda; ver jogoSelo no main.js) -->
     <div id="jogo-selo" hidden></div>
     <!-- lan house: de quem é a vez na máquina desta tela e quanto falta (ver mostrarVezLan) -->
@@ -951,6 +953,7 @@
             <label class="jogo-op-lossless"><span>Lossless Scaling neste PC <small>(para o desempenho contar os quadros gerados)</small></span>
               <select id="jogo-lossless"><option value="0">Não uso</option><option value="2">×2</option><option value="3">×3</option><option value="4">×4</option></select></label>
             <button type="button" class="secondary small" id="jogo-touchpad" hidden>Usar o touchpad do DualSense</button>
+            <button type="button" class="secondary small" id="jogo-tutorial" hidden>Tutorial do controle (teclado e mouse)</button>
           </span>
         </span>
         <button type="button" class="secondary small" id="focus-engasgo" hidden title="Marca no relatório do modo jogo o momento em que a imagem engasgou (F9)">Engasgou <kbd>F9</kbd></button>
