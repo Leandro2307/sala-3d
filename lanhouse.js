@@ -166,7 +166,11 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
 
   async function iniciar() {
     try {
-      for (const r of await banco.lerReservas(Date.now() - 2 * 86400_000)) reservas.set(r.id, r);
+      for (const r of await banco.lerReservas(Date.now() - 2 * 86400_000)) {
+        // teste curto do dono (liberar com minutos): o fim fica no "expira", antes do fim da hora
+        if (r.sessao === 'cortesia' && r.status === 'paga' && r.expira > r.inicio && r.expira < r.inicio + HORA) r.fimCedo = r.expira;
+        reservas.set(r.id, r);
+      }
     } catch (err) {
       console.warn('[lan] lendo reservas', err.code || err.message);
     }
@@ -404,6 +408,7 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
       r.status = 'paga';
       if (m === 'pc') Object.assign(r, doJogo);
       r.fimCedo = fimCedo;
+      r.expira = fimCedo; // gravado: o fim curto sobrevive a um reinício do servidor (ver iniciar)
       await guardar(r);
       setTimeout(() => { if (r.fimCedo === fimCedo) mudarStatus([r], 'cancelada').catch(() => {}); }, fimCedo - agora + 500).unref?.();
       console.log(`[lan] ${sala} ${MAQUINAS[m]} (${nome}): teste de ${min} min, até ${new Date(fimCedo).toISOString()}`);

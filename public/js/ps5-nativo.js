@@ -888,7 +888,8 @@ export class Ps5Nativo {
     } finally {
       this.retomada = false;
     }
-    if (this.fonte !== fonte) return;
+    // a sessão foi trocada enquanto a tela entrava na sala: essa tela sai (sobrava na sala)
+    if (this.fonte !== fonte) { if (key) this.pararTela?.(key); return; }
     if (!key) {
       this.toast?.('A sala não conseguiu pôr o PS5 numa tela. Desligando o PS5.', 'error', 6000);
       this.parar();

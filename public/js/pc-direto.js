@@ -217,7 +217,11 @@ export class PcDireto {
     const mon = this.monitorDoJogo();
     if (!mon) return { erro: 'a ponte não achou nenhum monitor' };
     const c = this.conectado;
-    if (this.noAr && this.key && c && c.monitor === mon.i && Number(c.qps) === QPS_JOGO) return { key: this.key, monitor: mon };
+    const certa = () => this.noAr && this.conectado && this.conectado.monitor === mon.i && Number(this.conectado.qps) === QPS_JOGO;
+    // já no ar do jeito certo (a sessão que voltou depois de a página recarregar, ainda entrando na
+    // sala): espera a tela entrar em vez de derrubar e abrir outra
+    if (certa() && !this.key) await esperar(() => this.key || !certa(), 10_000);
+    if (certa() && this.key) return { key: this.key, monitor: mon };
     if (this.noAr || this.fase === 'abrindo') {
       this.parar();
       await new Promise((ok) => setTimeout(ok, 800)); // a ponte solta a captura e o codificador
@@ -270,7 +274,8 @@ export class PcDireto {
     this.pondo = true;
     let key;
     try { key = await this.compartilhar(fonte, { rotulo: this.conectado?.rotulo || 'screen:0:0', auto: !!this.paraJogo }); } finally { this.pondo = false; }
-    if (this.fonte !== fonte) return;
+    // a sessão foi trocada enquanto a tela entrava na sala: essa tela sai (sobrava preta na sala)
+    if (this.fonte !== fonte) { if (key) this.pararTela?.(key); return; }
     if (!key) {
       this.toast?.('A sala não conseguiu pôr o PC numa tela. Desligando o PC direto.', 'error', 6000);
       this.parar();
