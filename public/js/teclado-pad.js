@@ -4,7 +4,7 @@
 // fonte "teclado" do controle virtual (pad-virtual.js), como o toque faz no celular:
 //
 //   WASD: analógico esquerdo        mouse: analógico direito (pela velocidade)
-//   clique esquerdo: ✕   clique direito: ○   roda para baixo: □   roda para cima: △ (um toque por dente)
+//   clique esquerdo: ✕   clique direito: ○   roda para baixo: □   roda para cima: △ (trava; o próximo dente solta)
 //   Espaço: ✕   Enter: ○   F: △ (pela posição: no Switch, B A X)
 //   Shift: L1/L   Ctrl: R1/R   Q: L2/ZL   E: R2/ZR   meio: R3   V: L3
 //   Tab: Create/−   Esc: Options/+   H: PS/Home   setas: direcional
@@ -21,13 +21,13 @@ const BOTAO_TECLA = {
   ArrowUp: 12, ArrowDown: 13, ArrowLeft: 14, ArrowRight: 15,
 };
 const BOTAO_MOUSE = { left: 0, right: 1, middle: 11, x1: 4, x2: 5 };
-// roda: rolando, o botão fica SEGURADO (para baixo □, para cima △) e solta RODA_SEGURA_MS depois do
-// último dente — rolar sem parar é segurar o botão; um dente só é um toque de RODA_SEGURA_MS. Virar o
-// lado solta um e aperta o outro na hora. (Antes cada dente era um toque, numa fila: atrasava e não
-// dava para segurar.)
+// roda: TRAVA o botão. Um dente para baixo aperta □ (para cima △) e deixa apertado; o próximo dente,
+// para qualquer lado, solta. A roda só manda pulsos, não dá para "segurar" nela — antes o botão soltava
+// 150 ms depois do último dente e só ficava apertado rolando sem parar. Dentes seguidos (menos de
+// RODA_PAUSA_MS entre um e outro) contam como um gesto só: rolar dois dentes sem querer não destrava.
 const RODA_BAIXO = 2;
 const RODA_CIMA = 3;
-const RODA_SEGURA_MS = 150; // maior que o intervalo entre dentes de quem rola devagar sem parar
+const RODA_PAUSA_MS = 250;
 // touchpad pelo mouse (Alt segurado): quantos pixels de mouse atravessam o touchpad de ponta a ponta
 const TP_LARGURA_PX = 800;
 const TP_ALTURA_PX = 450;
@@ -47,8 +47,8 @@ const VEL_CHEIA = 1.6;
 const MIN_MS = 60;
 
 export const DICA_TECLADO = {
-  switch: 'WASD anda, o mouse mexe a câmera. Clique esquerdo B · direito A · roda para baixo Y · para cima X · Shift L · Ctrl R · Q ZL · E ZR · Tab − · Esc + · H Home · setas: direcional.',
-  ps5: 'WASD anda, o mouse mexe a câmera. Clique esquerdo ✕ · direito ○ · roda para baixo □ · para cima △ · Shift L1 · Ctrl R1 · Q L2 · E R2 · Alt + mouse: touchpad (Alt + clique afunda) · Tab Create · Esc Options · H PS · setas: direcional.',
+  switch: 'WASD anda, o mouse mexe a câmera. Clique esquerdo B · direito A · roda para baixo Y · para cima X (trava até o próximo dente) · Shift L · Ctrl R · Q ZL · E ZR · Tab − · Esc + · H Home · setas: direcional.',
+  ps5: 'WASD anda, o mouse mexe a câmera. Clique esquerdo ✕ · direito ○ · roda para baixo □ · para cima △ (trava até o próximo dente) · Shift L1 · Ctrl R1 · Q L2 · E R2 · Alt + mouse: touchpad (Alt + clique afunda) · Tab Create · Esc Options · H PS · setas: direcional.',
 };
 
 export class TecladoPad {
@@ -64,9 +64,8 @@ export class TecladoPad {
     clearInterval(this.tick);
     this.tick = 0;
     for (const t of this.timers?.values() || []) clearTimeout(t);
-    clearTimeout(this.rodaT);
-    this.rodaT = 0;
-    this.rodaB = 0; // o bit do botão que a roda está apertando agora
+    this.rodaUlt = 0; // quando veio o último dente da roda
+    this.rodaB = 0; // o bit do botão que a roda está travando agora
     if (this.dedo) this.pad.touchpad(null);
     this.dedo = null; // {x, y} de 0 a 1: o dedo no touchpad enquanto o Alt está segurado
     this.cliqueTp = null; // o botão do mouse que afundou o touchpad (o "up" dele solta o touchpad)
@@ -173,18 +172,14 @@ export class TecladoPad {
     else soltar();
   }
 
-  // um dente da roda: aperta o botão (ou mantém apertado) e adia a soltura
+  // um dente da roda: trava o botão do lado, ou solta o que estava travado
   roda(i) {
-    clearTimeout(this.rodaT);
-    if (this.rodaB !== 1 << i) {
-      this.rodaB = 1 << i;
-      this.enviar();
-    }
-    this.rodaT = setTimeout(() => {
-      this.rodaT = 0;
-      this.rodaB = 0;
-      this.enviar();
-    }, RODA_SEGURA_MS);
+    const agora = performance.now();
+    const seguido = agora - this.rodaUlt < RODA_PAUSA_MS;
+    this.rodaUlt = agora;
+    if (seguido) return;
+    this.rodaB = this.rodaB ? 0 : 1 << i;
+    this.enviar();
   }
 
   // Alt: encosta o dedo no meio do touchpad (e a câmera para) ou tira o dedo

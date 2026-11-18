@@ -737,7 +737,7 @@ Agora `teclado-pad.js` (fonte `teclado` do `PadVirtual`, ligada no `controle.onJ
 `virtual`) converte: WASD = analógico esquerdo, mouse = analógico direito pela velocidade (janela de 40 ms,
 1,6 px/ms = fim do curso, curva em raiz), no começo Espaço/E/Q/F = botões de baixo/direita/esquerda/cima, Shift L, R R,
 Tab −, Esc +, H Home, setas = direcional. Desde 2026-11-18, como pediu o usuário: clique esquerdo ✕,
-direito ○, roda para baixo □, para cima △ (rolando, o botão fica segurado e solta 150 ms depois do último dente; virar o lado troca na hora), Q L2, E R2, Shift L1,
+direito ○, roda para baixo □, para cima △ (um dente trava o botão apertado, o próximo dente — para qualquer lado — solta; dentes com menos de 250 ms entre si contam como um só), Q L2, E R2, Shift L1,
 Ctrl R1, Espaço ✕, Enter ○, F △; Alt segurado + mouse = um dedo no touchpad (encosta no meio, Alt + clique
 afunda; só chega no PS5 direto, campo tp). Ctrl+W/T/N fora da tela cheia (sem keyboard.lock) o Chrome não
 deixa segurar. Teste visual: public/teste-controle.html. **Tutorial do controle** (`tutorial-controle.js`, 2026-11-18): toda vez que entra no modo jogo numa tela de PS5
