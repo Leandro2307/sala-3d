@@ -485,6 +485,7 @@ export class RTC {
       // Negociada e sem ligar (ou caída) há 15 s, mesmo com o reinício de ICE: refaz do zero. Antes
       // ficava assim até alguém sair e entrar na sala (a voz do amigo não chegava).
       const ligada = ice === 'connected' || ice === 'completed';
+      if (ligada && peer.refeitas && agora - peer.refeitaEm > 60000) peer.refeitas = 0; // firmou
       if (ligada || !pc.remoteDescription) {
         peer.semLigarDesde = 0;
       } else {
@@ -1395,19 +1396,22 @@ export class RTC {
   // voltar quando o reinício de ICE não bastava (conexão que nunca ligou, credencial do TURN que
   // venceu no meio, negociação que travou). Os dois lados podem pedir ao mesmo tempo: a "época"
   // (número de vezes refeita) acerta, e quem já está na época pedida não refaz de novo.
-  // No máximo uma vez a cada 20 s por pessoa. Devolve se refez.
+  // Espera entre uma e outra: 20 s, depois 40, 80… até 5 min enquanto não ficar ligada (cada
+  // conexão nova recria a voz e o vídeo das telas: em laço, pesa demais no celular). Devolve se refez.
   refazer(id, motivo = '', epoca = null) {
     const velho = this.peers.get(id);
     if (!velho) return false;
     const agora = performance.now();
     const pedido = epoca != null; // o outro lado refez e pediu que eu refaça também
-    if (pedido ? epoca <= velho.epoca : agora - velho.refeitaEm < 20000) return false;
+    const espera = Math.min(300_000, 20_000 * 2 ** Math.max(0, (velho.refeitas || 0) - 1));
+    if (pedido ? epoca <= velho.epoca : agora - velho.refeitaEm < espera) return false;
     console.warn(`[rtc] refazendo a conexão com ${id}${motivo ? `: ${motivo}` : ''}`);
     const nova = pedido ? epoca : velho.epoca + 1;
     // o que a outra pessoa já tinha dito (o que ela quer das minhas telas, se ouve a minha voz…)
     const herdar = {
       epoca: nova,
       refeitaEm: agora,
+      refeitas: (velho.refeitas || 0) + 1, // seguidas, sem a conexão ficar ligada entre elas
       ouveMic: velho.ouveMic,
       interesse: velho.interesse,
       hz: velho.hz,

@@ -200,6 +200,8 @@ export class Musica {
     }
     if (!this.player) {
       if (this.criando) return this.criando;
+      // o player que não abriu espera cada vez mais para tentar de novo (ver criarPlayer)
+      if (performance.now() < (this.proximaCriacao || 0)) return;
       this.criando = this.criarPlayer().finally(() => { this.criando = null; });
       await this.criando;
       // não abriu: o tique tenta de novo daqui a 3 s (antes chamava de novo na hora, em laço)
@@ -243,7 +245,10 @@ export class Musica {
       // o player que não fica pronto em 20 s é jogado fora (sem isso, a música da sala nunca mais
       // tocava nesta página: só saindo e entrando)
       const prazo = setTimeout(() => {
-        console.warn('[música] o player do YouTube não abriu: tentando de novo');
+        this.falhasPlayer = (this.falhasPlayer || 0) + 1;
+        const espera = Math.min(300_000, 30_000 * 2 ** (this.falhasPlayer - 1));
+        this.proximaCriacao = performance.now() + espera;
+        console.warn(`[música] o player do YouTube não abriu: tentando de novo em ${espera / 1000} s`);
         try { p.destroy(); } catch { /* nem abriu */ }
         el.remove();
         resolve();
@@ -256,6 +261,7 @@ export class Musica {
           onReady: () => {
             clearTimeout(prazo);
             this.avisouApi = false;
+            this.falhasPlayer = 0;
             p.getIframe().setAttribute('allow', 'autoplay; encrypted-media');
             this.player = p;
             this.volAplicado = null;
@@ -320,8 +326,12 @@ export class Musica {
 
   // A sala está tocando e o player daqui não anda há 12 s (travou carregando, o iframe do YouTube
   // morreu, ficou preso numa faixa): joga o player fora e cria outro no ponto da sala — o mesmo que
-  // sair e entrar fazia. Se é o navegador barrando o som (ninguém tocou na página ainda), não
-  // adianta recriar: avisa para tocar na tela (o pointerdown lá em cima solta a música).
+  // sair e entrar fazia.
+  // Só recria o player que já tocou e parou, ou cujo iframe sumiu. O que nunca começou é o
+  // navegador barrando o som (o iPhone não deixa o YouTube escondido tocar sem um toque dentro
+  // dele): recriar não adianta, e em 2026-11-18 recriar a cada 12 s encheu a memória do iPhone até
+  // o Safari derrubar a página ("Um problema ocorreu repetidamente"). Aí só avisa, uma vez.
+  // E no máximo 3 recriações a cada 10 min, aconteça o que acontecer.
   vigiar() {
     const agora = performance.now();
     const a = this.atual();
@@ -334,22 +344,29 @@ export class Musica {
     if (this.player && this.carregado === chave) {
       try { t = this.player.getCurrentTime(); } catch { /* sumiu */ }
     }
-    if (this.estadoPlayer() === 1 && t != null && t !== this.tempoVisto) this.andouEm = agora;
+    if (this.estadoPlayer() === 1 && t != null && t !== this.tempoVisto) {
+      this.andouEm = agora;
+      this.jaTocou = true; // este player toca de verdade aqui (não está barrado)
+    }
     this.tempoVisto = t;
     if (this.estadoPlayer() === 0) this.andouEm = agora; // acabou: o servidor manda a próxima
     if (agora - (this.andouEm ?? agora) < 12000) return;
     this.andouEm = agora;
-    // na primeira vez só avisa; se continuar parado, recria também (pode não ser o navegador)
-    if (navigator.userActivation && !navigator.userActivation.hasBeenActive && !this.avisouToque) {
-      this.toast('Toque na tela para ouvir a música da sala.', 'info', 6000, '#f472b6');
+    if (this.criando) return;
+    const iframeSumiu = this.player && !this.player.getIframe?.()?.isConnected;
+    if (!this.jaTocou && !iframeSumiu) {
+      if (!this.avisouToque) this.toast('Toque na tela para ouvir a música da sala.', 'info', 6000, '#f472b6');
       this.avisouToque = true;
       return;
     }
-    if (this.criando) return;
+    this.recriadas = (this.recriadas || []).filter((em) => agora - em < 600_000);
+    if (this.recriadas.length >= 3) return;
+    this.recriadas.push(agora);
     console.warn('[música] o player parou de tocar: criando outro');
     const p = this.player;
     this.player = null;
     this.carregado = null;
+    this.jaTocou = false;
     try { p?.destroy(); } catch { /* já foi */ }
     $('#musica-sink').replaceChildren();
     this.acompanhar();
