@@ -3536,7 +3536,8 @@ async function alternarLossless() {
 // o botão do painel do PS5: foco na tela do PS5, modo jogo em tela cheia e o Lossless
 async function jogarComLossless(key) {
   if (!key || !acharTela(key)) return void toast('Ponha o PS5 numa tela antes.', 'warn', 5000);
-  if (state.focus?.kind !== 'share' || state.focus.key !== key) enterFocus({ kind: 'share', key });
+  // semDualSense: aqui o DualSense é pedido no clique do Modo jogo logo abaixo (antes da tela cheia)
+  if (state.focus?.kind !== 'share' || state.focus.key !== key) enterFocus({ kind: 'share', key, semDualSense: true });
   updateFocusCtrl();
   if (controle.jogoNo !== $('#focus-video')) $('#focus-jogo').click(); // ainda no clique: a tela cheia é aceita
   // o Lossless pega a janela da frente: espera a tela cheia assentar
@@ -4495,6 +4496,7 @@ $('#focus-jogo').addEventListener('click', async () => {
   // decidido antes de ligar (ainda no clique): a lista de aparelhos do Chrome tem que abrir antes da
   // tela cheia, que a escondia
   const pedirDualSense = ligar && !isTouch && precisaPedirDualSense();
+  if (pedirDualSense) pedindoDualSense = true; // antes do modoJogo: o tutorial do teclado não abre
   controle.modoJogo(fv, ligar);
   updateFocusCtrl();
   if (ligar && isTouch) {
@@ -4505,11 +4507,11 @@ $('#focus-jogo').addEventListener('click', async () => {
     if (pedirDualSense) {
       await conectarDualSense();
       if (controle.jogoNo !== fv) return; // desligou o modo jogo enquanto a lista estava aberta
-      // a lista demorou e o clique "venceu": o Chrome recusa a tela cheia sem um clique recente
-      jogoNoPc(true).then(() => {
-        if (!document.fullscreenElement) toast('Modo jogo ligado. Para a tela cheia, clique em "Tela cheia" lá em cima.', 'info', 7000);
-      });
-      return void toast('Modo jogo ligado. Esc duas vezes (ou F8) desliga o modo jogo.', 'info', 4000);
+      // Depois da lista o Chrome já não deixa entrar em tela cheia (o clique "venceu"): tenta, e se
+      // não der, entra no próximo clique ou tecla na página — que é o mesmo clique que prende o mouse
+      await jogoNoPc(true);
+      if (!document.fullscreenElement) telaCheiaNoProximoGesto(fv);
+      return;
     }
     jogoNoPc(true);
     toast('Modo jogo ligado: tela cheia, o mouse gira a câmera e o teclado anda com o personagem (Ctrl+W e Esc vão para o jogo). Esc duas vezes (ou F8) desliga o modo jogo; segure Esc para sair da tela cheia.', 'info', 9000);
@@ -4521,26 +4523,55 @@ $('#focus-jogo').addEventListener('click', async () => {
 // uma vez só: com a permissão dada, o touchpad.ligar() do onJogo conecta sozinho daí em diante.
 // A permissão fica guardada aqui (dualSensePermitido) porque a decisão tem que ser na hora do clique.
 let dualSensePermitido = false;
+let pedindoDualSense = false; // a lista do Chrome está aberta (do clique no Modo jogo)
+
+// a tela cheia que a lista do Chrome não deixou entrar: no próximo clique ou tecla, se ainda no jogo
+function telaCheiaNoProximoGesto(fv) {
+  toast('DualSense pronto. Clique na tela (ou aperte uma tecla) para entrar em tela cheia.', 'info', 7000);
+  const ir = () => {
+    removeEventListener('pointerdown', ir, true);
+    removeEventListener('keydown', ir, true);
+    if (controle.jogoNo === fv && !document.fullscreenElement) jogoNoPc(true);
+  };
+  addEventListener('pointerdown', ir, true);
+  addEventListener('keydown', ir, true);
+}
 const conferirPermissaoDualSense = () => navigator.hid?.getDevices?.()
   .then((ds) => { dualSensePermitido = ds.some((d) => d.vendorId === 0x054c); })
   .catch(() => {});
 conferirPermissaoDualSense();
 navigator.hid?.addEventListener?.('connect', conferirPermissaoDualSense);
 
+// Não dá para exigir ver o DualSense na Gamepad API: depois de aberto pelo WebHID uma vez, ele fica no
+// relatório completo (0x31) até desligar, e aí o Chrome não o mostra mais. Então pede sempre numa tela
+// de PS5, menos se: quem joga fechou a lista sem escolher (não insiste mais neste navegador), ou o
+// controle ligado é de outra marca (um de Xbox não precisa disto).
+const RECUSOU_DUALSENSE = 'sala3d.dualsenseRecusou';
 function precisaPedirDualSense() {
-  if (!temTouchpadHid() || touchpad.ligado || dualSensePermitido) return false;
+  if (!temTouchpadHid() || touchpad.ligado || dualSensePermitido || pedindoDualSense) return false;
+  try { if (localStorage.getItem(RECUSOU_DUALSENSE)) return false; } catch { /* sem armazenamento: pede */ }
   const t = state.focus?.kind === 'share' ? acharTela(state.focus.key) : null;
   if (!t || !(t.share.ps5 || layoutDoTitulo(t.share.titulo) === 'ps5')) return false;
-  return [...(navigator.getGamepads?.() || [])].some((g) => g && /054c|dualsense|wireless controller/i.test(g.id));
+  const pads = [...(navigator.getGamepads?.() || [])].filter(Boolean);
+  const sony = (g) => /054c|dualsense|wireless controller/i.test(g.id);
+  return !pads.length || pads.some(sony);
 }
 
 async function conectarDualSense() {
-  try {
-    if (await touchpad.pedir()) {
-      dualSensePermitido = true;
-      toast('DualSense ligado: botões, gatilhos adaptativos, vibração e touchpad vão direto entre ele e o PS5. Das próximas vezes ele liga sozinho.', 'success', 6000);
-    }
-  } catch { /* fechou a lista: fica no botão das Opções */ }
+  let ok = false;
+  pedindoDualSense = true;
+  try { ok = await touchpad.pedir(); } catch { /* fechou a lista ou falhou ao abrir */ }
+  pedindoDualSense = false;
+  if (ok) {
+    dualSensePermitido = true;
+    try { localStorage.removeItem(RECUSOU_DUALSENSE); } catch { /* ok */ }
+    toast('DualSense ligado: botões, gatilhos adaptativos, vibração e touchpad vão direto entre ele e o PS5. Das próximas vezes ele liga sozinho.', 'success', 6000);
+  } else {
+    // fechou a lista sem escolher: não pergunta mais neste navegador (o botão das Opções continua lá)
+    try { localStorage.setItem(RECUSOU_DUALSENSE, '1'); } catch { /* ok */ }
+    toast('Sem o DualSense: dá para ligar depois em Opções → "Usar o DualSense".', 'info', 6000);
+    if (controle.jogo?.key) tutorialDoPs5(controle.jogo.key); // sem controle: o tutorial do teclado
+  }
   atualizarBotaoTouchpad();
 }
 
@@ -4725,10 +4756,13 @@ function tutorialDoPs5(key) {
     return false;
   }
   const modo = isTouch ? 'toque' : 'pc';
-  if (tutorialControle.ativo || (!isTouch && (fisico.pad() || touchpad.ligado))) return false;
+  // com controle de verdade não precisa (o DualSense pelo WebHID conta: ligado, com permissão — liga
+  // num instante — ou com a lista do Chrome aberta para escolher)
+  const temControle = () => fisico.pad() || touchpad.ligado || dualSensePermitido || pedindoDualSense;
+  if (tutorialControle.ativo || (!isTouch && temControle())) return false;
   // um instante para a tela cheia e o controle de toque montarem
   setTimeout(() => {
-    if (controle.jogo?.key === key) tutorialControle.abrir(modo);
+    if (controle.jogo?.key === key && (isTouch || !temControle())) tutorialControle.abrir(modo);
   }, 900);
   return true;
 }
@@ -8501,6 +8535,9 @@ function enterFocus(info) {
   $('#focus').hidden = false;
   syncTouchVisibility();
   setTimeout(atualizarInteresse, 0); // a tela em foco sobe para 1080p sem esperar a rodada
+  // Tela de PS5 sem o DualSense permitido ainda: a lista do Chrome abre já, neste clique (sem tela
+  // cheia para escondê-la). Assim o clique no Modo jogo fica livre para a tela cheia entrar direto.
+  if (!info.semDualSense && !isTouch && navigator.userActivation?.isActive !== false && precisaPedirDualSense()) conectarDualSense();
 }
 
 // Painel do jogo recolhido: só título, vez e mensagem — o resto do tabuleiro fica livre para tocar.
