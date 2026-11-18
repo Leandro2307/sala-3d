@@ -4489,9 +4489,12 @@ $('#focus-ctrl').addEventListener('click', async () => {
 // Modo jogo (Minecraft e cia.): mouse vira câmera, WASD anda. Esc pausa o jogo e solta o
 // mouse; clicar na tela prende de novo. Com o ponteiro preso não dá para clicar no botão — por
 // isso o F8 (ver controle.atalho).
-$('#focus-jogo').addEventListener('click', () => {
+$('#focus-jogo').addEventListener('click', async () => {
   const fv = $('#focus-video');
   const ligar = controle.jogoNo !== fv;
+  // decidido antes de ligar (ainda no clique): a lista de aparelhos do Chrome tem que abrir antes da
+  // tela cheia, que a escondia
+  const pedirDualSense = ligar && !isTouch && precisaPedirDualSense();
   controle.modoJogo(fv, ligar);
   updateFocusCtrl();
   if (ligar && isTouch) {
@@ -4499,7 +4502,15 @@ $('#focus-jogo').addEventListener('click', () => {
     // com que botões entrou)
     if (!document.fullscreenElement) $('#focus').requestFullscreen?.().then(() => screen.orientation?.lock?.('landscape')).catch(() => {});
   } else if (ligar) {
-    conectarDualSenseNoClique(fv);
+    if (pedirDualSense) {
+      await conectarDualSense();
+      if (controle.jogoNo !== fv) return; // desligou o modo jogo enquanto a lista estava aberta
+      // a lista demorou e o clique "venceu": o Chrome recusa a tela cheia sem um clique recente
+      jogoNoPc(true).then(() => {
+        if (!document.fullscreenElement) toast('Modo jogo ligado. Para a tela cheia, clique em "Tela cheia" lá em cima.', 'info', 7000);
+      });
+      return void toast('Modo jogo ligado. Esc duas vezes (ou F8) desliga o modo jogo.', 'info', 4000);
+    }
     jogoNoPc(true);
     toast('Modo jogo ligado: tela cheia, o mouse gira a câmera e o teclado anda com o personagem (Ctrl+W e Esc vão para o jogo). Esc duas vezes (ou F8) desliga o modo jogo; segure Esc para sair da tela cheia.', 'info', 9000);
   } else if (!isTouch) jogoNoPc(false);
@@ -4508,15 +4519,27 @@ $('#focus-jogo').addEventListener('click', () => {
 // Modo jogo numa tela de PS5 com um DualSense ligado neste PC (a Gamepad API o vê) e sem a permissão do
 // WebHID ainda: pede já, aproveitando o clique (o Chrome só abre a lista de aparelhos num clique). É
 // uma vez só: com a permissão dada, o touchpad.ligar() do onJogo conecta sozinho daí em diante.
-async function conectarDualSenseNoClique(fv) {
-  if (!temTouchpadHid() || touchpad.ligado) return;
+// A permissão fica guardada aqui (dualSensePermitido) porque a decisão tem que ser na hora do clique.
+let dualSensePermitido = false;
+const conferirPermissaoDualSense = () => navigator.hid?.getDevices?.()
+  .then((ds) => { dualSensePermitido = ds.some((d) => d.vendorId === 0x054c); })
+  .catch(() => {});
+conferirPermissaoDualSense();
+navigator.hid?.addEventListener?.('connect', conferirPermissaoDualSense);
+
+function precisaPedirDualSense() {
+  if (!temTouchpadHid() || touchpad.ligado || dualSensePermitido) return false;
   const t = state.focus?.kind === 'share' ? acharTela(state.focus.key) : null;
-  if (!t || controle.jogoNo !== fv || !(t.share.ps5 || layoutDoTitulo(t.share.titulo) === 'ps5')) return;
-  const sony = [...(navigator.getGamepads?.() || [])].some((g) => g && /054c|dualsense|wireless controller/i.test(g.id));
-  if (!sony) return;
+  if (!t || !(t.share.ps5 || layoutDoTitulo(t.share.titulo) === 'ps5')) return false;
+  return [...(navigator.getGamepads?.() || [])].some((g) => g && /054c|dualsense|wireless controller/i.test(g.id));
+}
+
+async function conectarDualSense() {
   try {
-    if ((await navigator.hid.getDevices()).some((d) => d.vendorId === 0x054c)) return; // já tem: liga sozinho
-    if (await touchpad.pedir()) toast('DualSense ligado: botões, gatilhos adaptativos, vibração e touchpad vão direto entre ele e o PS5. Das próximas vezes ele liga sozinho.', 'success', 6000);
+    if (await touchpad.pedir()) {
+      dualSensePermitido = true;
+      toast('DualSense ligado: botões, gatilhos adaptativos, vibração e touchpad vão direto entre ele e o PS5. Das próximas vezes ele liga sozinho.', 'success', 6000);
+    }
   } catch { /* fechou a lista: fica no botão das Opções */ }
   atualizarBotaoTouchpad();
 }
@@ -4638,6 +4661,7 @@ $('#jogo-touchpad').addEventListener('click', async (e) => {
   } catch (err) {
     toast(`Não deu para ler o touchpad: ${err?.message || err}`, 'warn', 7000);
   }
+  conferirPermissaoDualSense();
   atualizarBotaoTouchpad();
 });
 const fisico = new ControleFisico({
