@@ -23,7 +23,7 @@ import { opcoesJogo } from './jogo-opcoes.js';
 const ENVIO_MS = 12;
 const NEUTRO = { b: 0, lx: 0, ly: 0, rx: 0, ry: 0, lt: 0, rt: 0 };
 const EIXOS = ['lx', 'ly', 'rx', 'ry', 'lt', 'rt'];
-const FONTES = ['toque', 'giro', 'fisico', 'teclado'];
+const FONTES = ['toque', 'giro', 'fisico', 'teclado', 'hid']; // hid: o DualSense lido pelo WebHID (ps5-touchpad.js)
 const arred = (v) => Math.round(v * 1000) / 1000;
 const entre = (v) => Math.min(1, Math.max(0, Number(v) || 0));
 
@@ -49,6 +49,7 @@ export class PadVirtual {
     this.tp = null; // [x0, y0, x1, y1] (de 0 a 1, -1 sem dedo) ou null: ninguém lendo o touchpad
     this.tpClique = false;
     this.treino = null; // (estado) => …: tutorial aberto (tutorial-controle.js); nada vai para o PC
+    this.hid = null; // o DualSense aberto pelo WebHID (ps5-touchpad.js): a vibração vai direto nele
     opcoesJogo.ouvir((k, v) => { if (k === 'vibrar' && !v) this.pararTremor(); });
   }
 
@@ -149,7 +150,9 @@ export class PadVirtual {
   // ------------------------------------------------------------ vibração (o jogo mandou tremer)
   // g: motor grande (o tranco), p: motor pequeno (o zumbido), de 0 a 1
   // Devolve como tremeu ('controle', 'celular', 'nada', 'desligado', 'parou'), para o relatório.
-  tremor(g, p) {
+  // h: veio da vibração háptica do DualSense (PS5 direto), já na força certa: sem o reforço abaixo,
+  // senão o zumbido fino e constante dos jogos viraria tremor forte o tempo todo
+  tremor(g, p, h = false) {
     if (!this.key) return 'sem-jogo';
     if (!opcoesJogo.get('vibrar')) return 'desligado';
     g = entre(g);
@@ -162,8 +165,10 @@ export class PadVirtual {
     // 0,13), que no controle mal se sentem. Reforço: qualquer tremor sai com pelo menos ~40% e a
     // curva (raiz) sobe os fracos sem estourar os fortes.
     const reforco = (v) => (v < 0.05 ? 0 : Math.min(1, 0.35 + 0.65 * Math.sqrt(v)));
-    g = reforco(g);
-    p = reforco(p);
+    if (!h) {
+      g = reforco(g);
+      p = reforco(p);
+    }
     this.tremendo = { g, p, desde: performance.now() };
     return this.vibrar();
   }
@@ -205,6 +210,12 @@ export class PadVirtual {
       this.pararTremor();
       return 'parou';
     }
+    // o DualSense pelo WebHID: os motores ficam ligados até a próxima ordem (a renovação abaixo só
+    // reconfirma), e o TREMOR_MAX ainda para tudo se a conexão cair
+    if (this.hid?.ligado && this.hid.motores(t.g, t.p)) {
+      this.tremorTimer = setTimeout(() => this.vibrar(), TREMOR_RENOVA);
+      return 'dualsense';
+    }
     const at = this.atuador();
     let como = 'controle';
     if (at?.tipo === 'efeito') {
@@ -232,6 +243,7 @@ export class PadVirtual {
     this.tremorTimer = 0;
     if (!this.tremendo) return;
     this.tremendo = null;
+    if (this.hid?.ligado) this.hid.motores(0, 0);
     const at = this.atuador();
     if (at?.tipo === 'efeito') at.a.reset?.()?.catch?.(() => {});
     navigator.vibrate?.(0);

@@ -2780,7 +2780,7 @@ function receberVolta({ key, ev, de } = {}) {
   } else if (ev.t === 'tremor') {
     // o jogo do PS5 vibrou o controle: treme o celular (ou o controle ligado neste aparelho)
     if (jogandoLa?.key !== key) return;
-    const como = padVirtual.tremor(ev.g, ev.p);
+    const como = padVirtual.tremor(ev.g, ev.p, !!ev.h);
     // relatório: o primeiro tremor diz o que o navegador oferece; depois, um resumo a cada 10 s
     tremoresAqui.n++;
     tremoresAqui.como[como] = (tremoresAqui.como[como] || 0) + 1;
@@ -2795,6 +2795,11 @@ function receberVolta({ key, ev, de } = {}) {
       tremoresAqui.como = {};
       tremoresAqui.desde = agora;
     }
+  } else if (ev.t === 'gatilhos') {
+    // o jogo do PS5 mudou os gatilhos adaptativos: vão para o DualSense daqui (pelo WebHID)
+    if (jogandoLa?.key !== key) return;
+    const foi = touchpad.gatilhos(ev.e, ev.d);
+    diagJogo.evento('gatilhos adaptativos chegaram', { e: ev.e?.[0], d: ev.d?.[0], dualsense: foi });
   } else if (ev.t === 'cursor') {
     // o jogo mostrou o cursor (menu) ou escondeu: o mouse troca de jeito, se a pessoa deixou
     if (jogandoLa?.key !== key) return;
@@ -2912,7 +2917,7 @@ controle.onCursor = (sh, livre) => {
 const TREMOR_MS = 40;
 let tremorVez = 0, tremorTimer = 0, tremorFila = null;
 let tremoresLa = 0, tremoresLaDesde = 0;
-controle.onTremor = ({ key, deId }, g, p) => {
+controle.onTremor = ({ key, deId }, g, p, h = false) => {
   // relatório de quem compartilha: o ajudante contou que o jogo mandou tremer
   const agora = performance.now();
   tremoresLa++;
@@ -2922,7 +2927,7 @@ controle.onTremor = ({ key, deId }, g, p) => {
     tremoresLaDesde = agora;
   }
   if (!jogandoAqui.get(key)?.has(deId)) return;
-  tremorFila = { key, para: deId, ev: { t: 'tremor', g: Math.round(g * 100) / 100, p: Math.round(p * 100) / 100 } };
+  tremorFila = { key, para: deId, ev: { t: 'tremor', g: Math.round(g * 100) / 100, p: Math.round(p * 100) / 100, ...(h ? { h: true } : {}) } };
   if (tremorTimer) return;
   const sair = () => {
     tremorTimer = 0;
@@ -3113,10 +3118,19 @@ const ps5Nativo = new Ps5Nativo({
   pedirPonte: () => controle.pedir('ps5-ponte', undefined, undefined, undefined, 25_000),
   compartilhar: (fonte) => compartilharPs5(fonte),
   pararTela: (key) => stopShare(key, true),
-  // vibração: para quem mandou o último estado do controle nessa tela (como a do ajudante)
-  onTremor: (g, p) => {
+  // vibração e gatilhos adaptativos: para quem mandou o último estado do controle nessa tela (como a
+  // do ajudante); se quem joga é este PC (o PS5 é daqui), direto no controle daqui
+  onTremor: (g, p, h) => {
+    if (controle.jogo?.key === ps5Nativo.key) return void padVirtual.tremor(g, p, h);
     const u = controle.ultimoPad;
-    if (u && u.key === ps5Nativo.key) controle.onTremor?.(u, g, p);
+    if (u && u.key === ps5Nativo.key) controle.onTremor?.(u, g, p, h);
+  },
+  onGatilhos: (e, d) => {
+    diagJogo.evento('ps5 direto: gatilhos adaptativos', { e: e[0], d: d[0] });
+    if (controle.jogo?.key === ps5Nativo.key) return void touchpad.gatilhos(e, d);
+    const u = controle.ultimoPad;
+    if (!u || u.key !== ps5Nativo.key || !jogandoAqui.get(u.key)?.has(u.deId)) return;
+    controle.emitir('controle-volta', { key: u.key, para: u.deId, ev: { t: 'gatilhos', e, d } });
   },
   onEvento: (texto, dados) => diagJogo.evento(texto, dados),
   toast: (...a) => toast(...a),
@@ -4589,6 +4603,7 @@ controle.paraPad = (ev) => {
 // Touchpad do DualSense (ps5-touchpad.js): no modo jogo numa tela de PS5, no PC. Com a permissão dada
 // uma vez, volta sozinho; antes disso, pelo botão nas opções do modo jogo.
 const touchpad = new Ps5Touchpad({ pad: padVirtual, onMudou: () => atualizarBotaoTouchpad() });
+padVirtual.hid = touchpad; // com o DualSense aberto pelo WebHID, a vibração vai direto nele
 function atualizarBotaoTouchpad() {
   const b = $('#jogo-touchpad');
   b.hidden = !touchpad.ativo || !temTouchpadHid();
@@ -4665,7 +4680,7 @@ function tutorialDoPs5(key) {
     return false;
   }
   const modo = isTouch ? 'toque' : 'pc';
-  if (tutorialControle.ativo || (!isTouch && fisico.pad())) return false;
+  if (tutorialControle.ativo || (!isTouch && (fisico.pad() || touchpad.ligado))) return false;
   // um instante para a tela cheia e o controle de toque montarem
   setTimeout(() => {
     if (controle.jogo?.key === key) tutorialControle.abrir(modo);

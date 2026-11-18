@@ -757,6 +757,72 @@ static void som_cb(uint8_t *buf, size_t tam, void *user)
 	enviar_binario(2, 0, 0, ++seqSom, buf, tam);
 }
 
+// Vibração háptica do DualSense: com a sessão como DualSense (enable_dualsense), o PS5 manda a
+// vibração como som (PCM 16 bits, 2 canais, 3 kHz, um pacote a cada ~10 ms) em vez do tremor simples.
+// Como o chiaki-ng faz para controles sem alto-falante háptico: a força média de cada canal vira a
+// força de um motor (esquerdo: o forte; direito: o fraco). Uma linha (hapticos_thread) junta a cada
+// HAPTICO_MS e manda "tremor" com h:true só quando muda — e 0 quando os pacotes param.
+#define HAPTICO_MS 30
+#define HAPTICO_MIN 100 // abaixo disso é ruído (o HAPTIC_RUMBLE_MIN_STRENGTH do chiaki-ng)
+static CRITICAL_SECTION travaHaptico;
+static uint64_t hapticoSomaE, hapticoSomaD;
+static uint32_t hapticoPacotes;
+static volatile LONG hapticoRodando;
+static HANDLE linhaHaptico;
+
+static void haptico_cb(uint8_t *buf, size_t tam, void *user)
+{
+	(void)user;
+	size_t n = tam / 4;
+	if(!n) return;
+	uint64_t e = 0, d = 0;
+	for(size_t i = 0; i < n; i++)
+	{
+		int16_t a, b;
+		memcpy(&a, buf + i * 4, 2);
+		memcpy(&b, buf + i * 4 + 2, 2);
+		e += (uint32_t)(a < 0 ? -(int32_t)a : a) * 2;
+		d += (uint32_t)(b < 0 ? -(int32_t)b : b) * 2;
+	}
+	e /= n;
+	d /= n;
+	EnterCriticalSection(&travaHaptico);
+	hapticoSomaE += e < HAPTICO_MIN ? 0 : e;
+	hapticoSomaD += d < HAPTICO_MIN ? 0 : d;
+	hapticoPacotes++;
+	LeaveCriticalSection(&travaHaptico);
+}
+
+static unsigned __stdcall hapticos_thread(void *arg)
+{
+	(void)arg;
+	int antesE = 0, antesD = 0; // em centésimos: só manda quando muda
+	const uint32_t porJanela = HAPTICO_MS / 10;
+	while(hapticoRodando)
+	{
+		Sleep(HAPTICO_MS);
+		EnterCriticalSection(&travaHaptico);
+		uint64_t e = hapticoSomaE, d = hapticoSomaD;
+		uint32_t n = hapticoPacotes;
+		hapticoSomaE = hapticoSomaD = 0;
+		hapticoPacotes = 0;
+		LeaveCriticalSection(&travaHaptico);
+		// pacote que não veio conta como silêncio (senão o último tremor ficava ligado)
+		uint32_t div = n > porJanela ? n : porJanela;
+		double fe = (double)(e / div) / 65535.0, fd = (double)(d / div) / 65535.0;
+		if(fe > 1) fe = 1;
+		if(fd > 1) fd = 1;
+		int ce = (int)(fe * 100 + 0.5), cd = (int)(fd * 100 + 0.5);
+		if(ce == antesE && cd == antesD) continue;
+		antesE = ce;
+		antesD = cd;
+		char json[96];
+		snprintf(json, sizeof(json), "{\"tipo\":\"tremor\",\"g\":%.2f,\"p\":%.2f,\"h\":true}", ce / 100.0, cd / 100.0);
+		enviar_texto(json);
+	}
+	return 0;
+}
+
 static void evento_cb(ChiakiEvent *e, void *user)
 {
 	ChiakiSession *s = (ChiakiSession *)user;
@@ -783,6 +849,22 @@ static void evento_cb(ChiakiEvent *e, void *user)
 			snprintf(json, sizeof(json), "{\"tipo\":\"tremor\",\"g\":%.3f,\"p\":%.3f}", e->rumble.left / 255.0, e->rumble.right / 255.0);
 			enviar_texto(json);
 			break;
+		case CHIAKI_EVENT_TRIGGER_EFFECTS:
+		{
+			// gatilhos adaptativos: modo + 10 parâmetros de cada um, em hex (o DualSense de quem joga
+			// recebe como veio, ver ps5-touchpad.js)
+			char he[23], hd[23];
+			snprintf(he, 3, "%02x", e->trigger_effects.type_left);
+			snprintf(hd, 3, "%02x", e->trigger_effects.type_right);
+			for(int i = 0; i < 10; i++)
+			{
+				snprintf(he + 2 + i * 2, 3, "%02x", e->trigger_effects.left[i]);
+				snprintf(hd + 2 + i * 2, 3, "%02x", e->trigger_effects.right[i]);
+			}
+			snprintf(json, sizeof(json), "{\"tipo\":\"gatilhos\",\"e\":\"%s\",\"d\":\"%s\"}", he, hd);
+			enviar_texto(json);
+			break;
+		}
 		case CHIAKI_EVENT_QUIT:
 		{
 			char esc[300];
@@ -866,7 +948,9 @@ static unsigned __stdcall rodar_sessao(void *arg)
 	ci.video_profile.codec = p->h265 && ci.ps5 ? CHIAKI_CODEC_H265 : CHIAKI_CODEC_H264;
 	ci.video_profile_auto_downgrade = true;
 	ci.enable_keyboard = false;
-	ci.enable_dualsense = false; // tremor simples (RUMBLE), não a vibração em som do DualSense
+	// como DualSense: o PS5 passa a mandar os gatilhos adaptativos (TRIGGER_EFFECTS) e a vibração em
+	// som (haptico_cb); jogos de PS4 continuam no tremor simples (RUMBLE)
+	ci.enable_dualsense = true;
 	ci.audio_video_disabled = 0;
 	ci.auto_regist = false;
 	ci.holepunch_session = NULL;
@@ -887,6 +971,16 @@ static unsigned __stdcall rodar_sessao(void *arg)
 	som.header_cb = som_cab_cb;
 	som.frame_cb = som_cb;
 	chiaki_session_set_audio_sink(s, &som);
+	ChiakiAudioSink haptico;
+	memset(&haptico, 0, sizeof(haptico));
+	haptico.frame_cb = haptico_cb;
+	chiaki_session_set_haptics_sink(s, &haptico);
+	static bool travaHapticoIniciada = false;
+	if(!travaHapticoIniciada) { InitializeCriticalSection(&travaHaptico); travaHapticoIniciada = true; }
+	hapticoSomaE = hapticoSomaD = 0;
+	hapticoPacotes = 0;
+	InterlockedExchange(&hapticoRodando, 1);
+	linhaHaptico = (HANDLE)_beginthreadex(NULL, 0, hapticos_thread, NULL, 0, NULL);
 	chiaki_controller_state_set_idle(&estadoPad);
 	EnterCriticalSection(&travaSessao);
 	sessao = s;
@@ -911,6 +1005,13 @@ static unsigned __stdcall rodar_sessao(void *arg)
 	free(s);
 	registrar_log("sessao encerrada");
 fim:
+	if(linhaHaptico)
+	{
+		InterlockedExchange(&hapticoRodando, 0);
+		WaitForSingleObject(linhaHaptico, INFINITE);
+		CloseHandle(linhaHaptico);
+		linhaHaptico = NULL;
+	}
 	EnterCriticalSection(&travaEnvio);
 	free(cabecalho);
 	cabecalho = NULL;

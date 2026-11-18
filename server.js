@@ -964,7 +964,13 @@ function voltaDoControle(raw) {
   // o jogo do PS5 vibrou o controle virtual: motor grande (g) e pequeno (p), de 0 a 1
   if (e.t === 'tremor') {
     const f = (v) => Math.round(Math.min(1, Math.max(0, Number(v) || 0)) * 100) / 100;
-    return { t: 'tremor', g: f(e.g), p: f(e.p) };
+    return { t: 'tremor', g: f(e.g), p: f(e.p), ...(e.h === true ? { h: true } : {}) };
+  }
+  // o jogo do PS5 mudou os gatilhos adaptativos: 11 bytes por gatilho (modo + parâmetros), como o
+  // DualSense recebe (ver ps5-touchpad.js); e: L2, d: R2
+  if (e.t === 'gatilhos') {
+    const bytes = (v) => (Array.isArray(v) ? v.slice(0, 11).map((n) => Math.min(255, Math.max(0, Number(n) | 0))) : [0x05]);
+    return { t: 'gatilhos', e: bytes(e.e), d: bytes(e.d) };
   }
   // modo jogo: como a tela está saindo do PC de quem compartilha (o relatório de quem joga)
   if (e.t === 'jogo-envio') {
@@ -1901,7 +1907,7 @@ function attachSockets(io) {
       const agora = Date.now();
       if (!para || para === user || !(agora - (para.controlou?.get(m.key) ?? 0) < 10 * 60_000)) return;
       // a vibração do PS5 tem a conta dela (até 25 por segundo, ver TREMOR_MS no main.js)
-      const tremor = obj(m.ev).t === 'tremor';
+      const tremor = ['tremor', 'gatilhos'].includes(obj(m.ev).t);
       if (agora - voltaJanela > 1000) { voltaJanela = agora; voltaConta = 0; tremorConta = 0; }
       if (tremor ? ++tremorConta > 30 : ++voltaConta > 10) return;
       const ev = voltaDoControle(m.ev);

@@ -665,6 +665,13 @@ const FASES = { procurando: 'procurando o PS5 na rede…', acordando: 'acordando
 const ERROS_REGISTRO = { conta: 'o ID da conta PSN não está certo (8 bytes em base64, como o chiaki-ng mostra)', pin: 'o PIN tem 8 números', ocupado: 'já tem um registro em andamento', falhou: 'o PS5 recusou (PIN vencido ou errado? o IP está certo?)', cancelado: 'cancelado' };
 
 export class Ps5Nativo {
+  // "05000000…" (22 dígitos hex: modo + 10 parâmetros) → [5, 0, 0, …]; inválido: solto ([0x05])
+  static bytesGatilho(hex) {
+    const s = String(hex ?? '');
+    if (!/^[0-9a-f]{2,22}$/i.test(s) || s.length % 2) return [0x05];
+    return s.match(/../g).map((x) => parseInt(x, 16));
+  }
+
   // pedirPonte(): pede ao ajudante a porta e o token da ponte (via extensão)
   // compartilhar(fonte): põe a fonte numa tela da sala; devolve a chave ou null
   // pararTela(): tira a tela do PS5 da sala; onTremor(g, p); onEvento(texto, dados): relatório
@@ -672,8 +679,8 @@ export class Ps5Nativo {
   // losslessTodos: { ligado(), alternar() } — o Lossless deste PC para todos, pela câmera do OBS
   // somPc: { ligado(), alternar(), abafar(), alternarAbafar() } — o som do PC (Voz Universal) junto com o do PS5
   // dublagem: { ligada(), estado(), resumo(), ultimaFala(), alternar() } — o Voz Universal lendo a imagem do PS5 (voz-universal.js)
-  constructor({ pedirPonte, compartilhar, pararTela, onTremor, onEvento, toast, aoAbrir, aoFechar, jogarComLossless, losslessTodos, somPc, volume, dublagem }) {
-    Object.assign(this, { pedirPonte, compartilhar, pararTela, onTremor, onEvento, toast, aoAbrir, aoFechar, jogarComLossless, losslessTodos, somPc, volume, dublagem });
+  constructor({ pedirPonte, compartilhar, pararTela, onTremor, onGatilhos, onEvento, toast, aoAbrir, aoFechar, jogarComLossless, losslessTodos, somPc, volume, dublagem }) {
+    Object.assign(this, { pedirPonte, compartilhar, pararTela, onTremor, onGatilhos, onEvento, toast, aoAbrir, aoFechar, jogarComLossless, losslessTodos, somPc, volume, dublagem });
     this.ws = null;
     this.consoles = [];
     this.achados = null;
@@ -816,7 +823,12 @@ export class Ps5Nativo {
         this.onEvento?.('ps5 direto: som', m);
         break;
       case 'tremor':
-        this.onTremor?.(Number(m.g) || 0, Number(m.p) || 0);
+        // h: veio da vibração háptica do DualSense (a ponte converte em força dos motores)
+        this.onTremor?.(Number(m.g) || 0, Number(m.p) || 0, !!m.h);
+        break;
+      case 'gatilhos':
+        // gatilhos adaptativos: o modo e os 10 parâmetros de cada um, em hexadecimal
+        this.onGatilhos?.(Ps5Nativo.bytesGatilho(m.e), Ps5Nativo.bytesGatilho(m.d));
         break;
       case 'pin':
         this.pedirPinDeLogin(!!m.errado);
