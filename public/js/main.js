@@ -4547,6 +4547,7 @@ $('#focus-jogo-op').addEventListener('click', (e) => {
   // o volume do PS5 só aparece para quem tem o PS5 numa tela deste PC
   $('#jogo-ps5-vol-row').hidden = ![...(self()?.shares.values() || [])].some((sh) => sh.ps5 && sh.escuta);
   mudarVolumePs5(volumePs5);
+  atualizarBotaoTouchpad();
 });
 $('#jogo-ps5-vol').addEventListener('input', (e) => mudarVolumePs5(e.target.value));
 // sensibilidade do mouse num jogo de controle (teclado-pad.js), guardada neste aparelho
@@ -4606,7 +4607,10 @@ const touchpad = new Ps5Touchpad({ pad: padVirtual, onMudou: () => atualizarBota
 padVirtual.hid = touchpad; // com o DualSense aberto pelo WebHID, a vibração vai direto nele
 function atualizarBotaoTouchpad() {
   const b = $('#jogo-touchpad');
-  b.hidden = !touchpad.ativo || !temTouchpadHid();
+  // no modo jogo do PS5, e também só assistindo uma tela de PS5 (dá para ligar antes de jogar)
+  const t = state.focus?.kind === 'share' ? acharTela(state.focus.key) : null;
+  const telaPs5 = !isTouch && !!t && (!!t.share?.ps5 || layoutDoTitulo(t.share?.titulo) === 'ps5');
+  b.hidden = !temTouchpadHid() || !(touchpad.ativo || telaPs5);
   b.textContent = touchpad.ligado ? 'DualSense ligado ✓ (gatilhos, vibração e touchpad)' : 'Usar o DualSense (gatilhos, vibração e touchpad)';
   b.disabled = touchpad.ligado;
 }
