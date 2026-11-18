@@ -920,6 +920,12 @@ function eventoSemMarca(e) {
     // DualSense, [x0, y0, x1, y1] de 0 a 1 (-1: sem dedo), só de quem tem um (ps5-touchpad.js)
     const pad = { t: 'pad', b: n(e.b, 0, 0x3ffff) | 0, lx: r(e.lx, -1), ly: r(e.ly, -1), rx: r(e.rx, -1), ry: r(e.ry, -1), lt: r(e.lt, 0), rt: r(e.rt, 0) };
     if (Array.isArray(e.tp) && e.tp.length === 4) pad.tp = e.tp.map((v) => r(v, -1));
+    // m: o movimento do controle (movimento.js) — giroscópio em rad/s (±30), acelerômetro em g (±5),
+    // orientação (quaternion); só o PS5 direto usa
+    if (Array.isArray(e.m) && e.m.length === 10) {
+      const lim = [30, 30, 30, 5, 5, 5, 1, 1, 1, 1];
+      pad.m = e.m.map((v, i) => Math.round(n(v, -lim[i], lim[i]) * 10000) / 10000);
+    }
     return pad;
   }
   if (e.t === 'wheel') return { t: 'wheel', x: n(e.x, 0, 1), y: n(e.y, 0, 1), dx: n(e.dx, -3000, 3000), dy: n(e.dy, -3000, 3000), mod };

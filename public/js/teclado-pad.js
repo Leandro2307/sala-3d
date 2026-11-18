@@ -11,9 +11,16 @@
 //   Alt segurado: o mouse vira um dedo no touchpad (encosta no meio ao descer o Alt, sai ao soltar);
 //   Alt + clique esquerdo afunda o touchpad. O touchpad só chega no PS5 direto (a ponte); o controle
 //   de Xbox (emulador, chiaki-ng) não tem.
+//   G (só no PS5): liga/desliga a inclinação — o mouse inclina o controle em vez de mexer a câmera,
+//   no lugar do giroscópio do DualSense (a nave do Astro Bot se pilota inclinando o controle). Mouse
+//   para os lados: o controle tomba para o lado; para frente/trás: a frente desce/sobe. A inclinação
+//   fica onde o mouse deixou (até GIRO_MAX); G de novo: o controle volta deitado e o mouse, para a
+//   câmera. Também só chega no PS5 direto (movimento.js, o campo m do controle virtual).
 //
 // Tecla fora da lista continua indo como tecla (F11 do emulador, por exemplo). O mouse vai todo
 // para o controle.
+
+import { Fusao, inclinado } from './movimento.js';
 
 const BOTAO_TECLA = {
   Space: 0, Enter: 1, KeyF: 3, ShiftLeft: 4, ShiftRight: 4, ControlLeft: 5, ControlRight: 5,
@@ -35,6 +42,12 @@ const TP_CLIQUE = 17;
 const ALT = new Set(['AltLeft', 'AltRight']);
 const STICK = { KeyW: ['ly', -1], KeyS: ['ly', 1], KeyA: ['lx', -1], KeyD: ['lx', 1] };
 
+// inclinação pelo mouse (G): graus por pixel (× a sensibilidade das opções), o máximo para cada lado
+// e a velocidade de volta ao deitado (graus por segundo) quando desliga
+const GIRO_GRAUS_PX = 0.12;
+const GIRO_MAX = 75;
+const GIRO_VOLTA = 300;
+
 // O mouse vira o analógico pela velocidade: soma o que andou na última JANELA_MS e, a VEL_CHEIA
 // px/ms, o analógico vai até o fim. Raiz na curva: mirar devagar ainda mexe a câmera.
 // 24 ms (eram 40): o analógico parava/arrancava 40 ms depois do mouse. 24 ainda pega 3 relatórios de
@@ -48,21 +61,29 @@ const MIN_MS = 60;
 
 export const DICA_TECLADO = {
   switch: 'WASD anda, o mouse mexe a câmera. Clique esquerdo B · direito A · roda para baixo Y · para cima X (trava até o próximo dente) · Shift L · Ctrl R · Q ZL · E ZR · Tab − · Esc + · H Home · setas: direcional.',
-  ps5: 'WASD anda, o mouse mexe a câmera. Clique esquerdo ✕ · direito ○ · roda para baixo □ · para cima △ (trava até o próximo dente) · Shift L1 · Ctrl R1 · Q L2 · E R2 · Alt + mouse: touchpad (Alt + clique afunda) · Tab Create · Esc Options · H PS · setas: direcional.',
+  ps5: 'WASD anda, o mouse mexe a câmera. Clique esquerdo ✕ · direito ○ · roda para baixo □ · para cima △ (trava até o próximo dente) · Shift L1 · Ctrl R1 · Q L2 · E R2 · Alt + mouse: touchpad (Alt + clique afunda) · G: o mouse inclina o controle (giroscópio) · Tab Create · Esc Options · H PS · setas: direcional.',
 };
 
 export class TecladoPad {
   // sens(): a sensibilidade do mouse escolhida nas opções do modo jogo (1 = VEL_CHEIA)
-  constructor({ pad, sens = () => 1 }) {
+  // aviso(texto): um recado curto para quem joga (ligou/desligou a inclinação)
+  constructor({ pad, sens = () => 1, aviso = () => {} }) {
     this.pad = pad;
     this.sens = sens;
+    this.aviso = aviso;
     this.ativo = false;
+    this.layout = null;
     this.zerar();
   }
 
   zerar() {
     clearInterval(this.tick);
     this.tick = 0;
+    clearInterval(this.giroTick);
+    this.giroTick = 0;
+    if (this.giro) this.pad.movimento?.('teclado', null);
+    this.giro = null; // a inclinação pelo mouse (G): { ligado, r, p, dr, dp, t, fusao }
+    this.gSegurado = false;
     for (const t of this.timers?.values() || []) clearTimeout(t);
     this.rodaUlt = 0; // quando veio o último dente da roda
     this.rodaB = 0; // o bit do botão que a roda está travando agora
@@ -79,7 +100,9 @@ export class TecladoPad {
     this.ry = 0;
   }
 
-  ligar() {
+  // layout: 'ps5' ou 'switch' (o G da inclinação só vale no PS5; no Switch ele vai como tecla)
+  ligar(layout = null) {
+    this.layout = layout;
     if (this.ativo) return;
     this.zerar();
     this.ativo = true;
@@ -132,6 +155,11 @@ export class TecladoPad {
     const desce = ev.a === 'down';
     if (ALT.has(ev.code)) {
       this.alt(desce);
+      return true;
+    }
+    if (ev.code === 'KeyG' && this.layout === 'ps5') {
+      if (desce && !this.gSegurado) this.alternarGiro(); // a tecla segurada repete o "down"
+      this.gSegurado = desce;
       return true;
     }
     const s = STICK[ev.code];
@@ -209,6 +237,13 @@ export class TecladoPad {
       this.pad.touchpad([this.dedo.x, this.dedo.y, -1, -1]);
       return;
     }
+    if (this.giro?.ligado) {
+      // para a direita tomba para a direita (rolagem negativa); para frente, a frente desce
+      const k = GIRO_GRAUS_PX * (Number(this.sens()) || 1);
+      this.giro.dr -= dx * k;
+      this.giro.dp += dy * k;
+      return;
+    }
     this.mov.push([performance.now(), dx, dy]);
     if (!this.tick) this.tick = setInterval(() => this.medir(), TICK_MS);
     this.medir();
@@ -232,6 +267,57 @@ export class TecladoPad {
       this.tick = 0;
     }
     this.enviar();
+  }
+
+  // G: liga a inclinação (o mouse sai da câmera) ou desliga (o controle volta deitado aos poucos)
+  alternarGiro() {
+    if (this.giro?.ligado) {
+      this.giro.ligado = false;
+      this.aviso('Inclinação desligada: o controle volta deitado e o mouse volta para a câmera.');
+      return;
+    }
+    if (!this.giro) this.giro = { r: 0, p: 0, dr: 0, dp: 0, fusao: new Fusao() };
+    this.giro.ligado = true;
+    this.giro.t = performance.now();
+    this.mov = [];
+    this.rx = 0;
+    this.ry = 0;
+    this.enviar();
+    if (!this.giroTick) this.giroTick = setInterval(() => this.passoGiro(), TICK_MS);
+    this.aviso('Inclinação ligada: o mouse inclina o controle, como o giroscópio do DualSense (só no PS5 direto). G de novo volta para a câmera.');
+  }
+
+  // a cada TICK_MS: a inclinação nova → o que o giroscópio e o acelerômetro mediriam → a mesma fusão
+  // do DualSense de verdade (movimento.js), para o PS5 ver um controle coerente
+  passoGiro() {
+    const gi = this.giro;
+    if (!gi) return;
+    const agora = performance.now();
+    const dt = Math.min(0.05, Math.max(0.001, (agora - gi.t) / 1000));
+    gi.t = agora;
+    const preso = (v) => Math.max(-GIRO_MAX, Math.min(GIRO_MAX, v));
+    let r = preso(gi.r + gi.dr);
+    let p = preso(gi.p + gi.dp);
+    gi.dr = 0;
+    gi.dp = 0;
+    if (!gi.ligado) {
+      const volta = GIRO_VOLTA * dt;
+      r = Math.sign(r) * Math.max(0, Math.abs(r) - volta);
+      p = Math.sign(p) * Math.max(0, Math.abs(p) - volta);
+    }
+    const { g, a } = inclinado(r, p, (r - gi.r) / dt, (p - gi.p) / dt);
+    gi.r = r;
+    gi.p = p;
+    gi.fusao.passo(g, a, dt);
+    if (!gi.ligado && !r && !p) {
+      // voltou deitado: para de mandar o movimento (sem ele, a ponte deixa deitado e parado)
+      clearInterval(this.giroTick);
+      this.giroTick = 0;
+      this.giro = null;
+      this.pad.movimento?.('teclado', null);
+      return;
+    }
+    this.pad.movimento?.('teclado', gi.fusao.estado());
   }
 
   enviar() {

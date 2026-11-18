@@ -2,7 +2,9 @@
 // vez: depois ele volta sozinho). Começou só pelo touchpad (o Gamepad do navegador dá o clique, mas
 // não onde o dedo está) e hoje é o controle inteiro, nas duas direções:
 //   - entrada: botões, analógicos, gatilhos e os dois dedos do touchpad vão no estado do controle
-//     virtual (pad-virtual.js, fonte 'hid', e o campo tp), até a ponte do PS5;
+//     virtual (pad-virtual.js, fonte 'hid', e o campo tp), até a ponte do PS5; o giroscópio e o
+//     acelerômetro viram o movimento do controle (movimento.js, o campo m): inclinar o DualSense
+//     aqui inclina o controle no PS5;
 //   - saída: a vibração (os dois motores) e os gatilhos adaptativos que o jogo do PS5 manda.
 // Por que tudo por aqui: no Bluetooth, ler o relatório de recurso 0x05 põe o controle no relatório
 // completo (0x31, o único com o touchpad), e aí o Chrome no Windows deixa de ver o controle na
@@ -13,6 +15,8 @@
 // byte depois do id: no cabo, id 0x01; no Bluetooth, id 0x31 com um byte a mais na frente.
 //   0-3: analógicos (lx, ly, rx, ry; 128 no meio)   4-5: L2, R2 (0-255)
 //   7: direcional (4 bits) e □ ✕ ○ △   8: L1 R1 L2 R2 Create Options L3 R3   9: PS, touchpad, mudo
+//   15-20: giroscópio x, y, z (16 bits com sinal)   21-26: acelerômetro x, y, z   27-30: relógio dos
+//   sensores (32 bits, em terços de µs)
 //   32-35 e 36-39: os dois dedos — byte 0: bit 7 = sem dedo; x 12 bits (0-1919), y 12 bits (0-1079)
 // O relatório simples do Bluetooth (0x01 curto, antes do 0x05) tem outra ordem e não tem os dedos.
 //
@@ -21,6 +25,8 @@
 // 21-31: efeito do L2, 38: 0x04 vibração dos controles mais novos. No cabo vai como 0x02; no
 // Bluetooth como 0x31, com sequência, a marca 0x10 e o CRC32 no fim.
 
+import { Fusao } from './movimento.js';
+
 const SONY = 0x054c;
 const DUALSENSE = [0x0ce6, 0x0df2]; // DualSense e DualSense Edge
 const FILTROS = DUALSENSE.map((productId) => ({ vendorId: SONY, productId }));
@@ -28,6 +34,31 @@ const LARGURA = 1919;
 const ALTURA = 1079;
 const ZONA = 0.08; // zona morta dos analógicos (como o pad-virtual faz com o Gamepad)
 const SOLTO = [0x05]; // efeito de gatilho: solto (sem resistência)
+const RAD = Math.PI / 180;
+
+// Calibração dos sensores, no relatório de recurso 0x05 (como o hid-playstation do Linux lê): quanto
+// vale cada passo do giroscópio (°/s) e o zero e o passo do acelerômetro (g). O zero do giroscópio o
+// próprio controle já desconta. Sem calibração, ou com números sem sentido, os valores típicos.
+const PADRAO = { g: [1 / 16, 1 / 16, 1 / 16], az: [0, 0, 0], a: [1 / 8192, 1 / 8192, 1 / 8192] };
+export function calibracao(dv) {
+  if (!dv?.byteLength) return PADRAO;
+  // o primeiro byte pode ser o id do relatório (0x05) ou já o primeiro dado
+  for (const o of dv.getUint8(0) === 0x05 ? [1, 0] : [0]) {
+    if (dv.byteLength < o + 34) continue;
+    const s = (i) => dv.getInt16(o + i, true);
+    const vel2 = s(18) + s(20); // as velocidades de referência (+ e −)
+    const g = [0, 1, 2].map((k) => {
+      const zero = s(k * 2);
+      const passos = Math.abs(s(6 + k * 4) - zero) + Math.abs(s(8 + k * 4) - zero);
+      return passos ? vel2 / passos : 0;
+    });
+    const faixa = [0, 1, 2].map((k) => s(22 + k * 4) - s(24 + k * 4)); // de −1 g a +1 g
+    const az = [0, 1, 2].map((k) => s(22 + k * 4) - faixa[k] / 2);
+    const ok = g.every((x) => x > 1 / 32 && x < 1 / 8) && faixa.every((x) => x > 8000 && x < 33000) && az.every((x) => Math.abs(x) < 3000);
+    if (ok) return { g, az, a: faixa.map((x) => 2 / x) };
+  }
+  return PADRAO;
+}
 
 export const temTouchpadHid = () => typeof navigator !== 'undefined' && !!navigator.hid?.requestDevice;
 const eDualSense = (d) => d.vendorId === SONY && DUALSENSE.includes(d.productId);
@@ -63,6 +94,10 @@ export class Ps5Touchpad {
     this.saida = { forte: 0, fraco: 0, e: SOLTO, d: SOLTO };
     this.enviando = false;
     this.pendente = false;
+    this.calib = PADRAO;
+    this.fusao = new Fusao(); // giroscópio + acelerômetro → a orientação (movimento.js)
+    this.tsAntes = null; // o relógio dos sensores no relatório anterior
+    this.tAntes = 0;
     this.ler = (e) => this.relatorio(e);
     navigator.hid?.addEventListener?.('disconnect', (e) => {
       if (e.device !== this.dev) return;
@@ -90,6 +125,12 @@ export class Ps5Touchpad {
 
   // modo jogo no PS5: volta sozinho no controle que já tinha permissão
   async ligar() {
+    if (!this.ativo) {
+      // a orientação recomeça a cada modo jogo (acha a gravidade de novo nas primeiras amostras)
+      this.fusao.zerar();
+      this.tsAntes = null;
+      this.tAntes = 0;
+    }
     this.ativo = true;
     if (this.dev || !temTouchpadHid()) return;
     try {
@@ -112,8 +153,11 @@ export class Ps5Touchpad {
   async abrir(d) {
     if (this.dev === d) return;
     if (!d.opened) await d.open();
-    // Bluetooth: ler o 0x05 (calibração) põe o controle no relatório completo, com o touchpad
-    try { await d.receiveFeatureReport(0x05); } catch { /* no cabo não precisa */ }
+    // 0x05: a calibração dos sensores. No Bluetooth, lê-lo também põe o controle no relatório
+    // completo, com o touchpad e os sensores
+    let cal = null;
+    try { cal = await d.receiveFeatureReport(0x05); } catch { /* fica a calibração típica */ }
+    this.calib = calibracao(cal);
     d.addEventListener('inputreport', this.ler);
     this.dev = d;
     this.onMudou();
@@ -129,7 +173,8 @@ export class Ps5Touchpad {
     else return;
     if (!this.ativo) return;
     this.controle(v, o, simples);
-    if (simples) return; // o relatório simples do Bluetooth não tem o touchpad
+    if (simples) return; // o relatório simples do Bluetooth não tem o touchpad nem os sensores
+    this.movimento(v, o, e.timeStamp);
     const dedo = (i) => {
       if (v.getUint8(o + i) & 0x80) return [-1, -1];
       const b1 = v.getUint8(o + i + 1);
@@ -175,6 +220,23 @@ export class Ps5Touchpad {
     if (chave === this.ultimoEstado) return;
     this.ultimoEstado = chave;
     this.pad.definir('hid', estado);
+  }
+
+  // giroscópio e acelerômetro → a orientação (a cada relatório, com o relógio do controle) → o campo m
+  // do controle virtual. O pad-virtual só manda a foto mais nova, no máximo uma a cada 12 ms.
+  movimento(v, o, t) {
+    const c = this.calib;
+    const s = (i) => v.getInt16(o + i, true);
+    const g = [0, 1, 2].map((k) => s(15 + k * 2) * c.g[k] * RAD);
+    const a = [0, 1, 2].map((k) => (s(21 + k * 2) - c.az[k]) * c.a[k]);
+    const ts = v.getUint32(o + 27, true);
+    let dt = this.tsAntes === null ? 0 : ((ts - this.tsAntes) >>> 0) / 3e6;
+    // relógio dos sensores parado ou pulando: o do navegador
+    if (!(dt > 0 && dt < 0.1)) dt = this.tAntes ? Math.min(0.1, Math.max(0, (t - this.tAntes) / 1000)) : 0;
+    this.tsAntes = ts;
+    this.tAntes = t;
+    this.fusao.passo(g, a, dt);
+    this.pad.movimento('hid', this.fusao.estado());
   }
 
   // ------------------------------------------------------------ saída: vibração e gatilhos

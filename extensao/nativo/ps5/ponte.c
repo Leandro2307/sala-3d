@@ -40,7 +40,7 @@
 #include <chiaki/base64.h>
 #include <chiaki/controller.h>
 
-#define VERSAO "1.0.0"
+#define VERSAO "1.1.0" // 1.1: movimento do controle (giroscópio, acelerômetro, orientação) no pad
 #define MAX_CONSOLES 8
 #define MAX_MSG (64 * 1024)
 
@@ -1095,6 +1095,24 @@ static void pad(const char *m)
 	st.right_y = EIXO(json_num(m, "ry", 0));
 	st.l2_state = GATILHO(lt);
 	st.r2_state = GATILHO(rt);
+	// movimento (movimento.js de quem joga: o DualSense pelo WebHID ou o mouse inclinando o controle):
+	// giroscópio em rad/s, acelerômetro em g e a orientação já pronta — a fusão dos sensores roda lá,
+	// no ritmo do controle. Sem ele, fica o do set_idle: deitado e parado.
+	double ow = json_num(m, "ow", -9);
+	if(ow >= -1 && ow <= 1)
+	{
+		#define LIMITE(v, l) ((float)((v) < -(l) ? -(l) : (v) > (l) ? (l) : (v)))
+		st.gyro_x = LIMITE(json_num(m, "gx", 0), 30);
+		st.gyro_y = LIMITE(json_num(m, "gy", 0), 30);
+		st.gyro_z = LIMITE(json_num(m, "gz", 0), 30);
+		st.accel_x = LIMITE(json_num(m, "ax", 0), 5);
+		st.accel_y = LIMITE(json_num(m, "ay", 1), 5);
+		st.accel_z = LIMITE(json_num(m, "az", 0), 5);
+		st.orient_x = LIMITE(json_num(m, "ox", 0), 1);
+		st.orient_y = LIMITE(json_num(m, "oy", 0), 1);
+		st.orient_z = LIMITE(json_num(m, "oz", 0), 1);
+		st.orient_w = (float)ow;
+	}
 	// touchpad (DualSense de quem joga, pelo WebHID): t0x/t0y e t1x/t1y de 0 a 1, -1 sem dedo. O PS5
 	// segue cada dedo pelo id do toque: começa ao encostar, anda enquanto encostado, para ao soltar.
 	static ChiakiControllerState toque;

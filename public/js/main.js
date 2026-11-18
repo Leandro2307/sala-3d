@@ -4669,7 +4669,7 @@ document.addEventListener('pointerdown', (e) => {
 // Controle virtual (pad-virtual.js): no layout PS5 o toque e o controle de videogame viram um
 // controle de Xbox no PC de quem compartilha, em vez de teclado e mouse
 const padVirtual = new PadVirtual({ controle });
-const tecladoPad = new TecladoPad({ pad: padVirtual, sens: () => opcoesJogo.get('mouseSens') });
+const tecladoPad = new TecladoPad({ pad: padVirtual, sens: () => opcoesJogo.get('mouseSens'), aviso: (texto) => toast(texto, 'info', 5000) });
 // tremores que chegaram aqui (quem joga), para o relatório (ver receberVolta)
 const tremoresAqui = { n: 0, como: {}, primeiro: false, desde: 0 };
 padVirtual.onErroTremor = (erro) => diagJogo.evento('o controle não aceitou o tremor', { erro, ...padVirtual.comoVibra() });
@@ -4742,7 +4742,7 @@ controle.onJogo = (video, key) => {
   atualizarBotaoTouchpad();
   if (layoutPc && LAYOUTS[layoutPc]?.virtual) {
     padVirtual.acordar();
-    tecladoPad.ligar();
+    tecladoPad.ligar(layoutPc);
     if (DICA_TECLADO[layoutPc] && !tutorialDoPs5(key)) toast(`Teclado e mouse viram o controle. ${DICA_TECLADO[layoutPc]}`, 'info', 12000);
   } else tecladoPad.desligar();
   $('#jogo-tutorial').hidden = layoutPc !== 'ps5';

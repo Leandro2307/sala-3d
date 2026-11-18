@@ -154,9 +154,15 @@ const pad = {
     d.style.left = `${tp[0] * 100}%`;
     d.style.top = `${tp[1] * 100}%`;
   },
+  // inclinação pelo mouse (G): mostra o acelerômetro como os graus que o PS5 veria
+  movimento(_fonte, m) {
+    if (!m) return log('inclinação: deitado');
+    const graus = (v) => Math.round((Math.asin(Math.max(-1, Math.min(1, v))) * 180) / Math.PI);
+    $('#ultimo').textContent = `inclinado ${graus(m[3])}° para o lado, ${graus(-m[5])}° a frente`;
+  },
 };
-const tp = new TecladoPad({ pad });
-tp.ligar();
+const tp = new TecladoPad({ pad, aviso: log });
+tp.ligar('ps5');
 
 const area = $('#area');
 area.addEventListener('click', () => { if (!document.pointerLockElement) area.requestPointerLock(); });

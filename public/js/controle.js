@@ -31,6 +31,8 @@
 const MOD = (e) => (e.altKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.metaKey ? 4 : 0) | (e.shiftKey ? 8 : 0);
 // x1 e x2: os botões do lado do mouse (voltar e avançar) — antes iam como clique esquerdo
 const BOTAO = ['left', 'middle', 'right', 'x1', 'x2'];
+// o movimento do controle no pad (m): até onde o PS5 recebe (giroscópio ±30 rad/s, acelerômetro ±5 g)
+const LIM_MOV = [30, 30, 30, 5, 5, 5, 1, 1, 1, 1];
 // intervalo mínimo entre movimentos de mouse (ms). O servidor corta acima de 120 eventos/s.
 const MOVE_MS = 25;
 const ARRASTO_MS = 16;
@@ -71,6 +73,8 @@ export function eventoDeControle(e) {
     // DualSense, [x0, y0, x1, y1] de 0 a 1 (-1: sem dedo), só de quem tem um (ps5-touchpad.js)
     const pad = { t: 'pad', b: n(e.b, 0, 0x3ffff) | 0, lx: r(e.lx, -1), ly: r(e.ly, -1), rx: r(e.rx, -1), ry: r(e.ry, -1), lt: r(e.lt, 0), rt: r(e.rt, 0) };
     if (Array.isArray(e.tp) && e.tp.length === 4) pad.tp = e.tp.map((v) => r(v, -1));
+    // m: o movimento do controle (movimento.js) — giroscópio em rad/s, acelerômetro em g, orientação
+    if (Array.isArray(e.m) && e.m.length === 10) pad.m = e.m.map((v, i) => Math.round(n(v, -LIM_MOV[i], LIM_MOV[i]) * 10000) / 10000);
     return pad;
   } else if (e.t === 'wheel') ev = { t: 'wheel', x: n(e.x, 0, 1), y: n(e.y, 0, 1), dx: n(e.dx, -3000, 3000), dy: n(e.dy, -3000, 3000), mod };
   else if (e.t === 'tecla' && (e.a === 'down' || e.a === 'up')) {

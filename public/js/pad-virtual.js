@@ -12,6 +12,9 @@
 // ENVIO_MS (o último sempre sai). b: o bit i é o botão i do mapa padrão do navegador (0 ✕/A, 1 ○/B,
 // 2 □/X, 3 △/Y, 4 L1, 5 R1, 6 L2, 7 R2, 8 Create, 9 Options, 10 L3, 11 R3, 12-15 setas, 16 PS,
 // 17 clique do touchpad). tp: os dedos no touchpad do DualSense de quem tem um (ps5-touchpad.js).
+// m: o movimento do controle — giroscópio, acelerômetro e orientação (movimento.js), do DualSense de
+// verdade (fonte 'hid') ou do mouse inclinando o controle (fonte 'teclado', o G do teclado-pad.js).
+// Só o PS5 direto usa (a ponte); sem m, a ponte deixa o controle deitado e parado.
 // O "vivo" do modo jogo (controle.js) segura o estado no ajudante: sem notícia, ele solta tudo.
 //
 // Na volta, a vibração (tremor): o jogo manda o controle tremer, o ajudante 1.10+ fica sabendo e a
@@ -48,6 +51,7 @@ export class PadVirtual {
     this.tremorTimer = 0;
     this.tp = null; // [x0, y0, x1, y1] (de 0 a 1, -1 sem dedo) ou null: ninguém lendo o touchpad
     this.tpClique = false;
+    this.mov = { hid: null, teclado: null }; // o movimento de cada fonte (ver movimento())
     this.treino = null; // (estado) => …: tutorial aberto (tutorial-controle.js); nada vai para o PC
     this.hid = null; // o DualSense aberto pelo WebHID (ps5-touchpad.js): a vibração vai direto nele
     opcoesJogo.ouvir((k, v) => { if (k === 'vibrar' && !v) this.pararTremor(); });
@@ -74,10 +78,11 @@ export class PadVirtual {
     if (!this.key) return;
     // só solta se algo foi apertado: o "solto" mandado à toa criava um controle de Xbox no PC de lá
     // no fim de qualquer modo jogo, até no Minecraft
-    const apertado = this.enviado.b || EIXOS.some((k) => this.enviado[k]) || this.enviado.tp;
+    const apertado = this.enviado.b || EIXOS.some((k) => this.enviado[k]) || this.enviado.tp || this.enviado.m;
     this.fontes = this.neutras();
     this.tp = null;
     this.tpClique = false;
+    this.mov = { hid: null, teclado: null };
     if (apertado) this.enviar(true);
     this.key = null;
   }
@@ -138,7 +143,16 @@ export class PadVirtual {
 
   soltar(fonte) {
     this.fontes[fonte] = { ...NEUTRO };
+    if (fonte in this.mov) this.mov[fonte] = null;
     this.mudou();
+  }
+
+  // ------------------------------------------------------------ movimento (giroscópio do PS5 direto)
+  // m: [gx, gy, gz, ax, ay, az, ox, oy, oz, ow] (movimento.js), ou null: essa fonte parou. Vale o do
+  // DualSense; sem ele, o do mouse. O tutorial não precisa dele (e o DualSense manda ~250 por segundo).
+  movimento(fonte, m) {
+    this.mov[fonte] = m;
+    if (!this.treino) this.mudou();
   }
 
   // ------------------------------------------------------------ teclado e mouse do PC (teclado-pad.js)
@@ -255,6 +269,8 @@ export class PadVirtual {
     const e = { b: fs.reduce((b, f) => b | f.b, 0) | (this.tpClique ? 1 << 17 : 0) };
     for (const k of EIXOS) e[k] = fs.reduce((v, f) => (Math.abs(f[k]) > Math.abs(v) ? f[k] : v), 0);
     if (this.tp) e.tp = this.tp;
+    const m = this.mov.hid || this.mov.teclado;
+    if (m) e.m = m;
     return e;
   }
 
@@ -279,7 +295,8 @@ export class PadVirtual {
     if (!this.key) return;
     const e = this.treino ? { ...NEUTRO } : this.estado();
     const mesmoTp = String(e.tp ?? '') === String(this.enviado.tp ?? '');
-    if (!sempre && mesmoTp && e.b === this.enviado.b && EIXOS.every((k) => e[k] === this.enviado[k])) return;
+    const mesmoM = String(e.m ?? '') === String(this.enviado.m ?? '');
+    if (!sempre && mesmoTp && mesmoM && e.b === this.enviado.b && EIXOS.every((k) => e[k] === this.enviado[k])) return;
     this.enviado = e;
     this.ultimo = performance.now();
     this.controle.mandar(this.key, { t: 'pad', ...e });

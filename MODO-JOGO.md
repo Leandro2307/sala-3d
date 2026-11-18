@@ -995,3 +995,36 @@ entra numa tela.
 - Teste (scratchpad `dub/`, Chrome sem janela + Voz Universal na porta 8799): 180 quadros com a legenda
   desenhada num canvas → "Arthur: Precisamos sair daqui antes que eles voltem." lido e falado (Arthur ·
   Jason), a voz chegou na trilha (RMS 0,12) e o abafar desceu a 0,25 e voltou a 1.
+
+## Giroscópio do controle no PS5 direto (2026-11-18)
+
+Pedido do usuário (tela do Astro Bot pedindo para inclinar o controle e segurar R2, a nave que se pilota
+inclinando): "o giroscópio do controle, mas para PC". A libchiaki já tinha os campos (`gyro_*`, `accel_*`,
+`orient_*` no `ChiakiControllerState`); a ponte mandava sempre o `set_idle` (deitado e parado).
+
+- **`movimento.js`** (`Fusao`): fusão giroscópio + acelerômetro → orientação, copiada do `orientation.c` do
+  chiaki-ng (Madgwick, beta 20 nas 30 primeiras amostras e 0,05 depois, volta de −90° em x na saída).
+  Unidades do SDL: rad/s, g; x direita, y cima, z para quem segura. **Diferença**: lá o filtro de tremido
+  (fuzz) grava por cima do estado e engole parte de cada passo de rotação lenta (teste: 25° para frente
+  davam 15°); aqui a fusão anda no valor verdadeiro e o fuzz só alisa a saída. A fusão roda no navegador
+  de quem joga, no ritmo do controle, porque pela rede só vão fotos a cada 12 ms.
+- **DualSense de verdade** (`ps5-touchpad.js`, WebHID): bytes 15-20 giroscópio, 21-26 acelerômetro, 27-30
+  relógio dos sensores (terços de µs); calibração do relatório de recurso 0x05 como o hid-playstation do
+  Linux (com ou sem o id no 1º byte; números sem sentido → 16 passos por °/s e 8192 por g). Vai como
+  fonte `hid` do movimento.
+- **Sem DualSense, no PC** (`teclado-pad.js`): **G** liga/desliga a inclinação, e aí o mouse inclina o controle
+  em vez da câmera (0,12°/px × sensibilidade, até 75°; para os lados tomba, para frente a frente desce).
+  `inclinado()` gera o giroscópio e o acelerômetro coerentes e passa pela mesma `Fusao`. G de novo: volta
+  deitado a 300°/s e para de mandar. Só no layout `ps5` (`tecladoPad.ligar(layout)`); no Switch o G vai como tecla.
+- **Caminho**: `pad-virtual.js` `movimento(fonte, m)` → campo `m` do pad
+  `[gx, gy, gz, ax, ay, az, ox, oy, oz, ow]` (vale o `hid`; senão o `teclado`), entra na comparação de
+  "mudou" → `eventoDeControle` (controle.js e server.js: giroscópio ±30, acelerômetro ±5, quaternion ±1,
+  os limites do `feedback.c`) → `ps5-nativo.js` manda campos soltos `gx`…`ow` → **ponte 1.1.0** preenche
+  o estado (sem `ow` válido, fica o `set_idle`). O movimento conta para o `padSolto`: quem some com o
+  controle inclinado é solto pelo `vigiarPad`.
+- Testado aqui (scratchpad `teste-giro.mjs`): deitado = (0, 0, 0, 1); inclinar 30° de lado, 25° para frente
+  e 40°+20° pelo giroscópio sintético dá o mesmo que o acelerômetro converge 20 s depois, com o ângulo
+  certo; 30 s parado com ruído não anda; o G ponta a ponta (250 px → 30° para a direita, câmera parada,
+  volta e para de mandar, Switch ignora); calibração com e sem id. Ponte nova aberta numa pasta isolada:
+  aceita os pads com movimento e com valores absurdos (corta) e segue viva. **Não testado com o PS5**:
+  qual sinal cada jogo usa (orientação, acelerômetro ou giroscópio) e se o sentido do mouse agrada.
