@@ -193,7 +193,7 @@ namespace Sala3d
             new Thread(VigiarAtalho) { IsBackground = true }.Start();
             new Thread(VigiarJogo) { IsBackground = true }.Start();
             new Thread(VigiarWifi) { IsBackground = true }.Start();
-            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.20.0" } });
+            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.21.0" } });
             var json = new JavaScriptSerializer();
             string txt;
             while ((txt = Ler(entrada)) != null)
@@ -249,6 +249,7 @@ namespace Sala3d
             if (tipo == "jogos" || tipo == "jogo-abrir" || tipo == "jogo-fechar" || tipo == "obs") { PedidoJogo(m); return; }
             if (tipo == "ps5" || tipo == "pc-ponte") { PedidoPs5(S(m, "pid"), tipo); return; }
             if (tipo == "lossless") { PedidoLossless(S(m, "pid")); return; }
+            if (tipo == "voz") { PedidoVoz(S(m, "pid")); return; }
             if (tipo == "obs-ps5") { PedidoObsPs5(S(m, "pid"), S(m, "alvo")); return; }
             if (tipo == "parar") { lock (travaEntrada) { parado = true; SoltarTudo(); } return; }
             if (tipo == "soltar") { jogo = false; vivoVisto = false; cursorEnviado = null; SoltarTudo(); temAlvo = false; rotuloAtual = null; qualEnviado = null; return; }
@@ -785,6 +786,116 @@ namespace Sala3d
                     pontes[nome] = ponte;
                 }
                 return new Dictionary<string, object> { { "ok", true }, { "porta", ponte.porta }, { "token", ponte.token }, { "versao", ponte.versao } };
+            }
+        }
+
+        // ------------------------------------------------------------ Voz Universal (1.21+)
+        // A dublagem das legendas (o projeto VozUniversal) lendo o PS5 direto: a sala manda a imagem e o
+        // som do PS5 por um WebSocket e recebe a voz de volta. O Voz Universal aberto escreve a porta, o
+        // token e o pid dele em %LOCALAPPDATA%\Sala3d\voz-universal.json; fechado, este ajudante abre
+        // ele (minimizado) da pasta onde estiver: o instalado (%LOCALAPPDATA%\VozUniversal) ou o clonado
+        // (Área de Trabalho, pasta do usuário, Documentos; ou a variável VOZ_UNIVERSAL).
+        //   { tipo: "voz" } -> { tipo: "voz", ok, porta, token, abriu } ou { ok: false, msg: "sem-voz-universal" | "nao-abriu" | ... }
+        static readonly object travaVoz = new object();
+        static string ArquivoVoz()
+        {
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Sala3d", "voz-universal.json");
+        }
+
+        static void PedidoVoz(string pid)
+        {
+            new Thread(() =>
+            {
+                Dictionary<string, object> r;
+                try { r = AbrirVoz(); }
+                catch (Exception err) { r = new Dictionary<string, object> { { "ok", false }, { "msg", err.Message } }; }
+                r["tipo"] = "voz";
+                r["pid"] = pid;
+                Escrever(r);
+            }) { IsBackground = true }.Start();
+        }
+
+        // o Voz Universal que está aberto (o arquivo dele, com o processo vivo), ou null
+        static Dictionary<string, object> VozAberta()
+        {
+            string arq = ArquivoVoz();
+            if (!File.Exists(arq)) return null;
+            try
+            {
+                var m = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText(arq));
+                using (var p = System.Diagnostics.Process.GetProcessById(Convert.ToInt32(m["pid"])))
+                    if (p.HasExited) return null;
+                return new Dictionary<string, object> { { "ok", true }, { "porta", Convert.ToInt32(m["porta"]) }, { "token", S(m, "token") } };
+            }
+            catch { return null; } // processo que não existe mais, ou arquivo pela metade
+        }
+
+        static IEnumerable<string> PastasVoz()
+        {
+            string env = Environment.GetEnvironmentVariable("VOZ_UNIVERSAL");
+            if (!string.IsNullOrEmpty(env)) yield return env;
+            string casa = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            yield return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VozUniversal");
+            yield return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "VozUniversal");
+            yield return Path.Combine(casa, "Desktop", "VozUniversal");
+            yield return Path.Combine(casa, "VozUniversal");
+            yield return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "VozUniversal");
+        }
+
+        // o pythonw que roda o Voz Universal desta pasta: o .venv do instalador ou, no clonado, o que o
+        // "Iniciar Voz Universal.bat" usa
+        static string PythonDaVoz(string pasta)
+        {
+            string venv = Path.Combine(pasta, ".venv", "Scripts", "pythonw.exe");
+            if (File.Exists(venv)) return venv;
+            foreach (var bat in Directory.GetFiles(pasta, "*.bat"))
+            {
+                try
+                {
+                    foreach (System.Text.RegularExpressions.Match mt in System.Text.RegularExpressions.Regex.Matches(File.ReadAllText(bat), "\"([^\"]*pythonw?\\.exe)\"", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                    {
+                        string py = mt.Groups[1].Value;
+                        if (!Path.IsPathRooted(py)) py = Path.Combine(pasta, py);
+                        if (File.Exists(py)) return py;
+                    }
+                }
+                catch { }
+            }
+            return null;
+        }
+
+        static Dictionary<string, object> AbrirVoz()
+        {
+            lock (travaVoz)
+            {
+                var aberta = VozAberta();
+                if (aberta != null) { aberta["abriu"] = false; return aberta; }
+                string pasta = null, py = null;
+                foreach (var p in PastasVoz())
+                {
+                    if (!File.Exists(Path.Combine(p, "app.py"))) continue;
+                    py = PythonDaVoz(p);
+                    if (py != null) { pasta = p; break; }
+                }
+                if (pasta == null) return new Dictionary<string, object> { { "ok", false }, { "msg", "sem-voz-universal" } };
+                try { File.Delete(ArquivoVoz()); } catch { } // o de antes, de um que fechou travado
+                // pelo shell: o Voz Universal não herda o canal com o Chrome (a entrada e a saída deste programa)
+                var info = new System.Diagnostics.ProcessStartInfo(py, "app.py --minimizada")
+                {
+                    WorkingDirectory = pasta,
+                    UseShellExecute = true,
+                    WindowStyle = System.Diagnostics.ProcessWindowStyle.Minimized,
+                };
+                System.Diagnostics.Process.Start(info);
+                // ele escreve o arquivo quando o servidor dele sobe (as vozes terminam de carregar depois)
+                var fim = DateTime.UtcNow.AddSeconds(90);
+                while (DateTime.UtcNow < fim)
+                {
+                    Thread.Sleep(500);
+                    aberta = VozAberta();
+                    if (aberta != null) { aberta["abriu"] = true; return aberta; }
+                }
+                return new Dictionary<string, object> { { "ok", false }, { "msg", "nao-abriu" } };
             }
         }
 

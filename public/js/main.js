@@ -7,6 +7,7 @@ import { EscolherPersonagem } from './escolher-personagem.js';
 import { CatalogoJogos } from './catalogo-jogos.js';
 import { PcJogos } from './pc-jogos.js';
 import { Ps5Nativo, temPs5Nativo } from './ps5-nativo.js';
+import { Dublagem } from './voz-universal.js';
 import { PcDireto, temPcDireto } from './pc-direto.js';
 import { Ps5Touchpad, temTouchpadHid } from './ps5-touchpad.js';
 import { SalasLaterais } from './salas.js';
@@ -2555,6 +2556,7 @@ function stopShare(key, notify, { manter = false } = {}) {
   turbos.delete(key);
   // o som do PC misturado no PS5: a tela volta com o som do PS5 antes de sair
   if (sh.somPc) desligarSomPc(sh, rtc.screens.get(key));
+  if (sh.ps5 && !manter && dublagem.fonte === sh.ps5) dublagem.desligar();
   rtc.stopScreen(key, { manterTrilhas: manter });
   if (sh.escuta && !manter) {
     sh.escuta.pause();
@@ -3136,13 +3138,21 @@ const ps5Nativo = new Ps5Nativo({
   volume: { get: () => volumePs5, set: (v) => mudarVolumePs5(v) },
   // "Levar o som do PC": o som do PC (a voz do Voz Universal) misturado no do PS5, na mesma tela
   somPc: {
-    ligado: () => !!self()?.shares.get(ps5Nativo.key)?.somPc,
-    alternar: () => somDoPcNoPs5(!self()?.shares.get(ps5Nativo.key)?.somPc),
+    ligado: () => self()?.shares.get(ps5Nativo.key)?.somPc?.origem === 'pc',
+    alternar: () => somDoPcNoPs5(self()?.shares.get(ps5Nativo.key)?.somPc?.origem !== 'pc'),
     abafar: () => abafarPs5,
     alternarAbafar: () => {
       abafarPs5 = !abafarPs5;
       try { localStorage.setItem('sala3d-ps5-abafar', abafarPs5 ? '1' : '0'); } catch { /* sem armazenamento */ }
     },
+  },
+  // a dublagem pelo Voz Universal, lendo a imagem do PS5 direto (voz-universal.js)
+  dublagem: {
+    ligada: () => dublagem.ligado,
+    estado: () => dublagem.estado,
+    resumo: () => dublagem.resumo(),
+    ultimaFala: () => dublagem.ultimaFala,
+    alternar: () => alternarDublagem(),
   },
 });
 
@@ -3327,6 +3337,7 @@ async function somDoPcNoPs5(ligar) {
   if (!sh || !scr) return void toast('Ponha o PS5 numa tela antes.', 'warn', 5000);
   if (!ligar) return void desligarSomPc(sh, scr, true);
   if (sh.somPc) return;
+  if (dublagem.ligado) return void toast('A dublagem já leva a voz do Voz Universal junto com o PS5 (não precisa do som do PC).', 'info', 7000);
   const ps5 = scr.stream.getAudioTracks()[0];
   if (!ps5 || ps5.readyState !== 'live') return void toast('O som do PS5 não está tocando nesta tela (este navegador não decodifica o som dele).', 'warn', 8000);
   // o AudioContext nasce ainda no clique (depois do seletor o navegador poderia abrir ele parado)
@@ -3344,6 +3355,24 @@ async function somDoPcNoPs5(ligar) {
     ctx.close().catch(() => {});
     return;
   }
+  misturarNoPs5(sh, scr, ps5, pc, ctx, 'pc');
+  // parou pela faixa do Chrome ("Parar compartilhamento"): volta só o som do PS5
+  pc.addEventListener('ended', () => {
+    if (sh.somPc?.pc !== pc) return;
+    desligarSomPc(sh, rtc.screens.get(key), true);
+    toast('O som do PC parou: a tela do PS5 segue só com o som do PS5.', 'info', 6000);
+  }, { once: true });
+  const disp = pc.getSettings?.().deviceId || '';
+  diagJogo.evento('PS5 direto: som do PC ligado', { dispositivo: disp, hz: ctx.sampleRate });
+  // "loopback" sem o "WithoutChrome": o Chrome entra junto (o PS5 em dobro e a voz dos amigos de volta)
+  if (/^loopback$/i.test(disp)) toast('O som do PC está indo, mas este Chrome não separou o som dele mesmo: o PS5 pode ir em dobro. Atualize o Chrome.', 'warn', 12000);
+  else toast('O som do PC está indo junto com o PS5, na mesma tela. Deixe a tela do PS5 visível para o Voz Universal ler as legendas.', 'success', 9000);
+}
+
+// A mistura PS5 + outro som (origem 'pc': o som do sistema; 'voz': a voz da dublagem, voz-universal.js) no
+// lugar do som do PS5 da tela: pelo vídeo da conexão e pelo turbo. O PS5 abaixa enquanto o outro som toca.
+function misturarNoPs5(sh, scr, ps5, pc, ctx, origem) {
+  const key = sh.key;
   const dest = ctx.createMediaStreamDestination();
   dest.channelCount = 2;
   const gPs5 = ctx.createGain();
@@ -3371,25 +3400,67 @@ async function somDoPcNoPs5(ligar) {
   }, 40);
   if (ctx.state === 'suspended') ctx.resume().catch(() => {});
   const mix = dest.stream.getAudioTracks()[0];
-  sh.somPc = { ctx, mix, ps5, pc, vigia, gPs5 };
+  sh.somPc = { ctx, mix, ps5, pc, vigia, gPs5, origem };
   // a mistura entra no lugar do som do PS5 na própria trilha da tela: quem entrar depois já recebe ela
   scr.stream.removeTrack(ps5);
   scr.stream.addTrack(mix);
   rtc.replaceScreenTrack(key, mix);
   if (sh.lossless) sh.lossless = new MediaStream([...sh.lossless.getVideoTracks(), mix]);
   turboEnvio.trocarFonte(key);
-  // parou pela faixa do Chrome ("Parar compartilhamento"): volta só o som do PS5
-  pc.addEventListener('ended', () => {
-    if (sh.somPc?.pc !== pc) return;
-    desligarSomPc(sh, rtc.screens.get(key), true);
-    toast('O som do PC parou: a tela do PS5 segue só com o som do PS5.', 'info', 6000);
-  }, { once: true });
-  const disp = pc.getSettings?.().deviceId || '';
-  diagJogo.evento('PS5 direto: som do PC ligado', { dispositivo: disp, hz: ctx.sampleRate });
   ps5Nativo.render?.();
-  // "loopback" sem o "WithoutChrome": o Chrome entra junto (o PS5 em dobro e a voz dos amigos de volta)
-  if (/^loopback$/i.test(disp)) toast('O som do PC está indo, mas este Chrome não separou o som dele mesmo: o PS5 pode ir em dobro. Atualize o Chrome.', 'warn', 12000);
-  else toast('O som do PC está indo junto com o PS5, na mesma tela. Deixe a tela do PS5 visível para o Voz Universal ler as legendas.', 'success', 9000);
+}
+
+// ------------------------------------------------------------------ dublagem (Voz Universal)
+// Ligada no painel do PS5 direto, fica lembrada: toda vez que o PS5 entra numa tela, ela liga sozinha.
+const DUBLAGEM = 'sala3d-ps5-dublagem';
+let querDublagem = (() => {
+  try { return localStorage.getItem(DUBLAGEM) === '1'; } catch { return false; }
+})();
+let abafoVoz = 1; // o PS5 neste PC enquanto a voz da dublagem fala (0..1)
+const dublagem = new Dublagem({
+  // extensão de antes da 1.27 não conhece o pedido (ficaria 100 s esperando): já pede a atualização
+  pedirVoz: () => (controle.ext.ok && versaoNum(controle.ext.versao) < versaoNum('1.27')
+    ? Promise.resolve({ ok: false, erro: 'demorou' })
+    : controle.pedir('voz-universal', undefined, undefined, undefined, 105_000)),
+  // a voz vai na mistura com o PS5 para quem joga (no lugar do "Levar o som do PC")
+  aoTrilha: (trilha) => {
+    const key = ps5Nativo.key;
+    const sh = key && self()?.shares.get(key);
+    const scr = key && rtc?.screens.get(key);
+    if (!sh || !scr) return;
+    if (!trilha) {
+      if (sh.somPc?.origem === 'voz') desligarSomPc(sh, scr, true);
+      return;
+    }
+    if (sh.somPc) desligarSomPc(sh, scr);
+    const ps5 = sh.ps5?.trilhaSom || scr.stream.getAudioTracks()[0];
+    if (!ps5 || ps5.readyState !== 'live') return;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    let ctx;
+    try { ctx = new AC({ latencyHint: 'interactive', sampleRate: 48000 }); } catch { ctx = new AC({ latencyHint: 'interactive' }); }
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+    misturarNoPs5(sh, scr, ps5, trilha, ctx, 'voz');
+  },
+  // neste PC a voz sai pelo alto-falante (o Voz Universal toca): o PS5 daqui abaixa enquanto ela fala
+  abafarAqui: (nivel) => {
+    abafoVoz = nivel;
+    for (const sh of self()?.shares.values() || []) if (sh.ps5 && sh.escuta) sh.escuta.volume = (volumePs5 / 100) * abafoVoz;
+  },
+  aoMudar: () => ps5Nativo.render?.(),
+  onEvento: (texto, dados) => diagJogo.evento(texto, dados),
+});
+
+function ligarDublagem() {
+  const fonte = ps5Nativo.key ? ps5Nativo.fonte : null;
+  if (fonte) dublagem.ligar(fonte);
+}
+
+function alternarDublagem() {
+  querDublagem = !dublagem.ligado;
+  try { localStorage.setItem(DUBLAGEM, querDublagem ? '1' : '0'); } catch { /* sem armazenamento */ }
+  if (!querDublagem) return void dublagem.desligar();
+  if (!ps5Nativo.key) return void toast('Ponha o PS5 numa tela antes: a dublagem liga junto toda vez.', 'info', 6000);
+  ligarDublagem();
 }
 
 // tira a mistura e devolve o som do PS5 à tela (aviso: atualiza o painel)
@@ -3540,6 +3611,8 @@ async function compartilharPs5(fonte) {
     sh.escuta.volume = volumePs5 / 100;
     sh.escuta.play().catch(() => {});
   }
+  // a dublagem ligada da outra vez: liga junto (depois de o painel guardar a tela do PS5)
+  if (querDublagem) setTimeout(ligarDublagem, 300);
   renderPeople();
   renderSharePop();
   toast(`O PS5 está no ${ondeEsta(sh) === 'Telão' ? 'telão' : ondeEsta(sh)}, com o controle liberado. Quem abrir a tela e ligar o modo jogo joga nele.`, 'success', 7000);
@@ -3559,7 +3632,7 @@ let volumePs5 = (() => {
 function mudarVolumePs5(v) {
   volumePs5 = Math.min(100, Math.max(0, Math.round(Number(v) || 0)));
   try { localStorage.setItem('sala3d-ps5-volume', String(volumePs5)); } catch { /* sem armazenamento */ }
-  for (const sh of self()?.shares.values() || []) if (sh.ps5 && sh.escuta) sh.escuta.volume = volumePs5 / 100;
+  for (const sh of self()?.shares.values() || []) if (sh.ps5 && sh.escuta) sh.escuta.volume = (volumePs5 / 100) * abafoVoz;
   const el = $('#jogo-ps5-vol');
   if (el && Number(el.value) !== volumePs5) el.value = String(volumePs5);
   const saida = $('#jogo-ps5-vol-n');

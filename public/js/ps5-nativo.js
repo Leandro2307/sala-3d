@@ -306,6 +306,8 @@ export class Ps5Fonte {
       trilhas.push(this.gerSom);
     }
     this.stream = new MediaStream(trilhas);
+    // o som do PS5 sozinho (a stream pode trocar ele por uma mistura com a voz da dublagem)
+    this.trilhaSom = this.stream.getAudioTracks()[0] || null;
   }
 
   assinar(fn) {
@@ -496,6 +498,10 @@ export class Ps5Fonte {
     }
     if (this.parada) { frame.close(); return; }
     this.conta.desenhados++;
+    // a dublagem (voz-universal.js) tira uma cópia de alguns quadros antes de o quadro seguir
+    if (this.espiar) {
+      try { this.espiar(frame); } catch (err) { console.warn('[ps5] espiar', err); }
+    }
     if (this.escritorVideo) {
       // a trilha atrasada (ninguém puxando): este quadro fica de fora
       if (this.escritorVideo.desiredSize != null && this.escritorVideo.desiredSize <= 0) { frame.close(); return; }
@@ -574,6 +580,7 @@ export class Ps5Fonte {
   parar() {
     if (this.parada) return;
     this.parada = true;
+    this.espiar = null;
     this.assinantes.clear();
     for (const d of [this.dec, this.decSom]) {
       try { if (d && d.state !== 'closed') d.close(); } catch { /* já fechado */ }
@@ -664,8 +671,9 @@ export class Ps5Nativo {
   // jogarComLossless(key): a tela do PS5 em tela cheia no modo jogo, com o Lossless ligado (main.js)
   // losslessTodos: { ligado(), alternar() } — o Lossless deste PC para todos, pela câmera do OBS
   // somPc: { ligado(), alternar(), abafar(), alternarAbafar() } — o som do PC (Voz Universal) junto com o do PS5
-  constructor({ pedirPonte, compartilhar, pararTela, onTremor, onEvento, toast, aoAbrir, aoFechar, jogarComLossless, losslessTodos, somPc, volume }) {
-    Object.assign(this, { pedirPonte, compartilhar, pararTela, onTremor, onEvento, toast, aoAbrir, aoFechar, jogarComLossless, losslessTodos, somPc, volume });
+  // dublagem: { ligada(), estado(), resumo(), ultimaFala(), alternar() } — o Voz Universal lendo a imagem do PS5 (voz-universal.js)
+  constructor({ pedirPonte, compartilhar, pararTela, onTremor, onEvento, toast, aoAbrir, aoFechar, jogarComLossless, losslessTodos, somPc, volume, dublagem }) {
+    Object.assign(this, { pedirPonte, compartilhar, pararTela, onTremor, onEvento, toast, aoAbrir, aoFechar, jogarComLossless, losslessTodos, somPc, volume, dublagem });
     this.ws = null;
     this.consoles = [];
     this.achados = null;
@@ -974,6 +982,7 @@ export class Ps5Nativo {
       else if (acao === 'registrar') this.registrar();
       else if (acao === 'tentar') this.abrir();
       else if (acao === 'ls-jogar') { this.fechar(); this.jogarComLossless?.(this.key); }
+      else if (acao === 'dublagem') { this.dublagem?.alternar(); this.render(); }
       else if (acao === 'som-pc') Promise.resolve(this.somPc?.alternar()).finally(() => this.render());
       else if (acao === 'som-pc-abafar') { this.somPc?.alternarAbafar(); this.render(); }
       else if (acao === 'ls-todos') Promise.resolve(this.losslessTodos?.alternar()).finally(() => this.render());
@@ -1086,7 +1095,19 @@ export class Ps5Nativo {
         <span><b>Volume do PS5</b><small>Só o que você ouve neste PC. Quem joga ouve no volume das telas dele.</small>
           <span class="p5-vol-linha"><input type="range" name="p5-volume" min="0" max="100" step="1" value="${v}" aria-label="Volume do PS5"><output>${v}%</output></span></span></div>`);
     }
-    if (noAr && this.key && this.somPc) {
+    const dub = this.dublagem;
+    if (noAr && this.key && dub) {
+      const on = dub.ligada();
+      const est = dub.estado();
+      const pil = est === 'ligado' ? pilula('ligada', '#4ade80', true) : est === 'abrindo' ? pilula('abrindo', '#fbbf24') : est === 'erro' ? pilula('erro', '#f87171') : '';
+      const resumo = dub.resumo();
+      const f = on ? dub.ultimaFala() : null;
+      extras.push(`<div class="p5-item"><span class="p5-ic">${icon('mic', 18)}</span>
+        <span><b>Dublagem (Voz Universal)</b>${pil}
+        <small>${resumo ? `<b>${esc(resumo)}</b><br>` : ''}${f?.texto ? `“${esc(f.texto.slice(0, 90))}”${f.quem ? ` — ${esc(f.quem)}` : ''}<br>` : ''}Lê as legendas direto da imagem do PS5 (não precisa deixar a tela à vista) e fala em português. Quem joga ouve a voz junto com o PS5. Fica ligada para as próximas vezes.</small></span>
+        <span class="p5-acoes"><button type="button" class="${on ? 'secondary' : 'primary'} small" data-p5="dublagem">${on ? 'Desligar' : est === 'erro' ? 'Tentar de novo' : 'Ligar'}</button></span></div>`);
+    }
+    if (noAr && this.key && this.somPc && !(dub && dub.ligada())) {
       const on = this.somPc.ligado();
       extras.push(`<div class="p5-item"><span class="p5-ic">${icon('volume', 18)}</span>
         <span><b>Som do PC (Voz Universal)</b>${on ? pilula('ligado', '#4ade80') : ''}

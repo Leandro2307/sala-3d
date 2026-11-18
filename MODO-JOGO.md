@@ -958,3 +958,29 @@ chegava em ~28 ms (ajudante 1 ms), mas o automático trocou o turbo pelo 1080p n
 TURN") e o buffer do vídeo subiu até 300 ms (atraso de 250–470 ms). O turbo no mesmo caminho: ~106 ms
 a 57 qps. Agora o TURN só põe o vídeo normal no celular (`PRESET_TURN`); no PC fica o 1080p Turbo liso.
 E o mouse → analógico direito (`teclado-pad.js`) mede a velocidade em 24 ms (eram 40).
+
+## PS5 direto: dublagem nativa pelo Voz Universal (2026-11-17)
+
+Pedido do usuário: o Voz Universal "nativo na opção do PS5", ligar e já funcionar, sem gambiarra. Antes era
+preciso deixar a tela do PS5 à vista, apontar o Voz Universal para a janela do Chrome e ligar o "Levar o som
+do PC" (seletor do Chrome com o áudio do sistema). Agora o painel do PS5 direto tem **Dublagem (Voz
+Universal)**: um botão, lembrado (`localStorage sala3d-ps5-dublagem`), que liga sozinho toda vez que o PS5
+entra numa tela.
+
+- **Ajudante 1.21** (pedido `voz`, extensão 1.27 `voz-universal`): lê `%LOCALAPPDATA%\Sala3d\voz-universal.json`
+  (porta, token e pid que o Voz Universal escreve quando o servidor dele sobe). Fechado, abre ele minimizado
+  (`app.py --minimizada`) da pasta instalada (`%LOCALAPPDATA%\VozUniversal`, `.venv`) ou clonada (Área de
+  Trabalho, pasta do usuário, Documentos ou `VOZ_UNIVERSAL`; no clonado o Python vem do `Iniciar Voz
+  Universal.bat`) e espera o arquivo até 90 s.
+- **`voz-universal.js`** (`Dublagem`): WebSocket `ws://127.0.0.1:<porta>/sala?t=<token>`. A `Ps5Fonte` ganhou
+  `espiar(frame)` (cópia de ~8 quadros/s → OffscreenCanvas → JPEG 0,9, até 1920 de largura) e `trilhaSom` (o
+  som do PS5 sozinho, antes de qualquer mistura) → AudioWorklet 16 kHz mono em pedaços de 100 ms.
+- Volta do Voz Universal: a voz (float32 24 kHz) vira uma trilha (`AudioBufferSource` em fila, 60 ms de folga)
+  que entra na mesma mistura do "Levar o som do PC" (`misturarNoPs5(..., 'voz')`, com o PS5 abaixando na
+  voz para quem joga); e `abafar` (0..1) abaixa o `sh.escuta` deste PC enquanto a voz fala (o mixer do
+  Windows abaixaria o Chrome inteiro, com a voz dos amigos). Neste PC a voz sai pelo alto-falante, como sempre.
+- No Voz Universal: fonte `sala` (`nucleo/sala.py`), modo legenda com o quadro inteiro como vídeo, sem nada da
+  janela da frente; a escuta ouve só o som que a sala manda (sem os amigos); desconectou → fonte de antes.
+- Teste (scratchpad `dub/`, Chrome sem janela + Voz Universal na porta 8799): 180 quadros com a legenda
+  desenhada num canvas → "Arthur: Precisamos sair daqui antes que eles voltem." lido e falado (Arthur ·
+  Jason), a voz chegou na trilha (RMS 0,12) e o abafar desceu a 0,25 e voltou a 1.

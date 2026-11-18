@@ -712,6 +712,8 @@ async function tratar(m, sender) {
   if (m.tipo === 'pc-ponte') return pedidoNativo('pc-ponte', {}, 20_000);
   // Lossless (1.23+, ajudante 1.17+): aperta o atalho do Lossless Scaling com a sala na frente
   if (m.tipo === 'pc-lossless') return pedidoNativo('lossless', {}, 10_000);
+  // Dublagem do PS5 (1.27+, ajudante 1.21+): acha ou abre o Voz Universal e devolve a porta e o token dele
+  if (m.tipo === 'voz-universal') return pedidoNativo('voz', {}, 100_000);
   // Lossless para todos (1.24+, ajudante 1.18+): a janela do PS5 no outro monitor, o OBS capturando ela
   // (cena montada pelo WebSocket do OBS) e o Lossless ligado; alvo: o título da janela, ou __parar__
   if (m.tipo === 'pc-obs-ps5') return pedidoNativo('obs-ps5', { alvo: String(m.alvo || '').slice(0, 80) }, 60_000);
