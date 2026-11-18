@@ -7011,7 +7011,10 @@ async function pedidoDeJogoJa({ acao, id, de, maquina, lan: daLan }) {
   // alugou o PC sem escolher jogo: só a tela do PC na sala, a pessoa abre o que quiser
   if (!id) return responder(true, `O PC está na sala${como}${semControle}. Abra a tela de ${settings.name} para jogar.`);
   // ev.monitor: o ajudante abre o jogo no monitor que a placa está mandando (extensão 1.26+)
-  const j = await controle.pedir('pc-jogo-abrir', undefined, monitor ? { monitor: monitor.i } : undefined, String(id || ''), 40_000);
+  // o ajudante numera os monitores como o Windows (EnumDisplayDevices: o N do rótulo "screen:N:0");
+  // o "i" da ponte é a ordem da placa (DXGI), que pode ser outra: com ele o jogo ia para o monitor errado
+  const monWin = monitor ? Number(/^screen:(\d+):/.exec(monitor.rotulo || '')?.[1] ?? monitor.i) : null;
+  const j = await controle.pedir('pc-jogo-abrir', undefined, monitor ? { monitor: monWin } : undefined, String(id || ''), 40_000);
   publicarJogos();
   if (!j?.ok) return responder(false, `não abriu o jogo: ${erroDoAjudante(j)}`);
   if (daLan) lanAbriu.jogo = true;
