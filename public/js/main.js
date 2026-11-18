@@ -4579,8 +4579,8 @@ const tecladoPad = new TecladoPad({ pad: padVirtual, sens: () => opcoesJogo.get(
 // tremores que chegaram aqui (quem joga), para o relatório (ver receberVolta)
 const tremoresAqui = { n: 0, como: {}, primeiro: false, desde: 0 };
 padVirtual.onErroTremor = (erro) => diagJogo.evento('o controle não aceitou o tremor', { erro, ...padVirtual.comoVibra() });
-// Tutorial do controle (tutorial-controle.js): na primeira vez numa tela de PS5. Aberto, o teclado e
-// o mouse ficam todos com ele: o que o teclado-pad não usa também não vai para o jogo (P pula).
+// Tutorial do controle (tutorial-controle.js): toda vez que entra no modo jogo numa tela de PS5.
+// Aberto, o teclado e o mouse ficam todos com ele: nada vai para o jogo (P ou Esc pulam).
 const tutorialControle = new TutorialControle({ raiz: $('#tut-controle'), pad: padVirtual, toqueRaiz: $('#toque-jogo') });
 controle.paraPad = (ev) => {
   if (!tutorialControle.ativo) return tecladoPad.evento(ev);
@@ -4654,8 +4654,8 @@ controle.onJogo = (video, key) => {
   // a própria tela (PS5 direto): a imagem já é daqui, sem turbo nem diagnóstico de quem joga longe
   jogoLa(video && !acharTela(key)?.user.isSelf ? video : null, key);
 };
-// Tutorial do controle na primeira vez que joga uma tela de PS5 (no PC, só sem controle de verdade
-// ligado: quem tem um não precisa do teclado). true: abriu (ou vai abrir). Saiu do PS5: fecha.
+// Tutorial do controle toda vez que entra no modo jogo numa tela de PS5 (no PC, só sem controle de
+// verdade ligado: quem tem um não precisa do teclado). true: abriu (ou vai abrir). Saiu do PS5: fecha.
 function tutorialDoPs5(key) {
   const ps5 = isTouch ? toqueJogo.layoutId === 'ps5' && toqueJogo.key === key
     : layoutDoTitulo(acharTela(key)?.share.titulo) === 'ps5';
@@ -4664,7 +4664,7 @@ function tutorialDoPs5(key) {
     return false;
   }
   const modo = isTouch ? 'toque' : 'pc';
-  if (tutorialControle.ativo || !tutorialControle.precisa(modo) || (!isTouch && fisico.pad())) return false;
+  if (tutorialControle.ativo || (!isTouch && fisico.pad())) return false;
   // um instante para a tela cheia e o controle de toque montarem
   setTimeout(() => {
     if (controle.jogo?.key === key) tutorialControle.abrir(modo);

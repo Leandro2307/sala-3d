@@ -4391,16 +4391,19 @@ body.modo-offline #bar, body.modo-offline #touch, body.modo-offline #hud > :not(
 .tut-n { font-size: 12px; color: #9aa3b5; font-weight: 600; }
 .tut-pular {
   pointer-events: auto;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  color: #cfd5e2;
+  background: #f1f3f8;
+  border: 0;
+  color: #0c0e14;
   border-radius: 999px;
-  padding: 5px 12px;
-  font: 600 12px 'Plus Jakarta Sans', system-ui, sans-serif;
+  padding: 8px 16px;
+  min-height: 36px;
+  font: 800 13px 'Plus Jakarta Sans', system-ui, sans-serif;
   cursor: pointer;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
 }
-.tut-pular:hover { background: rgba(255, 255, 255, 0.16); }
-.tut-pular kbd { font: 700 10px 'JetBrains Mono', monospace; background: rgba(255, 255, 255, 0.14); border-radius: 4px; padding: 1px 5px; margin-left: 4px; }
+.tut-pular:hover { background: #fff; }
+.tut-pular:active { transform: scale(0.96); }
+.tut-pular kbd { font: 700 10px 'JetBrains Mono', monospace; background: #0c0e14; color: #f1f3f8; border: 0; border-radius: 4px; padding: 2px 6px; margin-left: 4px; }
 .tut-tit { margin: 0 0 10px; font-size: 21px; font-weight: 800; letter-spacing: -0.01em; text-align: center; }
 .tut-visual { display: flex; align-items: center; justify-content: center; gap: 14px; min-height: 92px; margin-bottom: 8px; }
 .tut-de, .tut-para { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; }

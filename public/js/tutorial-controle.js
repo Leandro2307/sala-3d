@@ -1,4 +1,4 @@
-// Tutorial do controle do PS5 no modo jogo: na primeira vez que a pessoa joga uma tela de PS5, um
+// Tutorial do controle do PS5 no modo jogo: toda vez que a pessoa entra no modo jogo numa tela de PS5, um
 // passo a passo pede cada ação (clicar, rolar, apertar, arrastar) e só anda quando ela faz. No PC
 // ensina o teclado e o mouse (teclado-pad.js); no celular, os botões da tela (toque-jogo.js), com o
 // botão da vez piscando.
@@ -7,10 +7,10 @@
 // estado vem para cá e nada vai para o PS5 — dá para apertar à vontade sem mexer no jogo. Ao fechar,
 // o estado de verdade volta a sair.
 //
-// Uma vez por aparelho (localStorage), separado para o PC e para o toque. ?tutorial-controle=1 na
-// URL força. As opções do modo jogo (PC) e o painel do toque (celular) têm "Tutorial do controle".
+// Aparece sempre (pedido do usuário) e sai fácil: o botão "Pular" grande, que pega clique e toque, e,
+// no PC com o mouse preso, P ou Esc. As opções do modo jogo (PC) e o painel do toque (celular) têm
+// "Tutorial do controle" para ver de novo.
 
-const CHAVE = 'sala3d-tutorial-ps5-';
 const OK_MS = 650; // o "Isso!" antes do próximo passo
 
 // botões no mapa padrão do navegador (o bit i do estado do controle)
@@ -49,7 +49,7 @@ const apertou = (...nomes) => (e, novos, p) => {
 const PASSOS_PC = [
   {
     tit: 'Prenda o mouse no jogo',
-    txt: 'Clique na imagem do jogo. O mouse some e passa a ser o controle (o Esc solta).',
+    txt: 'Clique na imagem do jogo. O mouse some e passa a ser o controle.',
     de: mouse('esq'), para: '<span class="tut-pill">jogo</span>',
     preso: true,
   },
@@ -115,13 +115,6 @@ const PASSOS_TOQUE = [
   },
 ];
 
-const lerVisto = (modo) => {
-  try { return localStorage.getItem(CHAVE + modo) === '1'; } catch { return false; }
-};
-const marcarVisto = (modo) => {
-  try { localStorage.setItem(CHAVE + modo, '1'); } catch { /* sem armazenamento: aparece de novo */ }
-};
-
 export class TutorialControle {
   // raiz: a camada do tutorial (dentro do #focus, que é o que vai para a tela cheia)
   // pad: o controle virtual; toqueRaiz: o controle de toque (para acender o botão da vez)
@@ -134,22 +127,16 @@ export class TutorialControle {
     this.i = 0;
     this.antes = 0;
     this.esperando = 0; // timer do "Isso!"
-    this.forcado = /[?&]tutorial-controle=1\b/.test(location.search);
     document.addEventListener('pointerlockchange', () => this.conferirPreso());
   }
 
   get ativo() { return !!this.modo; }
-
-  precisa(modo) {
-    return this.forcado || !lerVisto(modo);
-  }
 
   // modo: 'pc' (teclado e mouse) ou 'toque' (botões da tela)
   abrir(modo) {
     if (this.modo === modo) return;
     if (this.modo) this.fechar(false);
     this.modo = modo;
-    this.forcado = false; // forçado pela URL: uma vez só
     this.passos = (modo === 'pc' ? PASSOS_PC : PASSOS_TOQUE).map((p) => ({ ...p, visto: new Set() }));
     this.i = 0;
     this.antes = 0;
@@ -160,10 +147,9 @@ export class TutorialControle {
     this.mostrar();
   }
 
-  // concluiu: terminou ou pulou (não aparece mais); false: o modo jogo acabou no meio
+  // concluiu: terminou ou pulou; false: o modo jogo acabou no meio
   fechar(concluiu) {
     if (!this.modo) return;
-    if (concluiu) marcarVisto(this.modo);
     clearTimeout(this.esperando);
     this.esperando = 0;
     this.modo = null;
@@ -174,9 +160,9 @@ export class TutorialControle {
     this.onFechou?.(concluiu);
   }
 
-  // PC: P pula (o ponteiro preso não deixa clicar no botão). true: a tecla foi usada aqui
+  // PC: P ou Esc pulam (o ponteiro preso não deixa clicar no botão). true: a tecla foi usada aqui
   tecla(ev) {
-    if (!this.modo || ev.t !== 'tecla' || ev.code !== 'KeyP') return false;
+    if (!this.modo || ev.t !== 'tecla' || (ev.code !== 'KeyP' && ev.code !== 'Escape')) return false;
     if (ev.a === 'down') this.fechar(true);
     return true;
   }
@@ -189,7 +175,7 @@ export class TutorialControle {
     const toque = this.modo === 'toque';
     this.raiz.innerHTML = `<div class="tut-card" role="dialog" aria-live="polite" aria-label="Tutorial do controle">
       <div class="tut-topo"><span class="tut-n">${this.i + 1} de ${total}</span>
-        <button type="button" class="tut-pular">Pular tutorial${toque ? '' : ' <kbd>P</kbd>'}</button></div>
+        <button type="button" class="tut-pular">Pular tutorial${toque ? '' : ' <kbd>P</kbd> <kbd>Esc</kbd>'}</button></div>
       <p class="tut-tit">${p.tit}</p>
       <div class="tut-visual">${p.de ? `<span class="tut-de">${p.de}</span><span class="tut-seta" aria-hidden="true">→</span>` : ''}<span class="tut-para">${p.para}</span></div>
       <p class="tut-txt">${p.txt}</p>

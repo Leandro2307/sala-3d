@@ -740,13 +740,12 @@ Tab −, Esc +, H Home, setas = direcional. Desde 2026-11-18, como pediu o usuá
 direito ○, roda para baixo □, para cima △ (rolando, o botão fica segurado e solta 150 ms depois do último dente; virar o lado troca na hora), Q L2, E R2, Shift L1,
 Ctrl R1, Espaço ✕, Enter ○, F △; Alt segurado + mouse = um dedo no touchpad (encosta no meio, Alt + clique
 afunda; só chega no PS5 direto, campo tp). Ctrl+W/T/N fora da tela cheia (sem keyboard.lock) o Chrome não
-deixa segurar. Teste visual: public/teste-controle.html. **Tutorial do controle** (`tutorial-controle.js`, 2026-11-18): na primeira vez numa tela de PS5
+deixa segurar. Teste visual: public/teste-controle.html. **Tutorial do controle** (`tutorial-controle.js`, 2026-11-18): toda vez que entra no modo jogo numa tela de PS5
 (`tutorialDoPs5` no main.js, também quando o título chega depois), um cartão pede cada ação e só anda quando
 ela é feita — PC: prender o mouse, ✕ ○ □ △ pelo mouse, Q/E, Shift/Ctrl, WASD, câmera, Alt+touchpad, clique
 final; celular: o botão da vez pisca (`.tut-alvo`), analógico, câmera, ✕ final. Aberto, o `PadVirtual` fica
 em `treinar(fn)`: o estado vai só para o tutorial e o PC recebe o controle solto; no PC o `paraPad` engole
-tudo (P pula). Fecha ao soltar o ✕ final. Visto por aparelho em localStorage `sala3d-tutorial-ps5-pc`/`-toque`;
-`?tutorial-controle=1` força; "Tutorial do controle" nas Opções (PC) e no painel do toque. No PC não abre com
+tudo (P pula). Fecha ao soltar o ✕ final. Desde o mesmo dia aparece sempre (pedido do usuário), sem localStorage; pular: botão branco "Pular" ou P/Esc; "Tutorial do controle" nas Opções (PC) e no painel do toque. No PC não abre com
 controle de verdade ligado. Cartão do celular fica à esquerda da grade de botões (testado 844×390, 667×375,
 568×320, 740×300 sem tampar botão). Gancho: `controle.paraPad` em
 `mandar` e `moverJogo`. Tecla fora da lista continua indo como tecla; o mouse vai todo para o controle. Toast
