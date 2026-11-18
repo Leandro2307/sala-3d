@@ -4499,10 +4499,27 @@ $('#focus-jogo').addEventListener('click', () => {
     // com que botões entrou)
     if (!document.fullscreenElement) $('#focus').requestFullscreen?.().then(() => screen.orientation?.lock?.('landscape')).catch(() => {});
   } else if (ligar) {
+    conectarDualSenseNoClique(fv);
     jogoNoPc(true);
     toast('Modo jogo ligado: tela cheia, o mouse gira a câmera e o teclado anda com o personagem (Ctrl+W e Esc vão para o jogo). Esc duas vezes (ou F8) desliga o modo jogo; segure Esc para sair da tela cheia.', 'info', 9000);
   } else if (!isTouch) jogoNoPc(false);
 });
+
+// Modo jogo numa tela de PS5 com um DualSense ligado neste PC (a Gamepad API o vê) e sem a permissão do
+// WebHID ainda: pede já, aproveitando o clique (o Chrome só abre a lista de aparelhos num clique). É
+// uma vez só: com a permissão dada, o touchpad.ligar() do onJogo conecta sozinho daí em diante.
+async function conectarDualSenseNoClique(fv) {
+  if (!temTouchpadHid() || touchpad.ligado) return;
+  const t = state.focus?.kind === 'share' ? acharTela(state.focus.key) : null;
+  if (!t || controle.jogoNo !== fv || !(t.share.ps5 || layoutDoTitulo(t.share.titulo) === 'ps5')) return;
+  const sony = [...(navigator.getGamepads?.() || [])].some((g) => g && /054c|dualsense|wireless controller/i.test(g.id));
+  if (!sony) return;
+  try {
+    if ((await navigator.hid.getDevices()).some((d) => d.vendorId === 0x054c)) return; // já tem: liga sozinho
+    if (await touchpad.pedir()) toast('DualSense ligado: botões, gatilhos adaptativos, vibração e touchpad vão direto entre ele e o PS5. Das próximas vezes ele liga sozinho.', 'success', 6000);
+  } catch { /* fechou a lista: fica no botão das Opções */ }
+  atualizarBotaoTouchpad();
+}
 
 // Sai do modo jogo e fica na tela em foco (o Esc duas vezes): o mesmo que o botão "Desligar modo jogo"
 function desligarModoJogoNoFoco() {
