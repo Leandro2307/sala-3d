@@ -741,7 +741,7 @@ direito ○, roda para baixo □, para cima △ (rolando, o botão fica segurado
 Ctrl R1, Espaço ✕, Enter ○, F △; Alt segurado + mouse = um dedo no touchpad (encosta no meio, Alt + clique
 afunda; só chega no PS5 direto, campo tp). Ctrl+W/T/N fora da tela cheia (sem keyboard.lock) o Chrome não
 deixa segurar. Teste visual: public/teste-controle.html. **Tutorial do controle** (`tutorial-controle.js`, 2026-11-18): toda vez que entra no modo jogo numa tela de PS5
-(`tutorialDoPs5` no main.js, também quando o título chega depois), um cartão pede cada ação e só anda quando
+(`tutorialDoPs5` no main.js, também quando o título chega depois e quando o celular troca para o PS5 à mão no painel "Botões do controle": o painel fecha e o tutorial abre; trocar para outro fecha — `onLayout` do ToqueJogo), um cartão pede cada ação e só anda quando
 ela é feita — PC: prender o mouse, ✕ ○ □ △ pelo mouse, Q/E, Shift/Ctrl, WASD, câmera, Alt+touchpad, clique
 final; celular: o botão da vez pisca (`.tut-alvo`), analógico, câmera, ✕ final. Aberto, o `PadVirtual` fica
 em `treinar(fn)`: o estado vai só para o tutorial e o PC recebe o controle solto; no PC o `paraPad` engole

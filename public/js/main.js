@@ -4619,6 +4619,8 @@ const toqueJogo = new ToqueJogo({
   toast,
   onEngasgo: () => marcarEngasgo(),
   onTutorial: () => tutorialControle.abrir('toque'),
+  // trocou à mão no painel: para o PS5 abre o tutorial, para outro fecha
+  onLayout: () => { if (toqueJogo.key) tutorialDoPs5(toqueJogo.key); },
   onSair: () => {
     controle.desligarJogo();
     updateFocusCtrl();

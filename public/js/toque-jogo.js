@@ -299,7 +299,8 @@ function lerPosicoes() {
 export class ToqueJogo {
   // onEngasgo: quem joga tocou em "Engasgou" (marca no relatório do modo jogo)
   // onTutorial: "Tutorial do controle" no painel (layout PS5; ver tutorial-controle.js)
-  constructor({ raiz, controle, pad, toast, onSair, onEngasgo, onTutorial }) {
+  // onLayout: a pessoa trocou o layout à mão no painel (id do novo)
+  constructor({ raiz, controle, pad, toast, onSair, onEngasgo, onTutorial, onLayout }) {
     this.raiz = raiz;
     this.controle = controle;
     this.pad = pad; // controle virtual (layout PS5, ver pad-virtual.js)
@@ -307,6 +308,7 @@ export class ToqueJogo {
     this.onSair = onSair;
     this.onEngasgo = onEngasgo;
     this.onTutorial = onTutorial;
+    this.onLayout = onLayout;
     this.key = null;
     // tecla ou botão ("KeyW", "mouse:left") -> quantos botões da tela seguram agora: só sobe
     // quando o último solta (a Fúria aperta Shift com o analógico já correndo no Shift)
@@ -378,8 +380,12 @@ export class ToqueJogo {
       if (!id) return;
       this.escolha = id;
       if (this.key) this.escolhas.set(this.key, id);
+      const antes = this.layoutId;
       this.aplicar(id === 'auto' ? this.detectado : id);
-      this.abrirPainel();
+      // trocou para o PS5 à mão: o painel sai da frente e o tutorial do controle aparece (onLayout)
+      if (this.layoutId === 'ps5' && antes !== 'ps5') this.fecharPainel();
+      else this.abrirPainel();
+      if (this.layoutId !== antes) this.onLayout?.(this.layoutId);
     });
     const sens = r.querySelector('.tj-sens input');
     sens.addEventListener('input', () => {
