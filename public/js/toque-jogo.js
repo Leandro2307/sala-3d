@@ -353,6 +353,7 @@ export class ToqueJogo {
           <label><input type="checkbox" data-op="turbo"><span>Modo turbo <small>(imagem sem buffer: bem menos atraso)</small></span></label>
           <label><input type="checkbox" data-op="turboLiso"><span>Turbo liso <small>(+~20 ms: quadros no ritmo certo)</small></span></label>
           <label><input type="checkbox" data-op="preencher"><span>Preencher a tela <small>(sem faixas pretas: corta um pouco das bordas)</small></span></label>
+          <label><input type="checkbox" data-op="nitidez"><span>Realce de nitidez <small>(turbo: contornos mais nítidos)</small></span></label>
           <label><input type="checkbox" data-op="selo"><span>Mostrar desempenho</span></label>
           <label><input type="checkbox" data-op="giro"><span>Mirar virando o celular</span></label>
           <label><input type="checkbox" data-op="vibrar"><span>Vibrar com o jogo <small>(Android ou controle ligado)</small></span></label>

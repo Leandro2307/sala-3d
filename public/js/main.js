@@ -3758,8 +3758,9 @@ function ligarTurbo() {
   turboRecebe.h265 = !!p?.h265;
   turboRecebe.lisoPct = p?.lisoPct ?? LISO_PCT;
   turboRecebe.lisoMax = p?.lisoMax ?? LISO_MAX; // Turbo rápido: a folga do liso até 15 ms (e não 45)
+  turboRecebe.realce = !!opcoesJogo.get('nitidez');
   turboRecebe.ligar(jogandoLa.key, jogandoLa.video, opcoesJogo.get('rapido') ? 720 : 1080);
-  diagJogo.evento('modo turbo ligado', { liso: opcoesJogo.get('turboLiso'), vidaMs: turboRecebe.vidaMs, h265: turboRecebe.h265, lisoPct: turboRecebe.lisoPct, lisoMaxMs: turboRecebe.lisoMax });
+  diagJogo.evento('modo turbo ligado', { nitidez: turboRecebe.realce, liso: opcoesJogo.get('turboLiso'), vidaMs: turboRecebe.vidaMs, h265: turboRecebe.h265, lisoPct: turboRecebe.lisoPct, lisoMaxMs: turboRecebe.lisoMax });
 }
 
 // ---------------------------------------------------------------- modos de imagem (jogo-opcoes.js)
@@ -3955,6 +3956,7 @@ opcoesJogo.ouvir((k, v) => {
     else turboRecebe.desligar();
   }
   else if (k === 'selo') mostrarSelo();
+  else if (k === 'nitidez' && turboRecebe.ligado) ligarTurbo(); // o realce troca a tela: liga de novo
   else if (k === 'menuAuto' && jogandoLa) controle.cursorLivre(jogandoLa.key, v ? jogandoLa.cursorLivre : false);
   else if (k === 'preencher') document.body.classList.toggle('jogo-preencher', !!v);
   $$('#jogo-op-pop [data-op]').forEach((el) => { el.checked = !!opcoesJogo.get(el.dataset.op); });

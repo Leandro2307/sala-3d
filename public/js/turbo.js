@@ -175,6 +175,7 @@ const CODECS_HEVC = ['hvc1.1.6.L123.B0'];
 const ehHevc = (c) => /^(hvc1|hev1)\./.test(String(c));
 
 const QPS_TURBO = 60;
+const HEVC_LENTO_MS = 20; // decodificação do H.265 (mediana por quadro) acima disto: volta ao H.264 (largarHevc)
 
 // Turbo liso (2026-11-04): sem buffer nenhum, cada quadro ia para a tela na hora em que saía do
 // decodificador. No Wi-Fi eles chegam com 10–30 ms de diferença entre si (relatório de 2026-11-04
@@ -566,6 +567,85 @@ export function descricaoSemReordenar(desc) {
   }
 }
 
+// ================================================================== realce de nitidez
+// Realce (2026-11-19): a imagem que chega foi comprimida (às vezes duas vezes: o PS5 e o PC de quem
+// compartilha) e perde os contornos. Na placa de quem joga, cada quadro passa por um filtro de nitidez
+// adaptativo (no jeito do CAS da AMD): cada ponto é puxado para longe da média dos 4 vizinhos, com o
+// resultado preso entre o menor e o maior vizinho — os contornos ganham, sem halo nem ruído nas áreas
+// lisas. Custa uma passada na placa por quadro (nada na rede, nada no atraso). Sem WebGL, ou se a placa
+// não aceitar o quadro como textura, a tela volta ao desenho comum (2D).
+const REALCE_VS = `attribute vec2 p; varying vec2 uv;
+void main() { uv = vec2((p.x + 1.0) * 0.5, (1.0 - p.y) * 0.5); gl_Position = vec4(p, 0.0, 1.0); }`;
+const REALCE_FS = `precision mediump float;
+varying vec2 uv; uniform sampler2D img; uniform vec2 px; uniform float forca;
+void main() {
+  vec3 c = texture2D(img, uv).rgb;
+  if (forca <= 0.0) { gl_FragColor = vec4(c, 1.0); return; }
+  vec3 n = texture2D(img, uv - vec2(0.0, px.y)).rgb;
+  vec3 s = texture2D(img, uv + vec2(0.0, px.y)).rgb;
+  vec3 e = texture2D(img, uv + vec2(px.x, 0.0)).rgb;
+  vec3 w = texture2D(img, uv - vec2(px.x, 0.0)).rgb;
+  vec3 mn = min(c, min(min(n, s), min(e, w)));
+  vec3 mx = max(c, max(max(n, s), max(e, w)));
+  // menos realce onde o contraste já é alto (CAS): evita halo nos contornos fortes
+  vec3 amp = sqrt(clamp(min(mn, 1.0 - mx) / max(mx, 1e-4), 0.0, 1.0));
+  vec3 r = c + forca * 2.5 * amp * (c - (n + s + e + w) * 0.25);
+  gl_FragColor = vec4(clamp(r, mn, mx), 1.0);
+}`;
+export const REALCE_FORCA = 0.8;
+export class Realce {
+  // devolve null se não houver WebGL
+  static criar(tela) {
+    const gl = tela.getContext('webgl', { alpha: false, antialias: false, depth: false, desynchronized: true, preserveDrawingBuffer: false });
+    if (!gl) return null;
+    try { return new Realce(gl); } catch (err) { console.warn('[turbo] realce', err); return null; }
+  }
+
+  constructor(gl) {
+    this.gl = gl;
+    const sh = (tipo, src) => {
+      const x = gl.createShader(tipo);
+      gl.shaderSource(x, src);
+      gl.compileShader(x);
+      if (!gl.getShaderParameter(x, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(x) || 'shader');
+      return x;
+    };
+    const prog = gl.createProgram();
+    gl.attachShader(prog, sh(gl.VERTEX_SHADER, REALCE_VS));
+    gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, REALCE_FS));
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog) || 'programa');
+    gl.useProgram(prog);
+    const buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+    const p = gl.getAttribLocation(prog, 'p');
+    gl.enableVertexAttribArray(p);
+    gl.vertexAttribPointer(p, 2, gl.FLOAT, false, 0, 0);
+    this.tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, this.tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    this.uPx = gl.getUniformLocation(prog, 'px');
+    this.uForca = gl.getUniformLocation(prog, 'forca');
+  }
+
+  // desenha o quadro (VideoFrame) com o realce; lança se a placa não aceitar o quadro como textura
+  desenhar(frame, w, h, forca) {
+    const gl = this.gl;
+    if (gl.isContextLost()) throw new Error('contexto perdido');
+    gl.viewport(0, 0, w, h);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, frame);
+    const erro = gl.getError();
+    if (erro) throw new Error(`webgl ${erro}`);
+    gl.uniform2f(this.uPx, 1 / w, 1 / h);
+    gl.uniform1f(this.uForca, forca);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  }
+}
+
 // ================================================================== quem compartilha
 export class TurboEnvio {
   // tela(key) -> { stream, controle } da minha tela (ou null); onMudou(id, key, ligado)
@@ -641,7 +721,7 @@ export class TurboEnvio {
   // recodificar: o PS5 vai codificado aqui mesmo se couber repassado (vigiarRepasse: o repasse não coube);
   // bandaInicialKbps: a banda em que o codificador começa (a que a rede levava no repasse)
   async ligarSessao(id, canal, pedido) {
-    const { ligar: key, codecs, altura, versao, som, recodificar = false, bandaInicialKbps = null } = pedido;
+    const { ligar: key, codecs, altura, versao, som, recodificar = false, bandaInicialKbps = null, hevc = false } = pedido;
     this.desligar(id);
     const vez = (this.vez = (this.vez || 0) + 1);
     this.vezDe.set(id, vez);
@@ -674,7 +754,8 @@ export class TurboEnvio {
     // 2026-11-18, o 1080p repassado (15 Mbps) em 5–16 qps por minutos, com a rede levando ~6.
     if (fonte && !recodificar && pedida >= altFonte) {
       const kbpsPs5 = Number(fonte.kbps) || null;
-      const semRepasse = this.lembrado(id)?.semRepasse;
+      // o PS5 em H.265 só vai repassado a quem decodifica H.265 (o pedido diz: hevc)
+      const semRepasse = this.lembrado(id)?.semRepasse || (fonte.hevc && !hevc);
       const direto = !!rede && !rede.relay && !/^relay/.test(rede.local || '') && !/^relay/.test(rede.remoto || '');
       const cabe = !semRepasse && (!kbpsPs5 || !rede || rede.lan || direto || rede.saidaKbps == null || rede.saidaKbps >= kbpsPs5 * FOLGA_REPASSE);
       if (cabe) return this.ligarPs5(id, canal, key, fonte, { versao, som, somMix: t.somMix, rede, pedido });
@@ -704,6 +785,10 @@ export class TurboEnvio {
     s.altMax = Math.min(1080, Number(altura) || 1080);
     s.altTeto = s.altMax; // o tamanho pedido: decidirAltura desce dele com a rede apertada e volta até ele
     s.aceitos = (Array.isArray(codecs) ? codecs : []).filter((c) => CODECS.includes(c) || CODECS_HEVC.includes(c));
+    // Quem joga decodifica H.265 (versão nova: hevc no pedido, com ele no fim da lista): ele vem primeiro.
+    // A mesma banda dá uns 30–40% mais nitidez — e é a banda que a rede de quem joga leva que limita a
+    // imagem recomprimida aqui. Se a placa daqui não codificar, configurar cai no H.264 da lista.
+    if (hevc) s.aceitos.sort((a, b) => Number(ehHevc(b)) - Number(ehHevc(a)));
     this.rodar(s).catch((err) => {
       console.warn('[turbo] envio', err);
       responder({ erro: 'codificador' });
@@ -1334,6 +1419,12 @@ export class TurboRecebe {
     this._liso = true;
     this.vidaMs = TTL_MS; // a vida dos pedaços no canal: vale na próxima vez que o turbo ligar
     this.h265 = false; // pedir H.265 (presets de teste): vale na próxima vez que o turbo ligar
+    // H.265 de fábrica: este aparelho diz a quem compartilha que decodifica H.265 (hevc no pedido), e lá
+    // a imagem vem em H.265 — repassada do PS5 ou codificada lá. semHevc: o decodificador daqui segurou
+    // quadros ou demorou com ele (largarHevc): até recarregar a página, só H.264.
+    this.semHevc = false;
+    this.realce = false; // realce de nitidez (Realce): vale na próxima vez que o turbo ligar
+    this.realceForca = REALCE_FORCA;
     this.lisoPct = LISO_PCT; // quanto do tremido a folga do liso cobre (presets de teste)
     this.lisoMax = LISO_MAX; // a folga máxima (ms): o Turbo rápido troca o atraso pelo tremido
   }
@@ -1367,8 +1458,9 @@ export class TurboRecebe {
     tela.className = 'turbo-tela';
     tela.hidden = true;
     video.after(tela);
+    const realce = this.realce ? Realce.criar(tela) : null;
     const s = {
-      key, video, canal, tela, ctx: tela.getContext('2d', { alpha: false, desynchronized: true }),
+      key, video, canal, tela, realce, alturaPedida: altura, ctx: realce ? null : tela.getContext('2d', { alpha: false, desynchronized: true }),
       dec: null, montando: null, ultimoId: 0, esperaChave: true, pedidoEm: 0, desenhou: 0, inicio: performance.now(),
       maiorId: 0, // o quadro mais novo de que chegou algum pedaço (vai no pedido de quadro-chave)
       fimChave: null, // quando o último quadro-chave terminou de chegar, no relógio de lá (a fila dele não conta)
@@ -1411,11 +1503,15 @@ export class TurboRecebe {
     // jogo (o iPhone só deixa tocar assim; senão, destrava no próximo toque — ver prepararSom)
     this.prepararSom(s, dono);
     const codecs = [];
-    // com o H.265 pedido, ele vem primeiro: quem compartilha escolhe o primeiro que a placa codifica
-    for (const codec of s.h265 ? [...CODECS_HEVC, ...CODECS] : CODECS) {
+    // com o H.265 pedido (presets de teste), ele vem primeiro: quem compartilha numa versão antiga escolhe o
+    // primeiro que a placa codifica. De fábrica ele vai no fim da lista (a versão antiga continua no
+    // H.264) e o "hevc" do pedido diz à versão nova que pode usar.
+    const lista = this.semHevc ? CODECS : s.h265 ? [...CODECS_HEVC, ...CODECS] : [...CODECS, ...CODECS_HEVC];
+    for (const codec of lista) {
       const r = await VideoDecoder.isConfigSupported({ codec, optimizeForLatency: true }).catch(() => null);
       if (r?.supported) codecs.push(codec);
     }
+    s.hevcAqui = codecs.some(ehHevc);
     if (s.h265) this.onEvento?.(codecs.some(ehHevc) ? 'turbo: H.265 pedido' : 'turbo: este aparelho não decodifica H.265 (vai H.264)', { codecs });
     if (s.som) {
       const r = await AudioDecoder.isConfigSupported({ codec: 'opus', sampleRate: 48000, numberOfChannels: 2 }).catch(() => null);
@@ -1423,7 +1519,7 @@ export class TurboRecebe {
     }
     if (this.s !== s) return;
     if (!codecs.length) return this.falhou('navegador');
-    const ligar = () => canal.send(JSON.stringify({ ligar: key, codecs, altura, versao: VERSAO, som: !!s.som }));
+    const ligar = () => canal.send(JSON.stringify({ ligar: key, codecs, altura, versao: VERSAO, som: !!s.som, hevc: s.hevcAqui }));
     if (canal.readyState === 'open') ligar();
     else canal.addEventListener('open', ligar, { once: true });
     canal.onmessage = (e) => (typeof e.data === 'string' ? this.texto(s, e.data) : this.pedaco(s, e.data));
@@ -1529,6 +1625,8 @@ export class TurboRecebe {
     // a aba morreu junto).
     if (/iPhone|iPad|iPod/.test(navigator.userAgent) || (apple && navigator.maxTouchPoints > 1)) return;
     if (fila == null || fila >= 2 || (apple && dec != null && dec > 12)) return;
+    // H.265 que não seja o pedido de teste: volta ao H.264 em vez de ir para o processador
+    if (ehHevc(s.cfgAtual.codec) && !s.h265) return this.largarHevc(s, 'segurando');
     s.trocandoDec = true;
     try {
       const cfg = s.cfgAtual;
@@ -1952,7 +2050,17 @@ export class TurboRecebe {
         s.tela.width = w;
         s.tela.height = h;
       }
-      s.ctx.drawImage(frame, 0, 0, w, h);
+      if (s.realce) {
+        try {
+          s.realce.desenhar(frame, w, h, this.realceForca);
+        } catch (err) {
+          // a placa não aceitou: a tela volta ao desenho comum (um canvas novo: o de WebGL não vira 2D)
+          console.warn('[turbo] realce', err);
+          this.onEvento?.('turbo: realce de nitidez desligado (a placa não aceitou)', { erro: String(err?.message || err) });
+          this.trocarTela2d(s);
+        }
+      }
+      if (!s.realce) s.ctx.drawImage(frame, 0, 0, w, h);
       s.pintados++;
       s.conta.desenhados++;
       s.desenhou = performance.now();
@@ -1983,6 +2091,29 @@ export class TurboRecebe {
     };
   }
 
+  trocarTela2d(s) {
+    const nova = document.createElement('canvas');
+    nova.className = 'turbo-tela';
+    nova.hidden = s.tela.hidden;
+    nova.width = s.tela.width;
+    nova.height = s.tela.height;
+    s.tela.replaceWith(nova);
+    s.tela = nova;
+    s.realce = null;
+    s.ctx = nova.getContext('2d', { alpha: false, desynchronized: true });
+    this.posicionar(s);
+  }
+
+  // O H.265 daqui não serve: o decodificador segura quadros (o turbo trocaria para o processador, lento
+  // em 1080p) ou demora mais que HEVC_LENTO_MS por quadro. Até recarregar, só H.264 — e o turbo liga de
+  // novo agora, pedindo H.264 (quem compartilha codifica lá ou repassa o PS5 em H.264).
+  largarHevc(s, motivo) {
+    if (this.semHevc || this.s !== s) return;
+    this.semHevc = true;
+    this.onEvento?.('turbo: H.265 largado (este aparelho decodifica mal) — H.264 de novo', { motivo, decMs: mediana(s.conta.decMs) });
+    setTimeout(() => { if (this.s === s) this.ligar(s.key, s.video, s.alturaPedida); }, 0);
+  }
+
   // o canvas fica exatamente onde o vídeo está (mesma caixa e mesmas margens: object-fit cuida do resto)
   posicionar(s) {
     const v = s.video;
@@ -1997,6 +2128,9 @@ export class TurboRecebe {
     if (this.s !== s) return;
     const agora = performance.now();
     this.posicionar(s);
+    if (!s.h265 && ehHevc(s.cfgAtual?.codec) && s.conta.decMs.length >= 30 && agora - s.inicio > 4000 && mediana(s.conta.decMs) > HEVC_LENTO_MS) {
+      return this.largarHevc(s, 'lento');
+    }
     this.vigiarSom(s);
     // A própria página parou (o vigia, que é de 250 ms, ficou mais de 1 s sem rodar) ou a tela está
     // lenta: a imagem parada e a fila "cheia" vêm daí, não da conexão. No teste de 2026-11-05 01:09 a
