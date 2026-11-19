@@ -245,3 +245,13 @@ test('decidirBanda: no arranque sobe 30% a cada 2 avisos com a fila baixa; o pri
   c.baixas = 2;
   assert.equal(decidirBanda({ atual: 8_500_000, min: 2_500_000, max: 20_000_000, fila: 10, a: c, rxEscala: 1000 }), 8_500_000);
 });
+
+test('decidirBanda: um corte na graça do começo não acaba o arranque', () => {
+  const a = { altas: 2, baixas: 0, arranque: true, graca: true };
+  const n = decidirBanda({ atual: 4_900_000, min: 2_500_000, max: 20_000_000, fila: 200, a, rxEscala: 1000 });
+  assert.ok(n < 4_900_000);
+  assert.equal(a.arranque, true);
+  a.graca = false;
+  a.baixas = 2;
+  assert.equal(decidirBanda({ atual: n, min: 2_500_000, max: 20_000_000, fila: 10, a, rxEscala: 1000 }), Math.round(n * 1.3));
+});

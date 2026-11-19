@@ -108,6 +108,10 @@ const FOLGA_REPASSE = 1.15;
 // com a fila baixa (4,8 → 20 em ~6 s); o primeiro corte acaba o arranque e daí vale o passo de sempre.
 const ARRANQUE_SOBE = 1.3;
 const ARRANQUE_AVISOS = 2;
+// Um corte nos primeiros ARRANQUE_GRACA_MS não acaba o arranque: é a fila do quadro-chave inicial e do
+// codificador começando. No teste do kazu (2026-11-19 22:15, direta, 1080p) a banda foi de 4,9 a 2,9
+// no primeiro segundo, o arranque acabou ali e a subida levou ~50 s até 14,5 Mbps.
+const ARRANQUE_GRACA_MS = 4000;
 // A banda boa de cada pessoa fica lembrada por MEMORIA_MS: entrando de novo no modo jogo, começa em
 // MEMORIA_FRACAO dela (e não na estimativa do começo); o repasse do PS5 que não coube não é tentado
 // de novo nesse tempo (cada tentativa custava 2–4 s de imagem parada).
@@ -340,7 +344,7 @@ export function decidirBanda({ atual, min, max, fila, a, rxEscala = 1, entrega =
     a.altas = 0;
     a.trancos = (a.trancos || 0) + 1;
   } else if (a.altas >= 2) {
-    a.arranque = false;
+    if (!a.graca) a.arranque = false;
     nova = atual * (fila > FILA_MUITO_ALTA ? 0.7 : 0.85);
     const chegou = a.rxs?.length ? Math.max(...a.rxs) * rxEscala : null;
     if (chegou) nova = Math.min(nova, chegou * 0.9);
@@ -1055,6 +1059,7 @@ export class TurboEnvio {
     // que tranca a cada poucos segundos.
     const tranco = entrega != null && entrega >= ENTREGA_OK;
     a.baixas = fila < FILA_BAIXA ? a.baixas + 1 : fila > FILA_ALTA && !tranco ? 0 : a.baixas;
+    a.graca = agora - (s.inicioEm || 0) < ARRANQUE_GRACA_MS; // decidirBanda: o arranque não acaba aqui
     if (!s.enc && s.ps5 && !s.ps5.banda) return this.vigiarRepasse(s, fila);
     // PC direto (pc-direto.js): os quadros vêm da placa pela ponte; a banda muda lá (fonte.banda, em kbps)
     if (!s.enc && s.ps5?.banda) {
