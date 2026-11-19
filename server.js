@@ -757,6 +757,15 @@ function estadoLan(room) {
     const ids = atual ? [...room.users.values()].filter((u) => u.conta === atual.conta).map((u) => u.id) : [];
     e[m] = { conta: atual?.conta ?? null, inicio: atual?.inicio ?? null, fim: atual?.fim ?? null, preparando: !!atual?.preparando, ids };
   }
+  // teste grátis (máquina sem ninguém alugado): quem está com os 2 min correndo (id -> fim) e quem já
+  // usou o seu (pela conta ou pelo IP) e não joga mais de graça
+  e.teste = {};
+  e.semTeste = [];
+  for (const u of room.users.values()) {
+    const t = lan.teste(room.id, u.conta, u.ip);
+    if (t.fim) e.teste[u.id] = t.fim;
+    else if (t.acabou) e.semTeste.push(u.id);
+  }
   // a hora do servidor: a página conta quanto falta para o fim da vez pelo relógio daqui, não o dela
   e.agora = Date.now();
   return e;
@@ -808,11 +817,22 @@ async function vigiarJogoLan(room) {
 }
 
 // pode mexer nas telas desta pessoa? (dono da tela sempre pode; fora da lan house, todo mundo; na
-// lan house, com a máquina sem ninguém alugado na hora, também todo mundo)
+// lan house, com a máquina sem ninguém alugado na hora, quem ainda tem o teste grátis: os 2 min
+// correndo ou ainda não começados)
 function podeJogarLan(room, user, donoDaTela, tela) {
   if (!room.config?.lanhouse?.ligada || user === donoDaTela) return true;
   const atual = vezLan(room, maquinaDaTela(tela));
-  return !atual || user.conta === atual.conta;
+  if (atual) return user.conta === atual.conta;
+  return !lan.teste(room.id, user.conta, user.ip).acabou;
+}
+// o primeiro comando ao jogo numa máquina livre começa os 2 min do teste grátis desta pessoa; no
+// fim, a sala fica sabendo (a tela de quem joga deixa de aceitar e abre o aluguel para ela)
+function comecarTesteLan(room, user, tela) {
+  if (!room.config?.lanhouse?.ligada || vezLan(room, maquinaDaTela(tela))) return;
+  const fim = lan.comecarTeste(room.id, user.conta, user.ip);
+  if (!fim) return;
+  avisarLan(room, true);
+  setTimeout(() => avisarLan(room, true), fim - Date.now() + 300).unref?.();
 }
 
 // Prêmios. Cada um tem um intervalo mínimo por pessoa, para ninguém "farmar" repetindo.
@@ -1509,6 +1529,7 @@ function attachSockets(io) {
         gestor: false, // provou a senha de gestor (ou de dono): recebe os alertas da equipe
         ultimoChamado: 0,
         conta: contaLan, // a conta com que entrou (lanhouse.js): é ela que joga no horário reservado
+        ip: ipDe(), // o teste grátis da lan house é um por conta e um por IP
         p: [0, 0, -4], r: Math.PI, a: 0, s: 0,
       };
       user.moedas = saldoDe(user.name);
@@ -1557,6 +1578,16 @@ function attachSockets(io) {
       user.conta = conta;
       avisarLan(room);
       r({ ok: true, conta, lan: estadoLan(room) });
+    });
+
+    // lan house: os comandos ao jogo vão direto (WebRTC), sem passar por aqui. Quem compartilha a
+    // tela avisa o primeiro comando de quem joga de graça, e os 2 min dessa pessoa começam.
+    socket.on('lan-teste', (msg) => {
+      const { id, key } = obj(msg);
+      const tela = user?.shares.get(key);
+      const quem = room?.users.get(id);
+      if (!tela?.controle || !quem || quem === user) return;
+      comecarTesteLan(room, quem, tela);
     });
 
     // ---------------------------------------------------------- dono da sala
@@ -1905,6 +1936,7 @@ function attachSockets(io) {
       if (++ctrlConta > (repete ? 120 : 240)) return;
       const ev = eventoDeControle(msg.ev);
       if (!ev) return;
+      if (ev.t !== 'modo' && user !== dono) comecarTesteLan(room, user, dono.shares.get(msg.key));
       // quem mexeu em cada tela, e quando: só essa pessoa recebe a volta do controle (controle-volta)
       user.controlou ??= new Map();
       user.controlou.set(msg.key, agora);

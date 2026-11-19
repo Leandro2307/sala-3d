@@ -2747,6 +2747,8 @@ const controle = new Controle({
   // Mouse e teclado vão direto para o dono da tela pelo canal da conexão (ver rtc.canalControle):
   // o servidor no meio somava a distância até ele a cada tecla. Canal ainda fechando: pelo servidor.
   emitir: (ev, data, volatil) => {
+    // lan house: o teste grátis acabou nesta máquina livre: nada vai, e abre o aluguel
+    if (ev === 'controle' && barradoNoTesteLan(data.key)) return void pedirAluguelTeste();
     if (ev === 'controle' && rtc?.mandarControle(String(data.key).split('~')[0], { c: data })) return;
     if (ev === 'controle-volta' && rtc?.mandarControle(data.para, { v: { key: data.key, ev: data.ev } })) return;
     return volatil ? socket?.volatile.emit(ev, data) : socket?.emit(ev, data);
@@ -2754,7 +2756,7 @@ const controle = new Controle({
   // o canal com o dono da tela está aberto (o modo jogo manda o mouse mais vezes por ele)
   direto: (key) => !!rtc?.canalControle(String(key).split('~')[0]),
   // modo jogo: o total andado pelo mouse, no canal sem ordem (ver rtc.canalMovimento e receberDireto)
-  movimento: (key, total) => !!rtc?.mandarMovimento(String(key).split('~')[0], { m: { key, ...total } }),
+  movimento: (key, total) => (barradoNoTesteLan(key) ? (pedirAluguelTeste(), true) : !!rtc?.mandarMovimento(String(key).split('~')[0], { m: { key, ...total } })),
   semPonteiro: isTouch,
   // as minhas telas: o evento vai direto para a extensão, sem ida e volta pelo servidor
   minha: (key) => self()?.shares.get(key) ?? null,
@@ -2775,6 +2777,8 @@ function receberControle(msg) {
   // mexe; sem ninguém alugado na hora, todo mundo. O servidor também barra, mas o canal direto do
   // WebRTC não passa por ele.
   if (msg.deId && msg.deId !== state.selfId && !podeJogarLan(maquinaDaTela(sh), msg.deId)) return;
+  // máquina livre: o primeiro comando de quem joga (não o "entrar no modo jogo") começa o teste grátis
+  if (msg.deId && msg.deId !== state.selfId && sh?.controle && state.lan && lanLivre(maquinaDaTela(sh)) && msg.ev?.t !== 'modo') avisarTesteLan(msg.deId, msg.key);
   if (sh?.controle) turboDaTela(msg.key);
   controle.receber(sh, msg.deId === state.selfId ? { ...msg, deId: null } : msg);
 }
@@ -5615,9 +5619,38 @@ const MAQUINAS_LAN = { pc: 'PC', ps5: 'PS5' };
 // a tela do PS5 direto é o PS5; o resto (janela, tela inteira, aba) é o PC
 const maquinaDaTela = (sh) => (sh?.ps5 || sh?.superficie === 'ps5' || sh?.titulo === 'PS5' ? 'ps5' : 'pc');
 const idsDaVez = (m) => state.lan?.[m]?.ids || [];
-// lan house: a máquina sem ninguém alugado na hora fica livre para todos (igual ao servidor)
+// lan house: a máquina sem ninguém alugado na hora fica livre, mas só para o teste grátis: 2 min por
+// pessoa, uma vez (conta e IP, ver lanhouse.js teste). Quem já usou o seu não joga mais de graça.
 const lanLivre = (m) => !state.lan?.[m]?.conta;
-const podeJogarLan = (m, id) => !state.lan || lanLivre(m) || idsDaVez(m).includes(id);
+const semTesteLan = (id) => !!state.lan?.semTeste?.includes(id);
+const podeJogarLan = (m, id) => !state.lan || idsDaVez(m).includes(id) || (lanLivre(m) && !semTesteLan(id));
+// Quem compartilha a tela: o primeiro comando de quem joga de graça numa máquina livre começa os 2
+// min dessa pessoa no servidor (os comandos vêm direto, pelo WebRTC, e ele não os vê).
+const pediuTesteLan = new Map(); // id -> quando avisou
+function avisarTesteLan(id, key) {
+  if (state.lan?.teste?.[id] || Date.now() - (pediuTesteLan.get(id) || 0) < 3000) return;
+  pediuTesteLan.set(id, Date.now());
+  socket?.emit('lan-teste', { id, key });
+}
+// Quem joga: o teste grátis acabou e a máquina continua livre (sem ser a minha vez): o comando não
+// sai, e abre o aluguel.
+function barradoNoTesteLan(key) {
+  if (!state.lan || !semTesteLan(state.selfId)) return false;
+  const dono = String(key).split('~')[0];
+  if (dono === state.selfId) return false;
+  const sh = state.users.get(dono)?.shares.get(key);
+  if (!sh) return false;
+  const m = maquinaDaTela(sh);
+  return lanLivre(m) && !idsDaVez(m).includes(state.selfId);
+}
+let pediuAluguelEm = 0;
+function pedirAluguelTeste() {
+  if (!$('#lan-modal').hidden || Date.now() - pediuAluguelEm < 10_000) return;
+  pediuAluguelEm = Date.now();
+  toast('Seu teste grátis já foi usado. Para jogar, alugue o PC ou o PS5.', 'warn', 6000);
+  abrirAluguel();
+}
+let meuTesteLan = null; // o fim dos meus 2 min (correndo), para avisar no começo e no fim
 const minhasMaquinas = () => Object.keys(MAQUINAS_LAN).filter((m) => idsDaVez(m).includes(state.selfId));
 let lanEraMinha = new Set();
 const horaCurta = (ms) => new Date(ms).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
@@ -5633,7 +5666,15 @@ function faltaLan(fim) {
 }
 function textoVezLan(m) {
   const v = state.lan?.[m];
-  if (!v?.conta) return { texto: `${MAQUINAS_LAN[m]} livre`, livre: true };
+  if (!v?.conta) {
+    const fimTeste = state.lan?.teste?.[state.selfId];
+    if (fimTeste) {
+      const t = faltaLan(fimTeste);
+      return { texto: `Teste grátis no ${MAQUINAS_LAN[m]} · faltam ${t.texto}`, minha: true, acabando: t.s <= 30, s: t.s, teste: true };
+    }
+    if (semTesteLan(state.selfId)) return { texto: `${MAQUINAS_LAN[m]} livre · alugue para jogar`, livre: true };
+    return { texto: `${MAQUINAS_LAN[m]} livre · 2 min grátis`, livre: true };
+  }
   const f = faltaLan(v.fim);
   const minha = idsDaVez(m).includes(state.selfId);
   // o PC sendo preparado (o jogo abrindo) no minuto antes da vez: conta até a vez começar
@@ -5656,7 +5697,7 @@ function mostrarVezLan() {
     el.classList.toggle('minha', !!v.minha);
     el.classList.toggle('livre', !!v.livre);
     el.classList.toggle('acabando', !!v.acabando);
-    if (v.minha) {
+    if (v.minha && !v.teste) {
       const fim = state.lan[m].fim;
       for (const lim of [300, 60]) {
         const k = `${m}|${fim}|${lim}`;
@@ -5702,6 +5743,15 @@ function aplicarLan(e) {
   }
   for (const m of lanEraMinha) if (!agora.has(m)) toast(lanLivre(m) ? `Seu horário no ${MAQUINAS_LAN[m]} acabou. Ninguém alugou a próxima hora: a tela fica livre para todos.` : `Seu horário no ${MAQUINAS_LAN[m]} acabou. Para jogar mais, toque em "Alugar PC ou PS5".`, 'info', 10000);
   lanEraMinha = agora;
+  // o meu teste grátis: começou (primeiro comando ao jogo) ou acabou (abre o aluguel)
+  const fimTeste = state.lan?.teste?.[state.selfId] || null;
+  if (fimTeste && !meuTesteLan) toast('Teste grátis: você tem 2 minutos para jogar. Depois, para continuar, é só alugar o PC ou o PS5.', 'info', 7000);
+  if (meuTesteLan && !fimTeste && semTesteLan(state.selfId)) {
+    pediuAluguelEm = Date.now();
+    toast('Seu teste grátis de 2 minutos acabou. Para continuar jogando, alugue o PC ou o PS5.', 'warn', 10000);
+    abrirAluguel();
+  }
+  meuTesteLan = fimTeste;
   mostrarLan();
   mostrarVezLan();
 }

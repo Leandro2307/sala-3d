@@ -89,6 +89,13 @@ const TABELAS = [
     PRIMARY KEY (id),
     KEY (sala, inicio)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  // lan house: o teste grátis de 2 min já usado, por conta e por IP (lanhouse.js comecarTeste)
+  `CREATE TABLE IF NOT EXISTS sala3d_testes (
+    chave  VARCHAR(120) NOT NULL,
+    conta  VARCHAR(20)  NOT NULL,
+    fim    BIGINT       NOT NULL,
+    PRIMARY KEY (chave)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 ];
 
 // relatórios guardados por no máximo tantos dias (e, sem MySQL, no máximo tantos arquivos)
@@ -99,6 +106,7 @@ const salasArq = arquivo('salas.json');
 const moedasArq = arquivo('moedas.json');
 const contasArq = arquivo('contas.json');
 const reservasArq = arquivo('reservas.json');
+const testesArq = arquivo('testes.json');
 let pool = null;
 
 async function iniciar() {
@@ -314,6 +322,22 @@ async function salvarReserva(r) {
   );
 }
 
+// o teste grátis da lan house: [{ chave, conta, fim }] ("sala|c:conta" ou "sala|ip:1.2.3.4")
+async function lerTestes() {
+  if (!pool) return Object.entries(testesArq.mapa).map(([chave, v]) => ({ chave, ...v }));
+  const [linhas] = await pool.query('SELECT chave, conta, fim FROM sala3d_testes');
+  return linhas.map((l) => ({ ...l, fim: Number(l.fim) }));
+}
+
+async function salvarTeste({ chave, conta, fim }) {
+  if (!pool) {
+    testesArq.mapa[chave] = { conta, fim };
+    testesArq.salvar();
+    return;
+  }
+  await pool.query('INSERT INTO sala3d_testes (chave, conta, fim) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE conta = VALUES(conta), fim = VALUES(fim)', [chave, conta, fim]);
+}
+
 // Servidor saindo (deploy, Ctrl+C): o que esperava o atraso vai para o banco antes do fim.
 async function encerrar() {
   salasArq.agora();
@@ -321,10 +345,11 @@ async function encerrar() {
   relatoriosArq.agora();
   contasArq.agora();
   reservasArq.agora();
+  testesArq.agora();
   if (!pool) return;
   clearTimeout(timerSaldos);
   await gravarSaldos();
   await pool.end().catch(() => {});
 }
 
-module.exports = { iniciar, lerSala, salvarSala, lerSaldo, guardarSaldo, guardarRelatorio, listarRelatorios, lerRelatorio, lerConta, criarConta, trocarSenhaConta, lerReservas, salvarReserva, encerrar };
+module.exports = { iniciar, lerSala, salvarSala, lerSaldo, guardarSaldo, guardarRelatorio, listarRelatorios, lerRelatorio, lerConta, criarConta, trocarSenhaConta, lerReservas, salvarReserva, lerTestes, salvarTeste, encerrar };

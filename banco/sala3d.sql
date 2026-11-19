@@ -42,3 +42,11 @@ CREATE TABLE IF NOT EXISTS sala3d_reservas (
   PRIMARY KEY (id),
   KEY (sala, inicio)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- lan house: o teste grátis de 2 min já usado (um por conta e um por IP, ver lanhouse.js)
+CREATE TABLE IF NOT EXISTS sala3d_testes (
+  chave  VARCHAR(120) NOT NULL,     -- "sala|c:conta" ou "sala|ip:1.2.3.4"
+  conta  VARCHAR(20)  NOT NULL,     -- a conta que começou o teste
+  fim    BIGINT       NOT NULL,     -- ms desde 1970 (UTC): o fim dos 2 minutos
+  PRIMARY KEY (chave)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

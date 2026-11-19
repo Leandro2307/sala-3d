@@ -24,6 +24,10 @@ const MAQUINAS = { pc: 'PC', ps5: 'PS5' };
 const maquinaDe = (m) => (Object.hasOwn(MAQUINAS, m) ? m : 'pc');
 const ESPERA_CHECKOUT = 31 * 60_000; // a Stripe exige pelo menos 30 min até a sessão expirar
 const TOKEN_DIAS = 30;
+// Teste grátis: com a máquina sem ninguém alugado, cada pessoa joga 2 min uma vez só. O tempo conta
+// do primeiro comando que ela manda ao jogo. Fica marcado na conta e no IP: outra conta criada no
+// mesmo lugar não ganha outro teste.
+const TESTE_MS = 2 * 60_000;
 
 // o nome é o da pessoa (com acento e espaço); a conta é ele em minúsculas, então "Ana" e "ana" são a mesma
 const limparNome = (n) => String(n ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
@@ -46,6 +50,7 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
     || (CHAVE ? crypto.createHash('sha256').update(`sala3d-lan|${CHAVE}`).digest('hex') : crypto.randomBytes(32).toString('hex'));
 
   const reservas = new Map(); // id -> reserva (só as de ontem para a frente ficam na memória)
+  const testes = new Map(); // "sala|c:conta" ou "sala|ip:1.2.3.4" -> { conta, fim }
   let preco = null; // { id, valor (centavos), moeda }
 
   // ---------------------------------------------------------- Stripe (sem SDK: só fetch)
@@ -88,6 +93,28 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
     const certa = assinar(`${nome}:${ate}`);
     if (assin.length !== certa.length || !crypto.timingSafeEqual(Buffer.from(assin), Buffer.from(certa))) return null;
     return nome;
+  }
+
+  // ---------------------------------------------------------- teste grátis
+  // { fim } com o teste correndo; { acabou: true } já usado (por esta conta ou por outra do mesmo IP); {} nunca usou
+  function teste(sala, conta, ip, agora = Date.now()) {
+    const c = conta ? testes.get(`${sala}|c:${conta}`) : null;
+    if (c) return c.fim > agora ? { fim: c.fim } : { acabou: true };
+    if (ip && testes.has(`${sala}|ip:${ip}`)) return { acabou: true, ip: true };
+    return {};
+  }
+  // começa o teste (primeiro comando ao jogo): o fim, ou null se já tinha começado ou acabado
+  function comecarTeste(sala, conta, ip) {
+    if (!conta) return null;
+    const t = teste(sala, conta, ip);
+    if (t.fim || t.acabou) return null;
+    const fim = Date.now() + TESTE_MS;
+    for (const chave of [`${sala}|c:${conta}`, ...(ip ? [`${sala}|ip:${ip}`] : [])]) {
+      testes.set(chave, { conta, fim });
+      banco.salvarTeste({ chave, conta, fim }).catch((err) => console.warn('[lan] guardando teste', err.code || err.message));
+    }
+    console.log(`[lan] ${sala}: teste grátis de ${conta}${ip ? ` (${ip})` : ''}`);
+    return fim;
   }
 
   // ---------------------------------------------------------- reservas
@@ -173,6 +200,11 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
       }
     } catch (err) {
       console.warn('[lan] lendo reservas', err.code || err.message);
+    }
+    try {
+      for (const t of await banco.lerTestes()) testes.set(t.chave, { conta: t.conta, fim: t.fim });
+    } catch (err) {
+      console.warn('[lan] lendo testes', err.code || err.message);
     }
     console.log(`  Lan house:     ${CHAVE ? `Stripe ligada (${PRODUTO})` : 'sem STRIPE_KEY (não dá para pagar)'}, ${reservas.size} reservas`);
     setInterval(() => conferirPendentes().catch(() => {}), 60_000).unref();
@@ -455,5 +487,5 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
     return { ok: true, conta: atual.conta, maquina: MAQUINAS[m] };
   }
 
-  return { iniciar, rotas, contaDoToken, jogadorAgora, liberar, encerrar, MAQUINAS: Object.keys(MAQUINAS) };
+  return { iniciar, rotas, contaDoToken, jogadorAgora, liberar, encerrar, teste, comecarTeste, TESTE_MS, MAQUINAS: Object.keys(MAQUINAS) };
 };
