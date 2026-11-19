@@ -4,17 +4,18 @@
 // fonte "teclado" do controle virtual (pad-virtual.js), como o toque faz no celular:
 //
 //   WASD: analógico esquerdo        mouse: analógico direito (pela velocidade)
-//   clique esquerdo: ✕   clique direito: ○   roda para baixo: □   roda para cima: △ (trava; o próximo dente solta)
-//   Espaço: ✕   Enter: ○   F: △ (pela posição: no Switch, B A X)
-//   Shift: L1/L   Ctrl: R1/R   Q: L2/ZL   E: R2/ZR   meio: R3   V: L3
-//   Tab: Create/−   Esc: Options/+   H: PS/Home   setas: direcional
+//   (o layout de teclado e mouse mais usado, o dos adaptadores e dos jogos de PlayStation no PC)
+//   clique esquerdo: R2/ZR (atirar)   clique direito: L2/ZL (mirar)   rodinha: △ (trava; o próximo dente solta)
+//   Espaço/Enter: ✕   C/Ctrl/⌫: ○   R: □   F: △ (pela posição: no Switch, B A Y X)
+//   Q e Mouse 4: L1/L   E e Mouse 5: R1/R   Shift: L3 (correr)   V e meio: R3
+//   Tab: Create/−   Esc: Options/+   H: PS/Home   M: clique do touchpad   setas e 1 2 3 4: direcional
 //   Alt segurado: o mouse vira um dedo no touchpad (encosta no meio ao descer o Alt, sai ao soltar);
 //   Alt + clique esquerdo afunda o touchpad. O touchpad só chega no PS5 direto (a ponte); o controle
 //   de Xbox (emulador, chiaki-ng) não tem.
-//   G (só no PS5): liga/desliga a inclinação — o mouse inclina o controle em vez de mexer a câmera,
+//   J (só no PS5): liga/desliga a inclinação — o mouse inclina o controle em vez de mexer a câmera,
 //   no lugar do giroscópio do DualSense (a nave do Astro Bot se pilota inclinando o controle). Mouse
 //   para os lados: o controle tomba para o lado; para frente/trás: a frente desce/sobe. A inclinação
-//   fica onde o mouse deixou (até GIRO_MAX); G de novo: o controle volta deitado e o mouse, para a
+//   fica onde o mouse deixou (até GIRO_MAX); J de novo: o controle volta deitado e o mouse, para a
 //   câmera. Também só chega no PS5 direto (movimento.js, o campo m do controle virtual).
 //
 // Isso é o padrão: quem joga troca qualquer tecla no painel "Mapear teclas" (mapa-teclas.js, nas

@@ -4744,3 +4744,28 @@ body.touch :is(.hk-lista, #help-extra, #help-mais-btn) { display: none !importan
   .mt-teclas { grid-column: 1 / -1; grid-row: 2; justify-content: flex-start; }
   .mt-svg { max-height: 32vh; }
 }
+
+/* ============================================================ legenda dos botões no modo jogo (PC) */
+/* ✕ ○ □ △ e a tecla de cada um, bem no canto de baixo à direita, sem pegar clique */
+#jogo-legenda {
+  position: absolute;
+  right: max(10px, env(safe-area-inset-right));
+  bottom: max(8px, env(safe-area-inset-bottom));
+  z-index: 5;
+  pointer-events: none;
+  display: flex;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: 10px;
+  background: rgba(8, 10, 14, 0.62);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  font: 600 12px/1 'Plus Jakarta Sans', system-ui, sans-serif;
+  color: rgba(255, 255, 255, 0.86);
+  opacity: 0.85;
+}
+#jogo-legenda[hidden] { display: none; }
+#jogo-legenda span { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+#jogo-legenda b { font-size: 14px; font-weight: 800; }
+#jogo-legenda kbd { font: inherit; padding: 2px 5px; border-radius: 5px; background: rgba(255, 255, 255, 0.12); }
+#jogo-legenda .lg-xis { color: #93c5fd; } #jogo-legenda .lg-bol { color: #fca5a5; }
+#jogo-legenda .lg-qua { color: #f9a8d4; } #jogo-legenda .lg-tri { color: #6ee7b7; }

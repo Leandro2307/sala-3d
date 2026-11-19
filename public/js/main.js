@@ -30,7 +30,7 @@ import { ToqueJogo, jogoDaJanela, LAYOUTS, layoutDoTitulo } from './toque-jogo.j
 import { ControleFisico } from './gamepad-jogo.js';
 import { PadVirtual } from './pad-virtual.js';
 import { TecladoPad } from './teclado-pad.js';
-import { MapaTeclasPainel, dicaTeclado } from './mapa-teclas.js';
+import { MapaTeclasPainel, dicaTeclado, legendaBotoes, mapaTeclas } from './mapa-teclas.js';
 import { TutorialControle } from './tutorial-controle.js';
 import { TurboEnvio, TurboRecebe, TTL_MS, LISO_PCT, LISO_MAX } from './turbo.js';
 import { opcoesJogo, LISO_MS, PRESETS, OPCOES_DO_PRESET, htmlPresets, marcarPresets } from './jogo-opcoes.js';
@@ -4862,6 +4862,7 @@ controle.onJogo = (video, key) => {
     const dica = dicaTeclado(layoutPc);
     if (dica && !tutorialDoPs5(key)) toast(`Teclado e mouse viram o controle. ${dica}`, 'info', 12000);
   } else tecladoPad.desligar();
+  mostrarLegendaJogo(layoutPc && LAYOUTS[layoutPc]?.virtual ? layoutPc : null);
   $('#jogo-tutorial').hidden = layoutPc !== 'ps5';
   if (!video) {
     tutorialControle.fechar(false);
@@ -4874,6 +4875,19 @@ controle.onJogo = (video, key) => {
   // a própria tela (PS5 direto): a imagem já é daqui, sem turbo nem diagnóstico de quem joga longe
   jogoLa(video && !acharTela(key)?.user.isSelf ? video : null, key);
 };
+// A legenda do canto de baixo à direita no modo jogo do PC: ✕ = Espaço, ○ = C... (segue o mapa de
+// teclas; muda junto quando a pessoa troca uma tecla). layout null: some.
+let layoutLegenda = null;
+const CLASSE_LEGENDA = { b0: 'lg-xis', b1: 'lg-bol', b2: 'lg-qua', b3: 'lg-tri' };
+function mostrarLegendaJogo(layout) {
+  layoutLegenda = layout;
+  const el = $('#jogo-legenda');
+  el.hidden = !layout;
+  if (!layout) return void (el.innerHTML = '');
+  el.innerHTML = legendaBotoes(layout)
+    .map((b) => `<span><b class="${layout === 'ps5' ? CLASSE_LEGENDA[b.id] : ''}">${esc(b.botao)}</b>=<kbd>${esc(b.teclas)}</kbd></span>`).join('');
+}
+mapaTeclas.ouvir(() => { if (layoutLegenda) mostrarLegendaJogo(layoutLegenda); });
 // Tutorial do controle toda vez que entra no modo jogo numa tela de PS5 (no PC, só sem controle de
 // verdade ligado: quem tem um não precisa do teclado). true: abriu (ou vai abrir). Saiu do PS5: fecha.
 function tutorialDoPs5(key) {
@@ -5643,8 +5657,25 @@ function barradoNoTesteLan(key) {
   const m = maquinaDaTela(sh);
   return lanLivre(m) && !idsDaVez(m).includes(state.selfId);
 }
+// o teste acabou: sai do modo jogo e da tela cheia (o PC e o PS5 continuam abertos para quem alugar)
+let tirandoDoJogo = false; // desligar o modo jogo manda comandos (soltar tudo), que voltam aqui
+function tirarDoJogoLan() {
+  if (tirandoDoJogo) return;
+  tirandoDoJogo = true;
+  try {
+    if (controle.jogo) {
+      controle.desligarJogo();
+      updateFocusCtrl();
+    }
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    if (document.body.classList.contains('jogo-pc')) jogoNoPc(false);
+  } finally {
+    tirandoDoJogo = false;
+  }
+}
 let pediuAluguelEm = 0;
 function pedirAluguelTeste() {
+  tirarDoJogoLan();
   if (!$('#lan-modal').hidden || Date.now() - pediuAluguelEm < 10_000) return;
   pediuAluguelEm = Date.now();
   toast('Seu teste grátis já foi usado. Para jogar, alugue o PC ou o PS5.', 'warn', 6000);
@@ -5749,6 +5780,7 @@ function aplicarLan(e) {
   if (meuTesteLan && !fimTeste && semTesteLan(state.selfId)) {
     pediuAluguelEm = Date.now();
     toast('Seu teste grátis de 2 minutos acabou. Para continuar jogando, alugue o PC ou o PS5.', 'warn', 10000);
+    tirarDoJogoLan();
     abrirAluguel();
   }
   meuTesteLan = fimTeste;

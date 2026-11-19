@@ -11,16 +11,26 @@
 const CHAVE = 'sala3d-mapa-teclas';
 
 // entrada -> ação. Entradas: o e.code do teclado, Mouse* (botões) e Roda* (dentes da rodinha)
+// O padrão (desde 2026-11-19) é o layout de teclado e mouse mais usado para jogar no controle (o dos
+// adaptadores e programas como reWASD, XIM e Cronus, e o dos jogos de PlayStation que saíram no PC):
+// clique esquerdo atira (R2), direito mira (L2), Espaço pula (✕), C/Ctrl agacha (○), R recarrega ou
+// interage (□), F e a rodinha trocam de arma / entram no carro (△), Shift corre (L3), V golpeia (R3).
 export const PADRAO = Object.freeze({
-  Space: 'b0', Enter: 'b1', KeyF: 'b3',
-  ShiftLeft: 'b4', ShiftRight: 'b4', ControlLeft: 'b5', ControlRight: 'b5',
-  KeyQ: 'b6', KeyE: 'b7', Tab: 'b8', Escape: 'b9', KeyV: 'b10', KeyH: 'b16',
+  Space: 'b0', Enter: 'b0',
+  KeyC: 'b1', ControlLeft: 'b1', ControlRight: 'b1', Backspace: 'b1',
+  KeyR: 'b2',
+  KeyF: 'b3', RodaCima: 'b3', RodaBaixo: 'b3',
+  KeyQ: 'b4', MouseX1: 'b4', KeyE: 'b5', MouseX2: 'b5',
+  MouseRight: 'b6', MouseLeft: 'b7',
+  ShiftLeft: 'b10', ShiftRight: 'b10', KeyV: 'b11', MouseMiddle: 'b11',
+  Tab: 'b8', Escape: 'b9', KeyH: 'b16', KeyM: 'b17',
   ArrowUp: 'b12', ArrowDown: 'b13', ArrowLeft: 'b14', ArrowRight: 'b15',
+  Digit1: 'b12', Digit2: 'b15', Digit3: 'b13', Digit4: 'b14',
   KeyW: 'ly-', KeyS: 'ly+', KeyA: 'lx-', KeyD: 'lx+',
-  AltLeft: 'tp', AltRight: 'tp', KeyG: 'giro',
-  MouseLeft: 'b0', MouseRight: 'b1', MouseMiddle: 'b11', MouseX1: 'b4', MouseX2: 'b5',
-  RodaBaixo: 'b2', RodaCima: 'b3',
+  AltLeft: 'tp', AltRight: 'tp', KeyJ: 'giro',
 });
+// v2: o padrão novo. O mapa guardado na v1 (o padrão de antes, ou trocado em cima dele) dá lugar a ele.
+const VERSAO_MAPA = 2;
 
 // as direções dos analógicos: ação -> [eixo, sinal]
 export const EIXO = {
@@ -115,9 +125,11 @@ function ler() {
   const r = { mapa: { ...PADRAO }, carro: { ligado: false, t: 1, mapa: { ...CARRO_PADRAO } } };
   try {
     const o = JSON.parse(localStorage.getItem(CHAVE) || 'null');
-    if (o && o.v === 1 && o.mapa && typeof o.mapa === 'object') {
-      r.mapa = {};
-      for (const [e, a] of Object.entries(o.mapa)) if (POR_ID[a] && (!ehRoda(e) || ehBotao(a))) r.mapa[e] = a;
+    if (o && (o.v === 1 || o.v === VERSAO_MAPA) && o.mapa && typeof o.mapa === 'object') {
+      if (o.v === VERSAO_MAPA) {
+        r.mapa = {};
+        for (const [e, a] of Object.entries(o.mapa)) if (POR_ID[a] && (!ehRoda(e) || ehBotao(a))) r.mapa[e] = a;
+      }
       if (o.carro && typeof o.carro === 'object') {
         r.carro.ligado = !!o.carro.ligado;
         if (o.carro.mapa && typeof o.carro.mapa === 'object') {
@@ -135,7 +147,7 @@ function ler() {
 let { mapa, carro } = ler();
 const ouvintes = new Set();
 function gravar() {
-  try { localStorage.setItem(CHAVE, JSON.stringify({ v: 1, mapa, carro })); } catch { /* sem armazenamento */ }
+  try { localStorage.setItem(CHAVE, JSON.stringify({ v: VERSAO_MAPA, mapa, carro })); } catch { /* sem armazenamento */ }
   for (const f of ouvintes) f();
 }
 
@@ -224,6 +236,16 @@ export const visiveis = (id) => mapaTeclas.entradas(id).filter((e, _, todas) => 
 export function teclasDe(id) {
   const es = visiveis(id);
   return es.length ? es.map(nomeEntrada).join(' / ') : '—';
+}
+
+// a legenda do canto do modo jogo: [{ id, botao ('✕' ou 'B'), teclas ('Espaço') }] dos 4 botões da frente
+export function legendaBotoes(layout = 'ps5') {
+  return ['b0', 'b1', 'b2', 'b3'].map((id) => ({
+    id,
+    botao: rotulo(id, layout),
+    // até duas, sem a rodinha (a tecla é o que se lê primeiro)
+    teclas: visiveis(id).filter((e) => !ehRoda(e)).slice(0, 2).map(nomeEntrada).join(' / ') || '—',
+  }));
 }
 
 // o recado que aparece ao entrar no modo jogo, montado do mapa de agora
