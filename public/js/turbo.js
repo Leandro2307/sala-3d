@@ -1362,6 +1362,10 @@ export class TurboRecebe {
     const dec = mediana(s.conta.decMs);
     const fila = mediana(s.filaDec);
     const apple = /iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent);
+    // iPhone/iPad: nunca para o processador. O de lá solta na hora (o "segurando" é engano), e 1080p a
+    // 60 no processador derrubava a página do Safari (relatório de 2026-11-19 12:47, Carlos: a troca e
+    // a aba morreu junto).
+    if (/iPhone|iPad|iPod/.test(navigator.userAgent) || (apple && navigator.maxTouchPoints > 1)) return;
     if (fila == null || fila >= 2 || (apple && dec != null && dec > 12)) return;
     s.trocandoDec = true;
     try {

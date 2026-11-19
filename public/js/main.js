@@ -4895,7 +4895,20 @@ controle.onJogo = (video, key) => {
   if (!video && losslessLigado) alternarLossless();
   // a própria tela (PS5 direto): a imagem já é daqui, sem turbo nem diagnóstico de quem joga longe
   jogoLa(video && !acharTela(key)?.user.isSelf ? video : null, key);
+  placaNoJogo(!!video);
 };
+// Celular no modo jogo: o 3D sai da memória da placa enquanto o jogo cobre a tela (World.liberarPlaca)
+// e volta ao sair. No iPhone a memória da placa é a da página: 3D + vídeo do jogo derrubavam a aba.
+// Espera um pouco antes de soltar: entrar e sair na hora (toque sem querer) não paga a recompilação.
+let soltarPlaca = 0;
+function placaNoJogo(jogando) {
+  clearTimeout(soltarPlaca);
+  if (!isTouch) return;
+  if (!jogando) return void world.devolverPlaca();
+  soltarPlaca = setTimeout(() => {
+    if (controle.jogoNo && state.focus?.kind === 'share' && world.liberarPlaca()) diagJogo.marcar('3D solto da placa enquanto joga (celular)');
+  }, 1500);
+}
 // A legenda do canto de baixo à direita no modo jogo do PC: ✕ = Espaço, ○ = C... (segue o mapa de
 // teclas; muda junto quando a pessoa troca uma tecla). layout null: some.
 let layoutLegenda = null;
@@ -10631,6 +10644,8 @@ function atualizarSombrasRedondas() {
 let contextoPerdido = null; // { fechar, visivelMs, ultimo, ofereceu }
 world.aoPerder = () => {
   contextoPerdido?.fechar();
+  contextoPerdido = null;
+  if (world.liberada) return; // de propósito: celular jogando (placaNoJogo)
   contextoPerdido = { fechar: toast('Recuperando o 3D…', 'warn', 600_000), visivelMs: 0, ultimo: performance.now(), ofereceu: false };
 };
 world.aoVoltar = () => {
@@ -10667,6 +10682,8 @@ function frame(ts = performance.now()) {
   elapsed += dt;
   const t = elapsed;
   const desenhando = mundoVisivel();
+  // o 3D solto no jogo (placaNoJogo) e a sala de volta à vista por outro caminho: devolve
+  if (desenhando && world.liberada) world.devolverPlaca();
   quadrosDaSala++;
   world.update(t); // plataformas móveis e escritório andam mesmo sem desenhar (quem está em cima)
   clima.update(dt, t);

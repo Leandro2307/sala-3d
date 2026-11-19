@@ -954,10 +954,18 @@ export class World {
     this.perdido = false;
     this.aoPerder = null;
     this.aoVoltar = null;
+    // Soltar a placa de propósito (liberarPlaca): a extensão é pega agora, porque com o contexto
+    // perdido getExtension devolve null e não daria para pedir a volta.
+    this.extPerder = this.renderer.getContext().getExtension('WEBGL_lose_context');
+    this.liberada = false;
+    this.devolverJa = false;
     canvas.addEventListener('webglcontextlost', () => {
       this.perdido = true;
       this.consultaGpu = null;
       this.extGpu = undefined;
+      // soltou e já quis de volta antes deste aviso: pede agora, fora do aviso (o navegador só
+      // aceita depois que ele termina)
+      if (this.devolverJa) return void setTimeout(() => this.pedirVolta(), 0);
       this.aoPerder?.();
     });
     canvas.addEventListener('webglcontextrestored', () => {
@@ -1189,6 +1197,33 @@ export class World {
 
   // O lado de fora só é desenhado quando alguém olha pela porta ou sai, e é aí que o
   // navegador compilaria os shaders dele: a primeira olhada travava a tela por segundos.
+  // Celular jogando em tela cheia: o 3D nem é desenhado, mas texturas, malhas, sombra e o acabamento
+  // seguem na memória da placa — no iPhone ela é a mesma da página, e com o vídeo do jogo junto o
+  // Safari derrubava a aba (relatórios de 2026-11-19: a página recomeçava do zero a cada queda).
+  // Soltar perde o contexto de propósito (tudo sai da placa); devolver pede a volta, que sobe tudo de
+  // novo como numa perda do sistema (webglcontextrestored no construtor).
+  liberarPlaca() {
+    if (this.liberada || this.perdido || !this.extPerder) return false;
+    this.liberada = true;
+    try { this.extPerder.loseContext(); } catch { this.liberada = false; }
+    return this.liberada;
+  }
+
+  // A volta só pode ser pedida depois do aviso de perda (webglcontextlost, que chega depois do
+  // loseContext): pedida antes, o navegador ignora e o 3D nunca voltava. Aí fica marcada (devolverJa)
+  // e o aviso pede.
+  devolverPlaca() {
+    if (!this.liberada) return;
+    this.liberada = false;
+    if (this.perdido) this.pedirVolta();
+    else this.devolverJa = true;
+  }
+
+  pedirVolta() {
+    this.devolverJa = false;
+    try { this.extPerder.restoreContext(); } catch { /* o sistema devolve sozinho, ou o vigia oferece recarregar */ }
+  }
+
   // Compila tudo agora (no lobby, ou logo depois de trocar a qualidade).
   // Depois, um quadro invisível visto do alto manda terreno, árvores e texturas para a
   // placa de vídeo — senão o primeiro passo para fora ainda engasgava uns 300 ms.
