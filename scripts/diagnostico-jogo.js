@@ -98,7 +98,7 @@ const NOMES = {
 };
 
 function main() {
-  const { joga, comp, arq } = escolher(process.argv.slice(2));
+  const { joga, comp, arq } = escolher(process.argv.slice(2).filter((a) => !a.startsWith('-')));
   if (arq) console.log(`quem joga: ${arq}`);
   console.log(`quem joga: ${joga.inicio} → ${joga.fim} · ${joga.ambiente?.navegador?.match(/iPhone|Android|Windows|Mac/)?.[0] ?? '?'} · ${joga.amostras?.length ?? 0} amostras`);
   if (!comp) console.log('quem hospeda: relatório não achado na mesma hora (só o lado de quem joga)');
