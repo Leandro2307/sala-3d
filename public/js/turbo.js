@@ -101,6 +101,17 @@ const PONTE_MIN_KBPS = 2000;
 // Um PS5 repassado só vai assim se a rede até quem joga leva a banda da sessão com esta folga (a estimativa
 // do WebRTC); senão a imagem é codificada de novo aqui, na banda que a rede leva
 const FOLGA_REPASSE = 1.15;
+// A imagem do PS5 repassada é a original (sem a segunda compressão daqui): a mais nítida possível. Mas o
+// repasse quase nunca acontecia fora de casa: a estimativa do WebRTC no começo da sessão é baixa (~6 Mbps,
+// ela só cresce com tráfego) e o PS5 manda 10 — e quem joga (kazu, 2026-11-19) via 1080p recomprimido
+// a ~6–10 Mbps "igual ao 720p". Agora, por caminho direto (sem TURN), o repasse é tentado; vigiarRepasse
+// volta a codificar aqui se não couber, e a falha fica lembrada (lembrado: semRepasse).
+// E a desistência era cedo demais: 3 avisos com a fila acima de FILA_ALTA (30 ms) — no iPhone da casa
+// (2026-11-19 21:45) a fila estava em 32–39 ms, chegando tudo (rx 7 Mbps de 10), e o repasse caiu à toa.
+// Agora: fila acima de FILA_REPASSE em REPASSE_AVISOS avisos seguidos (com a rede sem levar tudo), ou 3
+// quadros pulados pela fila cheia em 2 s.
+const FILA_REPASSE = 80;
+const REPASSE_AVISOS = 3;
 // Começo rápido (2026-11-19, PS5 do lokao no cabo → Borges): a sessão começava em 4,8 Mbps (80% da
 // estimativa do WebRTC, que no começo é baixa) e levava ~1 min para chegar aos 20, subindo 10–15% a
 // cada 2 s — e cada vez que ele entrava de novo no modo jogo, recomeçava de baixo, com a imagem
@@ -664,7 +675,8 @@ export class TurboEnvio {
     if (fonte && !recodificar && pedida >= altFonte) {
       const kbpsPs5 = Number(fonte.kbps) || null;
       const semRepasse = this.lembrado(id)?.semRepasse;
-      const cabe = !semRepasse && (!kbpsPs5 || !rede || rede.lan || rede.saidaKbps == null || rede.saidaKbps >= kbpsPs5 * FOLGA_REPASSE);
+      const direto = !!rede && !rede.relay && !/^relay/.test(rede.local || '') && !/^relay/.test(rede.remoto || '');
+      const cabe = !semRepasse && (!kbpsPs5 || !rede || rede.lan || direto || rede.saidaKbps == null || rede.saidaKbps >= kbpsPs5 * FOLGA_REPASSE);
       if (cabe) return this.ligarPs5(id, canal, key, fonte, { versao, som, somMix: t.somMix, rede, pedido });
       this.onEvento?.(id, semRepasse ? 'turbo: o PS5 repassado não coube há pouco — codificando aqui direto' : 'turbo: a rede de quem joga não leva o PS5 repassado — codificando aqui', { ps5Kbps: kbpsPs5, estimativaKbps: rede?.saidaKbps ?? null, caminho: rede?.local ?? null });
     }
@@ -762,7 +774,7 @@ export class TurboEnvio {
   }
 
   // PS5 repassado (a banda é a da sessão do PS5: aqui não tem o que baixar). A fila medida lá acima de
-  // FILA_ALTA em 3 avisos seguidos (1,5 s), ou 3 quadros pulados aqui pela fila cheia em 2 s, e a imagem
+  // FILA_REPASSE em REPASSE_AVISOS avisos seguidos (1,5 s), ou 3 quadros pulados aqui pela fila cheia em 2 s, e a imagem
   // entra no ciclo fila → pula → quadro-chave → fila (5 a 16 qps no 1080p repassado do relatório de
   // 2026-11-18). Daí em diante esta pessoa recebe a imagem codificada aqui, começando em 85% do que
   // chegou lá (rx), e a banda acompanha a rede dela. Os 2 s do começo não contam (o quadro-chave inicial).
@@ -770,7 +782,11 @@ export class TurboEnvio {
     if (s.parar || s.trocando || s.ps5?.banda) return;
     const agora = performance.now();
     s.pulosFila = (s.pulosFila || []).filter((t) => agora - t < 2000);
-    if (agora - s.inicioEm < 2000 || (s.ajuste.altas < 3 && s.pulosFila.length < 3)) return;
+    // fila alta com a rede levando tudo (entrega em ENTREGA_OK ou mais) é tranco do Wi-Fi, não falta de banda
+    const entrega = s.ajuste.entrega;
+    const alta = fila > FILA_REPASSE && !(entrega != null && entrega >= ENTREGA_OK);
+    s.altasRepasse = alta ? (s.altasRepasse || 0) + 1 : 0;
+    if (agora - s.inicioEm < 2000 || (s.altasRepasse < REPASSE_AVISOS && s.pulosFila.length < 3)) return;
     s.trocando = true;
     this.memoria.set(s.id, { ...(this.memoria.get(s.id) || {}), semRepasseEm: Date.now() });
     const rx = s.ajuste.rxs?.length ? Math.max(...s.ajuste.rxs) : null;
