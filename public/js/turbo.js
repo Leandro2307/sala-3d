@@ -113,6 +113,7 @@ const ARRANQUE_AVISOS = 2;
 // de novo nesse tempo (cada tentativa custava 2–4 s de imagem parada).
 const MEMORIA_MS = 15 * 60_000;
 const MEMORIA_FRACAO = 0.85;
+const caminhoDe = (rede) => (rede ? `${rede.local || ''}|${rede.remoto || ''}|${rede.relay ? 'relay' : ''}` : null);
 const ESPERA_REDE_MS = 400; // quanto ligarSessao espera pela estimativa da rede antes de seguir sem ela
 const PEDIR_CHAVE_MS = 250; // intervalo mínimo entre pedidos de quadro-chave
 // Um quadro-chave que saiu há menos que isto e que quem joga ainda não viu está a caminho: outro
@@ -138,6 +139,14 @@ const SEM_IMAGEM_MS = 4000; // ligou e nenhum quadro apareceu: o turbo não serv
 const PAROU_MS = 2500; // já desenhou, e nenhum quadro novo há tanto tempo
 const FILA_LENTA = 600; // ms de fila medida (viagem p90 − a menor)...
 const FILA_LENTA_MS = 3000; // ...seguidos por tanto tempo
+// No fundo do poço: a imagem já no menor tamanho (540p, 0,8 Mbps) e a fila ainda acima de FILA_FUNDO
+// por FILA_FUNDO_MS — o canal do turbo não leva nem isso, e o vídeo normal vai melhor no mesmo caminho.
+// Teste de 2026-11-19 22:09–22:11 (kazu, PC, TURN do lado dele): o turbo ficou em 540p a 0,8 Mbps com
+// a fila em 150–260 ms e ~60 travadas por minuto; o vídeo normal, no mesmo caminho, deu 55 qps em 720p
+// com ~16 travadas por minuto.
+const FILA_FUNDO = 100;
+const FILA_FUNDO_MS = 8000;
+const ALTURA_FUNDO = 560;
 const PARADA_GRACA_MS = 4000; // depois de a página do aparelho parar ou ficar lenta, não desiste por isso (vigiar)
 
 // H.264 nos perfis High, Main e Baseline (nível 5.1: até 1080p acima de 60 qps). Quem joga diz quais
@@ -566,6 +575,7 @@ export class TurboEnvio {
     const agora = Date.now();
     return {
       bps: m.bps && agora - m.em < MEMORIA_MS ? m.bps : null,
+      caminho: m.caminho ?? null,
       semRepasse: !!m.semRepasseEm && agora - m.semRepasseEm < MEMORIA_MS,
     };
   }
@@ -968,7 +978,10 @@ export class TurboEnvio {
     const max = bandaDe(ch);
     const min = bandaMinDe(ch);
     const primeira = !s.banda;
-    const lembrada = primeira ? this.lembrado(s.id)?.bps : null;
+    // a banda lembrada só vale no mesmo caminho: no teste do kazu (2026-11-19 22:06) a conexão trocou de
+    // um TURN que levava 20 Mbps para outro que não levava 1 — começar em 17 ali só encheria a fila
+    const lem = primeira ? this.lembrado(s.id) : null;
+    const lembrada = lem?.bps && lem.caminho === caminhoDe(s.rede) ? lem.bps : null;
     escolhido.bitrate = primeira
       ? Math.max(
         bandaInicial({ max, min, rede: s.bandaInicialKbps ? { saidaKbps: s.bandaInicialKbps / 0.8 } : s.rede, kbps: false }),
@@ -1207,7 +1220,7 @@ export class TurboEnvio {
     this.sessoes.delete(id);
     // a banda em que a sessão estava (codificando aqui, por mais de 8 s): a próxima começa perto dela
     if (s.enc && s.banda && performance.now() - (s.inicioEm || 0) > 8000) {
-      this.memoria.set(id, { ...(this.memoria.get(id) || {}), bps: s.banda, em: Date.now() });
+      this.memoria.set(id, { ...(this.memoria.get(id) || {}), bps: s.banda, em: Date.now(), caminho: caminhoDe(s.rede) });
     }
     s.parar = true;
     s.leitor?.cancel().catch(() => {});
@@ -1350,6 +1363,7 @@ export class TurboRecebe {
       // a fila medida, para quem compartilha (vigiar): viagens desde o último aviso, a menor de cada aviso
       janelaViagem: [], minimos: [], filaEm: 0, filaMs: null,
       filaLentaDesde: 0, // desde quando a fila medida passa de FILA_LENTA (vigiar)
+      fundoDesde: 0, // desde quando a imagem está no menor tamanho com a fila acima de FILA_FUNDO (vigiar)
       // liso: quadros decodificados esperando a hora { frame, hora, info }; base: a menor diferença
       // (chegada − timestamp) por segundo, dos últimos 10 s; atrasos: quanto cada quadro veio depois da base
       fila: [], baseSeg: [], baseSegEm: 0, atrasos: [], alvo: LISO_INICIO, base: null, foraDaBase: 0,
@@ -1977,6 +1991,7 @@ export class TurboRecebe {
       s.paradaEm = agora;
       if (s.desenhou) s.desenhou = Math.max(s.desenhou, agora);
       s.filaLentaDesde = 0;
+      s.fundoDesde = 0;
       s.janelaViagem = [];
       if (s.esperaChave) this.pedirChave(s, true);
     }
@@ -1989,6 +2004,10 @@ export class TurboRecebe {
     const aCaminho = s.esperaChave || s.montando;
     if (!graca && aCaminho && s.desenhou && agora - s.desenhou > PAROU_MS && s.canal.readyState === 'open') return this.falhou('lento');
     if (!graca && s.filaLentaDesde && agora - s.filaLentaDesde > FILA_LENTA_MS) return this.falhou('lento');
+    if (!graca && s.fundoDesde && agora - s.fundoDesde > FILA_FUNDO_MS) {
+      this.onEvento?.('turbo: no menor tamanho e a fila não baixa — vídeo normal', { altura: s.tela?.height || null, filaMs: s.filaMs });
+      return this.falhou('lento');
+    }
     // parado esperando um quadro-chave que não veio (o pedido se perdeu): pede de novo
     if (s.esperaChave && agora - s.pedidoEm > 500) this.pedirChave(s);
     if (agora - s.pingEm > PING_MS && s.canal.readyState === 'open') {
@@ -2007,6 +2026,9 @@ export class TurboRecebe {
       s.filaMs = Math.round(Math.max(0, p90 - base) * 10) / 10;
       if (s.filaMs <= FILA_LENTA) s.filaLentaDesde = 0;
       else if (!s.filaLentaDesde) s.filaLentaDesde = agora;
+      const noFundo = s.tela?.height > 0 && s.tela.height <= ALTURA_FUNDO && s.filaMs > FILA_FUNDO;
+      if (!noFundo) s.fundoDesde = 0;
+      else if (!s.fundoDesde) s.fundoDesde = agora;
       // rx: o que chegou desde o aviso anterior (kbps = bytes × 8 / ms). Com a fila crescendo lá, é a banda
       // que a rede leva, e a banda de lá vai direto para perto dela (decidirBanda)
       const rx = s.rxEm ? Math.round((s.rxBytes * 8) / Math.max(1, agora - s.rxEm)) : null;
