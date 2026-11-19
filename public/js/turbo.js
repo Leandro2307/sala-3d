@@ -287,7 +287,11 @@ export function paraOTocador(no, data) {
 }
 
 const par = (n) => Math.max(2, Math.round(n / 2) * 2);
-const bandaDe = (h) => (h >= 1000 ? 10_000_000 : h >= 700 ? 6_000_000 : 3_500_000);
+// O teto da banda de cada altura. 1080p era 10 Mbps: em 2026-11-19 (PS5 do lokao → lokao16001) a banda
+// ficou cravada nos 10 com a rede entregando tudo e a fila em ~15 ms, e a imagem do PS5 (que vem a 20)
+// perdia nitidez na segunda compressão. Subir além do que a rede leva não acontece: a banda só sobe com
+// a fila baixa e desce quando chega lá menos do que sai (ENTREGA_OK).
+const bandaDe = (h) => (h >= 1000 ? 20_000_000 : h >= 700 ? 6_000_000 : 3_500_000);
 
 // A banda em que uma sessão começa (as unidades de max/min, kbps ou bps): a mesma casa → a máxima; com a
 // estimativa do WebRTC até quem joga (rede.saidaKbps, sempre em kbps; kbps: true quando max/min também

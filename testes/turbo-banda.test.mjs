@@ -180,12 +180,12 @@ function simular({ cap, trancoCada = 0, avisos = 120, inicio = 2_500_000 }) {
   }
 }
 
-test('ajustarBanda: Wi-Fi que tranca a cada 2 s mas leva 9,6 Mbps — a banda sobe para perto disso', () => {
+test('ajustarBanda: Wi-Fi que tranca a cada 2 s mas leva 9,6 Mbps — a banda sobe para perto disso e não passa muito', () => {
   // como o lokao → lokao16001 em 2026-11-19 13:18 (antes ficava no piso, 2,5 Mbps)
   const b = simular({ cap: 9600, trancoCada: 4 });
-  assert.ok(b >= 8_000_000, `banda ${b}`);
+  assert.ok(b >= 8_000_000 && b <= 12_000_000, `banda ${b}`);
   // com folga no caminho, chega na máxima
-  assert.equal(simular({ cap: 20000, trancoCada: 4 }), 10_000_000);
+  assert.equal(simular({ cap: 30000, trancoCada: 4, avisos: 200 }), 20_000_000);
 });
 
 test('ajustarBanda: o caminho leva só 4 Mbps — a banda desce para perto dele', () => {
