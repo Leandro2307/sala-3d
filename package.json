@@ -13,7 +13,8 @@
     "tunnel": "cloudflared.exe tunnel --url http://localhost:3000 --no-autoupdate",
     "publico": "node scripts/publico.js",
     "navegador": "node scripts/navegador.js",
-    "relatorios": "node scripts/relatorios.js"
+    "relatorios": "node scripts/relatorios.js",
+    "diagnostico": "node scripts/diagnostico-jogo.js"
   },
   "engines": {
     "node": ">=18"

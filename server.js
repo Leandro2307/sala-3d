@@ -389,6 +389,9 @@ const ID_RELATORIO = /^[a-z0-9-]{8,40}$/i;
 const envioRelatorio = new Map(); // ip → [vezes no último minuto]
 const texto40 = (v) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f]/g, '').slice(0, 40) || null : null);
 
+// A sonda do modo jogo (jogo-diag.js, SONDA_MS): só a ida e volta até aqui, sem nada no corpo
+app.get('/ping-jogo', (req, res) => res.set('Cache-Control', 'no-store').status(204).end());
+
 app.post('/relatorio-jogo', express.json({ limit: '12mb' }), async (req, res) => {
   const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
   const agora = Date.now();

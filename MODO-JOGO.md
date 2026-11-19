@@ -1097,3 +1097,63 @@ quadros saíam do PC aos trancos (Wi-Fi USB). Nos dois momentos de rede estável
   DirectX 9/11. O driver 610.88 deste PC não conhece mais os códigos do Ultra (0x0005F543, 0x10835000: -160
   ao gravar). Gravado neste PC em 2026-11-18 sem precisar de administrador; o de antes (0) ficou em
   `%LOCALAPPDATA%\Sala3d\nvidia-baixa-latencia-antes.json`. Nos jogos DirectX 12/Vulkan vale o Reflex do jogo.
+
+## De quem é a travada, e o que fazer sem cabo nos dois (2026-11-19)
+
+### O que os relatórios de 2026-11-19 mostraram (lokao hospeda o PS5, lokao16001 joga)
+
+- **O turbo prendia a banda no piso** (2,5 Mbps em 1080p) num Wi-Fi que tranca: cada parada de 80–500 ms
+  virava "rede cheia" e a banda nunca subia, enquanto o vídeo normal passava 9,6 Mbps na mesma hora.
+  Corrigido: a fila alta só baixa a banda quando chega lá menos do que sai (`ENTREGA_OK`, campo
+  `entrega` no relatório) ou quando a fila daqui fica cheia aviso após aviso (`pulFila`). Teto de 1080p
+  de 10 para 20 Mbps. Com a rede sem levar nem o piso, desce 1080 → 720 → 540 em vez de cair para o
+  vídeo normal (`decidirAltura`, evento "turbo: tamanho pela rede").
+- **O PS5 → PC do lokao falha no Wi-Fi da casa**: a captura do PS5 cai de 60 para 2–30 qps por segundos
+  e a ponte avisa "corrupt frame", "FEC failed", "Missing unit" (até 173 em 30 s). Nesses trechos não há
+  imagem para mandar — não é a internet nem o turbo. No relatório do iPhone (19:39) foram 41% das
+  amostras ruins.
+- **A internet do lokao é boa** (217/147 Mbps, ping 8 ms; durante o jogo 14–24 ms com 2 picos de ~100 ms
+  em 50). O teste de velocidade mostrou bufferbloat (282 ms com o upload no máximo), mas o jogo usa 5–20
+  dos 147 Mbps de upload: só pesa se outro aparelho da casa estiver mandando muito ao mesmo tempo.
+- Pelo celular no 4G (no serviço) a ligação vai pelo TURN (`relay/udp`): mais um trecho com oscilação.
+
+### Como saber com certeza
+
+Desde 2026-11-19 os dois lados mandam, em cada amostra, a **sonda**: o ping até o servidor (`/ping-jogo`)
+a cada 0,5 s (`sonda: { n, p50, max, base, picos, falhas }`, jogo-diag.js). O caminho até o servidor
+começa pela mesma rede de casa (Wi-Fi, roteador, upload) que o caminho entre os dois: pico na sonda de
+um lado na hora da travada = a rede daquele lado.
+
+    npm run relatorios
+    npm run diagnostico                         (a sessão mais nova; -- -v mostra cada amostra)
+    node scripts/diagnostico-jogo.js relatorios/<joga>.json [relatorios/<compartilha>.json]
+
+Para cada amostra ruim de quem joga (travada ou abaixo de 45 qps, a cada 2 s) ele diz o culpado:
+`ps5` (o PC de quem hospeda recebia menos de 50 qps do PS5), `aparelho` (a página de quem joga),
+`hospeda` (pico na sonda de quem hospeda), `joga` (pico na sonda de quem joga), `caminho` (as duas
+sondas limpas: internet entre os dois ou TURN), `pc` (o PC de quem hospeda pulou quadros sem rede
+cheia). Os dois lados precisam recarregar a página depois do deploy para a sonda aparecer; relatórios
+sem ela dão "rede?".
+
+### Sem cabo no PS5 e no PC: o que fazer, do que mais resolve para o que menos
+
+O vídeo do PS5 (15 Mbps) vai pelo ar até o roteador e volta pelo ar até o PC; o PC manda de novo pelo
+ar para a internet. É o mesmo canal levando o jogo três vezes, disputando com a casa toda.
+
+1. **PS5 e PC no mesmo ponto, com cabo curto entre eles e um só sem fio até o roteador.** Um repetidor
+   ou nó mesh com portas de rede (ou um par powerline, rede pela tomada) ao lado da TV, e um switch
+   barato se faltar porta: PS5 e PC no cabo até ele. O PS5 → PC passa pelo switch e não toca o Wi-Fi;
+   só o que vai para a internet (5–20 Mbps) vai pelo ar. Resolve o `ps5` do diagnóstico.
+2. **Se só um puder ir no cabo, que seja o PC** (sai o adaptador USB, que é o pior elo); o PS5 fica no
+   Wi-Fi de 5 GHz, perto do roteador.
+3. **Trocar o adaptador Wi-Fi do PC**: o Realtek 8811CU é USB de uma antena (433 Mbps). Uma placa PCIe
+   Wi-Fi 6 de duas antenas (ou ao menos USB 3.0 2×2), longe do gabinete com um cabo extensor.
+4. **Baixar a banda do PS5 na ponte** (PS5 direto, à mão: 8–10 Mbps em 1080p em vez de 15). O turbo
+   comprime de novo em 5–10 Mbps de qualquer jeito; menos banda do PS5 = menos ar ocupado e menos quadros
+   corrompidos, quase sem perda de nitidez no que chega a quem joga.
+5. **Roteador**: PS5 e PC no 5 GHz (canal 36–48, 80 MHz), sem o 2,4 GHz; QoS/SQM ligado com o upload em
+   ~85% do contratado (~125 Mbps), que tira o bufferbloat; prioridade para o PC e o PS5.
+6. **No PC**: economia de energia do adaptador desligada (Gerenciador de Dispositivos → adaptador →
+   Gerenciamento de energia; e "Desempenho máximo" no plano de energia); nada mandando muito durante o
+   jogo (OBS gravando/transmitindo, OneDrive, Google Fotos, câmeras).
+7. **Quem joga**: no Wi-Fi 5 GHz em vez do 4G sempre que der (o 4G costuma ir pelo TURN).

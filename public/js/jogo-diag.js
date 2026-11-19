@@ -14,6 +14,13 @@ const SEGUIDAS = 3; // amostras ruins em seguida (6 s) antes de avisar
 const ENTRE_AVISOS = 45_000;
 const GUARDA = 900; // amostras guardadas (30 min a cada 2 s)
 const ENVIO_MS = 60_000; // de quanto em quanto tempo o relatório da sessão vai para o servidor
+// A sonda: durante a sessão, cada aparelho mede a ida e volta até o servidor (/ping-jogo) a cada SONDA_MS.
+// O caminho até o servidor não é o mesmo que liga os dois aparelhos, mas começa pela mesma rede de casa
+// (Wi-Fi, roteador, upload): um pico na sonda de quem hospeda na hora da travada é a rede dele; na de
+// quem joga, a dele; nas duas limpas, o caminho entre os dois (internet, TURN). Quem junta as duas é
+// scripts/diagnostico-jogo.js (MODO-JOGO.md, "De quem é a travada").
+const SONDA_MS = 500;
+const SONDA_PICO_MS = 80; // acima da menor dos últimos ~30 s: pico
 const PS5 = /chiaki|\bps5\b|playstation/i; // a janela do Remote Play do PS5 (o mesmo título de toque-jogo.js)
 
 const kbps = (bytesPorSeg) => (bytesPorSeg == null ? null : Math.round((bytesPorSeg * 8) / 100) / 10);
@@ -100,6 +107,7 @@ export class DiagJogo {
     this.evento('começou', { lado, ...info.extra });
     clearInterval(this.timerEnvio);
     this.timerEnvio = setInterval(() => this.enviar(), ENVIO_MS);
+    this.ligarSonda();
     if (info.video) this.contarQuadros(info.video);
   }
 
@@ -110,6 +118,8 @@ export class DiagJogo {
     this.evento('terminou');
     this.video = null;
     clearInterval(this.timerEnvio);
+    clearInterval(this.timerSonda);
+    this.sonda = null;
     this.enviar();
     this.ultimo = this.relatorio();
     this.sessao = null;
@@ -119,6 +129,51 @@ export class DiagJogo {
       this.toast(`Modo jogo encerrado${m != null ? ` — média de ${Math.round(m)} qps` : ''}. O relatório foi salvo no servidor${juntos}.`, 'info', 15000, null, { rotulo: 'Baixar relatório', fazer: () => this.baixar() });
     }
     return this.ultimo;
+  }
+
+  // a sonda até o servidor (SONDA_MS): uma medida por vez; a que demora conta inteira quando volta
+  ligarSonda() {
+    clearInterval(this.timerSonda);
+    this.sonda = { medidas: [], falhas: 0, minimos: [], ocupada: false };
+    this.timerSonda = setInterval(() => this.sondar(), SONDA_MS);
+  }
+
+  async sondar() {
+    const so = this.sonda;
+    if (!so || so.ocupada || document.visibilityState === 'hidden') return;
+    so.ocupada = true;
+    const t0 = performance.now();
+    try {
+      const r = await fetch(`/ping-jogo?t=${Date.now()}`, { cache: 'no-store' });
+      if (!r.ok) throw new Error(String(r.status));
+      so.medidas.push(performance.now() - t0);
+    } catch {
+      so.falhas++;
+    } finally {
+      so.ocupada = false;
+    }
+  }
+
+  // o que a sonda viu desde a amostra anterior (vai em cada amostra, dos dois lados)
+  tirarSonda() {
+    const so = this.sonda;
+    if (!so) return null;
+    const v = so.medidas;
+    so.medidas = [];
+    const falhas = so.falhas;
+    so.falhas = 0;
+    if (!v.length && !falhas) return null;
+    if (v.length) { so.minimos.push(Math.min(...v)); if (so.minimos.length > 15) so.minimos.shift(); }
+    const base = so.minimos.length ? Math.min(...so.minimos) : null;
+    const o = [...v].sort((a, b) => a - b);
+    return {
+      n: v.length,
+      p50: o.length ? Math.round(o[Math.floor(o.length / 2)]) : null,
+      max: o.length ? Math.round(o.at(-1)) : null,
+      base: base != null ? Math.round(base) : null,
+      picos: base != null ? v.filter((x) => x > base + SONDA_PICO_MS).length : 0,
+      falhas,
+    };
   }
 
   // Fora ou dentro de uma sessão: vai para o histórico (a próxima sessão leva) e, com sessão, é evento
@@ -304,7 +359,7 @@ export class DiagJogo {
     // a placa recusou (medida ímpar, por exemplo) e o Chrome passou para o processador, ou voltou
     const ant = s.amostras.at(-1)?.codificador;
     if (ant && resumo.codificador && ant !== resumo.codificador) this.evento('codificador trocou', { de: ant, para: resumo.codificador, enviado: `${resumo.largura}x${resumo.altura}`, captura: resumo.capturaRes });
-    s.amostras.push({ ...resumo, sala, trilha: s.amostras.length % 15 === 0 ? cru.trilha : undefined, cru: s.amostras.length % 15 === 0 ? cru : undefined });
+    s.amostras.push({ ...resumo, sonda: this.tirarSonda(), sala, trilha: s.amostras.length % 15 === 0 ? cru.trilha : undefined, cru: s.amostras.length % 15 === 0 ? cru : undefined });
     if (s.amostras.length > GUARDA) s.amostras.shift();
     console.log(`[modo-jogo] envio: captura ${resumo.captura} qps (${resumo.capturaRes}) → codificado ${resumo.codificado} → enviado ${resumo.enviado} qps · ${resumo.largura}x${resumo.altura} · ${resumo.kbps} kbps (alvo ${resumo.alvoKbps}, teto ${resumo.tetoKbps}) · ${resumo.codMs} ms/quadro · ${resumo.codificador}${resumo.placa ? ' (placa)' : ''} · limite ${resumo.limite} ${JSON.stringify(resumo.limitePct)} · rtt ${resumo.rttMs} ms · perda lá ${resumo.perdaLa}% · fila ${resumo.filaMs} ms · ${resumo.caminho}${resumo.imagemBaixa ? ' · IMAGEM BAIXA' : ''}${resumo.motivo ? ` · MOTIVO: ${resumo.motivo}` : ''}`, { resumo, sala });
     this.julgar(resumo, 'compartilha');
@@ -417,7 +472,7 @@ export class DiagJogo {
       // imagem boa, mas esperando na fila/rede mais que um quadro e meio: o Wi-Fi é o atraso
       if (!resumo.motivo && tb.viagemMs != null && tb.viagemMs > 25) resumo.motivo = 'wifi';
     }
-    s.amostras.push({ ...resumo, sala, cru: s.amostras.length % 15 === 0 ? cru : undefined });
+    s.amostras.push({ ...resumo, sonda: this.tirarSonda(), sala, cru: s.amostras.length % 15 === 0 ? cru : undefined });
     if (s.amostras.length > GUARDA) s.amostras.shift();
     console.log(`[modo-jogo] chegada: recebido ${resumo.recebido} → decodificado ${resumo.decodificado} → na tela ${resumo.naTela} qps · ${resumo.largura}x${resumo.altura} · ${resumo.kbps} kbps · decodifica ${resumo.decMs} ms (${resumo.decodificador}${resumo.placa ? ', placa' : ''}) · buffer ${resumo.bufferMs} ms (som ${resumo.somBufferMs} ms) · controle ${resumo.controleRttMs} ms · atraso total ~${resumo.atrasoMs} ms · perdidos ${resumo.perdidos} · congelou ${resumo.congelou} (${resumo.congeladoMs} ms) · rtt ${resumo.rttMs} ms · ${resumo.caminho}${la ? ` · lá: captura ${la.captura}, enviado ${la.enviado}, limite ${la.limite}` : ' · sem notícia de lá'}${resumo.motivo ? ` · MOTIVO: ${resumo.motivo}` : ''}`, { resumo, sala });
     this.julgar(resumo, 'joga');
