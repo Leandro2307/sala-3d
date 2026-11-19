@@ -4690,12 +4690,22 @@ function desligarModoJogoNoFoco() {
 // Modo jogo no PC: tela cheia da tela em foco, sem moldura, com o teclado travado (Keyboard Lock).
 // Sem a trava o Chrome fica com Ctrl+W, Ctrl+T e Ctrl+N — no Minecraft correr é Ctrl+W, e a aba
 // da sala fechava. Travado, um Esc rápido vai para o jogo (segurar o Esc sai da tela cheia).
+// Só as teclas de jogo: a trava de todas (lock() sem lista) pegava o PC inteiro de quem joga — a tecla
+// Windows e os atalhos do Windows (Ctrl+Esc, Alt+Tab) iam para a página em vez do Windows daqui.
+const TECLAS_TRAVADAS = [
+  ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map((l) => `Key${l}`),
+  ...'0123456789'.split('').map((n) => `Digit${n}`),
+  ...Array.from({ length: 12 }, (_, i) => `F${i + 1}`),
+  'Escape', 'Tab', 'Space', 'Enter', 'Backspace', 'CapsLock', 'ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight',
+  'AltLeft', 'AltRight', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Backquote', 'Minus', 'Equal',
+  'BracketLeft', 'BracketRight', 'Backslash', 'Semicolon', 'Quote', 'Comma', 'Period', 'Slash', 'IntlBackslash', 'IntlRo',
+];
 async function jogoNoPc(ligar) {
   document.body.classList.toggle('jogo-pc', ligar);
   if (ligar) {
     try {
       if (document.fullscreenElement !== $('#focus')) await $('#focus').requestFullscreen({ navigationUI: 'hide' });
-      await navigator.keyboard?.lock?.();
+      await navigator.keyboard?.lock?.(TECLAS_TRAVADAS);
       diagJogo.evento('tela cheia com o teclado travado', { trava: !!navigator.keyboard?.lock });
     } catch (err) {
       diagJogo.evento('tela cheia ou trava do teclado recusada', { erro: String(err?.message || err) });
@@ -4885,7 +4895,7 @@ function mostrarLegendaJogo(layout) {
   el.hidden = !layout;
   if (!layout) return void (el.innerHTML = '');
   el.innerHTML = legendaBotoes(layout)
-    .map((b) => `<span><b class="${layout === 'ps5' ? CLASSE_LEGENDA[b.id] : ''}">${esc(b.botao)}</b>=<kbd>${esc(b.teclas)}</kbd></span>`).join('');
+    .map((b) => `<span${b.id === 'b4' ? ' class="lg-sep"' : ''}><b class="${layout === 'ps5' ? CLASSE_LEGENDA[b.id] || '' : ''}">${esc(b.botao)}</b><kbd>${esc(b.teclas)}</kbd></span>`).join('');
 }
 mapaTeclas.ouvir(() => { if (layoutLegenda) mostrarLegendaJogo(layoutLegenda); });
 // Tutorial do controle toda vez que entra no modo jogo numa tela de PS5 (no PC, só sem controle de

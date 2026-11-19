@@ -93,8 +93,11 @@ test('o mapa guardado do padrão de antes (v1) dá lugar ao padrão novo', async
   assert.equal(m.mapaTeclas.carroLigado(), true);
 });
 
-test('legenda do canto: ✕ = Espaço, ○ = C, □ = R, △ = F', async () => {
+test('legenda do canto: botões, ombros, gatilhos, L3/R3 e touchpad (sem analógicos)', async () => {
   mapaTeclas.restaurar();
   const { legendaBotoes } = await import('../public/js/mapa-teclas.js');
-  assert.deepEqual(legendaBotoes('ps5').map((b) => `${b.botao}=${b.teclas}`), ['✕=Espaço / Enter', '○=C / Ctrl', '□=R', '△=F']);
+  assert.deepEqual(legendaBotoes('ps5').map((b) => `${b.botao}=${b.teclas}`),
+    ['✕=Espaço', '○=C', '□=R', '△=F', 'L1=Q', 'L2=🖱 dir', 'R1=E', 'R2=🖱 esq', 'L3=Shift', 'R3=V', 'Touch=Alt']);
+  // no Switch não tem touchpad
+  assert.equal(legendaBotoes('switch').some((b) => b.id === 'tp'), false);
 });

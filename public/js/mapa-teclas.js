@@ -238,14 +238,16 @@ export function teclasDe(id) {
   return es.length ? es.map(nomeEntrada).join(' / ') : '—';
 }
 
-// a legenda do canto do modo jogo: [{ id, botao ('✕' ou 'B'), teclas ('Espaço') }] dos 4 botões da frente
+// a legenda do canto do modo jogo: [{ id, botao ('✕', 'L1' ou, no Switch, 'B'), teclas ('Espaço') }]
+// dos botões da frente, dos ombros e gatilhos, L3/R3 e o touchpad (só PS5). Os analógicos não entram.
+// Uma tecla só por botão (a primeira, sem a rodinha), com o nome curto: a legenda fica pequena.
+const CURTO = { MouseLeft: '🖱 esq', MouseRight: '🖱 dir', MouseMiddle: '🖱 meio', MouseX1: '🖱 4', MouseX2: '🖱 5', ShiftRight: 'Shift', ControlRight: 'Ctrl' };
+const LEGENDA = ['b0', 'b1', 'b2', 'b3', 'b4', 'b6', 'b5', 'b7', 'b10', 'b11', 'tp'];
 export function legendaBotoes(layout = 'ps5') {
-  return ['b0', 'b1', 'b2', 'b3'].map((id) => ({
-    id,
-    botao: rotulo(id, layout),
-    // até duas, sem a rodinha (a tecla é o que se lê primeiro)
-    teclas: visiveis(id).filter((e) => !ehRoda(e)).slice(0, 2).map(nomeEntrada).join(' / ') || '—',
-  }));
+  return LEGENDA.filter((id) => !POR_ID[id].so || POR_ID[id].so === layout).map((id) => {
+    const e = visiveis(id).find((x) => !ehRoda(x));
+    return { id, botao: id === 'tp' ? 'Touch' : rotulo(id, layout), teclas: e ? CURTO[e] || nomeEntrada(e) : '—' };
+  });
 }
 
 // o recado que aparece ao entrar no modo jogo, montado do mapa de agora

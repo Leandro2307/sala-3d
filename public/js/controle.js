@@ -819,11 +819,15 @@ export class Controle {
       this.soltarAlt();
       // o ajudante nativo aperta o Shift de verdade: solta ele lá antes do Esc. O Shift daqui,
       // quando subir, já não está em apertadas e não vai.
+      // No modo jogo o Esc vai sozinho: Ctrl ou Alt apertados junto (o Ctrl agacha em muitos jogos)
+      // viravam Ctrl+Esc / Alt+Esc lá — o menu Iniciar, como a tecla Windows.
       if (e.key === 'Escape') {
-        for (const code of ['ShiftLeft', 'ShiftRight']) {
+        const soltar = emJogo ? ['ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight', 'AltLeft', 'AltRight', 'MetaLeft', 'MetaRight'] : ['ShiftLeft', 'ShiftRight'];
+        for (const code of soltar) {
           const s = this.apertadas.get(code);
           if (s) this.mandarTecla(s.key, { ...s.ev, a: 'up', mod: 0 });
         }
+        if (emJogo) ev.mod = 0;
       }
       this.mandarTecla(key, ev);
     };

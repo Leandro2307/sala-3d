@@ -4746,7 +4746,8 @@ body.touch :is(.hk-lista, #help-extra, #help-mais-btn) { display: none !importan
 }
 
 /* ============================================================ legenda dos botões no modo jogo (PC) */
-/* ✕ ○ □ △ e a tecla de cada um, bem no canto de baixo à direita, sem pegar clique */
+/* cada botão numa coluna estreita: o símbolo em cima e a tecla embaixo, centralizados; pequena e
+   meio apagada no canto de baixo à direita, sem pegar clique */
 #jogo-legenda {
   position: absolute;
   right: max(10px, env(safe-area-inset-right));
@@ -4754,18 +4755,28 @@ body.touch :is(.hk-lista, #help-extra, #help-mais-btn) { display: none !importan
   z-index: 5;
   pointer-events: none;
   display: flex;
-  gap: 6px;
-  padding: 5px 8px;
-  border-radius: 10px;
-  background: rgba(8, 10, 14, 0.62);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  font: 600 12px/1 'Plus Jakarta Sans', system-ui, sans-serif;
-  color: rgba(255, 255, 255, 0.86);
-  opacity: 0.85;
+  align-items: stretch;
+  gap: 2px;
+  padding: 4px 6px;
+  border-radius: 9px;
+  background: rgba(8, 10, 14, 0.5);
+  font: 600 10px/1 'Plus Jakarta Sans', system-ui, sans-serif;
+  color: rgba(255, 255, 255, 0.8);
+  opacity: 0.7;
 }
 #jogo-legenda[hidden] { display: none; }
-#jogo-legenda span { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
-#jogo-legenda b { font-size: 14px; font-weight: 800; }
-#jogo-legenda kbd { font: inherit; padding: 2px 5px; border-radius: 5px; background: rgba(255, 255, 255, 0.12); }
+#jogo-legenda span {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 30px;
+  text-align: center;
+  white-space: nowrap;
+}
+#jogo-legenda .lg-sep { margin-left: 5px; padding-left: 7px; border-left: 1px solid rgba(255, 255, 255, 0.14); }
+#jogo-legenda b { font-size: 12px; font-weight: 800; }
+#jogo-legenda kbd { font: inherit; font-size: 9.5px; padding: 1px 4px; border-radius: 4px; background: rgba(255, 255, 255, 0.1); }
 #jogo-legenda .lg-xis { color: #93c5fd; } #jogo-legenda .lg-bol { color: #fca5a5; }
 #jogo-legenda .lg-qua { color: #f9a8d4; } #jogo-legenda .lg-tri { color: #6ee7b7; }
