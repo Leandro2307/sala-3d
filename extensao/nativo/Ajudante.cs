@@ -194,7 +194,7 @@ namespace Sala3d
             new Thread(VigiarAtalho) { IsBackground = true }.Start();
             new Thread(VigiarJogo) { IsBackground = true }.Start();
             new Thread(VigiarWifi) { IsBackground = true }.Start();
-            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.23.0" } });
+            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.24.0" } });
             var json = new JavaScriptSerializer();
             string txt;
             while ((txt = Ler(entrada)) != null)
@@ -273,7 +273,7 @@ namespace Sala3d
             // reabrir no meio. Movimento só com delta (sem x) também é de jogo.
             if (B(ev, "jogo") || (t == "mouse" && S(ev, "a") == "move" && !ev.ContainsKey("x") && ev.ContainsKey("dx"))) jogo = true;
             // a sala abriu um jogo: fora dele, nada (ver Liberado)
-            if (jogoTrava != null && !Liberado(t, ev)) return;
+            if (jogoTrava != null && !B(ev, "livre") && !Liberado(t, ev)) return; // livre: de quem hospeda
             if (t == "mouse")
             {
                 if (!jogo) Mouse(S(ev, "a"), D(ev, "x"), D(ev, "y"), S(ev, "b"));
@@ -1026,15 +1026,38 @@ namespace Sala3d
         // barrado: o jogo, se ainda estiver aberto, volta para a frente (no máximo a cada 1,5 s, fora
         // desta linha: procurar os programas leva um tempo e a entrada não pode parar)
         static int chamouJogo;
-        static void ChamarJogo()
+        // reabrir: no aluguel (lan house) o jogo não pode ser fechado — se quem alugou fechou (pelo menu
+        // do jogo), ele abre de novo, no máximo uma vez por minuto
+        static int reabriuJogo = Environment.TickCount - 600000;
+        static void ChamarJogo(bool reabrir = false)
         {
             int agora = Environment.TickCount;
             if (unchecked(agora - chamouJogo) < 1500) return;
             chamouJogo = agora;
             DateTime desde = travaDesde;
+            string jogo = jogoTrava;
             new Thread(() =>
             {
-                try { IntPtr h = MaiorJanela(ProcessosDesde(desde), true); if (h != IntPtr.Zero) Frente(h); }
+                try
+                {
+                    var procs = ProcessosDesde(desde);
+                    IntPtr h = MaiorJanela(procs, true);
+                    if (h != IntPtr.Zero) { Frente(h); return; }
+                    if (!reabrir || jogo == null || procs.Count > 0 || unchecked(Environment.TickCount - reabriuJogo) < 60000) return;
+                    lock (travaJogo)
+                    {
+                        if (jogoTrava != jogo) return;
+                        string arq = Atalhos().FirstOrDefault(f => string.Equals(Path.GetFileName(f), jogo, StringComparison.OrdinalIgnoreCase));
+                        if (arq == null) return;
+                        reabriuJogo = Environment.TickCount;
+                        jogoAtual = jogo;
+                        jogoDesde = desde;
+                        GuardarJogoAtual();
+                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", "\"" + arq + "\"") { UseShellExecute = false });
+                        VigiarTelaCheia(jogo);
+                    }
+                    Escrever(new Dictionary<string, object> { { "tipo", "jogo-reaberto" }, { "jogo", Path.GetFileNameWithoutExtension(jogo) } });
+                }
                 catch { }
             }) { IsBackground = true }.Start();
         }
@@ -1043,6 +1066,7 @@ namespace Sala3d
         static bool Liberado(string t, Dictionary<string, object> ev)
         {
             string a = S(ev, "a");
+            bool aluguel = B(ev, "aluguel"); // a sala marca: o PC está alugado (lan house) com este jogo
             IntPtr alvo;
             if (t == "mouse")
             {
@@ -1075,12 +1099,14 @@ namespace Sala3d
                 bool tab = code == "Tab" || key == "Tab", esc = code == "Escape" || key == "Escape", espaco = code == "Space" || key == " ";
                 // trocar de janela, abrir o Iniciar ou o menu da janela: nunca
                 if ((alt && (tab || esc || espaco)) || (ctrl && esc)) return false;
+                // aluguel: o Alt+F4 também não (fechar o jogo)
+                if (aluguel && alt && (code == "F4" || key == "F4")) return false;
                 alvo = GetForegroundWindow();
             }
             else if (t == "texto" || t == "pad") alvo = GetForegroundWindow();
             else return true;
             if (DoJogo(alvo)) return true;
-            ChamarJogo();
+            ChamarJogo(aluguel);
             if (t == "pad") PadNeutro();
             return false;
         }
@@ -2521,7 +2547,7 @@ namespace Sala3d
             if (unchecked(agora - padUltimo) > 5000) Focar();
             padUltimo = agora;
             int b = (int)D(ev, "b");
-            if (jogoTrava != null) b &= ~(1 << 16); // o Guia (Game Bar, Steam) não sai do jogo
+            if (jogoTrava != null && !B(ev, "livre")) b &= ~(1 << 16); // o Guia (Game Bar, Steam) não sai do jogo
             AplicarPad(b,D(ev, "lx"), D(ev, "ly"), D(ev, "rx"), D(ev, "ry"), D(ev, "lt"), D(ev, "rt"));
         }
 

@@ -3639,8 +3639,8 @@ setInterval(() => {
     + (lsx && m.tela != null ? ` · com o Lossless ×${lsx} ≈ ${Math.round(m.tela * lsx)} qps` : '');
 }, 1000);
 
-controle.onPs5 = (sh, ev) => {
-  if (ev?.t === 'pad') ps5Nativo.pad(ev);
+controle.onPs5 = (sh, ev, meu) => {
+  if (ev?.t === 'pad') ps5Nativo.pad(ev, meu); // meu: o botão PS de quem hospeda passa pela trava
   else if (ev?.t === 'vivo') ps5Nativo.vivo();
 };
 
@@ -7268,6 +7268,8 @@ const erroDoAjudante = (r) => (r?.erro === 'ajudante-ausente' ? 'o ajudante do W
 // Lan house: o que a vez de alguém pôs na sala (a tela do PC, o PS5). Acabou a vez e ninguém pegou a
 // seguinte, sai da sala; o que já estava na sala antes da vez fica.
 const lanAbriu = { pc: null, jogo: null, ps5: false };
+// o PC alugado (lan house) com um jogo aberto pela vez: quem joga também não fecha o jogo (controle.js, ajudante 1.24+)
+controle.aluguel = () => !!(state.lan && lanAbriu.jogo && !lanLivre('pc'));
 let ps5SemPerguntar = false;
 const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
 // a vez no PS5: liga o PS5 direto no último console usado (ou no primeiro registrado) e põe na sala

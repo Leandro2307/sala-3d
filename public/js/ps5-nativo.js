@@ -962,13 +962,13 @@ export class Ps5Nativo {
 
   // ---------------------------------------------------------------- o controle de quem joga
   // ev: { t: 'pad', b, lx, ly, rx, ry, lt, rt, tp?, m? } (já validado em controle.js)
-  pad(ev) {
+  pad(ev, livre = false) {
     this.ultimoPad = performance.now();
     const tp = Array.isArray(ev.tp) && ev.tp.length === 4 ? ev.tp : [-1, -1, -1, -1];
     const m = Array.isArray(ev.m) && ev.m.length === 10 ? ev.m : null;
     this.padSolto = !ev.b && !ev.lx && !ev.ly && !ev.rx && !ev.ry && !ev.lt && !ev.rt && tp[0] < 0 && tp[2] < 0 && !m;
     // os dedos no touchpad vão em números soltos (a ponte lê campo a campo): -1 é sem dedo
-    const b = this.opcoes.psTravado ? ev.b & ~BIT_PS : ev.b;
+    const b = this.opcoes.psTravado && !livre ? ev.b & ~BIT_PS : ev.b;
     const msg = { tipo: 'pad', b, lx: ev.lx, ly: ev.ly, rx: ev.rx, ry: ev.ry, lt: ev.lt, rt: ev.rt, t0x: tp[0], t0y: tp[1], t1x: tp[2], t1y: tp[3] };
     // o movimento também (ponte 1.1+): giroscópio, acelerômetro e orientação; sem ele, deitado e parado
     if (m) [msg.gx, msg.gy, msg.gz, msg.ax, msg.ay, msg.az, msg.ox, msg.oy, msg.oz, msg.ow] = m;

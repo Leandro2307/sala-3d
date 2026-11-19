@@ -372,13 +372,13 @@ export class Controle {
 
   // ---------------------------------------------------------------- quem compartilha
   // Chegou um clique/tecla de alguém para uma das minhas telas.
-  async receber(sh, { ev, de, deId }) {
+  async receber(sh, { ev, de, deId, meu }) {
     // PS5 direto (ps5-nativo.js): só o controle de PS5 e o modo jogo; nada de mouse e teclado
     if (sh?.ps5) {
       if (!sh.controle) return;
       if (ev?.t === 'modo' && deId) this.onModo?.(sh, ev.jogo, deId, !!ev.rapido, { vibra: ev.vibra, ds: ev.ds });
       if (ev?.t === 'pad' && deId) this.ultimoPad = { key: sh.key, deId };
-      if (ev?.t === 'pad' || ev?.t === 'vivo') this.onPs5?.(sh, ev);
+      if (ev?.t === 'pad' || ev?.t === 'vivo') this.onPs5?.(sh, ev, !!meu);
       return;
     }
     if (!sh?.controle || (sh.aba == null && !sh.alvo)) return;
@@ -401,6 +401,11 @@ export class Controle {
       return;
     }
     const t0 = performance.now();
+    // meu: veio deste aparelho (quem compartilha jogando aqui): passa pela trava do jogo do PC (ajudante 1.23+)
+    if (meu && sh.aba == null && ev && typeof ev === 'object') ev = { ...ev, livre: true };
+    // aluguel (lan house, main.js): quem alugou o PC com um jogo também não fecha o jogo (Alt+F4; fechado
+    // pelo menu dele, o ajudante abre de novo)
+    else if (sh.aba == null && ev && typeof ev === 'object' && this.aluguel?.(sh)) ev = { ...ev, aluguel: true };
     const r = sh.aba != null ? await this.pedir('entrada', sh.aba, ev) : await this.pedir('janela', null, ev, sh.alvo);
     // Daqui até o ajudante e de volta (relatório: o atraso do controle no PC de quem compartilha). Conta
     // também o controle do PS5 (pad), que no layout PS5 é quase tudo o que vai. Mediana dos últimos 30:
@@ -499,7 +504,7 @@ export class Controle {
     // reabria (ou ainda compilava) e o WASD e a câmera paravam, mas o clique continuava
     if (this.jogo?.key === key && ['mouse', 'wheel', 'tecla'].includes(ev.t)) ev = { ...ev, jogo: true };
     const minha = this.minha(key);
-    if (minha) return void this.receber(minha, { ev });
+    if (minha) return void this.receber(minha, { ev, meu: true });
     this.envios.set(key, Date.now());
     this.emitir('controle', { key, ev }, volatil);
   }
@@ -575,7 +580,7 @@ export class Controle {
         const { key, ev } = this.movePendente;
         this.movePendente = null;
         const minha = this.minha(key);
-        if (minha) await this.receber(minha, { ev });
+        if (minha) await this.receber(minha, { ev, meu: true });
         else this.mandar(key, ev, true);
       }
     } finally {
