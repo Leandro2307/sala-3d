@@ -333,6 +333,31 @@ export function decidirBanda({ atual, min, max, fila, a, rxEscala = 1, entrega =
   return encosta || Math.abs(nova - atual) >= atual * 0.03 ? Math.round(nova) : atual;
 }
 
+// O tamanho da imagem pela rede (só com o codificador daqui): com a banda no piso do tamanho e a rede
+// ainda sem levar (2 cortes seguidos no piso), desce um degrau (1080 → 720 → 540) em vez de o turbo
+// desistir; com a banda no teto do tamanho e a fila baixa por ALTURA_SUBIR avisos, sobe um degrau até o
+// pedido (teto). No relatório de 2026-11-19 19:21 (lokao → lokao16001) a rede não levava nem os 2,5 Mbps
+// do piso de 1080p, a fila foi a 500–750 ms e o turbo caiu para o vídeo normal duas vezes em 1 min.
+// Devolve a altura nova ou null. a: o estado do ajuste (noPiso, noTeto, alturaEm).
+export const ALTURAS = [1080, 720, 540];
+const ALTURA_SUBIR = 16; // avisos (8 s) no teto com a fila baixa para subir um degrau
+const ALTURA_ESPERA_MS = 5000; // entre uma troca de tamanho e outra
+export function decidirAltura({ h, teto, banda, min, max, cortou, fila, tranco, a, agora }) {
+  if (cortou && banda <= min * 1.05) a.noPiso = (a.noPiso || 0) + 1;
+  else if (!cortou && fila < FILA_ALTA) a.noPiso = 0;
+  if (fila < FILA_BAIXA && banda >= max * 0.95) a.noTeto = (a.noTeto || 0) + 1;
+  else if (fila > FILA_ALTA && !tranco) a.noTeto = 0;
+  if (agora - (a.alturaEm || -1e9) < ALTURA_ESPERA_MS) return null;
+  let nova = null;
+  if (a.noPiso >= 2) nova = ALTURAS.find((x) => x < h - 20) ?? null;
+  else if (a.noTeto >= ALTURA_SUBIR && h < teto - 20) nova = [...ALTURAS].reverse().find((x) => x > h + 20 && x <= teto) ?? null;
+  if (nova == null) return null;
+  a.noPiso = 0;
+  a.noTeto = 0;
+  a.alturaEm = agora;
+  return nova;
+}
+
 // O que chegou lá ÷ o que saiu daqui nos últimos avisos (a.par: [{ rx, tx }] em kbps), ou null sem conta
 // que sirva (quem joga antigo não manda rx; quase nada saiu: tela parada).
 export function entregaDe(par) {
@@ -622,6 +647,7 @@ export class TurboEnvio {
     // quem joga com a versão 2 lê o cabeçalho com a hora da captura (a antiga leria como imagem)
     s.v2 = Number(versao) >= 2;
     s.altMax = Math.min(1080, Number(altura) || 1080);
+    s.altTeto = s.altMax; // o tamanho pedido: decidirAltura desce dele com a rede apertada e volta até ele
     s.aceitos = (Array.isArray(codecs) ? codecs : []).filter((c) => CODECS.includes(c) || CODECS_HEVC.includes(c));
     this.rodar(s).catch((err) => {
       console.warn('[turbo] envio', err);
@@ -992,7 +1018,17 @@ export class TurboEnvio {
       return;
     }
     if (!s.enc || s.enc.state !== 'configured' || !s.config) return;
+    const cortou = a.altas >= 2 && !tranco; // decidirBanda vai descer a banda (ou queria, no piso)
     const nova = decidirBanda({ atual: s.banda, min: bandaMinDe(s.cfg.h), max: bandaDe(s.cfg.h), fila, a, rxEscala: 1000, entrega });
+    if (s.altTeto) {
+      const alt = decidirAltura({ h: s.cfg.h, teto: s.altTeto, banda: nova, min: bandaMinDe(s.cfg.h), max: bandaDe(s.cfg.h), cortou, fila, tranco, a, agora });
+      if (alt != null) {
+        // o próximo quadro reconfigura o codificador no tamanho novo (configurar), com a banda de agora
+        this.onEvento?.(s.id, 'turbo: tamanho pela rede', { de: s.cfg.h, para: alt, bandaKbps: Math.round(nova / 1000), filaMs: Math.round(fila) });
+        s.altMax = alt;
+        a.trocasDeTamanho = (a.trocasDeTamanho || 0) + 1;
+      }
+    }
     if (nova === s.banda) return;
     try {
       s.config = { ...s.config, bitrate: Math.round(nova) };
@@ -1174,6 +1210,7 @@ export class TurboEnvio {
       lan: s.rede ? !!s.rede.lan : null,
       spsReescrito: s.spsReescrito ?? null,
       trocasDeBanda: s.ajuste.mudou,
+      trocasDeTamanho: s.ajuste.trocasDeTamanho || 0, // decidirAltura (o tamanho de agora vai em altura)
       // o que chegou lá ÷ o que saiu (últimos ~2 s) e as filas altas que não baixaram a banda por isso
       entrega: s.ajuste.entrega != null ? Math.round(s.ajuste.entrega * 100) / 100 : null,
       trancos: s.ajuste.trancos,
@@ -1194,6 +1231,7 @@ export class TurboEnvio {
     if (s.som) Object.assign(s.som.conta, { enviados: 0, bytes: 0, pulados: 0 });
     s.ajuste.mudou = 0;
     s.ajuste.trancos = 0;
+    s.ajuste.trocasDeTamanho = 0;
     s.serie = { fila: [], pulados: [] };
     s.maiorRajada = 0;
     Object.assign(s.conta, { enviados: 0, bytes: 0, pulados: 0, fila: 0, cod: [], chaves: 0, chaveMax: 0, ignorados: 0, ultimo: agora });

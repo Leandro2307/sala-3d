@@ -1,7 +1,7 @@
 // Modo turbo: a banda que se ajusta sozinha e o SPS sem espera para reordenar (turbo.js): npm test
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { bandaInicial, decidirBanda, descricaoSemReordenar, entregaDe, TurboEnvio } from '../public/js/turbo.js';
+import { bandaInicial, decidirBanda, descricaoSemReordenar, entregaDe, decidirAltura, TurboEnvio } from '../public/js/turbo.js';
 
 const deHex = (h) => Uint8Array.from(h.match(/../g).map((x) => parseInt(x, 16)));
 // avcC com um SPS e um PPS
@@ -200,4 +200,33 @@ test('ajustarBanda: a fila daqui sempre cheia (quadros pulados) baixa a banda me
   // o teto de 20 Mbps num caminho que leva 8 (2026-11-19 19:14): a fila de 166 KB enche e fica cheia
   const b = simular({ cap: 8000, inicio: 20_000_000, avisos: 60, limite: 1300 });
   assert.ok(b <= 10_000_000, `banda ${b}`);
+});
+
+test('decidirAltura: no piso sem a rede levar desce um degrau; no teto com folga volta, devagar', () => {
+  const base = { teto: 1080, min: 2_500_000, max: 20_000_000, fila: 300, tranco: false };
+  const a = {};
+  // 1º corte no piso: ainda não
+  assert.equal(decidirAltura({ ...base, h: 1080, banda: 2_500_000, cortou: true, a, agora: 10_000 }), null);
+  // 2º: 720p
+  assert.equal(decidirAltura({ ...base, h: 1080, banda: 2_500_000, cortou: true, a, agora: 11_000 }), 720);
+  // logo depois não troca de novo (espera), mesmo no piso do 720p
+  const m720 = { ...base, min: 1_500_000, max: 6_000_000 };
+  assert.equal(decidirAltura({ ...m720, h: 720, banda: 1_500_000, cortou: true, a, agora: 12_000 }), null);
+  assert.equal(decidirAltura({ ...m720, h: 720, banda: 1_500_000, cortou: true, a, agora: 16_500 }), 540);
+  // 540p é o último degrau
+  const m540 = { ...base, min: 800_000, max: 3_500_000 };
+  for (let i = 0; i < 4; i++) assert.equal(decidirAltura({ ...m540, h: 540, banda: 800_000, cortou: true, a, agora: 30_000 + i * 500 }), null);
+  // a rede melhorou: 8 s no teto do 540p com a fila baixa → 720p
+  let r = null;
+  for (let i = 0; i < 16 && r == null; i++) r = decidirAltura({ ...m540, h: 540, banda: 3_500_000, cortou: false, fila: 10, a, agora: 40_000 + i * 500 });
+  assert.equal(r, 720);
+  // um tranco do Wi-Fi no meio não zera a conta para subir; fila alta de verdade zera
+  const b = { noTeto: 10 };
+  decidirAltura({ ...m720, h: 720, banda: 6_000_000, cortou: false, fila: 200, tranco: true, a: b, agora: 0 });
+  assert.equal(b.noTeto, 10);
+  decidirAltura({ ...m720, h: 720, banda: 6_000_000, cortou: false, fila: 200, tranco: false, a: b, agora: 0 });
+  assert.equal(b.noTeto, 0);
+  // nunca passa do pedido
+  const c = { noTeto: 40 };
+  assert.equal(decidirAltura({ ...m720, teto: 720, h: 720, banda: 6_000_000, cortou: false, fila: 10, a: c, agora: 0 }), null);
 });
