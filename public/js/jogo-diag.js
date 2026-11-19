@@ -207,6 +207,8 @@ export class DiagJogo {
       estado: d.conexao ?? null,
       idadeS: d.idadeS ?? null,
       reiniciosIce: d.reiniciosIce ?? null,
+      voltasDireto: d.voltasDireto ?? null, // saiu do TURN para o direto (rtc.vigiarRelay)
+      tentativasDireto: d.tentativasDireto ?? null,
       par: rede.par ?? null,
       remoto: rede.remoto ?? null,
       relay: rede.relay ?? null,
