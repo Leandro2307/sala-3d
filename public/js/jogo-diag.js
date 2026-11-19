@@ -68,6 +68,12 @@ export class DiagJogo {
     // aba fechando ou indo para o fundo (celular): manda o que tem
     addEventListener('pagehide', () => this.enviar(true));
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') this.enviar(true); });
+    // a rede deste aparelho saiu do ar (Wi-Fi caiu, cabo solto) e voltou: no relatório de 2026-11-18 a
+    // queda do Wi-Fi do PC (20:28) só aparecia pelos avisos da ponte do PS5
+    addEventListener('offline', () => this.marcar('a rede deste aparelho caiu (o navegador ficou sem rede)'));
+    addEventListener('online', () => this.marcar('a rede deste aparelho voltou'));
+    // a diferença entre o relógio daqui e o do servidor (enviar): casa os relatórios dos dois aparelhos
+    this.relogio = null;
   }
 
   get ativo() { return !!this.sessao; }
@@ -418,8 +424,17 @@ export class DiagJogo {
     return resumo;
   }
 
-  // o Wi-Fi deste PC, lido pelo ajudante do Windows (main.js: controle.onWifi); vai em cada amostra de envio
+  // o Wi-Fi deste PC, lido pelo ajudante do Windows (main.js: controle.onWifi); vai em cada amostra de envio.
+  // Caiu, voltou ou trocou de faixa/canal: evento (em 2026-11-18 o PC caiu do 5 GHz às 20:28 e foi para o
+  // 2,4 GHz às 20:34 — o relatório não dizia, só o log do Windows)
   wifiChegou(info) {
+    const ant = this.wifi?.info;
+    const desc = (w) => (w?.conectado ? `${w.faixa || '?'} canal ${w.canal ?? '?'}${w.recebeMbps ? ` (${w.recebeMbps} Mbps)` : ''}` : 'desconectado');
+    if (ant && info && !ant.erro && !info.erro) {
+      if (ant.conectado && !info.conectado) this.marcar('o Wi-Fi deste PC caiu', { antes: desc(ant) });
+      else if (!ant.conectado && info.conectado) this.marcar('o Wi-Fi deste PC voltou', { agora: desc(info) });
+      else if (info.conectado && (ant.faixa !== info.faixa || ant.canal !== info.canal || ant.adaptador !== info.adaptador)) this.marcar('o Wi-Fi deste PC trocou de rede', { de: desc(ant), para: desc(info) });
+    }
     this.wifi = { info, em: Date.now() };
   }
 
@@ -481,6 +496,9 @@ export class DiagJogo {
       fim: new Date().toISOString(),
       resumo: resumoDe(s.amostras),
       ambiente: s.ambiente,
+      // relógio do servidor − o daqui (ms), medido com ida e volta ao mandar o relatório: some à hora dos
+      // eventos e amostras para comparar com o relatório do outro aparelho
+      relogio: this.relogio,
       eventos: s.eventos,
       amostras: s.amostras,
       // o lado de quem joga, medido lá (só no relatório de quem compartilha)
@@ -503,17 +521,22 @@ export class DiagJogo {
     if (saindo && agora - (s.enviadoEm || 0) < 5000) return;
     s.enviadoEm = agora;
     const { sala = null, nome = null } = this.contexto() || {};
-    const texto = JSON.stringify({ id: s.id, sala, nome, relatorio: this.relatorio() });
+    const texto = JSON.stringify({ id: s.id, sala, nome, relogio: Date.now(), relatorio: this.relatorio() });
     (async () => {
       const gz = await gzip(texto);
       const corpo = gz || texto;
+      const t0 = Date.now();
       const r = await fetch('/relatorio-jogo', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(gz ? { 'Content-Encoding': 'gzip' } : {}) },
         body: corpo,
         keepalive: saindo && (gz ? gz.size : texto.length) < 60_000,
       });
-      if (!r.ok) console.warn('[modo-jogo] o servidor não guardou o relatório:', r.status);
+      if (!r.ok) return void console.warn('[modo-jogo] o servidor não guardou o relatório:', r.status);
+      // a hora do servidor corresponde ao meio da ida e volta; vale a medida de menor ida e volta
+      const t1 = Date.now();
+      const agora = Number((await r.json().catch(() => null))?.agora);
+      if (Number.isFinite(agora) && (!this.relogio || t1 - t0 <= this.relogio.rttMs)) this.relogio = { difMs: Math.round(agora - (t0 + t1) / 2), rttMs: t1 - t0 };
     })().catch((err) => {
       if (!saindo) console.warn('[modo-jogo] não deu para mandar o relatório ao servidor', err);
     });

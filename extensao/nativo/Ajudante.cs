@@ -193,7 +193,7 @@ namespace Sala3d
             new Thread(VigiarAtalho) { IsBackground = true }.Start();
             new Thread(VigiarJogo) { IsBackground = true }.Start();
             new Thread(VigiarWifi) { IsBackground = true }.Start();
-            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.21.0" } });
+            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.22.0" } });
             var json = new JavaScriptSerializer();
             string txt;
             while ((txt = Ler(entrada)) != null)
@@ -250,6 +250,7 @@ namespace Sala3d
             if (tipo == "ps5" || tipo == "pc-ponte") { PedidoPs5(S(m, "pid"), tipo); return; }
             if (tipo == "lossless") { PedidoLossless(S(m, "pid")); return; }
             if (tipo == "voz") { PedidoVoz(S(m, "pid")); return; }
+            if (tipo == "carga") { PedidoCarga(S(m, "pid")); return; }
             if (tipo == "obs-ps5") { PedidoObsPs5(S(m, "pid"), S(m, "alvo")); return; }
             if (tipo == "parar") { lock (travaEntrada) { parado = true; SoltarTudo(); } return; }
             if (tipo == "soltar") { jogo = false; vivoVisto = false; cursorEnviado = null; SoltarTudo(); temAlvo = false; rotuloAtual = null; qualEnviado = null; return; }
@@ -1832,6 +1833,7 @@ namespace Sala3d
 
         // ------------------------------------------------------------ Wi-Fi
         const int WIFI_MS = 2000; // o mesmo passo das amostras do relatório (2 s)
+        static readonly object travaCarga = new object(); // os contadores da carga guardam a leitura anterior
         static void VigiarWifi()
         {
             int ultimo = 0;
@@ -1843,18 +1845,42 @@ namespace Sala3d
                     if (!jogo || !temAlvo) { ultimo = 0; continue; }
                     if (ultimo != 0 && unchecked(Environment.TickCount - ultimo) < WIFI_MS) continue;
                     ultimo = Environment.TickCount;
-                    Dictionary<string, object> r;
-                    try { r = LerWifi(); }
-                    catch { r = new Dictionary<string, object> { { "tipo", "wifi" }, { "conectado", false }, { "erro", "wlan" } }; } // sem wlanapi (Windows Server)
-                    var pc = LerMemoria();
-                    if (pc != null) r["pc"] = pc;
-                    // 1.20+: a carga deste PC (placa, processador, rede) e as placas de rede ligadas
-                    try { var c = LerCarga(); if (c != null) r["carga"] = c; } catch { }
-                    try { r["redes"] = LerRedes(); } catch { }
-                    Escrever(r);
+                    Escrever(LerWifiECarga());
                 }
                 catch { /* a saída fechou */ }
             }
+        }
+
+        // O Wi-Fi, a memória, a carga do PC (1.20+) e as placas de rede ligadas, num pacote só
+        static Dictionary<string, object> LerWifiECarga()
+        {
+            lock (travaCarga)
+            {
+                Dictionary<string, object> r;
+                try { r = LerWifi(); }
+                catch { r = new Dictionary<string, object> { { "tipo", "wifi" }, { "conectado", false }, { "erro", "wlan" } }; } // sem wlanapi (Windows Server)
+                var pc = LerMemoria();
+                if (pc != null) r["pc"] = pc;
+                try { var c = LerCarga(); if (c != null) r["carga"] = c; } catch { }
+                try { r["redes"] = LerRedes(); } catch { }
+                return r;
+            }
+        }
+
+        // 1.22+: { tipo: "carga" } -> o mesmo pacote do Wi-Fi, na hora. No PS5 direto a entrada de quem joga
+        // vai pela ponte do PS5 (o ajudante não fica sabendo do modo jogo) e o relatório ficava sem o Wi-Fi e
+        // a carga deste PC — justo quando o Wi-Fi caiu (2026-11-18). A sala pede a cada 2 s nessas sessões.
+        static void PedidoCarga(string pid)
+        {
+            new Thread(() =>
+            {
+                Dictionary<string, object> r;
+                try { r = LerWifiECarga(); }
+                catch (Exception err) { r = new Dictionary<string, object> { { "ok", false }, { "msg", err.Message } }; }
+                r["tipo"] = "carga";
+                r["pid"] = pid;
+                Escrever(r);
+            }) { IsBackground = true }.Start();
         }
 
         // a memória deste PC em GB (ver o começo do arquivo); null se o Windows não disser

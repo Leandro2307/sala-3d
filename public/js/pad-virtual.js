@@ -37,6 +37,9 @@ const PULSO_MS = 60;
 const TREMOR_DURA = 1500;
 const TREMOR_RENOVA = 1200;
 const TREMOR_MAX = 15000;
+// O motor do celular (navigator.vibrate) só existe em aparelho de toque: no Chrome do PC a função existe e
+// não faz nada — e o relatório contava como "celular" (lorrel no teclado e mouse, 2026-11-18: milhares)
+const TOQUE = typeof navigator !== 'undefined' && (navigator.maxTouchPoints > 0 || (typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches));
 
 export class PadVirtual {
   constructor({ controle }) {
@@ -206,6 +209,13 @@ export class PadVirtual {
     return null;
   }
 
+  // Este aparelho tem como sentir o tremor (e quer)? Vai para quem compartilha no aviso do modo jogo: sem
+  // nada que vibre, lá não manda os ~20 tremores por segundo pelo canal da imagem à toa.
+  podeVibrar() {
+    if (!opcoesJogo.get('vibrar')) return false;
+    return !!(this.hid?.ligado || this.atuador() || (TOQUE && navigator.vibrate));
+  }
+
   // o que o navegador oferece para vibrar (vai no relatório quando o primeiro tremor chega)
   comoVibra() {
     const g = this.gamepad();
@@ -214,6 +224,7 @@ export class PadVirtual {
       vibrationActuator: g ? (g.vibrationActuator ? (g.vibrationActuator.effects || g.vibrationActuator.type || 'sim') : 'não tem') : null,
       hapticActuators: g ? (g.hapticActuators?.length || 0) : null,
       navigatorVibrate: !!navigator.vibrate,
+      toque: TOQUE, // sem toque, o navigator.vibrate não treme nada (Chrome do PC)
     };
   }
 
@@ -240,7 +251,7 @@ export class PadVirtual {
         .catch((err) => { if (!this.erroTremor) { this.erroTremor = String(err?.message || err); this.onErroTremor?.(this.erroTremor); } });
     } else if (at?.tipo === 'pulso') {
       at.a.pulse(Math.max(t.g, t.p), TREMOR_DURA)?.catch?.(() => {});
-    } else if (navigator.vibrate) {
+    } else if (TOQUE && navigator.vibrate) {
       como = 'celular';
       // no celular o motor pequeno conta menos: ele é o zumbido fino, que o celular não tem
       const forca = Math.max(t.g, t.p * 0.6);

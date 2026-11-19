@@ -1028,3 +1028,60 @@ inclinando): "o giroscópio do controle, mas para PC". A libchiaki já tinha os 
   volta e para de mandar, Switch ignora); calibração com e sem id. Ponte nova aberta numa pasta isolada:
   aceita os pads com movimento e com valores absurdos (corta) e segue viva. **Não testado com o PS5**:
   qual sinal cada jogo usa (orientação, acelerômetro ou giroscópio) e se o sentido do mouse agrada.
+
+## Relatórios do lorrel (2026-11-18) e a banda que se ajusta sozinha
+
+O lorrel joga de fora num PC (Windows, AMD integrada, 8 GB, no cabo, monitor de 100 Hz, teclado e mouse),
+conexão direta (srflx, ~40 ms). Este PC compartilhando pelo Wi-Fi USB (Realtek 8811CU), cabo desligado.
+O que os 18 relatórios de 20:04–20:47 mostraram:
+- **O decodificador dele segurava 85–88 ms** toda vez que a imagem era codificada pelo Chrome daqui (720p
+  "Menos atraso", jogo do PC ou PS5). O `segurando()` nunca corrigia: desistia com a mediana de `decMs` acima
+  de 12 ms — e segurar 5 quadros é justamente o que põe o `decMs` em ~85. Reproduzido aqui (Chrome 157, RTX
+  3060 Ti, `--enable-features=D3D12VideoEncodeAccelerator`): o codificador D3D12 manda o SPS **sem VUI** e a
+  placa segura 5 quadros (83,7 ms, `decodeQueueSize` 0); com o SPS reescrito, 0,2 ms. O do Media Foundation
+  manda a VUI com reordenar 0 (não segura).
+- **PC direto em 1080p**: o piso da banda era 60% da máxima (12 Mbps a 60 qps, 18 a 120 — estava a 120, ~85
+  qps com o Lossless) e o canal turbo até ele levava ~5–7 Mbps: fila de 120–230 ms e ~1 quadro-chave/s.
+- **PS5 1080p repassado (15 Mbps fixos)**: 5–16 qps por minutos (fila → pula → quadro-chave → fila).
+  PS5 720p repassado: a imagem em ~69 ms (o menor atraso do dia), mas 37 qps nos 10 Mbps automáticos.
+- Quedas: 20:24:43 deploy (commit das 20:23) derrubou as duas pontas; 20:28 o driver do Wi-Fi derrubou o
+  `LEANDRO_5G` duas vezes (~1 min sem rede; log `Microsoft-Windows-WLAN-AutoConfig/Operational`); 20:34 o PC
+  foi trocado para o `LEANDRO` (2,4 GHz, canal 6, 72 Mbps) e a banda do turbo ficou presa no piso.
+- O som do PS5 com "Null or empty decoder buffer" (até 19 por sessão: pacote vazio da ponte); tremores do
+  PS5 (~20/s) indo para quem jogava sem nada que vibrasse; o relatório sem o Wi-Fi e a carga do PC nas
+  sessões do PS5; os relógios dos dois PCs ~52 s diferentes.
+
+### O que entrou
+- **SPS sem espera**: `descricaoSemReordenar` também completa a VUI que existe sem a restrição; o SPS sai
+  reescrito de quem compartilha (`enviarQuadro`) e é reescrito de novo em quem joga ao configurar
+  (`configurarDec`, para quem compartilha numa versão antiga). `segurando()` separa lento de segurando pela
+  fila do decodificador (`decodeQueueSize`: o lento junta pedidos, o que segura não); no Safari, a conta de
+  antes. Relatório: `decAjuste: 'sps'`, `filaDec`, `spsReescrito` (lado de quem compartilha).
+- **A melhor banda, sozinha** (`turbo.js`): começa em 80% da banda que o WebRTC estima até a pessoa
+  (`rtc.caminhoPara`; a mesma casa → a máxima), desce até `bandaMinDe` (2,5 Mbps em 1080p, 1,5 em 720p;
+  PC direto 2 Mbps) e, com a fila alta, vai direto para perto do que chegou lá (`rx`, que quem joga manda
+  junto da fila) — `decidirBanda`/`bandaInicial`, testados em `testes/turbo-banda.test.mjs`.
+- **PS5**: repassa só quando a rede leva a banda da sessão (a mesma casa, ou a estimativa ≥ 1,15× a do PS5);
+  senão codifica aqui. Repassando, a fila alta por 1,5 s ou 3 quadros pulados em 2 s → passa a codificar
+  aqui, começando em 85% do que chegava (`vigiarRepasse`). A fonte do PS5 leva a banda da sessão (`fonte.kbps`).
+- **PC direto**: o tamanho pedido vira o da ponte (`pedirAltura`/`soltarAltura` → `trocarAltura`: recomeça a
+  captura no mesmo monitor e qps; a fonte continua a mesma); a máxima da banda acompanha o tamanho.
+- Som do PS5: pacote vazio ignorado (`somVazios` no relatório). Tremor e gatilhos: quem joga diz no aviso do
+  modo jogo se sente o tremor (`vibra`) e se tem DualSense (`ds`); quem compartilha só manda para quem tem.
+  `navigator.vibrate` só conta em aparelho de toque.
+- Relatório: `relogio` (diferença para o servidor, medida com ida e volta ao mandar) e `relogioServidor`
+  (carimbo do servidor); `npm run relatorios` mostra o relógio de cada um. Eventos "o Wi-Fi deste PC
+  caiu/voltou/trocou de rede" e "a rede deste aparelho caiu". Nas sessões do PS5 a sala pede o Wi-Fi e a
+  carga do PC ao ajudante a cada 2 s (**extensão 1.28, ajudante 1.22**: pedido `pc-carga` → `carga`).
+- **Voltar ao jogo**: a conexão com o servidor caiu (ou a página recarregou por um deploy) no meio do jogo →
+  quando a tela de quem compartilhava volta (até 3 min), um aviso com o botão "Voltar ao jogo" abre a tela
+  e religa o modo jogo num clique.
+
+Testado aqui: `npm test`; o turbo de ponta a ponta num Chrome sem janela (scratchpad `pw/turbo`, as duas
+pontas com o código real e o codificador D3D12): tela 720p começando em 3,2 Mbps e subindo 10% a cada 2 s com
+`decMs` 0,4; PS5 de 15 Mbps com a rede estimada em 6 → codificado aqui; PS5 na mesma casa → repassado (SPS
+reescrito em quem joga, 0,3 ms) e, com a fila enchendo, codificado aqui a 85% do que chegava; PC direto
+pedindo 720p à ponte e começando em 80% da estimativa. A sala inteira com dois aparelhos (servidor local):
+sem erro, `caminhoPara` dando `host/udp` e `lan` na mesma máquina, queda e volta do socket. O ajudante
+compila. **Não testado**: com o PS5 e o lorrel de verdade, a ponte do PC trocando de tamanho no meio do jogo,
+e o pedido `carga` pelo ajudante instalado (precisa recarregar a extensão e reabrir o Chrome).

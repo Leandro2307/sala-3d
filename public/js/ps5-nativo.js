@@ -554,6 +554,12 @@ export class Ps5Fonte {
 
   som(buf) {
     if (this.parada || !this.somCfg) return;
+    // Pacote vazio da ponte: o AudioDecoder recusa ("Null or empty decoder buffer"), fecha e o som some até
+    // nascer outro (até 1 s, aqui e no vídeo normal) — 19 vezes numa sessão do relatório de 2026-11-18
+    if (!buf?.byteLength) {
+      this.conta.somVazios = (this.conta.somVazios || 0) + 1;
+      return;
+    }
     const ts = Math.round(performance.now() * 1000);
     const dados = buf.slice();
     this.avisar({ som: dados, ts, hz: this.somCfg.hz, canais: this.somCfg.canais });
@@ -573,7 +579,8 @@ export class Ps5Fonte {
     const o = [...c.decMs].sort((a, b) => a - b);
     const r = { quadros: c.quadros, chaves: c.chaves, kbps: null, perdidos: c.perdidos, recuperados: c.recuperados, erros: c.erros, desenhados: c.desenhados, decMs: o.length ? Math.round(o[o.length >> 1] * 10) / 10 : null, codec: this.cfg?.codec ?? null, largura: this.cfg?.w ?? null, altura: this.cfg?.h ?? null, som: !!this.somCfg,
       // o tocador do som: buffer agora, alvo, faltas (buracos) e descartes desde o começo
-      tocador: this.estadoSom ? { nivelMs: Math.round(this.estadoSom.nivelMs), alvoMs: Math.round(this.estadoSom.alvoMs), faltas: this.estadoSom.faltas, descartes: this.estadoSom.descartes, ctx: this.ctxSom?.state ?? null } : null };
+      tocador: this.estadoSom ? { nivelMs: Math.round(this.estadoSom.nivelMs), alvoMs: Math.round(this.estadoSom.alvoMs), faltas: this.estadoSom.faltas, descartes: this.estadoSom.descartes, ctx: this.ctxSom?.state ?? null } : null,
+      somVazios: c.somVazios || 0 }; // pacotes de som vazios que vieram da ponte (ignorados)
     return r;
   }
 
@@ -814,6 +821,9 @@ export class Ps5Nativo {
         }
         // a ponte só pede H.265 a um PS5: a fonte segue o que ficou combinado
         if (this.fonte && this.fonte.hevc !== (m.codec === 'h265')) this.fonte.hevc = m.codec === 'h265';
+        // a banda da sessão (fixa enquanto ela durar): o turbo só repassa os quadros do PS5 para quem tem
+        // rede para ela; para os outros, codifica de novo (TurboEnvio.ligarSessao, vigiarRepasse)
+        if (this.fonte) this.fonte.kbps = Number(m.kbps) || null;
         this.fase = 'jogando';
         this.onEvento?.('ps5 direto: conectado', m);
         this.porNaSala();

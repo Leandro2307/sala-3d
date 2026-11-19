@@ -718,6 +718,13 @@ async function tratar(m, sender) {
   // (cena montada pelo WebSocket do OBS) e o Lossless ligado; alvo: o título da janela, ou __parar__
   if (m.tipo === 'pc-obs-ps5') return pedidoNativo('obs-ps5', { alvo: String(m.alvo || '').slice(0, 80) }, 60_000);
   if (m.tipo === 'pc-acordado') return pedidoNativo('acordado', { on: !!m.alvo }, 10_000);
+  // 1.28+ (ajudante 1.22+): o Wi-Fi e a carga deste PC na hora, para o relatório do modo jogo — no PS5
+  // direto a entrada vai pela ponte do PS5 e o ajudante não manda esses números sozinho. Só com o ajudante
+  // já aberto (é para o relatório: não sobe o ajudante por isso).
+  if (m.tipo === 'pc-carga') {
+    if (!nativo || nativo.ok !== true) return { erro: 'ajudante-fechado' };
+    return pedidoNativo('carga', {}, 4000);
+  }
   if (m.tipo === 'janela') return janela(m.alvo, m.ev && typeof m.ev === 'object' ? m.ev : null, sender.tab.id);
   // quem compartilha ligou "permitir controle" (de novo): destrava depois de um Ctrl+Alt+End
   if (m.tipo === 'janela-retomar') {

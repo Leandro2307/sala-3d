@@ -43,16 +43,23 @@ async function main() {
     const arq = path.join(dir, `${quando}_${it.lado}_${quem}_${it.id.slice(0, 8)}.json`);
     const mudou = new Date(it.mudou).getTime();
     const st = fs.existsSync(arq) ? fs.statSync(arq) : null;
+    // o relógio do aparelho que mandou − o do servidor (s): a hora dos eventos dele menos isso = a do servidor.
+    // Casa os relatórios dos dois lados (2026-11-18: ~52 s entre o PC de quem compartilhava e o do lorrel)
+    let relogio = null;
     if (!st || st.mtimeMs < mudou) {
       const d = await fetch(`${base}/relatorios-jogo/${it.id}`, { headers });
       if (!d.ok) { console.warn(`  ${it.id}: ${d.status}`); continue; }
-      fs.writeFileSync(arq, JSON.stringify(await d.json(), null, 1));
+      const rel = await d.json();
+      const dif = rel?.relogio?.difMs ?? rel?.relogioServidor?.defasagemMs ?? null;
+      if (dif != null) relogio = -dif / 1000;
+      fs.writeFileSync(arq, JSON.stringify(rel, null, 1));
       fs.utimesSync(arq, new Date(), new Date(Math.max(mudou, Date.now())));
       novos++;
     }
     const s = it.resumo || {};
     const fps = s.mediaQps ?? null;
-    const extras = [fps != null ? `${Math.round(fps)} qps` : null, s.amostras ? `${s.amostras} amostras` : null, s.quemJoga?.length ? `com ${s.quemJoga.join(', ')}` : null].filter(Boolean).join(', ');
+    const extras = [fps != null ? `${Math.round(fps)} qps` : null, s.amostras ? `${s.amostras} amostras` : null, s.quemJoga?.length ? `com ${s.quemJoga.join(', ')}` : null,
+      relogio != null && Math.abs(relogio) >= 1 ? `relógio ${relogio > 0 ? '+' : ''}${relogio.toFixed(1)} s` : null].filter(Boolean).join(', ');
     console.log(`${st && st.mtimeMs >= mudou ? ' ' : '*'} ${quando}  ${it.lado.padEnd(11)} ${String(it.nome || '-').padEnd(16)} sala ${it.sala || '-'}  ${extras}`);
   }
   console.log(`\n${lista.length} relatórios no servidor, ${novos} baixados agora em ${dir}`);

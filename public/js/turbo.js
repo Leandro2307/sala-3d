@@ -52,6 +52,16 @@
 //   - medida de verdade (versao 2): cada quadro leva a hora em que saiu da captura (relógio de quem
 //     compartilha), e quem joga, com a diferença dos relógios pelo ping, mede quanto ele levou até
 //     ser desenhado (pontaMs) e quanto ficou na fila + rede (viagemMs).
+//
+// A melhor banda, sozinha (2026-11-18, relatórios do lorrel: PC no Wi-Fi USB, o canal turbo até ele
+// levando só 5–7 Mbps):
+//   - começa pela banda que o WebRTC estimou até essa pessoa (rede: rtc.caminhoPara), não pela máxima;
+//   - desce até bandaMinDe (o piso era 60% da máxima e a banda ficava presa nele com a fila cheia) e,
+//     com a fila crescendo, vai direto para perto do que chegou lá (rx, que quem joga conta);
+//   - PS5: repassa os quadros do PS5 só quando a rede leva a banda da sessão dele; senão (ou quando a
+//     fila do repasse enche), codifica de novo aqui, na banda que a rede leva (vigiarRepasse);
+//   - PC direto: a placa muda de banda (ponte) e de tamanho (pedirAltura: 720p pedido vira 720p na
+//     ponte, sem decodificar e codificar de novo aqui).
 
 import { Ritmo } from './ritmo.js';
 
@@ -73,7 +83,18 @@ const FILA_ALTA = 30; // ms de fila (viagem p90 − a menor) que fazem a banda d
 // banda cheia (relatório de 2026-11-03 02:24), e depois de um aperto no começo a banda ficou em 6,1 de
 // 10 Mbps até o fim.
 const FILA_BAIXA = 24;
-const BANDA_MIN = 0.6; // a banda desce até 60% da do tamanho, no máximo
+const FILA_MUITO_ALTA = 150; // ms de fila: a banda desce 30% de uma vez (e não 15%)
+// O piso da banda (bps) de cada altura. Era 60% da banda do tamanho (6 Mbps em 1080p, 3,6 em 720p): no
+// relatório de 2026-11-18 (lorrel, 12 min em 720p, PC no Wi-Fi de 2,4 GHz) a banda ficou presa nos 3,6
+// com a fila cheia e 2.883 quadros pulados — a rede levava menos que o piso.
+const bandaMinDe = (h) => (h >= 1000 ? 2_500_000 : h >= 700 ? 1_500_000 : 800_000);
+// PC direto: o piso da banda da ponte (kbps). Era 60% da máxima — 12 Mbps em 1080p a 60 qps, 18 a 120 —,
+// e o caminho até o lorrel levava ~6: fila de 120–230 ms e um quadro-chave por segundo (2026-11-18).
+const PONTE_MIN_KBPS = 2000;
+// Um PS5 repassado só vai assim se a rede até quem joga leva a banda da sessão com esta folga (a estimativa
+// do WebRTC); senão a imagem é codificada de novo aqui, na banda que a rede leva
+const FOLGA_REPASSE = 1.15;
+const ESPERA_REDE_MS = 400; // quanto ligarSessao espera pela estimativa da rede antes de seguir sem ela
 const PEDIR_CHAVE_MS = 250; // intervalo mínimo entre pedidos de quadro-chave
 // Um quadro-chave que saiu há menos que isto e que quem joga ainda não viu está a caminho: outro
 // pedido por ele é ignorado (ver TurboEnvio.pedidoDeChave). Nos picos do Wi-Fi a viagem chegou a 250 ms.
@@ -261,6 +282,41 @@ export function paraOTocador(no, data) {
 const par = (n) => Math.max(2, Math.round(n / 2) * 2);
 const bandaDe = (h) => (h >= 1000 ? 10_000_000 : h >= 700 ? 6_000_000 : 3_500_000);
 
+// A banda em que uma sessão começa (as unidades de max/min, kbps ou bps): a mesma casa → a máxima; com a
+// estimativa do WebRTC até quem joga (rede.saidaKbps, sempre em kbps; kbps: true quando max/min também
+// são) → 80% dela; sem estimativa → desconhecida. Sempre entre min e max.
+export function bandaInicial({ max, min, rede = null, desconhecida, kbps = true }) {
+  let v = desconhecida ?? max * 0.8;
+  if (rede?.lan) v = max;
+  else if (Number(rede?.saidaKbps) > 0) v = Number(rede.saidaKbps) * (kbps ? 1 : 1000) * 0.8;
+  return Math.round(Math.min(max, Math.max(min, v)));
+}
+
+// A banda nova pela fila que quem joga mediu (ajustarBanda), na unidade de atual/min/max. a: o estado do
+// ajuste da sessão (altas, baixas: avisos seguidos acima/abaixo; rxs: o que chegou lá nos últimos avisos,
+// em kbps — rxEscala converte para a unidade da banda). Fila acima de FILA_ALTA em 2 avisos (1 s):
+// desce 15% (30% com a fila acima de FILA_MUITO_ALTA) e, com a fila crescendo, no máximo até 90% do
+// maior que chegou lá nos últimos 2 s — o que chega é o que o caminho leva; nunca mais que a metade
+// de uma vez (um Wi-Fi parado por um instante não é a banda). Abaixo de FILA_BAIXA em 4 avisos (2 s):
+// sobe 10% (15% abaixo da metade da máxima: volta mais rápido depois de um aperto). Muda só de 3% para
+// cima, ou para encostar no piso ou no teto.
+export function decidirBanda({ atual, min, max, fila, a, rxEscala = 1 }) {
+  let nova = atual;
+  if (a.altas >= 2) {
+    nova = atual * (fila > FILA_MUITO_ALTA ? 0.7 : 0.85);
+    const chegou = a.rxs?.length ? Math.max(...a.rxs) * rxEscala : null;
+    if (chegou) nova = Math.min(nova, chegou * 0.9);
+    nova = Math.max(nova, atual * 0.5);
+    a.altas = 0;
+  } else if (a.baixas >= 4 && atual < max) {
+    nova = atual * (atual < max * 0.5 ? 1.15 : 1.1);
+    a.baixas = 0;
+  }
+  nova = Math.min(max, Math.max(min, nova));
+  const encosta = nova !== atual && (nova === max || nova === min);
+  return encosta || Math.abs(nova - atual) >= atual * 0.03 ? Math.round(nova) : atual;
+}
+
 // ------------------------------------------------------------------ SPS sem espera para reordenar
 // O decodificador da placa no Chrome (medido: RTX 3060 Ti, Windows) segurava 5 quadros — 83 ms — em
 // todos os perfis, quando o SPS vinha sem VUI: um dos dois codificadores da placa no Chrome manda assim
@@ -268,7 +324,14 @@ const bandaDe = (h) => (h >= 1000 ? 10_000_000 : h >= 700 ? 6_000_000 : 3_500_00
 // decodificador guarda quadros para o caso de virem fora de ordem (nunca vêm: tempo real, sem quadro B).
 // Aqui o SPS da descrição (avcC) ganha uma VUI só com essa restrição (reordenar 0): 0,3 ms, a mesma
 // imagem pixel a pixel. Devolve a descrição nova, ou null se o SPS for de um jeito que não sei
-// reescrever (matriz de escala, VUI que já existe): aí quem resolve é o decodificador do processador.
+// reescrever (matriz de escala) ou não precisar (já tem a restrição): aí, se ainda segurar, quem
+// resolve é o decodificador do processador.
+// Quem é quem (teste de 2026-11-18, Chrome 157, RTX 3060 Ti): o codificador D3D12 do Chrome manda o SPS
+// sem VUI — a placa segurou 5 quadros, 83,7 ms; reescrito, 0,2 ms. O do Media Foundation manda a VUI
+// com reordenar 0. No relatório de 2026-11-18 o decodificador AMD do lorrel segurou 85–88 ms toda vez
+// que a imagem era codificada pelo Chrome daqui (720p): agora o SPS sai reescrito daqui
+// (TurboEnvio.enviarQuadro) e é reescrito de novo lá ao configurar (quem compartilha numa versão antiga).
+// Um SPS com VUI mas sem a restrição também ganha a restrição, no fim da VUI que ele tem.
 class LerBits {
   constructor(b) { this.b = b; this.p = 0; }
   u(n) {
@@ -338,15 +401,39 @@ function spsSemReordenar(nal) {
   if (!L.u(1)) L.u(1);
   L.u(1);
   if (L.u(1)) { L.ue(); L.ue(); L.ue(); L.ue(); }
-  const ate = L.p; // aqui vem vui_parameters_present_flag
-  if (L.u(1)) return null; // já tem VUI
+  let ate = L.p; // aqui vem vui_parameters_present_flag
+  const temVui = L.u(1);
+  if (temVui) {
+    // a VUI que já existe vai inteira até a bitstream_restriction_flag
+    if (L.u(1) && L.u(8) === 255) { L.u(16); L.u(16); } // aspecto (255: largura e altura do pixel)
+    if (L.u(1)) L.u(1); // overscan
+    if (L.u(1)) { L.u(4); if (L.u(1)) L.u(24); } // sinal de vídeo (formato, faixa; cores)
+    if (L.u(1)) { L.ue(); L.ue(); } // posição do croma
+    if (L.u(1)) { L.u(32); L.u(32); L.u(1); } // tempo
+    const hrd = () => {
+      const n = L.ue() + 1;
+      L.u(8);
+      for (let i = 0; i < n; i++) { L.ue(); L.ue(); L.u(1); }
+      L.u(20);
+    };
+    const nal = L.u(1);
+    if (nal) hrd();
+    const vcl = L.u(1);
+    if (vcl) hrd();
+    if (nal || vcl) L.u(1); // low_delay_hrd_flag
+    L.u(1); // pic_struct
+    ate = L.p; // aqui vem bitstream_restriction_flag
+    if (L.u(1)) return null; // já tem a restrição: vale o que o codificador disse
+  }
   const bits = [];
   for (let i = 0; i < ate; i++) bits.push((rbsp[i >> 3] >> (7 - (i & 7))) & 1);
   const u = (n, v) => { for (let i = n - 1; i >= 0; i--) bits.push(Math.floor(v / 2 ** i) % 2); };
   const ue = (v) => { const x = v + 1; const n = Math.floor(Math.log2(x)) + 1; u(n - 1, 0); u(n, x); };
-  u(1, 1); // vui_parameters_present_flag
-  u(5, 0); // aspecto, overscan, sinal de vídeo, croma, tempo: nada
-  u(3, 0); // hrd nal, hrd vcl, pic_struct
+  if (!temVui) {
+    u(1, 1); // vui_parameters_present_flag
+    u(5, 0); // aspecto, overscan, sinal de vídeo, croma, tempo: nada
+    u(3, 0); // hrd nal, hrd vcl, pic_struct
+  }
   u(1, 1); // bitstream_restriction_flag
   u(1, 1); // vetores de movimento passando da borda
   ue(2); // max_bytes_per_pic_denom (o padrão)
@@ -391,11 +478,17 @@ export function descricaoSemReordenar(desc) {
 // ================================================================== quem compartilha
 export class TurboEnvio {
   // tela(key) -> { stream, controle } da minha tela (ou null); onMudou(id, key, ligado)
-  constructor({ tela, onMudou }) {
+  // rede(id) -> Promise<{ saidaKbps, lan, local, remoto } | null>: o caminho até quem joga, pelo WebRTC
+  //   (rtc.caminhoPara) — a banda inicial e o repasse do PS5 saem dele
+  // onEvento(id, texto, dados): o que o turbo decidiu, para o relatório
+  constructor({ tela, onMudou, rede = null, onEvento = null }) {
     this.tela = tela;
     this.onMudou = onMudou;
+    this.rede = rede;
+    this.onEvento = onEvento;
     this.sessoes = new Map(); // id de quem joga -> sessão
     this.canaisSom = new Map(); // id de quem joga -> canal "turbo-som"
+    this.vezDe = new Map(); // id de quem joga -> o pedido mais novo (ligarSessao espera a rede: o de antes desiste)
   }
 
   // quem joga abriu o canal do som comigo (só pacotes de som, daqui para lá)
@@ -427,12 +520,10 @@ export class TurboEnvio {
     canal.onclose = () => this.desligar(id, canal);
   }
 
-  // guarda o pedido na sessão: trocarFonte liga de novo com ele quando a imagem da tela muda
+  // o pedido fica na sessão (ligarSessao/ligarPs5): trocarFonte liga de novo com ele quando a imagem da
+  // tela muda, e vigiarRepasse com ele marcado para codificar aqui
   ligar(id, canal, pedido) {
-    const feito = this.ligarSessao(id, canal, pedido);
-    const s = this.sessoes.get(id);
-    if (s) s.pedido = pedido;
-    return feito;
+    return this.ligarSessao(id, canal, pedido);
   }
 
   // A imagem da tela mudou de fonte (PS5 direto ↔ Lossless pelo OBS, ver main.js): cada sessão dessa
@@ -443,18 +534,46 @@ export class TurboEnvio {
     }
   }
 
-  async ligarSessao(id, canal, { ligar: key, codecs, altura, versao, som }) {
+  // recodificar: o PS5 vai codificado aqui mesmo se couber repassado (vigiarRepasse: o repasse não coube);
+  // bandaInicialKbps: a banda em que o codificador começa (a que a rede levava no repasse)
+  async ligarSessao(id, canal, pedido) {
+    const { ligar: key, codecs, altura, versao, som, recodificar = false, bandaInicialKbps = null } = pedido;
     this.desligar(id);
+    const vez = (this.vez = (this.vez || 0) + 1);
+    this.vezDe.set(id, vez);
     const t = typeof key === 'string' ? this.tela(key) : null;
     const responder = (m) => { try { canal.send(JSON.stringify(m)); } catch { /* canal fechou */ } };
     if (!t?.controle) return responder({ erro: 'sem-controle' });
-    // PS5 direto (ps5-nativo.js): os quadros já vêm codificados pelo PS5, só repassa — no tamanho e na
-    // banda do PS5 (1080p, 15 Mbps). Quem pediu menos que isso (720p Turbo liso) recebia o 1080p do
-    // mesmo jeito (relatórios do lorrel, 2026-11-17 21:56–22:01: modo 13 e toda amostra em 1920×1080).
-    // Aí a imagem do PS5, que já sai decodificada aqui para o vídeo normal, é codificada de novo no
-    // tamanho pedido, como uma tela comum — e com a banda se ajustando à rede de quem joga (ajustarBanda).
-    const altPs5 = t.ps5?.cfg?.h || 1080;
-    if (t.ps5 && !(Number(altura) > 0 && Number(altura) < altPs5)) return this.ligarPs5(id, canal, key, t.ps5, { versao, som, codecs, somMix: t.somMix });
+    // O caminho até quem joga (a banda que o WebRTC estimou, a mesma casa ou não): dele saem a banda
+    // inicial e o repasse do PS5. Espera pouco: sem resposta, segue sem ele (o ajuste pela fila resolve).
+    const rede = this.rede ? await Promise.race([
+      Promise.resolve().then(() => this.rede(id)).catch(() => null),
+      new Promise((ok) => setTimeout(() => ok(null), ESPERA_REDE_MS)),
+    ]) : null;
+    if (this.vezDe.get(id) !== vez || canal.readyState === 'closed') return; // outro pedido entrou enquanto esperava
+    const fonte = t.ps5;
+    const altFonte = fonte?.cfg?.h || 1080;
+    const pedida = Number(altura) > 0 ? Math.min(1080, Number(altura)) : 1080;
+    // PC direto (a placa daqui): repassa sempre. A banda da ponte acompanha a fila (ajustarBanda) e o
+    // tamanho pedido vira o da ponte (pedirAltura): o 720p não é mais decodificado e codificado de novo
+    // aqui (no relatório de 2026-11-18 o codificador do Chrome levava ~20 ms, até 58, com o jogo na placa)
+    if (fonte?.banda && !recodificar) {
+      fonte.pedirAltura?.(id, pedida);
+      return this.ligarPs5(id, canal, key, fonte, { versao, som, somMix: t.somMix, rede, pedido });
+    }
+    // PS5 direto (ps5-nativo.js): os quadros já vêm codificados pelo PS5, na banda da sessão dele (15 Mbps
+    // em 1080p), que aqui não muda. Repassa quando o tamanho é o pedido e a rede até quem joga leva essa
+    // banda (a mesma casa, ou a estimativa do WebRTC com FOLGA_REPASSE; sem estimativa, tenta e
+    // vigiarRepasse desiste se a fila encher). Senão a imagem do PS5, que já sai decodificada aqui para o
+    // vídeo normal, é codificada de novo no tamanho pedido, como uma tela comum — com a banda acompanhando
+    // a rede de quem joga (ajustarBanda). Relatórios do lorrel: 2026-11-17, 720p pedido e 1080p recebido;
+    // 2026-11-18, o 1080p repassado (15 Mbps) em 5–16 qps por minutos, com a rede levando ~6.
+    if (fonte && !recodificar && pedida >= altFonte) {
+      const kbpsPs5 = Number(fonte.kbps) || null;
+      const cabe = !kbpsPs5 || !rede || rede.lan || rede.saidaKbps == null || rede.saidaKbps >= kbpsPs5 * FOLGA_REPASSE;
+      if (cabe) return this.ligarPs5(id, canal, key, fonte, { versao, som, somMix: t.somMix, rede, pedido });
+      this.onEvento?.(id, 'turbo: a rede de quem joga não leva o PS5 repassado — codificando aqui', { ps5Kbps: kbpsPs5, estimativaKbps: rede.saidaKbps, caminho: rede.local });
+    }
     if (!temTurboEnvio()) return responder({ erro: 'navegador' });
     const original = t.stream?.getVideoTracks()[0];
     if (!original || original.readyState !== 'live') return responder({ erro: 'sem-tela' });
@@ -468,6 +587,12 @@ export class TurboEnvio {
       // se os pulos são picos curtos do Wi-Fi ou falta de banda o tempo todo; rajada: pulados em seguida
       serie: { fila: [], pulados: [] }, rajada: 0, maiorRajada: 0 };
     this.sessoes.set(id, s);
+    s.pedido = pedido;
+    s.rede = rede;
+    s.inicioEm = performance.now();
+    s.recodificado = !!fonte; // a imagem do PS5 codificada aqui (e não repassada)
+    s.kbpsFonte = Number(fonte?.kbps) || null; // a banda da sessão do PS5 (para o relatório)
+    s.bandaInicialKbps = Number(bandaInicialKbps) > 0 ? Number(bandaInicialKbps) : null;
     // quem joga com a versão 2 lê o cabeçalho com a hora da captura (a antiga leria como imagem)
     s.v2 = Number(versao) >= 2;
     s.altMax = Math.min(1080, Number(altura) || 1080);
@@ -488,15 +613,20 @@ export class TurboEnvio {
   // é pedido ao PS5 — que leva ~1 s para mandar. Por isso a fila cheia não tira quadro: eles esperam
   // aqui até ESPERA_PS5_MS (esvaziarPs5); só passando disso a cadeia é quebrada. Nos relatórios de
   // 2026-11-16 (21:19, PS5 → iPhone) 1 quadro pulado pela fila custava ~62 (raj 62–64): 42,7 qps de
-  // média contra 56 com o PC codificando. A banda é a da sessão do PS5 (ajustarBanda não tem o que mexer).
+  // média contra 56 com o PC codificando. A banda é a da sessão do PS5 (ajustarBanda não tem o que mexer:
+  // vigiarRepasse passa a codificar aqui quando ela não cabe na rede de quem joga).
   // somMix: o som do PS5 misturado com o do PC (main.js, "Levar o som do PC"). Com ele, o som não é o
   // Opus do PS5 repassado: a mistura é codificada aqui, como numa tela comum.
-  ligarPs5(id, canal, key, fonte, { versao, som, somMix = null }) {
+  // PC direto (fonte.banda): a mesma coisa, mas a banda da ponte (a placa daqui) acompanha a fila.
+  ligarPs5(id, canal, key, fonte, { versao, som, somMix = null, rede = null, pedido = null }) {
     const s = { id, key, canal, chave: true, quadro: 0, enc: null, cfg: null, config: null, banda: 0, trilha: null, parar: false, pulados: 0, enviados: 0,
       cfgEnviada: null, ajuste: { altas: 0, baixas: 0, mudou: 0, ultima: null }, chaveId: 0, chaveEm: 0, ps5: fonte,
       tempos: new Map(), conta: { enviados: 0, bytes: 0, pulados: 0, fila: 0, cod: [], chaves: 0, chaveMax: 0, ignorados: 0, ultimo: performance.now() },
-      serie: { fila: [], pulados: [] }, rajada: 0, maiorRajada: 0, espera: [] };
+      serie: { fila: [], pulados: [] }, rajada: 0, maiorRajada: 0, espera: [], pulosFila: [] };
     this.sessoes.set(id, s);
+    s.pedido = pedido;
+    s.rede = rede;
+    s.inicioEm = performance.now();
     s.v2 = Number(versao) >= 2;
     s.altMax = 1080;
     // a fila andou: os quadros que esperavam saem sem precisar do próximo quadro do PS5
@@ -524,10 +654,33 @@ export class TurboEnvio {
       s.espera.length = 0;
     };
     this.onMudou?.(id, key, true);
-    // PC direto: começa em 60% da banda e sobe pela fila (ajustarBanda). Em 20 Mbps de cara o Wi-Fi do
-    // celular engasgava os primeiros ~10 s (relatório de 2026-11-17 01:54: 16 qps, fila de 250 ms)
-    if (fonte.banda) fonte.banda.mudar(fonte.banda.max * 0.6);
+    // PC direto: começa na banda que a rede leva (bandaInicial) e sobe ou desce pela fila (ajustarBanda).
+    // Em 20 Mbps de cara o Wi-Fi do celular engasgava os primeiros ~10 s (relatório de 2026-11-17 01:54:
+    // 16 qps, fila de 250 ms); nos 60% da máxima (12 Mbps), o PC do lorrel (2026-11-18) nunca saiu da fila.
+    if (fonte.banda) {
+      const b = fonte.banda;
+      const kbps = bandaInicial({ max: b.max, min: b.min ?? PONTE_MIN_KBPS, rede, desconhecida: Math.min(b.max * 0.6, 8000) });
+      b.mudar(kbps);
+      this.onEvento?.(id, 'turbo: banda inicial da placa (PC direto)', { kbps, maxKbps: b.max, estimativaKbps: rede?.saidaKbps ?? null, caminho: rede?.local ?? null, lan: !!rede?.lan });
+    }
     fonte.pedirChave();
+  }
+
+  // PS5 repassado (a banda é a da sessão do PS5: aqui não tem o que baixar). A fila medida lá acima de
+  // FILA_ALTA em 3 avisos seguidos (1,5 s), ou 3 quadros pulados aqui pela fila cheia em 2 s, e a imagem
+  // entra no ciclo fila → pula → quadro-chave → fila (5 a 16 qps no 1080p repassado do relatório de
+  // 2026-11-18). Daí em diante esta pessoa recebe a imagem codificada aqui, começando em 85% do que
+  // chegou lá (rx), e a banda acompanha a rede dela. Os 2 s do começo não contam (o quadro-chave inicial).
+  vigiarRepasse(s, fila) {
+    if (s.parar || s.trocando || s.ps5?.banda) return;
+    const agora = performance.now();
+    s.pulosFila = (s.pulosFila || []).filter((t) => agora - t < 2000);
+    if (agora - s.inicioEm < 2000 || (s.ajuste.altas < 3 && s.pulosFila.length < 3)) return;
+    s.trocando = true;
+    const rx = s.ajuste.rxs?.length ? Math.max(...s.ajuste.rxs) : null;
+    const kbps = rx ? Math.round(rx * 0.85) : null;
+    this.onEvento?.(s.id, 'turbo: o PS5 repassado não coube na rede de quem joga — codificando aqui', { filaMs: Math.round(fila), puladosFila2s: s.pulosFila.length, rxKbps: rx, bandaInicialKbps: kbps, ps5Kbps: Number(s.ps5?.kbps) || null });
+    this.ligar(s.id, s.canal, { ...(s.pedido || { ligar: s.key, versao: s.v2 ? VERSAO : 1 }), recodificar: true, bandaInicialKbps: kbps });
   }
 
   // um quadro do PS5 que não vai (contado no relatório). quebra: a cadeia se perdeu e só um quadro-chave
@@ -538,7 +691,10 @@ export class TurboEnvio {
     s.pulados++;
     s.conta.pulados++;
     s.serie.pulados[b]++;
-    if (porFila) s.conta.fila++;
+    if (porFila) {
+      s.conta.fila++;
+      s.pulosFila?.push(performance.now()); // vigiarRepasse
+    }
     if (++s.rajada > s.maiorRajada) s.maiorRajada = s.rajada;
     if (!quebra) return;
     s.chave = true;
@@ -660,7 +816,7 @@ export class TurboEnvio {
   // um pacote Opus (daqui ou do PS5 direto) para quem joga
   mandarSom(s, som, dados, ts) {
     const canal = this.canaisSom.get(s.id);
-    if (s.som !== som || !canal || canal.readyState !== 'open' || !som.cfg) return;
+    if (s.som !== som || !canal || canal.readyState !== 'open' || !som.cfg || !dados?.byteLength) return;
     // som esperando na fila: mandar mais só atrasaria (o tocador de lá prefere uma falha curta)
     if (canal.bufferedAmount > SOM_FILA_MAX) { som.conta.pulados++; return; }
     const msg = new Uint8Array(SOM_CAB + dados.byteLength);
@@ -724,9 +880,18 @@ export class TurboEnvio {
         error: (err) => { console.warn('[turbo] codificador', err); s.parar = true; },
       });
     }
+    // A banda: trocando só o tamanho, a de agora (dentro dos limites do tamanho novo); começando, a que a
+    // rede leva (bandaInicial: a estimativa do WebRTC até essa pessoa, ou o que chegava no repasse do PS5)
+    const max = bandaDe(ch);
+    const min = bandaMinDe(ch);
+    const primeira = !s.banda;
+    escolhido.bitrate = primeira
+      ? bandaInicial({ max, min, rede: s.bandaInicialKbps ? { saidaKbps: s.bandaInicialKbps / 0.8 } : s.rede, kbps: false })
+      : Math.round(Math.min(max, Math.max(min, s.banda)));
     s.enc.configure(escolhido);
     s.config = escolhido;
     s.banda = escolhido.bitrate;
+    if (primeira) this.onEvento?.(s.id, 'turbo: banda inicial', { kbps: Math.round(s.banda / 1000), maxKbps: max / 1000, altura: ch, estimativaKbps: s.rede?.saidaKbps ?? null, doRepasseKbps: s.bandaInicialKbps, caminho: s.rede?.local ?? null, lan: !!s.rede?.lan });
     s.cfg = { codec: escolhido.codec, w: cw, h: ch, modo: escolhido.bitrateMode || 'variable' };
     s.chave = true; // a descrição nova sai junto com o próximo quadro-chave (enviarQuadro)
   }
@@ -753,11 +918,12 @@ export class TurboEnvio {
 
   // Quem joga conta a cada FILA_AVISO_MS a viagem medida dos quadros (fila de envio + rede): o p90 e a
   // menor dos últimos ~10 s. A diferença é a fila de verdade (o erro entre os relógios some na conta).
-  // Acima de FILA_ALTA em 2 avisos seguidos (1 s): a banda desce 15%, até BANDA_MIN da do tamanho;
-  // abaixo de FILA_BAIXA em 4 avisos (2 s; os do meio não contam nem zeram): sobe 10%, até a do tamanho.
-  // Quem joga deixa de fora da conta a fila que um quadro-chave causa (TurboRecebe.pedaco). Nos relatórios
-  // de 2026-11-03 (Wi-Fi de casa, PS5 → iPhone) a fila assim dava ~10–27 ms com a banda cheia.
-  // Trocar só a banda não gera quadro-chave nem descrição nova (medido na NVIDIA e no OpenH264).
+  // Junto vai o que chegou lá desde o aviso anterior (rx, kbps): com a fila crescendo, é o que a rede leva.
+  // A conta da banda nova está em decidirBanda (desce até bandaMinDe / PONTE_MIN_KBPS, e não mais até
+  // 60% da máxima). Quem joga deixa de fora da conta a fila que um quadro-chave causa (TurboRecebe.pedaco).
+  // Nos relatórios de 2026-11-03 (Wi-Fi de casa, PS5 → iPhone) a fila assim dava ~10–27 ms com a banda
+  // cheia. Trocar só a banda não gera quadro-chave nem descrição nova (medido na NVIDIA e no OpenH264).
+  // PS5 repassado: não tem banda para mexer — vigiarRepasse decide se passa a codificar aqui.
   ajustarBanda(s, f) {
     const p90 = Number(f.p90);
     const base = Number(f.base);
@@ -765,31 +931,24 @@ export class TurboEnvio {
     const fila = Math.max(0, p90 - base);
     const a = s.ajuste;
     a.ultima = Math.round(fila * 10) / 10;
+    const rx = Number(f.rx);
+    if (Number.isFinite(rx) && rx > 0) guardar((a.rxs ??= []), rx, 4); // os últimos 2 s (quem joga antigo não manda)
     a.altas = fila > FILA_ALTA ? a.altas + 1 : 0;
     // Entre FILA_BAIXA e FILA_ALTA a conta para subir fica onde está: zerar ali (como era) quase nunca
     // deixava juntar 4 seguidos — no relatório de 2026-11-03 16:13, 22 de 82 avisos caíram entre 24 e
     // 30 ms (Wi-Fi), e a imagem recebida foi de ~6,9 para ~4,8 Mbps sem voltar.
     a.baixas = fila < FILA_BAIXA ? a.baixas + 1 : fila > FILA_ALTA ? 0 : a.baixas;
+    if (!s.enc && s.ps5 && !s.ps5.banda) return this.vigiarRepasse(s, fila);
     // PC direto (pc-direto.js): os quadros vêm da placa pela ponte; a banda muda lá (fonte.banda, em kbps)
     if (!s.enc && s.ps5?.banda) {
       const b = s.ps5.banda;
-      let nova = b.atual;
-      if (a.altas >= 2) { nova = Math.max(b.max * BANDA_MIN, b.atual * 0.85); a.altas = 0; }
-      else if (a.baixas >= 4 && b.atual < b.max) { nova = Math.min(b.max, b.atual * 1.1); a.baixas = 0; }
-      if (Math.abs(nova - b.atual) >= b.atual * 0.03) { b.mudar(nova); a.mudou++; }
+      const nova = decidirBanda({ atual: b.atual, min: b.min ?? PONTE_MIN_KBPS, max: b.max, fila, a });
+      if (nova !== b.atual) { b.mudar(nova); a.mudou++; }
       return;
     }
     if (!s.enc || s.enc.state !== 'configured' || !s.config) return;
-    const max = bandaDe(s.cfg.h);
-    let nova = s.banda;
-    if (a.altas >= 2) {
-      nova = Math.max(max * BANDA_MIN, s.banda * 0.85);
-      a.altas = 0;
-    } else if (a.baixas >= 4 && s.banda < max) {
-      nova = Math.min(max, s.banda * 1.1);
-      a.baixas = 0;
-    }
-    if (Math.abs(nova - s.banda) < s.banda * 0.03) return;
+    const nova = decidirBanda({ atual: s.banda, min: bandaMinDe(s.cfg.h), max: bandaDe(s.cfg.h), fila, a, rxEscala: 1000 });
+    if (nova === s.banda) return;
     try {
       s.config = { ...s.config, bitrate: Math.round(nova) };
       s.enc.configure(s.config);
@@ -855,7 +1014,15 @@ export class TurboEnvio {
     const dc = meta?.decoderConfig;
     if (dc) {
       const v = dc.description;
-      const d = !v ? null : v instanceof ArrayBuffer ? new Uint8Array(v) : new Uint8Array(v.buffer, v.byteOffset, v.byteLength);
+      let d = !v ? null : v instanceof ArrayBuffer ? new Uint8Array(v) : new Uint8Array(v.buffer, v.byteOffset, v.byteLength);
+      // O SPS com a VUI de "nada fora de ordem" (descricaoSemReordenar): o codificador D3D12 do Chrome manda
+      // sem ela, e o decodificador da placa de quem joga segurava 5 quadros (85 ms no AMD do lorrel,
+      // 2026-11-18). Daqui só sai quadro em ordem (tempo real, sem quadro B): a declaração é verdadeira.
+      if (d && !ehHevc(dc.codec || s.cfg.codec)) {
+        const nova = descricaoSemReordenar(d);
+        if (nova) d = nova;
+        s.spsReescrito = !!nova;
+      }
       const cfg = { codec: dc.codec || s.cfg.codec, w: s.cfg.w, h: s.cfg.h, description: d ? btoa(String.fromCharCode(...d)) : null };
       const ant = s.cfgEnviada;
       const igual = ant && ant.codec === cfg.codec && ant.w === cfg.w && ant.h === cfg.h && (!cfg.description || cfg.description === ant.description);
@@ -927,6 +1094,7 @@ export class TurboEnvio {
     s.leitor?.cancel().catch(() => {});
     s.trilha?.stop();
     s.cancelar?.(); // PS5 direto: deixa de receber os quadros
+    s.ps5?.soltarAltura?.(id); // PC direto: o tamanho que essa pessoa pediu à ponte não vale mais
     try { if (s.enc && s.enc.state !== 'closed') s.enc.close(); } catch { /* já fechado */ }
     this.pararSom(s);
     this.onMudou?.(id, s.key, false);
@@ -948,8 +1116,17 @@ export class TurboEnvio {
       largura: s.cfg?.w ?? null,
       altura: s.cfg?.h ?? null,
       codec: s.cfg?.codec ?? null,
-      taxa: s.cfg?.modo ?? null, // 'constant' ou 'variable'
-      bandaKbps: s.banda ? Math.round(s.banda / 1000) : null, // a do codificador agora (ajustarBanda)
+      taxa: s.cfg?.modo ?? null, // 'constant' ou 'variable' (codificado aqui) ou 'ps5' (repassado)
+      // a do codificador agora (ajustarBanda) ou, no PC direto, a da ponte (a placa daqui)
+      bandaKbps: s.banda ? Math.round(s.banda / 1000) : s.ps5?.banda ? Math.round(s.ps5.banda.atual) : null,
+      bandaMinKbps: s.enc && s.cfg ? bandaMinDe(s.cfg.h) / 1000 : s.ps5?.banda ? (s.ps5.banda.min ?? PONTE_MIN_KBPS) : null,
+      bandaMaxKbps: s.enc && s.cfg ? bandaDe(s.cfg.h) / 1000 : s.ps5?.banda ? s.ps5.banda.max : null,
+      // PS5: repassado como veio ou codificado aqui (a rede não levava a banda dele), e a banda da sessão
+      ps5: s.ps5 && !s.ps5.banda ? { repasse: true, kbps: Number(s.ps5.kbps) || null } : s.recodificado ? { repasse: false, kbps: s.kbpsFonte } : null,
+      rxKbps: s.ajuste.rxs?.length ? s.ajuste.rxs[s.ajuste.rxs.length - 1] : null, // o que chegou lá (o último aviso)
+      estimativaKbps: s.rede?.saidaKbps ?? null, // a do WebRTC quando a sessão começou
+      lan: s.rede ? !!s.rede.lan : null,
+      spsReescrito: s.spsReescrito ?? null,
       trocasDeBanda: s.ajuste.mudou,
       fila: s.canal.bufferedAmount,
       filaLaMs: s.ajuste.ultima, // a última fila medida do outro lado (viagem p90 − a menor; ajustarBanda)
@@ -1039,6 +1216,9 @@ export class TurboRecebe {
       dif: null, // relógio de quem compartilha − o meu, do pong de menor ida e volta
       // o decodificador segurando quadros (segurando): 0 como veio, 1 SPS reescrito, 2 processador, 3 nada a fazer
       ajusteDec: 0,
+      spsReescrito: false, // o SPS foi reescrito já ao configurar (configurarDec)
+      filaDec: [], // a fila do próprio decodificador (decodeQueueSize) a cada quadro: separa lento de segurando
+      rxBytes: 0, rxEm: 0, // o que chegou desde o último aviso de fila (vai como rx para quem compartilha)
       // a fila medida, para quem compartilha (vigiar): viagens desde o último aviso, a menor de cada aviso
       janelaViagem: [], minimos: [], filaEm: 0, filaMs: null,
       filaLentaDesde: 0, // desde quando a fila medida passa de FILA_LENTA (vigiar)
@@ -1142,7 +1322,11 @@ export class TurboRecebe {
       const config = { codec: cfg.codec, optimizeForLatency: true, hardwareAcceleration: s.ajusteDec === 2 ? 'prefer-software' : 'prefer-hardware' };
       if (cfg.description) {
         const d = Uint8Array.from(atob(cfg.description), (c) => c.charCodeAt(0));
-        config.description = (s.ajusteDec === 1 && !ehHevc(cfg.codec) && descricaoSemReordenar(d)) || d;
+        // O SPS reescrito sempre, já de saída (era só depois de o decodificador segurar, e isso nunca
+        // era percebido: ver segurando). Com a restrição que já existe, nada muda (null).
+        const nova = ehHevc(cfg.codec) ? null : descricaoSemReordenar(d);
+        s.spsReescrito = !!nova;
+        config.description = nova || d;
       }
       s.dec.configure(config);
       s.esperaChave = true;
@@ -1157,21 +1341,32 @@ export class TurboRecebe {
   // O decodificador está segurando quadros: depois de soltar o primeiro, continua com SEGURANDO ou mais
   // dentro por SEGURANDO_QUADROS quadros seguidos (o da placa no Chrome segurava 5 — 83 ms — com o SPS
   // sem VUI de um dos codificadores da NVIDIA; ver descricaoSemReordenar).
-  // Um passo: o SPS reescrito, na placa ainda (medido: 0,3 ms e a mesma imagem); se não der ou não
-  // adiantar, o decodificador do processador (~2 ms em 720p). O iPhone solta na hora: lá nada muda.
+  // Um passo: o SPS reescrito, na placa ainda (medido: 0,3 ms e a mesma imagem) — hoje ele já vai
+  // reescrito ao configurar (configurarDec), então quase sempre é o decodificador do processador (~2 ms
+  // em 720p). O iPhone solta na hora: lá nada muda.
   async segurando(s) {
     if (s.trocandoDec || s.ajusteDec >= 2 || !s.cfgAtual) return;
     // Decodificador lento (cada quadro demorando) também deixa quadros lá dentro, e aí trocar para o
     // processador só piora: no relatório de 2026-11-05 00:43 o iPhone quente foi para o processador
-    // (de 15 para 70 ms por quadro) e o turbo desistiu. Segurar de verdade é soltar rápido, com atraso.
+    // (de 15 para 70 ms por quadro) e o turbo desistiu. Os dois se separam pela fila do próprio
+    // decodificador: o lento junta pedidos esperando a vez (decodeQueueSize), o que segura aceita cada
+    // quadro na hora e só solta o anterior quando chega o seguinte — e o tempo "decodificando" sobe
+    // junto (5 quadros a 60 qps = 83 ms). A conta de antes (mediana acima de 12 ms = lento) confundia os
+    // dois: no relatório de 2026-11-18 (lorrel, placa AMD) o decodificador segurou 85–88 ms a sessão
+    // inteira e nunca foi corrigido. Medido (Chrome 157, RTX 3060 Ti, o SPS sem VUI do codificador D3D12):
+    // segurando, fila 0 e 83,7 ms; reescrito, 0,2 ms. No Safari a fila dele não é garantida: lá vale a
+    // conta de antes.
     const dec = mediana(s.conta.decMs);
-    if (dec != null && dec > 12) return;
+    const fila = mediana(s.filaDec);
+    const apple = /iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent);
+    if (fila == null || fila >= 2 || (apple && dec != null && dec > 12)) return;
     s.trocandoDec = true;
     try {
       const cfg = s.cfgAtual;
       const d = cfg.description ? Uint8Array.from(atob(cfg.description), (c) => c.charCodeAt(0)) : null;
-      // o SPS reescrito é só do H.264 (avcC); no H.265 vai direto para o processador
-      let passo = s.ajusteDec === 0 && d && !ehHevc(cfg.codec) && descricaoSemReordenar(d) ? 1 : 2;
+      // o SPS reescrito é só do H.264 (avcC); no H.265 vai direto para o processador. Já reescrito ao
+      // configurar e segurando assim mesmo: o processador
+      let passo = s.ajusteDec === 0 && !s.spsReescrito && d && !ehHevc(cfg.codec) && descricaoSemReordenar(d) ? 1 : 2;
       if (passo === 2) {
         const r = await VideoDecoder.isConfigSupported({ codec: cfg.codec, ...(d ? { description: d } : {}), optimizeForLatency: true, hardwareAcceleration: 'prefer-software' }).catch(() => null);
         if (this.s !== s) return;
@@ -1195,6 +1390,7 @@ export class TurboRecebe {
   pedaco(s, buf) {
     if (buf.byteLength < CAB) return;
     s.conta.bytes += buf.byteLength;
+    s.rxBytes += buf.byteLength;
     // o maior tempo sem nada chegando: o Wi-Fi parado (vai na causa da travada e no relatório)
     const agoraP = performance.now();
     if (s.ultimoPacote) {
@@ -1279,6 +1475,7 @@ export class TurboRecebe {
     }
     try {
       s.pendentes.set(q.ts, { t: chegou, lido: q.lido, chaveAtrasou: atrasDaChave, reg });
+      guardar(s.filaDec, s.dec.decodeQueueSize ?? 0, 60); // segurando: lento junta pedidos aqui, o que segura não
       s.dec.decode(new EncodedVideoChunk({ type: q.chave ? 'key' : 'delta', timestamp: q.ts, data: dados }));
     } catch (err) {
       console.warn('[turbo] decodificar', err);
@@ -1676,7 +1873,13 @@ export class TurboRecebe {
       s.filaMs = Math.round(Math.max(0, p90 - base) * 10) / 10;
       if (s.filaMs <= FILA_LENTA) s.filaLentaDesde = 0;
       else if (!s.filaLentaDesde) s.filaLentaDesde = agora;
-      try { s.canal.send(JSON.stringify({ fila: { p90, base: Math.round(base * 10) / 10 } })); } catch { /* fechou */ }
+      // rx: o que chegou desde o aviso anterior (kbps = bytes × 8 / ms). Com a fila crescendo lá, é a banda
+      // que a rede leva, e a banda de lá vai direto para perto dela (decidirBanda)
+      const rx = s.rxEm ? Math.round((s.rxBytes * 8) / Math.max(1, agora - s.rxEm)) : null;
+      s.rxBytes = 0;
+      s.rxEm = agora;
+      s.rxKbps = rx;
+      try { s.canal.send(JSON.stringify({ fila: { p90, base: Math.round(base * 10) / 10, rx } })); } catch { /* fechou */ }
     }
   }
 
@@ -1757,7 +1960,10 @@ export class TurboRecebe {
       viagemP90: pct(s.conta.viagem, 0.9),
       rttMinMs: s.relogios.length ? Math.round(Math.min(...s.relogios.map((x) => x.rtt)) * 10) / 10 : null,
       filaMs: s.filaMs, // a última fila mandada a quem compartilha (viagem p90 − a menor)
-      decAjuste: [null, 'sps', 'processador', 'sem-saida'][s.ajusteDec] ?? null, // ver segurando
+      // ver segurando: 'sps' = o SPS foi reescrito (já ao configurar, ou depois de segurar); 'processador'
+      decAjuste: s.ajusteDec ? ([null, 'sps', 'processador', 'sem-saida'][s.ajusteDec] ?? null) : s.spsReescrito ? 'sps' : null,
+      filaDec: mediana(s.filaDec), // a fila do decodificador (pedidos esperando): lento, e não segurando
+      rxKbps: s.rxKbps ?? null, // o que chegou no último aviso de fila (vai para quem compartilha)
       codec: s.dec?.state === 'configured' ? (ehHevc(s.cfgAtual?.codec) ? 'h265' : 'h264') : null,
       codecLa: s.cfgAtual?.codec ?? null, // o codec que quem compartilha escolheu
       lisoPct: s.lisoPct,

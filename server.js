@@ -400,6 +400,11 @@ app.post('/relatorio-jogo', express.json({ limit: '12mb' }), async (req, res) =>
   const b = obj(req.body);
   const r = obj(b.relatorio);
   if (!ID_RELATORIO.test(String(b.id ?? '')) || !['compartilha', 'joga'].includes(r.lado) || !Array.isArray(r.amostras)) return res.status(400).end();
+  // O relógio de cada aparelho tem a sua diferença (em 2026-11-18 o PC do lorrel estava ~52 s atrás do de
+  // quem compartilhava): a hora do servidor ao receber, para casar os dois relatórios. A página manda a dela
+  // (relogio) e também guarda a diferença medida com ida e volta (relatorio.relogio, jogo-diag.js).
+  const relogio = Number(b.relogio);
+  if (Number.isFinite(relogio) && relogio > 0) r.relogioServidor = { recebido: new Date(agora).toISOString(), defasagemMs: agora - relogio };
   try {
     const json = JSON.stringify(r);
     await banco.guardarRelatorio({
@@ -412,7 +417,7 @@ app.post('/relatorio-jogo', express.json({ limit: '12mb' }), async (req, res) =>
       tamanho: json.length,
       dados: require('zlib').gzipSync(json),
     });
-    res.json({ ok: true });
+    res.json({ ok: true, agora: Date.now() });
   } catch (err) {
     console.warn('[relatorio-jogo]', err.code || err.message);
     res.status(500).end();
@@ -911,7 +916,13 @@ function eventoSemMarca(e) {
     return ev;
   }
   // liga/desliga o modo jogo no ajudante nativo; rapido: quem joga pediu menos atraso (720p fixo)
-  if (e.t === 'modo') return { t: 'modo', jogo: !!e.jogo, rapido: !!e.rapido };
+  if (e.t === 'modo') {
+    // vibra / ds: quem joga tem como sentir o tremor / tem um DualSense (controle.js, eventoDeControle)
+    const m = { t: 'modo', jogo: !!e.jogo, rapido: !!e.rapido };
+    if (typeof e.vibra === 'boolean') m.vibra = e.vibra;
+    if (typeof e.ds === 'boolean') m.ds = e.ds;
+    return m;
+  }
   if (e.t === 'vivo') return { t: 'vivo' }; // modo jogo: quem joga ainda está aí (sem ele o ajudante solta as teclas)
   // controle virtual (PS5 pelo chiaki-ng): o estado inteiro do controle (ver pad-virtual.js)
   if (e.t === 'pad') {

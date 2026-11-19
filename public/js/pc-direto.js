@@ -21,6 +21,14 @@ const PADRAO = { monitor: null, altura: 1080, qps: 60, kbps: 0, cursor: true, so
 // a banda de cada altura (kbps 0 = automática): a placa faz imagem melhor por bit que o OpenH264, mas o
 // jogo de PC mexe a tela inteira o tempo todo. O turbo baixa sozinho se a rede de quem joga não der.
 const bandaDe = (altura) => (altura && altura <= 720 ? 12000 : altura && altura <= 1080 ? 20000 : 35000);
+const bandaDoQps = (kbps, qps) => Math.round(kbps * (qps > 60 ? 1.5 : qps < 60 ? 0.7 : 1));
+// O piso da banda que o turbo ajusta (kbps). Era 60% da máxima (12 Mbps em 1080p a 60, 18 a 120): o caminho
+// até o lorrel levava ~6 e a imagem vivia na fila (relatório de 2026-11-18). A ponte aceita até 1000.
+const BANDA_MIN = 2000;
+// Subir o tamanho da ponte espera (a sessão do turbo que religa solta o pedido e pede de novo na hora:
+// sem a espera, a captura recomeçaria duas vezes); descer vai logo (quem pediu 720p quer menos atraso)
+const SUBIR_MS = 1500;
+const DESCER_MS = 300;
 const ALTURAS = [[720, '720p'], [1080, '1080p'], [0, 'Do monitor']];
 const QPS = [30, 60, 120];
 const QPS_JOGO = 60; // Jogos do PC: sempre a 60 qps (no monitor de 144 Hz, ver monitorDoJogo)
@@ -146,8 +154,12 @@ export class PcDireto {
         this.fase = 'no-ar';
         if (this.fonte?.banda) this.fonte.banda.atual = Number(m.kbps) || this.fonte.banda.atual;
         this.onEvento?.('pc direto: no ar', m);
-        // a página recarregou com a imagem no ar: uma fonte nova para ela
-        if (!this.fonte) this.novaFonte(Number(m.kbps) || bandaDe(m.altura));
+        // a página recarregou com a imagem no ar: uma fonte nova para ela (e o tamanho de agora vira o escolhido)
+        if (!this.fonte) {
+          this.alturaBase = Number(m.altura) || null;
+          this.novaFonte(Number(m.kbps) || bandaDe(m.altura));
+          if (this.fonte.banda) this.fonte.banda.max = Math.max(this.fonte.banda.atual, bandaDoQps(bandaDe(m.altura), Number(m.qps) || 60));
+        }
         this.porNaSala();
         break;
       case 'som':
@@ -173,19 +185,64 @@ export class PcDireto {
   // ---------------------------------------------------------------- no ar
   novaFonte(kbps) {
     this.fonte?.parar();
-    this.fonte = new Ps5Fonte({ pedirChave: () => this.mandar({ tipo: 'chave' }), onEvento: this.onEvento });
-    // o turbo ajusta a banda da placa pela fila que quem joga mede (TurboEnvio.ajustarBanda)
-    const max = kbps;
-    this.fonte.banda = {
+    const fonte = new Ps5Fonte({ pedirChave: () => this.mandar({ tipo: 'chave' }), onEvento: this.onEvento });
+    this.fonte = fonte;
+    // o turbo ajusta a banda da placa pela fila que quem joga mede (TurboEnvio.ajustarBanda), entre min e
+    // max — a max muda com o tamanho da ponte (trocarAltura)
+    fonte.banda = {
       atual: kbps,
-      max,
+      max: kbps,
+      min: BANDA_MIN,
       mudar: (nova) => {
-        const k = Math.round(Math.min(max, Math.max(2000, nova)));
-        if (Math.abs(k - this.fonte.banda.atual) < 200) return;
-        this.fonte.banda.atual = k;
-        this.mandar({ tipo: 'banda', kbps: k });
+        const b = fonte.banda;
+        const k = Math.round(Math.min(b.max, Math.max(b.min, nova)));
+        if (Math.abs(k - b.atual) < 200) return;
+        b.atual = k;
+        if (this.fonte === fonte) this.mandar({ tipo: 'banda', kbps: k });
       },
     };
+    // o tamanho que cada pessoa no turbo pediu (TurboEnvio.ligarSessao): a ponte vai no maior deles
+    fonte.pedirAltura = (id, altura) => { if (this.fonte === fonte) this.pedirAltura(id, altura); };
+    fonte.soltarAltura = (id) => { if (this.fonte === fonte) this.soltarAltura(id); };
+  }
+
+  // ---------------------------------------------------------------- o tamanho para quem joga
+  // O turbo diz o tamanho que cada pessoa pediu (720p no "Menos atraso", 1080p no resto). A ponte vai no
+  // maior pedido, sem passar do tamanho escolhido aqui (alturaBase); sem ninguém no turbo, volta a ele.
+  // Antes o 720p era decodificado e codificado de novo pelo Chrome daqui (~20 ms, até 58 com o jogo na
+  // placa; o SPS desse codificador fazia o decodificador AMD do lorrel segurar 85 ms — 2026-11-18).
+  pedirAltura(id, altura) {
+    (this.alturas ??= new Map()).set(id, Number(altura) || 1080);
+    this.agendarAltura();
+  }
+
+  soltarAltura(id) {
+    if (this.alturas?.delete(id)) this.agendarAltura();
+  }
+
+  agendarAltura() {
+    clearTimeout(this.alturaTimer);
+    const c = this.conectado;
+    if (!this.noAr || !c || !this.alturaBase) return;
+    const pedidas = [...(this.alturas?.values() || [])];
+    const alvo = pedidas.length ? Math.min(this.alturaBase, Math.max(...pedidas)) : this.alturaBase;
+    const agora = Number(c.altura) || this.alturaBase;
+    if (alvo === agora) return;
+    this.alturaTimer = setTimeout(() => this.trocarAltura(alvo), alvo > agora ? SUBIR_MS : DESCER_MS);
+  }
+
+  // Recomeça a captura no mesmo monitor e qps, com o tamanho novo e a banda de agora. A fonte continua a
+  // mesma: o SPS novo chega com o quadro-chave e vai para quem joga como configuração nova.
+  trocarAltura(altura) {
+    const c = this.conectado;
+    if (!this.noAr || !c || this.fase !== 'no-ar' || !this.fonte?.banda) return;
+    if (Number(c.altura) === altura) return;
+    const qps = Number(c.qps) || 60;
+    const b = this.fonte.banda;
+    b.max = Number(this.opcoes.kbps) >= 2000 ? Number(this.opcoes.kbps) : bandaDoQps(bandaDe(altura), qps);
+    b.atual = Math.round(Math.min(b.max, Math.max(b.min, b.atual)));
+    this.onEvento?.('pc direto: tamanho trocado para quem joga', { de: Number(c.altura) || null, para: altura, kbps: b.atual, maxKbps: b.max });
+    this.mandar({ tipo: 'iniciar', monitor: c.monitor, altura, qps, kbps: b.atual, cursor: !!this.opcoes.cursor, som: !!this.opcoes.som });
   }
 
   // Jogos do PC: o monitor de 144 Hz (o Windows pode dar 143 ou 144). Não o de mais Hz: neste PC o
@@ -260,7 +317,9 @@ export class PcDireto {
     const altura = Number(this.opcoes.altura) || 0;
     const qps = qpsFixo || (QPS.includes(Number(this.opcoes.qps)) ? Number(this.opcoes.qps) : 60);
     const alturaReal = altura && altura < mon.h ? altura : mon.h;
-    const kbps = Number(this.opcoes.kbps) >= 2000 ? Number(this.opcoes.kbps) : Math.round(bandaDe(alturaReal) * (qps > 60 ? 1.5 : qps < 60 ? 0.7 : 1));
+    const kbps = Number(this.opcoes.kbps) >= 2000 ? Number(this.opcoes.kbps) : bandaDoQps(bandaDe(alturaReal), qps);
+    this.alturaBase = alturaReal; // o tamanho escolhido: o turbo pode pedir menos (pedirAltura), nunca mais
+    this.alturas?.clear();
     this.novaFonte(kbps);
     this.fase = 'abrindo';
     this.onEvento?.('pc direto: pedido', { monitor: mon.nome, altura, qps, kbps });
@@ -290,6 +349,8 @@ export class PcDireto {
     this.fonte = null;
     this.conectado = null;
     this.fase = 'parado';
+    clearTimeout(this.alturaTimer);
+    this.alturas?.clear();
     if (motivo) this.toast?.(`PC direto desligado: ${motivo}.`, 'warn', 6000);
     const key = this.key;
     this.key = null;
@@ -311,7 +372,7 @@ export class PcDireto {
   }
 
   stats() {
-    return this.fonte ? { ...this.fonte.stats(), conectado: this.conectado, ponte: this.versaoPonte ?? null, banda: this.fonte.banda?.atual ?? null } : null;
+    return this.fonte ? { ...this.fonte.stats(), conectado: this.conectado, ponte: this.versaoPonte ?? null, banda: this.fonte.banda?.atual ?? null, bandaMax: this.fonte.banda?.max ?? null, alturaBase: this.alturaBase ?? null, alturasPedidas: this.alturas ? [...this.alturas.values()] : [] } : null;
   }
 
   // ---------------------------------------------------------------- painel

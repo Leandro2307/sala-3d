@@ -1651,6 +1651,43 @@ export class RTC {
     };
   }
 
+  // O caminho até uma pessoa, para o turbo (TurboEnvio: banda inicial e repasse do PS5): a banda que o
+  // WebRTC estima para mandar até ela (kbps), os tipos do par em uso e se é a mesma casa (lan: os dois
+  // lados por endereço local). null sem conexão ou sem par escolhido ainda.
+  async caminhoPara(id) {
+    const peer = this.peers.get(id);
+    if (!peer || ['failed', 'closed'].includes(peer.pc.connectionState)) return null;
+    let report;
+    try {
+      report = await peer.pc.getStats();
+    } catch {
+      return null;
+    }
+    let par = null;
+    report.forEach((s) => {
+      if (s.type === 'transport' && s.selectedCandidatePairId) par = report.get(s.selectedCandidatePairId) || par;
+      else if (s.type === 'candidate-pair' && s.nominated && s.state === 'succeeded' && !par) par = s;
+    });
+    if (!par) return null;
+    const c = caminhoDe(report, par);
+    const local = report.get(par.localCandidateId);
+    const remoto = report.get(par.remoteCandidateId);
+    // host com host é a mesma casa, menos por um endereço público — uma VPN como o Radmin (26.x) dá
+    // candidatos "host" que vão pela internet. O endereço do outro lado pode vir escondido (mDNS, .local).
+    const privado = (ip) => /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|fe80:|f[cd][0-9a-f]{2}:)/i.test(ip);
+    const ip = String(remoto?.address ?? remoto?.ip ?? '');
+    const publico = /^\d+\.\d+\.\d+\.\d+$/.test(ip) && !privado(ip);
+    const lan = local?.candidateType === 'host' && ((remoto?.candidateType === 'host' && !publico) || privado(ip));
+    return {
+      saidaKbps: c.saidaEstimada != null ? Math.round(c.saidaEstimada / 1000) : null,
+      rttMs: c.rtt != null ? Math.round(c.rtt * 1000) : null,
+      local: c.local,
+      remoto: c.remoto,
+      relay: !!c.relay,
+      lan,
+    };
+  }
+
   // Os números crus da chegada de uma tela de outra pessoa (a trilha de vídeo que está no <video>)
   async diagRecebe(trilha, somDaTela = null) {
     for (const peer of this.peers.values()) {

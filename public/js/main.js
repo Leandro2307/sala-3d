@@ -1447,6 +1447,7 @@ function bindSocket() {
   // houve antes dela: em 2026-11-17 tudo piorou depois de uma reconexão e o relatório não dizia)
   socket.on('disconnect', (motivo) => {
     diagJogo.marcar('caiu a conexão com o servidor', { motivo: String(motivo || '') });
+    lembrarJogo(); // jogando numa tela de outra pessoa: quando ela voltar, o botão "Voltar ao jogo"
     if (state.joined) $('#reconnecting').hidden = false;
   });
   socket.on('connect', async () => {
@@ -2885,12 +2886,36 @@ const cursorDoJogo = new Map(); // tela -> último estado mandado
 // envio. A memória do PC vem no mesmo pacote (ajudante 1.12+, em pc), que a extensão já repassa inteiro.
 // Ajudante 1.20+: no mesmo pacote, a carga do PC (placa, processador, rede: carga) e as placas de rede
 // ligadas (redes). Vão para cada amostra de envio do relatório (em pc).
+let wifiChegouEm = 0; // a última vez que o Wi-Fi e a carga do PC chegaram (pedirCargaDoPc)
 controle.onWifi = (w) => {
   const { pc, carga, redes, ...wifi } = w || {};
+  wifiChegouEm = Date.now();
   diagJogo.wifiChegou(wifi);
   diagJogo.pcChegou({ memoria: pc ?? null, carga: carga ?? null, redes: redes ?? null });
   memoriaDoPc(pc);
 };
+
+// O Wi-Fi e a carga do PC vêm do ajudante junto da resposta ao teclado e ao mouse de quem joga. No PS5
+// direto a entrada vai pela ponte do PS5 e nada vinha: justo a fase em que o Wi-Fi deste PC caiu
+// (2026-11-18, 20:28) ficou sem esses números no relatório. Sem notícia há 3 s, pede direto ao ajudante
+// (extensão 1.28+, ajudante 1.22+); sem resposta duas vezes seguidas, para de pedir por 1 min.
+const cargaDoPc = { pedidaEm: 0, falhas: 0, pausaAte: 0 };
+async function pedirCargaDoPc() {
+  const agora = Date.now();
+  if (agora - wifiChegouEm < 3000 || agora - cargaDoPc.pedidaEm < 1800 || agora < cargaDoPc.pausaAte) return;
+  const ext = controle.ext;
+  if (!ext?.ok || versaoNum(ext.versao) < versaoNum('1.28') || ext.nativo?.ok === false) return;
+  if (ext.nativo?.versao && versaoNum(ext.nativo.versao) < versaoNum('1.22')) return;
+  cargaDoPc.pedidaEm = agora;
+  const r = await controle.pedir('pc-carga', null, null, null, 4000);
+  if (!r || r.erro || r.ok === false) {
+    if (++cargaDoPc.falhas >= 2) Object.assign(cargaDoPc, { falhas: 0, pausaAte: Date.now() + 60_000 });
+    return;
+  }
+  cargaDoPc.falhas = 0;
+  const { tipo, pid, ...w } = r;
+  controle.onWifi?.(w);
+}
 
 // Memória do PC de quem compartilha, no modo jogo. A "confirmada" é o que os programas pediram ao
 // Windows (RAM + arquivo de paginação). O emulador de Switch 2 (lichii) segura ~17 GB sozinho: com o
@@ -2936,6 +2961,7 @@ controle.onTremor = ({ key, deId }, g, p, h = false) => {
     tremoresLaDesde = agora;
   }
   if (!jogandoAqui.get(key)?.has(deId)) return;
+  if (capacidadesJogo.get(deId)?.vibra === false) return; // nada para tremer lá (teclado e mouse)
   tremorFila = { key, para: deId, ev: { t: 'tremor', g: Math.round(g * 100) / 100, p: Math.round(p * 100) / 100, ...(h ? { h: true } : {}) } };
   if (tremorTimer) return;
   const sair = () => {
@@ -3026,7 +3052,13 @@ function jogoAqui(key, deId, ligar, rapido = false) {
   registrarRapido();
   atualizarInteresse();
 }
-controle.onModo = (sh, jogo, deId, rapido) => jogoAqui(sh.key, deId, jogo, rapido);
+// o que cada pessoa que joga sente (avisarRapido do lado dela): vibra (tremor) e ds (gatilhos do DualSense);
+// sem a informação (versão antiga), manda tudo como antes
+const capacidadesJogo = new Map();
+controle.onModo = (sh, jogo, deId, rapido, cap) => {
+  if (cap && (typeof cap.vibra === 'boolean' || typeof cap.ds === 'boolean')) capacidadesJogo.set(deId, cap);
+  jogoAqui(sh.key, deId, jogo, rapido);
+};
 
 // Emulador de Switch na tela: o controle de quem joga chega como um controle de Xbox virtual, e o
 // emulador só o usa se o Jogador 1 estiver nele (o padrão é o controle ligado no PC). Uma vez por
@@ -3044,10 +3076,15 @@ function avisarEmulador(sh) {
 }
 
 // quem joga: a opção "Menos atraso" vai para quem compartilha junto com o modo jogo (de novo a cada
-// mudança dela, no meio da jogatina)
+// mudança dela, no meio da jogatina). Junto, se este aparelho sente o tremor (vibra) e se tem um
+// DualSense para os gatilhos adaptativos (ds): sem eles, quem compartilha não manda — o lorrel, no
+// teclado e mouse, recebia ~20 tremores por segundo pelo mesmo canal da imagem (2026-11-18)
 function avisarRapido() {
-  if (jogandoLa) controle.mandar(jogandoLa.key, { t: 'modo', jogo: true, rapido: !!opcoesJogo.get('rapido') });
+  if (jogandoLa) controle.mandar(jogandoLa.key, { t: 'modo', jogo: true, rapido: !!opcoesJogo.get('rapido'), vibra: padVirtual.podeVibrar(), ds: !!touchpad.ligado });
 }
+// um controle ligou ou desligou neste aparelho: o que ele sente mudou
+addEventListener('gamepadconnected', () => avisarRapido());
+addEventListener('gamepaddisconnected', () => avisarRapido());
 
 // eu liguei (ou desliguei) o modo jogo numa tela de outra pessoa
 // Modo turbo (turbo.js). Quem compartilha: manda a imagem de uma tela minha liberada para quem
@@ -3066,6 +3103,10 @@ const turboEnvio = new TurboEnvio({
     rtc?.turboPara(id, key, ligado);
     diagJogo.evento(ligado ? 'modo turbo: mandando a imagem por fora do vídeo' : 'modo turbo desligado: vídeo normal', { para: state.users.get(id)?.name ?? id });
   },
+  // a banda que o WebRTC estima até essa pessoa (e se é a mesma casa): a banda em que o turbo começa e se
+  // os quadros do PS5 vão como vieram ou codificados aqui
+  rede: (id) => rtc?.caminhoPara(id) ?? null,
+  onEvento: (id, texto, dados) => diagJogo.evento(texto, { para: state.users.get(id)?.name ?? id, ...dados }),
 });
 
 // PS5 direto (ps5-nativo.js): o Remote Play pela ponte do ajudante, sem a janela do chiaki-ng. A imagem
@@ -3139,6 +3180,7 @@ const ps5Nativo = new Ps5Nativo({
     if (controle.jogo?.key === ps5Nativo.key) return void touchpad.gatilhos(e, d);
     const u = controle.ultimoPad;
     if (!u || u.key !== ps5Nativo.key || !jogandoAqui.get(u.key)?.has(u.deId)) return;
+    if (capacidadesJogo.get(u.deId)?.ds === false) return; // sem DualSense lá: os gatilhos não têm onde ir
     controle.emitir('controle-volta', { key: u.key, para: u.deId, ev: { t: 'gatilhos', e, d } });
   },
   onEvento: (texto, dados) => diagJogo.evento(texto, dados),
@@ -3772,6 +3814,48 @@ function marcarEngasgo() {
   if (diagJogo.marcarEngasgo(turboRecebe.ligado ? turboRecebe.caixaPreta() : null)) toast('Engasgo marcado no relatório', 'info', 1500);
 }
 
+// ---------------------------------------------------------------- voltar ao jogo depois de uma queda
+// A conexão com o servidor caiu no meio do jogo (ou a página recarregou porque o servidor mudou de
+// versão): a sala refaz tudo com ids novos e o modo jogo desliga. Em 2026-11-18 (20:24) um deploy
+// derrubou o lorrel no meio da partida, e ele levou ~15 s para achar a tela e religar. Agora a página
+// lembra em que tela estava jogando (sessionStorage: sobrevive à recarga) e, quando ela volta à sala (em
+// até 3 min), oferece um botão que abre a tela e religa o modo jogo — num clique, porque a tela cheia e o
+// mouse preso só entram com um.
+const VOLTAR_JOGO = 'sala3d-voltar-jogo';
+const VOLTAR_JOGO_MS = 3 * 60_000;
+function lembrarJogo() {
+  if (!jogandoLa) return;
+  const t = acharTela(jogandoLa.key);
+  if (!t || t.user.isSelf) return;
+  try {
+    sessionStorage.setItem(VOLTAR_JOGO, JSON.stringify({ dono: t.user.name, superficie: superficieDe(t.share), titulo: t.share.titulo ?? null, sala: state.room ?? null, em: Date.now() }));
+  } catch { /* sem armazenamento */ }
+}
+function esquecerJogo() {
+  try { sessionStorage.removeItem(VOLTAR_JOGO); } catch { /* sem armazenamento */ }
+}
+function conferirVoltaAoJogo() {
+  let info = null;
+  try { info = JSON.parse(sessionStorage.getItem(VOLTAR_JOGO) || 'null'); } catch { /* sem armazenamento */ }
+  if (!info) return;
+  if (Date.now() - info.em > VOLTAR_JOGO_MS || (info.sala && state.room && info.sala !== state.room)) return void esquecerJogo();
+  if (jogandoLa || !state.joined) return;
+  const t = telasNoAr().find(({ share, user }) => !user.isSelf && user.name === info.dono && superficieDe(share) === info.superficie && podeControlar({ share, user }));
+  if (!t) return;
+  esquecerJogo();
+  diagJogo.marcar('a tela do jogo voltou depois da queda', { dono: info.dono, superficie: info.superficie, foraMs: Date.now() - info.em });
+  toast(`A conexão caiu no meio do jogo. A tela de ${info.dono} já voltou.`, 'info', 60_000, null, { rotulo: 'Voltar ao jogo', fazer: () => voltarAoJogo(t.share.key) });
+}
+// no clique do botão: abre a tela em foco e liga o modo jogo como o botão "Modo jogo" (tela cheia inclusive)
+function voltarAoJogo(key) {
+  if (!acharTela(key) || jogandoLa) return;
+  enterFocus({ kind: 'share', key, semDualSense: true });
+  const fv = $('#focus-video');
+  if (state.focus?.kind === 'share' && state.focus.key === key && !$('#focus-jogo').hidden && controle.jogoNo !== fv) $('#focus-jogo').click();
+}
+setInterval(conferirVoltaAoJogo, 2000);
+addEventListener('pagehide', lembrarJogo); // a página recarregando (servidor novo) no meio do jogo
+
 function jogoLa(video, key) {
   turboRecebe.desligar();
   if (jogandoLa) {
@@ -3781,6 +3865,7 @@ function jogoLa(video, key) {
     diagJogo.parar();
   }
   if (!video) return void mostrarSelo();
+  esquecerJogo(); // de volta ao jogo: o "Voltar ao jogo" de uma queda anterior não vale mais
   jogandoLa = { key, video, cursorLivre: false };
   diagJogo.comecar('joga', {
     gl: world.renderer.getContext(),
@@ -3790,7 +3875,7 @@ function jogoLa(video, key) {
   });
   aplicarBuffer();
   mostrarSelo();
-  if (opcoesJogo.get('rapido')) avisarRapido();
+  avisarRapido(); // o "Menos atraso" e o que este aparelho sente (vibra, DualSense)
   if (opcoesJogo.get('turbo')) ligarTurbo();
 }
 
@@ -3872,6 +3957,8 @@ async function amostrarJogo() {
   if (!rtc || !diagJogo.ativo) return;
   try {
     const sala = salaAgora();
+    // alguém joga numa tela minha: o Wi-Fi e a carga deste PC também quando o ajudante não manda sozinho (PS5)
+    if (jogandoAqui.size) pedirCargaDoPc();
     for (const [key, quem] of [...jogandoAqui]) {
       if (!self()?.shares.has(key)) {
         for (const id of [...quem.keys()]) jogoAqui(key, id, false);
@@ -4502,6 +4589,7 @@ $('#focus-ctrl').addEventListener('click', async () => {
 $('#focus-jogo').addEventListener('click', async () => {
   const fv = $('#focus-video');
   const ligar = controle.jogoNo !== fv;
+  if (!ligar) esquecerJogo(); // desligou de propósito (botão ou F8): nada de "Voltar ao jogo"
   // decidido antes de ligar (ainda no clique): a lista de aparelhos do Chrome tem que abrir antes da
   // tela cheia, que a escondia
   const pedirDualSense = ligar && !isTouch && precisaPedirDualSense();
@@ -4586,6 +4674,7 @@ async function conectarDualSense() {
 
 // Sai do modo jogo e fica na tela em foco (o Esc duas vezes): o mesmo que o botão "Desligar modo jogo"
 function desligarModoJogoNoFoco() {
+  esquecerJogo();
   controle.modoJogo($('#focus-video'), false);
   updateFocusCtrl();
   if (!isTouch) jogoNoPc(false);
@@ -4683,7 +4772,7 @@ controle.paraPad = (ev) => {
 };
 // Touchpad do DualSense (ps5-touchpad.js): no modo jogo numa tela de PS5, no PC. Com a permissão dada
 // uma vez, volta sozinho; antes disso, pelo botão nas opções do modo jogo.
-const touchpad = new Ps5Touchpad({ pad: padVirtual, onMudou: () => atualizarBotaoTouchpad() });
+const touchpad = new Ps5Touchpad({ pad: padVirtual, onMudou: () => { atualizarBotaoTouchpad(); avisarRapido(); } });
 padVirtual.hid = touchpad; // com o DualSense aberto pelo WebHID, a vibração vai direto nele
 function atualizarBotaoTouchpad() {
   const b = $('#jogo-touchpad');
