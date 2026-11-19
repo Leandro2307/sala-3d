@@ -67,6 +67,10 @@ let infoCodecs = { preferido: null, forcado: null, testados: [] };
 // tela do OBS passa disso, ver QPS_OBS). Pedir 75 não tirou o teto de ~57 qps da janela de um jogo
 // (relatório de 2026-10-29 12:45: a captura nunca passou de 58, e na placa Intel ficou um pouco pior).
 const QPS_PADRAO = 60;
+// direto primeiro e de volta ao direto (ver liberarTurn e vigiarRelay)
+const DIRETO_PRIMEIRO_MS = 3000;
+const VOLTA_DIRETO_MS = 30_000;
+const VOLTA_DIRETO_MAX_MS = 8 * 60_000;
 // Compartilhar pelo OBS: a captura de tela do Chrome/Edge no Windows não passa de ~54 qps mesmo
 // pedindo 120/144/165 (teste de 2026-11-04, monitores de 144 e 165 Hz; igual com WGC, DXGI e pela
 // extensão). A câmera virtual do OBS não tem esse teto: com o OBS a 120 qps o Chrome recebeu 120
@@ -434,6 +438,57 @@ export class RTC {
     return n;
   }
 
+  // Direto primeiro (2026-11-19): a conexão nova nasce só com o STUN (sem o TURN) e o TURN entra depois
+  // de DIRETO_PRIMEIRO_MS — ligada direto, ele fica de reserva para o próximo reinício; sem ligar,
+  // reinicia o ICE já com ele. Nos relatórios de 17 a 19/11 a conexão começava pelo TURN em ~1 de cada
+  // 4 sessões com quem dava para ligar direto (o par do TURN ficava pronto antes).
+  liberarTurn(peer) {
+    if (!peer.soStun || peer.pc.connectionState === 'closed' || this.peers.get(peer.id) !== peer) return;
+    peer.soStun = false;
+    try {
+      peer.pc.setConfiguration({ ...peer.pc.getConfiguration(), iceServers: this.iceServers });
+    } catch (err) {
+      console.warn('[rtc] TURN de reserva', err);
+      this.refazer(peer.id, 'sem trocar os servidores de ICE');
+      return;
+    }
+    if (!['connected', 'completed'].includes(peer.pc.iceConnectionState)) {
+      peer.reinicioIce = 0;
+      this.restartIce(peer);
+    }
+  }
+
+  // De volta ao direto: ligada pelo TURN, um dos lados (o que não é "polite") reinicia o ICE de tempos em
+  // tempos para achar o caminho direto — o Chrome fica no par do TURN se o direto falhou na hora (uma
+  // queda, o roteador demorando a abrir a porta) e não tenta de novo sozinho. No teste do kazu
+  // (2026-11-19 19:06) a conexão caiu, voltou pelo TURN do lado dele e ficou ali, com o turbo a 0,8 Mbps,
+  // até ele sair e entrar na sala (aí ligou direto). Espera VOLTA_DIRETO_MS e dobra a cada tentativa
+  // sem sucesso (até VOLTA_DIRETO_MAX_MS): com quem só liga pelo TURN (4G), os reinícios ficam raros.
+  async vigiarRelay(peer, agora) {
+    if (peer.polite || peer.vendoRelay || agora - (peer.relayVistoEm || 0) < 5000) return;
+    peer.vendoRelay = true;
+    peer.relayVistoEm = agora;
+    try {
+      const c = await this.caminhoPara(peer.id);
+      if (!c || this.peers.get(peer.id) !== peer) return;
+      if (!c.relay) {
+        if (peer.relayDesde) peer.voltasDireto = (peer.voltasDireto || 0) + 1;
+        peer.relayDesde = 0;
+        peer.tentativasDireto = 0;
+        return;
+      }
+      peer.relayDesde ||= agora;
+      const espera = Math.min(VOLTA_DIRETO_MAX_MS, VOLTA_DIRETO_MS * 2 ** (peer.tentativasDireto || 0));
+      if (agora - peer.relayDesde < espera) return;
+      peer.relayDesde = agora;
+      peer.tentativasDireto = (peer.tentativasDireto || 0) + 1;
+      peer.reinicioIce = 0;
+      this.restartIce(peer);
+    } finally {
+      peer.vendoRelay = false;
+    }
+  }
+
   // no máximo um reinício de ICE a cada 8 s por pessoa
   restartIce(peer) {
     const agora = performance.now();
@@ -482,6 +537,8 @@ export class RTC {
       } else {
         peer.caiuDesde = 0;
       }
+      if (peer.soStun && agora - peer.nasceuEm > DIRETO_PRIMEIRO_MS) this.liberarTurn(peer);
+      if ((ice === 'connected' || ice === 'completed') && this.temTurn) this.vigiarRelay(peer, agora);
       // Negociada e sem ligar (ou caída) há 15 s, mesmo com o reinício de ICE: refaz do zero. Antes
       // ficava assim até alguém sair e entrar na sala (a voz do amigo não chegava).
       const ligada = ice === 'connected' || ice === 'completed';
@@ -1160,7 +1217,13 @@ export class RTC {
     // max-bundle: um transporte só desde a 1ª oferta. No 'balanced' o Chrome junta candidatos
     // (e reserva TURN) para cada seção até a resposta: voz + câmera + tela abriam 4 transportes
     // por pessoa que entrava.
-    const pc = new RTCPeerConnection({ iceServers: this.iceServers, bundlePolicy: 'max-bundle' });
+    // direto primeiro (liberarTurn): só o STUN nos primeiros DIRETO_PRIMEIRO_MS. Refeita do zero (herdar:
+    // a anterior falhou) já nasce com o TURN.
+    const soStun = this.temTurn && !herdar && this.iceServers.some((x) => [].concat(x.urls).some((u) => /^stun:/.test(u)));
+    const servidores = soStun
+      ? this.iceServers.map((x) => ({ ...x, urls: [].concat(x.urls).filter((u) => !/^turns?:/.test(u)) })).filter((x) => x.urls.length)
+      : this.iceServers;
+    const pc = new RTCPeerConnection({ iceServers: servidores, bundlePolicy: 'max-bundle' });
     peer = {
       id,
       pc,
@@ -1171,6 +1234,11 @@ export class RTC {
       ofertaDesde: 0, // quando saiu a minha última oferta (o vigia desfaz a que nunca teve resposta)
       caiuDesde: 0, // desde quando o ICE está desconectado
       reinicioIce: 0,
+      soStun, // ainda sem o TURN (liberarTurn)
+      nasceuEm: performance.now(),
+      relayDesde: 0, // desde quando está ligada pelo TURN (vigiarRelay)
+      tentativasDireto: 0, // reinícios seguidos atrás do caminho direto (vigiarRelay)
+      voltasDireto: 0, // vezes que saiu do TURN para o direto
       criadaEm: Date.now(), // relatório do modo jogo: há quanto tempo esta conexão existe
       reiniciosIce: 0, // e quantas vezes o ICE foi reiniciado nela
       banda: null, // banda inicial da conexão, em kbps (ver banda)
@@ -1377,8 +1445,8 @@ export class RTC {
     if (!Array.isArray(iceServers) || !iceServers.length) return;
     this.iceServers = iceServers;
     this.temTurn = iceServers.some((s) => [].concat(s.urls).some((u) => /^turns?:/.test(u)));
-    for (const { pc } of this.peers.values()) {
-      if (pc.connectionState === 'closed') continue;
+    for (const { pc, soStun } of this.peers.values()) {
+      if (pc.connectionState === 'closed' || soStun) continue; // a que ainda espera o direto recebe em liberarTurn
       try {
         pc.setConfiguration({ ...pc.getConfiguration(), iceServers });
       } catch (err) {
@@ -1622,7 +1690,7 @@ export class RTC {
       } catch {
         continue;
       }
-      const d = { id, nivel: peer.interesse.get(key) || null, conexao: peer.pc.connectionState, idadeS: Math.round((Date.now() - peer.criadaEm) / 1000), reiniciosIce: peer.reiniciosIce || 0 };
+      const d = { id, nivel: peer.interesse.get(key) || null, conexao: peer.pc.connectionState, idadeS: Math.round((Date.now() - peer.criadaEm) / 1000), reiniciosIce: peer.reiniciosIce || 0, voltasDireto: peer.voltasDireto || 0, tentativasDireto: peer.tentativasDireto || 0 };
       if (peer.bandaJogo) d.bandaJogo = { ...peer.bandaJogo, semPiso: peer.semPiso, balanceado: peer.balanceado, linhas: peer.linhasJogo, recuoCodec: peer.recuoCodec, rapido: peer.rapido };
       try {
         const p = tr.sender.getParameters();
@@ -1699,7 +1767,7 @@ export class RTC {
       } catch {
         return null;
       }
-      const d = { conexao: peer.pc.connectionState, idadeS: Math.round((Date.now() - peer.criadaEm) / 1000), reiniciosIce: peer.reiniciosIce || 0, jitterBufferTarget: tr.receiver.jitterBufferTarget ?? null, playoutDelayHint: tr.receiver.playoutDelayHint ?? null };
+      const d = { conexao: peer.pc.connectionState, idadeS: Math.round((Date.now() - peer.criadaEm) / 1000), reiniciosIce: peer.reiniciosIce || 0, voltasDireto: peer.voltasDireto || 0, tentativasDireto: peer.tentativasDireto || 0, jitterBufferTarget: tr.receiver.jitterBufferTarget ?? null, playoutDelayHint: tr.receiver.playoutDelayHint ?? null };
       const codecs = new Map();
       let par = null;
       report.forEach((s) => {
