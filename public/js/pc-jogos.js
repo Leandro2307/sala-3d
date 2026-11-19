@@ -162,7 +162,7 @@ export class PcJogos {
     // o jogo aberto, com o fechar à mão (escolher outro abaixo também fecha este)
     jogando.hidden = !nomeAtual;
     if (nomeAtual) {
-      jogando.querySelector('b').textContent = `Jogando ${nomeAtual}`;
+      jogando.querySelector('b').textContent = `Jogando ${nomeAtual} · controle travado no jogo`;
       jogando.querySelector('[data-pj="parar"]').disabled = !!this.abrindo;
     }
     if (this.erro || !hub) {
@@ -198,7 +198,7 @@ export class PcJogos {
       : nomeAtual && novo && novo !== nomeAtual ? `Fechando ${nomeAtual} e abrindo ${novo} no PC de ${hub.nick}…`
       : `Pedi ao PC de ${hub.nick}. O jogo e o PC direto levam uns segundos para abrir…`)
       : nomeAtual ? `Escolha outro jogo para trocar: o PC de ${hub.nick} fecha ${nomeAtual} e abre o novo.`
-      : `Escolha um jogo: o PC de ${hub.nick} abre no monitor de 144 Hz e põe na sala pelo PC direto (60 qps), com o controle liberado.`;
+      : `Escolha um jogo: o PC de ${hub.nick} abre no monitor de 144 Hz e põe na sala pelo PC direto (60 qps). O controle de quem joga só vale dentro do jogo, até você fechá-lo aqui.`;
   }
 
   pedir(acao, id) {

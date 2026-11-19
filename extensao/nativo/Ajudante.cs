@@ -190,10 +190,11 @@ namespace Sala3d
             try { SetProcessDpiAwarenessContext(new IntPtr(-4)); } catch { } // pixels reais em telas com escala
             saida = Console.OpenStandardOutput();
             var entrada = Console.OpenStandardInput();
+            LerTrava();
             new Thread(VigiarAtalho) { IsBackground = true }.Start();
             new Thread(VigiarJogo) { IsBackground = true }.Start();
             new Thread(VigiarWifi) { IsBackground = true }.Start();
-            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.22.0" } });
+            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.23.0" } });
             var json = new JavaScriptSerializer();
             string txt;
             while ((txt = Ler(entrada)) != null)
@@ -271,6 +272,8 @@ namespace Sala3d
             // o site (1.4+) marca cada evento do modo jogo; o "modo" sozinho se perde se o ajudante
             // reabrir no meio. Movimento só com delta (sem x) também é de jogo.
             if (B(ev, "jogo") || (t == "mouse" && S(ev, "a") == "move" && !ev.ContainsKey("x") && ev.ContainsKey("dx"))) jogo = true;
+            // a sala abriu um jogo: fora dele, nada (ver Liberado)
+            if (jogoTrava != null && !Liberado(t, ev)) return;
             if (t == "mouse")
             {
                 if (!jogo) Mouse(S(ev, "a"), D(ev, "x"), D(ev, "y"), S(ev, "b"));
@@ -952,6 +955,136 @@ namespace Sala3d
             catch { }
         }
 
+        // ------------------------------------------------------------ controle travado no jogo (1.23+)
+        // A sala abriu um jogo do catálogo: o mouse, o teclado e o controle de quem joga só valem nas
+        // janelas desse jogo (os programas abertos desde o clique, ver ProcessosDesde). Fora dele — a
+        // área de trabalho, a barra de tarefas, o Chrome, outro programa, ou o jogo já fechado — o
+        // clique e a tecla somem e o jogo volta para a frente se ainda estiver aberto. Alt+Tab,
+        // Alt+Esc, Ctrl+Esc, Alt+Espaço e o botão Guia do controle (Game Bar, Steam) não vão nunca.
+        // Só a sala destrava: fechando o jogo pelo catálogo ou abrindo outro. O mouse e o teclado
+        // deste PC continuam livres (só a entrada que vem da sala passa por aqui). Sobrevive ao
+        // ajudante reabrir: fica em jogo-trava.txt.
+        static volatile string jogoTrava;   // o atalho do jogo que trava (null: livre)
+        static DateTime travaDesde;
+        static string ArquivoTrava() { return Path.Combine(Environment.GetEnvironmentVariable("LOCALAPPDATA") ?? "", "Sala3d", "jogo-trava.txt"); }
+        static void LerTrava()
+        {
+            try
+            {
+                var l = File.ReadAllLines(ArquivoTrava());
+                if (l.Length >= 2) { travaDesde = new DateTime(long.Parse(l[1])); jogoTrava = l[0]; }
+            }
+            catch { }
+        }
+        static void DefinirTrava(string jogo, DateTime desde)
+        {
+            travaDesde = desde;
+            jogoTrava = jogo;
+            janelaConferida = IntPtr.Zero;
+            try
+            {
+                if (jogo == null) { File.Delete(ArquivoTrava()); return; }
+                Directory.CreateDirectory(Path.GetDirectoryName(ArquivoTrava()));
+                File.WriteAllLines(ArquivoTrava(), new[] { jogo, desde.Ticks.ToString() });
+            }
+            catch { }
+        }
+
+        // a janela é do jogo? (a de cima de tudo: a raiz). Cada janela é conferida no máximo 1 vez por segundo.
+        static IntPtr janelaConferida; static bool janelaEhDoJogo; static int janelaQuando;
+        static bool DoJogo(IntPtr h)
+        {
+            if (h == IntPtr.Zero) return false;
+            IntPtr raiz = GetAncestor(h, 2 /* GA_ROOT */);
+            if (raiz != IntPtr.Zero) h = raiz;
+            int agora = Environment.TickCount;
+            if (h == janelaConferida && unchecked(agora - janelaQuando) < 1000) return janelaEhDoJogo;
+            bool r = false;
+            try
+            {
+                uint pid;
+                GetWindowThreadProcessId(h, out pid);
+                var eu = System.Diagnostics.Process.GetCurrentProcess();
+                if (pid != 0 && pid != (uint)eu.Id)
+                {
+                    using (var p = System.Diagnostics.Process.GetProcessById((int)pid))
+                    {
+                        string win = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+                        r = p.SessionId == eu.SessionId && !NAO_FECHAR.Contains(p.ProcessName)
+                            && p.StartTime >= travaDesde.AddSeconds(-2)
+                            && !p.MainModule.FileName.StartsWith(win, StringComparison.OrdinalIgnoreCase);
+                    }
+                }
+            }
+            catch { r = false; }
+            janelaConferida = h; janelaEhDoJogo = r; janelaQuando = agora;
+            return r;
+        }
+
+        static IntPtr JanelaEm(int x, int y) { return GetAncestor(WindowFromPoint(new PONTO { X = x, Y = y }), 2 /* GA_ROOT */); }
+
+        // barrado: o jogo, se ainda estiver aberto, volta para a frente (no máximo a cada 1,5 s, fora
+        // desta linha: procurar os programas leva um tempo e a entrada não pode parar)
+        static int chamouJogo;
+        static void ChamarJogo()
+        {
+            int agora = Environment.TickCount;
+            if (unchecked(agora - chamouJogo) < 1500) return;
+            chamouJogo = agora;
+            DateTime desde = travaDesde;
+            new Thread(() =>
+            {
+                try { IntPtr h = MaiorJanela(ProcessosDesde(desde), true); if (h != IntPtr.Zero) Frente(h); }
+                catch { }
+            }) { IsBackground = true }.Start();
+        }
+
+        // o evento pode ir? (só com a trava ligada; soltar o que já estava apertado sempre pode)
+        static bool Liberado(string t, Dictionary<string, object> ev)
+        {
+            string a = S(ev, "a");
+            IntPtr alvo;
+            if (t == "mouse")
+            {
+                if (a == "move") return true;
+                if (a == "up") return botoesApertados.Contains(S(ev, "b"));
+                int x, y;
+                if (ehJanela) alvo = janela; // vem para a frente (Focar) e o clique fica dentro dela
+                else if (!jogo || B(ev, "abs")) alvo = Ponto(D(ev, "x"), D(ev, "y"), out x, out y) ? JanelaEm(x, y) : IntPtr.Zero;
+                else
+                {
+                    // no modo jogo o clique cai onde o cursor está (ou no meio da tela, se ele estiver fora)
+                    RECT r; PONTO c;
+                    if (!GetCursorPos(out c)) c = new PONTO();
+                    if (Retangulo(out r) && (c.X < r.Left || c.X >= r.Right || c.Y < r.Top || c.Y >= r.Bottom))
+                        c = new PONTO { X = (r.Left + r.Right) / 2, Y = (r.Top + r.Bottom) / 2 };
+                    alvo = JanelaEm(c.X, c.Y);
+                }
+            }
+            else if (t == "wheel")
+            {
+                int x, y;
+                alvo = jogo || ehJanela ? GetForegroundWindow() : Ponto(D(ev, "x"), D(ev, "y"), out x, out y) ? JanelaEm(x, y) : IntPtr.Zero;
+            }
+            else if (t == "tecla")
+            {
+                if (a == "up") return true;
+                string code = S(ev, "code"), key = S(ev, "key");
+                int mod = (int)D(ev, "mod");
+                bool alt = (mod & 1) != 0 || (jogo && altRemoto), ctrl = (mod & 2) != 0 || (jogo && ctrlRemoto);
+                bool tab = code == "Tab" || key == "Tab", esc = code == "Escape" || key == "Escape", espaco = code == "Space" || key == " ";
+                // trocar de janela, abrir o Iniciar ou o menu da janela: nunca
+                if ((alt && (tab || esc || espaco)) || (ctrl && esc)) return false;
+                alvo = GetForegroundWindow();
+            }
+            else if (t == "texto" || t == "pad") alvo = GetForegroundWindow();
+            else return true;
+            if (DoJogo(alvo)) return true;
+            ChamarJogo();
+            if (t == "pad") PadNeutro();
+            return false;
+        }
+
         static string[] Atalhos()
         {
             string pasta = PastaJogos();
@@ -1132,8 +1265,15 @@ namespace Sala3d
         // dele, se não estava aberto antes)
         static List<System.Diagnostics.Process> ProcessosDoJogo()
         {
+            if (jogoAtual == null) return new List<System.Diagnostics.Process>();
+            return ProcessosDesde(jogoDesde);
+        }
+
+        // os programas com janela abertos desde "desde" (tirando o Windows e os de NAO_FECHAR): o jogo
+        static List<System.Diagnostics.Process> ProcessosDesde(DateTime desde)
+        {
             var lista = new List<System.Diagnostics.Process>();
-            if (jogoAtual == null) return lista;
+            var jogoDesde = desde;
             string win = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
             var eu = System.Diagnostics.Process.GetCurrentProcess();
             foreach (var p in System.Diagnostics.Process.GetProcesses())
@@ -1168,6 +1308,7 @@ namespace Sala3d
             }
             jogoAtual = null;
             GuardarJogoAtual();
+            DefinirTrava(null, DateTime.MinValue); // a sala fechou o jogo: o controle volta a valer na tela toda
             return new Dictionary<string, object> { { "ok", true }, { "msg", procs.Count == 0 ? nome + " já estava fechado" : "fechou " + nome }, { "atual", null } };
         }
 
@@ -1180,6 +1321,7 @@ namespace Sala3d
             monitorDoJogo = monitor >= 0 && Monitor((uint)monitor, out alvo) ? monitor : -1;
             if (jogoAtual != null && string.Equals(jogoAtual, Path.GetFileName(arq), StringComparison.OrdinalIgnoreCase) && AtualAinda() != null)
             {
+                if (!string.Equals(jogoTrava, jogoAtual, StringComparison.OrdinalIgnoreCase)) DefinirTrava(jogoAtual, jogoDesde);
                 TrazerJogo(jogoAtual);
                 // aberto noutro monitor: vai para o do PC direto
                 if (monitorDoJogo >= 0) { IntPtr h = JanelaDoJogo(true); if (h != IntPtr.Zero) PorNoMonitor(h, monitorDoJogo); }
@@ -1189,6 +1331,7 @@ namespace Sala3d
             jogoDesde = DateTime.Now;
             jogoAtual = Path.GetFileName(arq);
             GuardarJogoAtual();
+            DefinirTrava(jogoAtual, jogoDesde);
             // o mouse no monitor do jogo: muitos jogos abrem no monitor onde o ponteiro está
             if (monitorDoJogo >= 0 && Monitor((uint)monitorDoJogo, out alvo)) SetCursorPos((alvo.Left + alvo.Right) / 2, (alvo.Top + alvo.Bottom) / 2);
             // pelo explorer: o jogo não fica pendurado no Chrome (nem no job dele)
@@ -1214,9 +1357,13 @@ namespace Sala3d
         // minimizada: vale também a minimizada (para trazer de volta)
         static IntPtr JanelaDoJogo(bool minimizada = false)
         {
-            IntPtr maior = IntPtr.Zero, mini = IntPtr.Zero; long area = 0;
             List<System.Diagnostics.Process> procs;
             lock (travaJogo) procs = ProcessosDoJogo();
+            return MaiorJanela(procs, minimizada);
+        }
+        static IntPtr MaiorJanela(List<System.Diagnostics.Process> procs, bool minimizada)
+        {
+            IntPtr maior = IntPtr.Zero, mini = IntPtr.Zero; long area = 0;
             foreach (var p in procs)
             {
                 if (LANCADORES.Contains(p.ProcessName)) continue;
@@ -2373,7 +2520,9 @@ namespace Sala3d
             // vale para a janela em foco, como um de verdade)
             if (unchecked(agora - padUltimo) > 5000) Focar();
             padUltimo = agora;
-            AplicarPad((int)D(ev, "b"), D(ev, "lx"), D(ev, "ly"), D(ev, "rx"), D(ev, "ry"), D(ev, "lt"), D(ev, "rt"));
+            int b = (int)D(ev, "b");
+            if (jogoTrava != null) b &= ~(1 << 16); // o Guia (Game Bar, Steam) não sai do jogo
+            AplicarPad(b,D(ev, "lx"), D(ev, "ly"), D(ev, "rx"), D(ev, "ry"), D(ev, "lt"), D(ev, "rt"));
         }
 
         // tudo solto e no centro (quem jogava saiu, a conexão caiu, Ctrl+Alt+End)
