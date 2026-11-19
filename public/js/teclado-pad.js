@@ -24,7 +24,7 @@
 // para o controle (botão do mouse sem ação não faz nada).
 
 import { Fusao, inclinado } from './movimento.js';
-import { mapaTeclas, EIXO, MOUSE } from './mapa-teclas.js';
+import { mapaTeclas, EIXO, MOUSE, ENTRA_CARRO, nomeEntrada } from './mapa-teclas.js';
 
 // roda: TRAVA o botão. Um dente para baixo aperta □ (para cima △) e deixa apertado; o próximo dente,
 // para qualquer lado, solta. A roda só manda pulsos, não dá para "segurar" nela — antes o botão soltava
@@ -62,7 +62,50 @@ export class TecladoPad {
     this.aviso = aviso;
     this.ativo = false;
     this.layout = null;
+    this.carro = false; // no modo carro (mapa-teclas.js): a camada do carro vale por cima do mapa
     this.zerar();
+  }
+
+  // a ação de uma entrada agora (a pé ou no carro)
+  acaoDe(entrada) {
+    return this.carro && mapaTeclas.carroLigado() ? mapaTeclas.acaoCarro(entrada) : mapaTeclas.acao(entrada);
+  }
+
+  // uma tecla/botão do mouse desceu ou subiu: a subida solta o que a descida apertou (mesmo que o
+  // modo tenha trocado no meio). O △ que desce troca o modo carro, se ele está ligado nas opções.
+  entrada(quem, ent, desce) {
+    const antes = this.seguras.get(quem);
+    const id = desce ? this.acaoDe(ent) : antes?.id;
+    if (!desce) {
+      this.seguras.delete(quem);
+      if (!antes) return this.acionar(quem, this.acaoDe(ent), false);
+    } else if (id) this.seguras.set(quem, { ent, id });
+    const foi = this.acionar(quem, id, desce);
+    if (desce && !antes && id === ENTRA_CARRO && mapaTeclas.carroLigado()) this.trocarCarro();
+    return foi;
+  }
+
+  // entra/sai do modo carro: as teclas seguradas passam para a ação do modo novo (o W segurado ao
+  // sair do carro solta o R2 e volta a andar)
+  trocarCarro(sim = !this.carro) {
+    if (this.carro === sim) return;
+    this.carro = sim;
+    for (const [quem, s] of [...this.seguras]) {
+      const novo = this.acaoDe(s.ent);
+      if (novo === s.id) continue;
+      this.acionar(quem, s.id, false);
+      if (novo) {
+        this.acionar(quem, novo, true);
+        this.seguras.set(quem, { ent: s.ent, id: novo });
+      } else this.seguras.delete(quem);
+    }
+    const teclas = (id) => mapaTeclas.entradasCarro(id).map(nomeEntrada).join(' / ');
+    const r2 = this.layout === 'switch' ? 'ZR' : 'R2';
+    const l2 = this.layout === 'switch' ? 'ZL' : 'L2';
+    const partes = [teclas('b7') && `${teclas('b7')} acelera (${r2})`, teclas('b6') && `${teclas('b6')} freia (${l2})`].filter(Boolean);
+    this.aviso(sim
+      ? `🚗 Modo carro: ${partes.join(', ') || 'as teclas do carro valem'}. Saiu do carro? O mesmo botão volta a pé.`
+      : '🚶 A pé: as teclas voltam ao normal.');
   }
 
   zerar() {
@@ -82,6 +125,7 @@ export class TecladoPad {
     this.cliqueTp = null; // o botão do mouse que afundou o touchpad (o "up" dele solta o touchpad)
     this.timers = new Map(); // botão -> soltura adiada (MIN_MS)
     this.desceu = new Map(); // botão -> quando desceu
+    this.seguras = new Map(); // tecla/botão do mouse segurado -> { ent: a entrada, id: a ação que apertou }
     this.fontes = new Map(); // botão -> quantas teclas/botões o seguram (Shift esq. e dir.)
     this.eixos = new Map(); // direção do analógico (ly-, rx+...) -> as entradas que seguram
     this.b = 0;
@@ -95,12 +139,14 @@ export class TecladoPad {
     this.layout = layout;
     if (this.ativo) return;
     this.zerar();
+    this.carro = false;
     this.ativo = true;
   }
 
   desligar() {
     if (!this.ativo) return;
     this.ativo = false;
+    this.carro = false;
     this.zerar();
     this.pad.soltar('teclado');
   }
@@ -133,7 +179,7 @@ export class TecladoPad {
           return true;
         }
         const ent = MOUSE[ev.b];
-        if (ent) this.acionar(quem, mapaTeclas.acao(ent), ev.a === 'down');
+        if (ent) this.entrada(quem, ent, ev.a === 'down');
       }
       return true;
     }
@@ -145,7 +191,7 @@ export class TecladoPad {
       return true;
     }
     if (ev.t !== 'tecla') return false;
-    return this.acionar(ev.code, mapaTeclas.acao(ev.code), ev.a === 'down');
+    return this.entrada(ev.code, ev.code, ev.a === 'down');
   }
 
   // a entrada (tecla ou botão do mouse) desceu/subiu e faz a ação id do mapa. false: não virou controle

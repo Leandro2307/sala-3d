@@ -98,22 +98,39 @@ export function nomeEntrada(e) {
   return e;
 }
 
+// Modo carro (GTA e parecidos): no carro o W acelera (R2) e o S freia/dá ré (L2), mas a pé o R2 atira e
+// o L2 mira — o W não pode fazer as duas coisas. Ligado aqui, o △ (o botão de entrar no carro, F no
+// padrão) troca de modo a cada toque: no carro valem as teclas desta camada por cima do mapa; △ de
+// novo volta a pé. A sala não vê o jogo por dentro: se o △ não entrou no carro, um △ longe de carro
+// acerta o modo. Desligado (o padrão), o △ é só o △.
+export const CARRO_PADRAO = Object.freeze({ KeyW: 'b7', KeyS: 'b6' });
+export const CARRO_ACOES = ['b7', 'b6']; // as ações que o painel deixa pôr no carro
+const CARRO_NOME = { b7: 'Acelerar', b6: 'Frear / ré' };
+export const ENTRA_CARRO = 'b3';
+
 function ler() {
+  const r = { mapa: { ...PADRAO }, carro: { ligado: false, mapa: { ...CARRO_PADRAO } } };
   try {
     const o = JSON.parse(localStorage.getItem(CHAVE) || 'null');
     if (o && o.v === 1 && o.mapa && typeof o.mapa === 'object') {
-      const mapa = {};
-      for (const [e, a] of Object.entries(o.mapa)) if (POR_ID[a] && (!ehRoda(e) || ehBotao(a))) mapa[e] = a;
-      return mapa;
+      r.mapa = {};
+      for (const [e, a] of Object.entries(o.mapa)) if (POR_ID[a] && (!ehRoda(e) || ehBotao(a))) r.mapa[e] = a;
+      if (o.carro && typeof o.carro === 'object') {
+        r.carro.ligado = !!o.carro.ligado;
+        if (o.carro.mapa && typeof o.carro.mapa === 'object') {
+          r.carro.mapa = {};
+          for (const [e, a] of Object.entries(o.carro.mapa)) if (CARRO_ACOES.includes(a) && !ehRoda(e)) r.carro.mapa[e] = a;
+        }
+      }
     }
   } catch { /* sem armazenamento */ }
-  return { ...PADRAO };
+  return r;
 }
 
-let mapa = ler();
+let { mapa, carro } = ler();
 const ouvintes = new Set();
 function gravar() {
-  try { localStorage.setItem(CHAVE, JSON.stringify({ v: 1, mapa })); } catch { /* sem armazenamento */ }
+  try { localStorage.setItem(CHAVE, JSON.stringify({ v: 1, mapa, carro })); } catch { /* sem armazenamento */ }
   for (const f of ouvintes) f();
 }
 
@@ -145,9 +162,44 @@ export const mapaTeclas = {
     for (const e of Object.keys(mapa)) if (mapa[e] === id) { delete mapa[e]; mudou = true; }
     if (mudou) gravar();
   },
+  // "Voltar ao padrão" volta as teclas do carro também (o liga/desliga do modo carro fica como está)
   restaurar() {
     mapa = { ...PADRAO };
+    carro.mapa = { ...CARRO_PADRAO };
     gravar();
+  },
+  // ---- modo carro
+  carroLigado: () => carro.ligado,
+  ligarCarro(sim) {
+    carro.ligado = !!sim;
+    gravar();
+  },
+  // a ação da entrada no carro (a camada do carro por cima do mapa)
+  acaoCarro: (entrada) => carro.mapa[entrada] || mapa[entrada],
+  entradasCarro: (id) => Object.keys(carro.mapa).filter((e) => carro.mapa[e] === id),
+  definirCarro(id, entrada, somar = false) {
+    if (!CARRO_ACOES.includes(id)) return { erro: 'ação desconhecida' };
+    if (ehRoda(entrada)) return { erro: 'A rodinha não vale no carro: escolha uma tecla ou um botão do mouse.' };
+    const tirou = carro.mapa[entrada] && carro.mapa[entrada] !== id ? carro.mapa[entrada] : null;
+    if (!somar) for (const e of Object.keys(carro.mapa)) if (carro.mapa[e] === id) delete carro.mapa[e];
+    carro.mapa[entrada] = id;
+    gravar();
+    return { tirou };
+  },
+  removerCarro(entrada) {
+    if (!(entrada in carro.mapa)) return;
+    delete carro.mapa[entrada];
+    gravar();
+  },
+  limparCarro(id) {
+    let mudou = false;
+    for (const e of Object.keys(carro.mapa)) if (carro.mapa[e] === id) { delete carro.mapa[e]; mudou = true; }
+    if (mudou) gravar();
+  },
+  padraoCarro(id) {
+    const agora = this.entradasCarro(id).sort().join();
+    const antes = Object.keys(CARRO_PADRAO).filter((e) => CARRO_PADRAO[e] === id).sort().join();
+    return agora === antes;
   },
   // a ação está como no padrão? (sem nada: true para ações sem entrada no padrão)
   padrao(id) {
@@ -155,7 +207,7 @@ export const mapaTeclas = {
     const antes = Object.keys(PADRAO).filter((e) => PADRAO[e] === id).sort().join();
     return agora === antes;
   },
-  personalizado() { return ACOES.some((a) => !this.padrao(a.id)); },
+  personalizado() { return ACOES.some((a) => !this.padrao(a.id)) || CARRO_ACOES.some((id) => !this.padraoCarro(id)); },
   ouvir(f) { ouvintes.add(f); },
 };
 
@@ -181,7 +233,14 @@ export function dicaTeclado(layout) {
     partes.push(`${t(a.id)} ${rotulo(a.id, layout)}`);
   }
   const andar = !ks.every(Boolean) ? 'O analógico esquerdo' : ks.every((k) => k.length === 1) ? ks.join('') : ks.join(' ');
-  return `${andar} anda, o mouse mexe a câmera. ${partes.join(' · ')}. Para trocar: Opções → Mapear teclas.`;
+  let noCarro = '';
+  // a rodinha não troca o modo carro (ela trava o botão; teclado-pad.js)
+  const entra = visiveis(ENTRA_CARRO).filter((e) => !ehRoda(e)).map(nomeEntrada).join(' / ');
+  if (mapaTeclas.carroLigado() && entra) {
+    const c = (id) => mapaTeclas.entradasCarro(id).map(nomeEntrada).join(' / ');
+    noCarro = ` Modo carro: ${entra} entra no carro e ${[c('b7') && `${c('b7')} acelera`, c('b6') && `${c('b6')} freia`].filter(Boolean).join(', ') || 'troca as teclas'}; ${entra} de novo volta a pé.`;
+  }
+  return `${andar} anda, o mouse mexe a câmera. ${partes.join(' · ')}.${noCarro} Para trocar: Opções → Mapear teclas.`;
 }
 
 // ------------------------------------------------------------------ o painel "Mapear teclas"
@@ -285,7 +344,18 @@ export class MapaTeclasPainel {
       </div>`;
     }
     html += '</div>';
-    this.raiz.innerHTML = `<div class="mt-card" role="dialog" aria-modal="true" aria-labelledby="mt-titulo" tabindex="-1">
+    html += `<h3 class="mt-grupo">No carro (GTA e parecidos)</h3>
+      <label class="mt-carro-liga"><input type="checkbox" data-carro-liga><span>O <b>${esc(rotulo(ENTRA_CARRO, l))}</b> (<span data-carro-tecla></span>) entra no carro e troca as teclas abaixo; <b>${esc(rotulo(ENTRA_CARRO, l))}</b> de novo volta a pé. A pé elas andam; no carro, aceleram e freiam.</span></label>
+      <div class="mt-lista" data-carro-lista>`;
+    for (const id of CARRO_ACOES) {
+      html += `<div class="mt-linha" data-carro="${id}">
+        <button type="button" class="mt-qual" data-carro-trocar="${id}" title="Trocar a tecla"><b class="mt-glifo">${esc(rotulo(id, l))}</b><span class="mt-nome">${esc(CARRO_NOME[id])} (no carro)</span></button>
+        <span class="mt-teclas"></span>
+        <button type="button" class="mt-mais" data-carro-somar="${id}" title="Pôr mais uma tecla" aria-label="Pôr mais uma tecla">+</button>
+      </div>`;
+    }
+    html += '</div>';
+    this.raiz.innerHTML =`<div class="mt-card" role="dialog" aria-modal="true" aria-labelledby="mt-titulo" tabindex="-1">
       <header class="mt-topo">
         <h2 id="mt-titulo">Mapear teclas <small>${l === 'switch' ? 'Switch' : 'PS5'}</small></h2>
         <button type="button" class="mt-x" data-fechar aria-label="Fechar">✕</button>
@@ -316,7 +386,24 @@ export class MapaTeclasPainel {
       mapaTeclas.restaurar();
       this.avisar('Tudo de volta ao padrão.');
     });
+    r.querySelector('[data-carro-liga]').addEventListener('change', (e) => {
+      mapaTeclas.ligarCarro(e.target.checked);
+      this.avisar(e.target.checked
+        ? `Modo carro ligado: no jogo, ${r.querySelector('[data-carro-tecla]').textContent} (${rotulo(ENTRA_CARRO, this.layout)}) entra no carro e troca as teclas; de novo, volta a pé.`
+        : `Modo carro desligado: ${rotulo(ENTRA_CARRO, this.layout)} é só ${rotulo(ENTRA_CARRO, this.layout)}.`);
+    });
     r.querySelector('.mt-rolar').addEventListener('click', (e) => {
+      const tirarC = e.target.closest('[data-tirar-carro]');
+      if (tirarC) {
+        mapaTeclas.removerCarro(tirarC.dataset.tirarCarro);
+        this.avisar(`${nomeEntrada(tirarC.dataset.tirarCarro)} saiu do carro: lá dentro faz o mesmo que a pé.`);
+        return;
+      }
+      const bc = e.target.closest('[data-carro-trocar], [data-carro-somar]');
+      if (bc) {
+        this.pegar(bc.dataset.carroTrocar || bc.dataset.carroSomar, !!bc.dataset.carroSomar, true);
+        return;
+      }
       const tirar = e.target.closest('[data-tirar-entrada]');
       if (tirar) {
         const ent = tirar.dataset.tirarEntrada;
@@ -364,8 +451,14 @@ export class MapaTeclasPainel {
     r.querySelector('[data-cancelar]').addEventListener('click', () => this.pararDePegar());
     r.querySelector('[data-tirar]').addEventListener('click', () => {
       const id = this.pegando?.id;
+      const noCarro = this.pegando?.carro;
       this.pararDePegar();
       if (!id) return;
+      if (noCarro) {
+        mapaTeclas.limparCarro(id);
+        this.avisar(`${rotulo(id, this.layout)} ficou sem tecla no carro.`);
+        return;
+      }
       mapaTeclas.limpar(id);
       this.avisar(`${rotulo(id, this.layout)} ficou sem tecla.`);
     });
@@ -375,7 +468,19 @@ export class MapaTeclasPainel {
   // escreve as teclas de cada ação no desenho e na lista
   atualizar() {
     const r = this.raiz;
-    for (const linha of r.querySelectorAll('.mt-linha')) {
+    const ligado = mapaTeclas.carroLigado();
+    r.querySelector('[data-carro-liga]').checked = ligado;
+    r.querySelector('[data-carro-tecla]').textContent = visiveis(ENTRA_CARRO).filter((e) => !ehRoda(e)).map(nomeEntrada).join(' / ') || 'sem tecla';
+    r.querySelector('[data-carro-lista]').classList.toggle('mt-carro-off', !ligado);
+    for (const linha of r.querySelectorAll('.mt-linha[data-carro]')) {
+      const id = linha.dataset.carro;
+      const es = mapaTeclas.entradasCarro(id);
+      linha.querySelector('.mt-teclas').innerHTML = es.length
+        ? es.map((e) => `<span class="mt-k">${esc(nomeEntrada(e))}<button type="button" data-tirar-carro="${esc(e)}" aria-label="Tirar ${esc(nomeEntrada(e))}" title="Tirar">×</button></span>`).join('')
+        : '<span class="mt-vazio">sem tecla</span>';
+      linha.classList.toggle('mt-mudou', !mapaTeclas.padraoCarro(id));
+    }
+    for (const linha of r.querySelectorAll('.mt-linha[data-acao]')) {
       const id = linha.dataset.acao;
       const es = mapaTeclas.entradas(id);
       linha.querySelector('.mt-teclas').innerHTML = es.length
@@ -398,11 +503,12 @@ export class MapaTeclasPainel {
     r.querySelector('[data-restaurar]').disabled = !mapaTeclas.personalizado();
   }
 
-  pegar(id, somar) {
-    if (!ACOES.some((a) => a.id === id)) return;
-    this.pegando = { id, somar };
+  pegar(id, somar, carro = false) {
+    if (carro ? !CARRO_ACOES.includes(id) : !ACOES.some((a) => a.id === id)) return;
+    this.pegando = { id, somar, carro };
     const box = this.raiz.querySelector('.mt-pegar');
-    box.querySelector('.mt-pegar-tit').innerHTML = `${somar ? 'Mais uma tecla para' : 'Nova tecla para'} <b>${esc(rotulo(id, this.layout))}</b> <small>${esc(ACOES.find((a) => a.id === id).nome)}</small>`;
+    const nome = carro ? `${CARRO_NOME[id]} (no carro)` : ACOES.find((a) => a.id === id).nome;
+    box.querySelector('.mt-pegar-tit').innerHTML = `${somar ? 'Mais uma tecla para' : 'Nova tecla para'} <b>${esc(rotulo(id, this.layout))}</b> <small>${esc(nome)}</small>`;
     box.hidden = false;
     this.raiz.querySelector('.mt-zona').focus();
     this.acender(id, true);
@@ -418,6 +524,14 @@ export class MapaTeclasPainel {
   atribuir(entrada) {
     const p = this.pegando;
     if (!p) return;
+    if (p.carro) {
+      const rc = mapaTeclas.definirCarro(p.id, entrada, p.somar);
+      if (rc.erro) return this.avisar(rc.erro, true);
+      this.pararDePegar();
+      const nome = nomeEntrada(entrada);
+      this.avisar(`No carro, ${nome} agora é ${rotulo(p.id, this.layout)}${rc.tirou ? ` (antes era ${rotulo(rc.tirou, this.layout)} no carro)` : ''}. A pé, ${nome} continua como está no mapa.`);
+      return;
+    }
     const r = mapaTeclas.definir(p.id, entrada, p.somar);
     if (r.erro) {
       this.avisar(r.erro, true);

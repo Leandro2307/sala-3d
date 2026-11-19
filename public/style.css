@@ -4723,6 +4723,9 @@ body.touch :is(.hk-lista, #help-extra, #help-mais-btn) { display: none !importan
 .mt-vazio { color: #6b7385; font-size: 12px; font-style: italic; }
 .mt-mais { width: 30px; height: 30px; border: 1px dashed rgba(255, 255, 255, 0.25); border-radius: 8px; background: none; color: #9aa3b5; font-size: 16px; cursor: pointer; }
 .mt-mais:hover { border-color: #8ab4ff; color: #f1f3f8; }
+.mt-carro-liga { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 6px; padding: 8px 10px; border-radius: 10px; background: rgba(255, 255, 255, 0.03); color: #c9cfdb; font-size: 13px; line-height: 1.4; cursor: pointer; }
+.mt-carro-liga input { flex: none; width: 16px; height: 16px; margin: 2px 0 0; accent-color: #5eead4; }
+.mt-carro-off { opacity: 0.45; }
 .mt-rodape { display: flex; justify-content: flex-end; gap: 8px; }
 .mt-pegar { position: absolute; inset: 0; display: grid; place-items: center; padding: 16px; background: rgba(5, 6, 9, 0.7); }
 .mt-pegar[hidden] { display: none; }
