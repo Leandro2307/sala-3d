@@ -1085,3 +1085,15 @@ pedindo 720p à ponte e começando em 80% da estimativa. A sala inteira com dois
 sem erro, `caminhoPara` dando `host/udp` e `lan` na mesma máquina, queda e volta do socket. O ajudante
 compila. **Não testado**: com o PS5 e o lorrel de verdade, a ponte do PC trocando de tamanho no meio do jogo,
 e o pedido `carga` pelo ajudante instalado (precisa recarregar a extensão e reabrir o Chrome).
+
+### Turbo rápido e a baixa latência da NVIDIA (2026-11-18)
+Dos ~120 ms do lorrel (já sem o decodificador segurando): ~20 a ida do comando, ~20 a volta da imagem
+(internet), ~33 o jogo, a captura e a tela, e **30–40 a espera do liso**, travada nos 45 ms porque os
+quadros saíam do PC aos trancos (Wi-Fi USB). Nos dois momentos de rede estável ele teve 81 e 101 ms.
+- **Turbo rápido** (modos 15 e 16, 720p e 1080p): o liso segura no máximo 15 ms (`lisoMax`, o Turbo liso
+  até 45). No Wi-Fi a imagem pode tremer um pouco; no cabo a espera já fica baixa sozinha.
+- `scripts/nvidia-baixa-latencia.ps1` (ler / ligar / desfazer): "Maximum pre-rendered frames" = 1 no perfil
+  global do driver (NVAPI DRS) — o "Modo de baixa latência: Ligado" do painel, fila de 1 quadro nos jogos
+  DirectX 9/11. O driver 610.88 deste PC não conhece mais os códigos do Ultra (0x0005F543, 0x10835000: -160
+  ao gravar). Gravado neste PC em 2026-11-18 sem precisar de administrador; o de antes (0) ficou em
+  `%LOCALAPPDATA%\Sala3d\nvidia-baixa-latencia-antes.json`. Nos jogos DirectX 12/Vulkan vale o Reflex do jogo.

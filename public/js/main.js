@@ -31,7 +31,7 @@ import { ControleFisico } from './gamepad-jogo.js';
 import { PadVirtual } from './pad-virtual.js';
 import { TecladoPad, DICA_TECLADO } from './teclado-pad.js';
 import { TutorialControle } from './tutorial-controle.js';
-import { TurboEnvio, TurboRecebe, TTL_MS, LISO_PCT } from './turbo.js';
+import { TurboEnvio, TurboRecebe, TTL_MS, LISO_PCT, LISO_MAX } from './turbo.js';
 import { opcoesJogo, LISO_MS, PRESETS, OPCOES_DO_PRESET, htmlPresets, marcarPresets } from './jogo-opcoes.js';
 import { Mesa } from './mesa.js';
 import { Qualidade, NIVEIS, nivelInicial } from './qualidade.js';
@@ -3739,8 +3739,9 @@ function ligarTurbo() {
   turboRecebe.vidaMs = p?.vida ?? TTL_MS;
   turboRecebe.h265 = !!p?.h265;
   turboRecebe.lisoPct = p?.lisoPct ?? LISO_PCT;
+  turboRecebe.lisoMax = p?.lisoMax ?? LISO_MAX; // Turbo rápido: a folga do liso até 15 ms (e não 45)
   turboRecebe.ligar(jogandoLa.key, jogandoLa.video, opcoesJogo.get('rapido') ? 720 : 1080);
-  diagJogo.evento('modo turbo ligado', { liso: opcoesJogo.get('turboLiso'), vidaMs: turboRecebe.vidaMs, h265: turboRecebe.h265, lisoPct: turboRecebe.lisoPct });
+  diagJogo.evento('modo turbo ligado', { liso: opcoesJogo.get('turboLiso'), vidaMs: turboRecebe.vidaMs, h265: turboRecebe.h265, lisoPct: turboRecebe.lisoPct, lisoMaxMs: turboRecebe.lisoMax });
 }
 
 // ---------------------------------------------------------------- modos de imagem (jogo-opcoes.js)

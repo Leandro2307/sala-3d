@@ -39,13 +39,20 @@ export const PRESETS = [
   { id: 12, nome: '1080p', modo: 'Vídeo normal', desc: 'sem turbo, mais compatível', opcoes: { turbo: false, turboLiso: true, rapido: false, liso: true }, vida: 250 },
   { id: 13, nome: '720p Turbo liso', modo: 'Turbo liso', desc: 'menos atraso, mais leve para o celular', opcoes: { turbo: true, turboLiso: true, rapido: true, liso: true }, vida: 250, lisoPct: 0.9 },
   { id: 14, nome: '1080p Turbo liso', modo: 'Turbo liso', desc: 'menos atraso, imagem mais nítida', opcoes: { turbo: true, turboLiso: true, rapido: false, liso: true }, vida: 250 },
+  // Turbo rápido (2026-11-18): o liso segura cada quadro no máximo lisoMax ms (o Turbo liso, até 45). Nos
+  // relatórios do lorrel essa espera ficava travada nos 45 ms com o PC de quem compartilha no Wi-Fi — a
+  // maior fatia do atraso depois da internet. Aqui são uns 30 ms a menos; com o Wi-Fi tremendo, a imagem
+  // treme um pouco (no cabo quase não)
+  { id: 15, nome: '720p Turbo rápido', modo: 'Turbo rápido', desc: 'o menor atraso, mais leve; pode tremer um pouco no Wi-Fi', opcoes: { turbo: true, turboLiso: true, rapido: true, liso: true }, vida: 250, lisoPct: 0.9, lisoMax: 15 },
+  { id: 16, nome: '1080p Turbo rápido', modo: 'Turbo rápido', desc: 'o menor atraso, imagem nítida; pode tremer um pouco no Wi-Fi', opcoes: { turbo: true, turboLiso: true, rapido: false, liso: true }, vida: 250, lisoMax: 15 },
 ];
 export const PRESET_INICIAL = 14; // o modo em que a página sempre entra
 export const OPCOES_DO_PRESET = ['turbo', 'turboLiso', 'rapido', 'liso'];
 const presetInicial = () => PRESETS.find((p) => p.id === PRESET_INICIAL);
 
 // O seletor do modo de imagem, igual no menu do PC e no painel do celular (main.js ouve o clique em
-// [data-preset]): uma grade 2×2 — colunas 720p / 1080p, linhas vídeo normal / turbo liso — e o Manual.
+// [data-preset]): uma grade 2×3 — colunas 720p / 1080p, linhas vídeo normal / turbo liso / turbo
+// rápido — e o Manual.
 export function htmlPresets() {
   const cartao = (p) => '<button type="button" class="jp-card' + (p.opcoes.turbo ? ' turbo' : '') + '" role="radio" aria-checked="false" data-preset="' + p.id + '" title="' + p.nome + ': ' + p.desc + '">'
     + '<b>' + p.nome.split(' ')[0] + '</b><span>' + p.modo + '</span>' + (p.id === PRESET_INICIAL ? '<em>padrão</em>' : '') + '</button>';

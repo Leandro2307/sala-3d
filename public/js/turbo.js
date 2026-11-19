@@ -147,7 +147,7 @@ const QPS_TURBO = 60;
 // metade, com ~27 ms a mais de atraso.
 export const LISO_PCT = 0.95; // o tremido que a folga cobre
 const LISO_MIN = 4;
-const LISO_MAX = 45;
+export const LISO_MAX = 45; // o Turbo rápido (jogo-opcoes.js) usa menos: TurboRecebe.lisoMax
 const LISO_INICIO = 16;
 const LISO_ATRAS = 2; // quadros na hora ao mesmo tempo antes de pular um para alcançar (ver volta)
 const LISO_ALCANCAR = 8; // quadros seguidos mostrados uma volta atrasados antes de pular um para alcançar
@@ -1174,6 +1174,7 @@ export class TurboRecebe {
     this.vidaMs = TTL_MS; // a vida dos pedaços no canal: vale na próxima vez que o turbo ligar
     this.h265 = false; // pedir H.265 (presets de teste): vale na próxima vez que o turbo ligar
     this.lisoPct = LISO_PCT; // quanto do tremido a folga do liso cobre (presets de teste)
+    this.lisoMax = LISO_MAX; // a folga máxima (ms): o Turbo rápido troca o atraso pelo tremido
   }
 
   get ligado() { return !!this.s; }
@@ -1234,6 +1235,8 @@ export class TurboRecebe {
     s.vidaMs = this.vidaMs;
     s.h265 = !!this.h265;
     s.lisoPct = this.lisoPct;
+    s.lisoMax = Math.max(LISO_MIN, Math.min(LISO_MAX, Number(this.lisoMax) || LISO_MAX));
+    s.alvo = Math.min(s.alvo, s.lisoMax);
     this.s = s;
     // a volta da tela: o liso escolhe o quadro, e o ritmo vê se apareceu um novo
     const volta = (t) => {
@@ -1714,7 +1717,7 @@ export class TurboRecebe {
     if (chaveAtrasou) return;
     guardar(s.atrasos, dif - s.base, 120);
     if (s.atrasos.length < 20) return;
-    const p95 = Math.min(LISO_MAX, Math.max(LISO_MIN, pct(s.atrasos, s.lisoPct ?? LISO_PCT) + 2));
+    const p95 = Math.min(s.lisoMax ?? LISO_MAX, Math.max(LISO_MIN, pct(s.atrasos, s.lisoPct ?? LISO_PCT) + 2));
     // sobe na hora, desce devagar (um tremido que passou pode voltar)
     s.alvo = p95 > s.alvo ? p95 : s.alvo + (p95 - s.alvo) * 0.02;
   }
@@ -1967,6 +1970,7 @@ export class TurboRecebe {
       codec: s.dec?.state === 'configured' ? (ehHevc(s.cfgAtual?.codec) ? 'h265' : 'h264') : null,
       codecLa: s.cfgAtual?.codec ?? null, // o codec que quem compartilha escolheu
       lisoPct: s.lisoPct,
+      lisoMaxMs: s.lisoMax, // a folga máxima do liso (45; o Turbo rápido, 15)
       chaves: s.conta.chaves, // quadros-chave que chegaram inteiros
       chaveKB: s.conta.chaves ? Math.round(s.conta.chaveMax / 102.4) / 10 : null, // o maior deles
       som: this.statsSom(s, seg),
