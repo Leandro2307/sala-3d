@@ -2170,6 +2170,38 @@ function attachSockets(io) {
       r({ ok: true });
     });
 
+    // ------------------------------------------------------------ PC da casa a distância
+    // O dono, de qualquer outro aparelho (painel Empresa → "PC da casa a distância"), põe no ar ou tira
+    // a Tela 1, o PC direto ou o PS5 direto do PC liberado para o /tela (o que fica na casa). Lista: os
+    // PCs liberados nesta sala. As respostas voltam pelo 'tela-resposta' (jogo: true).
+    socket.on('hub-pcs', async (_, ack) => {
+      if (typeof ack !== 'function') return;
+      if (!user) return ack({ ok: false, erro: 'fora' });
+      if (!dono) return ack({ ok: false, erro: 'dono' });
+      const pcs = (await io.in(room.id).fetchSockets())
+        .filter((s) => s.data.tela && room.users.has(s.id))
+        .map((s) => ({ nick: room.users.get(s.id).name, eu: s.id === socket.id }));
+      ack({ ok: true, pcs });
+    });
+    socket.on('hub-remoto', async (msg, ack) => {
+      const r = typeof ack === 'function' ? ack : () => {};
+      if (!user) return r({ ok: false, erro: 'fora' });
+      if (!dono) return r({ ok: false, erro: 'dono' });
+      const m = obj(msg);
+      const maquina = ['tela', 'pc', 'ps5'].includes(m.maquina) ? m.maquina : null;
+      const acao = m.acao === 'parar' ? 'parar' : 'ligar';
+      const nick = cleanText(m.nick, 20).toLowerCase();
+      if (!maquina || !nick) return r({ ok: false, erro: 'pedido' });
+      const alvos = (await io.in(room.id).fetchSockets()).filter((s) => s.data.tela
+        && room.users.get(s.id)?.name.toLowerCase() === nick);
+      if (!alvos.length) return r({ ok: false, erro: 'ninguem' });
+      for (const s of alvos) {
+        s.data.telaDe = socket.id;
+        s.emit('hub-remoto', { maquina, acao, de: user.name });
+      }
+      r({ ok: true });
+    });
+
     // ------------------------------------------------------------ foto do rosto
     socket.on('photo', (dataUrl) => {
       if (!user) return;

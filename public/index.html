@@ -700,107 +700,152 @@
         <button type="submit" class="secondary block">Entrar como dono</button>
       </form>
       <form id="sala-config" hidden autocomplete="off">
-        <label class="field"><span>Nome da empresa</span><input name="empresa" maxlength="40" placeholder="Aparece no topo da sala"></label>
-        <div class="field">
-          <span>Logo da empresa <small class="opt">(recepção, telas livres e topo da tela)</small></span>
-          <div class="photo-row">
-            <div class="logo-prev" id="logo-prev"><small>Sem logo</small></div>
-            <div class="photo-acts">
-              <button type="button" class="secondary small" id="logo-pick"><i data-icon="camera" data-size="16"></i>Escolher imagem</button>
-              <button type="button" class="ghost-btn small" id="logo-clear" hidden>Tirar o logo</button>
+        <!-- seções que abrem uma de cada vez (details name="empresa"), como nos Ajustes -->
+        <details class="aj-sec" name="empresa">
+          <summary><span class="aj-ic"><i data-icon="predio" data-size="18"></i></span><span class="aj-tit"><b>Nome, logo e comunicado</b><small>O que aparece no topo e na recepção</small></span><i data-icon="chevron" data-size="16" class="aj-seta"></i></summary>
+          <div class="aj-corpo">
+            <label class="field"><span>Nome da empresa</span><input name="empresa" maxlength="40" placeholder="Aparece no topo da sala"></label>
+            <div class="field">
+              <span>Logo da empresa <small class="opt">(recepção, telas livres e topo da tela)</small></span>
+              <div class="photo-row">
+                <div class="logo-prev" id="logo-prev"><small>Sem logo</small></div>
+                <div class="photo-acts">
+                  <button type="button" class="secondary small" id="logo-pick"><i data-icon="camera" data-size="16"></i>Escolher imagem</button>
+                  <button type="button" class="ghost-btn small" id="logo-clear" hidden>Tirar o logo</button>
+                </div>
+                <input type="file" id="logo-file" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden>
+              </div>
+              <small class="hint">PNG com fundo transparente fica melhor. Vale depois do “Salvar para todos”.</small>
             </div>
-            <input type="file" id="logo-file" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden>
-          </div>
-          <small class="hint">PNG com fundo transparente fica melhor. Vale depois do “Salvar para todos”.</small>
-        </div>
-        <label class="field"><span>Comunicado <small class="opt">(faixa no topo para todo mundo)</small></span><textarea name="aviso" maxlength="200" rows="2" placeholder="Ex.: Reunião geral às 15h na sala de Reunião"></textarea></label>
-        <div class="field">
-          <span>Mapa <small class="opt">(o mundo em volta do prédio: cada um com outros lugares e outra paisagem)</small></span>
-          <div class="modulos" id="sala-mapas"></div>
-        </div>
-        <div class="field">
-          <span>Ambiente</span>
-          <div class="modulos" id="sala-modulos"></div>
-          <small class="hint" id="deptos-hint" hidden>Marque os departamentos da empresa: cada um vira uma sala com a cara do setor, e elas se encaixam dos dois lados de um corredor, com a recepção na entrada.</small>
-          <div class="deptos" id="sala-deptos" hidden></div>
-          <label class="toggle-row compact" id="campo-privacidade" hidden>
-            <span><b>Salas à prova de som</b><small>Dentro de um departamento, só quem está na mesma sala ouve a conversa</small></span>
-            <input type="checkbox" name="privacidade" class="switch">
-          </label>
-        </div>
-        <div class="field">
-          <label class="toggle-row compact">
-            <span><b>Lan house (aluguel por hora)</b><small>Só quem reservou e pagou o horário joga nas telas com controle liberado. Reservas em <a href="/lan" target="_blank" rel="noopener">/lan</a></small></span>
-            <input type="checkbox" name="lanLigada" class="switch">
-          </label>
-          <div class="lan-horas">
-            <label><small>Abre às</small><select name="lanAbre"></select></label>
-            <label><small>Fecha às</small><select name="lanFecha"></select></label>
-          </div>
-          <div class="lan-horas">
-            <label><small>Liberar de graça para a conta</small><input name="lanLiberarConta" maxlength="20" placeholder="nome da conta"></label>
-            <label><small>Máquina</small><select name="lanLiberarMaquina"><option value="ps5">PS5</option><option value="pc">PC</option></select></label>
-            <!-- PC: o jogo que abre sozinho na vez (a lista do PC da casa, ver carregarJogosLiberar) -->
-            <label><small>Jogo (PC)</small><select name="lanLiberarJogo"><option value="">Nenhum: só a tela do PC</option></select></label>
-            <label><small>Horas a partir de agora</small><select name="lanLiberarHoras"><option value="2m">2 minutos (teste)</option><option value="5m">5 minutos (teste)</option><option selected>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option></select></label>
-          </div>
-          <button type="button" class="chip-btn" id="lan-liberar">Liberar agora (sem pagar)</button>
-          <!-- encerra a vez de agora na máquina escolhida acima (ver lan-encerrar no main.js) -->
-          <button type="button" class="chip-btn" id="lan-encerrar">Encerrar a vez agora</button>
-        </div>
-        <label class="toggle-row compact">
-          <span><b>Aparecer nas salas ao vivo</b><small>Mostra a sala e quem está nela na tela de entrada (com senha, só a quantidade)</small></span>
-          <input type="checkbox" name="listada" class="switch">
-        </label>
-        <div class="field" id="placar-editor" hidden>
-          <span>Placar de metas <small class="opt">(Sala Comercial)</small></span>
-          <input name="placarTitulo" maxlength="40" placeholder="Título — ex.: Metas de outubro">
-          <div class="placar-linhas" id="placar-linhas"></div>
-          <button type="button" class="chip-btn" id="placar-add">+ Pessoa no placar</button>
-          <small class="hint">Vendido e meta em números (ex.: 15000). Até 12 pessoas — o placar ordena pelo % da meta.</small>
-        </div>
-        <div class="field">
-          <span>Páginas nas telas <small class="opt">(um site aberto direto na tela, sem compartilhar)</small></span>
-          <div class="paginas-linhas" id="paginas-linhas"></div>
-          <button type="button" class="chip-btn" id="pagina-add">+ Página numa tela</button>
-          <small class="hint">Cada pessoa vê o site no próprio navegador e mexe nele chegando perto e apertando <kbd>E</kbd>. Site que pede login precisa estar logado no navegador de cada um. YouTube, Google e outros que não deixam abrir dentro de outra página precisam da extensão Sala 3D (1.7) no Chrome de quem vê.</small>
-        </div>
-        <div class="field">
-          <span class="field-linha">Jogos e diversão <span><button type="button" class="chip-btn" data-todos="1">Todos</button> <button type="button" class="chip-btn" data-todos="0">Nenhum</button></span></span>
-          <div class="jogos-lista" id="sala-jogos"></div>
-        </div>
-        <button type="submit" class="primary block">Salvar para todos</button>
-        <!-- senha de entrada: vale na hora (não espera o "Salvar para todos") -->
-        <div class="sala-bloco">
-          <div class="sala-bloco-topo">
-            <span class="sala-bloco-ic"><i data-icon="lock" data-size="16"></i></span>
-            <span><b>Senha para entrar</b><small id="entrada-status">Sala aberta: qualquer um com o link entra.</small></span>
-          </div>
-          <div class="senha-linha">
-            <input type="password" name="entrada" maxlength="100" autocomplete="new-password" placeholder="Nova senha (4+ caracteres)">
-            <button type="button" class="secondary small" id="entrada-salvar">Pôr senha</button>
-          </div>
-          <button type="button" class="ghost-btn small" id="entrada-tirar" hidden>Tirar a senha e abrir a sala</button>
-        </div>
-        <!-- senha de gestor: também vale na hora -->
-        <div class="sala-bloco">
-          <div class="sala-bloco-topo">
-            <span class="sala-bloco-ic"><i data-icon="users" data-size="16"></i></span>
-            <span><b>Senha de gestor</b><small id="gestor-status">Sem senha: só você recebe os alertas da equipe.</small></span>
-          </div>
-          <div class="senha-linha">
-            <input type="password" name="gestorSenha" maxlength="100" autocomplete="new-password" placeholder="Senha dos gestores (4+ caracteres)">
-            <button type="button" class="secondary small" id="gestor-salvar">Criar</button>
-          </div>
-          <button type="button" class="ghost-btn small" id="gestor-tirar" hidden>Tirar a senha de gestor</button>
-        </div>
-        <details class="sala-bloco sala-senha">
-          <summary><span class="sala-bloco-ic"><i data-icon="settings" data-size="16"></i></span><b>Trocar a senha de dono</b><i data-icon="chevron" data-size="16" class="sala-seta"></i></summary>
-          <div class="senha-linha">
-            <input type="password" name="nova" minlength="6" maxlength="100" autocomplete="new-password" placeholder="Nova senha (6+ caracteres)">
-            <button type="button" class="secondary small" id="sala-trocar">Trocar</button>
+            <label class="field"><span>Comunicado <small class="opt">(faixa no topo para todo mundo)</small></span><textarea name="aviso" maxlength="200" rows="2" placeholder="Ex.: Reunião geral às 15h na sala de Reunião"></textarea></label>
           </div>
         </details>
+        <details class="aj-sec" name="empresa">
+          <summary><span class="aj-ic"><i data-icon="mapa" data-size="18"></i></span><span class="aj-tit"><b>Mapa e ambiente</b><small>O mundo em volta, o prédio e os departamentos</small></span><i data-icon="chevron" data-size="16" class="aj-seta"></i></summary>
+          <div class="aj-corpo">
+            <div class="field">
+              <span>Mapa <small class="opt">(o mundo em volta do prédio: cada um com outros lugares e outra paisagem)</small></span>
+              <div class="modulos" id="sala-mapas"></div>
+            </div>
+            <div class="field">
+              <span>Ambiente</span>
+              <div class="modulos" id="sala-modulos"></div>
+              <small class="hint" id="deptos-hint" hidden>Marque os departamentos da empresa: cada um vira uma sala com a cara do setor, e elas se encaixam dos dois lados de um corredor, com a recepção na entrada.</small>
+              <div class="deptos" id="sala-deptos" hidden></div>
+              <label class="toggle-row compact" id="campo-privacidade" hidden>
+                <span><b>Salas à prova de som</b><small>Dentro de um departamento, só quem está na mesma sala ouve a conversa</small></span>
+                <input type="checkbox" name="privacidade" class="switch">
+              </label>
+            </div>
+          </div>
+        </details>
+        <details class="aj-sec" name="empresa">
+          <summary><span class="aj-ic"><i data-icon="tv" data-size="18"></i></span><span class="aj-tit"><b>Telas e placar</b><small>Sites fixos nas telas e o placar de metas</small></span><i data-icon="chevron" data-size="16" class="aj-seta"></i></summary>
+          <div class="aj-corpo">
+            <div class="field">
+              <span>Páginas nas telas <small class="opt">(um site aberto direto na tela, sem compartilhar)</small></span>
+              <div class="paginas-linhas" id="paginas-linhas"></div>
+              <button type="button" class="chip-btn" id="pagina-add">+ Página numa tela</button>
+              <small class="hint">Cada pessoa vê o site no próprio navegador e mexe nele chegando perto e apertando <kbd>E</kbd>. Site que pede login precisa estar logado no navegador de cada um. YouTube, Google e outros que não deixam abrir dentro de outra página precisam da extensão Sala 3D (1.7) no Chrome de quem vê.</small>
+            </div>
+            <div class="field" id="placar-editor" hidden>
+              <span>Placar de metas <small class="opt">(Sala Comercial)</small></span>
+              <input name="placarTitulo" maxlength="40" placeholder="Título — ex.: Metas de outubro">
+              <div class="placar-linhas" id="placar-linhas"></div>
+              <button type="button" class="chip-btn" id="placar-add">+ Pessoa no placar</button>
+              <small class="hint">Vendido e meta em números (ex.: 15000). Até 12 pessoas — o placar ordena pelo % da meta.</small>
+            </div>
+          </div>
+        </details>
+        <details class="aj-sec" name="empresa">
+          <summary><span class="aj-ic"><i data-icon="gamepad" data-size="18"></i></span><span class="aj-tit"><b>Jogos e diversão</b><small>O que fica ligado na sala</small></span><i data-icon="chevron" data-size="16" class="aj-seta"></i></summary>
+          <div class="aj-corpo">
+            <div class="field">
+              <span class="field-linha">Jogos e diversão <span><button type="button" class="chip-btn" data-todos="1">Todos</button> <button type="button" class="chip-btn" data-todos="0">Nenhum</button></span></span>
+              <div class="jogos-lista" id="sala-jogos"></div>
+            </div>
+          </div>
+        </details>
+        <details class="aj-sec" name="empresa">
+          <summary><span class="aj-ic"><i data-icon="moeda" data-size="18"></i></span><span class="aj-tit"><b>Lan house</b><small>Aluguel por hora, liberar e encerrar a vez</small></span><i data-icon="chevron" data-size="16" class="aj-seta"></i></summary>
+          <div class="aj-corpo">
+            <div class="field">
+              <label class="toggle-row compact">
+                <span><b>Lan house (aluguel por hora)</b><small>Só quem reservou e pagou o horário joga nas telas com controle liberado. Reservas em <a href="/lan" target="_blank" rel="noopener">/lan</a></small></span>
+                <input type="checkbox" name="lanLigada" class="switch">
+              </label>
+              <div class="lan-horas">
+                <label><small>Abre às</small><select name="lanAbre"></select></label>
+                <label><small>Fecha às</small><select name="lanFecha"></select></label>
+              </div>
+              <div class="lan-horas">
+                <label><small>Liberar de graça para a conta</small><input name="lanLiberarConta" maxlength="20" placeholder="nome da conta"></label>
+                <label><small>Máquina</small><select name="lanLiberarMaquina"><option value="ps5">PS5</option><option value="pc">PC</option></select></label>
+                <!-- PC: o jogo que abre sozinho na vez (a lista do PC da casa, ver carregarJogosLiberar) -->
+                <label><small>Jogo (PC)</small><select name="lanLiberarJogo"><option value="">Nenhum: só a tela do PC</option></select></label>
+                <label><small>Horas a partir de agora</small><select name="lanLiberarHoras"><option value="2m">2 minutos (teste)</option><option value="5m">5 minutos (teste)</option><option selected>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option></select></label>
+              </div>
+              <button type="button" class="chip-btn" id="lan-liberar">Liberar agora (sem pagar)</button>
+              <!-- encerra a vez de agora na máquina escolhida acima (ver lan-encerrar no main.js) -->
+              <button type="button" class="chip-btn" id="lan-encerrar">Encerrar a vez agora</button>
+            </div>
+          </div>
+        </details>
+        <details class="aj-sec" name="empresa">
+          <summary><span class="aj-ic"><i data-icon="pc" data-size="18"></i></span><span class="aj-tit"><b>PC da casa a distância</b><small>Tela 1, PC direto e PS5 direto de outro aparelho</small></span><i data-icon="chevron" data-size="16" class="aj-seta"></i></summary>
+          <div class="aj-corpo">
+            <p class="hint">Daqui, de qualquer aparelho, você põe no ar a tela do PC que fica na casa (o liberado com <code>/tela liberar</code>). Vale na hora, sem o “Salvar para todos”.</p>
+            <label class="field"><span>PC</span><select id="remoto-pc"><option value="">Procurando…</option></select></label>
+            <div class="remoto-linhas">
+      <div class="remoto-linha"><span class="sala-bloco-ic"><i data-icon="monitores" data-size="16"></i></span><span><b>Tela 1</b><small>Tela inteira, com áudio e controle</small></span><span class="remoto-acoes"><button type="button" class="primary small" data-remoto="tela" data-acao="ligar">Ligar</button><button type="button" class="secondary small" data-remoto="tela" data-acao="parar">Parar</button></span></div>
+      <div class="remoto-linha"><span class="sala-bloco-ic"><i data-icon="pc" data-size="16"></i></span><span><b>PC direto</b><small>Pela placa de vídeo, 60 qps, com controle</small></span><span class="remoto-acoes"><button type="button" class="primary small" data-remoto="pc" data-acao="ligar">Ligar</button><button type="button" class="secondary small" data-remoto="pc" data-acao="parar">Parar</button></span></div>
+      <div class="remoto-linha"><span class="sala-bloco-ic"><i data-icon="gamepad" data-size="16"></i></span><span><b>PS5 direto</b><small>Acorda o PS5 e põe na sala</small></span><span class="remoto-acoes"><button type="button" class="primary small" data-remoto="ps5" data-acao="ligar">Ligar</button><button type="button" class="secondary small" data-remoto="ps5" data-acao="parar">Parar</button></span></div>
+            </div>
+            <small class="hint" id="remoto-noar"></small>
+            <small class="hint" id="remoto-status" role="status"></small>
+          </div>
+        </details>
+        <details class="aj-sec" name="empresa">
+          <summary><span class="aj-ic"><i data-icon="lock" data-size="18"></i></span><span class="aj-tit"><b>Acesso e senhas</b><small>Salas ao vivo, senha de entrada, gestores e dono</small></span><i data-icon="chevron" data-size="16" class="aj-seta"></i></summary>
+          <div class="aj-corpo">
+            <label class="toggle-row compact">
+              <span><b>Aparecer nas salas ao vivo</b><small>Mostra a sala e quem está nela na tela de entrada (com senha, só a quantidade)</small></span>
+              <input type="checkbox" name="listada" class="switch">
+            </label>
+            <!-- senha de entrada: vale na hora (não espera o "Salvar para todos") -->
+            <div class="sala-bloco">
+              <div class="sala-bloco-topo">
+                <span class="sala-bloco-ic"><i data-icon="lock" data-size="16"></i></span>
+                <span><b>Senha para entrar</b><small id="entrada-status">Sala aberta: qualquer um com o link entra.</small></span>
+              </div>
+              <div class="senha-linha">
+                <input type="password" name="entrada" maxlength="100" autocomplete="new-password" placeholder="Nova senha (4+ caracteres)">
+                <button type="button" class="secondary small" id="entrada-salvar">Pôr senha</button>
+              </div>
+              <button type="button" class="ghost-btn small" id="entrada-tirar" hidden>Tirar a senha e abrir a sala</button>
+            </div>
+            <!-- senha de gestor: também vale na hora -->
+            <div class="sala-bloco">
+              <div class="sala-bloco-topo">
+                <span class="sala-bloco-ic"><i data-icon="users" data-size="16"></i></span>
+                <span><b>Senha de gestor</b><small id="gestor-status">Sem senha: só você recebe os alertas da equipe.</small></span>
+              </div>
+              <div class="senha-linha">
+                <input type="password" name="gestorSenha" maxlength="100" autocomplete="new-password" placeholder="Senha dos gestores (4+ caracteres)">
+                <button type="button" class="secondary small" id="gestor-salvar">Criar</button>
+              </div>
+              <button type="button" class="ghost-btn small" id="gestor-tirar" hidden>Tirar a senha de gestor</button>
+            </div>
+            <details class="sala-bloco sala-senha">
+              <summary><span class="sala-bloco-ic"><i data-icon="settings" data-size="16"></i></span><b>Trocar a senha de dono</b><i data-icon="chevron" data-size="16" class="sala-seta"></i></summary>
+              <div class="senha-linha">
+                <input type="password" name="nova" minlength="6" maxlength="100" autocomplete="new-password" placeholder="Nova senha (6+ caracteres)">
+                <button type="button" class="secondary small" id="sala-trocar">Trocar</button>
+              </div>
+            </details>
+          </div>
+        </details>
+        <button type="submit" class="primary block sala-salvar">Salvar para todos</button>
       </form>
     </section>
 

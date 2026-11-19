@@ -194,7 +194,7 @@ namespace Sala3d
             new Thread(VigiarAtalho) { IsBackground = true }.Start();
             new Thread(VigiarJogo) { IsBackground = true }.Start();
             new Thread(VigiarWifi) { IsBackground = true }.Start();
-            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.24.0" } });
+            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.25.0" } });
             var json = new JavaScriptSerializer();
             string txt;
             while ((txt = Ler(entrada)) != null)
@@ -374,7 +374,16 @@ namespace Sala3d
             new Thread(() =>
             {
                 var r = new Dictionary<string, object> { { "tipo", "lossless" }, { "pid", pid } };
-                try { AtalhoLossless(r); }
+                try
+                {
+                    // vai ligar (não está escalando): antes, o modo de vários monitores (ver LosslessMultiMonitor)
+                    if (!LosslessEscalando())
+                    {
+                        IntPtr frente = GetForegroundWindow();
+                        if (LosslessMultiMonitor(r) && frente != IntPtr.Zero) { Frente(frente); Thread.Sleep(400); }
+                    }
+                    AtalhoLossless(r);
+                }
                 catch (Exception err) { r["ok"] = false; r["msg"] = err.Message; }
                 Escrever(r);
             }) { IsBackground = true }.Start();
@@ -432,6 +441,68 @@ namespace Sala3d
             }
             r["ok"] = true;
             return true;
+        }
+
+        // Lossless em vários monitores (ajudante 1.25+). De fábrica o Lossless só escala a janela da
+        // FRENTE: clicou na sala (no outro monitor) ou em qualquer outra janela, ele pausa e só volta com a
+        // janela do PS5 na frente de novo (teste de 2026-11-19: "só entra quando fica na janela que abriu").
+        // O "Multi display mode" dele (MultiDisplayMode no Settings.xml) segue escalando com o foco em
+        // outra janela; e o "Clip cursor" desligado deixa o mouse sair da janela escalada para a sala.
+        // Só esses dois campos mudam (em todos os perfis); o resto da configuração fica como está, e a
+        // de antes fica guardada em Settings.antes-sala3d.xml (uma vez). O Lossless só lê o arquivo ao
+        // abrir: se precisou mudar com ele aberto, fecha, grava e abre de novo (minimizado).
+        // Devolve true quando reabriu o Lossless (a janela da frente pode ter mudado). r["multiMonitor"]:
+        // "ja" | "ligado" | "sem-opcao" (Lossless antigo, sem o campo) | "erro: ..."
+        static bool LosslessMultiMonitor(Dictionary<string, object> r)
+        {
+            try
+            {
+                string pasta = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Lossless Scaling");
+                string arq = Path.Combine(pasta, "Settings.xml");
+                if (!File.Exists(arq)) { r["multiMonitor"] = "sem-opcao"; return false; }
+                string x = File.ReadAllText(arq);
+                if (!x.Contains("<MultiDisplayMode>")) { r["multiMonitor"] = "sem-opcao"; return false; }
+                if (!x.Contains("<MultiDisplayMode>false</MultiDisplayMode>") && !x.Contains("<ClipCursor>true</ClipCursor>")) { r["multiMonitor"] = "ja"; return false; }
+
+                // aberto: fecha (pela janela, ele grava a dele; não fechou em 6 s, encerra) e guarda o caminho
+                var ps = System.Diagnostics.Process.GetProcessesByName("LosslessScaling");
+                string exe = null;
+                foreach (var p in ps) { try { exe = exe ?? p.MainModule.FileName; } catch { } }
+                foreach (var p in ps)
+                {
+                    try { p.CloseMainWindow(); } catch { }
+                    try { if (!p.WaitForExit(6000)) { p.Kill(); p.WaitForExit(3000); } } catch { }
+                }
+                // relê: fechando, o Lossless grava a configuração dele por cima
+                x = File.ReadAllText(arq);
+                string antes = Path.Combine(pasta, "Settings.antes-sala3d.xml");
+                if (!File.Exists(antes)) File.WriteAllText(antes, x);
+                x = x.Replace("<MultiDisplayMode>false</MultiDisplayMode>", "<MultiDisplayMode>true</MultiDisplayMode>")
+                     .Replace("<ClipCursor>true</ClipCursor>", "<ClipCursor>false</ClipCursor>");
+                File.WriteAllText(arq, x, new UTF8Encoding(false));
+                r["multiMonitor"] = "ligado";
+                if (ps.Length == 0) return false; // fechado: vale quando abrir
+
+                // abre de novo, como estava (pelo exe; sem ele, pela Steam) e minimizado
+                if (exe != null && File.Exists(exe))
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(exe) { WorkingDirectory = Path.GetDirectoryName(exe), UseShellExecute = true, WindowStyle = System.Diagnostics.ProcessWindowStyle.Minimized });
+                else
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("steam://rungameid/993090") { UseShellExecute = true });
+                IntPtr janela = IntPtr.Zero;
+                for (int t = 0; t < 60 && janela == IntPtr.Zero; t++)
+                {
+                    Thread.Sleep(250);
+                    foreach (var p in System.Diagnostics.Process.GetProcessesByName("LosslessScaling"))
+                    {
+                        try { p.Refresh(); if (p.MainWindowHandle != IntPtr.Zero) janela = p.MainWindowHandle; } catch { }
+                    }
+                }
+                if (janela != IntPtr.Zero) { Thread.Sleep(800); ShowWindow(janela, 6); } // minimizada (o atalho vale com ela assim)
+                else r["multiMonitor"] = "ligado (o Lossless não reabriu: abra ele de novo)";
+                Thread.Sleep(500);
+                return true;
+            }
+            catch (Exception err) { r["multiMonitor"] = "erro: " + err.Message; return false; }
         }
 
         // ------------------------------------------------------------ PS5 + Lossless para todos (1.18+)
@@ -565,6 +636,9 @@ namespace Sala3d
                 r["qpsObs"] = Txt(ws.Pedir("GetVideoSettings"), "fpsNumerator");
             }
 
+            // o Lossless seguindo com o foco na sala (antes de levar a janela para a frente: reabrir o
+            // Lossless muda a janela da frente)
+            if (!LosslessEscalando()) LosslessMultiMonitor(r);
             // a janela do PS5 maximizada no outro monitor, na frente, e o Lossless nela
             ShowWindow(janela, 9);
             SetWindowPos(janela, IntPtr.Zero, rc.Left + 40, rc.Top + 40, 1280, 720, 0x0040);

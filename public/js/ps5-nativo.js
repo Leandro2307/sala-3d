@@ -1180,7 +1180,7 @@ export class Ps5Nativo {
       const on = this.losslessTodos.ligado();
       extras.push(`<div class="p5-item"><span class="p5-ic">${icon('monitores', 18)}</span>
         <span><b>Lossless para todos</b>${on ? pilula('ligado', '#4ade80') : ''}
-        <small>Ponha o PS5 a 30 qps: o Lossless deste PC dobra para 60 e todo mundo recebe pelo OBS. A janela do PS5 vai para o outro monitor e precisa ficar na frente. Precisa do OBS com o WebSocket ligado e do Lossless aberto.</small></span>
+        <small>Ponha o PS5 a 30 qps: o Lossless deste PC dobra para 60 e todo mundo recebe pelo OBS. A janela do PS5 vai para o outro monitor e o Lossless segue nela mesmo com você usando a sala (modo de vários monitores dele, ligado sozinho). Precisa do OBS com o WebSocket ligado e do Lossless aberto.</small></span>
         <span class="p5-acoes"><button type="button" class="${on ? 'secondary' : 'primary'} small" data-p5="ls-todos">${on ? 'Voltar à imagem direta' : 'Ligar'}</button></span></div>`);
     }
     if (noAr && this.key && this.jogarComLossless) {

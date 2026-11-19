@@ -1706,10 +1706,13 @@ function bindSocket() {
     if (!ok) toast(`${quem}: ${texto}`, 'warn', 8000);
     else if (jogo) toast(`${quem}: ${texto}`, 'success', 7000);
     if (jogo) pcJogos.resposta();
+    if (jogo) remotoResposta(ok, texto, de);
   });
   // Jogos do PC: este PC (o de jogos) foi chamado; ou o catálogo de algum PC mudou
   socket.on('hub-pedido', (m) => pedidoDeJogo(m || {}).catch((err) => socket.emit('tela-resposta', { ok: false, jogo: true, texto: String(err?.message || err) })));
   socket.on('hub-mudou', () => pcJogos.mudou());
+  // PC da casa a distância: o dono pediu daqui a Tela 1, o PC direto ou o PS5 direto (ver pedidoRemoto)
+  socket.on('hub-remoto', (m) => pedidoRemoto(m || {}).catch((err) => socket.emit('tela-resposta', { ok: false, jogo: true, texto: String(err?.message || err) })));
 
   socket.on('browser-opened', ({ site, by }) => {
     toast(by === settings.name ? `Abrindo ${site} no telão` : `${by} abriu ${site} no navegador do telão`, 'info', 3500, '#38bdf8');
@@ -3269,9 +3272,16 @@ function vigiarSomQueChega(resumo) {
 // monitor e liga o Lossless nela. A imagem da tela do PS5 vira a câmera do OBS: o turbo codifica ela e o
 // vídeo da conexão troca de trilha; o som e o controle continuam os do PS5 direto.
 // Testado em 2026-11-16 (página a 30 qps no lugar do PS5): a câmera do OBS deu 55 quadros diferentes por
-// segundo. O Lossless só escala a janela da frente: clicando em outra ele pausa (vão os 30) e retoma
-// sozinho quando a janela do PS5 volta para a frente.
+// segundo. De fábrica o Lossless só escala a janela da frente: clicando em outra ele pausava (iam os 30).
+// O ajudante 1.25+ liga o "Multi display mode" dele (e solta o mouse da janela escalada): ele segue
+// escalando a janela do PS5 com a sala em uso no outro monitor (r.multiMonitor: ja | ligado | sem-opcao).
 const TITULO_LS = 'PS5 · Lossless';
+const multiMonitorOk = (r) => r?.multiMonitor === 'ja' || /^ligado/.test(r?.multiMonitor || '');
+function avisoFocoLossless(r) {
+  if (multiMonitorOk(r)) return 'Pode usar a sala no outro monitor: o Lossless segue escalando a janela do PS5.';
+  if (r?.multiMonitor === 'sem-opcao') return 'Este Lossless não tem o modo de vários monitores (atualize o Lossless Scaling): deixe a janela do PS5 na frente, clicando em outra ele pausa.';
+  return 'Deixe a janela do PS5 na frente: clicando em outra, o Lossless pausa. Para ele seguir com a sala em uso, atualize a extensão (chrome://extensions → recarregar a da Sala 3D: ajudante 1.25).';
+}
 let janelaLs = null;
 
 function abrirJanelaPs5(trilha) {
@@ -3342,7 +3352,7 @@ async function losslessParaTodos(ligar) {
     mostrarNaMinhaTela(sh, new MediaStream([nova]));
     ps5Nativo.render?.();
     const semLs = r.lossless ? '' : ' O Lossless não ligou na janela: clique nela e aperte o atalho dele.';
-    toast(`Lossless para todos ligado: a janela do PS5 está ${r.umMonitor ? 'na tela' : 'no outro monitor'} e todos recebem a imagem do OBS.${semLs} Deixe a janela do PS5 na frente: clicando em outra, o Lossless pausa (vão os 30) e volta quando ela volta.`, semLs ? 'warn' : 'success', 14000);
+    toast(`Lossless para todos ligado: a janela do PS5 está ${r.umMonitor ? 'na tela' : 'no outro monitor'} e todos recebem a imagem do OBS.${semLs} ${avisoFocoLossless(r)}`, semLs || !multiMonitorOk(r) ? 'warn' : 'success', 14000);
   } else {
     if (!sh.lossless) return;
     const cam = sh.losslessCam;
@@ -3580,7 +3590,8 @@ async function alternarLossless() {
     const aviso = r.modo === 'ADAPTIVE' && Number(r.alvo) <= 60
       ? ` Atenção: o Lossless está no modo Adaptativo com alvo ${r.alvo}; com o PS5 a 60 ele não gera nada. No Lossless, ponha Fixo ×2 (ou alvo 120/144).`
       : '';
-    toast(`Lossless ligado (${r.atalho}).${aviso} O contador dele mostra base / gerados; ${r.atalho} desliga.`, aviso ? 'warn' : 'success', aviso ? 15000 : 7000);
+    const mm = /^ligado/.test(r.multiMonitor || '') ? ' Liguei o modo de vários monitores do Lossless: ele segue escalando mesmo com o foco em outra janela.' : '';
+    toast(`Lossless ligado (${r.atalho}).${aviso}${mm} O contador dele mostra base / gerados; ${r.atalho} desliga.`, aviso ? 'warn' : 'success', aviso ? 15000 : 8000);
   } else if (r?.msg === 'fechado') {
     toast('O Lossless Scaling está fechado. Abra o Lossless e tente de novo.', 'warn', 8000);
   } else {
@@ -7271,8 +7282,7 @@ async function sairDaTelaCheiaParaOSeletor() {
   await new Promise((ok) => setTimeout(ok, 300)); // a janela do Chrome se acerta antes do clique
 }
 
-async function pedidoDeTela({ acao, de }) {
-  const responder = (ok, texto) => socket.emit('tela-resposta', { ok, texto });
+async function pedidoDeTela({ acao, de }, responder = (ok, texto) => socket.emit('tela-resposta', { ok, texto })) {
   if (!telaLiberadaAqui()) return; // o servidor já não manda, mas por garantia
   const minhas = self()?.shares;
   if (acao === 'parar') {
@@ -7518,6 +7528,114 @@ async function pedidoDeJogoJa({ acao, id, de, maquina, lan: daLan }) {
   if (!j?.ok) return responder(false, `não abriu o jogo: ${erroDoAjudante(j)}`);
   if (daLan) lanAbriu.jogo = true;
   responder(true, `${j.msg}${como}${semControle}. Abra a tela de ${settings.name} para jogar.`);
+}
+
+// PC da casa a distância (painel Empresa do dono, em outro aparelho): a Tela 1 (como o /tela), o PC
+// direto (como alugar o PC sem jogo) ou o PS5 direto (como a vez no PS5), ligar ou parar. Usa os mesmos
+// caminhos da lan house e do /tela, na mesma fila de cada máquina.
+async function pedidoRemoto({ maquina, acao, de }) {
+  if (!telaLiberadaAqui()) return;
+  const responder = (ok, texto) => socket.emit('tela-resposta', { ok, texto, jogo: true });
+  const parar = acao === 'parar';
+  if (maquina === 'tela') {
+    // pedidoDeTela responde sem o "jogo": aqui a resposta vai com ele, para o painel do dono
+    const resp = (ok, texto) => responder(ok, `Tela 1: ${texto}`);
+    if (parar) {
+      const key = telaKey && self()?.shares.has(telaKey) ? telaKey : null;
+      if (!key) return resp(true, 'não estava no ar');
+      stopShare(key, true);
+      telaKey = null;
+      return resp(true, 'saiu do ar');
+    }
+    return pedidoDeTela({ acao: 'compartilhar', de }, resp);
+  }
+  if (maquina === 'ps5') return pedidoDeJogo({ maquina: 'ps5', acao: parar ? 'fechar' : 'abrir', de });
+  // PC direto
+  if (parar) {
+    const key = pcDireto.key;
+    if (!pcDireto.noAr && !(key && self()?.shares.has(key))) return responder(true, 'O PC direto não estava no ar.');
+    if (key && self()?.shares.has(key)) stopShare(key, true);
+    pcDireto.parar();
+    if (lanAbriu.pc === key) lanAbriu.pc = null;
+    return responder(true, 'O PC direto saiu do ar.');
+  }
+  return pedidoDeJogo({ maquina: 'pc', acao: 'abrir', id: '', de });
+}
+
+// ----- o painel do dono (Empresa → "PC da casa a distância"): escolhe o PC liberado e manda o pedido
+const REMOTO_PC = 'sala3d-remoto-pc';
+let remotoEsperando = null; // o pedido mandado, até a resposta do PC (ou 3 min: o PS5 tenta até 6 vezes)
+const remotoAberto = () => state.panel === 'sala' && !!$('#remoto-pc')?.closest('details')?.open;
+function carregarPcsRemotos() {
+  if (!socket || !state.donoDaSala) return;
+  socket.emit('hub-pcs', null, (r) => {
+    const sel = $('#remoto-pc');
+    if (!r?.ok) {
+      sel.innerHTML = '<option value="">Só o dono vê os PCs</option>';
+      return renderRemoto();
+    }
+    let lembrado = null;
+    try { lembrado = localStorage.getItem(REMOTO_PC); } catch { /* sem armazenamento */ }
+    const antes = sel.value || lembrado;
+    // o próprio aparelho por último: o comum é mandar de outro
+    const pcs = [...r.pcs].sort((a, b) => Number(a.eu) - Number(b.eu));
+    sel.innerHTML = pcs.length
+      ? pcs.map((p) => `<option value="${esc(p.nick)}">${esc(p.nick)}${p.eu ? ' (este aparelho)' : ''}</option>`).join('')
+      : '<option value="">Nenhum PC liberado na sala agora</option>';
+    if (pcs.some((p) => p.nick === antes)) sel.value = antes;
+    renderRemoto();
+  });
+}
+// o que o PC escolhido tem no ar agora (pelas telas dele na sala)
+function renderRemoto() {
+  const nick = $('#remoto-pc').value;
+  const dono = nick ? [...state.users.values()].find((u) => u.name === nick) : null;
+  const telas = dono ? [...(dono.shares?.values() || [])] : [];
+  const ps5 = telas.some((sh) => sh.superficie === 'ps5' || sh.titulo === 'PS5');
+  const monitor = telas.some((sh) => sh.superficie === 'monitor');
+  document.querySelector('.remoto-linha:has([data-remoto="ps5"])')?.classList.toggle('no-ar', ps5);
+  for (const b of $$('[data-remoto]')) if (!remotoEsperando) b.disabled = !nick;
+  // o que está no ar fica numa linha; a resposta do último pedido, na outra (até o próximo)
+  $('#remoto-noar').textContent = !nick ? 'Libere o PC da casa: nele, mande uma vez “/tela liberar” no chat, com a sala aberta.'
+    : ps5 || monitor ? `No ar agora: ${[monitor && 'a tela do PC', ps5 && 'o PS5'].filter(Boolean).join(' e ')}.`
+    : 'Nada deste PC no ar agora.';
+}
+const NOME_REMOTO = { tela: 'a Tela 1', pc: 'o PC direto', ps5: 'o PS5 direto' };
+$('#sala-config').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-remoto]');
+  if (!b) return;
+  const nick = $('#remoto-pc').value;
+  if (!nick || !socket) return;
+  const { remoto: maquina, acao } = b.dataset;
+  socket.emit('hub-remoto', { nick, maquina, acao }, (r) => {
+    if (!r?.ok) {
+      const erros = { dono: 'Só o dono da sala manda no PC da casa.', ninguem: `${nick} não está mais na sala (ou deixou de atender o /tela).` };
+      $('#remoto-status').textContent = erros[r?.erro] || 'Não deu para mandar o pedido.';
+      return carregarPcsRemotos();
+    }
+    clearTimeout(remotoEsperando?.t);
+    remotoEsperando = { t: setTimeout(() => {
+      remotoEsperando = null;
+      renderRemoto();
+      $('#remoto-status').textContent = `O PC de ${nick} não respondeu em 3 min (a sala está aberta lá?).`;
+    }, 180_000) };
+    for (const x of $$('[data-remoto]')) x.disabled = true;
+    $('#remoto-status').textContent = `${acao === 'parar' ? 'Tirando' : 'Ligando'} ${NOME_REMOTO[maquina]} no PC de ${nick}…${maquina === 'ps5' && acao !== 'parar' ? ' (o PS5 pode levar até 1 min para acordar)' : ''}`;
+  });
+});
+$('#remoto-pc').addEventListener('change', (e) => {
+  try { localStorage.setItem(REMOTO_PC, e.target.value); } catch { /* sem armazenamento */ }
+  renderRemoto();
+});
+$('#remoto-pc').closest('details').addEventListener('toggle', (e) => { if (e.target.open) carregarPcsRemotos(); });
+setInterval(() => { if (remotoAberto()) carregarPcsRemotos(); }, 5000);
+// a resposta do PC chegou ('tela-resposta' com jogo: true)
+function remotoResposta(ok, texto, de) {
+  if (!remotoEsperando) return;
+  clearTimeout(remotoEsperando.t);
+  remotoEsperando = null;
+  renderRemoto();
+  $('#remoto-status').textContent = `${ok ? '✓' : '✕'} PC de ${de}: ${texto}`;
 }
 
 // /pix do dono e /tela: completam o comando, a ação e o nome de quem está na sala. Setas escolhem, Tab ou
