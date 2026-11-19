@@ -11,6 +11,8 @@
 // no PC com o mouse preso, P ou Esc. As opções do modo jogo (PC) e o painel do toque (celular) têm
 // "Tutorial do controle" para ver de novo.
 
+import { mapaTeclas, nomeEntrada, teclasDe, visiveis } from './mapa-teclas.js';
+
 const OK_MS = 650; // o "Isso!" antes do próximo passo
 
 // botões no mapa padrão do navegador (o bit i do estado do controle)
@@ -46,7 +48,7 @@ const apertou = (...nomes) => (e, novos, p) => {
   for (const n of nomes) if (novos & (1 << B[n])) p.visto.add(n);
   return nomes.every((n) => p.visto.has(n));
 };
-const PASSOS_PC = [
+const PASSOS_PC_PADRAO = [
   {
     tit: 'Prenda o mouse no jogo',
     txt: 'Clique na imagem do jogo. O mouse some e passa a ser o controle.',
@@ -88,6 +90,39 @@ const PASSOS_PC = [
     fim: true,
   },
 ];
+// Os passos do PC seguem o mapa de teclas (mapa-teclas.js): o passo de uma ação que a pessoa trocou
+// vira "aperte a tecla dela"; ação sem tecla nenhuma não tem passo.
+const ID = { xis: 'b0', bol: 'b1', qua: 'b2', tri: 'b3', l1: 'b4', r1: 'b5', l2: 'b6', r2: 'b7' };
+const MOUSE_PARTE = { MouseLeft: 'esq', MouseRight: 'dir', RodaBaixo: 'baixo', RodaCima: 'cima' };
+const desenhoDe = (id) => {
+  const es = visiveis(id).slice(0, 3);
+  return es.map((e) => (MOUSE_PARTE[e] ? mouse(MOUSE_PARTE[e]) : `<kbd class="tut-k">${nomeEntrada(e)}</kbd>`)).join('<span class="tut-mais">/</span>');
+};
+function passosPc() {
+  const p = PASSOS_PC_PADRAO;
+  const tem = (id) => mapaTeclas.entradas(id).length > 0;
+  const um = (nome, glifo) => (tem(ID[nome])
+    ? { tit: `${teclasDe(ID[nome])} = ${glifo.replace(/<[^>]+>/g, '')}`, txt: `Aperte <b>${teclasDe(ID[nome])}</b>.`, de: desenhoDe(ID[nome]), para: glifo, feito: apertou(nome) }
+    : null);
+  const passo = (padrao, ...nomes) => (nomes.every((n) => mapaTeclas.padrao(ID[n])) ? [padrao] : nomes.map((n) => um(n, GLIFO[n])));
+  const andar = ['ly-', 'lx-', 'ly+', 'lx+'];
+  const andarPadrao = andar.every((id) => mapaTeclas.padrao(id));
+  const ks = andar.map((id) => mapaTeclas.entradas(id).map(nomeEntrada)[0]);
+  const fim = [['b8', 'Create'], ['b9', 'Options'], ['b16', 'PS'], ['b10', 'L3'], ['b11', 'R3'], ['b12', '↑'], ['b13', '↓'], ['b14', '←'], ['b15', '→']]
+    .filter(([id]) => tem(id)).map(([id, n]) => `<b>${teclasDe(id)}</b> ${n}`).join(' · ');
+  const xis = tem('b0') ? `${teclasDe('b0')} (✕)` : 'P';
+  return [
+    p[0],
+    ...passo(p[1], 'xis'), ...passo(p[2], 'bol'), ...passo(p[3], 'qua'), ...passo(p[4], 'tri'),
+    ...passo(p[5], 'l2', 'r2'), ...passo(p[6], 'l1', 'r1'),
+    andarPadrao ? p[7] : ks.every(Boolean) ? { ...p[7], tit: `${ks.join(' ')} = andar`, txt: `Ande com <b>${ks.join(' ')}</b>.`, de: teclas(...ks) } : null,
+    p[8],
+    mapaTeclas.padrao('tp') ? p[9] : tem('tp') ? { ...p[9], tit: `${teclasDe('tp')} + mouse = touchpad`, txt: `<b>Segure ${teclasDe('tp')}</b> e mexa o mouse: é o dedo no touchpad.`, de: desenhoDe('tp') + '<span class="tut-mais">+</span>' + mouse('mover') } : null,
+    mapaTeclas.personalizado()
+      ? { ...p[10], txt: `Mais: ${fim}.<br>Aperte ${xis} para começar a jogar.`, de: desenhoDe('b0') || p[10].de }
+      : p[10],
+  ].filter(Boolean);
+}
 const PASSOS_TOQUE = [
   { tit: 'Toque no ✕', txt: 'Toque no botão que está <b>piscando</b>.', para: GLIFO.xis, alvos: ['xis'], feito: apertou('xis') },
   { tit: 'Toque no ○', txt: 'Agora o ○.', para: GLIFO.bol, alvos: ['bol'], feito: apertou('bol') },
@@ -137,7 +172,7 @@ export class TutorialControle {
     if (this.modo === modo) return;
     if (this.modo) this.fechar(false);
     this.modo = modo;
-    this.passos = (modo === 'pc' ? PASSOS_PC : PASSOS_TOQUE).map((p) => ({ ...p, visto: new Set() }));
+    this.passos = (modo === 'pc' ? passosPc() : PASSOS_TOQUE).map((p) => ({ ...p, visto: new Set() }));
     this.i = 0;
     this.antes = 0;
     this.fimDesceu = false;

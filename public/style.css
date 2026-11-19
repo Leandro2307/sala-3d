@@ -4640,3 +4640,104 @@ body:not(.touch) #controls-help { width: 272px; }
 #help-extra { max-height: min(46vh, 360px); overflow: hidden auto; scrollbar-width: thin; padding: 8px 6px 0; margin: 8px -6px 0; }
 #help-extra .hk { margin: 0; }
 body.touch :is(.hk-lista, #help-extra, #help-mais-btn) { display: none !important; }
+
+/* ============================================================ mapear teclas do PC no controle (mapa-teclas.js) */
+/* dentro do #focus (vai junto para a tela cheia), por cima do jogo e do tutorial */
+#mapa-teclas {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  place-items: center;
+  padding: 16px;
+  background: rgba(5, 6, 9, 0.72);
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+}
+#mapa-teclas[hidden] { display: none; }
+.mt-card {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  gap: 10px;
+  width: min(1080px, 100%);
+  max-height: calc(100% - 8px);
+  padding: 16px 18px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 18px;
+  background: rgba(12, 14, 20, 0.96);
+  color: #f1f3f8;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+  outline: none;
+  overflow: hidden;
+}
+.mt-topo { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.mt-topo h2 { margin: 0; font-size: 18px; }
+.mt-topo h2 small { margin-left: 6px; padding: 2px 8px; border-radius: 999px; background: rgba(255, 255, 255, 0.1); color: #9aa3b5; font-size: 12px; font-weight: 600; vertical-align: middle; }
+.mt-x { width: 34px; height: 34px; border: 0; border-radius: 10px; background: rgba(255, 255, 255, 0.08); color: inherit; font-size: 15px; cursor: pointer; }
+.mt-x:hover { background: rgba(255, 255, 255, 0.16); }
+.mt-sub { margin: 0; color: #9aa3b5; font-size: 13px; line-height: 1.45; }
+.mt-corpo { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 16px; min-height: 0; }
+.mt-desenho { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.mt-svg { width: 100%; height: auto; max-height: 52vh; user-select: none; }
+.mt-svg .mt-casco { fill: rgba(255, 255, 255, 0.05); stroke: rgba(255, 255, 255, 0.18); stroke-width: 2; }
+.mt-svg .mt-base { fill: rgba(0, 0, 0, 0.35); stroke: rgba(255, 255, 255, 0.14); stroke-width: 1.5; }
+.mt-p { cursor: pointer; }
+.mt-p circle, .mt-p rect, .mt-p path { fill: #232836; stroke: rgba(255, 255, 255, 0.28); stroke-width: 1.5; transition: fill 0.1s, stroke 0.1s; }
+.mt-p:hover circle, .mt-p:hover rect, .mt-p:hover path,
+.mt-p.mt-sob circle, .mt-p.mt-sob rect, .mt-p.mt-sob path { fill: #34405a; stroke: #8ab4ff; }
+.mt-p.mt-on circle, .mt-p.mt-on rect, .mt-p.mt-on path { fill: #34d399; stroke: #a7f3d0; }
+.mt-p.mt-escolhida circle, .mt-p.mt-escolhida rect, .mt-p.mt-escolhida path { fill: #f59e0b; stroke: #fde68a; }
+.mt-svg text { font-family: inherit; pointer-events: none; }
+.mt-g, .mt-t-nome { text-anchor: middle; }
+.mt-g { fill: #f1f3f8; font-size: 15px; font-weight: 700; }
+.mt-g-p { font-size: 11px; font-weight: 600; fill: #c9cfdb; }
+.mt-t { fill: #8ab4ff; font-size: 12.5px; font-weight: 700; }
+.mt-t-nome { fill: #9aa3b5; font-size: 11px; font-weight: 600; }
+.mt-t-vazio { display: none; }
+.mt-aviso { min-height: 20px; margin: 0; color: #a7f3d0; font-size: 13px; line-height: 1.4; }
+.mt-aviso.mt-alerta { color: #fcd34d; }
+.mt-rolar { min-height: 0; overflow-y: auto; padding-right: 4px; }
+.mt-grupo { margin: 12px 0 6px; color: #9aa3b5; font-size: 11.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+.mt-grupo:first-child { margin-top: 0; }
+.mt-lista { display: grid; gap: 4px; }
+.mt-linha {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 30px;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 4px 4px 6px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+}
+.mt-linha.mt-sob, .mt-linha:hover { border-color: rgba(138, 180, 255, 0.45); background: rgba(138, 180, 255, 0.08); }
+.mt-linha.mt-mudou { box-shadow: inset 3px 0 0 #f59e0b; }
+.mt-qual { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 4px; border: 0; background: none; color: inherit; text-align: left; cursor: pointer; font: inherit; }
+.mt-glifo { flex: none; min-width: 34px; padding: 3px 7px; border-radius: 8px; background: #232836; font-size: 13px; text-align: center; }
+.mt-nome { overflow: hidden; color: #c9cfdb; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.mt-teclas { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
+.mt-k { display: inline-flex; align-items: center; gap: 2px; padding: 3px 4px 3px 8px; border: 1px solid rgba(255, 255, 255, 0.2); border-bottom-width: 3px; border-radius: 7px; background: #1a1e29; font-size: 12.5px; font-weight: 700; white-space: nowrap; }
+.mt-k button { width: 18px; height: 18px; padding: 0; border: 0; border-radius: 5px; background: none; color: #9aa3b5; font-size: 14px; line-height: 1; cursor: pointer; }
+.mt-k button:hover { background: rgba(242, 85, 90, 0.25); color: #fda4a7; }
+.mt-vazio { color: #6b7385; font-size: 12px; font-style: italic; }
+.mt-mais { width: 30px; height: 30px; border: 1px dashed rgba(255, 255, 255, 0.25); border-radius: 8px; background: none; color: #9aa3b5; font-size: 16px; cursor: pointer; }
+.mt-mais:hover { border-color: #8ab4ff; color: #f1f3f8; }
+.mt-rodape { display: flex; justify-content: flex-end; gap: 8px; }
+.mt-pegar { position: absolute; inset: 0; display: grid; place-items: center; padding: 16px; background: rgba(5, 6, 9, 0.7); }
+.mt-pegar[hidden] { display: none; }
+.mt-pegar-card { display: grid; gap: 12px; width: min(380px, 100%); padding: 18px; border: 1px solid #f59e0b; border-radius: 16px; background: #12151d; text-align: center; }
+.mt-pegar-tit { margin: 0; font-size: 15px; }
+.mt-pegar-tit small { display: block; margin-top: 2px; color: #9aa3b5; font-size: 12px; }
+.mt-zona { display: grid; place-items: center; min-height: 120px; padding: 12px; border: 2px dashed rgba(245, 158, 11, 0.6); border-radius: 12px; background: rgba(245, 158, 11, 0.06); color: #fde68a; font-size: 16px; font-weight: 700; line-height: 1.5; cursor: crosshair; outline: none; animation: mt-pisca 1.2s ease-in-out infinite; }
+.mt-zona small { color: #9aa3b5; font-size: 12px; font-weight: 500; }
+@keyframes mt-pisca { 50% { border-color: rgba(245, 158, 11, 0.2); } }
+.mt-pegar-botoes { display: flex; justify-content: center; gap: 8px; }
+@media (max-width: 760px) {
+  .mt-card { display: flex; flex-direction: column; overflow-y: auto; }
+  .mt-corpo { grid-template-columns: minmax(0, 1fr); }
+  .mt-rolar { overflow: visible; }
+  .mt-linha { grid-template-columns: minmax(0, 1fr) 30px; }
+  .mt-teclas { grid-column: 1 / -1; grid-row: 2; justify-content: flex-start; }
+  .mt-svg { max-height: 32vh; }
+}

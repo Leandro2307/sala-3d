@@ -29,7 +29,8 @@ import { AvisoDoSite } from './aviso-site.js';
 import { ToqueJogo, jogoDaJanela, LAYOUTS, layoutDoTitulo } from './toque-jogo.js';
 import { ControleFisico } from './gamepad-jogo.js';
 import { PadVirtual } from './pad-virtual.js';
-import { TecladoPad, DICA_TECLADO } from './teclado-pad.js';
+import { TecladoPad } from './teclado-pad.js';
+import { MapaTeclasPainel, dicaTeclado } from './mapa-teclas.js';
 import { TutorialControle } from './tutorial-controle.js';
 import { TurboEnvio, TurboRecebe, TTL_MS, LISO_PCT, LISO_MAX } from './turbo.js';
 import { opcoesJogo, LISO_MS, PRESETS, OPCOES_DO_PRESET, htmlPresets, marcarPresets } from './jogo-opcoes.js';
@@ -4766,7 +4767,25 @@ padVirtual.onErroTremor = (erro) => diagJogo.evento('o controle não aceitou o t
 // Tutorial do controle (tutorial-controle.js): toda vez que entra no modo jogo numa tela de PS5.
 // Aberto, o teclado e o mouse ficam todos com ele: nada vai para o jogo (P ou Esc pulam).
 const tutorialControle = new TutorialControle({ raiz: $('#tut-controle'), pad: padVirtual, toqueRaiz: $('#toque-jogo') });
+// Mapear teclas (mapa-teclas.js): pelas Opções do modo jogo. Aberto, o teclado e o mouse são do painel
+// (nada vai para o jogo) e o que o teclado segurava no controle solta.
+const mapaPainel = new MapaTeclasPainel({
+  raiz: $('#mapa-teclas'),
+  onAbriu: () => tecladoPad.soltarTudo(),
+  onFechou: () => {
+    tecladoPad.soltarTudo();
+    if (controle.jogo) toast('Teclas salvas neste navegador. Clique na imagem para voltar a jogar.', 'success', 4000);
+  },
+});
+$('#jogo-mapear').addEventListener('click', (e) => {
+  e.currentTarget.blur();
+  $('#jogo-op-pop').hidden = true;
+  tutorialControle.fechar(true);
+  const t = state.focus?.kind === 'share' ? acharTela(state.focus.key) : null;
+  mapaPainel.abrir(layoutDoTitulo(t?.share?.titulo) === 'switch' ? 'switch' : 'ps5');
+});
 controle.paraPad = (ev) => {
+  if (mapaPainel.aberto) return true;
   if (!tutorialControle.ativo) return tecladoPad.evento(ev);
   if (!tutorialControle.tecla(ev)) tecladoPad.evento(ev);
   return true;
@@ -4783,6 +4802,9 @@ function atualizarBotaoTouchpad() {
   b.hidden = !temTouchpadHid() || !(touchpad.ativo || telaPs5);
   b.textContent = touchpad.ligado ? 'DualSense ligado ✓ (gatilhos, vibração e touchpad)' : 'Usar o DualSense (gatilhos, vibração e touchpad)';
   b.disabled = touchpad.ligado;
+  // Mapear teclas: no PC, numa tela de PS5 ou de Switch (onde o teclado vira o controle)
+  const lay = t ? (t.share?.ps5 ? 'ps5' : layoutDoTitulo(t.share?.titulo)) : null;
+  $('#jogo-mapear').hidden = isTouch || !LAYOUTS[lay]?.virtual;
 }
 $('#jogo-touchpad').addEventListener('click', async (e) => {
   e.currentTarget.blur();
@@ -4833,11 +4855,14 @@ controle.onJogo = (video, key) => {
   if (layoutPc && LAYOUTS[layoutPc]?.virtual) {
     padVirtual.acordar();
     tecladoPad.ligar(layoutPc);
-    if (DICA_TECLADO[layoutPc] && !tutorialDoPs5(key)) toast(`Teclado e mouse viram o controle. ${DICA_TECLADO[layoutPc]}`, 'info', 12000);
+    const dica = dicaTeclado(layoutPc);
+    if (dica && !tutorialDoPs5(key)) toast(`Teclado e mouse viram o controle. ${dica}`, 'info', 12000);
   } else tecladoPad.desligar();
   $('#jogo-tutorial').hidden = layoutPc !== 'ps5';
-  if (!video) tutorialControle.fechar(false);
-  else if (isTouch) tutorialDoPs5(key);
+  if (!video) {
+    tutorialControle.fechar(false);
+    mapaPainel.fechar();
+  } else if (isTouch) tutorialDoPs5(key);
   if (!video) padVirtual.desligar(); // depois do toque e do controle: o último estado é tudo solto
   // o modo jogo desligou por fora do botão (a tela fechou, saiu do foco): sai da tela cheia também
   if (!video && !isTouch && document.body.classList.contains('jogo-pc')) jogoNoPc(false);

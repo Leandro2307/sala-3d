@@ -962,6 +962,8 @@
     <div id="toque-jogo" hidden></div>
     <!-- modo jogo no PS5: o tutorial do controle na primeira vez (ver tutorial-controle.js) -->
     <div id="tut-controle" hidden></div>
+    <!-- modo jogo no PC: o painel para trocar a tecla de cada botão do controle (ver mapa-teclas.js) -->
+    <div id="mapa-teclas" hidden></div>
     <!-- modo jogo: o selo de desempenho de quem joga (qps, atraso, banda; ver jogoSelo no main.js) -->
     <div id="jogo-selo" hidden></div>
     <!-- lan house: de quem é a vez na máquina desta tela e quanto falta (ver mostrarVezLan) -->
@@ -997,6 +999,7 @@
             <label class="jogo-op-lossless"><span>Lossless Scaling neste PC <small>(para o desempenho contar os quadros gerados)</small></span>
               <select id="jogo-lossless"><option value="0">Não uso</option><option value="2">×2</option><option value="3">×3</option><option value="4">×4</option></select></label>
             <button type="button" class="secondary small" id="jogo-touchpad" hidden>Usar o DualSense (gatilhos, vibração e touchpad)</button>
+            <button type="button" class="secondary small" id="jogo-mapear" hidden>Mapear teclas (qual tecla é cada botão)</button>
             <button type="button" class="secondary small" id="jogo-tutorial" hidden>Tutorial do controle (teclado e mouse)</button>
           </span>
         </span>

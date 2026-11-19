@@ -17,30 +17,24 @@
 //   fica onde o mouse deixou (até GIRO_MAX); G de novo: o controle volta deitado e o mouse, para a
 //   câmera. Também só chega no PS5 direto (movimento.js, o campo m do controle virtual).
 //
-// Tecla fora da lista continua indo como tecla (F11 do emulador, por exemplo). O mouse vai todo
-// para o controle.
+// Isso é o padrão: quem joga troca qualquer tecla no painel "Mapear teclas" (mapa-teclas.js, nas
+// Opções do modo jogo) e o que vale aqui é sempre o mapa de lá.
+//
+// Tecla sem ação no mapa continua indo como tecla (F11 do emulador, por exemplo). O mouse vai todo
+// para o controle (botão do mouse sem ação não faz nada).
 
 import { Fusao, inclinado } from './movimento.js';
+import { mapaTeclas, EIXO, MOUSE } from './mapa-teclas.js';
 
-const BOTAO_TECLA = {
-  Space: 0, Enter: 1, KeyF: 3, ShiftLeft: 4, ShiftRight: 4, ControlLeft: 5, ControlRight: 5,
-  KeyQ: 6, KeyE: 7, Tab: 8, Escape: 9, KeyV: 10, KeyH: 16,
-  ArrowUp: 12, ArrowDown: 13, ArrowLeft: 14, ArrowRight: 15,
-};
-const BOTAO_MOUSE = { left: 0, right: 1, middle: 11, x1: 4, x2: 5 };
 // roda: TRAVA o botão. Um dente para baixo aperta □ (para cima △) e deixa apertado; o próximo dente,
 // para qualquer lado, solta. A roda só manda pulsos, não dá para "segurar" nela — antes o botão soltava
 // 150 ms depois do último dente e só ficava apertado rolando sem parar. Dentes seguidos (menos de
 // RODA_PAUSA_MS entre um e outro) contam como um gesto só: rolar dois dentes sem querer não destrava.
-const RODA_BAIXO = 2;
-const RODA_CIMA = 3;
 const RODA_PAUSA_MS = 250;
 // touchpad pelo mouse (Alt segurado): quantos pixels de mouse atravessam o touchpad de ponta a ponta
 const TP_LARGURA_PX = 800;
 const TP_ALTURA_PX = 450;
 const TP_CLIQUE = 17;
-const ALT = new Set(['AltLeft', 'AltRight']);
-const STICK = { KeyW: ['ly', -1], KeyS: ['ly', 1], KeyA: ['lx', -1], KeyD: ['lx', 1] };
 
 // inclinação pelo mouse (G): graus por pixel (× a sensibilidade das opções), o máximo para cada lado
 // e a velocidade de volta ao deitado (graus por segundo) quando desliga
@@ -58,11 +52,6 @@ const VEL_CHEIA = 1.6;
 // Toque rápido numa tecla (ou o Esc que solta o ponteiro, que desce e sobe junto): o botão fica
 // apertado pelo menos MIN_MS, senão o emulador podia nem ver.
 const MIN_MS = 60;
-
-export const DICA_TECLADO = {
-  switch: 'WASD anda, o mouse mexe a câmera. Clique esquerdo B · direito A · roda para baixo Y · para cima X (trava até o próximo dente) · Shift L · Ctrl R · Q ZL · E ZR · Tab − · Esc + · H Home · setas: direcional.',
-  ps5: 'WASD anda, o mouse mexe a câmera. Clique esquerdo ✕ · direito ○ · roda para baixo □ · para cima △ (trava até o próximo dente) · Shift L1 · Ctrl R1 · Q L2 · E R2 · Alt + mouse: touchpad (Alt + clique afunda) · G: o mouse inclina o controle (giroscópio) · Tab Create · Esc Options · H PS · setas: direcional.',
-};
 
 export class TecladoPad {
   // sens(): a sensibilidade do mouse escolhida nas opções do modo jogo (1 = VEL_CHEIA)
@@ -83,7 +72,8 @@ export class TecladoPad {
     this.giroTick = 0;
     if (this.giro) this.pad.movimento?.('teclado', null);
     this.giro = null; // a inclinação pelo mouse (G): { ligado, r, p, dr, dp, t, fusao }
-    this.gSegurado = false;
+    this.gSegurado = new Set(); // as entradas da inclinação seguradas (a tecla segurada repete o "down")
+    this.altSegura = new Set(); // as entradas do touchpad seguradas
     for (const t of this.timers?.values() || []) clearTimeout(t);
     this.rodaUlt = 0; // quando veio o último dente da roda
     this.rodaB = 0; // o bit do botão que a roda está travando agora
@@ -93,7 +83,7 @@ export class TecladoPad {
     this.timers = new Map(); // botão -> soltura adiada (MIN_MS)
     this.desceu = new Map(); // botão -> quando desceu
     this.fontes = new Map(); // botão -> quantas teclas/botões o seguram (Shift esq. e dir.)
-    this.direcoes = new Set(); // códigos de WASD apertados
+    this.eixos = new Map(); // direção do analógico (ly-, rx+...) -> as entradas que seguram
     this.b = 0;
     this.mov = []; // [t, dx, dy] da última JANELA_MS
     this.rx = 0;
@@ -142,36 +132,50 @@ export class TecladoPad {
           this.botao(quem, TP_CLIQUE, false);
           return true;
         }
-        const i = BOTAO_MOUSE[ev.b];
-        if (i !== undefined) this.botao(quem, i, ev.a === 'down');
+        const ent = MOUSE[ev.b];
+        if (ent) this.acionar(quem, mapaTeclas.acao(ent), ev.a === 'down');
       }
       return true;
     }
     if (ev.t === 'wheel') {
-      if (ev.dy && document.pointerLockElement) this.roda(ev.dy > 0 ? RODA_BAIXO : RODA_CIMA);
+      if (ev.dy && document.pointerLockElement) {
+        const id = mapaTeclas.acao(ev.dy > 0 ? 'RodaBaixo' : 'RodaCima');
+        if (/^b\d+$/.test(id || '')) this.roda(Number(id.slice(1)));
+      }
       return true;
     }
     if (ev.t !== 'tecla') return false;
-    const desce = ev.a === 'down';
-    if (ALT.has(ev.code)) {
-      this.alt(desce);
+    return this.acionar(ev.code, mapaTeclas.acao(ev.code), ev.a === 'down');
+  }
+
+  // a entrada (tecla ou botão do mouse) desceu/subiu e faz a ação id do mapa. false: não virou controle
+  acionar(quem, id, desce) {
+    if (!id) return false;
+    if (id === 'tp') {
+      if (desce) this.altSegura.add(quem);
+      else this.altSegura.delete(quem);
+      this.alt(this.altSegura.size > 0);
       return true;
     }
-    if (ev.code === 'KeyG' && this.layout === 'ps5') {
-      if (desce && !this.gSegurado) this.alternarGiro(); // a tecla segurada repete o "down"
-      this.gSegurado = desce;
+    if (id === 'giro') {
+      // só no PS5; no Switch a tecla vai como tecla
+      if (this.layout !== 'ps5') return false;
+      if (desce && !this.gSegurado.has(quem)) this.alternarGiro();
+      if (desce) this.gSegurado.add(quem);
+      else this.gSegurado.delete(quem);
       return true;
     }
-    const s = STICK[ev.code];
-    if (s) {
-      if (desce) this.direcoes.add(ev.code);
-      else this.direcoes.delete(ev.code);
+    if (EIXO[id]) {
+      const segura = this.eixos.get(id) || new Set();
+      if (desce) segura.add(quem);
+      else segura.delete(quem);
+      this.eixos.set(id, segura);
       this.enviar();
       return true;
     }
-    const i = BOTAO_TECLA[ev.code];
-    if (i === undefined) return false;
-    this.botao(ev.code, i, desce);
+    const m = /^b(\d+)$/.exec(id);
+    if (!m) return false;
+    this.botao(quem, Number(m[1]), desce);
     return true;
   }
 
@@ -321,13 +325,18 @@ export class TecladoPad {
   }
 
   enviar() {
-    const tem = (c) => (this.direcoes.has(c) ? 1 : 0);
-    let lx = tem('KeyD') - tem('KeyA');
-    let ly = tem('KeyS') - tem('KeyW');
+    const tem = (id) => (this.eixos.get(id)?.size ? 1 : 0);
+    let lx = tem('lx+') - tem('lx-');
+    let ly = tem('ly+') - tem('ly-');
     if (lx && ly) { lx *= Math.SQRT1_2; ly *= Math.SQRT1_2; }
+    // o analógico direito pelo teclado soma com o mouse
+    let kx = tem('rx+') - tem('rx-');
+    let ky = tem('ry+') - tem('ry-');
+    if (kx && ky) { kx *= Math.SQRT1_2; ky *= Math.SQRT1_2; }
+    const preso = (v) => Math.max(-1, Math.min(1, v));
     const b = this.b | this.rodaB;
     this.pad.definir('teclado', {
-      b, lx, ly, rx: this.rx, ry: this.ry,
+      b, lx, ly, rx: preso(this.rx + kx), ry: preso(this.ry + ky),
       lt: b & (1 << 6) ? 1 : 0, rt: b & (1 << 7) ? 1 : 0,
     });
   }
