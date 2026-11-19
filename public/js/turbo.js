@@ -84,6 +84,13 @@ const FILA_ALTA = 30; // ms de fila (viagem p90 − a menor) que fazem a banda d
 // 10 Mbps até o fim.
 const FILA_BAIXA = 24;
 const FILA_MUITO_ALTA = 150; // ms de fila: a banda desce 30% de uma vez (e não 15%)
+// Fila alta só é falta de banda se chegou lá menos do que saiu daqui: com o que chegou nos últimos ~2 s
+// acima desta fração do que saiu, a rede levou tudo e a fila foi um tranco do Wi-Fi (parou e mandou
+// tudo de uma vez), que banda menor não evita. No relatório de 2026-11-19 13:18 (lokao → lokao16001,
+// PS5 em 1080p) a fila pulava para 80–500 ms a 2,5 Mbps tanto quanto a 6; chegava lá 1,79 de 1,79 Mbps
+// mandados, e cada tranco cortava a banda, que ficou no piso (2,5 de 10) a sessão inteira enquanto o
+// vídeo normal, no mesmo Wi-Fi e na mesma hora, passava 9,6 Mbps.
+const ENTREGA_OK = 0.85;
 // O piso da banda (bps) de cada altura. Era 60% da banda do tamanho (6 Mbps em 1080p, 3,6 em 720p): no
 // relatório de 2026-11-18 (lorrel, 12 min em 720p, PC no Wi-Fi de 2,4 GHz) a banda ficou presa nos 3,6
 // com a fila cheia e 2.883 quadros pulados — a rede levava menos que o piso.
@@ -300,9 +307,14 @@ export function bandaInicial({ max, min, rede = null, desconhecida, kbps = true 
 // de uma vez (um Wi-Fi parado por um instante não é a banda). Abaixo de FILA_BAIXA em 4 avisos (2 s):
 // sobe 10% (15% abaixo da metade da máxima: volta mais rápido depois de um aperto). Muda só de 3% para
 // cima, ou para encostar no piso ou no teto.
-export function decidirBanda({ atual, min, max, fila, a, rxEscala = 1 }) {
+// entrega (entregaDe): o que chegou ÷ o que saiu; com ela em ENTREGA_OK ou mais, a fila alta não desce
+// a banda (tranco do Wi-Fi, ver ENTREGA_OK). Sem ela (quem joga numa versão sem rx), como antes.
+export function decidirBanda({ atual, min, max, fila, a, rxEscala = 1, entrega = null }) {
   let nova = atual;
-  if (a.altas >= 2) {
+  if (a.altas >= 2 && entrega != null && entrega >= ENTREGA_OK) {
+    a.altas = 0;
+    a.trancos = (a.trancos || 0) + 1;
+  } else if (a.altas >= 2) {
     nova = atual * (fila > FILA_MUITO_ALTA ? 0.7 : 0.85);
     const chegou = a.rxs?.length ? Math.max(...a.rxs) * rxEscala : null;
     if (chegou) nova = Math.min(nova, chegou * 0.9);
@@ -315,6 +327,16 @@ export function decidirBanda({ atual, min, max, fila, a, rxEscala = 1 }) {
   nova = Math.min(max, Math.max(min, nova));
   const encosta = nova !== atual && (nova === max || nova === min);
   return encosta || Math.abs(nova - atual) >= atual * 0.03 ? Math.round(nova) : atual;
+}
+
+// O que chegou lá ÷ o que saiu daqui nos últimos avisos (a.par: [{ rx, tx }] em kbps), ou null sem conta
+// que sirva (quem joga antigo não manda rx; quase nada saiu: tela parada).
+export function entregaDe(par) {
+  if (!par?.length) return null;
+  let rx = 0;
+  let tx = 0;
+  for (const p of par) { rx += p.rx; tx += p.tx; }
+  return tx >= 200 * par.length ? rx / tx : null;
 }
 
 // ------------------------------------------------------------------ SPS sem espera para reordenar
@@ -580,7 +602,7 @@ export class TurboEnvio {
     // a tela saiu do ar (a cópia da trilha não acaba sozinha com ela)
     original.addEventListener('ended', () => this.desligar(id), { once: true });
     const s = { id, key, canal, chave: true, quadro: 0, enc: null, cfg: null, config: null, banda: 0, trilha: original.clone(), parar: false, pulados: 0, enviados: 0,
-      cfgEnviada: null, ajuste: { altas: 0, baixas: 0, mudou: 0, ultima: null }, // ajustarBanda
+      cfgEnviada: null, ajuste: { altas: 0, baixas: 0, mudou: 0, ultima: null, tx: 0, trancos: 0 }, // ajustarBanda
       chaveId: 0, chaveEm: 0, // o último quadro-chave mandado (pedidoDeChave)
       tempos: new Map(), conta: { enviados: 0, bytes: 0, pulados: 0, fila: 0, cod: [], chaves: 0, chaveMax: 0, ignorados: 0, ultimo: performance.now() },
       // a fila de envio a cada 100 ms (a maior vista em cada um, em KB) e os pulados em cada um: mostra
@@ -620,7 +642,7 @@ export class TurboEnvio {
   // PC direto (fonte.banda): a mesma coisa, mas a banda da ponte (a placa daqui) acompanha a fila.
   ligarPs5(id, canal, key, fonte, { versao, som, somMix = null, rede = null, pedido = null }) {
     const s = { id, key, canal, chave: true, quadro: 0, enc: null, cfg: null, config: null, banda: 0, trilha: null, parar: false, pulados: 0, enviados: 0,
-      cfgEnviada: null, ajuste: { altas: 0, baixas: 0, mudou: 0, ultima: null }, chaveId: 0, chaveEm: 0, ps5: fonte,
+      cfgEnviada: null, ajuste: { altas: 0, baixas: 0, mudou: 0, ultima: null, tx: 0, trancos: 0 }, chaveId: 0, chaveEm: 0, ps5: fonte,
       tempos: new Map(), conta: { enviados: 0, bytes: 0, pulados: 0, fila: 0, cod: [], chaves: 0, chaveMax: 0, ignorados: 0, ultimo: performance.now() },
       serie: { fila: [], pulados: [] }, rajada: 0, maiorRajada: 0, espera: [], pulosFila: [] };
     this.sessoes.set(id, s);
@@ -933,21 +955,32 @@ export class TurboEnvio {
     a.ultima = Math.round(fila * 10) / 10;
     const rx = Number(f.rx);
     if (Number.isFinite(rx) && rx > 0) guardar((a.rxs ??= []), rx, 4); // os últimos 2 s (quem joga antigo não manda)
+    // o que saiu daqui desde o aviso anterior (kbps), ao lado do que chegou lá no mesmo tempo
+    const agora = performance.now();
+    const tx = a.txEm ? (a.tx * 8) / Math.max(1, agora - a.txEm) : null;
+    a.tx = 0;
+    a.txEm = agora;
+    if (tx != null && Number.isFinite(rx) && rx >= 0) guardar((a.par ??= []), { rx, tx }, 4);
+    const entrega = Number.isFinite(rx) ? entregaDe(a.par) : null;
+    a.entrega = entrega;
     a.altas = fila > FILA_ALTA ? a.altas + 1 : 0;
     // Entre FILA_BAIXA e FILA_ALTA a conta para subir fica onde está: zerar ali (como era) quase nunca
     // deixava juntar 4 seguidos — no relatório de 2026-11-03 16:13, 22 de 82 avisos caíram entre 24 e
-    // 30 ms (Wi-Fi), e a imagem recebida foi de ~6,9 para ~4,8 Mbps sem voltar.
-    a.baixas = fila < FILA_BAIXA ? a.baixas + 1 : fila > FILA_ALTA ? 0 : a.baixas;
+    // 30 ms (Wi-Fi), e a imagem recebida foi de ~6,9 para ~4,8 Mbps sem voltar. Um tranco do Wi-Fi (fila
+    // alta com a rede levando tudo, ver ENTREGA_OK) também não zera: senão a banda nunca sobe num Wi-Fi
+    // que tranca a cada poucos segundos.
+    const tranco = entrega != null && entrega >= ENTREGA_OK;
+    a.baixas = fila < FILA_BAIXA ? a.baixas + 1 : fila > FILA_ALTA && !tranco ? 0 : a.baixas;
     if (!s.enc && s.ps5 && !s.ps5.banda) return this.vigiarRepasse(s, fila);
     // PC direto (pc-direto.js): os quadros vêm da placa pela ponte; a banda muda lá (fonte.banda, em kbps)
     if (!s.enc && s.ps5?.banda) {
       const b = s.ps5.banda;
-      const nova = decidirBanda({ atual: b.atual, min: b.min ?? PONTE_MIN_KBPS, max: b.max, fila, a });
+      const nova = decidirBanda({ atual: b.atual, min: b.min ?? PONTE_MIN_KBPS, max: b.max, fila, a, entrega });
       if (nova !== b.atual) { b.mudar(nova); a.mudou++; }
       return;
     }
     if (!s.enc || s.enc.state !== 'configured' || !s.config) return;
-    const nova = decidirBanda({ atual: s.banda, min: bandaMinDe(s.cfg.h), max: bandaDe(s.cfg.h), fila, a, rxEscala: 1000 });
+    const nova = decidirBanda({ atual: s.banda, min: bandaMinDe(s.cfg.h), max: bandaDe(s.cfg.h), fila, a, rxEscala: 1000, entrega });
     if (nova === s.banda) return;
     try {
       s.config = { ...s.config, bitrate: Math.round(nova) };
@@ -1081,6 +1114,7 @@ export class TurboEnvio {
       s.enviados++;
       s.conta.enviados++;
       s.conta.bytes += dados.length + total * cab;
+      s.ajuste.tx += dados.length + total * cab; // o que saiu, para comparar com o que chegou lá (entregaDe)
     } catch {
       s.chave = true; // a mensagem não coube na fila: o próximo quadro recomeça do zero
     }
@@ -1128,6 +1162,9 @@ export class TurboEnvio {
       lan: s.rede ? !!s.rede.lan : null,
       spsReescrito: s.spsReescrito ?? null,
       trocasDeBanda: s.ajuste.mudou,
+      // o que chegou lá ÷ o que saiu (últimos ~2 s) e as filas altas que não baixaram a banda por isso
+      entrega: s.ajuste.entrega != null ? Math.round(s.ajuste.entrega * 100) / 100 : null,
+      trancos: s.ajuste.trancos,
       fila: s.canal.bufferedAmount,
       filaLaMs: s.ajuste.ultima, // a última fila medida do outro lado (viagem p90 − a menor; ajustarBanda)
       chaves: s.conta.chaves, // quadros-chave mandados
@@ -1144,6 +1181,7 @@ export class TurboEnvio {
     };
     if (s.som) Object.assign(s.som.conta, { enviados: 0, bytes: 0, pulados: 0 });
     s.ajuste.mudou = 0;
+    s.ajuste.trancos = 0;
     s.serie = { fila: [], pulados: [] };
     s.maiorRajada = 0;
     Object.assign(s.conta, { enviados: 0, bytes: 0, pulados: 0, fila: 0, cod: [], chaves: 0, chaveMax: 0, ignorados: 0, ultimo: agora });

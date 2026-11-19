@@ -1,7 +1,7 @@
 // Modo turbo: a banda que se ajusta sozinha e o SPS sem espera para reordenar (turbo.js): npm test
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { bandaInicial, decidirBanda, descricaoSemReordenar } from '../public/js/turbo.js';
+import { bandaInicial, decidirBanda, descricaoSemReordenar, entregaDe, TurboEnvio } from '../public/js/turbo.js';
 
 const deHex = (h) => Uint8Array.from(h.match(/../g).map((x) => parseInt(x, 16)));
 // avcC com um SPS e um PPS
@@ -133,4 +133,62 @@ test('decidirBanda: a fila alta leva para perto do que chegou lá; sem apertos, 
   // o codificador conta em bps: o rx (kbps) vai com rxEscala 1000
   const d = { altas: 2, baixas: 0, rxs: [3000] };
   assert.equal(decidirBanda({ atual: 6_000_000, min: 1_500_000, max: 6_000_000, fila: 60, a: d, rxEscala: 1000 }), 3_000_000);
+});
+
+test('entregaDe: o que chegou ÷ o que saiu; sem conta que sirva, null', () => {
+  assert.equal(entregaDe([{ rx: 1800, tx: 2000 }, { rx: 2000, tx: 2000 }]), 0.95);
+  assert.equal(entregaDe([]), null);
+  assert.equal(entregaDe(null), null);
+  assert.equal(entregaDe([{ rx: 50, tx: 100 }]), null); // tela parada: quase nada saiu
+});
+
+test('decidirBanda: fila alta com a rede levando tudo é tranco do Wi-Fi e não desce', () => {
+  const a = { altas: 2, baixas: 0, rxs: [1800] };
+  assert.equal(decidirBanda({ atual: 2_500_000, min: 2_500_000, max: 10_000_000, fila: 150, a, rxEscala: 1000, entrega: 0.97 }), 2_500_000);
+  assert.equal(a.altas, 0);
+  assert.equal(a.trancos, 1);
+  // chegando bem menos do que sai: desce como antes
+  const b = { altas: 2, baixas: 0, rxs: [4000] };
+  assert.equal(decidirBanda({ atual: 8_000_000, min: 2_500_000, max: 10_000_000, fila: 80, a: b, rxEscala: 1000, entrega: 0.55 }), 4_000_000);
+});
+
+// TurboEnvio.ajustarBanda de ponta a ponta com uma rede de mentira: a cada aviso (500 ms) quem joga
+// manda a fila e o que chegou; o codificador manda a banda que tem
+function simular({ cap, trancoCada = 0, avisos = 120, inicio = 2_500_000 }) {
+  const real = performance.now;
+  let agora = 1000;
+  performance.now = () => agora;
+  try {
+    const envio = new TurboEnvio({ tela: null, onMudou: null });
+    const s = { banda: inicio, cfg: { h: 1080 }, config: { bitrate: inicio }, enc: { state: 'configured', configure(c) { this.c = c; } },
+      ajuste: { altas: 0, baixas: 0, mudou: 0, ultima: null, tx: 0, trancos: 0 } };
+    let atraso = 0; // kbit esperando no caminho
+    for (let i = 0; i < avisos; i++) {
+      agora += 500;
+      const mandou = s.banda / 1000; // kbps
+      s.ajuste.tx += (mandou * 500) / 8; // bytes
+      const tranco = trancoCada && i % trancoCada === trancoCada - 1;
+      // no tranco o Wi-Fi para 200 ms e entrega tudo depois (o que não chegou vai no aviso seguinte)
+      const levou = tranco ? Math.min(cap, mandou) * 0.6 : Math.min(cap, mandou + atraso / 0.5);
+      atraso = Math.max(0, atraso + (mandou - levou) * 0.5);
+      const fila = tranco ? 200 : (atraso / cap) * 1000 + 10;
+      envio.ajustarBanda(s, { p90: 20 + fila, base: 20, rx: Math.round(levou) });
+    }
+    return s.banda;
+  } finally {
+    performance.now = real;
+  }
+}
+
+test('ajustarBanda: Wi-Fi que tranca a cada 2 s mas leva 9,6 Mbps — a banda sobe para perto disso', () => {
+  // como o lokao → lokao16001 em 2026-11-19 13:18 (antes ficava no piso, 2,5 Mbps)
+  const b = simular({ cap: 9600, trancoCada: 4 });
+  assert.ok(b >= 8_000_000, `banda ${b}`);
+  // com folga no caminho, chega na máxima
+  assert.equal(simular({ cap: 20000, trancoCada: 4 }), 10_000_000);
+});
+
+test('ajustarBanda: o caminho leva só 4 Mbps — a banda desce para perto dele', () => {
+  const b = simular({ cap: 4000, inicio: 10_000_000, avisos: 40 });
+  assert.ok(b <= 5_000_000 && b >= 2_500_000, `banda ${b}`); // passa um pouco ao subir e volta
 });
