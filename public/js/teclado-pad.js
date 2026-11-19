@@ -74,6 +74,13 @@ export class TecladoPad {
   // uma tecla/botão do mouse desceu ou subiu: a subida solta o que a descida apertou (mesmo que o
   // modo tenha trocado no meio). O △ que desce troca o modo carro, se ele está ligado nas opções.
   entrada(quem, ent, desce) {
+    // a tecla só de troca (Num * no padrão): troca o modo e não aperta nada no jogo
+    if (mapaTeclas.carroLigado() && mapaTeclas.trocaCarro(ent)) {
+      if (desce && !this.trocaSegura.has(quem)) this.trocarCarro();
+      if (desce) this.trocaSegura.add(quem);
+      else this.trocaSegura.delete(quem);
+      return true;
+    }
     const antes = this.seguras.get(quem);
     const id = desce ? this.acaoDe(ent) : antes?.id;
     if (!desce) {
@@ -102,9 +109,10 @@ export class TecladoPad {
     const teclas = (id) => mapaTeclas.entradasCarro(id).map(nomeEntrada).join(' / ');
     const r2 = this.layout === 'switch' ? 'ZR' : 'R2';
     const l2 = this.layout === 'switch' ? 'ZL' : 'L2';
+    const troca = teclas('troca');
     const partes = [teclas('b7') && `${teclas('b7')} acelera (${r2})`, teclas('b6') && `${teclas('b6')} freia (${l2})`].filter(Boolean);
     this.aviso(sim
-      ? `🚗 Modo carro: ${partes.join(', ') || 'as teclas do carro valem'}. Saiu do carro? O mesmo botão volta a pé.`
+      ? `🚗 Modo carro: ${partes.join(', ') || 'as teclas do carro valem'}. Saiu do carro? O mesmo botão${troca ? ` ou ${troca}` : ''} volta a pé.`
       : '🚶 A pé: as teclas voltam ao normal.');
   }
 
@@ -125,6 +133,7 @@ export class TecladoPad {
     this.cliqueTp = null; // o botão do mouse que afundou o touchpad (o "up" dele solta o touchpad)
     this.timers = new Map(); // botão -> soltura adiada (MIN_MS)
     this.desceu = new Map(); // botão -> quando desceu
+    this.trocaSegura = new Set(); // as teclas de troca do modo carro seguradas (a repetição não troca de novo)
     this.seguras = new Map(); // tecla/botão do mouse segurado -> { ent: a entrada, id: a ação que apertou }
     this.fontes = new Map(); // botão -> quantas teclas/botões o seguram (Shift esq. e dir.)
     this.eixos = new Map(); // direção do analógico (ly-, rx+...) -> as entradas que seguram
