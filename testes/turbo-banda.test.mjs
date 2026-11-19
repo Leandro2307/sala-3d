@@ -154,23 +154,26 @@ test('decidirBanda: fila alta com a rede levando tudo é tranco do Wi-Fi e não 
 
 // TurboEnvio.ajustarBanda de ponta a ponta com uma rede de mentira: a cada aviso (500 ms) quem joga
 // manda a fila e o que chegou; o codificador manda a banda que tem
-function simular({ cap, trancoCada = 0, avisos = 120, inicio = 2_500_000 }) {
+function simular({ cap, trancoCada = 0, avisos = 120, inicio = 2_500_000, limite = Infinity }) {
   const real = performance.now;
   let agora = 1000;
   performance.now = () => agora;
   try {
     const envio = new TurboEnvio({ tela: null, onMudou: null });
     const s = { banda: inicio, cfg: { h: 1080 }, config: { bitrate: inicio }, enc: { state: 'configured', configure(c) { this.c = c; } },
-      ajuste: { altas: 0, baixas: 0, mudou: 0, ultima: null, tx: 0, trancos: 0 } };
+      ajuste: { altas: 0, baixas: 0, mudou: 0, ultima: null, tx: 0, trancos: 0, pulFila: 0 } };
     let atraso = 0; // kbit esperando no caminho
     for (let i = 0; i < avisos; i++) {
       agora += 500;
-      const mandou = s.banda / 1000; // kbps
+      // com a fila daqui cheia (limite, kbit) os quadros são pulados: sai só o que o caminho leva
+      const cheia = atraso >= limite;
+      const mandou = cheia ? cap : s.banda / 1000; // kbps
+      if (cheia) s.ajuste.pulFila += 5;
       s.ajuste.tx += (mandou * 500) / 8; // bytes
       const tranco = trancoCada && i % trancoCada === trancoCada - 1;
       // no tranco o Wi-Fi para 200 ms e entrega tudo depois (o que não chegou vai no aviso seguinte)
       const levou = tranco ? Math.min(cap, mandou) * 0.6 : Math.min(cap, mandou + atraso / 0.5);
-      atraso = Math.max(0, atraso + (mandou - levou) * 0.5);
+      atraso = Math.min(limite, Math.max(0, atraso + (mandou - levou) * 0.5));
       const fila = tranco ? 200 : (atraso / cap) * 1000 + 10;
       envio.ajustarBanda(s, { p90: 20 + fila, base: 20, rx: Math.round(levou) });
     }
@@ -191,4 +194,10 @@ test('ajustarBanda: Wi-Fi que tranca a cada 2 s mas leva 9,6 Mbps — a banda so
 test('ajustarBanda: o caminho leva só 4 Mbps — a banda desce para perto dele', () => {
   const b = simular({ cap: 4000, inicio: 10_000_000, avisos: 40 });
   assert.ok(b <= 5_000_000 && b >= 2_500_000, `banda ${b}`); // passa um pouco ao subir e volta
+});
+
+test('ajustarBanda: a fila daqui sempre cheia (quadros pulados) baixa a banda mesmo com a entrega em dia', () => {
+  // o teto de 20 Mbps num caminho que leva 8 (2026-11-19 19:14): a fila de 166 KB enche e fica cheia
+  const b = simular({ cap: 8000, inicio: 20_000_000, avisos: 60, limite: 1300 });
+  assert.ok(b <= 10_000_000, `banda ${b}`);
 });

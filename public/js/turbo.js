@@ -606,7 +606,7 @@ export class TurboEnvio {
     // a tela saiu do ar (a cópia da trilha não acaba sozinha com ela)
     original.addEventListener('ended', () => this.desligar(id), { once: true });
     const s = { id, key, canal, chave: true, quadro: 0, enc: null, cfg: null, config: null, banda: 0, trilha: original.clone(), parar: false, pulados: 0, enviados: 0,
-      cfgEnviada: null, ajuste: { altas: 0, baixas: 0, mudou: 0, ultima: null, tx: 0, trancos: 0 }, // ajustarBanda
+      cfgEnviada: null, ajuste: { altas: 0, baixas: 0, mudou: 0, ultima: null, tx: 0, trancos: 0, pulFila: 0 }, // ajustarBanda
       chaveId: 0, chaveEm: 0, // o último quadro-chave mandado (pedidoDeChave)
       tempos: new Map(), conta: { enviados: 0, bytes: 0, pulados: 0, fila: 0, cod: [], chaves: 0, chaveMax: 0, ignorados: 0, ultimo: performance.now() },
       // a fila de envio a cada 100 ms (a maior vista em cada um, em KB) e os pulados em cada um: mostra
@@ -646,7 +646,7 @@ export class TurboEnvio {
   // PC direto (fonte.banda): a mesma coisa, mas a banda da ponte (a placa daqui) acompanha a fila.
   ligarPs5(id, canal, key, fonte, { versao, som, somMix = null, rede = null, pedido = null }) {
     const s = { id, key, canal, chave: true, quadro: 0, enc: null, cfg: null, config: null, banda: 0, trilha: null, parar: false, pulados: 0, enviados: 0,
-      cfgEnviada: null, ajuste: { altas: 0, baixas: 0, mudou: 0, ultima: null, tx: 0, trancos: 0 }, chaveId: 0, chaveEm: 0, ps5: fonte,
+      cfgEnviada: null, ajuste: { altas: 0, baixas: 0, mudou: 0, ultima: null, tx: 0, trancos: 0, pulFila: 0 }, chaveId: 0, chaveEm: 0, ps5: fonte,
       tempos: new Map(), conta: { enviados: 0, bytes: 0, pulados: 0, fila: 0, cod: [], chaves: 0, chaveMax: 0, ignorados: 0, ultimo: performance.now() },
       serie: { fila: [], pulados: [] }, rajada: 0, maiorRajada: 0, espera: [], pulosFila: [] };
     this.sessoes.set(id, s);
@@ -719,6 +719,7 @@ export class TurboEnvio {
     s.serie.pulados[b]++;
     if (porFila) {
       s.conta.fila++;
+      s.ajuste.pulFila++; // ajustarBanda: fila cheia aviso após aviso é falta de banda
       s.pulosFila?.push(performance.now()); // vigiarRepasse
     }
     if (++s.rajada > s.maiorRajada) s.maiorRajada = s.rajada;
@@ -965,8 +966,15 @@ export class TurboEnvio {
     a.tx = 0;
     a.txEm = agora;
     if (tx != null && Number.isFinite(rx) && rx >= 0) guardar((a.par ??= []), { rx, tx }, 4);
-    const entrega = Number.isFinite(rx) ? entregaDe(a.par) : null;
-    a.entrega = entrega;
+    // Quadros pulados pela fila de envio cheia em 3 dos últimos 4 avisos: falta de banda, mesmo com a
+    // entrega em dia — a fila daqui é limitada (limiteFila), e com ela sempre cheia sai daqui só o que
+    // chega lá. No relatório de 2026-11-19 19:14 (teto de 20 Mbps) a fila ficou em 50–120 ms com quadros
+    // pulados por ~6 s e a entrega em 0,95–1,05: a banda não descia e a imagem perdia quadros.
+    guardar((a.pulos ??= []), a.pulFila > 0 ? 1 : 0, 4);
+    a.pulFila = 0;
+    const apertado = a.pulos.reduce((n, v) => n + v, 0) >= 3;
+    const entrega = Number.isFinite(rx) && !apertado ? entregaDe(a.par) : null;
+    a.entrega = Number.isFinite(rx) ? entregaDe(a.par) : null;
     a.altas = fila > FILA_ALTA ? a.altas + 1 : 0;
     // Entre FILA_BAIXA e FILA_ALTA a conta para subir fica onde está: zerar ali (como era) quase nunca
     // deixava juntar 4 seguidos — no relatório de 2026-11-03 16:13, 22 de 82 avisos caíram entre 24 e
@@ -1026,7 +1034,7 @@ export class TurboEnvio {
           s.conta.pulados++;
           s.serie.pulados[b]++;
           if (++s.rajada > s.maiorRajada) s.maiorRajada = s.rajada;
-          if (filaCheia) s.conta.fila++;
+          if (filaCheia) { s.conta.fila++; s.ajuste.pulFila++; }
           continue;
         }
         s.rajada = 0;
