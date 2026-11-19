@@ -101,6 +101,18 @@ const PONTE_MIN_KBPS = 2000;
 // Um PS5 repassado só vai assim se a rede até quem joga leva a banda da sessão com esta folga (a estimativa
 // do WebRTC); senão a imagem é codificada de novo aqui, na banda que a rede leva
 const FOLGA_REPASSE = 1.15;
+// Começo rápido (2026-11-19, PS5 do lokao no cabo → Borges): a sessão começava em 4,8 Mbps (80% da
+// estimativa do WebRTC, que no começo é baixa) e levava ~1 min para chegar aos 20, subindo 10–15% a
+// cada 2 s — e cada vez que ele entrava de novo no modo jogo, recomeçava de baixo, com a imagem
+// borrada. Agora, até o primeiro corte da banda, ela sobe ARRANQUE_SOBE a cada ARRANQUE_AVISOS avisos
+// com a fila baixa (4,8 → 20 em ~6 s); o primeiro corte acaba o arranque e daí vale o passo de sempre.
+const ARRANQUE_SOBE = 1.3;
+const ARRANQUE_AVISOS = 2;
+// A banda boa de cada pessoa fica lembrada por MEMORIA_MS: entrando de novo no modo jogo, começa em
+// MEMORIA_FRACAO dela (e não na estimativa do começo); o repasse do PS5 que não coube não é tentado
+// de novo nesse tempo (cada tentativa custava 2–4 s de imagem parada).
+const MEMORIA_MS = 15 * 60_000;
+const MEMORIA_FRACAO = 0.85;
 const ESPERA_REDE_MS = 400; // quanto ligarSessao espera pela estimativa da rede antes de seguir sem ela
 const PEDIR_CHAVE_MS = 250; // intervalo mínimo entre pedidos de quadro-chave
 // Um quadro-chave que saiu há menos que isto e que quem joga ainda não viu está a caminho: outro
@@ -319,11 +331,15 @@ export function decidirBanda({ atual, min, max, fila, a, rxEscala = 1, entrega =
     a.altas = 0;
     a.trancos = (a.trancos || 0) + 1;
   } else if (a.altas >= 2) {
+    a.arranque = false;
     nova = atual * (fila > FILA_MUITO_ALTA ? 0.7 : 0.85);
     const chegou = a.rxs?.length ? Math.max(...a.rxs) * rxEscala : null;
     if (chegou) nova = Math.min(nova, chegou * 0.9);
     nova = Math.max(nova, atual * 0.5);
     a.altas = 0;
+  } else if (a.arranque && a.baixas >= ARRANQUE_AVISOS && atual < max) {
+    nova = atual * ARRANQUE_SOBE;
+    a.baixas = 0;
   } else if (a.baixas >= 4 && atual < max) {
     nova = atual * (atual < max * 0.5 ? 1.15 : 1.1);
     a.baixas = 0;
@@ -540,6 +556,18 @@ export class TurboEnvio {
     this.sessoes = new Map(); // id de quem joga -> sessão
     this.canaisSom = new Map(); // id de quem joga -> canal "turbo-som"
     this.vezDe = new Map(); // id de quem joga -> o pedido mais novo (ligarSessao espera a rede: o de antes desiste)
+    this.memoria = new Map(); // id de quem joga -> { bps, em, semRepasseEm } (ver MEMORIA_MS)
+  }
+
+  // o que ficou lembrado dessa pessoa, se ainda vale
+  lembrado(id) {
+    const m = this.memoria.get(id);
+    if (!m) return null;
+    const agora = Date.now();
+    return {
+      bps: m.bps && agora - m.em < MEMORIA_MS ? m.bps : null,
+      semRepasse: !!m.semRepasseEm && agora - m.semRepasseEm < MEMORIA_MS,
+    };
   }
 
   // quem joga abriu o canal do som comigo (só pacotes de som, daqui para lá)
@@ -621,9 +649,10 @@ export class TurboEnvio {
     // 2026-11-18, o 1080p repassado (15 Mbps) em 5–16 qps por minutos, com a rede levando ~6.
     if (fonte && !recodificar && pedida >= altFonte) {
       const kbpsPs5 = Number(fonte.kbps) || null;
-      const cabe = !kbpsPs5 || !rede || rede.lan || rede.saidaKbps == null || rede.saidaKbps >= kbpsPs5 * FOLGA_REPASSE;
+      const semRepasse = this.lembrado(id)?.semRepasse;
+      const cabe = !semRepasse && (!kbpsPs5 || !rede || rede.lan || rede.saidaKbps == null || rede.saidaKbps >= kbpsPs5 * FOLGA_REPASSE);
       if (cabe) return this.ligarPs5(id, canal, key, fonte, { versao, som, somMix: t.somMix, rede, pedido });
-      this.onEvento?.(id, 'turbo: a rede de quem joga não leva o PS5 repassado — codificando aqui', { ps5Kbps: kbpsPs5, estimativaKbps: rede.saidaKbps, caminho: rede.local });
+      this.onEvento?.(id, semRepasse ? 'turbo: o PS5 repassado não coube há pouco — codificando aqui direto' : 'turbo: a rede de quem joga não leva o PS5 repassado — codificando aqui', { ps5Kbps: kbpsPs5, estimativaKbps: rede?.saidaKbps ?? null, caminho: rede?.local ?? null });
     }
     if (!temTurboEnvio()) return responder({ erro: 'navegador' });
     const original = t.stream?.getVideoTracks()[0];
@@ -631,7 +660,7 @@ export class TurboEnvio {
     // a tela saiu do ar (a cópia da trilha não acaba sozinha com ela)
     original.addEventListener('ended', () => this.desligar(id), { once: true });
     const s = { id, key, canal, chave: true, quadro: 0, enc: null, cfg: null, config: null, banda: 0, trilha: original.clone(), parar: false, pulados: 0, enviados: 0,
-      cfgEnviada: null, ajuste: { altas: 0, baixas: 0, mudou: 0, ultima: null, tx: 0, trancos: 0, pulFila: 0 }, // ajustarBanda
+      cfgEnviada: null, ajuste: { altas: 0, baixas: 0, mudou: 0, ultima: null, tx: 0, trancos: 0, pulFila: 0, arranque: true }, // ajustarBanda
       chaveId: 0, chaveEm: 0, // o último quadro-chave mandado (pedidoDeChave)
       tempos: new Map(), conta: { enviados: 0, bytes: 0, pulados: 0, fila: 0, cod: [], chaves: 0, chaveMax: 0, ignorados: 0, ultimo: performance.now() },
       // a fila de envio a cada 100 ms (a maior vista em cada um, em KB) e os pulados em cada um: mostra
@@ -672,7 +701,7 @@ export class TurboEnvio {
   // PC direto (fonte.banda): a mesma coisa, mas a banda da ponte (a placa daqui) acompanha a fila.
   ligarPs5(id, canal, key, fonte, { versao, som, somMix = null, rede = null, pedido = null }) {
     const s = { id, key, canal, chave: true, quadro: 0, enc: null, cfg: null, config: null, banda: 0, trilha: null, parar: false, pulados: 0, enviados: 0,
-      cfgEnviada: null, ajuste: { altas: 0, baixas: 0, mudou: 0, ultima: null, tx: 0, trancos: 0, pulFila: 0 }, chaveId: 0, chaveEm: 0, ps5: fonte,
+      cfgEnviada: null, ajuste: { altas: 0, baixas: 0, mudou: 0, ultima: null, tx: 0, trancos: 0, pulFila: 0, arranque: true }, chaveId: 0, chaveEm: 0, ps5: fonte,
       tempos: new Map(), conta: { enviados: 0, bytes: 0, pulados: 0, fila: 0, cod: [], chaves: 0, chaveMax: 0, ignorados: 0, ultimo: performance.now() },
       serie: { fila: [], pulados: [] }, rajada: 0, maiorRajada: 0, espera: [], pulosFila: [] };
     this.sessoes.set(id, s);
@@ -729,6 +758,7 @@ export class TurboEnvio {
     s.pulosFila = (s.pulosFila || []).filter((t) => agora - t < 2000);
     if (agora - s.inicioEm < 2000 || (s.ajuste.altas < 3 && s.pulosFila.length < 3)) return;
     s.trocando = true;
+    this.memoria.set(s.id, { ...(this.memoria.get(s.id) || {}), semRepasseEm: Date.now() });
     const rx = s.ajuste.rxs?.length ? Math.max(...s.ajuste.rxs) : null;
     const kbps = rx ? Math.round(rx * 0.85) : null;
     this.onEvento?.(s.id, 'turbo: o PS5 repassado não coube na rede de quem joga — codificando aqui', { filaMs: Math.round(fila), puladosFila2s: s.pulosFila.length, rxKbps: rx, bandaInicialKbps: kbps, ps5Kbps: Number(s.ps5?.kbps) || null });
@@ -938,13 +968,16 @@ export class TurboEnvio {
     const max = bandaDe(ch);
     const min = bandaMinDe(ch);
     const primeira = !s.banda;
+    const lembrada = primeira ? this.lembrado(s.id)?.bps : null;
     escolhido.bitrate = primeira
-      ? bandaInicial({ max, min, rede: s.bandaInicialKbps ? { saidaKbps: s.bandaInicialKbps / 0.8 } : s.rede, kbps: false })
+      ? Math.max(
+        bandaInicial({ max, min, rede: s.bandaInicialKbps ? { saidaKbps: s.bandaInicialKbps / 0.8 } : s.rede, kbps: false }),
+        lembrada ? Math.round(Math.min(max, lembrada * MEMORIA_FRACAO)) : 0)
       : Math.round(Math.min(max, Math.max(min, s.banda)));
     s.enc.configure(escolhido);
     s.config = escolhido;
     s.banda = escolhido.bitrate;
-    if (primeira) this.onEvento?.(s.id, 'turbo: banda inicial', { kbps: Math.round(s.banda / 1000), maxKbps: max / 1000, altura: ch, estimativaKbps: s.rede?.saidaKbps ?? null, doRepasseKbps: s.bandaInicialKbps, caminho: s.rede?.local ?? null, lan: !!s.rede?.lan });
+    if (primeira) this.onEvento?.(s.id, 'turbo: banda inicial', { kbps: Math.round(s.banda / 1000), maxKbps: max / 1000, altura: ch, estimativaKbps: s.rede?.saidaKbps ?? null, doRepasseKbps: s.bandaInicialKbps, lembradaKbps: lembrada ? Math.round(lembrada / 1000) : null, caminho: s.rede?.local ?? null, lan: !!s.rede?.lan });
     s.cfg = { codec: escolhido.codec, w: cw, h: ch, modo: escolhido.bitrateMode || 'variable' };
     s.chave = true; // a descrição nova sai junto com o próximo quadro-chave (enviarQuadro)
   }
@@ -1172,6 +1205,10 @@ export class TurboEnvio {
     const s = this.sessoes.get(id);
     if (!s || (canal && s.canal !== canal)) return;
     this.sessoes.delete(id);
+    // a banda em que a sessão estava (codificando aqui, por mais de 8 s): a próxima começa perto dela
+    if (s.enc && s.banda && performance.now() - (s.inicioEm || 0) > 8000) {
+      this.memoria.set(id, { ...(this.memoria.get(id) || {}), bps: s.banda, em: Date.now() });
+    }
     s.parar = true;
     s.leitor?.cancel().catch(() => {});
     s.trilha?.stop();
@@ -1251,7 +1288,9 @@ export class TurboRecebe {
   // abrirSom(idDoDono) -> canal "turbo-som" (rtc.abrirTurboSom)
   // somDaTela(key) -> o <video> que toca o som dessa tela na sala (o da imagem, o #focus-video, é
   // sempre mudo: com o volume dele o som do turbo saía calado — ver vigiarSom)
-  constructor({ abrir, abrirSom, somDaTela, onFalhou, onEvento }) {
+  // volume() -> o volume das telas (0 a 1): o do <video> não serve no iPhone (é só leitura, sempre 1)
+  constructor({ abrir, abrirSom, somDaTela, volume = null, onFalhou, onEvento }) {
+    this.volume = volume;
     this.abrir = abrir;
     this.abrirSom = abrirSom;
     this.somDaTela = somDaTela;
@@ -1717,7 +1756,7 @@ export class TurboRecebe {
     const som = s.som;
     if (!som) return;
     const v = this.somDaTela?.(s.key) || null;
-    const vol = !v || v.muted ? 0 : v.volume;
+    const vol = !v || v.muted ? 0 : Math.min(1, Math.max(0, this.volume ? Number(this.volume()) || 0 : v.volume));
     if (Math.abs(som.ganho.gain.value - vol) > 0.005) som.ganho.gain.setTargetAtTime(vol, som.ctx.currentTime, 0.02);
     // Para ligar, o tocador tem que estar tocando; depois, só os pacotes parando por SOM_PARADO_MS
     // devolvem o som ao WebRTC. Uma falha curta (o tocador enchendo de novo) não troca: no teste com

@@ -4168,6 +4168,7 @@ body.toque-jogo #jogo-selo { top: auto; bottom: max(8px, env(safe-area-inset-bot
 .tj-sens { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 6px 8px; font-size: 12px; }
 .tj-sens input { grid-column: 1 / -1; grid-row: 2; width: 100%; margin: 0; accent-color: #38bdf8; }
 .tj-sens output { grid-column: 2; grid-row: 1; opacity: 0.75; }
+.tj-vol[hidden] { display: none; }
 #toque-jogo .tj-ok { height: 38px; background: rgba(56, 189, 248, 0.35); font-size: 13px; touch-action: manipulation; }
 
 /* analógico */

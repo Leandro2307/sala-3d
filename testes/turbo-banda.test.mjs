@@ -230,3 +230,18 @@ test('decidirAltura: no piso sem a rede levar desce um degrau; no teto com folga
   const c = { noTeto: 40 };
   assert.equal(decidirAltura({ ...m720, teto: 720, h: 720, banda: 6_000_000, cortou: false, fila: 10, a: c, agora: 0 }), null);
 });
+
+test('decidirBanda: no arranque sobe 30% a cada 2 avisos com a fila baixa; o primeiro corte acaba o arranque', () => {
+  const a = { altas: 0, baixas: 2, arranque: true };
+  assert.equal(decidirBanda({ atual: 4_800_000, min: 2_500_000, max: 20_000_000, fila: 10, a, rxEscala: 1000 }), 6_240_000);
+  let b = 4_800_000;
+  let avisos = 0;
+  while (b < 20_000_000 && avisos < 40) { a.baixas += 1; avisos++; b = decidirBanda({ atual: b, min: 2_500_000, max: 20_000_000, fila: 10, a, rxEscala: 1000 }); }
+  assert.equal(b, 20_000_000);
+  assert.ok(avisos <= 12, `levou ${avisos} avisos`); // ~6 s (aviso a cada 0,5 s)
+  const c = { altas: 2, baixas: 0, arranque: true };
+  decidirBanda({ atual: 10_000_000, min: 2_500_000, max: 20_000_000, fila: 80, a: c, rxEscala: 1000 });
+  assert.equal(c.arranque, false);
+  c.baixas = 2;
+  assert.equal(decidirBanda({ atual: 8_500_000, min: 2_500_000, max: 20_000_000, fila: 10, a: c, rxEscala: 1000 }), 8_500_000);
+});

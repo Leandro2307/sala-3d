@@ -3739,6 +3739,8 @@ const turboRecebe = new TurboRecebe({
   abrirSom: (id) => rtc?.abrirTurboSom(id),
   // o som da tela toca no vídeo dela no #media-sink (o #focus-video, da imagem, é mudo)
   somDaTela: (key) => shareVideo(acharTela(key)?.share),
+  // o volume vem dos Ajustes, não do <video>: no iPhone o volume dele fica sempre em 1
+  volume: () => settings.screen / 100,
   onEvento: (texto, dados) => diagJogo.evento(texto, dados),
   onFalhou: (motivo) => {
     diagJogo.evento('modo turbo falhou: vídeo normal de volta', { motivo });
@@ -4857,6 +4859,17 @@ const toqueJogo = new ToqueJogo({
   onTutorial: () => tutorialControle.abrir('toque'),
   // trocou à mão no painel: para o PS5 abre o tutorial, para outro fecha
   onLayout: () => { if (toqueJogo.key) tutorialDoPs5(toqueJogo.key); },
+  // "Volume do jogo" no painel: o mesmo "Volume das telas compartilhadas" dos Ajustes
+  volume: {
+    get: () => settings.screen,
+    set: (v) => {
+      settings.screen = Math.min(100, Math.max(0, Math.round(Number(v) || 0)));
+      const el = $('#set-screen');
+      if (el) el.value = String(settings.screen);
+      updateVolumes();
+      saveSettings();
+    },
+  },
   onSair: () => {
     controle.desligarJogo();
     updateFocusCtrl();

@@ -300,8 +300,11 @@ export class ToqueJogo {
   // onEngasgo: quem joga tocou em "Engasgou" (marca no relatório do modo jogo)
   // onTutorial: "Tutorial do controle" no painel (layout PS5; ver tutorial-controle.js)
   // onLayout: a pessoa trocou o layout à mão no painel (id do novo)
-  constructor({ raiz, controle, pad, toast, onSair, onEngasgo, onTutorial, onLayout }) {
+  // volume: { get, set } do som das telas (0 a 100), o mesmo dos Ajustes — no iPhone o volume do
+  // <video> é só leitura, e sem este controle no painel não havia como baixar o som do jogo
+  constructor({ raiz, controle, pad, toast, onSair, onEngasgo, onTutorial, onLayout, volume = null }) {
     this.raiz = raiz;
+    this.volume = volume;
     this.controle = controle;
     this.pad = pad; // controle virtual (layout PS5, ver pad-virtual.js)
     this.toast = toast || (() => {});
@@ -341,6 +344,7 @@ export class ToqueJogo {
         <p class="tj-painel-tit">Botões do controle</p>
         <div class="tj-opcoes"></div>
         <label class="tj-sens"><span>Sensibilidade</span><input type="range" min="0.4" max="2.5" step="0.1"><output></output></label>
+        <label class="tj-sens tj-vol"><span>Volume do jogo</span><input type="range" min="0" max="100" step="1"><output></output></label>
         <div class="tj-liga">
           ${htmlPresets()}
           <label><input type="checkbox" data-op="liso"><span>Imagem mais lisa <small>(vídeo normal: +40 ms de atraso)</small></span></label>
@@ -392,6 +396,11 @@ export class ToqueJogo {
       this.sens = Number(sens.value) || 1;
       this.mostrarSens();
       try { localStorage.setItem(CHAVE_SENS, String(this.sens)); } catch { /* sem armazenamento */ }
+    });
+    const vol = r.querySelector('.tj-vol input');
+    vol.addEventListener('input', () => {
+      this.volume?.set(Number(vol.value));
+      this.mostrarVolume();
     });
     const form = r.querySelector('.tj-texto');
     form.addEventListener('submit', (e) => {
@@ -678,6 +687,9 @@ export class ToqueJogo {
       .map(([id, txt]) => `<button type="button" data-layout="${id}"${this.escolha === id ? ' class="on" aria-pressed="true"' : ''}>${txt}</button>`).join('');
     p.querySelector('.tj-sens input').value = String(this.sens);
     this.mostrarSens();
+    p.querySelector('.tj-vol').hidden = !this.volume;
+    if (this.volume) p.querySelector('.tj-vol input').value = String(this.volume.get());
+    this.mostrarVolume();
     p.querySelectorAll('[data-op]').forEach((el) => { el.checked = !!opcoesJogo.get(el.dataset.op); });
     marcarPresets(p);
     p.hidden = false;
@@ -696,6 +708,7 @@ export class ToqueJogo {
   }
 
   mostrarSens() { this.painel.querySelector('.tj-sens output').textContent = `${this.sens.toFixed(1)}×`; }
+  mostrarVolume() { if (this.volume) this.painel.querySelector('.tj-vol output').textContent = `${Math.round(this.volume.get())}%`; }
 
   // ---------------------------------------------------------------- texto (chat)
   // O teclado do celular só abre num toque de verdade: por isso no soltar do dedo (pointerup).
