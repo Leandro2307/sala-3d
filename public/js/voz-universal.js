@@ -142,6 +142,7 @@ export class Dublagem {
       this.trilha.stop();
     }
     this.trilha = null;
+    this.pararVoz();
     this.ctxVoz?.close().catch(() => {});
     this.ctxVoz = null;
     this.destVoz = null;
@@ -156,6 +157,7 @@ export class Dublagem {
     this.ctxEscuta = novo();
     this.destVoz = this.ctxVoz.createMediaStreamDestination();
     this.proximo = 0;
+    this.agendados = [];
     for (const c of [this.ctxVoz, this.ctxEscuta]) if (c.state === 'suspended') c.resume().catch(() => {});
   }
 
@@ -245,11 +247,31 @@ export class Dublagem {
     const src = ctx.createBufferSource();
     src.buffer = buf;
     src.connect(this.destVoz);
-    // os pedaços em fila, sem buraco entre eles; 60 ms de folga para a rede local; atrasou demais: recomeça
+    // os pedaços em fila, sem buraco entre eles; 60 ms de folga para a rede local.
+    // Fila longa demais (relógio do áudio parado, rede engasgou): CORTA o que estava agendado e recomeça.
+    // Antes só recomeçava o relógio e os pedaços antigos continuavam agendados: 3-4 vozes ao mesmo tempo.
     const agora = ctx.currentTime;
-    if (this.proximo < agora + 0.02 || this.proximo > agora + 1.5) this.proximo = agora + 0.06;
+    if (this.proximo > agora + 1.5) {
+      console.warn('[dublagem] voz atrasada', (this.proximo - agora).toFixed(1), 's: cortei', this.agendados.length, 'pedaços');
+      this.pararVoz();
+    }
+    if (this.proximo < agora + 0.02) this.proximo = agora + 0.06;
     src.start(this.proximo);
     this.proximo += buf.duration;
+    this.agendados.push(src);
+    src.onended = () => {
+      const i = this.agendados.indexOf(src);
+      if (i >= 0) this.agendados.splice(i, 1);
+    };
+  }
+
+  pararVoz() {
+    for (const s of this.agendados || []) {
+      s.onended = null;
+      try { s.stop(); } catch {}
+    }
+    this.agendados = [];
+    this.proximo = 0;
   }
 
   texto(txt) {
