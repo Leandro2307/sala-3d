@@ -381,6 +381,8 @@
     <div class="bar-right">
       <!-- computador: os ícones dos painéis ficam num menu só (no celular o wrapper some e eles
            continuam na grade do ⋯) -->
+      <!-- o chat fica sempre à vista, fora do menu -->
+      <button type="button" class="ghost" data-panel="chat" data-nome="Chat" data-tip="Chat (T)"><i data-icon="chat"></i><span class="dot" id="chat-dot" hidden></span></button>
       <div class="bar-menu-wrap">
         <button type="button" class="ghost" id="btn-menu" data-tip="Menu" aria-label="Menu" aria-expanded="false" aria-controls="bar-menu"><i data-icon="grade"></i></button>
         <div class="bar-menu" id="bar-menu">
@@ -391,7 +393,6 @@
           <button type="button" class="ghost" data-panel="telao" data-nome="Telão" data-tip="Telão: vídeos e lives"><i data-icon="tv"></i></button>
           <button type="button" class="ghost" data-panel="musica" data-nome="Música" data-tip="Música da sala (YouTube)"><i data-icon="musica"></i></button>
           <button type="button" class="ghost" data-panel="people" data-nome="Pessoas" data-tip="Pessoas"><i data-icon="users"></i><span class="badge" id="people-badge">1</span></button>
-          <button type="button" class="ghost" data-panel="chat" data-nome="Chat" data-tip="Chat (T)"><i data-icon="chat"></i><span class="dot" id="chat-dot" hidden></span></button>
           <!-- todos os jogos num modal só, por gênero (catalogo-jogos.js); as regras e os recordes de cada
                um continuam nos painéis (parkour, ringue, corrida...), que o modal abre -->
           <button type="button" class="ghost" id="btn-jogos" data-nome="Jogos" data-jogo="futebol volei basquete boliche pingue sinuca golfe queimada corrida kart matamata batalha ringue xadrez dama velha dados truco uno vinteum cacheta parkour gincana surf pinta" data-tip="Jogos"><i data-icon="gamepad"></i></button>
