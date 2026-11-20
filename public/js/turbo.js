@@ -637,7 +637,23 @@ export class Realce {
     const gl = this.gl;
     if (gl.isContextLost()) throw new Error('contexto perdido');
     gl.viewport(0, 0, w, h);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, frame);
+    // Subir o VideoFrame direto como textura corta pela área visível em quase todo PC, mas em alguns
+    // (certas placas/drivers) o quadro do H.265 — maior que a imagem, por causa da "janela" de corte do
+    // HEVC — vinha inteiro, e a imagem saía com zoom. Quando o quadro é maior que a área visível, passa
+    // primeiro por um canvas 2D do tamanho da imagem (drawImage corta certo, como o desenho comum) e
+    // sobe esse canvas. Sem corte (H.264 comum), sobe o quadro direto, sem custo a mais.
+    // (drawImage/texImage2D já trabalham no espaço da imagem visível, então o canvas 2D de w×h recebe a
+    // imagem certa; o que ele resolve é o tamanho da textura, que em alguns PCs vinha o do quadro cheio.)
+    const vr = frame.visibleRect;
+    let fonte = frame;
+    if (vr && (vr.width !== frame.codedWidth || vr.height !== frame.codedHeight)) {
+      const tmp = this.tmp || (this.tmp = document.createElement('canvas'));
+      if (tmp.width !== w || tmp.height !== h) { tmp.width = w; tmp.height = h; }
+      const g2 = this.g2 || (this.g2 = tmp.getContext('2d', { alpha: false, desynchronized: true }));
+      g2.drawImage(frame, 0, 0, w, h);
+      fonte = tmp;
+    }
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, fonte);
     const erro = gl.getError();
     if (erro) throw new Error(`webgl ${erro}`);
     gl.uniform2f(this.uPx, 1 / w, 1 / h);
@@ -2044,8 +2060,12 @@ export class TurboRecebe {
 
   pintar(s, frame, p) {
     try {
-      const w = frame.displayWidth;
-      const h = frame.displayHeight;
+      // A área visível (visibleRect) é a imagem de verdade: o H.265 decodifica um quadro maior (a "janela"
+      // de corte do HEVC, em múltiplos de 64). displayWidth/Height já a descontam, mas tomá-la direto
+      // evita o zoom em placas que não cortam sozinhas (ver Realce.desenhar e o drawImage abaixo).
+      const vr = frame.visibleRect;
+      const w = vr?.width || frame.displayWidth;
+      const h = vr?.height || frame.displayHeight;
       if (s.tela.width !== w || s.tela.height !== h) {
         s.tela.width = w;
         s.tela.height = h;
@@ -2060,6 +2080,7 @@ export class TurboRecebe {
           this.trocarTela2d(s);
         }
       }
+      // o desenho comum já pega a imagem visível (o VideoFrame se desenha nela); o canvas em w×h a mostra
       if (!s.realce) s.ctx.drawImage(frame, 0, 0, w, h);
       s.pintados++;
       s.conta.desenhados++;
