@@ -57,10 +57,12 @@ const MIN_MS = 60;
 export class TecladoPad {
   // sens(): a sensibilidade do mouse escolhida nas opções do modo jogo (1 = VEL_CHEIA)
   // aviso(texto): um recado curto para quem joga (ligou/desligou a inclinação)
-  constructor({ pad, sens = () => 1, aviso = () => {} }) {
+  // onCarro(sim): o modo carro trocou (a legenda da tela mostra a pé / no carro o tempo todo)
+  constructor({ pad, sens = () => 1, aviso = () => {}, onCarro = () => {} }) {
     this.pad = pad;
     this.sens = sens;
     this.aviso = aviso;
+    this.onCarro = onCarro;
     this.ativo = false;
     this.layout = null;
     this.carro = false; // no modo carro (mapa-teclas.js): a camada do carro vale por cima do mapa
@@ -75,7 +77,7 @@ export class TecladoPad {
   // uma tecla/botão do mouse desceu ou subiu: a subida solta o que a descida apertou (mesmo que o
   // modo tenha trocado no meio). O △ que desce troca o modo carro, se ele está ligado nas opções.
   entrada(quem, ent, desce) {
-    // a tecla só de troca (Num * no padrão): troca o modo e não aperta nada no jogo
+    // a tecla só de troca (' no padrão): troca o modo e não aperta nada no jogo
     if (mapaTeclas.carroLigado() && mapaTeclas.trocaCarro(ent)) {
       if (desce && !this.trocaSegura.has(quem)) this.trocarCarro();
       if (desce) this.trocaSegura.add(quem);
@@ -98,6 +100,7 @@ export class TecladoPad {
   trocarCarro(sim = !this.carro) {
     if (this.carro === sim) return;
     this.carro = sim;
+    this.onCarro(sim);
     for (const [quem, s] of [...this.seguras]) {
       const novo = this.acaoDe(s.ent);
       if (novo === s.id) continue;
@@ -151,12 +154,14 @@ export class TecladoPad {
     this.zerar();
     this.carro = false;
     this.ativo = true;
+    this.onCarro(false);
   }
 
   desligar() {
     if (!this.ativo) return;
     this.ativo = false;
     this.carro = false;
+    this.onCarro(false);
     this.zerar();
     this.pad.soltar('teclado');
   }
@@ -241,6 +246,25 @@ export class TecladoPad {
     else segura.delete(quem);
     this.fontes.set(i, segura);
     const bit = 1 << i;
+    // A roda está travando este botão (no padrão a roda e o F são o △): o △ já estava apertado e o F
+    // não fazia nada até outro dente da roda ou sair e entrar no modo jogo. Destrava, solta o △ lá
+    // (o PS5 precisa ver ele subir) e aperta de novo MIN_MS depois, como um toque de verdade.
+    if (desce && this.rodaB & bit) {
+      this.rodaB = 0;
+      this.b &= ~bit;
+      this.enviar();
+      this.pad.enviar?.(); // sai já, sem juntar com o aperto que vem logo atrás
+      clearTimeout(this.timers.get(i));
+      this.timers.set(i, setTimeout(() => {
+        this.timers.delete(i);
+        this.desceu.set(i, performance.now());
+        this.b |= bit;
+        this.enviar();
+        // soltou antes do aperto sair: fica o toque curto (MIN_MS) e solta
+        if (!this.fontes.get(i)?.size) this.botao(null, i, false);
+      }, MIN_MS));
+      return;
+    }
     if (segura.size) {
       clearTimeout(this.timers.get(i));
       this.timers.delete(i);

@@ -4796,3 +4796,8 @@ body.touch :is(.hk-lista, #help-extra, #help-mais-btn) { display: none !importan
 #jogo-legenda kbd { font: inherit; font-size: 9.5px; padding: 1px 4px; border-radius: 4px; background: rgba(255, 255, 255, 0.1); }
 #jogo-legenda .lg-xis { color: #93c5fd; } #jogo-legenda .lg-bol { color: #fca5a5; }
 #jogo-legenda .lg-qua { color: #f9a8d4; } #jogo-legenda .lg-tri { color: #6ee7b7; }
+/* modo carro (Mapear teclas): a pé / no carro sempre à vista na legenda do modo jogo */
+#jogo-legenda .lg-carro { margin-right: 5px; padding: 0 7px 0 2px; border-right: 1px solid rgba(255, 255, 255, 0.14); }
+#jogo-legenda .lg-carro b { font-size: 11px; }
+#jogo-legenda .lg-carro.on b { color: #fbbf24; }
+#jogo-legenda:has(.lg-carro.on) { opacity: 0.95; }
