@@ -15,7 +15,14 @@
 //      celular manda os comandos. Para quem compartilha, é a mesma conta jogando: a imagem vem para a
 //      TV (que liga o modo jogo) e os botões, do celular.
 // Os comandos vão direto pelo WebRTC (rtc.mandarControle), e pelo servidor enquanto o canal não abre.
+// Imagem no modo jogo: o Turbo (turbo.js), como o site faz para quem joga. No vídeo normal o PC de quem
+// compartilha codifica de novo o que o PS5 já mandou codificado (duas compressões: a imagem saía
+// granulada na TV, teste de 2026-11-22). No Turbo os quadros do PS5 vêm como saíram dele (H.265 se a
+// TV decodifica) e o PC só repassa. A TV sem WebCodecs, ou com a rede apertada, volta ao vídeo normal.
+// A cada 2 s a TV mede a imagem (selo com Info ou um botão colorido do controle remoto) e, ao sair do
+// jogo, manda o relatório ao servidor (scripts/relatorios.js baixa: "joga", nome "conta (TV)").
 import { RTC } from './rtc.js';
+import { TurboRecebe } from './turbo.js';
 
 const $ = (s) => document.querySelector(s);
 const params = new URLSearchParams(location.search);
@@ -265,7 +272,7 @@ function mostrarVideo() {
   if (ok && video.srcObject !== stream) {
     video.srcObject = stream;
     tocar();
-    if (st.jogando) rtc.baixaLatencia(stream, true);
+    if (st.jogando) rtc.baixaLatencia(stream, true, BUFFER_MS);
   } else if (!ok && video.srcObject) video.srcObject = null;
   $('#vazio').hidden = ok;
   if (!ok) {
@@ -351,9 +358,16 @@ function ligarJogo() {
   }
   st.jogando = a.sh.key;
   document.body.classList.add('jogando');
+  document.activeElement?.blur?.();
   mandar(st.jogando, { t: 'modo', jogo: true, rapido: false, vibra: !!gamepad()?.vibrationActuator, ds: false });
   enviado = null; // o estado do controle vai inteiro de novo
-  if (video.srcObject) rtc.baixaLatencia(video.srcObject, true);
+  if (video.srcObject) rtc.baixaLatencia(video.srcObject, true, BUFFER_MS);
+  comecarRelatorio(a);
+  if (!turboFalhou) {
+    turbo.ligar(st.jogando, video, 1080);
+    evento('turbo ligado');
+  }
+  mostrarSelo(10_000);
   const dica = $('#dica-jogo');
   dica.classList.remove('some');
   setTimeout(() => dica.classList.add('some'), 5000);
@@ -369,10 +383,136 @@ function desligarJogo(avisarLa = true) {
     mandar(key, { t: 'modo', jogo: false });
   }
   st.jogando = null;
+  turbo.desligar();
   document.body.classList.remove('jogando');
   if (video.srcObject) rtc.baixaLatencia(video.srcObject, false);
   focar($('#btn-jogo'));
+  mandarRelatorio('saiu do jogo');
 }
+
+// ------------------------------------------------------------------ Turbo e a medida da imagem
+// Um buffer pequeno no vídeo normal: com 0, cada pacote atrasado no Wi-Fi da TV virava quadro perdido e
+// pedido de quadro-chave (o PC gasta a banda no quadro-chave e a imagem embaça)
+const BUFFER_MS = 40;
+let turboFalhou = null; // o motivo: nesta página a TV fica no vídeo normal
+const turbo = new TurboRecebe({
+  abrir: (id, vida) => rtc?.abrirTurbo(id, vida),
+  abrirSom: (id) => rtc?.abrirTurboSom(id),
+  somDaTela: () => video,
+  volume: () => 1,
+  onEvento: (texto, dados) => evento(texto, dados),
+  onFalhou: (motivo) => {
+    turboFalhou = motivo;
+    evento('turbo falhou: vídeo normal', { motivo });
+    if (st.jogando && video.srcObject) rtc.baixaLatencia(video.srcObject, true, BUFFER_MS);
+  },
+});
+
+let rel = null; // o relatório desta vez no jogo
+function comecarRelatorio(a) {
+  rel = {
+    id: `tv-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+    lado: 'joga',
+    inicio: new Date().toISOString(),
+    fim: null,
+    tv: true,
+    ambiente: {
+      ua: navigator.userAgent,
+      tela: `${screen.width}×${screen.height}`,
+      janela: `${innerWidth}×${innerHeight}`,
+      dpr: devicePixelRatio,
+      webcodecs: typeof VideoDecoder === 'function',
+      controle: gamepad() ? nomeDoControle(gamepad()) : null,
+    },
+    alvo: { dono: a.u.name, maquina: maquinaDaTela(a.sh), superficie: a.sh.superficie || null, titulo: a.sh.titulo || null },
+    eventos: [],
+    amostras: [],
+    enviado: false,
+  };
+}
+function evento(texto, dados = null) {
+  if (!rel) return;
+  if (rel.eventos.length < 300) rel.eventos.push({ t: Date.now(), texto, ...(dados ? { dados } : {}) });
+}
+
+// a imagem que chega pelo vídeo normal (getStats do receptor da tela)
+const medidaAntes = new Map(); // id do inbound-rtp -> { bytes, t, quadros }
+async function medirVideo() {
+  const a = st.alvo;
+  const trilha = video.srcObject?.getVideoTracks?.()[0];
+  const peer = a && rtc?.peers.get(a.u.id);
+  if (!trilha || !peer) return null;
+  let rep;
+  try {
+    rep = await peer.pc.getStats(trilha);
+  } catch {
+    return null;
+  }
+  let inb = null;
+  const codecs = new Map();
+  rep.forEach((r) => {
+    if (r.type === 'inbound-rtp' && r.kind === 'video') inb = r;
+    else if (r.type === 'codec') codecs.set(r.id, r.mimeType);
+  });
+  if (!inb) return null;
+  const antes = medidaAntes.get(inb.id);
+  medidaAntes.set(inb.id, { bytes: inb.bytesReceived, t: inb.timestamp });
+  const kbps = antes && inb.timestamp > antes.t ? Math.round(((inb.bytesReceived - antes.bytes) * 8) / (inb.timestamp - antes.t)) : null;
+  return {
+    largura: inb.frameWidth ?? null,
+    altura: inb.frameHeight ?? null,
+    qps: inb.framesPerSecond ?? null,
+    kbps,
+    codec: (codecs.get(inb.codecId) || '').replace('video/', '') || null,
+    decodificador: inb.decoderImplementation ?? null,
+    perdidos: inb.packetsLost ?? null,
+    pacotes: inb.packetsReceived ?? null,
+    descartados: inb.framesDropped ?? null,
+    congelou: inb.freezeCount ?? null,
+    pli: inb.pliCount ?? null,
+    nack: inb.nackCount ?? null,
+    bufferMs: inb.jitterBufferEmittedCount ? Math.round((inb.jitterBufferDelay / inb.jitterBufferEmittedCount) * 1000) : null,
+  };
+}
+
+let seloAte = 0;
+let seloSempre = false;
+function mostrarSelo(ms) {
+  seloAte = performance.now() + ms;
+}
+setInterval(async () => {
+  if (CONTROLE || !st.jogando) {
+    $('#selo').hidden = true;
+    return;
+  }
+  const t = turbo.ligado ? turbo.stats() : null;
+  const v = await medirVideo();
+  if (rel && rel.amostras.length < 1800) rel.amostras.push({ t: Date.now(), turbo: t, video: v });
+  if (rel && !rel.enviado && rel.amostras.length === 45) mandarRelatorio('90 s de jogo', true); // a TV pode desligar sem sair
+  const usado = t && t.qps > 0 ? { ...t, via: 'Turbo' } : v ? { ...v, via: 'vídeo' } : null;
+  const el = $('#selo');
+  el.hidden = !(seloSempre || performance.now() < seloAte) || !usado;
+  if (usado) {
+    const mbps = usado.kbps != null ? `${(usado.kbps / 1000).toFixed(1)} Mbps` : '–';
+    const res = usado.largura ? `${usado.largura}×${usado.altura}` : '–';
+    const codec = usado.codec ? String(usado.codec).toUpperCase().replace('H265', 'H.265').replace('H264', 'H.264') : '';
+    el.textContent = `${usado.via} · ${res} · ${Math.round(usado.qps || 0)} qps · ${mbps}${codec ? ` · ${codec}` : ''}${turboFalhou ? ` · turbo: ${turboFalhou}` : ''}`;
+  }
+}, 2000);
+
+function mandarRelatorio(motivo, parcial = false) {
+  if (!rel || !rel.amostras.length) return;
+  const r = { ...rel, fim: new Date().toISOString(), motivo };
+  const qps = r.amostras.map((x) => x.turbo?.qps || x.video?.qps).filter((x) => x > 0);
+  r.resumo = { mediaQps: qps.length ? qps.reduce((s, x) => s + x, 0) / qps.length : null, turbo: !!r.amostras.some((x) => x.turbo?.qps), turboFalhou };
+  const corpo = JSON.stringify({ id: parcial ? `${r.id}-p` : r.id, relatorio: r, sala: SALA, nome: `${conta?.nome || 'sem conta'} (TV)`, relogio: Date.now() });
+  if (parcial) rel.enviado = true;
+  else rel = null;
+  try {
+    fetch('/relatorio-jogo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: corpo, keepalive: corpo.length < 60_000 }).catch(() => {});
+  } catch { /* sem rede */ }
+}
+addEventListener('pagehide', () => mandarRelatorio('a página fechou'));
 
 // "estou aqui": sem notícia, quem compartilha solta o que estava apertado
 setInterval(() => {
@@ -483,9 +623,16 @@ setInterval(lerControles, ENVIO_MS);
 // Voltar: Tizen (Samsung) 10009, webOS (LG) 461, Android TV Escape/BrowserBack
 const VOLTAR = new Set([10009, 461, 27, 166]);
 const ehVoltar = (e) => VOLTAR.has(e.keyCode) || ['Escape', 'GoBack', 'BrowserBack', 'Back'].includes(e.key);
+// Info e os botões coloridos (Tizen/webOS 403–406 e 457; I no teclado): mostra ou esconde o selo da imagem
+const SELO = new Set([403, 404, 405, 406, 457]);
 addEventListener('keydown', (e) => {
   if (CONTROLE) return;
   ligarSom();
+  if (SELO.has(e.keyCode) || ['Info', 'ColorF0Red', 'ColorF1Green', 'ColorF2Yellow', 'ColorF3Blue', 'i', 'I'].includes(e.key)) {
+    e.preventDefault();
+    seloSempre = !seloSempre;
+    return;
+  }
   if (st.jogando) {
     if (ehVoltar(e)) {
       e.preventDefault();
