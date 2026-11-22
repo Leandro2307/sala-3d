@@ -1666,7 +1666,9 @@ export class RTC {
           if ('jitterBufferTarget' in r) r.jitterBufferTarget = ligar ? alvoMs : null;
           // o antigo do Chrome: 0 no vídeo liga o caminho de "quadro direto para a tela"
           if (r.track.kind === 'video' && 'playoutDelayHint' in r) r.playoutDelayHint = ligar ? 0 : null;
-          feitos.push({ tipo: r.track.kind, jitterBufferTarget: r.jitterBufferTarget ?? null, playoutDelayHint: r.playoutDelayHint ?? null });
+          // o mais antigo (Chrome até ~95, o das TVs LG webOS 22): em segundos
+          if (!('jitterBufferTarget' in r) && 'jitterBufferDelayHint' in r) r.jitterBufferDelayHint = ligar ? alvoMs / 1000 : null;
+          feitos.push({ tipo: r.track.kind, jitterBufferTarget: r.jitterBufferTarget ?? null, playoutDelayHint: r.playoutDelayHint ?? null, ...('jitterBufferDelayHint' in r ? { jitterBufferDelayHint: r.jitterBufferDelayHint ?? null } : {}) });
         } catch (err) {
           console.warn('[modo-jogo] buffer de quem joga', err);
           feitos.push({ tipo: r.track.kind, erro: String(err?.message || err) });

@@ -361,8 +361,8 @@ function ligarJogo() {
   document.activeElement?.blur?.();
   mandar(st.jogando, { t: 'modo', jogo: true, rapido: false, vibra: !!gamepad()?.vibrationActuator, ds: false });
   enviado = null; // o estado do controle vai inteiro de novo
-  if (video.srcObject) rtc.baixaLatencia(video.srcObject, true, BUFFER_MS);
   comecarRelatorio(a);
+  if (video.srcObject) evento('buffer do vídeo normal', { feitos: rtc.baixaLatencia(video.srcObject, true, BUFFER_MS) });
   if (!turboFalhou) {
     turbo.ligar(st.jogando, video, 1080);
     evento('turbo ligado');
@@ -402,11 +402,34 @@ const turbo = new TurboRecebe({
   volume: () => 1,
   onEvento: (texto, dados) => evento(texto, dados),
   onFalhou: (motivo) => {
+    // TV LG (webOS, Chrome 94, teste de 2026-11-22): o decodificador recusou o H.265 que ela disse
+    // aceitar. Antes de desistir, tenta uma vez só com o H.264.
+    if (motivo === 'decodificador' && !turbo.semHevc && st.jogando) {
+      turbo.semHevc = true;
+      evento('turbo: o decodificador falhou, tentando só com H.264', { erros: errosTurbo.slice(-5) });
+      turbo.ligar(st.jogando, video, 1080);
+      return;
+    }
     turboFalhou = motivo;
-    evento('turbo falhou: vídeo normal', { motivo });
-    if (st.jogando && video.srcObject) rtc.baixaLatencia(video.srcObject, true, BUFFER_MS);
+    evento('turbo falhou: vídeo normal', { motivo, erros: errosTurbo.slice(-5) });
+    if (st.jogando && video.srcObject) evento('buffer do vídeo normal', { feitos: rtc.baixaLatencia(video.srcObject, true, BUFFER_MS) });
   },
 });
+// os erros do Turbo (decodificador da TV) vão para o relatório: é com eles que dá para ver o que a TV recusa
+const errosTurbo = [];
+const warnOriginal = console.warn.bind(console);
+console.warn = (...a) => {
+  if (typeof a[0] === 'string' && a[0].startsWith('[turbo]') && errosTurbo.length < 50) errosTurbo.push(a.map((x) => String(x?.message || x)).join(' ').slice(0, 300));
+  warnOriginal(...a);
+};
+
+// o caminho do controle: ping pelo canal direto até quem compartilha (volta {pe, aj}: a ida e volta e
+// quanto o ajudante de lá levou), o mesmo que o site mede para quem joga
+const ping = { rtt: [], aj: null };
+setInterval(() => {
+  if (!st.jogando || !rtc) return;
+  rtc.mandarControle(String(st.jogando).split('~')[0], { p: performance.now() });
+}, 1000);
 
 let rel = null; // o relatório desta vez no jogo
 function comecarRelatorio(a) {
@@ -456,8 +479,12 @@ async function medirVideo() {
   });
   if (!inb) return null;
   const antes = medidaAntes.get(inb.id);
-  medidaAntes.set(inb.id, { bytes: inb.bytesReceived, t: inb.timestamp });
+  const agora = { bytes: inb.bytesReceived, t: inb.timestamp, buf: inb.jitterBufferDelay || 0, saidos: inb.jitterBufferEmittedCount || 0, dec: inb.totalDecodeTime || 0, decodificados: inb.framesDecoded || 0 };
+  medidaAntes.set(inb.id, agora);
   const kbps = antes && inb.timestamp > antes.t ? Math.round(((inb.bytesReceived - antes.bytes) * 8) / (inb.timestamp - antes.t)) : null;
+  // nos últimos 2 s (o jitterBufferDelay é a soma desde o começo: a média geral escondia o de agora)
+  const saidos = antes ? agora.saidos - antes.saidos : 0;
+  const decs = antes ? agora.decodificados - antes.decodificados : 0;
   return {
     largura: inb.frameWidth ?? null,
     altura: inb.frameHeight ?? null,
@@ -471,7 +498,8 @@ async function medirVideo() {
     congelou: inb.freezeCount ?? null,
     pli: inb.pliCount ?? null,
     nack: inb.nackCount ?? null,
-    bufferMs: inb.jitterBufferEmittedCount ? Math.round((inb.jitterBufferDelay / inb.jitterBufferEmittedCount) * 1000) : null,
+    bufferMs: saidos > 0 ? Math.round(((agora.buf - antes.buf) / saidos) * 1000) : null,
+    decMs: decs > 0 ? Math.round(((agora.dec - antes.dec) / decs) * 10000) / 10 : null,
   };
 }
 
@@ -487,7 +515,10 @@ setInterval(async () => {
   }
   const t = turbo.ligado ? turbo.stats() : null;
   const v = await medirVideo();
-  if (rel && rel.amostras.length < 1800) rel.amostras.push({ t: Date.now(), turbo: t, video: v });
+  const rtts = [...ping.rtt].sort((x, y) => x - y);
+  const controle = { rttMs: rtts.length ? Math.round(rtts[rtts.length >> 1]) : null, ajudanteMs: ping.aj, pad: !!gamepad() };
+  ping.rtt.length = 0;
+  if (rel && rel.amostras.length < 1800) rel.amostras.push({ t: Date.now(), turbo: t, video: v, controle });
   if (rel && !rel.enviado && rel.amostras.length === 45) mandarRelatorio('90 s de jogo', true); // a TV pode desligar sem sair
   const usado = t && t.qps > 0 ? { ...t, via: 'Turbo' } : v ? { ...v, via: 'vídeo' } : null;
   const el = $('#selo');
@@ -496,7 +527,10 @@ setInterval(async () => {
     const mbps = usado.kbps != null ? `${(usado.kbps / 1000).toFixed(1)} Mbps` : '–';
     const res = usado.largura ? `${usado.largura}×${usado.altura}` : '–';
     const codec = usado.codec ? String(usado.codec).toUpperCase().replace('H265', 'H.265').replace('H264', 'H.264') : '';
-    el.textContent = `${usado.via} · ${res} · ${Math.round(usado.qps || 0)} qps · ${mbps}${codec ? ` · ${codec}` : ''}${turboFalhou ? ` · turbo: ${turboFalhou}` : ''}`;
+    // atraso que dá para medir aqui: a espera na fila do vídeo (ou o liso do Turbo) e o caminho do controle
+    const espera = usado.via === 'vídeo' && usado.bufferMs != null ? ` · fila ${usado.bufferMs} ms` : usado.pontaMs != null ? ` · imagem ${Math.round(usado.pontaMs)} ms` : '';
+    const ctrl = controle.rttMs != null ? ` · controle ${Math.round(controle.rttMs / 2)} ms` : '';
+    el.textContent = `${usado.via} · ${res} · ${Math.round(usado.qps || 0)} qps · ${mbps}${codec ? ` · ${codec}` : ''}${espera}${ctrl}${turboFalhou ? ` · turbo: ${turboFalhou}` : ''}`;
   }
 }, 2000);
 
@@ -522,6 +556,12 @@ setInterval(() => {
 
 // a volta: o jogo vibrou o controle
 function receberDireto(id, m) {
+  if (typeof m?.pe === 'number') {
+    if (ping.rtt.length > 30) ping.rtt.shift();
+    ping.rtt.push(performance.now() - m.pe);
+    if (typeof m.aj === 'number') ping.aj = m.aj;
+    return;
+  }
   if (m?.v && typeof m.v.key === 'string' && m.v.key.split('~')[0] === id) receberVolta(m.v.key, m.v.ev);
 }
 function receberVolta(key, ev) {
