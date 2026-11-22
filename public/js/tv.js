@@ -163,6 +163,11 @@ function ligarSocket() {
   });
   socket.on('lan', aplicarLan);
   socket.on('controle-volta', ({ key, ev }) => receberVolta(key, ev));
+  // o celular desta conta virou o controle (ou saiu do jogo): a TV entra no modo jogo sozinha
+  socket.on('tv-modo', (m) => {
+    if (CONTROLE) return;
+    if (m?.ligar) { if (!st.jogando) ligarJogo(); } else desligarJogo();
+  });
   socket.on('tv-conta', (c) => {
     if (!c?.token) return;
     try { localStorage.setItem(LAN_CHAVE, JSON.stringify({ nome: c.nome, token: c.token })); } catch { /* sem storage */ }
@@ -174,7 +179,9 @@ function ligarSocket() {
 function addUser(u) {
   const shares = new Map((u.shares || []).map((sh) => [sh.key, { ...sh }]));
   const antes = st.users.get(u.id);
-  st.users.set(u.id, { id: u.id, name: u.name, shares, streams: antes?.streams || new Map() });
+  const streams = antes?.streams || semDono.get(u.id) || new Map();
+  semDono.delete(u.id);
+  st.users.set(u.id, { id: u.id, name: u.name, shares, streams });
 }
 
 // ------------------------------------------------------------------ a TV no código do QR
@@ -255,12 +262,47 @@ function escolherAlvo() {
   return telas.find((x) => x.sh.key === st.main) || telas.find((x) => x.sh.controle) || telas[0] || null;
 }
 
+// a imagem pode chegar antes de a TV saber de quem é (o 'user-joined' atrasado): fica guardada
+const semDono = new Map(); // id -> Map(stream.id -> stream)
 function receberTrilha(peerId, stream) {
   const u = st.users.get(peerId);
-  if (!u) return;
+  if (!u) {
+    if (!semDono.has(peerId)) semDono.set(peerId, new Map());
+    semDono.get(peerId).set(stream.id, stream);
+    return;
+  }
   u.streams.set(stream.id, stream);
   mostrarVideo();
 }
+
+// "Carregando a imagem…" que não sai (2026-11-22: o PS5 entrou na sala depois de a TV abrir e a imagem
+// nunca subiu): pede de novo, depois refaz a conexão com quem compartilha e, por fim, recarrega a página
+let esperandoDesde = 0;
+let passoEspera = 0;
+setInterval(() => {
+  if (CONTROLE || !st.entrou) return;
+  const a = st.alvo;
+  const ok = a && vivo(a.u.streams.get(a.sh.streamId));
+  if (!a || ok) {
+    esperandoDesde = 0;
+    passoEspera = 0;
+    return;
+  }
+  esperandoDesde ||= Date.now();
+  const s = (Date.now() - esperandoDesde) / 1000;
+  if (passoEspera === 0 && s > 6) {
+    passoEspera = 1;
+    st.interesse.delete(a.u.id);
+    enviarInteresse(true);
+  } else if (passoEspera === 1 && s > 14) {
+    passoEspera = 2;
+    console.info('[tv] a imagem não chegou: refazendo a conexão com', a.u.name);
+    rtc.refazer(a.u.id, 'a imagem da TV não chegou');
+  } else if (passoEspera === 2 && s > 40) {
+    passoEspera = 3;
+    location.reload();
+  }
+}, 2000);
 
 const vivo = (s) => s && s.getTracks().some((t) => t.readyState === 'live');
 const video = $('#tela');
@@ -415,6 +457,8 @@ const turbo = new TurboRecebe({
     if (st.jogando && video.srcObject) evento('buffer do vídeo normal', { feitos: rtc.baixaLatencia(video.srcObject, true, BUFFER_MS) });
   },
 });
+// TV: a aceleração da placa pode não existir para o WebCodecs (LG webOS): tenta sem preferência e no processador
+turbo.aceleracoes = ['prefer-hardware', 'no-preference', 'prefer-software'];
 // os erros do Turbo (decodificador da TV) vão para o relatório: é com eles que dá para ver o que a TV recusa
 const errosTurbo = [];
 const warnOriginal = console.warn.bind(console);
@@ -550,7 +594,7 @@ addEventListener('pagehide', () => mandarRelatorio('a página fechou'));
 
 // "estou aqui": sem notícia, quem compartilha solta o que estava apertado
 setInterval(() => {
-  const key = CONTROLE ? (gamepad() ? chaveDoPad() : null) : st.jogando;
+  const key = CONTROLE ? (gamepad() || toque.ativo ? chaveDoPad() : null) : st.jogando;
   if (key) mandar(key, { t: 'vivo' });
 }, VIVO_MS);
 
@@ -580,6 +624,7 @@ function gamepad() {
 }
 addEventListener('gamepadconnected', (e) => {
   gpIndice = e.gamepad.index;
+  if (CONTROLE && conta) socket?.emit('tv-modo', { ligar: true }); // o controle ligado no celular: a TV entra no jogo
   aviso(`Controle ligado: ${nomeDoControle(e.gamepad)}`, 'info', 3500);
   atualizarBotao();
   atualizarCelular();
@@ -626,6 +671,11 @@ function lerControles() {
   const g = gamepad();
   const e = g ? estadoDoControle(g) : { b: 0, lx: 0, ly: 0, rx: 0, ry: 0, lt: 0, rt: 0 };
   e.b |= remoto.b;
+  // o controle de toque do celular soma com o de verdade: botões juntos e, em cada eixo, o mais empurrado
+  if (toque.ativo) {
+    e.b |= toque.b;
+    for (const k of ['lx', 'ly', 'rx', 'ry', 'lt', 'rt']) if (Math.abs(toque[k]) > Math.abs(e[k])) e[k] = toque[k];
+  }
   // fora do jogo, na TV: o ✕/A aperta o botão em foco e o direcional anda entre os botões
   if (!CONTROLE && !st.jogando && g) {
     const novo = e.b & ~botoesAntes;
@@ -650,9 +700,11 @@ function lerControles() {
     return;
   }
   const mudou = !enviado || e.b !== enviado.b || ['lx', 'ly', 'rx', 'ry', 'lt', 'rt'].some((k) => e[k] !== enviado[k]);
-  if (!mudou || performance.now() - ultimoEnvio < ENVIO_MS) return;
+  // botão mudou: sai na hora; só o analógico respeita o intervalo
+  const botao = !enviado || e.b !== enviado.b;
+  if (!mudou || (!botao && performance.now() - ultimoEnvio < ENVIO_MS)) return;
   // celular sem controle ligado: não manda nada (o da TV pode estar jogando)
-  if (CONTROLE && !g) return;
+  if (CONTROLE && !g && !toque.ativo) return;
   enviado = e;
   ultimoEnvio = performance.now();
   mandar(key, { t: 'pad', ...e });
@@ -736,6 +788,127 @@ function atualizarBotao() {
   if (!document.activeElement || document.activeElement === document.body) focar($('#btn-jogo'));
 }
 
+// ------------------------------------------------------------------ o celular como controle (toque)
+// Sem controle de verdade, o próprio celular vira um controle de PS5 na tela (deitado). Ao abrir, a TV
+// desta conta entra no modo jogo sozinha ('tv-modo' pelo servidor); "Sair do jogo" tira.
+const TOQUE_MIN_MS = 50;
+const toque = { ativo: false, b: 0, lx: 0, ly: 0, rx: 0, ry: 0, lt: 0, rt: 0 };
+const vibrarToque = () => { try { navigator.vibrate?.(8); } catch { /* sem motor */ } };
+let travaTela = null;
+async function ligarToque() {
+  const el = $('#toque');
+  el.hidden = false;
+  toque.ativo = true;
+  enviado = null;
+  try {
+    await document.documentElement.requestFullscreen?.({ navigationUI: 'hide' });
+    await screen.orientation?.lock?.('landscape');
+  } catch { /* iPhone e navegadores sem tela cheia: o aviso "gire o celular" cobre */ }
+  try { travaTela = await navigator.wakeLock?.request('screen'); } catch { /* sem wake lock */ }
+  socket?.emit('tv-modo', { ligar: true });
+  atualizarToque();
+}
+function desligarToque() {
+  Object.assign(toque, { ativo: false, b: 0, lx: 0, ly: 0, rx: 0, ry: 0, lt: 0, rt: 0 });
+  const key = chaveDoPad();
+  if (key) mandar(key, { t: 'pad', b: 0, lx: 0, ly: 0, rx: 0, ry: 0, lt: 0, rt: 0 });
+  $('#toque').hidden = true;
+  for (const b of document.querySelectorAll('#toque .on')) b.classList.remove('on');
+  socket?.emit('tv-modo', { ligar: false });
+  try { travaTela?.release(); } catch { /* já solta */ }
+  travaTela = null;
+  if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+}
+function atualizarToque() {
+  if (!toque.ativo) return;
+  const sh = st.alvo?.sh;
+  const txt = !conta ? 'Sem conta' : !sh ? 'Nada no telão' : !sh.controle ? 'Controle travado' : !podeJogar(sh) ? 'Sem horário agora' : `Jogando no ${NOME_MAQ[maquinaDaTela(sh)]}`;
+  $('#toque-status').textContent = txt;
+}
+setInterval(atualizarToque, 1000);
+
+if (CONTROLE) {
+  const raiz = $('#toque');
+  raiz.addEventListener('contextmenu', (e) => e.preventDefault());
+  // botões: cada dedo segura o seu (multitoque); L2 e R2 também vão como gatilho inteiro
+  for (const el of raiz.querySelectorAll('[data-b]')) {
+    const bit = Number(el.dataset.b);
+    let desde = 0;
+    let timer = 0;
+    // um toque rápido vale pelo menos TOQUE_MIN_MS: o jogo lê o controle a cada quadro e perderia o aperto
+    const soltar = () => {
+      if (!desde) return;
+      const falta = TOQUE_MIN_MS - (performance.now() - desde);
+      desde = 0;
+      el.classList.remove('on');
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        toque.b &= ~(1 << bit);
+        if (bit === 6) toque.lt = 0;
+        if (bit === 7) toque.rt = 0;
+        lerControles();
+      }, Math.max(0, falta));
+    };
+    el.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      try { el.setPointerCapture?.(e.pointerId); } catch { /* ponteiro já solto */ }
+      clearTimeout(timer);
+      desde = performance.now();
+      el.classList.add('on');
+      toque.b |= 1 << bit;
+      if (bit === 6) toque.lt = 1;
+      if (bit === 7) toque.rt = 1;
+      vibrarToque();
+      lerControles(); // sai na hora, sem esperar a próxima leitura
+    });
+    el.addEventListener('pointerup', soltar);
+    el.addEventListener('pointercancel', soltar);
+    el.addEventListener('lostpointercapture', soltar);
+  }
+  // analógicos: o dedo arrasta a bolinha; o eixo vai de -1 a 1 (y para baixo é positivo, como no controle)
+  for (const el of raiz.querySelectorAll('[data-stick]')) {
+    const lado = el.dataset.stick;
+    const bola = el.querySelector('i');
+    let dedo = null;
+    const mover = (e) => {
+      const r = el.getBoundingClientRect();
+      const raio = r.width / 2;
+      let dx = (e.clientX - (r.left + raio)) / raio;
+      let dy = (e.clientY - (r.top + raio)) / raio;
+      const d = Math.hypot(dx, dy);
+      if (d > 1) { dx /= d; dy /= d; }
+      toque[`${lado}x`] = Math.round(dx * 1000) / 1000;
+      toque[`${lado}y`] = Math.round(dy * 1000) / 1000;
+      bola.style.transform = `translate(${dx * raio * 0.6}px, ${dy * raio * 0.6}px)`;
+    };
+    const soltar = () => {
+      dedo = null;
+      el.classList.remove('on');
+      toque[`${lado}x`] = 0;
+      toque[`${lado}y`] = 0;
+      bola.style.transform = '';
+    };
+    el.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      dedo = e.pointerId;
+      try { el.setPointerCapture?.(e.pointerId); } catch { /* ponteiro já solto */ }
+      el.classList.add('on');
+      mover(e);
+    });
+    el.addEventListener('pointermove', (e) => { if (e.pointerId === dedo) mover(e); });
+    el.addEventListener('pointerup', soltar);
+    el.addEventListener('pointercancel', soltar);
+  }
+  $('#btn-toque').addEventListener('click', ligarToque);
+  $('#toque-sair').addEventListener('click', desligarToque);
+  // voltou para a página (a tela apagou e acendeu): a trava da tela volta
+  document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState === 'visible' && toque.ativo && !travaTela) {
+      try { travaTela = await navigator.wakeLock?.request('screen'); } catch { /* sem wake lock */ }
+    }
+  });
+}
+
 function atualizarCelular() {
   if (!CONTROLE) return;
   const g = gamepad();
@@ -743,6 +916,7 @@ function atualizarCelular() {
   pad.textContent = g ? `🎮 ${nomeDoControle(g)} ligado` : 'Nenhum controle ligado';
   pad.className = `grande-status ${g ? 'ok' : ''}`;
   $('#cel-pad-txt').hidden = !!g;
+  $('#btn-toque').hidden = !conta;
   const sh = st.alvo?.sh;
   const el = $('#cel-alvo');
   if (!conta) el.innerHTML = '<span class="ruim">Sem conta.</span> Abra a página de aluguel, entre na sua conta e volte aqui.';

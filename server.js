@@ -1659,6 +1659,15 @@ function attachSockets(io) {
       r({ ok: true, codigo: meuCodigoTV });
     });
 
+    // TV: o celular da mesma conta virou o controle (tv.js ligarToque) — a TV dessa conta entra (ou sai)
+    // do modo jogo sozinha
+    socket.on('tv-modo', (msg) => {
+      if (!room || !user?.tv || !user.conta) return;
+      for (const u of room.users.values()) {
+        if (u !== user && u.tv && u.conta === user.conta) io.to(u.id).emit('tv-modo', { ligar: !!obj(msg).ligar });
+      }
+    });
+
     // lan house: os comandos ao jogo vão direto (WebRTC), sem passar por aqui. Quem compartilha a
     // tela avisa o primeiro comando de quem joga de graça, e os 2 min dessa pessoa começam.
     socket.on('lan-teste', (msg) => {

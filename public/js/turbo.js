@@ -1440,6 +1440,8 @@ export class TurboRecebe {
     // quadros ou demorou com ele (largarHevc): até recarregar a página, só H.264.
     this.semHevc = false;
     this.realce = false; // realce de nitidez (Realce): vale na próxima vez que o turbo ligar
+    // as acelerações tentadas no decodificador, em ordem (configurarDec, proximaAceleracao)
+    this.aceleracoes = ['prefer-hardware'];
     this.realceForca = REALCE_FORCA;
     this.lisoPct = LISO_PCT; // quanto do tremido a folga do liso cobre (presets de teste)
     this.lisoMax = LISO_MAX; // a folga máxima (ms): o Turbo rápido troca o atraso pelo tremido
@@ -1589,6 +1591,13 @@ export class TurboRecebe {
             if (this.s !== s) return;
             s.dec = null;
             s.esperaChave = true;
+            // a aceleração pedida não existe neste aparelho (TV LG webOS, Chrome 94: "Unsupported
+            // configuration" com o isConfigSupported dizendo sim): tenta a próxima da lista
+            if (this.proximaAceleracao(s, err)) {
+              this.configurarDec(s);
+              this.pedirChave(s, true);
+              return;
+            }
             s.errosDec = (s.errosDec || 0) + 1;
             if (s.errosDec > 5) return this.falhou('decodificador');
             this.configurarDec(s);
@@ -1596,7 +1605,9 @@ export class TurboRecebe {
           },
         });
       }
-      const config = { codec: cfg.codec, optimizeForLatency: true, hardwareAcceleration: s.ajusteDec === 2 ? 'prefer-software' : 'prefer-hardware' };
+      const acel = s.ajusteDec === 2 ? 'prefer-software' : this.aceleracoes[s.acel || 0] || 'prefer-hardware';
+      const config = { codec: cfg.codec, optimizeForLatency: true };
+      if (acel !== 'no-preference') config.hardwareAcceleration = acel;
       if (cfg.description) {
         const d = Uint8Array.from(atob(cfg.description), (c) => c.charCodeAt(0));
         // O SPS reescrito sempre, já de saída (era só depois de o decodificador segurar, e isso nunca
@@ -1611,8 +1622,22 @@ export class TurboRecebe {
       s.seguros = 0;
     } catch (err) {
       console.warn('[turbo] configurar', err);
+      if (this.proximaAceleracao(s, err)) return this.configurarDec(s);
       this.falhou('decodificador');
     }
+  }
+
+  // Erro de configuração (o decodificador não existe com essa aceleração): passa para a próxima de
+  // this.aceleracoes, se houver. A TV usa ['prefer-hardware', 'no-preference', 'prefer-software'].
+  proximaAceleracao(s, err) {
+    const msg = String(err?.message || err);
+    if (!/unsupported configuration|not ?supported/i.test(msg) && err?.name !== 'NotSupportedError') return false;
+    if ((s.acel || 0) >= this.aceleracoes.length - 1 || s.ajusteDec === 2) return false;
+    s.acel = (s.acel || 0) + 1;
+    try { if (s.dec && s.dec.state !== 'closed') s.dec.close(); } catch { /* já fechado */ }
+    s.dec = null;
+    this.onEvento?.(`turbo: decodificador recusou, tentando ${this.aceleracoes[s.acel]}`, { codec: s.cfgAtual?.codec ?? null, erro: msg.slice(0, 160) });
+    return true;
   }
 
   // O decodificador está segurando quadros: depois de soltar o primeiro, continua com SEGURANDO ou mais
