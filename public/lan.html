@@ -127,6 +127,16 @@
 
   <div class="msg" id="aviso" hidden></div>
 
+  <!-- veio pelo QR da TV (/lan?tv=CÓDIGO): a TV entra na conta de quem escaneou (ver /lan/tv) -->
+  <section class="card" id="tv-card" hidden>
+    <h2>📺 TV</h2>
+    <p class="sub" id="tv-txt" style="margin:0 0 10px">Entre na sua conta aqui embaixo e a TV entra junto.</p>
+    <div class="row" id="tv-acoes" hidden>
+      <a class="btn primary" href="/tv?controle=1">🎮 Usar o celular como controle</a>
+    </div>
+    <p class="sub" id="tv-dica" style="margin:10px 0 0" hidden>A TV não reconheceu o seu controle? Ligue o controle no Bluetooth deste celular e toque no botão acima: os botões vão do celular para o jogo e a imagem continua na TV.</p>
+  </section>
+
   <section class="card" id="login">
     <h2>Sua conta</h2>
     <p class="sub" style="margin:-4px 0 12px">Seu nome e senha da sala. Primeira vez? A senha que você digitar vira a da sua conta.</p>
@@ -143,6 +153,7 @@
     <div class="row spread">
       <div class="quem"><span class="avatar" id="conta-avatar"></span><span><small>Logado como</small><b id="conta-nome"></b></span></div>
       <div class="row" style="gap:2px">
+        <a class="btn link" href="/tv?controle=1" title="O controle ligado neste celular joga na TV">🎮 Controle da TV</a>
         <button type="button" class="link" id="trocar-senha">Trocar senha</button>
         <button type="button" class="link perigo" id="sair">Sair</button>
       </div>
@@ -239,7 +250,37 @@
     try { c ? localStorage.setItem(CHAVE, JSON.stringify(c)) : localStorage.removeItem(CHAVE); } catch { /* sem storage */ }
     mostrarConta();
   }
+  // ------------------------------------------------ TV (QR code)
+  const tvCodigo = (params.get('tv') || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8) || null;
+  let tvLigada = null; // a conta com que a TV entrou
+  let ligandoTv = false;
+  async function ligarTV() {
+    if (!tvCodigo) return;
+    $('#tv-card').hidden = false;
+    if (!conta) {
+      $('#tv-txt').textContent = 'Entre na sua conta aqui embaixo e a TV entra junto. Depois é só alugar o PC ou o PS5.';
+      $('#tv-acoes').hidden = true;
+      $('#tv-dica').hidden = true;
+      return;
+    }
+    if (tvLigada === conta.nome || ligandoTv) return;
+    ligandoTv = true;
+    $('#tv-txt').textContent = 'Ligando a TV na sua conta…';
+    const r = await post('/lan/tv', { token: conta.token, codigo: tvCodigo });
+    ligandoTv = false;
+    if (sairPorLogin(r)) return;
+    if (!r.ok) {
+      $('#tv-txt').textContent = r.erro || 'Não deu para ligar a TV. Escaneie o código de novo.';
+      return;
+    }
+    tvLigada = conta.nome;
+    $('#tv-txt').innerHTML = `<b>Pronto: a TV entrou na conta ${esc(r.conta || conta.nome)}.</b> Agora alugue o PC ou o PS5 aqui embaixo. Na sua hora, aperte <b>Modo jogo</b> na TV.`;
+    $('#tv-acoes').hidden = false;
+    $('#tv-dica').hidden = false;
+  }
+
   function mostrarConta() {
+    setTimeout(ligarTV, 0);
     $('#login').hidden = !!conta;
     $('#conta').hidden = !conta;
     $('#minhas').hidden = !conta;

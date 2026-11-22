@@ -10,6 +10,7 @@ const compression = require('compression');
 const { paginaInicial, moduloVersionado, listaOffline, servidorDeBolso, PREFIXO_THREE, THREE_DIR, PREFIXO_SIO, SIO_DIR } = require('./pagina.js');
 const { execFile } = require('child_process');
 const crypto = require('crypto');
+const QRCode = require('qrcode');
 const banco = require('./banco');
 const { ligarFutebol } = require('./futebol-servidor.js');
 const { ligarQuadras } = require('./quadras-servidor.js');
@@ -256,8 +257,19 @@ if (!(process.env.RENDER || process.env.NODE_ENV === 'production')) {
 // cache HTTP e o do service worker (configurações e nome no localStorage ficam). O cookie marca
 // quem já limpou, para não limpar a cada visita.
 const LIMPEZA = '3';
+// Modo TV: o navegador de Smart TV (Samsung/Tizen, LG/webOS, Android/Google TV, Fire TV, Roku,
+// Philips, Hisense/VIDAA, Sony BRAVIA...) abre o mesmo endereço e cai na página leve da TV
+// (public/tv.html): sem o mundo 3D, só o telão, o modo jogo e o QR do aluguel. ?tv=1 força, ?tv=0 não.
+const UA_TV = /smart-?tv|smarttv|tizen|web0s|webos|netcast|hbbtv|bravia|googletv|google tv|android tv|androidtv|\baft[a-z]{1,4}\b|crkey|chromecast|roku|vidaa|hisense|philipstv|nettv|tv bro|large screen|\bdtv\b|; ?tv[;)]|appletv|viera|aquos|opera tv|tvos/i;
+const ehTV = (req) => req.query.tv === '1' || (req.query.tv !== '0' && UA_TV.test(req.headers['user-agent'] || ''));
+const paginaTV = path.join(__dirname, 'public', 'tv.html');
+app.get('/tv', (_req, res) => {
+  res.set('Cache-Control', 'no-cache');
+  res.sendFile(paginaTV);
+});
 app.get(['/', '/index.html'], (req, res) => {
   res.set('Cache-Control', 'no-cache');
+  if (ehTV(req)) return res.sendFile(paginaTV);
   if (!new RegExp(`(?:^|;\\s*)sala3d-limpo=${LIMPEZA}(?:;|$)`).test(req.headers.cookie || '')) {
     res.set('Clear-Site-Data', '"cache"');
     res.cookie('sala3d-limpo', LIMPEZA, { maxAge: 365 * 86400_000, sameSite: 'lax', secure: req.secure || req.get('x-forwarded-proto') === 'https' });
@@ -740,6 +752,48 @@ const lan = require('./lanhouse')({
 lan.rotas(app);
 app.get('/lan', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'lan.html')));
 
+// ------------------------------------------------------------------ TV ligada na conta pelo QR
+// A TV (public/tv.html) pede um código ('tv-codigo') e mostra o QR de /lan?tv=CÓDIGO. No celular a
+// pessoa entra na conta e a página /lan manda o token dela aqui: a TV recebe e entra com essa conta
+// (como o login da Netflix na TV). O QR some na vez de quem está na TV: no horário pago ninguém
+// troca a conta dela; fora dele, quem escanear assume a TV.
+const tvCodigos = new Map(); // código -> { socket, dados: () => ({ room, user }) }
+const LETRAS_TV = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // sem 0/O e 1/I
+function novoCodigoTV() {
+  let c;
+  do c = Array.from(crypto.randomBytes(8), (b) => LETRAS_TV[b % LETRAS_TV.length]).join('');
+  while (tvCodigos.has(c));
+  return c;
+}
+const codigoTV = (c) => String(c ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+app.get('/tv/qr.svg', async (req, res) => {
+  const codigo = codigoTV(req.query.c);
+  if (codigo.length !== 8) return res.status(400).end();
+  const base = `${req.get('x-forwarded-proto') || req.protocol}://${req.get('host')}`;
+  try {
+    const svg = await QRCode.toString(`${base}/lan?tv=${codigo}`, { type: 'svg', margin: 1, errorCorrectionLevel: 'M', color: { dark: '#0b1020', light: '#ffffff' } });
+    res.set('Cache-Control', 'no-store').type('image/svg+xml').send(svg);
+  } catch {
+    res.status(500).end();
+  }
+});
+app.post('/lan/tv', express.json({ limit: '2kb' }), (req, res) => {
+  const conta = lan.contaDoToken(req.body?.token);
+  if (!conta) return res.json({ ok: false, erro: 'login' });
+  const tv = tvCodigos.get(codigoTV(req.body?.codigo));
+  if (!tv?.socket.connected) return res.json({ ok: false, erro: 'A TV não está mais esperando. Escaneie o código que está na tela dela agora.' });
+  const { room, user } = tv.dados();
+  // na vez de outra pessoa (PC ou PS5), a TV continua com ela
+  if (room && user?.conta && user.conta !== conta && room.config?.lanhouse?.ligada) {
+    for (const m of lan.MAQUINAS) {
+      if (vezLan(room, m)?.conta === user.conta) return res.json({ ok: false, erro: `A TV está no horário de ${user.conta}. Espere acabar.` });
+    }
+  }
+  tv.socket.emit('tv-conta', { nome: conta, token: req.body.token });
+  console.log(`[tv] TV ligada na conta ${conta}`);
+  res.json({ ok: true, conta });
+});
+
 // o que cada um na sala sabe: se está ligada e, em cada máquina (PC, PS5), de quem é a vez, até
 // quando e os ids dessa pessoa na sala
 // A vez numa máquina. O PC começa a ser preparado 1 min antes (abrir o jogo leva quase isso: o God
@@ -765,6 +819,11 @@ function estadoLan(room) {
   e.teste = {};
   e.semTeste = [];
   for (const u of room.users.values()) {
+    // TV sem conta: não joga de graça (o teste é por conta); quem compartilha também a barra
+    if (!u.conta) {
+      e.semTeste.push(u.id);
+      continue;
+    }
     const t = lan.teste(room.id, u.conta, u.ip);
     if (t.fim) e.teste[u.id] = t.fim;
     else if (t.acabou) e.semTeste.push(u.id);
@@ -825,8 +884,8 @@ async function vigiarJogoLan(room) {
 function podeJogarLan(room, user, donoDaTela, tela) {
   if (!room.config?.lanhouse?.ligada || user === donoDaTela) return true;
   const atual = vezLan(room, maquinaDaTela(tela));
-  if (atual) return user.conta === atual.conta;
-  return !lan.teste(room.id, user.conta, user.ip).acabou;
+  if (atual) return !!user.conta && user.conta === atual.conta;
+  return !!user.conta && !lan.teste(room.id, user.conta, user.ip).acabou;
 }
 // o primeiro comando ao jogo numa máquina livre começa os 2 min do teste grátis desta pessoa; no
 // fim, a sala fica sabendo (a tela de quem joga deixa de aceitar e abre o aluguel para ela)
@@ -1493,15 +1552,18 @@ function attachSockets(io) {
       // todo mundo entra com a conta (nome e senha, ver lanhouse.js); o nome na sala é o dela, do
       // jeito que a pessoa escreveu (só muda maiúscula/minúscula)
       const contaLan = data?.lan ? lan.contaDoToken(data.lan) : null;
-      if (!contaLan) {
+      // a TV (public/tv.html) entra sem conta para mostrar o telão e o QR do aluguel; só joga depois
+      // que alguém a liga na conta pelo celular (ver 'tv-codigo' e /lan/tv)
+      const tvSemConta = !contaLan && data?.tv === true;
+      if (!contaLan && !tvSemConta) {
         entrando = false;
         return ack?.({ erro: 'conta' });
       }
       const escrito = cleanText(data?.name, 20).replace(/\s+/g, ' ').trim();
-      const nome = escrito.toLowerCase() === contaLan ? escrito : contaLan;
+      const nome = tvSemConta ? 'TV' : escrito.toLowerCase() === contaLan ? escrito : contaLan;
       // configuração da sala e carteira vêm do banco: espera antes de entrar
       const sala = getRoom(roomId);
-      await Promise.all([carregarSala(sala), carregarCarteira(nome)]);
+      await Promise.all([carregarSala(sala), tvSemConta ? null : carregarCarteira(nome)]);
       if (!socket.connected) return;
       // sala com senha: só entra com o passe (ver /sala-acesso)
       if (!passeValido(sala, data?.passe)) {
@@ -1531,7 +1593,8 @@ function attachSockets(io) {
         statusDesde: Date.now(),
         gestor: false, // provou a senha de gestor (ou de dono): recebe os alertas da equipe
         ultimoChamado: 0,
-        conta: contaLan, // a conta com que entrou (lanhouse.js): é ela que joga no horário reservado
+        conta: contaLan, // a conta com que entrou (lanhouse.js): é ela que joga no horário reservado (null: TV sem conta)
+        tv: data?.tv === true, // a página da TV ou o celular como controle dela (public/tv.html)
         ip: ipDe(), // o teste grátis da lan house é um por conta e um por IP
         p: [0, 0, -4], r: Math.PI, a: 0, s: 0,
       };
@@ -1581,6 +1644,19 @@ function attachSockets(io) {
       user.conta = conta;
       avisarLan(room);
       r({ ok: true, conta, lan: estadoLan(room) });
+    });
+
+    // TV: o código do QR (ver /lan/tv). Um por conexão; some quando a TV sai.
+    let meuCodigoTV = null;
+    socket.on('tv-codigo', (_msg, ack) => {
+      const r = resposta(ack);
+      if (!user?.tv) return r({ ok: false });
+      if (!meuCodigoTV) {
+        meuCodigoTV = novoCodigoTV();
+        tvCodigos.set(meuCodigoTV, { socket, dados: () => ({ room, user }) });
+        socket.on('disconnect', () => tvCodigos.delete(meuCodigoTV));
+      }
+      r({ ok: true, codigo: meuCodigoTV });
     });
 
     // lan house: os comandos ao jogo vão direto (WebRTC), sem passar por aqui. Quem compartilha a

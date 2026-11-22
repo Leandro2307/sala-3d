@@ -100,7 +100,9 @@ async function daRede(req) {
   const cache = await abrirCache();
   try {
     const resp = await fetch(req);
-    if (resp.status === 200) cache?.put(req.mode === 'navigate' ? '/' : req, resp.clone()).catch(() => {});
+    // só a página da sala vale como a última vista (/tv e /lan, abertas no celular, não)
+    const guardar = req.mode !== 'navigate' || new URL(req.url).pathname === '/';
+    if (resp.status === 200 && guardar) cache?.put(req.mode === 'navigate' ? '/' : req, resp.clone()).catch(() => {});
     return resp;
   } catch (err) {
     // sem rede, a página do pacote offline (que combina com os módulos dele) vem antes da última vista

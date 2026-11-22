@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#05070d">
+<title>Sala 3D · TV</title>
+<link rel="icon" href="/icons/icon-192.png">
+<!-- Modo TV (ver public/js/tv.js): o telão da sala principal em tela cheia, o "Modo jogo" e o QR do
+     aluguel. Com ?controle=1 é o plano B: o celular vira o controle da TV. -->
+<style>
+  :root {
+    --fundo: #05070d;
+    --vidro: rgba(10, 14, 26, 0.82);
+    --borda: rgba(255, 255, 255, 0.12);
+    --texto: #eef2fb;
+    --apagado: #9aa4ba;
+    --destaque: #6ee7c8;
+    --destaque-txt: #04281f;
+    --alerta: #fbbf24;
+    --erro: #fb7185;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; height: 100%; background: var(--fundo); color: var(--texto); overflow: hidden;
+    font-family: "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+  body { font-size: 1.6vw; }
+  button { font: inherit; color: inherit; }
+
+  #tela { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+  #vazio { position: fixed; inset: 0; display: grid; place-items: center; text-align: center; color: var(--apagado); padding: 4vw; }
+  #vazio b { display: block; color: var(--texto); font-size: 2.6vw; margin-bottom: .6vw; }
+
+  .vidro { background: var(--vidro); border: 1px solid var(--borda); border-radius: 1.2vw; backdrop-filter: blur(8px); }
+
+  #topo { position: fixed; top: 2vw; left: 2vw; right: 2vw; display: flex; gap: 1.2vw; align-items: center; pointer-events: none; }
+  #topo .vidro { padding: .7vw 1.2vw; display: flex; align-items: center; gap: .8vw; }
+  #marca { font-weight: 800; letter-spacing: .02em; }
+  #marca i { display: inline-block; width: .9vw; height: .9vw; border-radius: 50%; background: var(--apagado); }
+  #marca.on i { background: var(--destaque); box-shadow: 0 0 1vw var(--destaque); }
+  #conta-chip, #tempo-chip { color: var(--apagado); }
+  #conta-chip b, #tempo-chip b { color: var(--texto); }
+  .espaco { flex: 1; }
+
+  #painel { position: fixed; left: 2vw; bottom: 2vw; display: flex; flex-direction: column; gap: 1vw; max-width: 46vw; }
+  .botoes { display: flex; gap: 1vw; flex-wrap: wrap; }
+  .btn { border: 2px solid var(--borda); background: var(--vidro); border-radius: 1vw; padding: 1vw 1.8vw; font-weight: 700; cursor: pointer; outline: none; }
+  .btn.grande { font-size: 2.4vw; padding: 1.2vw 2.6vw; background: var(--destaque); color: var(--destaque-txt); border-color: transparent; }
+  .btn:focus, .btn.foco { border-color: #fff; box-shadow: 0 0 0 .35vw rgba(255,255,255,.35); transform: scale(1.04); }
+  .btn.grande:focus, .btn.grande.foco { box-shadow: 0 0 0 .4vw #fff, 0 0 3vw rgba(110,231,200,.6); }
+  #pad-status { padding: .9vw 1.2vw; color: var(--apagado); line-height: 1.35; }
+  #pad-status b { color: var(--texto); }
+  #pad-status.ok b { color: var(--destaque); }
+
+  #qr { position: fixed; right: 2vw; bottom: 2vw; width: 22vw; padding: 1.2vw; text-align: center; }
+  #qr img { width: 100%; aspect-ratio: 1; background: #fff; border-radius: .8vw; display: block; }
+  #qr h2 { margin: 0 0 .5vw; font-size: 1.8vw; }
+  #qr p { margin: .7vw 0 0; color: var(--apagado); font-size: 1.15vw; line-height: 1.35; }
+  #qr .codigo { font-family: Consolas, monospace; color: var(--texto); letter-spacing: .12em; }
+
+  #aviso { position: fixed; top: 7vw; left: 50%; transform: translateX(-50%); max-width: 70vw; padding: 1vw 1.8vw; text-align: center; font-weight: 600; }
+  #aviso.erro { border-color: var(--erro); }
+  #aviso.alerta { border-color: var(--alerta); }
+
+  #dica-jogo { position: fixed; top: 2vw; left: 50%; transform: translateX(-50%); padding: .7vw 1.4vw; color: var(--apagado); transition: opacity .6s; }
+  #dica-jogo b { color: var(--texto); }
+
+  /* jogando: só a imagem do jogo */
+  body.jogando #topo, body.jogando #painel, body.jogando #qr { display: none; }
+  body:not(.jogando) #dica-jogo { display: none; }
+  #dica-jogo.some { opacity: 0; }
+
+  /* plano B: o celular como controle */
+  body.controle { font-size: 16px; overflow: auto; }
+  body.controle #tela, body.controle #topo, body.controle #painel, body.controle #qr, body.controle #vazio, body.controle #dica-jogo { display: none !important; }
+  #cel { display: none; max-width: 520px; margin: 0 auto; padding: 20px 16px 40px; }
+  body.controle #cel { display: block; }
+  #cel h1 { font-size: 22px; margin: 4px 0 2px; }
+  #cel .sub { color: var(--apagado); margin: 0 0 16px; }
+  #cel .cartao { padding: 16px; margin-bottom: 12px; line-height: 1.45; }
+  #cel .cartao b { color: var(--texto); }
+  #cel .grande-status { font-size: 20px; font-weight: 800; }
+  #cel .ok { color: var(--destaque); }
+  #cel .ruim { color: var(--erro); }
+  #cel .btn { font-size: 16px; padding: 12px 18px; border-radius: 12px; }
+  #cel ol { margin: 6px 0 0; padding-left: 20px; color: var(--apagado); }
+  body.controle #aviso { top: auto; bottom: 16px; font-size: 15px; max-width: 92vw; }
+
+  #antiga { display: none; position: fixed; inset: 0; place-items: center; text-align: center; padding: 6vw; font-size: 2vw; background: var(--fundo); }
+</style>
+</head>
+<body>
+<video id="tela" autoplay playsinline></video>
+<div id="vazio"><div><b>Conectando à sala…</b><span id="vazio-txt">Só um instante.</span></div></div>
+
+<header id="topo">
+  <div class="vidro" id="marca"><i></i> Sala 3D · TV</div>
+  <div class="vidro" id="conta-chip">Sem conta</div>
+  <div class="vidro" id="tempo-chip" hidden></div>
+  <div class="espaco"></div>
+</header>
+
+<section id="painel">
+  <div class="botoes">
+    <button class="btn grande" id="btn-jogo" type="button" data-foco>▶ Modo jogo</button>
+    <button class="btn" id="btn-som" type="button" data-foco hidden>🔊 Ligar o som</button>
+    <button class="btn" id="btn-sair" type="button" data-foco hidden>Trocar de conta</button>
+  </div>
+  <div class="vidro" id="pad-status">Procurando o controle…</div>
+</section>
+
+<aside id="qr" class="vidro" hidden>
+  <h2 id="qr-titulo">Alugue pelo celular</h2>
+  <img id="qr-img" alt="QR code para alugar pelo celular">
+  <p id="qr-txt">Aponte a câmera do celular. Lá você entra na sua conta, escolhe PC ou PS5 e paga. A TV entra na sua conta sozinha.</p>
+  <p>ou abra <span class="codigo" id="qr-url"></span></p>
+</aside>
+
+<div id="dica-jogo" class="vidro">Para sair do jogo: <b>Voltar</b> no controle remoto, ou segure <b>Select + Start</b></div>
+<div id="aviso" class="vidro" hidden></div>
+
+<!-- plano B: este celular é o controle da TV -->
+<main id="cel">
+  <h1>🎮 Controle da TV</h1>
+  <p class="sub" id="cel-conta">Conectando…</p>
+  <div class="cartao vidro">
+    <div class="grande-status" id="cel-pad">Nenhum controle ligado</div>
+    <div id="cel-pad-txt">
+      <ol>
+        <li>Ligue o controle (PS4, PS5 ou Xbox) no Bluetooth deste celular.</li>
+        <li>Aperte qualquer botão do controle.</li>
+        <li>Na TV, aperte <b>Modo jogo</b> (pelo controle remoto).</li>
+      </ol>
+    </div>
+  </div>
+  <div class="cartao vidro" id="cel-alvo">Procurando o jogo no telão…</div>
+  <div class="cartao vidro" id="cel-vez"></div>
+  <p class="sub">Deixe esta página aberta e a tela do celular ligada enquanto joga.</p>
+</main>
+
+<div id="antiga"><div><b>Esta TV não tem um navegador novo o bastante.</b><br><br>Use o celular como controle e outro aparelho (Chromecast, Fire TV, PC) para mostrar a imagem, ou atualize o software da TV.</div></div>
+
+<script>
+  // TV antiga (sem módulos JS, ou que quebra no meio): explica em vez de ficar na tela preta
+  window.__tvFalhou = function () { document.getElementById('antiga').style.display = 'grid'; };
+  setTimeout(function () { if (!window.__tvOk) window.__tvFalhou(); }, 20000);
+</script>
+<script nomodule>window.__tvFalhou();</script>
+<script src="/socket.io/socket.io.js"></script>
+<script type="module" src="/js/tv.js"></script>
+</body>
+</html>
