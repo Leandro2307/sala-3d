@@ -335,6 +335,7 @@ export class RTC {
     this.jogoTelas = new Set(); // telas minhas em que alguém está jogando (modoJogo)
     this.jogadores = new Map(); // tela minha em jogo -> ids de quem joga nela
     this.shareMode = 'max'; // preset das telas: leve, max ou ultra
+    this.semHevc = false; // esta página não recebe H.265 (a TV, ver soH264)
     this.medidas = new WeakMap(); // receptor de vídeo -> os totais da medida anterior (ver recebendo)
     // A escolha do codec trava a página: o RTCRtpSender.getCapabilities levou 1,4 s na primeira
     // chamada (o Chrome acorda os codificadores da placa), bem no meio da abertura da sala. Fica
@@ -684,6 +685,7 @@ export class RTC {
       peer.balanceado = false;
       peer.linhasJogo = null;
       peer.rapido = false;
+      peer.linhasPedidas = null;
       this.tuneScreen(peer);
     }
     console.info('[modo-jogo] banda da conexão', peer.id, nova ? `começa em ${nova.inicio} kbps, piso ${nova.piso} kbps` : 'normal');
@@ -730,6 +732,32 @@ export class RTC {
         else preferirCodec(tr);
       }
     }
+  }
+
+  // TV: nunca H.265. A Philips (Android, 2026-11-23 11:52) diz que decodifica e mostra a imagem com uma faixa
+  // verde embaixo e as cores fora do lugar (a sobra do quadro do H.265, 768 linhas para 720, sem o corte), a
+  // 27–240 ms por quadro. Tira o H.265 do que esta página aceita receber, antes de cada oferta e resposta.
+  soH264(pc) {
+    if (!this.semHevc) return;
+    // o H.264 na frente (com os pacotes do modo 1, o dos codificadores da placa) e o resto, menos o H.265, de
+    // reserva: quem responde manda na ordem, e sem isto ela começava pelo VP8
+    const nota = (c) => (c.mimeType === 'video/H264' ? (/packetization-mode=1/.test(c.sdpFmtpLine || '') ? 0 : 1) : 2);
+    const codecs = (RTCRtpReceiver.getCapabilities?.('video')?.codecs || []).filter((c) => c.mimeType !== 'video/H265').sort((a, b) => nota(a) - nota(b));
+    if (!codecs.length) return;
+    for (const tr of pc.getTransceivers()) {
+      if (tr.receiver.track?.kind !== 'video' || tr.stopped) continue;
+      try { tr.setCodecPreferences?.(codecs); } catch (err) { console.warn('[rtc] sem H.265', err); }
+    }
+  }
+
+  // Quem joga pediu a imagem com no máximo tantas linhas (a TV que não dá conta de decodificar): null tira
+  linhasPedidas(id, linhas) {
+    const peer = this.peers.get(id);
+    const v = [432, 576, 720].includes(linhas) ? linhas : null;
+    if (!peer || (peer.linhasPedidas ?? null) === v) return false;
+    peer.linhasPedidas = v;
+    this.tuneScreen(peer);
+    return true;
   }
 
   // as seções do som das minhas telas que vão em estéreo para quem joga (comEstereo)
@@ -814,7 +842,7 @@ export class RTC {
     if (qpsAlto) banda = Math.min(banda * 1.5, 30_000_000);
     // modo jogo com pouca banda: resolução fixa (linhasDeJogo) em vez de deixar pular; com "Menos
     // atraso" (rapidoJogo), 720p sempre
-    const linhasJogo = jogo ? Math.min(peer.linhasJogo || Infinity, peer.rapido ? 720 : Infinity) : Infinity;
+    const linhasJogo = jogo ? Math.min(peer.linhasJogo || Infinity, peer.rapido ? 720 : Infinity, peer.linhasPedidas || Infinity) : Infinity;
     if (linhasJogo < altura) {
       escala = altura / linhasJogo;
       // A banda cai junto com os pixels (720 de 1080: metade). Em 720p com a banda do 1080p a fila
@@ -822,6 +850,7 @@ export class RTC {
       banda *= Math.max(0.5, (linhasJogo / altura) ** 2);
     }
     if (jogo && peer.rapido) banda = Math.min(banda, 8_000_000);
+    if (jogo && peer.linhasPedidas && peer.linhasPedidas <= 576) banda = Math.min(banda, 4_000_000);
     return {
       active: nivel !== NIVEIS.off,
       maxBitrate: Math.round(Math.min(banda * nivel.teto, Math.max(nivel.piso, banda * parte))),
@@ -1273,6 +1302,7 @@ export class RTC {
       try {
         peer.makingOffer = true;
         peer.renegociar = false;
+        this.soH264(pc);
         const oferta = await pc.createOffer();
         // outra negociação começou enquanto a oferta era montada: o evento volta sozinho depois
         if (pc.signalingState !== 'stable') return;
@@ -1490,6 +1520,7 @@ export class RTC {
       balanceado: velho.balanceado,
       linhasJogo: velho.linhasJogo,
       rapido: velho.rapido,
+      linhasPedidas: velho.linhasPedidas,
       recuoCodec: velho.recuoCodec,
       reiniciosIce: velho.reiniciosIce,
     };
@@ -1538,6 +1569,7 @@ export class RTC {
           peer.aplicandoResposta = false;
         }
         if (description.type === 'offer') {
+          this.soH264(pc);
           await pc.setLocalDescription(comEstereo(comBandaInicial(await pc.createAnswer(), ...this.bandaSdp(peer)), null));
           this.send(from, { description: trocarPerfil(pc.localDescription, this.midsDeJogo(peer), '42001f', '42e01f'), e: peer.epoca });
         }

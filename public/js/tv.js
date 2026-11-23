@@ -23,6 +23,7 @@
 // jogo, manda o relatório ao servidor (scripts/relatorios.js baixa: "joga", nome "conta (TV)").
 import { RTC } from './rtc.js';
 import { TurboRecebe } from './turbo.js';
+import { contarCulpa, culpaDe, linhaDaCulpa, Sonda } from './culpa.js';
 
 const $ = (s) => document.querySelector(s);
 const params = new URLSearchParams(location.search);
@@ -77,6 +78,7 @@ async function iniciar() {
   socket = window.io({ transports: ['websocket', 'polling'], tryAllTransports: true, reconnectionDelay: 1500, reconnectionDelayMax: 10000 });
   rtc = new RTC(socket, { iceServers: config.iceServers, onTrack: receberTrilha });
   rtc.onControle = receberDireto;
+  rtc.semHevc = true; // TV: sempre H.264 (rtc.soH264)
   setInterval(() => {
     fetch('/config').then((r) => r.json()).then((c) => rtc.trocarIce(c.iceServers)).catch(() => {});
   }, 6 * 3600_000);
@@ -405,6 +407,12 @@ function ligarJogo() {
   enviado = null; // o estado do controle vai inteiro de novo
   comecarRelatorio(a);
   zerarFila();
+  altura = null;
+  alturaEm = performance.now();
+  culpas = {};
+  paradaRefeitas = 0;
+  la = null;
+  sonda.ligada = true;
   if (video.srcObject) evento('buffer do vídeo normal', { feitos: rtc.baixaLatencia(video.srcObject, true, BUFFER_MS) });
   if (TURBO_NA_TV && !turboFalhou) ligarForma(proximaForma(-1));
   mostrarSelo(10_000);
@@ -419,14 +427,21 @@ function ligarJogo() {
 // 8 Mbps — quadros menores codificam, viajam e chegam mais por igual, e a fila da TV (a maior parte do
 // atraso medido: 90–250 ms nos testes de 2026-11-23) fica menor. Ligado de fábrica na TV; um botão
 // colorido do controle remoto troca para 1080p (fica guardado nesta TV).
+// A altura que esta TV aguenta (null: a do "Menos atraso" ou 1080p). Desce sozinha (vigiarDecodificacao)
+// 1024×576 e 768×432: 16:9 em blocos inteiros de 16, sem sobra para o decodificador da TV cortar
+const ALTURAS_TV = [576, 432];
+let altura = null;
+let alturaEm = 0;
 const RAPIDO_CHAVE = 'sala3d-tv-rapido';
 let rapido = true;
 try { rapido = localStorage.getItem(RAPIDO_CHAVE) !== '0'; } catch { /* sem armazenamento */ }
 function mandarModo() {
-  if (st.jogando) mandar(st.jogando, { t: 'modo', jogo: true, rapido, vibra: !!gamepad()?.vibrationActuator, ds: false });
+  if (st.jogando) mandar(st.jogando, { t: 'modo', jogo: true, rapido, vibra: !!gamepad()?.vibrationActuator, ds: false, ...(altura ? { alt: altura } : {}) });
 }
 function trocarRapido() {
   rapido = !rapido;
+  altura = null; // escolheu à mão: recomeça do tamanho dela
+  alturaEm = performance.now();
   try { localStorage.setItem(RAPIDO_CHAVE, rapido ? '1' : '0'); } catch { /* sem armazenamento */ }
   mandarModo();
   evento(rapido ? 'menos atraso ligado (720p)' : 'menos atraso desligado (1080p)');
@@ -442,6 +457,7 @@ function desligarJogo(avisarLa = true) {
     mandar(key, { t: 'modo', jogo: false });
   }
   st.jogando = null;
+  sonda.ligada = false;
   formaAtual = null;
   turbo.desligar();
   document.body.classList.remove('jogando');
@@ -691,7 +707,23 @@ setInterval(async () => {
   const controle = { rttMs: rtts.length ? Math.round(rtts[rtts.length >> 1]) : null, ajudanteMs: ping.aj, pad: !!gamepad() };
   ping.rtt.length = 0;
   if (rel && rel.amostras.length < 1800) rel.amostras.push({ t: Date.now(), rapido, turbo: t, video: v, controle });
-  if (!(t && t.qps > 0)) vigiarFila(v);
+  const semTurbo = !(t && t.qps > 0);
+  const jogados = v?.descartados != null && descartadosAntes != null ? Math.max(0, v.descartados - descartadosAntes) : 0;
+  descartadosAntes = v?.descartados ?? null;
+  let parou = false;
+  if (semTurbo) {
+    parou = vigiarParada(v, jogados);
+    vigiarDecodificacao(v, jogados);
+    vigiarFila(v);
+  }
+  const deLa = la && Date.now() - la.recebido < 6000 ? la : null;
+  const so = sonda.tirar();
+  // os 2 primeiros (4 s) são o jogo entrando
+  const culpa = (rel?.amostras.length ?? 0) <= 2 ? null
+    : culpaDe({ turbo: semTurbo ? null : t, fpsFinal: v?.qps ?? null, decMs: v?.decMs ?? null, bufferMs: v?.bufferMs ?? null, ritmo: semTurbo ? null : t.ritmo, sonda: so, parou }, deLa, 'a TV');
+  contarCulpa(culpas, culpa);
+  const ultima = rel?.amostras.at(-1);
+  if (ultima) Object.assign(ultima, { culpa, sonda: so, altura, visivel: document.visibilityState === 'visible', la: deLa && { captura: deLa.captura, enviado: deLa.enviado, sonda: deLa.sonda ?? null, roteador: deLa.roteador ?? null } });
   vigiarForma(t);
   if (rel && !rel.enviado && rel.amostras.length === 45) mandarRelatorio('90 s de jogo', true); // a TV pode desligar sem sair
   const usado = t && t.qps > 0 ? { ...t, via: 'Turbo' } : v ? { ...v, via: 'vídeo' } : null;
@@ -705,8 +737,9 @@ setInterval(async () => {
     // atraso que dá para medir aqui: a espera na fila do vídeo (ou o liso do Turbo) e o caminho do controle
     const espera = usado.via === 'vídeo' && usado.bufferMs != null ? ` · fila ${usado.bufferMs} ms` : usado.pontaMs != null ? ` · imagem ${Math.round(usado.pontaMs)} ms` : '';
     const ctrl = controle.rttMs != null ? ` · controle ${Math.round(controle.rttMs / 2)} ms` : '';
-    el.textContent = `${rapido ? 'menos atraso' : '1080p'} · ${usado.via} · ${res} · ${Math.round(usado.qps || 0)} qps · ${mbps}${codec ? ` · ${codec}` : ''}${espera}${ctrl}${turboFalhou ? ` · turbo: ${turboFalhou}` : formaAtual && formaOk !== formaAtual.forma.id ? ` · testando ${formaAtual.forma.id} (${formaAtual.indice + 1}/${FORMAS.length})` : ''}`;
+    el.textContent = `${altura ? `${altura}p` : rapido ? 'menos atraso' : '1080p'} · ${usado.via} · ${res} · ${Math.round(usado.qps || 0)} qps · ${mbps}${codec ? ` · ${codec}` : ''}${espera}${ctrl}${turboFalhou ? ` · turbo: ${turboFalhou}` : formaAtual && formaOk !== formaAtual.forma.id ? ` · testando ${formaAtual.forma.id} (${formaAtual.indice + 1}/${FORMAS.length})` : ''}`;
   }
+  el.textContent += `\n${linhaDaCulpa(culpa, culpas)}`;
 }, 2000);
 
 // Fila que não para de crescer no vídeo normal (teste de 2026-11-23 00:34 e 00:42): no meio do jogo o
@@ -718,6 +751,44 @@ setInterval(async () => {
 // 20–60 s só travava a imagem e recomeçava em 360p. Nos primeiros 10 s a fila ainda é a de antes do jogo,
 // e se duas vezes não resolveram, a terceira também não.
 const FILA_REFAZ_MAX = 2;
+// De quem é a culpa (culpa.js): o que o PC que transmite contou (la, 'jogo-envio'), a sonda daqui e a medida
+const sonda = new Sonda();
+let la = null;
+let culpas = {};
+let descartadosAntes = null;
+let paradaSeguidas = 0;
+let decSeguidas = 0;
+let paradaRefeitas = 0;
+// A TV joga fora todos os quadros e não mostra nenhum (a Philips, 2026-11-23 11:53:58 até o fim): 4 s assim e a
+// conexão é refeita (um decodificador novo), no máximo 2 vezes por jogo
+function vigiarParada(v, jogados) {
+  const a = st.alvo;
+  const parou = !!v && !(v.qps > 0) && jogados > 30 && document.visibilityState === 'visible';
+  paradaSeguidas = parou ? paradaSeguidas + 1 : 0;
+  if (paradaSeguidas < 2 || !a) return parou;
+  if (paradaRefeitas < 2 && rtc.refazer(a.u.id, 'a TV parou de mostrar a imagem')) {
+    paradaRefeitas++;
+    paradaSeguidas = 0;
+    evento('a TV parou de mostrar a imagem: conexão refeita', { descartados: jogados });
+  }
+  return true;
+}
+// A TV não dá conta de decodificar (demora, e o sintoma: fila, quadros jogados fora ou poucos na tela): pede menos
+// linhas. 6 s seguidos, com 8 s de acerto depois de cada troca. Só desce; o botão colorido recomeça.
+function vigiarDecodificacao(v, jogados) {
+  const ruim = v && (v.decMs ?? 0) > 14 && ((v.bufferMs ?? 0) > 250 || jogados > 20 || (v.qps > 0 && v.qps < 45));
+  decSeguidas = ruim ? decSeguidas + 1 : 0;
+  if (decSeguidas < 3 || performance.now() - alturaEm < 8000) return;
+  const nova = ALTURAS_TV.find((h) => !altura || h < altura);
+  if (!nova) return;
+  altura = nova;
+  alturaEm = performance.now();
+  decSeguidas = 0;
+  mandarModo();
+  evento('a TV não dá conta de decodificar: menos linhas', { linhas: altura, decMs: v.decMs, bufferMs: v.bufferMs, qps: v.qps, jogados });
+  aviso(`Esta TV não dá conta: imagem em ${altura}p`, 'info', 5000);
+}
+
 let filaRuim = 0;
 let filaRefeitas = 0;
 let filaDesde = 0;
@@ -743,7 +814,7 @@ function mandarRelatorio(motivo, parcial = false) {
   if (!rel || !rel.amostras.length) return;
   const r = { ...rel, fim: new Date().toISOString(), motivo };
   const qps = r.amostras.map((x) => x.turbo?.qps || x.video?.qps).filter((x) => x > 0);
-  r.resumo = { mediaQps: qps.length ? qps.reduce((s, x) => s + x, 0) / qps.length : null, turbo: !!r.amostras.some((x) => x.turbo?.qps), turboFalhou, rapido, turboForma: formaOk, turboGuardada: formaGuardada, turboTentativas: formasTentadas };
+  r.resumo = { mediaQps: qps.length ? qps.reduce((s, x) => s + x, 0) / qps.length : null, turbo: !!r.amostras.some((x) => x.turbo?.qps), turboFalhou, rapido, altura, culpas, turboForma: formaOk, turboGuardada: formaGuardada, turboTentativas: formasTentadas };
   const corpo = JSON.stringify({ id: parcial ? `${r.id}-p` : r.id, relatorio: r, sala: SALA, nome: `${conta?.nome || 'sem conta'} (TV)`, relogio: Date.now() });
   if (parcial) rel.enviado = true;
   else rel = null;
@@ -771,7 +842,8 @@ function receberDireto(id, m) {
 }
 function receberVolta(key, ev) {
   if (!ev || key !== st.jogando) return;
-  if (ev.t === 'tremor') {
+  if (ev.t === 'jogo-envio') la = { ...ev, recebido: Date.now() };
+  else if (ev.t === 'tremor') {
     const a = gamepad()?.vibrationActuator;
     a?.playEffect?.('dual-rumble', { duration: 1500, startDelay: 0, strongMagnitude: Math.min(1, Number(ev.g) || 0), weakMagnitude: Math.min(1, Number(ev.p) || 0) }).catch(() => {});
   }

@@ -412,7 +412,7 @@ export class DiagJogo {
       caminho: cru.rede?.local ?? null,
       jitterBufferTarget: cru.jitterBufferTarget,
       playoutDelayHint: cru.playoutDelayHint,
-      la: la ? { captura: la.captura, enviado: la.enviado, altura: la.altura, kbps: la.kbps, limite: la.limite, motivo: la.motivo, codificador: la.codificador, placa: la.placa, imagemBaixa: la.imagemBaixa ?? null, codMs: la.codMs ?? null, filaMs: la.filaMs ?? null, turbo: la.turbo ?? null, ps5: la.ps5 ?? null, sonda: la.sonda ?? null } : null,
+      la: la ? { captura: la.captura, enviado: la.enviado, altura: la.altura, kbps: la.kbps, limite: la.limite, motivo: la.motivo, codificador: la.codificador, placa: la.placa, imagemBaixa: la.imagemBaixa ?? null, codMs: la.codMs ?? null, filaMs: la.filaMs ?? null, turbo: la.turbo ?? null, ps5: la.ps5 ?? null, sonda: la.sonda ?? null, roteador: la.roteador ?? null } : null,
       // o som da mesma tela: buffer maior que o do vídeo faz o vídeo esperar por ele (sincronia)
       somBufferMs: somEmitidos > 0 ? r1((1000 * dif(cru.som, antes?.som, 'jitterBufferDelay')) / somEmitidos) : null,
       // o som da tela pelo vídeo normal: pacotes por segundo (0 = não está chegando), o nível (0 a 1) e

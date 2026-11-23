@@ -70,6 +70,8 @@ export function eventoDeControle(e) {
     const m = { t: 'modo', jogo: !!e.jogo, rapido: !!e.rapido };
     if (typeof e.vibra === 'boolean') m.vibra = e.vibra;
     if (typeof e.ds === 'boolean') m.ds = e.ds;
+    // alt: quem joga não dá conta de mais linhas que isto (TV)
+    if ([432, 576, 720].includes(e.alt)) m.alt = e.alt;
     return m;
   }
   else if (e.t === 'vivo') return { t: 'vivo' };
@@ -376,7 +378,7 @@ export class Controle {
     // PS5 direto (ps5-nativo.js): só o controle de PS5 e o modo jogo; nada de mouse e teclado
     if (sh?.ps5) {
       if (!sh.controle) return;
-      if (ev?.t === 'modo' && deId) this.onModo?.(sh, ev.jogo, deId, !!ev.rapido, { vibra: ev.vibra, ds: ev.ds });
+      if (ev?.t === 'modo' && deId) this.onModo?.(sh, ev.jogo, deId, !!ev.rapido, { vibra: ev.vibra, ds: ev.ds, alt: ev.alt });
       if (ev?.t === 'pad' && deId) this.ultimoPad = { key: sh.key, deId };
       if (ev?.t === 'pad' || ev?.t === 'vivo') this.onPs5?.(sh, ev, !!meu);
       return;
@@ -385,7 +387,7 @@ export class Controle {
     // o "estou aqui" do modo jogo só serve ao ajudante (janela/tela inteira)
     if (ev?.t === 'vivo' && sh.aba != null) return;
     // modo jogo de quem controla: a sala deste PC fica leve enquanto durar (onModo, no main.js)
-    if (ev?.t === 'modo' && deId) this.onModo?.(sh, ev.jogo, deId, !!ev.rapido, { vibra: ev.vibra, ds: ev.ds });
+    if (ev?.t === 'modo' && deId) this.onModo?.(sh, ev.jogo, deId, !!ev.rapido, { vibra: ev.vibra, ds: ev.ds, alt: ev.alt });
     // aba trocando de página (sem marca por um instante): ignora até a página nova aparecer
     if (sh.semMarca) return;
     // voltar/endereço e os avisos do site só existem em aba; numa janela quem clica é o ajudante

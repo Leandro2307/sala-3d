@@ -1190,3 +1190,15 @@ Relatórios do lokao16001 na /jogar: 60 qps chegando do PS5 no PC que transmite,
 - Repasse do PS5 tentado de novo quando a conexão vira direta (voltarAoRepasse); falha espera 2 min, dobrando.
 - O selo diz de quem é a culpa (culpa.js): HOST, VOCÊ ou INTERNET, com a conta da sessão. A sonda de cada ponta
   separa as redes; soluço menor que 0,5 s escapa dela e fica em INTERNET. Relatório: resumo.culpas e amostra.culpa.
+
+## TV em H.264, e o PS5 repassado que não cai por um soluço (2026-11-23, 11:37–11:52)
+
+- Philips "4K SMART TV PH" (Android 14): em H.265 a imagem sai com uma faixa verde embaixo e as cores fora do lugar,
+  a 27–240 ms por quadro, e parou de ser mostrada no meio. A TV agora nunca aceita H.265 e põe o H.264 na frente
+  (rtc.soH264). Se não der conta, desce sozinha para 576p e 432p (blocos inteiros de 16); imagem parada por 4 s refaz
+  a conexão. O selo da TV também diz a culpa.
+- Repasse do PS5: os 10 primeiros segundos não contam e depois a falta de banda tem que durar ~4 s; caindo, volta em
+  30 s (dobrando). Codificando aqui, a banda não passa de 80% da do PS5: as duas paradas de segundos (11:03, 11:38)
+  vieram logo depois de ~10 Mbps.
+- Ajudante 1.26: a ida e volta até o roteador (TCP, 5 por segundo) vai no pacote da carga. Pico ou falha nela = o
+  Wi-Fi do PC que transmite. Fechar e abrir o Chrome de lá para ele compilar a versão nova.

@@ -1022,6 +1022,7 @@ function eventoSemMarca(e) {
     const m = { t: 'modo', jogo: !!e.jogo, rapido: !!e.rapido };
     if (typeof e.vibra === 'boolean') m.vibra = e.vibra;
     if (typeof e.ds === 'boolean') m.ds = e.ds;
+    if ([432, 576, 720].includes(e.alt)) m.alt = e.alt; // a TV que não dá conta de mais linhas
     return m;
   }
   if (e.t === 'vivo') return { t: 'vivo' }; // modo jogo: quem joga ainda está aí (sem ele o ajudante solta as teclas)
@@ -1105,6 +1106,9 @@ function voltaDoControle(raw) {
         : null,
       // PS5 direto: os qps que o PS5 manda e, com o Lossless no PC de lá, os qps da câmera do OBS
       ps5: e.ps5 && typeof e.ps5 === 'object' ? { manda: num(e.ps5.manda), lossless: num(e.ps5.lossless) } : null,
+      // a sonda e o ping do roteador de lá (culpa.js: de quem é a culpa)
+      sonda: e.sonda && typeof e.sonda === 'object' ? Object.fromEntries(['n', 'p50', 'max', 'base', 'picos', 'falhas'].map((k) => [k, num(e.sonda[k])])) : null,
+      roteador: e.roteador && typeof e.roteador === 'object' ? Object.fromEntries(['n', 'p50', 'max', 'falhas'].map((k) => [k, num(e.roteador[k])])) : null,
     };
   }
   // modo jogo: o jogo mostrou o cursor (menu) ou escondeu — quem joga troca o jeito de mexer o mouse

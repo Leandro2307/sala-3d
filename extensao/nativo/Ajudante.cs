@@ -194,7 +194,7 @@ namespace Sala3d
             new Thread(VigiarAtalho) { IsBackground = true }.Start();
             new Thread(VigiarJogo) { IsBackground = true }.Start();
             new Thread(VigiarWifi) { IsBackground = true }.Start();
-            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.25.0" } });
+            Escrever(new Dictionary<string, object> { { "tipo", "oi" }, { "versao", "1.26.0" } });
             var json = new JavaScriptSerializer();
             string txt;
             while ((txt = Ler(entrada)) != null)
@@ -2110,6 +2110,7 @@ namespace Sala3d
                 if (pc != null) r["pc"] = pc;
                 try { var c = LerCarga(); if (c != null) r["carga"] = c; } catch { }
                 try { r["redes"] = LerRedes(); } catch { }
+                try { var rot = LerRoteador(); if (rot != null) r["roteador"] = rot; } catch { }
                 return r;
             }
         }
@@ -2391,6 +2392,106 @@ namespace Sala3d
             object v = brutoAntes.TryGetValue(chave, out antes) ? (object)Math.Max(0, agora - antes) : null;
             brutoAntes[chave] = agora;
             return v;
+        }
+
+        // 1.26+: a ida e volta até o roteador (o gateway da placa por onde sai a internet), a cada ~100 ms enquanto alguém
+        // pede a carga: é o Wi-Fi deste PC sozinho, sem a internet no meio (culpa.js: o Wi-Fi de quem transmite ou o
+        // caminho entre os dois). Sem pedido há 10 s, a thread para.
+        // Não é ping: o roteador da casa do lokao recusa o ICMP e ainda limita as recusas a 1 ou 2 por segundo (parecia
+        // perda). É uma conexão TCP curta a uma porta dele que responda (aceitando ou recusando), fechada na hora.
+        const int ROTEADOR_MS = 200;
+        const int ROTEADOR_ESPERA = 700; // sem resposta nisto: falha (o Windows só repete o SYN depois de ~1 s)
+        static readonly int[] ROTEADOR_PORTAS = { 80, 443, 53, 8080, 22 };
+        static readonly object travaRot = new object();
+        static readonly List<int> pingsRot = new List<int>(); // ms, ou -1 sem resposta
+        static Thread threadRot;
+        static int rotPedidoEm;
+        static Dictionary<string, object> LerRoteador()
+        {
+            lock (travaRot)
+            {
+                rotPedidoEm = Environment.TickCount;
+                if (threadRot == null)
+                {
+                    threadRot = new Thread(PingarRoteador) { IsBackground = true };
+                    threadRot.Start();
+                    return null;
+                }
+                var ok = pingsRot.Where(p => p >= 0).OrderBy(p => p).ToList();
+                int falhas = pingsRot.Count - ok.Count;
+                pingsRot.Clear();
+                if (ok.Count == 0 && falhas == 0) return null;
+                var r = new Dictionary<string, object> { { "n", ok.Count }, { "falhas", falhas } };
+                if (ok.Count > 0) { r["p50"] = ok[ok.Count / 2]; r["max"] = ok[ok.Count - 1]; }
+                return r;
+            }
+        }
+
+        static System.Net.IPAddress AcharRoteador()
+        {
+            foreach (var ni in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (ni.OperationalStatus != System.Net.NetworkInformation.OperationalStatus.Up) continue;
+                var t = ni.NetworkInterfaceType;
+                if (t != System.Net.NetworkInformation.NetworkInterfaceType.Wireless80211 && t != System.Net.NetworkInformation.NetworkInterfaceType.Ethernet) continue;
+                if ((ni.Description + " " + ni.Name).IndexOf("VPN", StringComparison.OrdinalIgnoreCase) >= 0 || ni.Description.IndexOf("Virtual", StringComparison.OrdinalIgnoreCase) >= 0) continue;
+                foreach (var g in ni.GetIPProperties().GatewayAddresses)
+                    if (g.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork && !g.Address.Equals(System.Net.IPAddress.Any)) return g.Address;
+            }
+            return null;
+        }
+
+        // ms até a porta responder (aceitar ou recusar), ou -1
+        static int TocarPorta(System.Net.IPAddress ip, int porta, int espera)
+        {
+            using (var sk = new System.Net.Sockets.Socket(System.Net.Sockets.AddressFamily.InterNetwork, System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp))
+            {
+                sk.LingerState = new System.Net.Sockets.LingerOption(true, 0); // fecha sem deixar a conexão pendurada
+                var relogio = System.Diagnostics.Stopwatch.StartNew();
+                var ia = sk.BeginConnect(ip, porta, null, null);
+                if (!ia.AsyncWaitHandle.WaitOne(espera)) return -1;
+                relogio.Stop();
+                try { sk.EndConnect(ia); }
+                catch (System.Net.Sockets.SocketException e) { if (e.SocketErrorCode != System.Net.Sockets.SocketError.ConnectionRefused) return -1; }
+                return (int)relogio.ElapsedMilliseconds;
+            }
+        }
+
+        static void PingarRoteador()
+        {
+            System.Net.IPAddress alvo = null;
+            int porta = 0, achadoEm = 0, seguidas = 0;
+            while (true)
+            {
+                lock (travaRot)
+                {
+                    if (unchecked(Environment.TickCount - rotPedidoEm) > 10000) { threadRot = null; pingsRot.Clear(); return; }
+                }
+                int ms = -1;
+                try
+                {
+                    if (alvo == null || unchecked(Environment.TickCount - achadoEm) > 15000)
+                    {
+                        var novo = AcharRoteador();
+                        if (novo == null || !novo.Equals(alvo)) porta = 0;
+                        alvo = novo;
+                        achadoEm = Environment.TickCount;
+                    }
+                    if (alvo == null) { Thread.Sleep(1000); continue; }
+                    if (porta == 0)
+                    {
+                        // a primeira porta que responde (cada uma, duas vezes); nenhuma: tenta de novo daqui a 10 s
+                        foreach (var p in ROTEADOR_PORTAS) if (TocarPorta(alvo, p, 300) >= 0 || TocarPorta(alvo, p, 300) >= 0) { porta = p; break; }
+                        if (porta == 0) { Thread.Sleep(10000); continue; }
+                    }
+                    ms = TocarPorta(alvo, porta, ROTEADOR_ESPERA);
+                    seguidas = ms < 0 ? seguidas + 1 : 0;
+                    if (seguidas >= 20) { porta = 0; seguidas = 0; } // parou de responder de vez: procura outra porta
+                }
+                catch { }
+                lock (travaRot) { pingsRot.Add(ms); if (pingsRot.Count > 200) pingsRot.RemoveAt(0); }
+                Thread.Sleep(ROTEADOR_MS);
+            }
         }
 
         // As placas de rede ligadas agora (cabo, Wi-Fi, VPN) e por qual sai a internet (a que tem gateway)

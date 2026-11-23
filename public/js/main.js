@@ -2897,10 +2897,10 @@ const cursorDoJogo = new Map(); // tela -> último estado mandado
 // ligadas (redes). Vão para cada amostra de envio do relatório (em pc).
 let wifiChegouEm = 0; // a última vez que o Wi-Fi e a carga do PC chegaram (pedirCargaDoPc)
 controle.onWifi = (w) => {
-  const { pc, carga, redes, ...wifi } = w || {};
+  const { pc, carga, redes, roteador, ...wifi } = w || {};
   wifiChegouEm = Date.now();
   diagJogo.wifiChegou(wifi);
-  diagJogo.pcChegou({ memoria: pc ?? null, carga: carga ?? null, redes: redes ?? null });
+  diagJogo.pcChegou({ memoria: pc ?? null, carga: carga ?? null, redes: redes ?? null, roteador: roteador ?? null });
   memoriaDoPc(pc);
 };
 
@@ -3067,6 +3067,7 @@ const capacidadesJogo = new Map();
 controle.onModo = (sh, jogo, deId, rapido, cap) => {
   if (cap && (typeof cap.vibra === 'boolean' || typeof cap.ds === 'boolean')) capacidadesJogo.set(deId, cap);
   jogoAqui(sh.key, deId, jogo, rapido);
+  if (jogo && rtc?.linhasPedidas(deId, cap?.alt ?? null)) diagJogo.evento('quem joga pediu outra altura', { deId, linhas: cap?.alt ?? null });
 };
 
 // Emulador de Switch na tela: o controle de quem joga chega como um controle de Xbox virtual, e o
@@ -4012,7 +4013,7 @@ async function amostrarJogo() {
         // vai junto: o relatório de quem joga explica sozinho uma queda de banda ou de quadros
         const tb = turbo && { bandaKbps: turbo.bandaKbps, pulados: turbo.pulados, puladosFila: turbo.puladosFila, trocasDeBanda: turbo.trocasDeBanda, filaLaMs: turbo.filaLaMs, chaves: turbo.chaves, chaveKB: turbo.chaveKB, chavesIgnoradas: turbo.chavesIgnoradas, som: turbo.som };
         const ps5 = self()?.shares.get(key)?.ps5 ? { manda: ps5Agora.manda, lossless: null } : null;
-        controle.emitir('controle-volta', { key, para: id, ev: { t: 'jogo-envio', quando: t, captura, enviado, codificado, altura, kbps, limite, motivo, codificador, placa, imagemBaixa, codMs, filaMs, turbo: tb || null, ps5, sonda: resumo.sonda ?? null } });
+        controle.emitir('controle-volta', { key, para: id, ev: { t: 'jogo-envio', quando: t, captura, enviado, codificado, altura, kbps, limite, motivo, codificador, placa, imagemBaixa, codMs, filaMs, turbo: tb || null, ps5, sonda: resumo.sonda ?? null, roteador: resumo.pc?.roteador ?? null } });
       }
     }
     if (jogandoLa) {

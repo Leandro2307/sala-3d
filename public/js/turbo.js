@@ -111,7 +111,7 @@ const FOLGA_REPASSE = 1.15;
 // Agora: fila acima de FILA_REPASSE em REPASSE_AVISOS avisos seguidos (com a rede sem levar tudo), ou 3
 // quadros pulados pela fila cheia em 2 s.
 const FILA_REPASSE = 80;
-const REPASSE_AVISOS = 3;
+const REPASSE_AVISOS = 8; // 4 s
 // Começo rápido (2026-11-19, PS5 do lokao no cabo → Borges): a sessão começava em 4,8 Mbps (80% da
 // estimativa do WebRTC, que no começo é baixa) e levava ~1 min para chegar aos 20, subindo 10–15% a
 // cada 2 s — e cada vez que ele entrava de novo no modo jogo, recomeçava de baixo, com a imagem
@@ -145,9 +145,21 @@ const FONTE_RAPIDA = 72;
 const QUEDA_PULO = 0.88;
 const QUEDA_TRANCO = 0.94;
 const PISO_SUAVE = 0.6;
-const FOLGA_SUBIR = 1.5;
+const FOLGA_SUBIR = 1.3;
 const TETO_MS = 20_000;
-const REPASSE_VOLTA_MS = 2 * 60_000;
+const REPASSE_VOLTA_MS = 30_000;
+// 2026-11-23 11:38 (/jogar): o repasse caiu nos primeiros 10 s (a conexão trocando de caminho) e de novo por um
+// soluço só; a TV, com um soluço parecido, se recuperou repassando. Agora o começo não conta (a não ser que
+// quase nada passe) e depois a falta de banda tem que durar ~4 s.
+const REPASSE_GRACA_MS = 10_000;
+const REPASSE_GRACA_PULOS = 45; // quadros pulados em 2 s no começo: aí não é acerto do caminho
+const REPASSE_JANELA_MS = 4000;
+const REPASSE_SEGUNDOS = 3; // segundos diferentes com pulos dentro da janela
+const REPASSE_BOM_MS = 60_000; // um repasse que durou isto zera as quedas
+// Codificar a imagem do PS5 acima do que ele manda não dá nitidez, só enche a rede: nas duas vezes em que ela
+// parou por segundos (11:03 e 11:38) a banda tinha acabado de passar de ~10 Mbps
+const TETO_RECOD = 0.8;
+const TETO_RECOD_MIN = 4_000_000;
 const REPASSE_CALMA = 20; // avisos (10 s) seguidos sem fila nem pulo antes de tentar o repasse de novo
 const caminhoDe = (rede) => (rede ? `${rede.local || ''}|${rede.remoto || ''}|${rede.relay ? 'relay' : ''}` : null);
 const ESPERA_REDE_MS = 400; // quanto ligarSessao espera pela estimativa da rede antes de seguir sem ela
@@ -752,7 +764,7 @@ export class TurboEnvio {
     if (!fonte || fonte.banda || (fonte.hevc && !s.pedido?.hevc) || s.altTeto < (fonte.cfg?.h || 1080)) return;
     // já caiu uma vez: a rede tem que estar levando agora perto do que o PS5 manda
     const rx = s.ajuste.rxs?.length ? Math.max(...s.ajuste.rxs) : 0;
-    if (lem?.caiu && rx < (s.kbpsFonte || 0) * 0.6) return;
+    if (lem?.caiu && rx < (s.kbpsFonte || 0) * 0.4) return;
     const rede = this.rede ? await this.rede(s.id).catch(() => null) : null;
     if (s.parar || s.trocando || this.sessoes.get(s.id) !== s || !rede) return;
     const direto = !rede.relay && !/^relay/.test(rede.local || '') && !/^relay/.test(rede.remoto || '');
@@ -867,6 +879,7 @@ export class TurboEnvio {
     s.inicioEm = performance.now();
     s.recodificado = !!fonte && !fonte.banda; // a imagem do PS5 codificada aqui (e não repassada)
     s.recodPorFalha = s.recodificado && (!!pedido.porFalha || !!this.lembrado(id)?.caiu); // o repasse foi tentado e não coube
+    if (s.recodPorFalha) s.ajuste.arranque = false; // a rede já mostrou o que leva: sobe no passo de sempre
     s.kbpsFonte = Number(fonte?.kbps) || null; // a banda da sessão do PS5 (para o relatório)
     s.bandaInicialKbps = Number(bandaInicialKbps) > 0 ? Number(bandaInicialKbps) : null;
     // quem joga com a versão 2 lê o cabeçalho com a hora da captura (a antiga leria como imagem)
@@ -955,18 +968,24 @@ export class TurboEnvio {
   vigiarRepasse(s, fila) {
     if (s.parar || s.trocando || s.ps5?.banda) return;
     const agora = performance.now();
-    s.pulosFila = (s.pulosFila || []).filter((t) => agora - t < 2000);
+    s.pulosFila = (s.pulosFila || []).filter((t) => agora - t < REPASSE_JANELA_MS);
     // fila alta com a rede levando tudo (entrega em ENTREGA_OK ou mais) é tranco do Wi-Fi, não falta de banda
     const entrega = s.ajuste.entrega;
     const alta = fila > FILA_REPASSE && !(entrega != null && entrega >= ENTREGA_OK);
     s.altasRepasse = alta ? (s.altasRepasse || 0) + 1 : 0;
-    if (agora - s.inicioEm < 2000 || (s.altasRepasse < REPASSE_AVISOS && s.pulosFila.length < 3)) return;
+    const pulos2s = s.pulosFila.filter((t) => agora - t < 2000).length;
+    if (agora - s.inicioEm < REPASSE_GRACA_MS) {
+      if (agora - s.inicioEm < 2000 || pulos2s < REPASSE_GRACA_PULOS) return;
+    } else {
+      const segundos = new Set(s.pulosFila.map((t) => Math.floor((agora - t) / 1000))).size;
+      if (s.altasRepasse < REPASSE_AVISOS && segundos < REPASSE_SEGUNDOS) return;
+    }
     s.trocando = true;
     const m0 = this.memoria.get(s.id) || {};
-    this.memoria.set(s.id, { ...m0, semRepasseEm: Date.now(), quedasRepasse: (m0.quedasRepasse || 0) + 1 });
+    this.memoria.set(s.id, { ...m0, semRepasseEm: Date.now(), quedasRepasse: (agora - s.inicioEm > REPASSE_BOM_MS ? 0 : m0.quedasRepasse || 0) + 1 });
     const rx = s.ajuste.rxs?.length ? Math.max(...s.ajuste.rxs) : null;
     const kbps = rx ? Math.round(rx * 0.85) : null;
-    this.onEvento?.(s.id, 'turbo: o PS5 repassado não coube na rede de quem joga — codificando aqui', { filaMs: Math.round(fila), puladosFila2s: s.pulosFila.length, rxKbps: rx, bandaInicialKbps: kbps, ps5Kbps: Number(s.ps5?.kbps) || null });
+    this.onEvento?.(s.id, 'turbo: o PS5 repassado não coube na rede de quem joga — codificando aqui', { filaMs: Math.round(fila), puladosFila2s: pulos2s, rxKbps: rx, bandaInicialKbps: kbps, ps5Kbps: Number(s.ps5?.kbps) || null });
     this.ligar(s.id, s.canal, { ...(s.pedido || { ligar: s.key, versao: s.v2 ? VERSAO : 1 }), recodificar: true, porFalha: true, bandaInicialKbps: kbps });
   }
 
@@ -1170,7 +1189,7 @@ export class TurboEnvio {
     }
     // A banda: trocando só o tamanho, a de agora (dentro dos limites do tamanho novo); começando, a que a
     // rede leva (bandaInicial: a estimativa do WebRTC até essa pessoa, ou o que chegava no repasse do PS5)
-    const max = bandaDe(ch);
+    const max = this.tetoBanda(s, ch);
     const min = bandaMinDe(ch);
     const primeira = !s.banda;
     // a banda lembrada só vale no mesmo caminho: no teste do kazu (2026-11-19 22:06) a conexão trocou de
@@ -1188,6 +1207,12 @@ export class TurboEnvio {
     if (primeira) this.onEvento?.(s.id, 'turbo: banda inicial', { kbps: Math.round(s.banda / 1000), maxKbps: max / 1000, altura: ch, estimativaKbps: s.rede?.saidaKbps ?? null, doRepasseKbps: s.bandaInicialKbps, lembradaKbps: lembrada ? Math.round(lembrada / 1000) : null, caminho: s.rede?.local ?? null, lan: !!s.rede?.lan });
     s.cfg = { codec: escolhido.codec, w: cw, h: ch, modo: escolhido.bitrateMode || 'variable' };
     s.chave = true; // a descrição nova sai junto com o próximo quadro-chave (enviarQuadro)
+  }
+
+  // a banda máxima desta sessão na altura h: a da altura e, com a imagem do PS5 codificada aqui, perto da dele
+  tetoBanda(s, h) {
+    const max = bandaDe(h);
+    return s.recodificado && s.kbpsFonte ? Math.min(max, Math.max(TETO_RECOD_MIN, s.kbpsFonte * 1000 * TETO_RECOD)) : max;
   }
 
   // A trava da fila de envio: FILA_QUADROS quadros da banda cheia (720p: ~50 KB; 1080p: ~83 KB)
@@ -1263,9 +1288,9 @@ export class TurboEnvio {
     if (!s.enc || s.enc.state !== 'configured' || !s.config) return;
     this.voltarAoRepasse(s, fila, pulou).catch(() => {});
     const cortou = a.altas >= 2 && !tranco; // decidirBanda vai descer a banda (ou queria, no piso)
-    const nova = decidirBanda({ atual: s.banda, min: bandaMinDe(s.cfg.h), max: bandaDe(s.cfg.h), fila, a, rxEscala: 1000, entrega, pulou, agora });
+    const nova = decidirBanda({ atual: s.banda, min: bandaMinDe(s.cfg.h), max: this.tetoBanda(s, s.cfg.h), fila, a, rxEscala: 1000, entrega, pulou, agora });
     if (s.altTeto) {
-      const alt = decidirAltura({ h: s.cfg.h, teto: s.altTeto, banda: nova, min: bandaMinDe(s.cfg.h), max: bandaDe(s.cfg.h), cortou, fila, tranco, a, agora });
+      const alt = decidirAltura({ h: s.cfg.h, teto: s.altTeto, banda: nova, min: bandaMinDe(s.cfg.h), max: this.tetoBanda(s, s.cfg.h), cortou, fila, tranco, a, agora });
       if (alt != null) {
         // o próximo quadro reconfigura o codificador no tamanho novo (configurar), com a banda de agora
         this.onEvento?.(s.id, 'turbo: tamanho pela rede', { de: s.cfg.h, para: alt, bandaKbps: Math.round(nova / 1000), filaMs: Math.round(fila) });
@@ -1456,7 +1481,7 @@ export class TurboEnvio {
       // a do codificador agora (ajustarBanda) ou, no PC direto, a da ponte (a placa daqui)
       bandaKbps: s.banda ? Math.round(s.banda / 1000) : s.ps5?.banda ? Math.round(s.ps5.banda.atual) : null,
       bandaMinKbps: s.enc && s.cfg ? bandaMinDe(s.cfg.h) / 1000 : s.ps5?.banda ? (s.ps5.banda.min ?? PONTE_MIN_KBPS) : null,
-      bandaMaxKbps: s.enc && s.cfg ? bandaDe(s.cfg.h) / 1000 : s.ps5?.banda ? s.ps5.banda.max : null,
+      bandaMaxKbps: s.enc && s.cfg ? this.tetoBanda(s, s.cfg.h) / 1000 : s.ps5?.banda ? s.ps5.banda.max : null,
       // PS5: repassado como veio ou codificado aqui (a rede não levava a banda dele), e a banda da sessão
       ps5: s.ps5 && !s.ps5.banda ? { repasse: true, kbps: Number(s.ps5.kbps) || null } : s.recodificado ? { repasse: false, kbps: s.kbpsFonte } : null,
       rxKbps: s.ajuste.rxs?.length ? s.ajuste.rxs[s.ajuste.rxs.length - 1] : null, // o que chegou lá (o último aviso)

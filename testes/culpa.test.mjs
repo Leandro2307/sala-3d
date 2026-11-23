@@ -47,3 +47,19 @@ test('a conta da sessão e a linha do selo', () => {
   assert.match(linhaDaCulpa({ lado: 'host', texto: 'abc' }, contas), /culpa: HOST \(abc\).*host 67%, você 0%, internet 33%/);
   assert.match(linhaDaCulpa(null, {}), /tudo certo$/);
 });
+
+test('o ping do roteador separa o Wi-Fi do PC que transmite da internet', () => {
+  const ruim = { turbo: { qps: 40, filaMs: 200 } };
+  assert.equal(com(ruim, { roteador: { n: 20, max: 180, falhas: 0 } }).onde, 'wifi');
+  assert.equal(com(ruim, { roteador: { n: 18, max: 9, falhas: 2 } }).lado, 'host');
+  assert.equal(com(ruim, { roteador: { n: 20, max: 8, falhas: 0 } }).onde, 'caminho');
+  assert.equal(com(ruim, { roteador: { n: 0, max: null, falhas: 20 } }).onde, 'caminho'); // não responde a ping
+});
+
+test('TV: decodificador lento no vídeo normal, e a imagem parada (a Philips, 2026-11-23)', () => {
+  const tv = { turbo: null, fpsFinal: 57, decMs: 27, bufferMs: 570, sonda: null };
+  assert.equal(culpaDe(tv, la, 'a TV').lado, 'voce');
+  assert.match(culpaDe(tv, la, 'a TV').texto, /^a TV: o decodificador/);
+  assert.equal(culpaDe({ ...tv, fpsFinal: null, parou: true }, la, 'a TV').onde, 'parou');
+  assert.equal(culpaDe({ ...tv, decMs: 0.2, bufferMs: 60 }, la, 'a TV'), null);
+});

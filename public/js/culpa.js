@@ -12,21 +12,30 @@
 
 export const BOM = 50; // quadros por segundo
 const FILA_RUIM = 60; // ms de fila medida (viagem p90 − a menor)
+const BUFFER_RUIM = 250; // ms esperando no buffer do vídeo normal
 const DEC_LENTO = 14; // ms por quadro: perto de um quadro inteiro a 60 qps
 const PAGINA_RUIM = 150; // ms de página travada numa amostra
+
+// a ida e volta do PC que transmite até o roteador dele (ajudante 1.26+, 5 vezes por segundo): é o Wi-Fi de lá, sem a
+// internet no meio. Roteador que não responde nada (só falhas) não diz nada.
+const ROTEADOR_PICO = 60; // ms
+export const roteadorRuim = (r) => !!r && r.n > 0 && ((r.max ?? 0) > ROTEADOR_PICO || (r.falhas || 0) >= 2);
 
 const sondaRuim = (s) => !!s && ((s.picos || 0) > 0 || (s.falhas || 0) > 0);
 const n = (v) => (v == null ? '–' : Math.round(v));
 
 // r: a amostra de quem joga (DiagJogo.amostraRecebe); la: o que quem compartilha contou (ou null)
-export function culpaDe(r, la = r?.la ?? null) {
+// aparelho: como chamar o de quem joga ('seu PC', 'a TV')
+export function culpaDe(r, la = r?.la ?? null, aparelho = 'seu PC') {
   const tb = r?.turbo || null;
   const qps = tb?.qps ?? r?.fpsFinal ?? null;
+  // a imagem chega e o aparelho joga todos os quadros fora (a Philips, 2026-11-23 11:53)
+  if (r?.parou) return { lado: 'voce', onde: 'parou', texto: `${aparelho}: a imagem parou de ser mostrada` };
   if (qps == null) return null;
   const travadas = r.ritmo?.travadas || [];
   const causas = travadas.map((t) => String(t.causa || ''));
   const fila = tb?.filaMs ?? null;
-  const ruim = qps < BOM || travadas.length > 0 || (fila != null && fila > FILA_RUIM);
+  const ruim = qps < BOM || travadas.length > 0 || (fila != null && fila > FILA_RUIM) || (!tb && (r.bufferMs ?? 0) > BUFFER_RUIM);
   if (!ruim) return null;
   const ps5 = !!la?.ps5;
 
@@ -36,7 +45,7 @@ export function culpaDe(r, la = r?.la ?? null) {
     || (r.pagina?.maiorMs || 0) > PAGINA_RUIM) {
     const porque = (tb?.decAtrasou || 0) > 0 || (tb?.decMs ?? r.decMs ?? 0) > DEC_LENTO ? 'o decodificador não dá conta'
       : (r.pagina?.maiorMs || 0) > PAGINA_RUIM ? 'a página travou' : 'a tela demorou a mostrar';
-    return { lado: 'voce', onde: 'aparelho', texto: `seu PC: ${porque}` };
+    return { lado: 'voce', onde: 'aparelho', texto: `${aparelho}: ${porque}` };
   }
   // lá chegou pouco da origem (o PS5 pelo Wi-Fi de lá, ou a captura do jogo)
   if (la?.captura != null && la.captura < BOM) {
@@ -51,6 +60,7 @@ export function culpaDe(r, la = r?.la ?? null) {
     return { lado: 'host', onde: 'pc', texto: `o PC que transmite mandou ${n(la.enviado)} de ${n(la.captura)} qps` };
   }
   // daqui para baixo é rede
+  if (roteadorRuim(la?.roteador)) return { lado: 'host', onde: 'wifi', texto: `o Wi-Fi do PC que transmite (até o roteador: ${la.roteador.falhas ? `${la.roteador.falhas} sem resposta` : `${n(la.roteador.max)} ms`})` };
   const host = sondaRuim(la?.sonda);
   const eu = sondaRuim(r.sonda);
   if (host && !eu) return { lado: 'host', onde: 'rede', texto: 'a internet (ou o Wi-Fi) do PC que transmite' };
@@ -75,4 +85,45 @@ export function contarCulpa(contas, culpa) {
   contas.total = (contas.total || 0) + 1;
   if (culpa) contas[culpa.lado] = (contas[culpa.lado] || 0) + 1;
   return contas;
+}
+
+// A sonda até o servidor para páginas sem o DiagJogo (a TV): a mesma conta de jogo-diag.js
+export class Sonda {
+  constructor(ms = 1000) {
+    this.medidas = [];
+    this.falhas = 0;
+    this.minimos = [];
+    this.ligada = false;
+    this.ocupada = false;
+    setInterval(() => this.medir(), ms);
+  }
+
+  async medir() {
+    if (!this.ligada || this.ocupada || document.visibilityState === 'hidden') return;
+    this.ocupada = true;
+    const t0 = performance.now();
+    try {
+      const r = await fetch(`/ping-jogo?t=${Date.now()}`, { cache: 'no-store' });
+      if (!r.ok) throw new Error(String(r.status));
+      this.medidas.push(performance.now() - t0);
+    } catch {
+      this.falhas++;
+    } finally {
+      this.ocupada = false;
+    }
+  }
+
+  tirar() {
+    const v = this.medidas;
+    const falhas = this.falhas;
+    this.medidas = [];
+    this.falhas = 0;
+    if (!v.length && !falhas) return null;
+    if (v.length) {
+      this.minimos.push(Math.min(...v));
+      if (this.minimos.length > 15) this.minimos.shift();
+    }
+    const base = this.minimos.length ? Math.min(...this.minimos) : null;
+    return { n: v.length, max: v.length ? Math.round(Math.max(...v)) : null, base: base != null ? Math.round(base) : null, picos: base != null ? v.filter((x) => x > base + 80).length : 0, falhas };
+  }
 }

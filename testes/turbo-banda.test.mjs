@@ -271,7 +271,7 @@ test('decidirBanda: quadro pulado desce um degrau já, com chão no que a rede l
 });
 
 test('decidirBanda: não sobe muito além do que está chegando lá (2026-11-23: 20 Mbps com a rede em 9)', () => {
-  assert.equal(decidirBanda({ atual: 13_000_000, min: 2_500_000, max: 20_000_000, fila: 10, a: { altas: 0, baixas: 4, rxs: [9000] }, rxEscala: 1000, agora: 1 }), 13_500_000);
+  assert.equal(decidirBanda({ atual: 13_000_000, min: 2_500_000, max: 20_000_000, fila: 10, a: { altas: 0, baixas: 4, rxs: [11000] }, rxEscala: 1000, agora: 1 }), 14_300_000);
   assert.equal(decidirBanda({ atual: 14_000_000, min: 2_500_000, max: 20_000_000, fila: 10, a: { altas: 0, baixas: 4, rxs: [9000] }, rxEscala: 1000, agora: 1 }), 14_000_000);
 });
 
@@ -302,7 +302,51 @@ test('voltarAoRepasse: só por caminho direto, com a rede calma, e respeitando a
   e.memoria.set('x', { semRepasseEm: Date.now(), quedasRepasse: 1 });
   for (let i = 0; i < 40; i++) await e.voltarAoRepasse(s, 10, false);
   assert.equal(ligou.length, 0); // caiu há pouco
-  assert.equal(e.esperaRepasse({ quedasRepasse: 1 }), 120_000);
-  assert.equal(e.esperaRepasse({ quedasRepasse: 3 }), 480_000);
+  assert.equal(e.esperaRepasse({ quedasRepasse: 1 }), 30_000);
+  assert.equal(e.esperaRepasse({ quedasRepasse: 3 }), 120_000);
   assert.equal(e.esperaRepasse({ quedasRepasse: 9 }), 900_000);
+});
+
+test('vigiarRepasse: o começo e um soluço não derrubam o PS5 repassado; a falta de banda que dura, sim', () => {
+  const real = performance.now;
+  let agora = 100_000;
+  performance.now = () => agora;
+  try {
+    const novo = (idade) => {
+      const e = new TurboEnvio({ tela: () => null, onMudou: null });
+      const ligou = [];
+      e.ligar = (...x) => ligou.push(x);
+      return { e, ligou, s: { id: 'x', canal: {}, key: 'k', inicioEm: agora - idade, ajuste: { rxs: [5000] }, pulosFila: [], ps5: { kbps: 10000 } } };
+    };
+    // 11:38: aos 8 s, 10 pulados e a fila em 561 ms — a conexão ainda se acertando
+    let { e, s, ligou } = novo(8000);
+    for (let i = 0; i < 10; i++) s.pulosFila.push(agora - 100 * i);
+    e.vigiarRepasse(s, 561);
+    assert.equal(ligou.length, 0);
+    // quase nada passando, mesmo no começo
+    for (let i = 0; i < 40; i++) s.pulosFila.push(agora - 40 * i);
+    e.vigiarRepasse(s, 561);
+    assert.equal(ligou.length, 1);
+    // um soluço no meio do jogo: 10 pulados num segundo só
+    ({ e, s, ligou } = novo(40_000));
+    for (let i = 0; i < 10; i++) s.pulosFila.push(agora - 30 * i);
+    e.vigiarRepasse(s, 336);
+    assert.equal(ligou.length, 0);
+    // pulos em 3 dos últimos 4 s
+    s.pulosFila.push(agora - 1500, agora - 2500);
+    e.vigiarRepasse(s, 336);
+    assert.equal(ligou.length, 1);
+    assert.equal(ligou[0][2].porFalha, true);
+    assert.equal(e.memoria.get('x').quedasRepasse, 1);
+  } finally {
+    performance.now = real;
+  }
+});
+
+test('tetoBanda: recodificando o PS5, não passa de perto do que ele manda', () => {
+  const e = new TurboEnvio({ tela: () => null, onMudou: null });
+  assert.equal(e.tetoBanda({ recodificado: true, kbpsFonte: 10000 }, 1080), 8_000_000);
+  assert.equal(e.tetoBanda({ recodificado: true, kbpsFonte: 3000 }, 1080), 4_000_000);
+  assert.equal(e.tetoBanda({ recodificado: false, kbpsFonte: null }, 1080), 20_000_000);
+  assert.equal(e.tetoBanda({ recodificado: true, kbpsFonte: 10000 }, 720), 6_000_000);
 });
