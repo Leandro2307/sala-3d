@@ -268,6 +268,12 @@ app.get('/tv', (_req, res) => {
   res.set('Cache-Control', 'no-cache');
   res.sendFile(paginaTV);
 });
+// Modo jogo do PC (public/jogar.html): a tela da sala principal com o mesmo modo jogo da sala, sem o mundo
+// 3D. Em teste ao lado da sala, que continua a principal (2026-11-23).
+app.get('/jogar', (_req, res) => {
+  res.set('Cache-Control', 'no-cache');
+  res.sendFile(path.join(__dirname, 'public', 'jogar.html'));
+});
 app.get(['/', '/index.html'], (req, res) => {
   res.set('Cache-Control', 'no-cache');
   if (ehTV(req)) return res.sendFile(paginaTV);

@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#05070d">
+<title>Sala 3D · Jogar</title>
+<link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+<!-- Modo jogo do PC (ver public/js/jogar.js): a tela da sala principal com o mesmo modo jogo da sala, sem o
+     mundo 3D. Não leva a <meta name="sala3d">: a extensão continua falando só com a sala de verdade. -->
+<link rel="stylesheet" href="/style.css">
+<style>
+  body { background: #05070d; }
+  /* a tela em foco da sala é a página inteira aqui */
+  #focus { animation: none; background: #05070d; }
+  #focus .focus-bar { flex-wrap: wrap; z-index: 4; }
+  /* com a lan house a barra ocupa duas linhas: a imagem começa abaixo dela (jogando em tela cheia, sem margem) */
+  #focus:not(:fullscreen) video { padding-top: 104px; }
+  #jg-vazio { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 24px; color: #9aa4ba; pointer-events: none; }
+  #jg-vazio[hidden] { display: none; }
+  #jg-vazio b { display: block; color: #eef2fb; font-size: 22px; margin-bottom: 6px; }
+  .jg-esq { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; }
+  .jg-telas { display: flex; gap: 6px; flex-wrap: wrap; }
+  .jg-telas button[aria-pressed="true"] { border-color: #6ee7c8; color: #6ee7c8; }
+  .jg-vol { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #9aa4ba; }
+  .jg-vol input { width: 80px; }
+  #jg-jogar { position: absolute; left: 50%; bottom: 7%; transform: translateX(-50%); z-index: 3; font-size: 20px; font-weight: 800; padding: 16px 34px; border: 0; border-radius: 16px;
+    background: #6ee7c8; color: #04281f; cursor: pointer; box-shadow: 0 8px 40px rgba(110, 231, 200, .35); }
+  #jg-jogar[hidden], body.jg-jogando #jg-jogar { display: none; }
+  /* embaixo à esquerda: em cima à direita ficam o selo, as Opções; embaixo à direita, a legenda */
+  #toasts { z-index: 2; top: auto; right: auto; left: 16px; bottom: 16px; justify-items: start; }
+  #entrada { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 16px; background: #05070d; }
+  #entrada[hidden] { display: none; }
+  #entrada form { width: min(380px, 100%); display: grid; gap: 12px; padding: 24px; border-radius: 18px; background: #0f1420; border: 1px solid rgba(255, 255, 255, .12); }
+  #entrada h1 { margin: 0; font-size: 22px; }
+  #entrada p { margin: 0; color: #9aa4ba; font-size: 14px; line-height: 1.45; }
+  #entrada label { display: grid; gap: 5px; font-size: 13px; color: #9aa4ba; }
+  #entrada label[hidden] { display: none; }
+  #entrada input { font: inherit; font-size: 16px; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(255, 255, 255, .16); background: #05070d; color: #eef2fb; }
+  #entrada .erro { color: #fb7185; }
+  #entrada a, #jg-sala { color: #6ee7c8; }
+</style>
+</head>
+<body>
+<div id="media-sink" aria-hidden="true"></div>
+
+<div id="focus">
+  <video id="focus-video" playsinline autoplay muted></video>
+  <div id="toque-jogo" hidden></div>
+  <div id="tut-controle" hidden></div>
+  <div id="jogo-legenda" hidden aria-hidden="true"></div>
+  <div id="mapa-teclas" hidden></div>
+  <div id="jogo-selo" hidden></div>
+  <div id="lan-vez-foco" hidden></div>
+  <div id="jg-vazio"><div><b>Conectando à sala…</b><span>Só um instante.</span></div></div>
+  <button type="button" id="jg-jogar" hidden>▶ Modo jogo</button>
+  <div class="focus-bar">
+    <div class="jg-esq">
+      <div class="focus-name"><span class="live-dot"></span><span id="focus-name">Sala 3D · Jogar</span><small class="focus-qualidade" id="focus-qualidade"></small></div>
+      <span class="jg-telas" id="jg-telas" role="group" aria-label="Qual tela"></span>
+      <span class="lan-vez" id="lan-vez-pc" hidden></span>
+      <span class="lan-vez" id="lan-vez-ps5" hidden></span>
+    </div>
+    <div class="focus-actions">
+      <label class="jg-vol" title="Volume do jogo">Jogo <input type="range" id="jg-vol-jogo" min="0" max="100" aria-label="Volume do jogo"></label>
+      <label class="jg-vol" title="Volume da voz das pessoas (0 desliga)">Voz <input type="range" id="jg-vol-voz" min="0" max="100" aria-label="Volume da voz"></label>
+      <button type="button" class="secondary small" id="jg-mic" aria-pressed="false">Microfone desligado</button>
+      <button type="button" class="secondary small" id="lan-reservar" hidden>Alugar PC ou PS5</button>
+      <button type="button" class="secondary small" id="focus-ctrl" hidden>Controlar</button>
+      <button type="button" class="secondary small" id="focus-jogo" hidden>Modo jogo</button>
+      <span class="jogo-op-wrap" id="focus-jogo-op-wrap" hidden>
+        <button type="button" class="secondary small" id="focus-jogo-op" aria-haspopup="true" aria-expanded="false" title="Opções do modo jogo">Opções</button>
+        <span class="jogo-op-pop" id="jogo-op-pop" hidden>
+          <label><input type="checkbox" data-op="liso"><span>Imagem mais lisa <small>(vídeo normal: +40 ms de atraso)</small></span></label>
+          <label><input type="checkbox" data-op="rapido"><span>Menos atraso <small>(imagem em 720p)</small></span></label>
+          <label><input type="checkbox" data-op="menuAuto"><span>Menu do jogo automático <small>(mouse solto quando o jogo mostra o cursor)</small></span></label>
+          <label><input type="checkbox" data-op="turbo"><span>Modo turbo <small>(imagem sem buffer: bem menos atraso)</small></span></label>
+          <label><input type="checkbox" data-op="turboLiso"><span>Turbo liso <small>(+~20 ms: quadros no ritmo certo)</small></span></label>
+          <label><input type="checkbox" data-op="preencher"><span>Preencher a tela <small>(sem faixas pretas: corta um pouco das bordas)</small></span></label>
+          <label><input type="checkbox" data-op="nitidez"><span>Realce de nitidez <small>(turbo: contornos mais nítidos)</small></span></label>
+          <label><input type="checkbox" data-op="selo"><span>Mostrar desempenho</span></label>
+          <label><input type="checkbox" data-op="vibrar"><span>Vibrar com o jogo <small>(PS5: o controle ligado neste PC treme)</small></span></label>
+          <label class="jogo-op-vol"><span>Sensibilidade do mouse <small>(PS5 e Switch: o mouse vira o analógico)</small></span>
+            <span class="jogo-op-vol-linha"><input type="range" id="jogo-mouse-sens" min="0.3" max="3" step="0.1" value="3" aria-label="Sensibilidade do mouse"><output id="jogo-mouse-sens-n">3.0×</output></span></label>
+          <label class="jogo-op-lossless"><span>Lossless Scaling neste PC <small>(ligue com Ctrl+Alt+S; aqui só para o desempenho contar os quadros gerados)</small></span>
+            <select id="jogo-lossless"><option value="0">Não uso</option><option value="2">×2</option><option value="3">×3</option><option value="4">×4</option></select></label>
+          <button type="button" class="secondary small" id="jogo-touchpad" hidden>Usar o DualSense (gatilhos, vibração e touchpad)</button>
+          <button type="button" class="secondary small" id="jogo-mapear" hidden>Mapear teclas (qual tecla é cada botão)</button>
+          <button type="button" class="secondary small" id="jogo-tutorial" hidden>Tutorial do controle (teclado e mouse)</button>
+        </span>
+      </span>
+      <button type="button" class="secondary small" id="focus-engasgo" hidden title="Marca no relatório o momento em que a imagem engasgou (F9)">Engasgou <kbd>F9</kbd></button>
+      <button type="button" class="secondary small" id="focus-full">Tela cheia</button>
+      <a class="small" id="jg-sala" href="/?sala=principal">Ir para a sala</a>
+    </div>
+  </div>
+  <div id="toasts" aria-live="polite"></div>
+</div>
+
+<!-- o aluguel (a mesma página /lan da sala, por dentro) -->
+<div id="lan-modal" class="ep-fundo" hidden>
+  <div class="ep-card lan-card" role="dialog" aria-modal="true" aria-labelledby="lan-modal-titulo">
+    <header class="guia-head">
+      <h2 id="lan-modal-titulo">Alugar PC ou PS5</h2>
+      <button type="button" class="icon-btn" id="lan-modal-fechar" aria-label="Fechar">✕</button>
+    </header>
+    <iframe id="lan-frame" title="Reservar horário"></iframe>
+  </div>
+</div>
+
+<div class="escolher-tela" id="aviso-site" hidden>
+  <form class="et-card as-card" role="alertdialog" aria-modal="true" aria-labelledby="as-titulo" aria-describedby="as-msg" autocomplete="off">
+    <h3 id="as-titulo">O site pergunta</h3>
+    <p class="et-sub" id="as-onde"></p>
+    <p class="as-msg" id="as-msg"></p>
+    <input class="as-texto" name="texto" spellcheck="false" aria-label="Resposta" hidden>
+    <div class="et-acoes">
+      <button type="button" class="secondary small" data-as="nao">Cancelar</button>
+      <button type="submit" class="primary small" data-as="sim">OK</button>
+    </div>
+  </form>
+</div>
+
+<div id="entrada" hidden>
+  <form autocomplete="on">
+    <h1>Jogar</h1>
+    <p id="en-texto">Entre com a sua conta da sala. Primeira vez? A senha que você digitar vira a da sua conta.</p>
+    <label id="en-nome-l">Nome<input name="nome" maxlength="20" autocomplete="username" spellcheck="false"></label>
+    <label id="en-senha-l">Senha<input name="senha" type="password" maxlength="100" autocomplete="current-password"></label>
+    <label id="en-sala-l" hidden>Senha da sala principal<input name="sala" type="password" maxlength="100" autocomplete="off"></label>
+    <p class="erro" id="en-erro" role="alert" hidden></p>
+    <button type="submit" class="primary">Entrar</button>
+    <p><a href="/">Ir para a sala</a></p>
+  </form>
+</div>
+
+<div id="reconnecting" hidden><div class="spinner"></div>Reconectando…</div>
+
+<script src="/socket.io/socket.io.js" defer></script>
+<script type="module" src="/js/jogar.js"></script>
+</body>
+</html>

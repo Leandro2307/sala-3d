@@ -1157,3 +1157,20 @@ ar para a internet. É o mesmo canal levando o jogo três vezes, disputando com 
    Gerenciamento de energia; e "Desempenho máximo" no plano de energia); nada mandando muito durante o
    jogo (OBS gravando/transmitindo, OneDrive, Google Fotos, câmeras).
 7. **Quem joga**: no Wi-Fi 5 GHz em vez do 4G sempre que der (o 4G costuma ir pelo TURN).
+
+## Página leve do PC: /jogar (2026-11-23, em teste)
+
+`public/jogar.html` + `public/js/jogar.js`: a tela do PC ou do PS5 da sala **principal** com o mesmo modo jogo
+da sala (os mesmos módulos), sem o mundo 3D. A sala continua a principal e não muda em nada.
+
+Por quê: nos testes de 2026-11-23 (mesmo notebook, PS5 no Turbo, com 2–3 min entre eles) a página leve da TV
+com `?turbo=1` deu ~44 ms de imagem e a sala ~89 ms — decodificador a 13 ms por quadro e o liso no teto de
+45 ms. Às 08:50 a mesma sala tinha dado 52 ms (decodificador a 0,7 ms): a causa não está provada.
+
+- Abrir a página só assiste; mouse e teclado só vão ao jogo com **Modo jogo** (F8) ou **Controlar**.
+- Relatório: nome `conta (jogar)`, com `ambiente.pagina = 'jogar'`; as amostras são as mesmas da sala.
+- `?canal=confiavel`: o canal do Turbo sem prazo de entrega, como na TV (o padrão é o da sala).
+- Fora: 3D, minijogos, webcams, chat, compartilhar tela. Sem a `<meta name="sala3d">`, para a extensão falar
+  só com a sala — por isso o Lossless é ligado pelo atalho dele.
+- A travada de ~0,5 s ao entrar no modo jogo é do código comum (primeiro desenho do Realce e a renegociação
+  do vídeo): acontece também na sala.
