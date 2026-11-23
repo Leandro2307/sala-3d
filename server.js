@@ -260,7 +260,8 @@ const LIMPEZA = '3';
 // Modo TV: o navegador de Smart TV (Samsung/Tizen, LG/webOS, Android/Google TV, Fire TV, Roku,
 // Philips, Hisense/VIDAA, Sony BRAVIA...) abre o mesmo endereço e cai na página leve da TV
 // (public/tv.html): sem o mundo 3D, só o telão, o modo jogo e o QR do aluguel. ?tv=1 força, ?tv=0 não.
-const UA_TV = /smart-?tv|smarttv|tizen|web0s|webos|netcast|hbbtv|bravia|googletv|google tv|android tv|androidtv|\baft[a-z]{1,4}\b|crkey|chromecast|roku|vidaa|hisense|philipstv|nettv|tv bro|large screen|\bdtv\b|; ?tv[;)]|appletv|viera|aquos|opera tv|tvos/i;
+// "4K SMART TV PH" (Android 14, 2026-11-23) vem com espaço: qualquer "TV" solto depois de Android também vale.
+const UA_TV = /smart[-_ ]?tv|android[^)]*\btv\b|tizen|web0s|webos|netcast|hbbtv|bravia|googletv|google tv|android tv|androidtv|\baft[a-z]{1,4}\b|crkey|chromecast|roku|vidaa|hisense|philipstv|nettv|tv bro|large screen|\bdtv\b|; ?tv[;)]|appletv|viera|aquos|opera tv|tvos/i;
 const ehTV = (req) => req.query.tv === '1' || (req.query.tv !== '0' && UA_TV.test(req.headers['user-agent'] || ''));
 const paginaTV = path.join(__dirname, 'public', 'tv.html');
 app.get('/tv', (_req, res) => {

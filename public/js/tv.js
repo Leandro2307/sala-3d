@@ -404,6 +404,7 @@ function ligarJogo() {
   mandarModo();
   enviado = null; // o estado do controle vai inteiro de novo
   comecarRelatorio(a);
+  zerarFila();
   if (video.srcObject) evento('buffer do vídeo normal', { feitos: rtc.baixaLatencia(video.srcObject, true, BUFFER_MS) });
   if (TURBO_NA_TV && !turboFalhou) ligarForma(proximaForma(-1));
   mostrarSelo(10_000);
@@ -712,14 +713,30 @@ setInterval(async () => {
 // decodificador da TV passou da placa para o processador (de 0,2 ms para ~19 ms por quadro, acima dos 16 ms
 // de um quadro a 60 qps) e a fila chegou a 5 s. Refazer a conexão cria um decodificador novo, na placa.
 // O rtc.refazer já espera 20 s, 40 s, 80 s… entre uma vez e outra.
+// A decodificação lenta só conta se a TV já decodificou rápido neste jogo (a placa que caiu para o
+// processador): na "4K SMART TV PH" (Android, 2026-11-23 11:30) ela é sempre 27–195 ms, e refazer a cada
+// 20–60 s só travava a imagem e recomeçava em 360p. Nos primeiros 10 s a fila ainda é a de antes do jogo,
+// e se duas vezes não resolveram, a terceira também não.
+const FILA_REFAZ_MAX = 2;
 let filaRuim = 0;
+let filaRefeitas = 0;
+let filaDesde = 0;
+let decRapido = false; // já decodificou em até 6 ms neste jogo
+function zerarFila() {
+  filaRuim = 0;
+  filaRefeitas = 0;
+  filaDesde = performance.now();
+  decRapido = false;
+}
 function vigiarFila(v) {
   const a = st.alvo;
-  const lento = v && ((v.bufferMs ?? 0) > 600 || (v.decMs ?? 0) > 12);
+  if (v?.decMs != null && v.decMs <= 6) decRapido = true;
+  const lento = v && ((v.bufferMs ?? 0) > 600 || (decRapido && (v.decMs ?? 0) > 12));
   filaRuim = lento ? filaRuim + 1 : 0;
   if (filaRuim < 2 || !a) return; // 4 s seguidos
+  if (filaRefeitas >= FILA_REFAZ_MAX || performance.now() - filaDesde < 10_000) return;
   filaRuim = 0;
-  if (rtc.refazer(a.u.id, 'a fila do vídeo da TV não baixa')) evento('fila do vídeo alta: conexão refeita', { bufferMs: v.bufferMs, decMs: v.decMs, qps: v.qps });
+  if (rtc.refazer(a.u.id, 'a fila do vídeo da TV não baixa') && ++filaRefeitas) evento('fila do vídeo alta: conexão refeita', { bufferMs: v.bufferMs, decMs: v.decMs, qps: v.qps });
 }
 
 function mandarRelatorio(motivo, parcial = false) {
