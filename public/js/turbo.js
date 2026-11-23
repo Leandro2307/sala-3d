@@ -137,6 +137,10 @@ const CHAVE_A_CAMINHO_MS = 400;
 // PS5 direto: com a fila de envio cheia, os quadros esperam aqui até tanto (ver quadroPs5)
 const ESPERA_PS5_MS = 150;
 const PING_MS = 500;
+// O decodificador não dá conta (TV LG, 2026-11-23 02:16: o H.264 do PS5 no processador dela, ~10 qps, e a
+// fila dele chegou a 2500 quadros — a imagem minutos atrasada): mais que isto esperando, joga a fila fora
+// (reset) e recomeça no próximo quadro-chave. Melhor pular que atrasar.
+const DEC_FILA_MAX = 8;
 const SEGURANDO = 3; // quadros dentro do decodificador depois de ele já ter soltado algum...
 const SEGURANDO_QUADROS = 15; // ...em tantos quadros seguidos: ele está guardando (TurboRecebe.segurando)
 const pct = (v, p) => {
@@ -1617,8 +1621,11 @@ export class TurboRecebe {
           },
         });
       }
-      const acel = s.ajusteDec === 2 ? 'prefer-software' : this.aceleracoes[s.acel || 0] || 'prefer-hardware';
-      const config = { codec: cfg.codec, optimizeForLatency: true };
+      const [acel, nivel] = (s.ajusteDec === 2 ? 'prefer-software' : this.aceleracoes[s.acel || 0] || 'prefer-hardware').split('@');
+      // "@nível" (TV, tv.js): o mesmo H.264 anunciado com outro nível no codec (2a = 4.2, 28 = 4.0). A placa
+      // da LG recusou o "avc1.4d4032" (nível 5.0) do PS5; o vídeo normal, com o mesmo H.264, ela decodifica.
+      const codec = nivel && /^avc1\.[0-9a-f]{6}$/i.test(cfg.codec) ? cfg.codec.slice(0, 9) + nivel : cfg.codec;
+      const config = { codec, optimizeForLatency: true };
       if (acel !== 'no-preference') config.hardwareAcceleration = acel;
       if (cfg.description) {
         const d = Uint8Array.from(atob(cfg.description), (c) => c.charCodeAt(0));
@@ -1654,7 +1661,10 @@ export class TurboRecebe {
   // this.aceleracoes, se houver. A TV usa ['prefer-hardware', 'no-preference', 'prefer-software'].
   proximaAceleracao(s, err) {
     const msg = String(err?.message || err);
-    if (!/unsupported configuration|not ?supported/i.test(msg) && err?.name !== 'NotSupportedError') return false;
+    // recusou a configuração, ou aceitou e errou antes de soltar o 1º quadro (o nível menor anunciado
+    // pode passar no configure e falhar no quadro de verdade): também passa para a próxima
+    const recusou = /unsupported configuration|not ?supported/i.test(msg) || err?.name === 'NotSupportedError';
+    if (!recusou && (s.saiuDoDec || 0) > 0) return false;
     if ((s.acel || 0) >= this.aceleracoes.length - 1 || s.ajusteDec === 2) return false;
     s.acel = (s.acel || 0) + 1;
     try { if (s.dec && s.dec.state !== 'closed') s.dec.close(); } catch { /* já fechado */ }
@@ -1803,6 +1813,18 @@ export class TurboRecebe {
       s.seguros = 0;
       // logo depois de a página ficar parada, os quadros se acumulam por isso, não pelo decodificador
       if (performance.now() - (s.paradaEm || -1e9) > PARADA_GRACA_MS) this.segurando(s);
+    }
+    if ((s.dec.decodeQueueSize ?? 0) > DEC_FILA_MAX) {
+      s.conta.decAtrasou = (s.conta.decAtrasou || 0) + 1;
+      if (performance.now() - (s.decAtrasouEm || 0) > 5000) {
+        s.decAtrasouEm = performance.now();
+        this.onEvento?.('turbo: o decodificador daqui não dá conta — fila jogada fora', { fila: s.dec.decodeQueueSize, vezes: s.conta.decAtrasou, decMs: mediana(s.conta.decMs) });
+      }
+      try { s.dec.reset(); } catch { /* fechado */ }
+      s.pendentes.clear();
+      this.configurarDec(s); // reset deixa "unconfigured": a mesma configuração de novo, à espera da chave
+      this.pedirChave(s, true);
+      return;
     }
     try {
       s.pendentes.set(q.ts, { t: chegou, lido: q.lido, chaveAtrasou: atrasDaChave, reg });
@@ -2353,6 +2375,8 @@ export class TurboRecebe {
       filaMs: s.filaMs, // a última fila mandada a quem compartilha (viagem p90 − a menor)
       // ver segurando: 'sps' = o SPS foi reescrito (já ao configurar, ou depois de segurar); 'processador'
       decAjuste: s.ajusteDec ? ([null, 'sps', 'processador', 'sem-saida'][s.ajusteDec] ?? null) : s.spsReescrito ? 'sps' : null,
+      decAtrasou: s.conta.decAtrasou || 0, // vezes que a fila do decodificador foi jogada fora (DEC_FILA_MAX)
+      aceleracao: this.aceleracoes[s.acel || 0] || null,
       filaDec: mediana(s.filaDec), // a fila do decodificador (pedidos esperando): lento, e não segurando
       rxKbps: s.rxKbps ?? null, // o que chegou no último aviso de fila (vai para quem compartilha)
       codec: s.dec?.state === 'configured' ? (ehHevc(s.cfgAtual?.codec) ? 'h265' : 'h264') : null,

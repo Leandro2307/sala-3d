@@ -453,7 +453,9 @@ turbo.semHevc = true;
 // Sempre H.264. ?turbo=testar esquece a guardada e testa tudo de novo.
 const TODOS_H264 = ['avc1.640033', 'avc1.4d0033', 'avc1.42e033', 'avc1.42001f'];
 const BASELINE = ['avc1.42e033', 'avc1.42001f'];
-const PLACA_OU_NAO = ['prefer-hardware', 'no-preference'];
+// Na placa da TV primeiro, com o nível do H.264 que veio e com níveis menores no codec (a LG recusou o
+// nível 5.0 do PS5 na placa e caiu no processador: ~10 qps, 2026-11-23 02:16); por último sem preferência
+const PLACA_OU_NAO = ['prefer-hardware', 'prefer-hardware@2a', 'prefer-hardware@28', 'prefer-hardware@1f', 'no-preference'];
 const FORMAS = [
   // o PS5 repassado (se a rede levar) ou codificado no PC, o perfil que o PC escolher
   { id: 'normal-1080', altura: 1080, codecs: TODOS_H264, recodificar: false, aceleracoes: PLACA_OU_NAO },
@@ -466,7 +468,8 @@ const FORMAS = [
   { id: 'pc-720-processador', altura: 720, codecs: TODOS_H264, recodificar: true, aceleracoes: ['prefer-software'] },
 ];
 const FORMA_CHAVE = 'sala3d-tv-turbo';
-const FORMA_OK_MS = 10_000; // imagem pelo Turbo por tanto tempo seguido: esta forma funciona
+const FORMA_OK_MS = 10_000; // imagem pelo Turbo por tanto tempo seguido: esta forma funciona…
+const FORMA_QPS_MIN = 40; // …e na média com pelo menos isto: abaixo, a TV não dá conta e vai a próxima forma
 let formaGuardada = null;
 try {
   if (new URLSearchParams(location.search).get('turbo') === 'testar') localStorage.removeItem(FORMA_CHAVE);
@@ -475,6 +478,7 @@ try {
 let formaAtual = null; // { forma, indice, desde, qpsDesde }
 let formasTentadas = []; // nesta página
 let formaOk = null;
+let melhorLenta = null; // a forma lenta com mais qps (só para o relatório)
 
 // a ordem: a guardada primeiro, depois as outras na ordem de FORMAS
 function ordemDasFormas() {
@@ -530,12 +534,28 @@ function pararTurbo(motivo) {
 function vigiarForma(t) {
   const f = formaAtual;
   if (!f || formaOk === f.forma.id) return;
-  if (!(t && t.qps > 0)) { f.qpsDesde = 0; return; }
+  if (!(t && t.qps > 0)) { f.qpsDesde = 0; f.qpss = []; return; }
   f.qpsDesde ||= performance.now();
+  (f.qpss ||= []).push(t.qps);
   if (performance.now() - f.qpsDesde < FORMA_OK_MS) return;
+  // a média sem a 1ª amostra (o começo, com o quadro-chave e o decodificador ligando)
+  const conta = f.qpss.slice(1);
+  const media = conta.reduce((a, b) => a + b, 0) / (conta.length || 1);
+  if (media < FORMA_QPS_MIN) {
+    const dados = { qpsMedia: Math.round(media * 10) / 10, kbps: t.kbps, decMs: t.decMs, filaDec: t.filaDec, decAtrasou: t.decAtrasou, aceleracao: t.aceleracao, codecLa: t.codecLa, largura: t.largura, altura: t.altura };
+    turbo.desligar();
+    registrarTentativa('lenta na TV', dados);
+    evento(`turbo: forma ${f.forma.id} mostrou imagem mas lenta (${dados.qpsMedia} qps)`, dados);
+    formaAtual = null;
+    melhorLenta = !melhorLenta || dados.qpsMedia > melhorLenta.qpsMedia ? { ...dados, id: f.forma.id } : melhorLenta;
+    const prox = st.jogando ? proximaForma(f.indice) : null;
+    if (prox) return ligarForma(prox);
+    evento('turbo: nenhuma forma rápida o bastante nesta TV — vídeo normal', { melhorLenta, tentativas: formasTentadas });
+    return pararTurbo('lenta na TV');
+  }
   formaOk = f.forma.id;
   try { localStorage.setItem(FORMA_CHAVE, formaOk); } catch { /* sem armazenamento */ }
-  registrarTentativa('funcionou', { qps: t.qps, kbps: t.kbps, decMs: t.decMs, largura: t.largura, altura: t.altura, codec: t.codec });
+  registrarTentativa('funcionou', { qpsMedia: Math.round(media * 10) / 10, aceleracao: t.aceleracao, codecLa: t.codecLa, decAtrasou: t.decAtrasou, qps: t.qps, kbps: t.kbps, decMs: t.decMs, largura: t.largura, altura: t.altura, codec: t.codec });
   evento(`turbo: a forma ${formaOk} funciona nesta TV (guardada)`, { qps: t.qps, kbps: t.kbps, decMs: t.decMs, codec: t.codec, largura: t.largura, altura: t.altura });
 }
 // O PC leva 3–4 s para começar a mandar (mede a rede e escolhe repassar o PS5 ou codificar): com a desistência
