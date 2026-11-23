@@ -13,7 +13,13 @@
 // Diferença de propósito: abrir a página só assiste. Mouse e teclado só vão para o jogo com "Modo jogo" ou
 // "Controlar" (na sala a pessoa abre a tela de propósito; aqui ela abre com a página).
 //
-// ?canal=confiavel abre o canal do Turbo sem prazo de entrega, como a TV faz (para comparar).
+// A receita é a da TV (tv.js), que o usuário achou melhor no PC (2026-11-23): a imagem medida empatava (~47
+// ms), e o que sobrava de diferente o relatório não via —
+//   - o controle pela Gamepad API, lido a cada 8 ms, com o botão saindo na hora. Pelo WebHID (a sala), o
+//     giroscópio do DualSense muda sempre e ocupa o envio de 12 em 12 ms: o botão esperava a vez dele. O
+//     DualSense direto (gatilhos, touchpad, giroscópio) fica nas Opções, desligado de fábrica;
+//   - sem o realce de nitidez (um shader por quadro na placa integrada) e só H.264;
+//   - os canais do Turbo sem prazo de entrega (?canal=prazo volta ao da sala, para comparar).
 import { RTC } from './rtc.js';
 import { Controle } from './controle.js';
 import { TurboRecebe, TTL_MS, LISO_PCT, LISO_MAX } from './turbo.js';
@@ -39,7 +45,7 @@ const PASSES_CHAVE = 'sala3d-passes';
 const AJUSTES_CHAVE = 'sala3d-jogar';
 const VOLTAR_CHAVE = 'sala3d-jogar-voltar';
 const VOLTAR_MS = 3 * 60_000;
-const CANAL_CONFIAVEL = params.get('canal') === 'confiavel';
+const CANAL_CONFIAVEL = params.get('canal') !== 'prazo';
 const NOME_MAQ = { pc: 'PC', ps5: 'PS5' };
 
 const lerJSON = (k, padrao) => {
@@ -51,7 +57,9 @@ const gravarJSON = (k, v) => {
 const limitar = (v, a, b) => Math.min(b, Math.max(a, Number(v) || 0));
 let conta = lerJSON(LAN_CHAVE, null); // { nome, token }: o mesmo da sala e da /lan
 let passe = lerJSON(PASSES_CHAVE, {})[SALA] || null;
-const ajustes = { jogo: 100, voz: 100, ...lerJSON(AJUSTES_CHAVE, {}) };
+// nitidez e dualsense são daqui (as opções da sala, guardadas no mesmo navegador, não mudam)
+const ajustes = { jogo: 100, voz: 100, nitidez: false, dualsense: false, ...lerJSON(AJUSTES_CHAVE, {}) };
+const ENVIO_PAD_MS = 8;
 
 const st = {
   selfId: null,
@@ -662,9 +670,9 @@ function mostrarVezLan() {
   // por cima da imagem só jogando em tela cheia (fora dela a barra já mostra)
   const foco = $('#lan-vez-foco');
   const sh = st.alvo?.sh;
-  foco.hidden = !(st.lan && sh && controle.jogo);
+  const v = st.lan && sh && controle.jogo ? textoVez(maquinaDaTela(sh)) : null;
+  foco.hidden = !v?.acabando; // jogando, só no fim da vez: nada por cima da imagem
   if (foco.hidden) return;
-  const v = textoVez(maquinaDaTela(sh));
   foco.textContent = v.texto;
   foco.classList.toggle('minha', !!v.minha);
   foco.classList.toggle('acabando', !!v.acabando);
@@ -847,7 +855,7 @@ const MOTIVO_TURBO = {
 const turboAvisado = new Set();
 const turboRecebe = new TurboRecebe({
   abrir: (id, vida) => rtc?.abrirTurbo(id, CANAL_CONFIAVEL ? null : vida),
-  abrirSom: (id) => rtc?.abrirTurboSom(id),
+  abrirSom: (id) => rtc?.abrirTurboSom(id, CANAL_CONFIAVEL),
   somDaTela: () => video,
   volume: () => ajustes.jogo / 100,
   onEvento: (texto, dados) => diagJogo.evento(texto, dados),
@@ -858,6 +866,11 @@ const turboRecebe = new TurboRecebe({
     toast(`Modo turbo desligado: ${MOTIVO_TURBO[motivo] || motivo}. A imagem voltou ao normal.`, 'warn', 8000);
   },
 });
+// como na TV: só H.264, os mesmos perfis, e a placa antes de qualquer outra coisa; o PC leva 3–4 s para começar
+turboRecebe.semHevc = true;
+turboRecebe.codecsForcados = ['avc1.640033', 'avc1.4d0033', 'avc1.42e033', 'avc1.42001f'];
+turboRecebe.aceleracoes = ['prefer-hardware', 'prefer-hardware@2a', 'prefer-hardware@28', 'prefer-hardware@1f', 'no-preference'];
+turboRecebe.semImagemMs = 12_000;
 const presetAtual = () => PRESETS.find((p) => p.id === opcoesJogo.get('preset')) || null;
 function ligarTurbo() {
   if (!jogandoLa) return;
@@ -867,7 +880,7 @@ function ligarTurbo() {
   turboRecebe.h265 = !!p?.h265;
   turboRecebe.lisoPct = p?.lisoPct ?? LISO_PCT;
   turboRecebe.lisoMax = p?.lisoMax ?? LISO_MAX;
-  turboRecebe.realce = !!opcoesJogo.get('nitidez');
+  turboRecebe.realce = !!ajustes.nitidez;
   turboRecebe.ligar(jogandoLa.key, jogandoLa.video, opcoesJogo.get('rapido') ? 720 : 1080);
   diagJogo.evento('modo turbo ligado', { nitidez: turboRecebe.realce, liso: opcoesJogo.get('turboLiso'), vidaMs: turboRecebe.vidaMs, h265: turboRecebe.h265, lisoPct: turboRecebe.lisoPct, lisoMaxMs: turboRecebe.lisoMax, canal: CANAL_CONFIAVEL ? 'confiável' : 'com prazo' });
 }
@@ -910,7 +923,6 @@ opcoesJogo.ouvir((k, v) => {
     if (v) ligarTurbo();
     else turboRecebe.desligar();
   } else if (k === 'selo') mostrarSelo();
-  else if (k === 'nitidez' && turboRecebe.ligado) ligarTurbo();
   else if (k === 'menuAuto' && jogandoLa) controle.cursorLivre(jogandoLa.key, v ? jogandoLa.cursorLivre : false);
   else if (k === 'preencher') document.body.classList.toggle('jogo-preencher', !!v);
   for (const el of $$('#jogo-op-pop [data-op]')) el.checked = !!opcoesJogo.get(el.dataset.op);
@@ -955,7 +967,7 @@ function jogoLa(v, key) {
   diagJogo.comecar('joga', {
     gl: placaLida,
     video: v,
-    extra: { pagina: 'jogar', canal: CANAL_CONFIAVEL ? 'confiável' : 'com prazo', janelaDoJogo: acharTela(key)?.sh.titulo ?? null, toque: false, opcoes: { liso: op('liso'), menuAuto: op('menuAuto'), giro: false, rapido: op('rapido'), turbo: op('turbo'), turboLiso: op('turboLiso'), preset: op('preset') } },
+    extra: { pagina: 'jogar', receita: 'tv', dualsense: ajustes.dualsense, nitidez: ajustes.nitidez, canal: CANAL_CONFIAVEL ? 'confiável' : 'com prazo', janelaDoJogo: acharTela(key)?.sh.titulo ?? null, toque: false, opcoes: { liso: op('liso'), menuAuto: op('menuAuto'), giro: false, rapido: op('rapido'), turbo: op('turbo'), turboLiso: op('turboLiso'), preset: op('preset') } },
   });
   aplicarBuffer();
   mostrarSelo();
@@ -1004,13 +1016,14 @@ async function amostrar() {
     rtc.mandarControle(dono, { p: performance.now() });
     const trilha = video.srcObject?.getVideoTracks()[0];
     if (!trilha) return;
-    const extra = { preset: opcoesJogo.get('preset') || 0, turbo: turboRecebe.stats(), controleRttMs: ping.rtt, controleIdaMs: ping.ida, ajudanteMs: ping.ajudante, movimentoCru: controle.movimentoCru, controleFisico: fisico.usado, cursorLivre: jogandoLa.cursorLivre };
+    const extra = { preset: opcoesJogo.get('preset') || 0, turbo: turboRecebe.stats(), controleRttMs: ping.rtt, controleIdaMs: ping.ida, ajudanteMs: ping.ajudante, movimentoCru: controle.movimentoCru, controleFisico: fisico.usado, entrada: entradaDeAgora(), cursorLivre: jogandoLa.cursorLivre };
     const cru = await rtc.diagRecebe(trilha, video.srcObject?.getAudioTracks()[0] || null);
     if (jogandoLa?.key !== key) return;
     const resumo = diagJogo.amostraRecebe(cru, { desenha: false, teto: null, quadros2s: 0, escondida: document.hidden, foco: 'jogar', pessoas: st.users.size + 1 }, extra);
     vigiarSom(resumo);
     mostrarSelo(resumo);
-    if (!resumo) return;
+    // no Turbo quem compartilha não precisa da cópia (o relatório vai ao servidor): o canal fica só do controle
+    if (!resumo || turboRecebe.ligado) return;
     const { la, ...r } = resumo;
     const n = diagJogo.sessao.amostras.length;
     rtc.mandarControle(dono, { j: { key, r, amb: n <= 4 || n % 15 === 1 ? diagJogo.sessao.ambiente : undefined } });
@@ -1030,7 +1043,26 @@ $('#focus-engasgo').addEventListener('click', (e) => {
 });
 
 // ------------------------------------------------------------------ teclado, controle e DualSense
-const padVirtual = new PadVirtual({ controle });
+// o controle virtual com a pressa da TV: botão que mudou sai na hora; analógico, a cada 8 ms
+class PadRapido extends PadVirtual {
+  mudou() {
+    if (this.treino) return void super.mudou();
+    if (!this.key) return;
+    if (this.estado().b !== this.enviado.b) return void this.enviar();
+    if (this.timer) return;
+    const falta = this.ultimo + ENVIO_PAD_MS - performance.now();
+    if (falta <= 0) this.enviar();
+    else this.timer = setTimeout(() => this.enviar(), falta);
+  }
+}
+const padVirtual = new PadRapido({ controle });
+// A leitura do ControleFisico é por quadro da tela (13 ms a 75 Hz): aqui, a cada 8 ms, como na TV
+setInterval(() => {
+  if (!padVirtual.key || touchpad.ativo || !LAYOUTS[layoutDa(st.alvo?.sh)]?.virtual) return;
+  const g = fisico.pad();
+  if (g) padVirtual.fisico(g);
+}, ENVIO_PAD_MS);
+const entradaDeAgora = () => (touchpad.ligado && touchpad.ativo ? 'dualsense' : fisico.pad() ? 'gamepad' : 'teclado');
 let layoutLegenda = null;
 let noCarro = false;
 const tecladoPad = new TecladoPad({
@@ -1067,8 +1099,9 @@ const CLASSE_LEGENDA = { b0: 'lg-xis', b1: 'lg-bol', b2: 'lg-qua', b3: 'lg-tri' 
 function mostrarLegenda(layout) {
   layoutLegenda = layout;
   const el = $('#jogo-legenda');
-  el.hidden = !layout;
-  if (!layout) return void (el.innerHTML = '');
+  // com controle não serve para nada, e menos coisa por cima da imagem é menos trabalho para mostrá-la
+  el.hidden = !layout || entradaDeAgora() !== 'teclado';
+  if (el.hidden) return void (el.innerHTML = '');
   const troca = mapaTeclas.carroLigado() ? mapaTeclas.entradasCarro('troca').map(nomeEntrada).join(' / ') : '';
   const carro = !mapaTeclas.carroLigado() ? ''
     : `<span class="lg-carro${noCarro ? ' on' : ''}"><b>${noCarro ? '🚗 No carro' : '🚶 A pé'}</b><kbd>${esc(troca || '△ troca')}</kbd></span>`;
@@ -1076,53 +1109,37 @@ function mostrarLegenda(layout) {
     .map((b) => `<span${b.id === 'b4' ? ' class="lg-sep"' : ''}><b class="${layout === 'ps5' ? CLASSE_LEGENDA[b.id] || '' : ''}">${esc(b.botao)}</b><kbd>${esc(b.teclas)}</kbd></span>`).join('');
 }
 mapaTeclas.ouvir(() => { if (layoutLegenda) mostrarLegenda(layoutLegenda); });
+for (const ev of ['gamepadconnected', 'gamepaddisconnected']) addEventListener(ev, () => { if (layoutLegenda) mostrarLegenda(layoutLegenda); });
 
 function atualizarBotaoTouchpad() {
   const sh = st.alvo?.sh;
   const b = $('#jogo-touchpad');
   b.hidden = !temTouchpadHid() || !(touchpad.ativo || ehPs5(sh));
-  b.textContent = touchpad.ligado ? 'DualSense ligado ✓ (gatilhos, vibração e touchpad)' : 'Usar o DualSense (gatilhos, vibração e touchpad)';
-  b.disabled = touchpad.ligado;
+  b.textContent = ajustes.dualsense ? 'DualSense direto ligado ✓ (clique para desligar)' : 'Usar o DualSense direto (gatilhos e giroscópio; pode atrasar)';
   $('#jogo-mapear').hidden = !LAYOUTS[layoutDa(sh)]?.virtual;
 }
 
-// a permissão do DualSense (WebHID): pedida no clique do Modo jogo, uma vez só
-const RECUSOU_DUALSENSE = 'sala3d.dualsenseRecusou';
-let dualSensePermitido = false;
-let pedindoDualSense = false;
-const conferirPermissao = () => navigator.hid?.getDevices?.().then((ds) => { dualSensePermitido = ds.some((d) => d.vendorId === 0x054c); }).catch(() => {});
-conferirPermissao();
-navigator.hid?.addEventListener?.('connect', conferirPermissao);
-function precisaPedirDualSense() {
-  if (!temTouchpadHid() || touchpad.ligado || dualSensePermitido || pedindoDualSense || !ehPs5(st.alvo?.sh)) return false;
-  try { if (localStorage.getItem(RECUSOU_DUALSENSE)) return false; } catch { /* sem armazenamento: pede */ }
-  const pads = [...(navigator.getGamepads?.() || [])].filter(Boolean);
-  return !pads.length || pads.some((g) => /054c|dualsense|wireless controller/i.test(g.id));
-}
-async function conectarDualSense() {
-  let ok = false;
-  pedindoDualSense = true;
-  try { ok = await touchpad.pedir(); } catch { /* fechou a lista ou falhou ao abrir */ }
-  pedindoDualSense = false;
-  if (ok) {
-    dualSensePermitido = true;
-    try { localStorage.removeItem(RECUSOU_DUALSENSE); } catch { /* ok */ }
-    toast('DualSense ligado: botões, gatilhos adaptativos, vibração e touchpad. Das próximas vezes ele liga sozinho.', 'success', 6000);
-  } else {
-    try { localStorage.setItem(RECUSOU_DUALSENSE, '1'); } catch { /* ok */ }
-    toast('Sem o DualSense: dá para ligar depois em Opções → "Usar o DualSense".', 'info', 6000);
-    if (controle.jogo) tutorialDoPs5(controle.jogo.key);
-  }
-  atualizarBotaoTouchpad();
-}
+// O DualSense direto (WebHID: gatilhos adaptativos, touchpad, giroscópio), só para quem ligar nas Opções.
+// Depois de aberto assim, no Bluetooth o Chrome não o mostra mais pela Gamepad API até ele desligar.
 $('#jogo-touchpad').addEventListener('click', async (e) => {
   e.currentTarget.blur();
-  try {
-    if (await touchpad.pedir()) toast('DualSense ligado: botões, gatilhos adaptativos, vibração e touchpad.', 'success', 5000);
-  } catch (err) {
-    toast(`Não deu para ler o DualSense: ${err?.message || err}`, 'warn', 7000);
+  if (ajustes.dualsense) {
+    ajustes.dualsense = false;
+    gravarJSON(AJUSTES_CHAVE, ajustes);
+    touchpad.desligar();
+    toast('DualSense direto desligado. Desligue e ligue o controle (segure o botão PS) para ele voltar pelo caminho rápido.', 'info', 10000);
+  } else {
+    try {
+      if (!(await touchpad.pedir())) return;
+      ajustes.dualsense = true;
+      gravarJSON(AJUSTES_CHAVE, ajustes);
+      if (controle.jogo) await touchpad.ligar();
+      toast('DualSense direto ligado: gatilhos adaptativos, touchpad e giroscópio.', 'success', 5000);
+    } catch (err) {
+      toast(`Não deu para ler o DualSense: ${err?.message || err}`, 'warn', 7000);
+    }
   }
-  conferirPermissao();
+  avisarModo();
   atualizarBotaoTouchpad();
 });
 
@@ -1132,7 +1149,7 @@ function tutorialDoPs5(key) {
     tutorial.fechar(false);
     return false;
   }
-  const temControle = () => fisico.pad() || touchpad.ligado || dualSensePermitido || pedindoDualSense;
+  const temControle = () => fisico.pad() || touchpad.ligado;
   if (tutorial.ativo || temControle()) return false;
   setTimeout(() => { if (controle.jogo?.key === key && !temControle()) tutorial.abrir('pc'); }, 900);
   return true;
@@ -1146,7 +1163,7 @@ controle.onJogo = (v, key) => {
     fisico.ligar(key, sh?.titulo);
   } else fisico.desligar();
   const layout = sh ? layoutDa(sh) : null;
-  if (layout === 'ps5') touchpad.ligar().then(atualizarBotaoTouchpad);
+  if (layout === 'ps5' && ajustes.dualsense) touchpad.ligar().then(atualizarBotaoTouchpad);
   else touchpad.desligar();
   const virtual = layout && LAYOUTS[layout]?.virtual ? layout : null;
   if (virtual) {
@@ -1207,7 +1224,7 @@ document.addEventListener('fullscreenchange', () => {
 });
 
 // o clique no "Modo jogo" (a tela cheia e o mouse preso só entram com um)
-async function alternarJogo() {
+function alternarJogo() {
   if (controle.jogo) {
     esquecerJogo();
     controle.desligarJogo();
@@ -1216,29 +1233,13 @@ async function alternarJogo() {
   }
   if (!jogavel() || !video.srcObject) return void toast('A imagem ainda não chegou.', 'warn');
   if (!deixarJogar()) return;
-  const pedir = precisaPedirDualSense(); // a lista do Chrome tem que abrir antes da tela cheia
-  if (pedir) pedindoDualSense = true; // o tutorial do teclado não abre
   if (!controle.tem(video)) controle.adicionar(video, st.alvo.sh.key);
   controle.modoJogo(video, true);
-  if (pedir) {
-    await conectarDualSense();
-    if (!controle.jogo) return;
-    await jogoNoPc(true);
-    if (!document.fullscreenElement) telaCheiaNoProximoGesto();
-    return;
-  }
   jogoNoPc(true);
+  if (ehPs5(st.alvo.sh) && entradaDeAgora() === 'teclado') {
+    toast('Vai jogar no controle? Aperte um botão dele. Se não responder, desligue e ligue o controle (a sala pode ter deixado ele no modo direto).', 'info', 10000);
+  }
   toast('Modo jogo ligado. Esc duas vezes (ou F8) desliga; segure Esc para sair da tela cheia.', 'info', 7000);
-}
-function telaCheiaNoProximoGesto() {
-  toast('Clique na tela (ou aperte uma tecla) para entrar em tela cheia.', 'info', 7000);
-  const ir = () => {
-    removeEventListener('pointerdown', ir, true);
-    removeEventListener('keydown', ir, true);
-    if (controle.jogo && !document.fullscreenElement) jogoNoPc(true);
-  };
-  addEventListener('pointerdown', ir, true);
-  addEventListener('keydown', ir, true);
 }
 for (const id of ['#focus-jogo', '#jg-jogar']) {
   $(id).addEventListener('click', (e) => {
@@ -1298,6 +1299,12 @@ const mostrarSens = () => {
   $('#jogo-mouse-sens').value = String(v);
   $('#jogo-mouse-sens-n').textContent = `${v.toFixed(1)}×`;
 };
+$('#jg-nitidez').checked = ajustes.nitidez;
+$('#jg-nitidez').addEventListener('change', (e) => {
+  ajustes.nitidez = e.target.checked;
+  gravarJSON(AJUSTES_CHAVE, ajustes);
+  if (turboRecebe.ligado) ligarTurbo(); // o realce troca a tela: liga de novo
+});
 mostrarSens();
 $('#jogo-mouse-sens').addEventListener('input', (e) => {
   opcoesJogo.set('mouseSens', limitar(Number(e.target.value) || 1, 0.3, 3));

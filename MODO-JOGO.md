@@ -1169,7 +1169,10 @@ com `?turbo=1` deu ~44 ms de imagem e a sala ~89 ms — decodificador a 13 ms po
 
 - Abrir a página só assiste; mouse e teclado só vão ao jogo com **Modo jogo** (F8) ou **Controlar**.
 - Relatório: nome `conta (jogar)`, com `ambiente.pagina = 'jogar'`; as amostras são as mesmas da sala.
-- `?canal=confiavel`: o canal do Turbo sem prazo de entrega, como na TV (o padrão é o da sala).
+- Receita da TV (2026-11-23, depois do teste das 10:34): Gamepad API a cada 8 ms com o botão na hora (o WebHID do
+  DualSense, com o giroscópio, segurava o botão até 12 ms), sem realce, só H.264 e os canais do Turbo sem prazo
+  (`?canal=prazo` volta ao da sala). O DualSense direto fica nas Opções, desligado. Teste local (botão → PC):
+  TV 9 ms, /jogar antes 10, /jogar com a receita 7; imagem 14,9 / 20,6 / 14,8 ms.
 - Fora: 3D, minijogos, webcams, chat, compartilhar tela. Sem a `<meta name="sala3d">`, para a extensão falar
   só com a sala — por isso o Lossless é ligado pelo atalho dele.
 - A travada de ~0,5 s ao entrar no modo jogo é do código comum (primeiro desenho do Realce e a renegociação
