@@ -1375,6 +1375,10 @@ export class World {
             }
           }
           try {
+            // Com tudo à vista há mais luzes acesas do que no quadro, e outra quantidade fazia o three
+            // recompilar todos os materiais na hora: 9,3 s de página parada numa RTX 3060 Ti (2026-11-23),
+            // sem mandar nem receber tela nenhuma. As mesmas maxLuzes de um quadro: nada recompila.
+            this.atualizarLuzes();
             r.setRenderTarget(null);
             r.render(this.scene, cam);
           } finally {
@@ -1399,7 +1403,15 @@ export class World {
     } finally {
       if (fog) [fog.near, fog.far] = nevoa;
       r.shadowMap.autoUpdate = sombra;
+      this.atualizarLuzes(); // de volta às do quadro
     }
+  }
+
+  async compilarParaFoto() {
+    if (!this.renderer.compileAsync) return;
+    try {
+      await this.renderer.compileAsync(this.scene, this.camera);
+    } catch { /* compila no desenho, como antes */ }
   }
 
   // câmera bem alta, olhando para baixo, que enxerga o mapa inteiro (para os quadros de aquecer)
@@ -4070,6 +4082,12 @@ export class World {
     if (this.mapasSatelite?.length && (this._fotosSatelite ?? 0) < 2) {
       this._proximaFoto ??= agora + 12000;
       if (agora >= this._proximaFoto) {
+        // o que entrou na cena depois do aquecimento compila antes, em segundo plano: na foto, parava a página
+        this._proximaFoto = Infinity;
+        this.compilarParaFoto().then(() => { this._fotoPronta = true; });
+      }
+      if (this._fotoPronta) {
+        this._fotoPronta = false;
         this.fotografarSatelite();
         this._fotosSatelite = (this._fotosSatelite ?? 0) + 1;
         this._proximaFoto = agora + 33000;
