@@ -1,0 +1,167 @@
+/* O celular como controle da TV (js/toque-tv.js): o desenho do modo jogo do celular (#toque-jogo no
+   style.css), maior, porque aqui não há imagem por baixo. --k: o "Tamanho dos botões". */
+#toque {
+  --k: 1;
+  --g: calc(clamp(50px, 17.5vh, 78px) * var(--k));
+  --gap: 8px;
+  --barra: 40px;
+  --em-cima: max(8px, env(safe-area-inset-top));
+  /* o direcional e o analógico, um em cima do outro: nunca passam da metade do que sobra na altura */
+  --meia: calc((100vh - var(--em-cima) - var(--barra) - 32px - max(14px, env(safe-area-inset-bottom))) / 2);
+  --stick: min(calc(clamp(112px, 37vh, 164px) * var(--k)), var(--meia));
+  --dpad: min(calc(clamp(112px, 36vh, 156px) * var(--k)), var(--meia));
+  --esq: max(26px, env(safe-area-inset-left));
+  --dir: max(16px, env(safe-area-inset-right));
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  overflow: hidden;
+  background: radial-gradient(ellipse at 50% 40%, #161d33, #05070d 72%);
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  color: #fff;
+  font: 700 13px/1.1 system-ui, "Segoe UI", Roboto, sans-serif;
+}
+#toque * { touch-action: none; -webkit-tap-highlight-color: transparent; }
+#toque button {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  padding: 0;
+  border: 1.5px solid rgba(255, 255, 255, 0.24);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.07);
+  color: #fff;
+  font: inherit;
+}
+/* o dedo que cai no vão entre dois botões ainda pega o mais perto */
+#toque .tt-b::before { content: ""; position: absolute; inset: -4px; }
+#toque button.on, #toque .tt-dpad b.on { background: rgba(56, 189, 248, 0.5); border-color: rgba(125, 211, 252, 0.95); }
+#toque .tt-acoes button, #toque .tt-sair { transition: transform 0.06s; }
+#toque .tt-acoes button.on { transform: scale(0.94); }
+
+.tt-olhar { position: absolute; inset: 0; }
+.tt-zona { position: absolute; left: 0; bottom: 0; width: 44%; top: calc(var(--em-cima) + var(--barra) + 6px); }
+.tt-marca {
+  position: absolute; left: 50%; bottom: max(16px, env(safe-area-inset-bottom)); transform: translateX(-50%); margin: 0;
+  color: rgba(255, 255, 255, 0.3); font-size: 12px; font-weight: 600; white-space: nowrap; pointer-events: none;
+}
+#toque.tt-olhou .tt-marca { display: none; }
+/* o centro do analógico direito, onde o dedo encostou */
+.tt-anel { position: absolute; left: 0; top: 0; width: 0; height: 0; pointer-events: none; }
+.tt-anel::before {
+  content: ""; position: absolute; left: calc(-1 * var(--r, 70px)); top: calc(-1 * var(--r, 70px));
+  width: calc(2 * var(--r, 70px)); height: calc(2 * var(--r, 70px)); border-radius: 50%; box-sizing: border-box;
+  border: 1.5px solid rgba(255, 255, 255, 0.2); background: rgba(255, 255, 255, 0.04);
+}
+.tt-anel i { position: absolute; left: -24px; top: -24px; width: 48px; height: 48px; border-radius: 50%; background: rgba(56, 189, 248, 0.4); border: 1.5px solid rgba(125, 211, 252, 0.8); box-sizing: border-box; }
+
+/* em cima: a situação (abre os ajustes) e os botões pequenos */
+#toque .tt-chip {
+  position: absolute; top: var(--em-cima); left: max(12px, env(safe-area-inset-left)); height: var(--barra);
+  gap: 7px; padding: 0 13px; border-radius: 999px; max-width: 32vw; font-size: 12.5px;
+}
+.tt-chip i { flex: none; width: 9px; height: 9px; border-radius: 50%; background: #9aa4ba; }
+.tt-chip[data-tipo="ok"] i { background: #34d399; box-shadow: 0 0 8px #34d399; }
+.tt-chip[data-tipo="espera"] i { background: #fbbf24; }
+.tt-chip[data-tipo="ruim"] i { background: #fb7185; }
+.tt-status { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.3; }
+.tt-topo { position: absolute; top: var(--em-cima); right: max(12px, env(safe-area-inset-right)); display: flex; gap: 6px; }
+#toque .tt-topo button { height: var(--barra); padding: 0 11px; border-radius: 12px; font-size: 13px; }
+#toque .tt-topo .tt-b::before { inset: -6px -2px; }
+#toque .tt-topo .tt-sair { margin-left: 6px; background: rgba(127, 29, 29, 0.6); border-color: rgba(252, 165, 165, 0.45); }
+#toque.tt-pc .tt-topo [data-b="17"] { display: none; }
+
+/* direcional: uma cruz só */
+.tt-dpad { position: absolute; left: var(--esq); top: calc(var(--em-cima) + var(--barra) + 10px); width: var(--dpad); height: var(--dpad); }
+.tt-dpad::before { content: ""; position: absolute; inset: 0; border-radius: 50%; background: rgba(255, 255, 255, 0.035); }
+.tt-dpad b {
+  position: absolute; display: grid; place-items: center; width: 35%; height: 35%; box-sizing: border-box; pointer-events: none;
+  border: 1.5px solid rgba(255, 255, 255, 0.24); border-radius: 12px; background: rgba(255, 255, 255, 0.08); font-size: 17px;
+}
+.tt-dpad .c { left: 32.5%; top: 0; }
+.tt-dpad .b { left: 32.5%; bottom: 0; }
+.tt-dpad .e { left: 0; top: 32.5%; }
+.tt-dpad .d { right: 0; top: 32.5%; }
+
+/* analógico esquerdo */
+.tt-stick {
+  position: absolute; left: var(--esq); bottom: max(14px, env(safe-area-inset-bottom)); width: var(--stick); height: var(--stick); box-sizing: border-box;
+  border: 1.5px solid rgba(255, 255, 255, 0.22); border-radius: 50%; background: rgba(255, 255, 255, 0.05);
+}
+.tt-stick u { position: absolute; inset: 17%; border: 1px dashed rgba(255, 255, 255, 0.16); border-radius: 50%; }
+.tt-stick i {
+  position: absolute; left: 28%; top: 28%; width: 44%; height: 44%; box-sizing: border-box; border-radius: 50%;
+  background: rgba(255, 255, 255, 0.26); border: 1.5px solid rgba(255, 255, 255, 0.45); will-change: transform;
+}
+.tt-stick.on { border-color: rgba(125, 211, 252, 0.6); }
+.tt-stick.on i { background: rgba(56, 189, 248, 0.5); border-color: rgba(125, 211, 252, 0.95); }
+
+/* os botões da direita, na mesma grade do modo jogo do celular */
+.tt-acoes {
+  position: absolute; right: var(--dir); bottom: max(14px, env(safe-area-inset-bottom)); display: grid; gap: var(--gap); pointer-events: none;
+  grid-template: "l2 tri r2" var(--g) "qua . bol" var(--g) "l1 xis r1" var(--g) / var(--g) var(--g) var(--g);
+}
+#toque .tt-acoes button { pointer-events: auto; font-size: 17px; }
+.tt-acoes [data-a="l2"] { grid-area: l2; } .tt-acoes [data-a="tri"] { grid-area: tri; } .tt-acoes [data-a="r2"] { grid-area: r2; }
+.tt-acoes [data-a="qua"] { grid-area: qua; } .tt-acoes [data-a="bol"] { grid-area: bol; }
+.tt-acoes [data-a="l1"] { grid-area: l1; } .tt-acoes [data-a="xis"] { grid-area: xis; } .tt-acoes [data-a="r1"] { grid-area: r1; }
+#toque .tt-ps { border-radius: 50%; }
+.tt-ps svg { width: 46%; height: 46%; fill: none; stroke: currentColor; stroke-width: 2.3; stroke-linejoin: round; stroke-linecap: round; pointer-events: none; }
+#toque .tt-tri { color: #5eead4; border-color: rgba(94, 234, 212, 0.6); }
+#toque .tt-bol { color: #fb7185; border-color: rgba(251, 113, 133, 0.6); }
+#toque .tt-xis { color: #93c5fd; border-color: rgba(147, 197, 253, 0.6); }
+#toque .tt-qua { color: #f0abfc; border-color: rgba(240, 171, 252, 0.6); }
+#toque .tt-ps.on { background: rgba(255, 255, 255, 0.3); }
+/* L1 e L2 na mão esquerda: ao lado do direcional, fora da grade */
+#toque.tt-esq .tt-acoes { position: static; display: contents; }
+#toque.tt-esq .tt-acoes button { position: absolute; width: var(--g); height: var(--g); }
+#toque.tt-esq .tt-acoes [data-a="l2"], #toque.tt-esq .tt-acoes [data-a="l1"] { left: calc(var(--esq) + var(--dpad) + 14px); height: calc((var(--dpad) - var(--gap)) / 2); }
+#toque.tt-esq .tt-acoes [data-a="l2"] { top: calc(var(--em-cima) + var(--barra) + 10px); }
+#toque.tt-esq .tt-acoes [data-a="l1"] { top: calc(var(--em-cima) + var(--barra) + 10px + (var(--dpad) + var(--gap)) / 2); }
+#toque.tt-esq .tt-acoes button:is([data-a="r2"], [data-a="bol"], [data-a="r1"]) { right: var(--dir); }
+#toque.tt-esq .tt-acoes button:is([data-a="tri"], [data-a="xis"]) { right: calc(var(--dir) + var(--g) + var(--gap)); }
+#toque.tt-esq .tt-acoes button[data-a="qua"] { right: calc(var(--dir) + 2 * (var(--g) + var(--gap))); }
+#toque.tt-esq .tt-acoes button:is([data-a="r1"], [data-a="xis"]) { bottom: max(14px, env(safe-area-inset-bottom)); }
+#toque.tt-esq .tt-acoes button:is([data-a="qua"], [data-a="bol"]) { bottom: calc(max(14px, env(safe-area-inset-bottom)) + var(--g) + var(--gap)); }
+#toque.tt-esq .tt-acoes button:is([data-a="r2"], [data-a="tri"]) { bottom: calc(max(14px, env(safe-area-inset-bottom)) + 2 * (var(--g) + var(--gap))); }
+
+/* ajustes */
+.tt-painel {
+  position: absolute; z-index: 3; top: calc(var(--em-cima) + var(--barra) + 8px); left: max(12px, env(safe-area-inset-left));
+  display: flex; flex-direction: column; gap: 11px; width: min(290px, calc(100vw - 24px)); box-sizing: border-box;
+  max-height: calc(100% - var(--em-cima) - var(--barra) - 18px); overflow-y: auto; padding: 13px;
+  border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 16px; background: rgba(12, 14, 20, 0.97); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+}
+#toque .tt-painel, #toque .tt-painel *:not([type="range"]) { touch-action: pan-y; }
+.tt-tit { margin: 0; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; opacity: 0.65; }
+.tt-painel label { display: flex; align-items: center; gap: 9px; font-weight: 600; }
+.tt-painel input { width: 19px; height: 19px; margin: 0; accent-color: #38bdf8; }
+.tt-painel .tt-faixa { display: grid; grid-template-columns: 1fr auto; gap: 6px; }
+.tt-painel .tt-faixa input { grid-column: 1 / -1; width: 100%; }
+.tt-faixa output { opacity: 0.75; }
+.tt-linha { display: flex; gap: 7px; }
+#toque .tt-linha button { flex: 1; height: 38px; border-radius: 11px; font-size: 12.5px; }
+#toque .tt-ok { background: rgba(56, 189, 248, 0.35); }
+.tt-edicao {
+  position: absolute; z-index: 3; top: calc(var(--em-cima) + var(--barra) + 8px); left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 10px;
+  margin: 0; padding: 6px 6px 6px 14px; border-radius: 999px; background: rgba(10, 12, 18, 0.92); font-size: 12px; white-space: nowrap;
+}
+#toque .tt-fim { height: 32px; padding: 0 14px; border-radius: 999px; background: rgba(56, 189, 248, 0.4); }
+#toque.tt-editando :is(.tt-olhar, .tt-zona) { pointer-events: none; }
+#toque.tt-editando [data-m] { outline: 2px dashed rgba(251, 191, 36, 0.9); outline-offset: 2px; }
+
+.tt-gire { display: none; position: absolute; inset: 0; z-index: 4; place-items: center; padding: 24px; background: #05070d; text-align: center; font-size: 17px; font-weight: 500; line-height: 1.4; }
+.tt-gire b { font-size: 22px; }
+#toque .tt-gire button { margin: 18px auto 0; height: 44px; padding: 0 20px; font-size: 15px; }
+@media (orientation: portrait) { .tt-gire { display: grid; } }
+
+@media (max-height: 350px) { #toque { --barra: 34px; --gap: 6px; } }
+@media (max-width: 700px) {
+  #toque .tt-topo { gap: 4px; }
+  #toque .tt-topo button { padding: 0 8px; font-size: 12px; }
+}

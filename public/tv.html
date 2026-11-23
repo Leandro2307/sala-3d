@@ -8,6 +8,7 @@
 <link rel="icon" href="/icons/icon-192.png">
 <!-- Modo TV (ver public/js/tv.js): o telão da sala principal em tela cheia, o "Modo jogo" e o QR do
      aluguel. Com ?controle=1 é o plano B: o celular vira o controle da TV. -->
+<link rel="stylesheet" href="/toque-tv.css">
 <style>
   :root {
     --fundo: #05070d;
@@ -89,29 +90,6 @@
   #cel ol { margin: 6px 0 0; padding-left: 20px; color: var(--apagado); }
   body.controle #aviso { top: auto; bottom: 16px; font-size: 15px; max-width: 92vw; }
 
-  /* o controle de toque (celular sem controle de verdade): deitado, tela inteira */
-  #toque { position: fixed; inset: 0; z-index: 20; background: radial-gradient(ellipse at center, #141a2e, #05070d 70%);
-    touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; overflow: hidden; font-size: 16px; }
-  #toque * { touch-action: none; }
-  #toque .tb { position: absolute; display: grid; place-items: center; border-radius: 50%; border: 2px solid rgba(255,255,255,.18);
-    background: rgba(255,255,255,.07); color: #dfe6f5; font-weight: 800; transition: background .05s, transform .05s; }
-  #toque .tb.on { background: rgba(110,231,200,.45); border-color: #6ee7c8; transform: scale(.93); }
-  #toque .face { width: 15vh; height: 15vh; font-size: 7vh; }
-  #toque .face.x { color: #7cb4ff; } #toque .face.o { color: #ff7b8a; } #toque .face.q { color: #f29cd8; } #toque .face.t { color: #63e2b7; }
-  #toque .dir { width: 13vh; height: 13vh; border-radius: 2vh; font-size: 5.5vh; }
-  #toque .omb { width: 17vh; height: 9vh; border-radius: 2.5vh; font-size: 4vh; }
-  #toque .mini { width: 11vh; height: 7vh; border-radius: 3.5vh; font-size: 2.6vh; }
-  #toque .stick { position: absolute; width: 36vh; height: 36vh; border-radius: 50%; border: 2px solid rgba(255,255,255,.14); background: rgba(255,255,255,.04); }
-  #toque .stick i { position: absolute; left: 50%; top: 50%; width: 15vh; height: 15vh; margin: -7.5vh 0 0 -7.5vh; border-radius: 50%;
-    background: rgba(255,255,255,.22); border: 2px solid rgba(255,255,255,.35); }
-  #toque .stick.on i { background: rgba(110,231,200,.5); }
-  #toque .topo-t .tb { position: static; }
-  #toque .topo-t { position: absolute; top: 2vh; left: 50%; transform: translateX(-50%); display: flex; gap: 2vh; align-items: center; }
-  #toque .acao { border: 1px solid rgba(255,255,255,.2); background: rgba(255,255,255,.08); color: #cfd8ea; border-radius: 3vh; padding: 1.2vh 2.4vh; font-size: 2.6vh; font-weight: 700; }
-  #toque .status-t { position: absolute; top: 11vh; left: 50%; transform: translateX(-50%); color: #9aa4ba; font-size: 2.6vh; white-space: nowrap; }
-  #toque .gire { display: none; position: absolute; inset: 0; z-index: 2; background: #05070d; place-items: center; text-align: center; padding: 24px; font-size: 18px; }
-  @media (orientation: portrait) { #toque .gire { display: grid; } }
-
   #antiga { display: none; position: fixed; inset: 0; place-items: center; text-align: center; padding: 6vw; font-size: 2vw; background: var(--fundo); }
 </style>
 </head>
@@ -163,35 +141,8 @@
   <p class="sub">Deixe esta página aberta e a tela do celular ligada enquanto joga.</p>
 </main>
 
-<!-- o controle de toque: posições em vh/vw, deitado (ver ligarToque no tv.js). data-b: o bit do botão
-     no mapa padrão (0 ✕, 1 ○, 2 □, 3 △, 4 L1, 5 R1, 6 L2, 7 R2, 8 Create, 9 Options, 12-15 setas, 16 PS) -->
-<section id="toque" hidden>
-  <div class="tb omb" data-b="6" style="left:3vw;top:3vh">L2</div>
-  <div class="tb omb" data-b="4" style="left:3vw;top:14vh">L1</div>
-  <div class="tb omb" data-b="7" style="right:3vw;top:3vh">R2</div>
-  <div class="tb omb" data-b="5" style="right:3vw;top:14vh">R1</div>
-
-  <div class="tb dir" data-b="12" style="left:calc(4vw + 13vh);top:27vh">▲</div>
-  <div class="tb dir" data-b="14" style="left:4vw;top:40vh">◀</div>
-  <div class="tb dir" data-b="15" style="left:calc(4vw + 26vh);top:40vh">▶</div>
-  <div class="tb dir" data-b="13" style="left:calc(4vw + 13vh);top:53vh">▼</div>
-
-  <div class="tb face t" data-b="3" style="right:calc(4vw + 15vh);top:24vh">△</div>
-  <div class="tb face q" data-b="2" style="right:calc(4vw + 30vh);top:38vh">□</div>
-  <div class="tb face o" data-b="1" style="right:4vw;top:38vh">○</div>
-  <div class="tb face x" data-b="0" style="right:calc(4vw + 15vh);top:52vh">✕</div>
-
-  <div class="stick" data-stick="l" style="left:calc(50vw - 46vh);bottom:4vh"><i></i></div>
-  <div class="stick" data-stick="r" style="left:calc(50vw + 10vh);bottom:4vh"><i></i></div>
-
-  <div class="topo-t">
-    <div class="tb mini" data-b="8">Create</div>
-    <div class="tb mini" data-b="16">PS</div>
-    <div class="tb mini" data-b="9">Options</div>
-  </div>
-  <div class="status-t"><span id="toque-status">Conectando…</span> · <button class="acao" id="toque-sair" type="button">Sair do jogo</button></div>
-  <div class="gire"><div><b style="font-size:22px">Gire o celular</b><br><br>O controle funciona com o celular deitado.</div></div>
-</section>
+<!-- o controle de toque do celular (js/toque-tv.js monta; toque-tv.css) -->
+<section id="toque" hidden></section>
 
 <div id="antiga"><div><b>Esta TV não tem um navegador novo o bastante.</b><br><br>Use o celular como controle e outro aparelho (Chromecast, Fire TV, PC) para mostrar a imagem, ou atualize o software da TV.</div></div>
 

@@ -1029,31 +1029,35 @@ function atualizarBotao() {
 }
 
 // ------------------------------------------------------------------ o celular como controle (toque)
-// Sem controle de verdade, o próprio celular vira um controle de PS5 na tela (deitado). Ao abrir, a TV
-// desta conta entra no modo jogo sozinha ('tv-modo' pelo servidor); "Sair do jogo" tira.
-const TOQUE_MIN_MS = 50;
+// Sem controle de verdade, o próprio celular vira um controle de PS5 na tela (toque-tv.js, deitado). Ao
+// abrir, a TV desta conta entra no modo jogo sozinha ('tv-modo' pelo servidor); "Sair" tira.
 const toque = { ativo: false, b: 0, lx: 0, ly: 0, rx: 0, ry: 0, lt: 0, rt: 0 };
-const vibrarToque = () => { try { navigator.vibrate?.(8); } catch { /* sem motor */ } };
+let toqueTv = null;
 let travaTela = null;
-async function ligarToque() {
-  const el = $('#toque');
-  el.hidden = false;
-  toque.ativo = true;
-  enviado = null;
+async function travarTela() {
+  try { travaTela = await navigator.wakeLock?.request('screen'); } catch { /* sem wake lock */ }
+}
+async function telaCheia() {
   try {
-    await document.documentElement.requestFullscreen?.({ navigationUI: 'hide' });
+    if (!document.fullscreenElement) await document.documentElement.requestFullscreen?.({ navigationUI: 'hide' });
     await screen.orientation?.lock?.('landscape');
   } catch { /* iPhone e navegadores sem tela cheia: o aviso "gire o celular" cobre */ }
-  try { travaTela = await navigator.wakeLock?.request('screen'); } catch { /* sem wake lock */ }
-  socket?.emit('tv-modo', { ligar: true });
+}
+async function ligarToque() {
+  if (!toqueTv) return;
+  toqueTv.mostrar();
+  toque.ativo = true;
+  enviado = null;
   atualizarToque();
+  socket?.emit('tv-modo', { ligar: true });
+  await telaCheia();
+  await travarTela();
 }
 function desligarToque() {
-  Object.assign(toque, { ativo: false, b: 0, lx: 0, ly: 0, rx: 0, ry: 0, lt: 0, rt: 0 });
+  toque.ativo = false;
+  toqueTv.esconder();
   const key = chaveDoPad();
   if (key) mandar(key, { t: 'pad', b: 0, lx: 0, ly: 0, rx: 0, ry: 0, lt: 0, rt: 0 });
-  $('#toque').hidden = true;
-  for (const b of document.querySelectorAll('#toque .on')) b.classList.remove('on');
   socket?.emit('tv-modo', { ligar: false });
   try { travaTela?.release(); } catch { /* já solta */ }
   travaTela = null;
@@ -1062,90 +1066,40 @@ function desligarToque() {
 function atualizarToque() {
   if (!toque.ativo) return;
   const sh = st.alvo?.sh;
-  const txt = !conta ? 'Sem conta' : !sh ? 'Nada no telão' : !sh.controle ? 'Controle travado' : !podeJogar(sh) ? 'Sem horário agora' : `Jogando no ${NOME_MAQ[maquinaDaTela(sh)]}`;
-  $('#toque-status').textContent = txt;
+  const m = sh && maquinaDaTela(sh);
+  const [txt, tipo] = !conta ? ['Sem conta', 'ruim']
+    : !socket?.connected ? ['Reconectando…', 'espera']
+      : !sh ? ['Nada no telão', 'espera']
+        : !sh.controle ? ['Controle travado', 'ruim']
+          : !podeJogar(sh) ? ['Sem horário agora', 'ruim']
+            : [`${NOME_MAQ[m]}${faltaDaVez(m)}`, 'ok'];
+  toqueTv.status(txt, tipo, m !== 'pc');
+}
+// " · 12 min": quanto falta da vez paga nesta máquina
+function faltaDaVez(m) {
+  if (!st.lan || !idsDaVez(m).includes(st.selfId) || !st.lan[m]?.fim) return '';
+  return ` · ${Math.ceil(Math.max(0, st.lan[m].fim - (Date.now() + st.lanDif)) / 60_000)} min`;
 }
 setInterval(atualizarToque, 1000);
 
 if (CONTROLE) {
-  const raiz = $('#toque');
-  raiz.addEventListener('contextmenu', (e) => e.preventDefault());
-  // botões: cada dedo segura o seu (multitoque); L2 e R2 também vão como gatilho inteiro
-  for (const el of raiz.querySelectorAll('[data-b]')) {
-    const bit = Number(el.dataset.b);
-    let desde = 0;
-    let timer = 0;
-    // um toque rápido vale pelo menos TOQUE_MIN_MS: o jogo lê o controle a cada quadro e perderia o aperto
-    const soltar = () => {
-      if (!desde) return;
-      const falta = TOQUE_MIN_MS - (performance.now() - desde);
-      desde = 0;
-      el.classList.remove('on');
-      clearTimeout(timer);
-      timer = setTimeout(() => {
-        toque.b &= ~(1 << bit);
-        if (bit === 6) toque.lt = 0;
-        if (bit === 7) toque.rt = 0;
-        lerControles();
-      }, Math.max(0, falta));
-    };
-    el.addEventListener('pointerdown', (e) => {
-      e.preventDefault();
-      try { el.setPointerCapture?.(e.pointerId); } catch { /* ponteiro já solto */ }
-      clearTimeout(timer);
-      desde = performance.now();
-      el.classList.add('on');
-      toque.b |= 1 << bit;
-      if (bit === 6) toque.lt = 1;
-      if (bit === 7) toque.rt = 1;
-      vibrarToque();
-      lerControles(); // sai na hora, sem esperar a próxima leitura
+  import('./toque-tv.js').then(({ ToqueTv }) => {
+    toqueTv = new ToqueTv({
+      raiz: $('#toque'),
+      estado: toque,
+      aoMudar: () => { if (toque.ativo) lerControles(); }, // botão sai na hora, sem esperar a próxima leitura
+      onSair: desligarToque,
+      onTelaCheia: telaCheia,
+      aviso,
     });
-    el.addEventListener('pointerup', soltar);
-    el.addEventListener('pointercancel', soltar);
-    el.addEventListener('lostpointercapture', soltar);
-  }
-  // analógicos: o dedo arrasta a bolinha; o eixo vai de -1 a 1 (y para baixo é positivo, como no controle)
-  for (const el of raiz.querySelectorAll('[data-stick]')) {
-    const lado = el.dataset.stick;
-    const bola = el.querySelector('i');
-    let dedo = null;
-    const mover = (e) => {
-      const r = el.getBoundingClientRect();
-      const raio = r.width / 2;
-      let dx = (e.clientX - (r.left + raio)) / raio;
-      let dy = (e.clientY - (r.top + raio)) / raio;
-      const d = Math.hypot(dx, dy);
-      if (d > 1) { dx /= d; dy /= d; }
-      toque[`${lado}x`] = Math.round(dx * 1000) / 1000;
-      toque[`${lado}y`] = Math.round(dy * 1000) / 1000;
-      bola.style.transform = `translate(${dx * raio * 0.6}px, ${dy * raio * 0.6}px)`;
-    };
-    const soltar = () => {
-      dedo = null;
-      el.classList.remove('on');
-      toque[`${lado}x`] = 0;
-      toque[`${lado}y`] = 0;
-      bola.style.transform = '';
-    };
-    el.addEventListener('pointerdown', (e) => {
-      e.preventDefault();
-      dedo = e.pointerId;
-      try { el.setPointerCapture?.(e.pointerId); } catch { /* ponteiro já solto */ }
-      el.classList.add('on');
-      mover(e);
-    });
-    el.addEventListener('pointermove', (e) => { if (e.pointerId === dedo) mover(e); });
-    el.addEventListener('pointerup', soltar);
-    el.addEventListener('pointercancel', soltar);
-  }
+  }).catch((err) => {
+    console.error('[tv] controle de toque', err);
+    aviso('O controle da tela não abriu. Recarregue a página.', 'erro', 8000);
+  });
   $('#btn-toque').addEventListener('click', ligarToque);
-  $('#toque-sair').addEventListener('click', desligarToque);
-  // voltou para a página (a tela apagou e acendeu): a trava da tela volta
-  document.addEventListener('visibilitychange', async () => {
-    if (document.visibilityState === 'visible' && toque.ativo && !travaTela) {
-      try { travaTela = await navigator.wakeLock?.request('screen'); } catch { /* sem wake lock */ }
-    }
+  // voltou para a página (a tela apagou e acendeu): a trava da tela volta (o navegador a solta ao esconder)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && toque.ativo) travarTela();
   });
 }
 
