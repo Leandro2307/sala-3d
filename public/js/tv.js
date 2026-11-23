@@ -91,6 +91,8 @@ function aviso(texto, tipo = 'info', ms = 5000) {
 }
 
 // ------------------------------------------------------------------ entrar
+// ?sincronia=1: a imagem volta a esperar o som (para comparar na mesma TV)
+const SINCRONIA = new URLSearchParams(location.search).get('sincronia') === '1';
 const pegarConfig = () => fetch('/config').then((r) => r.json());
 async function iniciar() {
   // a conexão com o servidor já vai abrindo enquanto o /config vem (uma ida e volta a menos)
@@ -107,6 +109,7 @@ async function iniciar() {
   });
   rtc.onControle = receberDireto;
   rtc.semHevc = true; // TV: sempre H.264 (rtc.soH264)
+  rtc.semSincronia = !SINCRONIA; // a imagem não espera o som (rtc.somSolto)
   const renovar = () => pegarConfig().then((c) => rtc.trocarIce(c.iceServers)).catch(() => {});
   setInterval(renovar, 6 * 3600_000);
   // entrou sem o TURN (o /config falhou, o servidor acordando): pede de novo até vir, como a sala
@@ -718,6 +721,8 @@ const turboPronto = TURBO_NA_TV && import('./turbo.js').then(({ TurboRecebe }) =
   });
   // TV nunca pede H.265: a LG disse que decodificava e recusou nas três acelerações (2026-11-22 e 2026-11-23)
   turbo.semHevc = true;
+  turbo.somCurto = !SINCRONIA;
+  turbo.lisoSoluco = !SINCRONIA;
   // O PC leva 3–4 s para começar a mandar (mede a rede e escolhe repassar o PS5 ou codificar): com a desistência de
   // fábrica (4 s), a TV largava o Turbo um instante antes do primeiro quadro (teste de 2026-11-23 00:34 e 00:44)
   turbo.semImagemMs = 12_000;
@@ -864,6 +869,7 @@ function comecarRelatorio(a) {
       janela: `${innerWidth}×${innerHeight}`,
       dpr: devicePixelRatio,
       webcodecs: typeof VideoDecoder === 'function',
+      sincronia: SINCRONIA,
       controle: gamepad() ? nomeDoControle(gamepad()) : null,
     },
     alvo: { dono: a.u.name, maquina: maquinaDaTela(a.sh), superficie: a.sh.superficie || null, titulo: a.sh.titulo || null },
@@ -891,6 +897,13 @@ async function medirVideo() {
     return null;
   }
   let inb = null;
+  let som = null;
+  const trilhaSom = video.srcObject.getAudioTracks()[0];
+  if (trilhaSom) {
+    try {
+      (await peer.pc.getStats(trilhaSom)).forEach((r) => { if (r.type === 'inbound-rtp' && r.kind === 'audio') som = r; });
+    } catch { /* sem medida do som */ }
+  }
   const codecs = new Map();
   rep.forEach((r) => {
     if (r.type === 'inbound-rtp' && r.kind === 'video') inb = r;
@@ -898,12 +911,14 @@ async function medirVideo() {
   });
   if (!inb) return null;
   const antes = medidaAntes.get(inb.id);
-  const agora = { bytes: inb.bytesReceived, t: inb.timestamp, buf: inb.jitterBufferDelay || 0, saidos: inb.jitterBufferEmittedCount || 0, dec: inb.totalDecodeTime || 0, decodificados: inb.framesDecoded || 0, descartados: inb.framesDropped ?? null };
+  const agora = { bytes: inb.bytesReceived, t: inb.timestamp, buf: inb.jitterBufferDelay || 0, saidos: inb.jitterBufferEmittedCount || 0, dec: inb.totalDecodeTime || 0, decodificados: inb.framesDecoded || 0, descartados: inb.framesDropped ?? null, alvo: inb.jitterBufferTargetDelay ?? null, minimo: inb.jitterBufferMinimumDelay ?? null, chegaram: inb.framesReceived ?? null, somBuf: som?.jitterBufferDelay ?? null, somSaidos: som?.jitterBufferEmittedCount ?? null };
   medidaAntes.set(inb.id, agora);
   const kbps = antes && inb.timestamp > antes.t ? Math.round(((inb.bytesReceived - antes.bytes) * 8) / (inb.timestamp - antes.t)) : null;
   // nos últimos 2 s (o jitterBufferDelay é a soma desde o começo: a média geral escondia o de agora)
   const saidos = antes ? agora.saidos - antes.saidos : 0;
   const decs = antes ? agora.decodificados - antes.decodificados : 0;
+  // por quadro que saiu da fila, em ms (null: este navegador não mede)
+  const porQuadro = (k) => (saidos > 0 && agora[k] != null && antes[k] != null ? Math.round(((agora[k] - antes[k]) / saidos) * 1000) : null);
   return {
     largura: inb.frameWidth ?? null,
     altura: inb.frameHeight ?? null,
@@ -919,6 +934,10 @@ async function medirVideo() {
     pli: inb.pliCount ?? null,
     nack: inb.nackCount ?? null,
     bufferMs: saidos > 0 ? Math.round(((agora.buf - antes.buf) / saidos) * 1000) : null,
+    bufferAlvoMs: porQuadro('alvo'),
+    bufferMinimoMs: porQuadro('minimo'), // sem a sincronia com o som: se o bufferMs fica bem acima, é o som puxando
+    chegaram: antes && agora.chegaram != null && antes.chegaram != null ? agora.chegaram - antes.chegaram : null,
+    somBufferMs: antes && agora.somSaidos > antes.somSaidos ? Math.round(((agora.somBuf - antes.somBuf) / (agora.somSaidos - antes.somSaidos)) * 1000) : null,
     decMs: decs > 0 ? Math.round(((agora.dec - antes.dec) / decs) * 10000) / 10 : null,
   };
 }

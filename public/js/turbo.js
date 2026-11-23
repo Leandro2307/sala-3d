@@ -227,6 +227,10 @@ const HEVC_LENTO_MS = 20; // decodificação do H.265 (mediana por quadro) acima
 // quadros que nunca apareciam caíram de ~360 para ~25 por minuto e os trancos de 3 voltas pela
 // metade, com ~27 ms a mais de atraso.
 export const LISO_PCT = 0.95; // o tremido que a folga cobre
+// lisoSoluco (só /tv e /jogar): um quadro que atrasou mais que a folga máxima não cabe nela de jeito nenhum, e
+// contá-lo levava a folga a 45 ms por ~5 s a cada soluço do Wi-Fi (relatório de 2026-11-23 16:46: a imagem ia de
+// 42 para 70 ms). Fica fora da conta até LISO_SOLUCO dos quadros; acima disso a rede é assim mesmo, e conta tudo.
+const LISO_SOLUCO = 0.25;
 const LISO_MIN = 4;
 export const LISO_MAX = 45; // o Turbo rápido (jogo-opcoes.js) usa menos: TurboRecebe.lisoMax
 const LISO_INICIO = 16;
@@ -264,6 +268,14 @@ class TurboSom extends AudioWorkletProcessor {
     this.w = 0;
     this.r = 0;
     this.hz = sampleRate;
+    // curto (só /tv e /jogar): guarda menos (até 80 ms), a falha longa (> 100 ms sem nada chegar) não aumenta o alvo
+    // — nenhum buffer curto a cobre —, desce 5 ms a cada 6 s e a sobra acima do alvo sai logo. Com o de sempre, o
+    // som ficava em 120–160 ms com a imagem em 42 (relatório de 2026-11-23 16:46). Simulado com 60 soluços em 5 min:
+    // de ~116 para ~60 ms, com ~9 falhas curtas a mais
+    this.curto = false;
+    this.teto = 0.12;
+    this.piso = 0.02;
+    this.vazio = -1; // amostras desde que faltou som, até chegar o próximo pedaço (−1: não falta)
     this.alvo = 0.03;
     this.enchendo = true;
     this.faltas = 0;
@@ -271,10 +283,19 @@ class TurboSom extends AudioWorkletProcessor {
     this.semFalta = 0;
     this.aviso = 0;
     // { alvo }: o buffer inicial (s); o resto são os pedaços de som
-    this.port.onmessage = (e) => (e.data.canais ? this.chegou(e.data) : e.data.alvo > 0 && (this.alvo = Math.min(0.12, e.data.alvo)));
+    this.port.onmessage = (e) => {
+      if (e.data.canais) return void this.chegou(e.data);
+      if (e.data.curto) { this.curto = true; this.teto = 0.08; }
+      if (e.data.alvo > 0) this.alvo = Math.min(this.teto, e.data.alvo);
+    };
   }
   chegou({ canais, hz }) {
     this.hz = hz;
+    if (this.vazio >= 0) {
+      // falhou por pouco: aqui o buffer resolve, e o mínimo passa a ser 40 ms
+      if (this.vazio < sampleRate * 0.1) { this.piso = 0.04; this.alvo = Math.min(this.teto, Math.max(this.piso, this.alvo + 0.01)); }
+      this.vazio = -1;
+    }
     const n = canais[0].length;
     const m = this.cap - 1;
     if (this.w - this.r + n > m - 256) { this.r = this.w - this.alvo * hz; this.descartes++; }
@@ -296,12 +317,13 @@ class TurboSom extends AudioWorkletProcessor {
     let tem = this.w - this.r;
     if (this.enchendo && tem >= alvo) this.enchendo = false;
     if (this.enchendo) {
+      if (this.vazio >= 0) this.vazio += n;
       L.fill(0);
       R.fill(0);
     } else {
-      if (tem > alvo + 0.06 * hz) { this.r = this.w - alvo; tem = alvo; this.descartes++; }
+      if (tem > alvo + (this.curto ? 0.045 : 0.06) * hz) { this.r = this.w - alvo; tem = alvo; this.descartes++; }
       let passo = hz / sampleRate;
-      if (tem > alvo * 1.4 + 0.005 * hz) passo *= 1.01;
+      if (tem > (this.curto ? alvo + 0.012 * hz : alvo * 1.4 + 0.005 * hz)) passo *= 1.01;
       else if (tem < alvo * 0.6) passo *= 0.99;
       const m = this.cap - 1;
       const [x, y] = this.b;
@@ -311,7 +333,8 @@ class TurboSom extends AudioWorkletProcessor {
           this.faltas++;
           this.enchendo = true;
           this.semFalta = 0;
-          this.alvo = Math.min(0.12, this.alvo + 0.01);
+          if (this.curto) this.vazio = 0;
+          else this.alvo = Math.min(this.teto, this.alvo + 0.01);
           break;
         }
         const p = Math.floor(this.r);
@@ -323,7 +346,7 @@ class TurboSom extends AudioWorkletProcessor {
         this.r += passo;
       }
       this.semFalta += n;
-      if (this.semFalta > sampleRate * 10 && this.alvo > 0.02) { this.alvo = Math.max(0.02, this.alvo - 0.005); this.semFalta = 0; }
+      if (this.semFalta > sampleRate * (this.curto ? 6 : 10) && this.alvo > this.piso) { this.alvo = Math.max(this.piso, this.alvo - 0.005); this.semFalta = 0; }
     }
     if ((this.aviso += n) >= sampleRate / 4) {
       this.aviso = 0;
@@ -1556,6 +1579,8 @@ export class TurboRecebe {
     this.ultimaFalha = null; // o que se viu na última desistência (falhou): para o relatório
     this.realceForca = REALCE_FORCA;
     this.lisoPct = LISO_PCT; // quanto do tremido a folga do liso cobre (presets de teste)
+    this.somCurto = false; // o tocador do som guarda menos (ver SOM_WORKLET): /tv e /jogar
+    this.lisoSoluco = false; // o soluço do Wi-Fi não infla a folga do liso (ver LISO_SOLUCO): /tv e /jogar
     this.lisoMax = LISO_MAX; // a folga máxima (ms): o Turbo rápido troca o atraso pelo tremido
   }
 
@@ -2004,6 +2029,7 @@ export class TurboRecebe {
       if (s.som !== som) return;
       som.no = new AudioWorkletNode(ctx, 'turbo-som', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2] });
       som.no.port.onmessage = (e) => { som.estado = e.data; };
+      if (this.somCurto) som.no.port.postMessage({ curto: true });
       som.no.connect(som.ganho);
     }).catch((err) => {
       console.warn('[turbo] som: tocador', err);
@@ -2170,7 +2196,13 @@ export class TurboRecebe {
     if (chaveAtrasou) return;
     guardar(s.atrasos, dif - s.base, 120);
     if (s.atrasos.length < 20) return;
-    const p95 = Math.min(s.lisoMax ?? LISO_MAX, Math.max(LISO_MIN, pct(s.atrasos, s.lisoPct ?? LISO_PCT) + 2));
+    const teto = s.lisoMax ?? LISO_MAX;
+    let conta = s.atrasos;
+    if (this.lisoSoluco) {
+      const cabem = s.atrasos.filter((a) => a <= teto);
+      if (cabem.length >= s.atrasos.length * (1 - LISO_SOLUCO)) conta = cabem;
+    }
+    const p95 = Math.min(teto, Math.max(LISO_MIN, pct(conta, s.lisoPct ?? LISO_PCT) + 2));
     // sobe na hora, desce devagar (um tremido que passou pode voltar)
     s.alvo = p95 > s.alvo ? p95 : s.alvo + (p95 - s.alvo) * 0.02;
   }

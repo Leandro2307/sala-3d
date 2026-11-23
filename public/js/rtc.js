@@ -316,6 +316,30 @@ function comEstereo(desc, mids) {
   return { type: desc.type, sdp: saida.join('\r\n') };
 }
 
+// Sem a sincronia entre a imagem e o som (2026-11-23): o WebRTC segura a imagem para casar com o som da mesma
+// transmissão. Num vídeo está certo; jogando, o som com 150–300 ms de fila levava a imagem junto: nos relatórios,
+// 48–95 ms sem a sincronia (jitterBufferMinimumDelay) viravam 140–290 ms, e na TV LG a fila subia em rampa até
+// parar cravada em 300–500 ms sem nenhum pacote perdido. O navegador casa o que chega com o mesmo msid: na
+// descrição que chega, o som ganha um msid só dele (+SEM_SINCRONIA) e o ontrack junta as trilhas de volta na
+// mesma MediaStream. Só muda quem recebe: quem manda nem fica sabendo.
+const SEM_SINCRONIA = '-som';
+function somSolto(desc) {
+  if (!desc?.sdp) return desc;
+  const secoes = secoesDoSdp(desc.sdp);
+  const idDe = (l) => /^a=(?:ssrc:\d+ )?msid:(\S+)/.exec(l)?.[1];
+  const comImagem = new Set();
+  for (const sec of secoes) if (sec[0].startsWith('m=video')) for (const l of sec) { const id = idDe(l); if (id && id !== '-') comImagem.add(id); }
+  const saida = [];
+  for (const sec of secoes) {
+    const som = sec[0].startsWith('m=audio');
+    for (const l of sec) {
+      const id = som ? idDe(l) : null;
+      saida.push(id && comImagem.has(id) ? l.replace(`msid:${id}`, () => `msid:${id}${SEM_SINCRONIA}`) : l);
+    }
+  }
+  return { type: desc.type, sdp: saida.join('\r\n') };
+}
+
 export class RTC {
   constructor(socket, { iceServers, onTrack, onPeerGone, onFalha }) {
     this.socket = socket;
@@ -336,6 +360,7 @@ export class RTC {
     this.jogadores = new Map(); // tela minha em jogo -> ids de quem joga nela
     this.shareMode = 'max'; // preset das telas: leve, max ou ultra
     this.semHevc = false; // esta página não recebe H.265 (a TV, ver soH264)
+    this.semSincronia = false; // a imagem não espera o som (ver somSolto); antes de conectar com alguém
     this.medidas = new WeakMap(); // receptor de vídeo -> os totais da medida anterior (ver recebendo)
     // A escolha do codec trava a página: o RTCRtpSender.getCapabilities levou 1,4 s na primeira
     // chamada (o Chrome acorda os codificadores da placa), bem no meio da abertura da sala. Fica
@@ -1363,6 +1388,7 @@ export class RTC {
     };
     pc.ontrack = (ev) => {
       const stream = ev.streams[0] || new MediaStream([ev.track]);
+      if (this.semSincronia && this.juntarSom(peer, stream, ev.track)) return;
       this.onTrack(id, stream, ev.track);
       ev.track.addEventListener('unmute', () => this.onTrack(id, stream, ev.track));
     };
@@ -1375,6 +1401,38 @@ export class RTC {
     this.addCamTo(peer);
     this.addScreenTo(peer);
     return peer;
+  }
+
+  // O som solto (somSolto) volta para a MediaStream da imagem dele, e quem recebe vê uma só, como sempre.
+  // Devolve true quando era o som (a imagem segue o caminho normal, levando o som que chegou antes).
+  juntarSom(peer, stream, track) {
+    peer.imagens ??= new Map(); // id da transmissão -> a MediaStream da imagem
+    peer.sonsSoltos ??= new Map(); // id da transmissão -> a trilha do som dela
+    if (track.kind === 'video') {
+      peer.imagens.set(stream.id, stream);
+      const som = peer.sonsSoltos.get(stream.id);
+      if (som && som.readyState === 'live' && !stream.getTracks().includes(som)) stream.addTrack(som);
+      return false;
+    }
+    if (!stream.id.endsWith(SEM_SINCRONIA)) return false;
+    const base = stream.id.slice(0, -SEM_SINCRONIA.length);
+    peer.sonsSoltos.set(base, track);
+    const avisar = () => {
+      const imagem = peer.imagens.get(base);
+      if (!imagem || peer.sonsSoltos.get(base) !== track) return;
+      for (const t of imagem.getAudioTracks()) if (t !== track) imagem.removeTrack(t);
+      if (!imagem.getTracks().includes(track)) imagem.addTrack(track);
+      this.onTrack(peer.id, imagem, track);
+    };
+    // a outra ponta tirou o som
+    stream.addEventListener('removetrack', (e) => {
+      if (e.track !== track) return;
+      if (peer.sonsSoltos.get(base) === track) peer.sonsSoltos.delete(base);
+      peer.imagens.get(base)?.removeTrack(track);
+    });
+    track.addEventListener('unmute', avisar);
+    avisar();
+    return true;
   }
 
   // -------------------------------------------------------------- controle remoto direto
@@ -1596,7 +1654,8 @@ export class RTC {
         if (description.type === 'offer' && peer.soStun && pc.remoteDescription && ufragDe(description) !== ufragDe(pc.remoteDescription)) this.liberarTurn(peer, false);
         peer.aplicandoResposta = description.type === 'answer';
         try {
-          const recebida = trocarPerfil(description, this.midsDeJogo(peer), '42e01f', '42001f');
+          const inteira = trocarPerfil(description, this.midsDeJogo(peer), '42e01f', '42001f');
+          const recebida = this.semSincronia ? somSolto(inteira) : inteira;
           await pc.setRemoteDescription(comEstereo(comDtx(comBandaInicial(recebida, ...this.bandaSdp(peer)), semDtx), this.midsSomDeJogo(peer)));
         } finally {
           peer.aplicandoResposta = false;

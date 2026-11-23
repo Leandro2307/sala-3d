@@ -199,6 +199,8 @@ function preparar() {
   socket ||= window.io({ transports: ['websocket', 'polling'], tryAllTransports: true, reconnectionDelay: 1500, reconnectionDelayMax: 10000 });
 }
 
+// ?sincronia=1: a imagem volta a esperar o som e o som e o liso do Turbo voltam a ser os da sala (para comparar)
+const SINCRONIA = new URLSearchParams(location.search).get('sincronia') === '1';
 let conectando = false;
 async function conectar() {
   if (conectando) return;
@@ -215,6 +217,7 @@ async function conectar() {
       toast(temTurn ? `Não deu para conectar com ${u.name}. Recarregue a página.` : `Não deu para conectar com ${u.name}: as redes bloqueiam a conexão direta.`, 'error', 12000);
     },
   });
+  rtc.semSincronia = !SINCRONIA; // a imagem não espera o som (rtc.somSolto)
   rtc.onControle = receberDireto;
   rtc.onMicCaiu = () => {
     mic.ligado = false;
@@ -966,6 +969,8 @@ turboRecebe.semHevc = true;
 turboRecebe.codecsForcados = ['avc1.640033', 'avc1.4d0033', 'avc1.42e033', 'avc1.42001f'];
 turboRecebe.aceleracoes = ['prefer-hardware', 'prefer-hardware@2a', 'prefer-hardware@28', 'prefer-hardware@1f', 'no-preference'];
 turboRecebe.semImagemMs = 12_000;
+turboRecebe.somCurto = !SINCRONIA;
+turboRecebe.lisoSoluco = !SINCRONIA;
 const presetAtual = () => PRESETS.find((p) => p.id === opcoesJogo.get('preset')) || null;
 function ligarTurbo() {
   if (!jogandoLa) return;
@@ -977,7 +982,7 @@ function ligarTurbo() {
   turboRecebe.lisoMax = p?.lisoMax ?? LISO_MAX;
   turboRecebe.realce = !!ajustes.nitidez;
   turboRecebe.ligar(jogandoLa.key, jogandoLa.video, opcoesJogo.get('rapido') ? 720 : 1080);
-  diagJogo.evento('modo turbo ligado', { nitidez: turboRecebe.realce, liso: opcoesJogo.get('turboLiso'), vidaMs: turboRecebe.vidaMs, h265: turboRecebe.h265, lisoPct: turboRecebe.lisoPct, lisoMaxMs: turboRecebe.lisoMax, canal: CANAL_CONFIAVEL ? 'confiável' : 'com prazo' });
+  diagJogo.evento('modo turbo ligado', { nitidez: turboRecebe.realce, liso: opcoesJogo.get('turboLiso'), vidaMs: turboRecebe.vidaMs, h265: turboRecebe.h265, lisoPct: turboRecebe.lisoPct, lisoMaxMs: turboRecebe.lisoMax, menosFila: !SINCRONIA, canal: CANAL_CONFIAVEL ? 'confiável' : 'com prazo' });
 }
 let aplicandoPreset = false;
 function aplicarPreset(n) {
