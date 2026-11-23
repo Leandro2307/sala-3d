@@ -405,7 +405,7 @@ function ligarJogo() {
   enviado = null; // o estado do controle vai inteiro de novo
   comecarRelatorio(a);
   if (video.srcObject) evento('buffer do vídeo normal', { feitos: rtc.baixaLatencia(video.srcObject, true, BUFFER_MS) });
-  if (!turboFalhou) ligarForma(proximaForma(-1));
+  if (TURBO_NA_TV && !turboFalhou) ligarForma(proximaForma(-1));
   mostrarSelo(10_000);
   const dica = $('#dica-jogo');
   dica.classList.remove('some');
@@ -435,6 +435,12 @@ function desligarJogo(avisarLa = true) {
 // pedido de quadro-chave (o PC gasta a banda no quadro-chave e a imagem embaça)
 const BUFFER_MS = 40;
 let turboFalhou = null; // o motivo: nesta página a TV fica no vídeo normal
+// TV sem Turbo de fábrica (teste de 2026-11-23 02:23, LG webOS): a placa dela não decodifica para o
+// WebCodecs em nenhuma forma (6 formas, 4 níveis de H.264 cada) e o processador dá 5–13 qps; o vídeo
+// normal, com a mesma placa, decodifica em ~0,1 ms a 50–60 qps. Enquanto tenta, o PC ainda segura o
+// vídeo normal no mínimo (o Turbo o substitui). ?turbo=testar liga as tentativas para uma TV nova.
+const PARAM_TURBO = new URLSearchParams(location.search).get('turbo');
+const TURBO_NA_TV = PARAM_TURBO === 'testar' || PARAM_TURBO === '1';
 const turbo = new TurboRecebe({
   // canais confiáveis na TV (ver rtc.abrirTurbo): sem o prazo; o PC já pula quadros quando a fila do canal enche
   abrir: (id) => rtc?.abrirTurbo(id, null),
@@ -472,7 +478,7 @@ const FORMA_OK_MS = 10_000; // imagem pelo Turbo por tanto tempo seguido: esta f
 const FORMA_QPS_MIN = 40; // …e na média com pelo menos isto: abaixo, a TV não dá conta e vai a próxima forma
 let formaGuardada = null;
 try {
-  if (new URLSearchParams(location.search).get('turbo') === 'testar') localStorage.removeItem(FORMA_CHAVE);
+  if (PARAM_TURBO === 'testar') localStorage.removeItem(FORMA_CHAVE);
   formaGuardada = localStorage.getItem(FORMA_CHAVE);
 } catch { /* sem armazenamento */ }
 let formaAtual = null; // { forma, indice, desde, qpsDesde }
