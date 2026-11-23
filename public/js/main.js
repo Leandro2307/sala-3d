@@ -68,6 +68,7 @@ import { icon, hydrateIcons } from './icons.js';
 import { photoFromFile } from './foto.js';
 import { Musica } from './musica.js';
 import { DiagJogo } from './jogo-diag.js';
+import { linhaDaCulpa } from './culpa.js';
 import { isTouch, setupTouchControls, toggleFullscreen, isFullscreen, temTelaCheia } from './touch.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -3931,7 +3932,8 @@ function mostrarSelo(r = null) {
   const lsx = Number(opcoesJogo.get('lossless')) || 0;
   const comLs = lsx && r.fpsFinal != null ? ` · com o Lossless ×${lsx} ≈ ${Math.round(r.fpsFinal * lsx)} qps` : '';
   el.innerHTML = (turboRecebe.ligado ? '<b>turbo</b> · ' : '') + `${origem}<span class="${r.fpsFinal != null && r.fpsFinal < 50 ? 'ruim' : ''}">${qps} qps</span>${comLs}${trancos} · ${linhas} · ~${atraso}${imagem}${liso} · ${mbps} Mbps`
-    + (r.motivo ? ` · <span class="ruim">${r.motivo}</span>` : '');
+    + (r.motivo ? ` · <span class="ruim">${r.motivo}</span>` : '')
+    + `\n<span class="${r.culpa ? 'ruim' : ''}">${esc(linhaDaCulpa(r.culpa, diagJogo.sessao?.culpas))}</span>`;
 }
 
 opcoesJogo.ouvir((k, v) => {
@@ -4010,7 +4012,7 @@ async function amostrarJogo() {
         // vai junto: o relatório de quem joga explica sozinho uma queda de banda ou de quadros
         const tb = turbo && { bandaKbps: turbo.bandaKbps, pulados: turbo.pulados, puladosFila: turbo.puladosFila, trocasDeBanda: turbo.trocasDeBanda, filaLaMs: turbo.filaLaMs, chaves: turbo.chaves, chaveKB: turbo.chaveKB, chavesIgnoradas: turbo.chavesIgnoradas, som: turbo.som };
         const ps5 = self()?.shares.get(key)?.ps5 ? { manda: ps5Agora.manda, lossless: null } : null;
-        controle.emitir('controle-volta', { key, para: id, ev: { t: 'jogo-envio', quando: t, captura, enviado, codificado, altura, kbps, limite, motivo, codificador, placa, imagemBaixa, codMs, filaMs, turbo: tb || null, ps5 } });
+        controle.emitir('controle-volta', { key, para: id, ev: { t: 'jogo-envio', quando: t, captura, enviado, codificado, altura, kbps, limite, motivo, codificador, placa, imagemBaixa, codMs, filaMs, turbo: tb || null, ps5, sonda: resumo.sonda ?? null } });
       }
     }
     if (jogandoLa) {

@@ -255,3 +255,54 @@ test('decidirBanda: um corte na graça do começo não acaba o arranque', () => 
   a.baixas = 2;
   assert.equal(decidirBanda({ atual: n, min: 2_500_000, max: 20_000_000, fila: 10, a, rxEscala: 1000 }), Math.round(n * 1.3));
 });
+
+test('decidirBanda: quadro pulado desce um degrau já, com chão no que a rede leva, e lembra o teto', () => {
+  const a = { altas: 0, baixas: 3, rxs: [8000, 9000], arranque: true };
+  const n1 = decidirBanda({ atual: 14_000_000, min: 2_500_000, max: 20_000_000, fila: 40, a, rxEscala: 1000, entrega: 1, pulou: true, agora: 1000 });
+  assert.equal(n1, 12_320_000); // 88%
+  assert.equal(a.arranque, false);
+  // o chão: 60% do que chega (9 Mbps), e não o piso de 2,5
+  assert.equal(decidirBanda({ atual: 6_000_000, min: 2_500_000, max: 20_000_000, fila: 40, a: { altas: 0, baixas: 0, rxs: [9000] }, rxEscala: 1000, entrega: 1, pulou: true, agora: 1000 }), 5_400_000);
+  // subindo de volta: não passa de 95% de onde perdeu quadros por 20 s…
+  const b = { altas: 0, baixas: 4, rxs: [14000], teto: a.teto };
+  assert.equal(decidirBanda({ atual: 12_800_000, min: 2_500_000, max: 20_000_000, fila: 10, a: b, rxEscala: 1000, pulou: false, agora: 5000 }), 13_300_000);
+  // …depois pode
+  assert.equal(decidirBanda({ atual: 12_800_000, min: 2_500_000, max: 20_000_000, fila: 10, a: { altas: 0, baixas: 4, rxs: [14000], teto: a.teto }, rxEscala: 1000, pulou: false, agora: 30_000 }), 14_080_000);
+});
+
+test('decidirBanda: não sobe muito além do que está chegando lá (2026-11-23: 20 Mbps com a rede em 9)', () => {
+  assert.equal(decidirBanda({ atual: 13_000_000, min: 2_500_000, max: 20_000_000, fila: 10, a: { altas: 0, baixas: 4, rxs: [9000] }, rxEscala: 1000, agora: 1 }), 13_500_000);
+  assert.equal(decidirBanda({ atual: 14_000_000, min: 2_500_000, max: 20_000_000, fila: 10, a: { altas: 0, baixas: 4, rxs: [9000] }, rxEscala: 1000, agora: 1 }), 14_000_000);
+});
+
+test('voltarAoRepasse: só por caminho direto, com a rede calma, e respeitando a espera de quem já caiu', async () => {
+  const novo = (rede) => {
+    const e = new TurboEnvio({ tela: () => ({ ps5: { cfg: { h: 1080 }, kbps: 10000 } }), onMudou: null, rede: async () => rede });
+    const ligou = [];
+    e.ligar = (...x) => ligou.push(x);
+    const s = { id: 'x', key: 'k', canal: {}, recodificado: true, recodPorFalha: false, altTeto: 1080, kbpsFonte: 10000, pedido: { ligar: 'k', altura: 1080 }, ajuste: { rxs: [7000] }, vendoRepasseEm: -1e9 };
+    e.sessoes.set('x', s);
+    return { e, s, ligou };
+  };
+  const direto = { local: 'srflx/udp wifi', remoto: 'srflx/udp', relay: null };
+  let { e, s, ligou } = novo(direto);
+  for (let i = 0; i < 3; i++) await e.voltarAoRepasse(s, 10, false);
+  assert.equal(ligou.length, 0); // ainda não está calmo há tempo bastante
+  await e.voltarAoRepasse(s, 10, false);
+  assert.equal(ligou.length, 1);
+  assert.equal(ligou[0][2].recodificar, undefined);
+  ({ e, s, ligou } = novo({ ...direto, relay: 'udp' }));
+  for (let i = 0; i < 6; i++) await e.voltarAoRepasse(s, 10, false);
+  assert.equal(ligou.length, 0); // pelo TURN, não
+  ({ e, s, ligou } = novo(direto));
+  for (let i = 0; i < 6; i++) await e.voltarAoRepasse(s, 10, i % 3 === 0);
+  assert.equal(ligou.length, 0); // pulando quadros, não
+  ({ e, s, ligou } = novo(direto));
+  s.recodPorFalha = true;
+  e.memoria.set('x', { semRepasseEm: Date.now(), quedasRepasse: 1 });
+  for (let i = 0; i < 40; i++) await e.voltarAoRepasse(s, 10, false);
+  assert.equal(ligou.length, 0); // caiu há pouco
+  assert.equal(e.esperaRepasse({ quedasRepasse: 1 }), 120_000);
+  assert.equal(e.esperaRepasse({ quedasRepasse: 3 }), 480_000);
+  assert.equal(e.esperaRepasse({ quedasRepasse: 9 }), 900_000);
+});

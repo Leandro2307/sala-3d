@@ -1177,3 +1177,16 @@ com `?turbo=1` deu ~44 ms de imagem e a sala ~89 ms — decodificador a 13 ms po
   só com a sala — por isso o Lossless é ligado pelo atalho dele.
 - A travada de ~0,5 s ao entrar no modo jogo é do código comum (primeiro desenho do Realce e a renegociação
   do vídeo): acontece também na sala.
+
+## Quadros primeiro e de quem é a culpa (2026-11-23, 11:02–11:06)
+
+Relatórios do lokao16001 na /jogar: 60 qps chegando do PS5 no PC que transmite, ~47 saindo, com 0 "pulados".
+
+- Codificando aqui, a trilha guardava 1 quadro e o ritmo fixo de 60 jogava fora o que chegava adiantado; pelo
+  Wi-Fi os quadros do PS5 chegam em grupinhos. Guarda 3, e o ritmo fixo só vale para fonte acima de 72 qps.
+  Teste local com grupinhos de 1 a 3 quadros: 30 → 60 qps, 16 → 0 trancos.
+- Banda aos poucos (decidirBanda): um aviso com quadros pulados desce 12% já, com chão em 60% do que a rede leva;
+  tranco desce 6%; não sobe além de 1,5× o que chega, nem acima de 95% de onde perdeu quadros por 20 s.
+- Repasse do PS5 tentado de novo quando a conexão vira direta (voltarAoRepasse); falha espera 2 min, dobrando.
+- O selo diz de quem é a culpa (culpa.js): HOST, VOCÊ ou INTERNET, com a conta da sessão. A sonda de cada ponta
+  separa as redes; soluço menor que 0,5 s escapa dela e fica em INTERNET. Relatório: resumo.culpas e amostra.culpa.

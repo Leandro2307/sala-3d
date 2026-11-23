@@ -8,6 +8,7 @@
 // Para ler: npm run relatorios (scripts/relatorios.js).
 
 import { Ritmo } from './ritmo.js';
+import { contarCulpa, culpaDe } from './culpa.js';
 
 const BOM = 50; // abaixo disso (quadros por segundo) a jogatina já engasga
 const SEGUIDAS = 3; // amostras ruins em seguida (6 s) antes de avisar
@@ -361,7 +362,8 @@ export class DiagJogo {
     // a placa recusou (medida ímpar, por exemplo) e o Chrome passou para o processador, ou voltou
     const ant = s.amostras.at(-1)?.codificador;
     if (ant && resumo.codificador && ant !== resumo.codificador) this.evento('codificador trocou', { de: ant, para: resumo.codificador, enviado: `${resumo.largura}x${resumo.altura}`, captura: resumo.capturaRes });
-    s.amostras.push({ ...resumo, sonda: this.tirarSonda(), sala, trilha: s.amostras.length % 15 === 0 ? cru.trilha : undefined, cru: s.amostras.length % 15 === 0 ? cru : undefined });
+    resumo.sonda = this.tirarSonda(); // vai também para quem joga (culpa.js)
+    s.amostras.push({ ...resumo, sala, trilha: s.amostras.length % 15 === 0 ? cru.trilha : undefined, cru: s.amostras.length % 15 === 0 ? cru : undefined });
     if (s.amostras.length > GUARDA) s.amostras.shift();
     console.log(`[modo-jogo] envio: captura ${resumo.captura} qps (${resumo.capturaRes}) → codificado ${resumo.codificado} → enviado ${resumo.enviado} qps · ${resumo.largura}x${resumo.altura} · ${resumo.kbps} kbps (alvo ${resumo.alvoKbps}, teto ${resumo.tetoKbps}) · ${resumo.codMs} ms/quadro · ${resumo.codificador}${resumo.placa ? ' (placa)' : ''} · limite ${resumo.limite} ${JSON.stringify(resumo.limitePct)} · rtt ${resumo.rttMs} ms · perda lá ${resumo.perdaLa}% · fila ${resumo.filaMs} ms · ${resumo.caminho}${resumo.imagemBaixa ? ' · IMAGEM BAIXA' : ''}${resumo.motivo ? ` · MOTIVO: ${resumo.motivo}` : ''}`, { resumo, sala });
     this.julgar(resumo, 'compartilha');
@@ -410,7 +412,7 @@ export class DiagJogo {
       caminho: cru.rede?.local ?? null,
       jitterBufferTarget: cru.jitterBufferTarget,
       playoutDelayHint: cru.playoutDelayHint,
-      la: la ? { captura: la.captura, enviado: la.enviado, altura: la.altura, kbps: la.kbps, limite: la.limite, motivo: la.motivo, codificador: la.codificador, placa: la.placa, imagemBaixa: la.imagemBaixa ?? null, codMs: la.codMs ?? null, filaMs: la.filaMs ?? null, turbo: la.turbo ?? null } : null,
+      la: la ? { captura: la.captura, enviado: la.enviado, altura: la.altura, kbps: la.kbps, limite: la.limite, motivo: la.motivo, codificador: la.codificador, placa: la.placa, imagemBaixa: la.imagemBaixa ?? null, codMs: la.codMs ?? null, filaMs: la.filaMs ?? null, turbo: la.turbo ?? null, ps5: la.ps5 ?? null, sonda: la.sonda ?? null } : null,
       // o som da mesma tela: buffer maior que o do vídeo faz o vídeo esperar por ele (sincronia)
       somBufferMs: somEmitidos > 0 ? r1((1000 * dif(cru.som, antes?.som, 'jitterBufferDelay')) / somEmitidos) : null,
       // o som da tela pelo vídeo normal: pacotes por segundo (0 = não está chegando), o nível (0 a 1) e
@@ -469,12 +471,18 @@ export class DiagJogo {
       // viu (a fila de envio cheia)
       resumo.motivo = tb.qps >= BOM ? null
         : la?.captura != null && la.captura < BOM ? la.motivo || 'captura'
-          : tb.perdidos > 0 ? 'perdas'
+          : la?.enviado != null && la.enviado < BOM && la.motivo ? la.motivo // saiu pouco de lá: o motivo é o de lá
+            : tb.perdidos > 0 ? 'perdas'
             : la?.motivo === 'fila' ? 'fila' : 'perdas';
       // imagem boa, mas esperando na fila/rede mais que um quadro e meio: o Wi-Fi é o atraso
       if (!resumo.motivo && tb.viagemMs != null && tb.viagemMs > 25) resumo.motivo = 'wifi';
     }
-    s.amostras.push({ ...resumo, sonda: this.tirarSonda(), sala, cru: s.amostras.length % 15 === 0 ? cru : undefined });
+    resumo.sonda = this.tirarSonda();
+    // de quem é a culpa desta amostra (o selo mostra) e a conta da sessão
+    // (as 2 primeiras amostras, 4 s, são o jogo entrando: não contam)
+    resumo.culpa = s.amostras.length < 2 ? null : culpaDe(resumo, la);
+    s.culpas = contarCulpa(s.culpas || {}, resumo.culpa);
+    s.amostras.push({ ...resumo, sala, cru: s.amostras.length % 15 === 0 ? cru : undefined });
     if (s.amostras.length > GUARDA) s.amostras.shift();
     console.log(`[modo-jogo] chegada: recebido ${resumo.recebido} → decodificado ${resumo.decodificado} → na tela ${resumo.naTela} qps · ${resumo.largura}x${resumo.altura} · ${resumo.kbps} kbps · decodifica ${resumo.decMs} ms (${resumo.decodificador}${resumo.placa ? ', placa' : ''}) · buffer ${resumo.bufferMs} ms (som ${resumo.somBufferMs} ms) · controle ${resumo.controleRttMs} ms · atraso total ~${resumo.atrasoMs} ms · perdidos ${resumo.perdidos} · congelou ${resumo.congelou} (${resumo.congeladoMs} ms) · rtt ${resumo.rttMs} ms · ${resumo.caminho}${la ? ` · lá: captura ${la.captura}, enviado ${la.enviado}, limite ${la.limite}` : ' · sem notícia de lá'}${resumo.motivo ? ` · MOTIVO: ${resumo.motivo}` : ''}`, { resumo, sala });
     this.julgar(resumo, 'joga');
@@ -551,7 +559,7 @@ export class DiagJogo {
       lado: s.lado,
       inicio: s.inicio,
       fim: new Date().toISOString(),
-      resumo: resumoDe(s.amostras),
+      resumo: { ...resumoDe(s.amostras), culpas: s.culpas || null },
       ambiente: s.ambiente,
       // relógio do servidor − o daqui (ms), medido com ida e volta ao mandar o relatório: some à hora dos
       // eventos e amostras para comparar com o relatório do outro aparelho

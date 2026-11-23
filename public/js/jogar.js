@@ -24,6 +24,7 @@ import { RTC } from './rtc.js';
 import { Controle } from './controle.js';
 import { TurboRecebe, TTL_MS, LISO_PCT, LISO_MAX } from './turbo.js';
 import { DiagJogo } from './jogo-diag.js';
+import { linhaDaCulpa } from './culpa.js';
 import { opcoesJogo, LISO_MS, PRESETS, OPCOES_DO_PRESET, htmlPresets, marcarPresets } from './jogo-opcoes.js';
 import { LAYOUTS, layoutDoTitulo } from './toque-jogo.js';
 import { ControleFisico } from './gamepad-jogo.js';
@@ -990,7 +991,8 @@ function mostrarSelo(r = null) {
   const origem = p5 ? `PS5 ${q(p5.manda)}${p5.lossless != null ? ` → Lossless (OBS) ${q(p5.lossless)}` : ''} → aqui ` : '';
   const lsx = Number(opcoesJogo.get('lossless')) || 0;
   const comLs = lsx && r.fpsFinal != null ? ` · com o Lossless ×${lsx} ≈ ${Math.round(r.fpsFinal * lsx)} qps` : '';
-  el.innerHTML = `${turboRecebe.ligado ? '<b>turbo</b> · ' : ''}${origem}<span class="${r.fpsFinal != null && r.fpsFinal < 50 ? 'ruim' : ''}">${q(r.fpsFinal)} qps</span>${comLs}${trancos} · ${r.altura ? `${r.altura}p` : ''} · ~${atraso}${imagem}${liso} · ${mbps} Mbps${r.motivo ? ` · <span class="ruim">${esc(r.motivo)}</span>` : ''}`;
+  el.innerHTML = `${turboRecebe.ligado ? '<b>turbo</b> · ' : ''}${origem}<span class="${r.fpsFinal != null && r.fpsFinal < 50 ? 'ruim' : ''}">${q(r.fpsFinal)} qps</span>${comLs}${trancos} · ${r.altura ? `${r.altura}p` : ''} · ~${atraso}${imagem}${liso} · ${mbps} Mbps${r.motivo ? ` · <span class="ruim">${esc(r.motivo)}</span>` : ''}
+<span class="${r.culpa ? 'ruim' : ''}">${esc(linhaDaCulpa(r.culpa, diagJogo.sessao?.culpas))}</span>`;
 }
 
 let somSumiu = false;
