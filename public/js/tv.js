@@ -401,7 +401,7 @@ function ligarJogo() {
   st.jogando = a.sh.key;
   document.body.classList.add('jogando');
   document.activeElement?.blur?.();
-  mandar(st.jogando, { t: 'modo', jogo: true, rapido: false, vibra: !!gamepad()?.vibrationActuator, ds: false });
+  mandarModo();
   enviado = null; // o estado do controle vai inteiro de novo
   comecarRelatorio(a);
   if (video.srcObject) evento('buffer do vídeo normal', { feitos: rtc.baixaLatencia(video.srcObject, true, BUFFER_MS) });
@@ -412,6 +412,25 @@ function ligarJogo() {
   setTimeout(() => dica.classList.add('some'), 5000);
   try { document.documentElement.requestFullscreen?.().catch(() => {}); } catch { /* TV sem tela cheia */ }
   history.pushState({ jogo: true }, ''); // o Voltar do controle remoto sai do jogo, não do site
+}
+
+// "Menos atraso" (o mesmo do site, rtc.rapidoJogo lá no PC): a tela vem em 720p fixo com no máximo
+// 8 Mbps — quadros menores codificam, viajam e chegam mais por igual, e a fila da TV (a maior parte do
+// atraso medido: 90–250 ms nos testes de 2026-11-23) fica menor. Ligado de fábrica na TV; um botão
+// colorido do controle remoto troca para 1080p (fica guardado nesta TV).
+const RAPIDO_CHAVE = 'sala3d-tv-rapido';
+let rapido = true;
+try { rapido = localStorage.getItem(RAPIDO_CHAVE) !== '0'; } catch { /* sem armazenamento */ }
+function mandarModo() {
+  if (st.jogando) mandar(st.jogando, { t: 'modo', jogo: true, rapido, vibra: !!gamepad()?.vibrationActuator, ds: false });
+}
+function trocarRapido() {
+  rapido = !rapido;
+  try { localStorage.setItem(RAPIDO_CHAVE, rapido ? '1' : '0'); } catch { /* sem armazenamento */ }
+  mandarModo();
+  evento(rapido ? 'menos atraso ligado (720p)' : 'menos atraso desligado (1080p)');
+  aviso(rapido ? 'Menos atraso: 720p (botão colorido volta ao 1080p)' : 'Imagem em 1080p (botão colorido: menos atraso)', 'info', 4000);
+  seloSempre = true;
 }
 
 function desligarJogo(avisarLa = true) {
@@ -670,7 +689,7 @@ setInterval(async () => {
   const rtts = [...ping.rtt].sort((x, y) => x - y);
   const controle = { rttMs: rtts.length ? Math.round(rtts[rtts.length >> 1]) : null, ajudanteMs: ping.aj, pad: !!gamepad() };
   ping.rtt.length = 0;
-  if (rel && rel.amostras.length < 1800) rel.amostras.push({ t: Date.now(), turbo: t, video: v, controle });
+  if (rel && rel.amostras.length < 1800) rel.amostras.push({ t: Date.now(), rapido, turbo: t, video: v, controle });
   if (!(t && t.qps > 0)) vigiarFila(v);
   vigiarForma(t);
   if (rel && !rel.enviado && rel.amostras.length === 45) mandarRelatorio('90 s de jogo', true); // a TV pode desligar sem sair
@@ -685,7 +704,7 @@ setInterval(async () => {
     // atraso que dá para medir aqui: a espera na fila do vídeo (ou o liso do Turbo) e o caminho do controle
     const espera = usado.via === 'vídeo' && usado.bufferMs != null ? ` · fila ${usado.bufferMs} ms` : usado.pontaMs != null ? ` · imagem ${Math.round(usado.pontaMs)} ms` : '';
     const ctrl = controle.rttMs != null ? ` · controle ${Math.round(controle.rttMs / 2)} ms` : '';
-    el.textContent = `${usado.via} · ${res} · ${Math.round(usado.qps || 0)} qps · ${mbps}${codec ? ` · ${codec}` : ''}${espera}${ctrl}${turboFalhou ? ` · turbo: ${turboFalhou}` : formaAtual && formaOk !== formaAtual.forma.id ? ` · testando ${formaAtual.forma.id} (${formaAtual.indice + 1}/${FORMAS.length})` : ''}`;
+    el.textContent = `${rapido ? 'menos atraso' : '1080p'} · ${usado.via} · ${res} · ${Math.round(usado.qps || 0)} qps · ${mbps}${codec ? ` · ${codec}` : ''}${espera}${ctrl}${turboFalhou ? ` · turbo: ${turboFalhou}` : formaAtual && formaOk !== formaAtual.forma.id ? ` · testando ${formaAtual.forma.id} (${formaAtual.indice + 1}/${FORMAS.length})` : ''}`;
   }
 }, 2000);
 
@@ -707,7 +726,7 @@ function mandarRelatorio(motivo, parcial = false) {
   if (!rel || !rel.amostras.length) return;
   const r = { ...rel, fim: new Date().toISOString(), motivo };
   const qps = r.amostras.map((x) => x.turbo?.qps || x.video?.qps).filter((x) => x > 0);
-  r.resumo = { mediaQps: qps.length ? qps.reduce((s, x) => s + x, 0) / qps.length : null, turbo: !!r.amostras.some((x) => x.turbo?.qps), turboFalhou, turboForma: formaOk, turboGuardada: formaGuardada, turboTentativas: formasTentadas };
+  r.resumo = { mediaQps: qps.length ? qps.reduce((s, x) => s + x, 0) / qps.length : null, turbo: !!r.amostras.some((x) => x.turbo?.qps), turboFalhou, rapido, turboForma: formaOk, turboGuardada: formaGuardada, turboTentativas: formasTentadas };
   const corpo = JSON.stringify({ id: parcial ? `${r.id}-p` : r.id, relatorio: r, sala: SALA, nome: `${conta?.nome || 'sem conta'} (TV)`, relogio: Date.now() });
   if (parcial) rel.enviado = true;
   else rel = null;
@@ -840,14 +859,21 @@ setInterval(lerControles, ENVIO_MS);
 // Voltar: Tizen (Samsung) 10009, webOS (LG) 461, Android TV Escape/BrowserBack
 const VOLTAR = new Set([10009, 461, 27, 166]);
 const ehVoltar = (e) => VOLTAR.has(e.keyCode) || ['Escape', 'GoBack', 'BrowserBack', 'Back'].includes(e.key);
-// Info e os botões coloridos (Tizen/webOS 403–406 e 457; I no teclado): mostra ou esconde o selo da imagem
-const SELO = new Set([403, 404, 405, 406, 457]);
+// Info (457; I no teclado): mostra ou esconde o selo da imagem. Botões coloridos (Tizen/webOS 403–406; R no
+// teclado): troca "Menos atraso" (720p) ↔ 1080p
+const SELO = new Set([457]);
+const CORES = new Set([403, 404, 405, 406]);
 addEventListener('keydown', (e) => {
   if (CONTROLE) return;
   ligarSom();
-  if (SELO.has(e.keyCode) || ['Info', 'ColorF0Red', 'ColorF1Green', 'ColorF2Yellow', 'ColorF3Blue', 'i', 'I'].includes(e.key)) {
+  if (SELO.has(e.keyCode) || ['Info', 'i', 'I'].includes(e.key)) {
     e.preventDefault();
     seloSempre = !seloSempre;
+    return;
+  }
+  if (CORES.has(e.keyCode) || ['ColorF0Red', 'ColorF1Green', 'ColorF2Yellow', 'ColorF3Blue', 'r', 'R'].includes(e.key)) {
+    e.preventDefault();
+    trocarRapido();
     return;
   }
   if (st.jogando) {
