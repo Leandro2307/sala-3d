@@ -145,14 +145,15 @@ function moduloVersionado(url) {
   return modulos.get(url) || null;
 }
 
+const comVersao = (u) => {
+  const m = moduloVersionado(u);
+  return m ? `${u}?v=${m.hash}` : u;
+};
+
 function montar() {
   let html = fs.readFileSync(path.join(PUBLICO, 'index.html'), 'utf8');
   html = html.split('"/vendor/three/').join(`"${PREFIXO_THREE}/`);
   html = html.replace('src="/socket.io/socket.io.js"', `src="${PREFIXO_SIO}/socket.io.min.js"`);
-  const comVersao = (u) => {
-    const m = moduloVersionado(u);
-    return m ? `${u}?v=${m.hash}` : u;
-  };
   html = html.replace('src="/js/entrada.js"', `src="${comVersao('/js/entrada.js')}"`);
   // Na abertura só o formulário de entrada (entrada.js e os poucos módulos dele, sem o three.js).
   // A sala vai numa lista que o entrada.js pede depois que o formulário aparece.
@@ -169,6 +170,22 @@ let pronta = null;
 function paginaInicial() {
   if (PRODUCAO) return (pronta ??= montar());
   return montar();
+}
+
+// As páginas leves (/tv e /jogar): o mesmo da inicial, sem a lista da sala. Os módulos são pedidos todos de
+// uma vez (eram três levas, cada uma com a ida e volta até o Render), com a impressão no endereço, e o
+// socket.io vai no arquivo menor. Os imports dinâmicos (o Turbo na TV) continuam de fora.
+const leves = new Map();
+function paginaLeve(arq, entrada) {
+  const pronto = PRODUCAO && leves.get(arq);
+  if (pronto) return pronto;
+  const links = grafo(entrada).map((u) => `<link rel="modulepreload" href="${comVersao(u)}">`).join('\n');
+  const html = fs.readFileSync(path.join(PUBLICO, arq), 'utf8')
+    .replace('src="/socket.io/socket.io.js"', `src="${PREFIXO_SIO}/socket.io.min.js"`)
+    .replace(`src="${entrada}"`, `src="${comVersao(entrada)}"`)
+    .replace('</head>', `${links}\n</head>`);
+  leves.set(arq, html);
+  return html;
 }
 
 // ------------------------------------------------------------------ modo offline
@@ -197,10 +214,6 @@ function arquivosDe(dir) {
 let offlinePronta = null;
 function listaOffline(mapas) {
   if (PRODUCAO && offlinePronta) return offlinePronta;
-  const comVersao = (u) => {
-    const m = moduloVersionado(u);
-    return m ? `${u}?v=${m.hash}` : u;
-  };
   const nossos = fs.readdirSync(path.join(PUBLICO, 'js')).filter((f) => f.endsWith('.js')).map((f) => `/js/${f}`);
   const todos = new Set();
   for (const u of nossos) {
@@ -243,4 +256,4 @@ function servidorDeBolso(nome) {
   return `${topo}\nconst module = { exports: {} };\n${codigo}\nexport default module.exports;\n`;
 }
 
-module.exports = { paginaInicial, moduloVersionado, listaOffline, servidorDeBolso, PREFIXO_THREE, THREE_DIR, PREFIXO_SIO, SIO_DIR };
+module.exports = { paginaInicial, paginaLeve, moduloVersionado, listaOffline, servidorDeBolso, PREFIXO_THREE, THREE_DIR, PREFIXO_SIO, SIO_DIR };

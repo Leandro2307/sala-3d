@@ -7,7 +7,7 @@ const os = require('os');
 const path = require('path');
 const { Server } = require('socket.io');
 const compression = require('compression');
-const { paginaInicial, moduloVersionado, listaOffline, servidorDeBolso, PREFIXO_THREE, THREE_DIR, PREFIXO_SIO, SIO_DIR } = require('./pagina.js');
+const { paginaInicial, paginaLeve, moduloVersionado, listaOffline, servidorDeBolso, PREFIXO_THREE, THREE_DIR, PREFIXO_SIO, SIO_DIR } = require('./pagina.js');
 const { execFile } = require('child_process');
 const crypto = require('crypto');
 const QRCode = require('qrcode');
@@ -263,20 +263,20 @@ const LIMPEZA = '3';
 // "4K SMART TV PH" (Android 14, 2026-11-23) vem com espaço: qualquer "TV" solto depois de Android também vale.
 const UA_TV = /smart[-_ ]?tv|android[^)]*\btv\b|tizen|web0s|webos|netcast|hbbtv|bravia|googletv|google tv|android tv|androidtv|\baft[a-z]{1,4}\b|crkey|chromecast|roku|vidaa|hisense|philipstv|nettv|tv bro|large screen|\bdtv\b|; ?tv[;)]|appletv|viera|aquos|opera tv|tvos/i;
 const ehTV = (req) => req.query.tv === '1' || (req.query.tv !== '0' && UA_TV.test(req.headers['user-agent'] || ''));
-const paginaTV = path.join(__dirname, 'public', 'tv.html');
+const mandarTV = (res) => res.type('html').send(paginaLeve('tv.html', '/js/tv.js'));
 app.get('/tv', (_req, res) => {
   res.set('Cache-Control', 'no-cache');
-  res.sendFile(paginaTV);
+  mandarTV(res);
 });
 // Modo jogo do PC (public/jogar.html): a tela da sala principal com o mesmo modo jogo da sala, sem o mundo
 // 3D. Em teste ao lado da sala, que continua a principal (2026-11-23).
 app.get('/jogar', (_req, res) => {
   res.set('Cache-Control', 'no-cache');
-  res.sendFile(path.join(__dirname, 'public', 'jogar.html'));
+  res.type('html').send(paginaLeve('jogar.html', '/js/jogar.js'));
 });
 app.get(['/', '/index.html'], (req, res) => {
   res.set('Cache-Control', 'no-cache');
-  if (ehTV(req)) return res.sendFile(paginaTV);
+  if (ehTV(req)) return mandarTV(res);
   if (!new RegExp(`(?:^|;\\s*)sala3d-limpo=${LIMPEZA}(?:;|$)`).test(req.headers.cookie || '')) {
     res.set('Clear-Site-Data', '"cache"');
     res.cookie('sala3d-limpo', LIMPEZA, { maxAge: 365 * 86400_000, sameSite: 'lax', secure: req.secure || req.get('x-forwarded-proto') === 'https' });
@@ -1688,6 +1688,16 @@ function attachSockets(io) {
       if (!room || !user?.tv || !user.conta) return;
       for (const u of room.users.values()) {
         if (u !== user && u.tv && u.conta === user.conta) io.to(u.id).emit('tv-modo', { ligar: !!obj(msg).ligar });
+      }
+    });
+
+    // O caminho de volta: a TV diz ao celular-controle da mesma conta em que tela está jogando (null: fora do
+    // jogo). Os botões dele vão para essa tela, mesmo que o telão da sala já seja outro.
+    socket.on('tv-tela', (msg) => {
+      if (!room || !user?.tv || !user.conta) return;
+      const tela = typeof obj(msg).tela === 'string' ? obj(msg).tela.slice(0, 80) : null;
+      for (const u of room.users.values()) {
+        if (u !== user && u.tv && u.conta === user.conta) io.to(u.id).emit('tv-tela', { tela });
       }
     });
 

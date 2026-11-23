@@ -44,7 +44,7 @@
   .espaco { flex: 1; }
 
   #painel { position: fixed; left: 2vw; bottom: 2vw; display: flex; flex-direction: column; gap: 1vw; max-width: 46vw; }
-  .botoes { display: flex; gap: 1vw; flex-wrap: wrap; }
+  .botoes { display: flex; gap: 1vw 1.6vw; flex-wrap: wrap; }
   .btn { border: 2px solid var(--borda); background: var(--vidro); border-radius: 1vw; padding: 1vw 1.8vw; font-weight: 700; cursor: pointer; outline: none; }
   .btn.grande { font-size: 2.4vw; padding: 1.2vw 2.6vw; background: var(--destaque); color: var(--destaque-txt); border-color: transparent; }
   .btn:focus, .btn.foco { border-color: #fff; box-shadow: 0 0 0 .35vw rgba(255,255,255,.35); transform: scale(1.04); }
@@ -59,15 +59,18 @@
   #qr p { margin: .7vw 0 0; color: var(--apagado); font-size: 1.15vw; line-height: 1.35; }
   #qr .codigo { font-family: Consolas, monospace; color: var(--texto); letter-spacing: .12em; }
 
-  #aviso { position: fixed; top: 7vw; left: 50%; transform: translateX(-50%); max-width: 70vw; padding: 1vw 1.8vw; text-align: center; font-weight: 600; }
+  #aviso { position: fixed; top: 7vw; left: 0; right: 0; width: fit-content; margin: 0 auto; max-width: 70vw; padding: 1vw 1.8vw; text-align: center; font-weight: 600; z-index: 6; }
   #aviso.erro { border-color: var(--erro); }
   #aviso.alerta { border-color: var(--alerta); }
 
   /* o Turbo desenha num canvas por cima do vídeo (turbo.js posicionar) */
   .turbo-tela { position: fixed; box-sizing: border-box; pointer-events: none; background: #000; }
   #selo { position: fixed; top: 1.4vw; right: 1.4vw; padding: .5vw 1vw; font-size: 1.1vw; font-family: Consolas, monospace; color: var(--texto); z-index: 5; white-space: pre-line; max-width: 90vw; }
-  #dica-jogo { position: fixed; top: 2vw; left: 50%; transform: translateX(-50%); padding: .7vw 1.4vw; color: var(--apagado); transition: opacity .6s; }
+  /* embaixo: em cima ficam o selo, a contagem e os avisos */
+  #dica-jogo { position: fixed; bottom: 2vw; left: 0; right: 0; width: fit-content; margin: 0 auto; max-width: 94vw; padding: .7vw 1.4vw; text-align: center; color: var(--apagado); transition: opacity .6s; }
   #dica-jogo b { color: var(--texto); }
+  /* jogando: só aparece no fim do horário pago (5 min) ou no teste grátis */
+  #tempo-jogo { position: fixed; top: 1.4vw; left: 1.4vw; padding: .5vw 1vw; font-size: 1.3vw; font-weight: 700; z-index: 5; border-color: var(--alerta); color: #fde68a; font-variant-numeric: tabular-nums; }
 
   /* jogando: só a imagem do jogo */
   body.jogando #topo, body.jogando #painel, body.jogando #qr { display: none; }
@@ -107,6 +110,7 @@
 <section id="painel">
   <div class="botoes">
     <button class="btn grande" id="btn-jogo" type="button" data-foco>▶ Modo jogo</button>
+    <button class="btn" id="btn-trocar" type="button" data-foco hidden>Ver o PS5</button>
     <button class="btn" id="btn-som" type="button" data-foco hidden>🔊 Ligar o som</button>
     <button class="btn" id="btn-sair" type="button" data-foco hidden>Trocar de conta</button>
   </div>
@@ -121,8 +125,9 @@
 </aside>
 
 <div id="dica-jogo" class="vidro">Para sair do jogo: <b>Voltar</b> no controle remoto, ou segure <b>Select + Start</b> · menos atraso ↔ 1080p: <b>botão colorido</b> · desempenho: <b>Info</b></div>
-<div id="aviso" class="vidro" hidden></div>
+<div id="aviso" class="vidro" role="status" hidden></div>
 <div id="selo" class="vidro" hidden></div>
+<div id="tempo-jogo" class="vidro" hidden></div>
 
 <!-- plano B: este celular é o controle da TV -->
 <main id="cel">
@@ -138,7 +143,7 @@
   <p><button class="btn grande" id="btn-toque" type="button" style="width:100%">🎮 Abrir o controle na tela</button></p>
   <div class="cartao vidro" id="cel-alvo">Procurando o jogo no telão…</div>
   <div class="cartao vidro" id="cel-vez"></div>
-  <p class="sub">Deixe esta página aberta e a tela do celular ligada enquanto joga.</p>
+  <p class="sub">Deixe esta página aberta enquanto joga. A tela do celular fica acesa; se apagar, o controle para.</p>
 </main>
 
 <!-- o controle de toque do celular (js/toque-tv.js monta; toque-tv.css) -->

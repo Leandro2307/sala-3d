@@ -2969,7 +2969,10 @@ controle.onTremor = ({ key, deId }, g, p, h = false) => {
     tremoresLa = 0;
     tremoresLaDesde = agora;
   }
-  if (!jogandoAqui.get(key)?.has(deId)) return;
+  // o celular como controle da TV: quem está no modo jogo é a TV da mesma conta, e quem treme é ele
+  const quem = jogandoAqui.get(key);
+  const nome = state.users.get(deId)?.name;
+  if (!quem?.has(deId) && !(nome && [...(quem?.keys() || [])].some((id) => state.users.get(id)?.name === nome))) return;
   if (capacidadesJogo.get(deId)?.vibra === false) return; // nada para tremer lá (teclado e mouse)
   tremorFila = { key, para: deId, ev: { t: 'tremor', g: Math.round(g * 100) / 100, p: Math.round(p * 100) / 100, ...(h ? { h: true } : {}) } };
   if (tremorTimer) return;

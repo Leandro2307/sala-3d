@@ -20,6 +20,10 @@
 //     DualSense direto (gatilhos, touchpad, giroscópio) fica nas Opções, desligado de fábrica;
 //   - sem o realce de nitidez (um shader por quadro na placa integrada) e só H.264;
 //   - os canais do Turbo sem prazo de entrega (?canal=prazo volta ao da sala, para comparar).
+//
+// Quedas: a conexão com o servidor que pisca entra de novo sem recarregar (reentrar; só um deploy recarrega), e a
+// tela do jogo que saiu e voltou põe a pessoa no jogo sozinha, ainda em tela cheia (tentarVoltar). Segurar
+// Create + Options por 2 s sai do modo jogo, como na TV.
 import { RTC } from './rtc.js';
 import { Controle } from './controle.js';
 import { TurboRecebe, TTL_MS, LISO_PCT, LISO_MAX } from './turbo.js';
@@ -46,6 +50,8 @@ const PASSES_CHAVE = 'sala3d-passes';
 const AJUSTES_CHAVE = 'sala3d-jogar';
 const VOLTAR_CHAVE = 'sala3d-jogar-voltar';
 const VOLTAR_MS = 3 * 60_000;
+const QUEDA_MS = 90_000; // a tela do jogo caiu: por este tempo a tela cheia espera por ela
+const SAIR_SEGURANDO_MS = 2000; // Create + Options seguidos por isto: sai do modo jogo
 const CANAL_CONFIAVEL = params.get('canal') !== 'prazo';
 const NOME_MAQ = { pc: 'PC', ps5: 'PS5' };
 
@@ -71,6 +77,7 @@ const st = {
   escolhida: null, // a tela escolhida à mão (chave)
   controlando: false, // "Controlar" ligado: mouse e teclado vão à tela mesmo fora do modo jogo
   entrou: false,
+  versao: null, // a do servidor na primeira entrada
   semVoz: false, // escritório com salas à prova de som: aqui não há posição, então ninguém é ouvido
   interesse: new Map(),
 };
@@ -180,18 +187,26 @@ async function iniciar() {
     conta = null;
     return pedirEntrada({ conta: true });
   }
+  preparar();
   if (await liberarSala()) conectar();
+}
+
+// O /config e a conexão com o servidor já vão saindo enquanto a entrada é conferida (duas idas e voltas a menos)
+const pegarConfig = () => fetch('/config').then((r) => r.json());
+let config = null;
+function preparar() {
+  config ||= pegarConfig().catch(() => null);
+  socket ||= window.io({ transports: ['websocket', 'polling'], tryAllTransports: true, reconnectionDelay: 1500, reconnectionDelayMax: 10000 });
 }
 
 let conectando = false;
 async function conectar() {
   if (conectando) return;
   conectando = true;
-  let config = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
-  try { config = await (await fetch('/config')).json(); } catch { /* usa o padrão */ }
-  socket = window.io({ transports: ['websocket', 'polling'], tryAllTransports: true, reconnectionDelay: 1500, reconnectionDelayMax: 10000 });
+  preparar();
+  const ice = (await config)?.iceServers;
   rtc = new RTC(socket, {
-    iceServers: config.iceServers,
+    iceServers: Array.isArray(ice) && ice.length ? ice : [{ urls: 'stun:stun.l.google.com:19302' }],
     onTrack: receberTrilha,
     onFalha: (id, temTurn) => {
       const u = st.users.get(id);
@@ -208,7 +223,7 @@ async function conectar() {
     mostrarMic();
     toast('O microfone foi desligado pelo sistema. Clique em Microfone para ligar de novo.', 'warn', 6000);
   };
-  const renovar = () => fetch('/config').then((r) => r.json()).then((c) => rtc.trocarIce(c.iceServers)).catch(() => {});
+  const renovar = () => pegarConfig().then((c) => rtc.trocarIce(c.iceServers)).catch(() => {});
   setInterval(renovar, 6 * 3600_000);
   if (!rtc.temTurn) {
     const semTurn = setInterval(() => { if (rtc.temTurn) clearInterval(semTurn); else renovar(); }, 10_000);
@@ -230,30 +245,50 @@ function entrar() {
       return location.reload();
     }
     if (!data?.selfId) return;
+    // o servidor mudou de versão enquanto a conexão estava fora (deploy): o código novo combina com ele
+    if (st.versao && data.versao && data.versao !== st.versao) return location.reload();
+    st.versao ??= data.versao || null;
     st.entrou = true;
     st.selfId = data.selfId;
     rtc.selfId = data.selfId;
     st.main = data.main;
+    $('#reconnecting').hidden = true;
     if (data.passe) {
       passe = data.passe;
       guardarPasse();
     }
     aplicarSala(data.sala);
     for (const u of data.users) addUser(u);
-    aplicarLan(data.lan);
+    // as conexões antes do primeiro pedido de imagem (aplicarLan → atualizar): sem elas o pedido não sai
     for (const u of data.users) rtc.getPeer(u.id);
+    aplicarLan(data.lan);
+    if (mic.ligado) socket.emit('mic', true); // reconexão com o microfone aberto
     atualizar();
   });
 }
 
+// Reconexão: os ids mudaram e as conexões de vídeo eram com os antigos. Entra de novo sem recarregar a página: a
+// tela cheia fica e, quando a tela do jogo voltar, a pessoa volta ao jogo (tentarVoltar).
+function reentrar() {
+  if (jogandoLa) caiuDoJogo();
+  for (const u of st.users.values()) u.audioEl?.remove();
+  for (const id of [...rtc.peers.keys()]) rtc.removePeer(id);
+  st.users.clear();
+  st.interesse.clear();
+  semDono.clear();
+  Object.assign(st, { entrou: false, selfId: null, main: null, controlando: false });
+  atualizar();
+  entrar();
+}
+
 function ligarSocket() {
-  socket.on('connect', () => {
+  const aoConectar = () => {
     diagJogo.marcar('conectou ao servidor', { id: socket.id, transporte: socket.io?.engine?.transport?.name ?? null });
-    // reconexão: os ids mudaram e as conexões de vídeo eram com os antigos — começa de novo (o "Voltar ao
-    // jogo" aparece quando a tela voltar)
-    if (st.entrou) return location.reload();
-    entrar();
-  });
+    if (st.entrou) reentrar();
+    else entrar();
+  };
+  socket.on('connect', aoConectar);
+  if (socket.connected) aoConectar(); // conectou enquanto a entrada era conferida
   socket.on('disconnect', (motivo) => {
     diagJogo.marcar('caiu a conexão com o servidor', { motivo: String(motivo || '') });
     lembrarJogo();
@@ -328,13 +363,13 @@ function addUser(u) {
 }
 
 // ------------------------------------------------------------------ voltar ao jogo depois de uma queda
+// (de quem é e qual máquina ficam guardados ao entrar: na queda, a tela já não está na lista)
 function lembrarJogo() {
-  if (!jogandoLa) return;
-  const t = acharTela(jogandoLa.key);
-  if (!t) return;
-  try { sessionStorage.setItem(VOLTAR_CHAVE, JSON.stringify({ dono: t.u.name, maquina: maquinaDaTela(t.sh), em: Date.now() })); } catch { /* sem armazenamento */ }
+  if (!jogandoLa?.dono) return;
+  try { sessionStorage.setItem(VOLTAR_CHAVE, JSON.stringify({ dono: jogandoLa.dono, maquina: jogandoLa.maquina, em: Date.now() })); } catch { /* sem armazenamento */ }
 }
 function esquecerJogo() {
+  queda = null;
   try { sessionStorage.removeItem(VOLTAR_CHAVE); } catch { /* sem armazenamento */ }
 }
 function voltaAoJogo() {
@@ -346,6 +381,58 @@ function voltaAoJogo() {
   }
 }
 addEventListener('pagehide', lembrarJogo);
+
+// A tela do jogo saiu do ar com a página aberta (o PS5 saiu e entrou, a conexão piscou): a tela cheia espera por ela
+// e, voltando, o modo jogo liga sozinho. Só com a página na frente e no horário da pessoa. Esc desiste.
+let queda = null; // { dono, maquina, em }
+let caindo = false;
+function caiuDoJogo() {
+  lembrarJogo();
+  queda = { dono: jogandoLa.dono, maquina: jogandoLa.maquina, em: Date.now() };
+  caindo = true;
+  try { controle.desligarJogo(); } finally { caindo = false; }
+}
+function desistirDeVoltar() {
+  if (!queda) return;
+  queda = null; // o botão "Voltar ao jogo" continua valendo (voltaAoJogo)
+  jogoNoPc(false);
+  atualizarBarra();
+}
+function tentarVoltar() {
+  if (!queda || jogandoLa) return;
+  if (Date.now() - queda.em > QUEDA_MS) return desistirDeVoltar();
+  const a = st.alvo;
+  if (!a || a.u.name !== queda.dono || maquinaDaTela(a.sh) !== queda.maquina || !jogavel() || !vivo(a.u.streams.get(a.sh.streamId))) return;
+  if (document.hidden || !document.hasFocus() || !podeJogarLan(queda.maquina)) return;
+  const fora = Math.round((Date.now() - queda.em) / 100) / 10;
+  queda = null;
+  entrarNoJogo(!!document.fullscreenElement);
+  diagJogo.evento('a tela voltou: de volta ao jogo sozinho', { foraS: fora, telaCheia: !!document.fullscreenElement });
+  toast('A tela voltou: você está no jogo de novo.', 'success', 4000);
+}
+setInterval(tentarVoltar, 1000);
+
+// A tela deste PC não apaga com o jogo ligado: um controle de videogame não conta como uso para o Windows
+let trava = null;
+let pedindoTrava = false;
+async function acertarTrava() {
+  if (!controle.jogo) {
+    trava?.release().catch(() => {});
+    trava = null;
+    return;
+  }
+  if (trava || pedindoTrava || document.visibilityState !== 'visible' || !navigator.wakeLock) return;
+  pedindoTrava = true;
+  try {
+    const l = await navigator.wakeLock.request('screen');
+    l.addEventListener('release', () => { if (trava === l) trava = null; });
+    if (controle.jogo) trava = l;
+    else l.release().catch(() => {});
+  } catch { /* sem trava */ } finally {
+    pedindoTrava = false;
+  }
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') acertarTrava(); });
 
 // ------------------------------------------------------------------ som e voz
 const mic = { pronto: false, ligado: false };
@@ -382,9 +469,15 @@ function volumes() {
 }
 // o navegador só deixa tocar com som depois de um gesto
 function tocarTudo() {
+  // (o Esc não conta como gesto: tirar o mudo com ele pausaria o vídeo)
+  if (navigator.userActivation && !navigator.userActivation.hasBeenActive) return;
   if (video.muted && video.srcObject) {
     video.muted = false;
-    video.play().catch(() => {});
+    video.play().catch((err) => {
+      if (err?.name !== 'NotAllowedError') return;
+      video.muted = true;
+      video.play().catch(() => {});
+    });
   }
   for (const u of st.users.values()) if (u.audioEl?.srcObject && u.audioEl.paused) u.audioEl.play().catch(() => {});
 }
@@ -479,10 +572,11 @@ function mostrarVideo() {
     aplicarBuffer();
   } else if (!ok && video.srcObject) video.srcObject = null;
   $('#jg-vazio').hidden = ok;
-  if (!ok && st.entrou) {
-    $('#jg-vazio b').textContent = a ? 'Carregando a imagem…' : 'Nada no telão agora';
-    $('#jg-vazio span').textContent = a ? `${a.u.name} · ${a.sh.titulo || NOME_MAQ[maquinaDaTela(a.sh)]}` : 'Quando o PC ou o PS5 entrar na sala, a imagem aparece aqui.';
-  }
+  if (ok) return void tentarVoltar();
+  $('#jg-vazio b').textContent = !st.entrou ? 'Conectando à sala…' : a ? 'Carregando a imagem…' : queda ? 'A tela do jogo saiu do ar' : 'Nada no telão agora';
+  $('#jg-vazio span').textContent = !st.entrou ? 'Só um instante.'
+    : a ? `${a.u.name} · ${a.sh.titulo || NOME_MAQ[maquinaDaTela(a.sh)]}`
+      : queda ? 'Se ela voltar, você volta ao jogo sozinho. Esc desiste.' : 'Quando o PC ou o PS5 entrar na sala, a imagem aparece aqui.';
 }
 
 // a imagem que não sobe: pede de novo e depois refaz a conexão com quem compartilha
@@ -510,7 +604,7 @@ setInterval(() => {
 function enviarInteresse(forcar = false) {
   if (!rtc || !st.selfId) return;
   for (const u of st.users.values()) {
-    if (!u.shares.size && !u.cam) continue;
+    if ((!u.shares.size && !u.cam) || !rtc.peers.has(u.id)) continue;
     const mapa = {};
     for (const sh of u.shares.values()) mapa[sh.key] = sh.key === st.alvo?.sh.key ? 'max' : 'off';
     if (u.cam) mapa.cam = 'off';
@@ -524,7 +618,8 @@ let ultimoCompleto = 0;
 let interesseDesde = 0; // ao entrar, o canal ainda está abrindo e o 1º pedido se perde: repete mais nos 20 s
 setInterval(() => {
   const agora = Date.now();
-  if (st.entrou) interesseDesde ||= agora;
+  if (!st.entrou) return void (interesseDesde = 0);
+  interesseDesde ||= agora;
   const completo = agora - ultimoCompleto > (agora - interesseDesde < 20_000 ? 1500 : 8000);
   if (completo) ultimoCompleto = agora;
   enviarInteresse(completo);
@@ -534,9 +629,8 @@ function atualizar() {
   const antes = st.alvo?.sh.key;
   // a tela em que se jogava saiu do ar ou perdeu o controle
   if (jogandoLa && !acharTela(jogandoLa.key)?.sh.controle) {
-    lembrarJogo();
-    controle.desligarJogo();
-    toast('A tela do jogo saiu do ar ou o controle foi travado.', 'warn', 6000);
+    caiuDoJogo();
+    toast('A tela do jogo saiu do ar ou o controle foi travado. Se voltar, você volta ao jogo sozinho.', 'warn', 6000);
   }
   st.alvo = escolherAlvo();
   if (antes !== st.alvo?.sh.key) {
@@ -963,12 +1057,13 @@ function jogoLa(v, key) {
   }
   if (!v) return void mostrarSelo();
   esquecerJogo();
-  jogandoLa = { key, video: v, cursorLivre: false };
+  const t = acharTela(key);
+  jogandoLa = { key, video: v, cursorLivre: false, dono: t?.u.name ?? null, maquina: maquinaDaTela(t?.sh) };
   const op = (k) => opcoesJogo.get(k);
   diagJogo.comecar('joga', {
     gl: placaLida,
     video: v,
-    extra: { pagina: 'jogar', receita: 'tv', dualsense: ajustes.dualsense, nitidez: ajustes.nitidez, canal: CANAL_CONFIAVEL ? 'confiável' : 'com prazo', janelaDoJogo: acharTela(key)?.sh.titulo ?? null, toque: false, opcoes: { liso: op('liso'), menuAuto: op('menuAuto'), giro: false, rapido: op('rapido'), turbo: op('turbo'), turboLiso: op('turboLiso'), preset: op('preset') } },
+    extra: { pagina: 'jogar', receita: 'tv', dualsense: ajustes.dualsense, nitidez: ajustes.nitidez, canal: CANAL_CONFIAVEL ? 'confiável' : 'com prazo', janelaDoJogo: t?.sh.titulo ?? null, toque: false, opcoes: { liso: op('liso'), menuAuto: op('menuAuto'), giro: false, rapido: op('rapido'), turbo: op('turbo'), turboLiso: op('turboLiso'), preset: op('preset') } },
   });
   aplicarBuffer();
   mostrarSelo();
@@ -1059,10 +1154,18 @@ class PadRapido extends PadVirtual {
 }
 const padVirtual = new PadRapido({ controle });
 // A leitura do ControleFisico é por quadro da tela (13 ms a 75 Hz): aqui, a cada 8 ms, como na TV
+let segurandoSair = 0;
 setInterval(() => {
-  if (!padVirtual.key || touchpad.ativo || !LAYOUTS[layoutDa(st.alvo?.sh)]?.virtual) return;
+  if (!padVirtual.key || touchpad.ativo) return void (segurandoSair = 0);
   const g = fisico.pad();
-  if (g) padVirtual.fisico(g);
+  if (!g) return void (segurandoSair = 0);
+  if (LAYOUTS[layoutDa(st.alvo?.sh)]?.virtual) padVirtual.fisico(g);
+  // Create + Options (View + Menu) segurados: sai do modo jogo, para quem joga longe do teclado
+  if (!g.buttons[8]?.pressed || !g.buttons[9]?.pressed) return void (segurandoSair = 0);
+  segurandoSair ||= performance.now();
+  if (performance.now() - segurandoSair < SAIR_SEGURANDO_MS) return;
+  segurandoSair = 0;
+  sairDoJogo();
 }, ENVIO_PAD_MS);
 const entradaDeAgora = () => (touchpad.ligado && touchpad.ativo ? 'dualsense' : fisico.pad() ? 'gamepad' : 'teclado');
 let layoutLegenda = null;
@@ -1180,12 +1283,13 @@ controle.onJogo = (v, key) => {
     tutorial.fechar(false);
     mapaPainel.fechar();
     padVirtual.desligar(); // depois do controle: o último estado é tudo solto
-    if (document.body.classList.contains('jogo-pc')) jogoNoPc(false);
+    if (!caindo && document.body.classList.contains('jogo-pc')) jogoNoPc(false); // caindo: a tela cheia espera a volta
   }
   jogoLa(v || null, key);
   // controle.jogo ainda vale aqui ao desligar (onJogo vem antes): a barra se acerta em seguida
   setTimeout(() => {
     atualizar();
+    acertarTrava();
     if (!controle.jogo) document.activeElement?.blur?.();
   }, 0);
 };
@@ -1223,6 +1327,7 @@ async function jogoNoPc(ligar) {
 }
 document.addEventListener('fullscreenchange', () => {
   document.body.classList.toggle('jogo-pc', !!document.fullscreenElement && !!controle.jogo);
+  if (!document.fullscreenElement && queda) desistirDeVoltar(); // saiu da tela cheia esperando: só pelo botão
 });
 
 // o clique no "Modo jogo" (a tela cheia e o mouse preso só entram com um)
@@ -1235,13 +1340,23 @@ function alternarJogo() {
   }
   if (!jogavel() || !video.srcObject) return void toast('A imagem ainda não chegou.', 'warn');
   if (!deixarJogar()) return;
-  if (!controle.tem(video)) controle.adicionar(video, st.alvo.sh.key);
-  controle.modoJogo(video, true);
-  jogoNoPc(true);
+  entrarNoJogo(true);
   if (ehPs5(st.alvo.sh) && entradaDeAgora() === 'teclado') {
     toast('Vai jogar no controle? Aperte um botão dele. Se não responder, desligue e ligue o controle (a sala pode ter deixado ele no modo direto).', 'info', 10000);
   }
-  toast('Modo jogo ligado. Esc duas vezes (ou F8) desliga; segure Esc para sair da tela cheia.', 'info', 7000);
+  toast(`Modo jogo ligado. Esc duas vezes (ou F8) desliga${fisico.pad() ? '; no controle, segure Create + Options' : ''}; segure Esc para sair da tela cheia.`, 'info', 7000);
+}
+// cheia: com a tela cheia e o teclado travado (só com um gesto, ou se a página já está em tela cheia)
+function entrarNoJogo(cheia) {
+  if (!controle.tem(video)) controle.adicionar(video, st.alvo.sh.key);
+  controle.modoJogo(video, true);
+  if (cheia) jogoNoPc(true);
+}
+function sairDoJogo() {
+  esquecerJogo();
+  controle.desligarJogo();
+  jogoNoPc(false);
+  toast('Modo jogo desligado.', 'info', 3000);
 }
 for (const id of ['#focus-jogo', '#jg-jogar']) {
   $(id).addEventListener('click', (e) => {
@@ -1268,12 +1383,9 @@ addEventListener('keydown', (e) => {
   if (avisoSite.aberto) avisoSite.esc();
   else if (!$('#lan-modal').hidden) fecharAluguel();
   else if (!$('#jogo-op-pop').hidden) $('#jogo-op-pop').hidden = true;
-  else if (controle.jogo) {
-    esquecerJogo();
-    controle.desligarJogo();
-    jogoNoPc(false);
-    toast('Modo jogo desligado.', 'info', 3000);
-  } else if (st.controlando) {
+  else if (controle.jogo) sairDoJogo();
+  else if (queda) desistirDeVoltar();
+  else if (st.controlando) {
     st.controlando = false;
     atualizarBarra();
   }

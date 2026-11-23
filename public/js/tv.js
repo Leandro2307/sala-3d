@@ -21,8 +21,10 @@
 // TV decodifica) e o PC só repassa. A TV sem WebCodecs, ou com a rede apertada, volta ao vídeo normal.
 // A cada 2 s a TV mede a imagem (selo com Info ou um botão colorido do controle remoto) e, ao sair do
 // jogo, manda o relatório ao servidor (scripts/relatorios.js baixa: "joga", nome "conta (TV)").
+//
+// Quedas: a conexão com o servidor que pisca entra de novo sem recarregar (reentrar; só um deploy recarrega),
+// e a tela do jogo que saiu e voltou põe a TV no jogo sozinha (tentarVoltar, até 3 min).
 import { RTC } from './rtc.js';
-import { TurboRecebe } from './turbo.js';
 import { contarCulpa, culpaDe, linhaDaCulpa, Sonda } from './culpa.js';
 
 const $ = (s) => document.querySelector(s);
@@ -36,6 +38,10 @@ const ENVIO_MS = 8;
 const INTERESSE_MS = 1000;
 const SAIR_SEGURANDO_MS = 2000; // Select + Start seguidos por isso: sai do modo jogo
 const ZONA_MORTA = 0.08;
+const VOLTAR_CHAVE = 'sala3d-tv-voltar';
+const VOLTAR_MS = 3 * 60_000;
+const VOLTAR_MAX = 3; // a página recarregou tantas vezes seguidas, sem 1 min de jogo entre elas: só pelo botão
+const TOQUE_ABERTO = 'sala3d-tv-toque-aberto';
 
 window.__tvOk = true;
 if (CONTROLE) document.body.classList.add('controle');
@@ -44,7 +50,14 @@ const lerJSON = (k, padrao) => {
   try { return JSON.parse(localStorage.getItem(k) || 'null') ?? padrao; } catch { return padrao; }
 };
 const conta = lerJSON(LAN_CHAVE, null); // { nome, token } (o mesmo da página /lan)
-const passe = lerJSON('sala3d-passes', {})[SALA] || null;
+let passe = lerJSON('sala3d-passes', {})[SALA] || null;
+function guardarPasse(p) {
+  passe = p;
+  const passes = lerJSON('sala3d-passes', {});
+  if (p) passes[SALA] = p;
+  else delete passes[SALA];
+  try { localStorage.setItem('sala3d-passes', JSON.stringify(passes)); } catch { /* sem storage */ }
+}
 
 const st = {
   selfId: null,
@@ -53,8 +66,14 @@ const st = {
   lan: null,
   lanDif: 0,
   alvo: null, // { u, sh }: a tela que a TV mostra (e em que joga)
+  escolhida: null, // a tela escolhida no botão "Ver o PS5/PC" (chave)
   jogando: null, // a chave da tela em que está no modo jogo (só a TV)
+  jogo: null, // { dono, maquina, voltas, desde } do jogo de agora, para voltar a ele depois de uma queda
+  telaDaTv: null, // só no celular: a tela em que a TV desta conta está jogando (null: fora do jogo)
+  chamouTv: 0, // só no celular: quando pediu à TV para entrar no jogo
+  tvRespondeu: 0, // e quando ela respondeu
   entrou: false,
+  versao: null, // a do servidor na primeira entrada
   interesse: new Map(), // id -> o último mapa enviado (JSON)
 };
 let socket = null;
@@ -72,16 +91,28 @@ function aviso(texto, tipo = 'info', ms = 5000) {
 }
 
 // ------------------------------------------------------------------ entrar
+const pegarConfig = () => fetch('/config').then((r) => r.json());
 async function iniciar() {
-  let config = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
-  try { config = await (await fetch('/config')).json(); } catch { /* usa o padrão */ }
+  // a conexão com o servidor já vai abrindo enquanto o /config vem (uma ida e volta a menos)
+  const config = pegarConfig().catch(() => null);
   socket = window.io({ transports: ['websocket', 'polling'], tryAllTransports: true, reconnectionDelay: 1500, reconnectionDelayMax: 10000 });
-  rtc = new RTC(socket, { iceServers: config.iceServers, onTrack: receberTrilha });
+  const ice = (await config)?.iceServers;
+  rtc = new RTC(socket, {
+    iceServers: Array.isArray(ice) && ice.length ? ice : [{ urls: 'stun:stun.l.google.com:19302' }],
+    onTrack: receberTrilha,
+    onFalha: (id, temTurn) => {
+      if (CONTROLE || id !== st.alvo?.u.id) return;
+      aviso(temTurn ? `Não deu para conectar com ${st.alvo.u.name}. Tentando de novo…` : `A rede daqui bloqueia a conexão com ${st.alvo.u.name}.`, 'erro', 10_000);
+    },
+  });
   rtc.onControle = receberDireto;
   rtc.semHevc = true; // TV: sempre H.264 (rtc.soH264)
-  setInterval(() => {
-    fetch('/config').then((r) => r.json()).then((c) => rtc.trocarIce(c.iceServers)).catch(() => {});
-  }, 6 * 3600_000);
+  const renovar = () => pegarConfig().then((c) => rtc.trocarIce(c.iceServers)).catch(() => {});
+  setInterval(renovar, 6 * 3600_000);
+  // entrou sem o TURN (o /config falhou, o servidor acordando): pede de novo até vir, como a sala
+  if (!rtc.temTurn) {
+    const semTurn = setInterval(() => { if (rtc.temTurn) clearInterval(semTurn); else renovar(); }, 10_000);
+  }
   ligarSocket();
 }
 
@@ -106,6 +137,9 @@ function entrar() {
       return;
     }
     if (!data?.selfId) return;
+    // o servidor mudou de versão enquanto a conexão estava fora (deploy): o código novo combina com ele
+    if (st.versao && data.versao && data.versao !== st.versao) return location.reload();
+    st.versao ??= data.versao || null;
     entrou(data);
   });
 }
@@ -115,27 +149,45 @@ function entrou(data) {
   st.selfId = data.selfId;
   rtc.selfId = data.selfId;
   st.main = data.main;
+  if (data.passe) guardarPasse(data.passe);
   for (const u of data.users) addUser(u);
-  aplicarLan(data.lan);
+  // as conexões antes do primeiro pedido de imagem (aplicarLan → atualizar): sem elas o pedido não sai, e a
+  // imagem ficava em 270p até o próximo pedido completo, 8 s depois (numa TV lenta, 10 s para chegar a 1080p)
   for (const u of data.users) rtc.getPeer(u.id);
+  aplicarLan(data.lan);
   $('#marca').classList.add('on');
   $('#conta-chip').innerHTML = conta ? `Conta <b>${esc(conta.nome)}</b>` : 'Sem conta';
   $('#btn-sair').hidden = !conta;
   $('#cel-conta').textContent = conta ? `Conta ${conta.nome} · sala ${SALA}` : 'Entre na sua conta pela página de aluguel primeiro.';
   if (!CONTROLE) pedirCodigo();
+  else if (toque.ativo || (conta && gamepad())) chamarTv(true); // a conexão voltou com o controle na mão
   atualizar();
 }
 
+// Reconexão: os ids mudaram e as conexões de vídeo eram com os antigos. Entra de novo sem recarregar a página: a
+// tela cheia fica, e o som também (recarregada sem um gesto, a TV podia voltar muda).
+function reentrar() {
+  if (st.jogando) caiuDoJogo('a conexão com a sala caiu');
+  for (const id of [...rtc.peers.keys()]) rtc.removePeer(id);
+  st.users.clear();
+  st.interesse.clear();
+  semDono.clear();
+  Object.assign(st, { entrou: false, selfId: null, main: null, alvo: null, telaDaTv: null });
+  mostrarVideo();
+  entrar();
+}
+
 function ligarSocket() {
-  socket.on('connect', () => {
-    // reconexão: começa de novo (as conexões de vídeo eram com os ids antigos)
-    if (st.entrou) return location.reload();
-    entrar();
-  });
+  const aoConectar = () => (st.entrou ? reentrar() : entrar());
+  socket.on('connect', aoConectar);
+  if (socket.connected) aoConectar(); // conectou antes de o /config chegar
   socket.on('disconnect', () => {
     $('#marca').classList.remove('on');
+    lembrarJogo();
     if (st.jogando) aviso('A conexão caiu. Voltando…', 'alerta', 8000);
   });
+  // o dono pôs ou trocou a senha da sala: o passe novo, para reconectar
+  socket.on('passe', guardarPasse);
   socket.on('user-joined', (u) => {
     addUser(u);
     rtc.getPeer(u.id);
@@ -150,8 +202,11 @@ function ligarSocket() {
   socket.on('share-update', ({ id, key, slot, streamId, gone, controle, titulo, superficie }) => {
     const u = st.users.get(id);
     if (!u || typeof key !== 'string') return;
-    if (gone) u.shares.delete(key);
-    else {
+    if (gone) {
+      const sh = u.shares.get(key);
+      if (sh) u.streams.delete(sh.streamId);
+      u.shares.delete(key);
+    } else {
       const sh = u.shares.get(key) || { key, streamId };
       Object.assign(sh, { slot: slot ?? null, controle: !!controle, titulo: titulo ?? null, superficie: superficie ?? sh.superficie ?? null });
       if (streamId) sh.streamId = streamId;
@@ -165,10 +220,20 @@ function ligarSocket() {
   });
   socket.on('lan', aplicarLan);
   socket.on('controle-volta', ({ key, ev }) => receberVolta(key, ev));
-  // o celular desta conta virou o controle (ou saiu do jogo): a TV entra no modo jogo sozinha
+  // o celular desta conta virou o controle (ou saiu do jogo): a TV entra no modo jogo sozinha e responde em que
+  // tela está (os botões dele vão para ela)
   socket.on('tv-modo', (m) => {
     if (CONTROLE) return;
-    if (m?.ligar) { if (!st.jogando) ligarJogo(); } else desligarJogo();
+    if (!m?.ligar) {
+      esquecerJogo();
+      desligarJogo();
+    } else if (st.jogando || !ligarJogo()) avisarTela();
+  });
+  socket.on('tv-tela', (m) => {
+    if (!CONTROLE) return;
+    st.telaDaTv = typeof m?.tela === 'string' ? m.tela : null;
+    st.tvRespondeu = Date.now();
+    atualizar();
   });
   socket.on('tv-conta', (c) => {
     if (!c?.token) return;
@@ -207,6 +272,8 @@ function podeJogar(sh) {
   return !st.lan[m]?.conta && !st.lan.semTeste?.includes(st.selfId);
 }
 
+const hora = (ms) => new Date(ms).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+let eraMinha = null; // as máquinas da minha vez (null: ainda não sei, a primeira notícia não avisa)
 function aplicarLan(e) {
   st.lan = e?.ligada ? e : null;
   if (typeof e?.agora === 'number') st.lanDif = e.agora - Date.now();
@@ -214,11 +281,40 @@ function aplicarLan(e) {
   if (st.jogando) {
     const sh = st.alvo?.sh;
     if (!sh || !podeJogar(sh)) {
+      esquecerJogo();
       desligarJogo();
       aviso('Seu tempo acabou. Para continuar, alugue mais pelo celular (QR code).', 'alerta', 9000);
     }
   }
+  const agora = new Set(minhaVez());
+  for (const m of agora) {
+    if (!eraMinha || eraMinha.has(m)) continue;
+    st.escolhida = null; // começou a minha vez: a TV vai para a máquina alugada
+    const v = st.lan[m];
+    if (!CONTROLE) aviso(v.preparando ? `Seu horário no ${NOME_MAQ[m]} começa às ${hora(v.inicio)}.` : `Seu horário no ${NOME_MAQ[m]} começou: você joga até ${hora(v.fim)}. Bom jogo!`, 'info', 8000);
+  }
+  eraMinha = agora;
   atualizar();
+}
+
+// Jogando, a barra de cima some: o fim do horário avisa por cima da imagem (5 min e 1 min antes; no teste grátis,
+// 30 s antes) e a contagem fica no canto nos últimos 5 minutos
+const avisouFim = new Set();
+function vigiarTempo() {
+  const el = $('#tempo-jogo');
+  const m = st.jogando && st.lan && st.alvo ? maquinaDaTela(st.alvo.sh) : null;
+  const paga = m && idsDaVez(m).includes(st.selfId) && !st.lan[m].preparando;
+  const fim = m ? (paga ? st.lan[m].fim : st.lan.teste?.[st.selfId]) : null;
+  const s = fim ? Math.round((fim - Date.now() - st.lanDif) / 1000) : 0;
+  el.hidden = !(fim && s > 0 && s <= 300);
+  if (el.hidden) return;
+  el.textContent = `${paga ? `Seu horário no ${NOME_MAQ[m]}` : 'Teste grátis'} · ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  const limite = (paga ? [60, 300] : [30]).find((x) => s <= x);
+  const chave = `${m}|${fim}|${limite}`;
+  if (!limite || avisouFim.has(chave)) return;
+  avisouFim.add(chave);
+  aviso(paga ? `Falta${limite === 60 ? ' 1 minuto' : 'm 5 minutos'} do seu horário no ${NOME_MAQ[m]}. Para continuar, alugue mais pelo celular.`
+    : 'Faltam 30 segundos do teste grátis. Para continuar, alugue pelo celular.', 'alerta', 8000);
 }
 
 function atualizarTempo() {
@@ -238,8 +334,14 @@ function atualizarTempo() {
   el.hidden = !texto;
   el.innerHTML = texto;
   $('#cel-vez').innerHTML = texto || (st.lan ? 'Você não tem horário agora. Alugue na página de aluguel.' : 'Sala sem aluguel: pode jogar.');
+  vigiarTempo();
 }
-setInterval(atualizarTempo, 1000);
+setInterval(() => {
+  atualizarTempo();
+  tentarVoltar();
+  // nada pausa o telão de propósito: parado (o sistema da TV, o autoplay), volta a tocar
+  if (!CONTROLE && video.srcObject && video.paused && document.visibilityState === 'visible') tocar();
+}, 1000);
 
 // o QR some no horário pago de quem está na TV (aí ninguém troca a conta dela)
 function atualizarQr() {
@@ -249,19 +351,37 @@ function atualizarQr() {
 }
 
 // ------------------------------------------------------------------ a tela do telão
-// Qual tela mostrar: na minha vez, a da máquina que aluguei (PS5 ou PC); fora dela, a que está no
-// telão da sala; sem telão, a primeira com o controle liberado.
-function escolherAlvo() {
+function telasNoAr() {
   const telas = [];
   for (const u of st.users.values()) {
     if (u.id === st.selfId) continue;
     for (const sh of u.shares.values()) telas.push({ u, sh });
   }
+  return telas;
+}
+// Qual tela mostrar: jogando, a do jogo (trocar o telão da sala não tira ninguém do jogo); no celular-controle, a
+// que a TV está jogando; a escolhida à mão; a do jogo que caiu há pouco; na minha vez, a da máquina que aluguei
+// (PS5 ou PC); fora dela, a que está no telão da sala; sem telão, a primeira com o controle liberado.
+function escolherAlvo() {
+  const telas = telasNoAr();
+  const doJogo = telas.find((x) => x.sh.key === (CONTROLE ? st.telaDaTv : st.jogando) && x.sh.controle);
+  if (doJogo) return doJogo;
+  const escolhida = telas.find((x) => x.sh.key === st.escolhida);
+  if (escolhida) return escolhida;
+  const v = CONTROLE ? null : voltaAoJogo();
+  const antes = v && telas.find((x) => x.u.name === v.dono && maquinaDaTela(x.sh) === v.maquina);
+  if (antes) return antes;
   for (const m of minhaVez()) {
     const t = telas.find((x) => maquinaDaTela(x.sh) === m && x.sh.controle) || telas.find((x) => maquinaDaTela(x.sh) === m);
     if (t) return t;
   }
   return telas.find((x) => x.sh.key === st.main) || telas.find((x) => x.sh.controle) || telas[0] || null;
+}
+// a outra máquina no ar (o PS5, se a TV está no PC), para o botão de trocar
+function outraTela() {
+  const m = st.alvo && maquinaDaTela(st.alvo.sh);
+  const outras = m ? telasNoAr().filter((x) => maquinaDaTela(x.sh) !== m) : [];
+  return outras.find((x) => x.sh.controle) || outras[0] || null;
 }
 
 // a imagem pode chegar antes de a TV saber de quem é (o 'user-joined' atrasado): fica guardada
@@ -275,6 +395,7 @@ function receberTrilha(peerId, stream) {
   }
   u.streams.set(stream.id, stream);
   mostrarVideo();
+  tentarVoltar();
 }
 
 // "Carregando a imagem…" que não sai (2026-11-22: o PS5 entrou na sala depois de a TV abrir e a imagem
@@ -320,35 +441,42 @@ function mostrarVideo() {
   } else if (!ok && video.srcObject) video.srcObject = null;
   $('#vazio').hidden = ok;
   if (!ok) {
-    $('#vazio').querySelector('b').textContent = a ? 'Carregando a imagem…' : 'Nada no telão agora';
-    $('#vazio-txt').textContent = a ? `${a.u.name} · ${NOME_MAQ[maquinaDaTela(a.sh)]}` : 'Quando o PC ou o PS5 entrar na sala, a imagem aparece aqui.';
+    $('#vazio').querySelector('b').textContent = !st.entrou ? 'Conectando à sala…' : a ? 'Carregando a imagem…' : 'Nada no telão agora';
+    $('#vazio-txt').textContent = !st.entrou ? 'Só um instante.' : a ? `${a.u.name} · ${NOME_MAQ[maquinaDaTela(a.sh)]}` : 'Quando o PC ou o PS5 entrar na sala, a imagem aparece aqui.';
   }
 }
 
 // TV costuma deixar tocar com som; se não deixar, começa mudo e o OK liga
+let vezDeTocar = 0;
 function tocar() {
+  const vez = ++vezDeTocar;
   video.muted = false;
-  video.play().then(() => { $('#btn-som').hidden = true; }).catch(() => {
+  video.play().then(() => {
+    $('#btn-som').hidden = true;
+    if ($('#aviso').textContent.startsWith('Sem som')) $('#aviso').hidden = true;
+  }).catch((err) => {
+    if (vez !== vezDeTocar || err?.name !== 'NotAllowedError') return; // outra imagem entrou no lugar
     video.muted = true;
     video.play().catch(() => {});
     $('#btn-som').hidden = false;
   });
 }
+// Só depois de um gesto (tecla do controle remoto, toque): sem ele, tirar o mudo fazia o Chrome pausar o vídeo e a
+// imagem congelava. Um botão do controle de videogame e o pedido do celular não contam como gesto.
 function ligarSom() {
-  if (!video.muted) return;
-  video.muted = false;
-  video.play().catch(() => {});
-  $('#btn-som').hidden = true;
+  if (!video.muted || !video.srcObject) return;
+  if (navigator.userActivation && !navigator.userActivation.hasBeenActive) return;
+  tocar();
 }
 
-// Quanto cada um precisa mandar: a tela do alvo no máximo, o resto nada (na TV, nem a voz das
-// pessoas toca). O celular-controle não vê imagem nenhuma.
+// Quanto cada um precisa mandar: a tela do alvo no máximo (fora do jogo, o que esta TV aguenta: nivelAssistir), o
+// resto nada (na TV, nem a voz das pessoas toca). O celular-controle não vê imagem nenhuma.
 function enviarInteresse(forcar = false) {
   if (!rtc || !st.selfId) return;
   for (const u of st.users.values()) {
-    if (u.id === st.selfId || !u.shares.size) continue;
+    if (u.id === st.selfId || !u.shares.size || !rtc.peers.has(u.id)) continue;
     const mapa = {};
-    for (const sh of u.shares.values()) mapa[sh.key] = !CONTROLE && sh.key === st.alvo?.sh.key ? 'max' : 'off';
+    for (const sh of u.shares.values()) mapa[sh.key] = CONTROLE || sh.key !== st.alvo?.sh.key ? 'off' : st.jogando ? 'max' : nivelAssistir;
     const json = JSON.stringify(mapa);
     if (!forcar && st.interesse.get(u.id) === json) continue;
     st.interesse.set(u.id, json);
@@ -356,9 +484,12 @@ function enviarInteresse(forcar = false) {
   }
 }
 let ultimoCompleto = 0;
+let interesseDesde = 0; // ao entrar, um pedido pode se perder com a conexão nascendo: repete mais nos 20 s
 setInterval(() => {
   const agora = Date.now();
-  const completo = agora - ultimoCompleto > 8000;
+  if (!st.entrou) return void (interesseDesde = 0);
+  interesseDesde ||= agora;
+  const completo = agora - ultimoCompleto > (agora - interesseDesde < 20_000 ? 1500 : 8000);
   if (completo) ultimoCompleto = agora;
   enviarInteresse(completo);
 }, INTERESSE_MS);
@@ -366,15 +497,58 @@ setInterval(() => {
 function atualizar() {
   const antes = st.alvo?.sh.key;
   st.alvo = escolherAlvo();
-  // a tela em que estava jogando saiu do ar: sai do modo jogo
-  if (st.jogando && st.alvo?.sh.key !== st.jogando) desligarJogo(false);
+  // a tela em que estava jogando saiu do ar (ou travaram o controle): sai do modo jogo e volta sozinha se ela voltar
+  if (st.jogando && (st.alvo?.sh.key !== st.jogando || !st.alvo.sh.controle)) {
+    caiuDoJogo('a tela do jogo saiu do ar');
+    aviso('A tela do jogo saiu do ar. Se ela voltar, você volta ao jogo sozinho.', 'alerta', 8000);
+  }
   if (antes !== st.alvo?.sh.key) enviarInteresse(true);
   mostrarVideo();
   atualizarQr();
   atualizarTempo();
   atualizarBotao();
   atualizarCelular();
+  tentarVoltar();
 }
+
+// ------------------------------------------------------------------ voltar ao jogo depois de uma queda
+function lembrarJogo() {
+  if (!st.jogando || !st.jogo) return;
+  const { dono, maquina, voltas, desde } = st.jogo;
+  try { sessionStorage.setItem(VOLTAR_CHAVE, JSON.stringify({ dono, maquina, voltas: performance.now() - desde > 60_000 ? 0 : voltas, em: Date.now() })); } catch { /* sem storage */ }
+}
+function esquecerJogo() {
+  try { sessionStorage.removeItem(VOLTAR_CHAVE); } catch { /* sem storage */ }
+}
+function voltaAoJogo() {
+  try {
+    const v = JSON.parse(sessionStorage.getItem(VOLTAR_CHAVE) || 'null');
+    return v && Date.now() - v.em < VOLTAR_MS ? v : null;
+  } catch {
+    return null;
+  }
+}
+function caiuDoJogo(motivo) {
+  lembrarJogo();
+  desligarJogo(false, motivo);
+}
+// A tela em que se jogava voltou (o PS5 saiu e entrou, a conexão piscou, a página recarregou num deploy): a TV entra
+// no jogo de novo, sem ninguém apertar nada. Se é a página que recarrega no jogo (a TV que trava), não insiste: três
+// vezes seguidas sem 1 min de jogo, e só pelo botão.
+let jaJogou = false; // nesta página
+function tentarVoltar() {
+  if (CONTROLE || st.jogando || !st.entrou || !st.alvo) return;
+  const v = voltaAoJogo();
+  if (!v) return;
+  const voltas = (v.voltas || 0) + (jaJogou ? 0 : 1);
+  if (voltas > VOLTAR_MAX) return;
+  const { u, sh } = st.alvo;
+  if (u.name !== v.dono || maquinaDaTela(sh) !== v.maquina || !sh.controle || !podeJogar(sh) || !vivo(u.streams.get(sh.streamId))) return;
+  if (!ligarJogo({ voltas })) return;
+  evento('a tela voltou: de volta ao jogo sozinha', { foraS: Math.round((Date.now() - v.em) / 100) / 10 });
+  if (!video.muted) aviso('De volta ao jogo.', 'info', 4000); // muda, o aviso do som vale mais
+}
+addEventListener('pagehide', lembrarJogo);
 
 // ------------------------------------------------------------------ comandos para o jogo
 function mandar(key, ev) {
@@ -386,41 +560,66 @@ function mandar(key, ev) {
 // a chave em que os botões vão agora: na TV, a do modo jogo; no celular, a do alvo (se pode jogar)
 function chaveDoPad() {
   if (!CONTROLE) return st.jogando;
+  // a TV acabou de ser chamada: espera ela dizer em que tela está (sem resposta em 1,5 s, vale a do telão)
+  if (st.tvRespondeu < st.chamouTv && Date.now() - st.chamouTv < 1500) return null;
   const sh = st.alvo?.sh;
   return sh?.controle && podeJogar(sh) ? sh.key : null;
 }
+// conta ao celular-controle desta conta em que tela a TV está jogando (null: fora do jogo)
+function avisarTela() {
+  if (!CONTROLE && conta) socket?.emit('tv-tela', { tela: st.jogando });
+}
 
-function ligarJogo() {
+// voltas: quantas vezes seguidas a página recarregou no meio do jogo e a TV entrou sozinha (tentarVoltar; null: foi
+// a pessoa que entrou). Devolve se entrou.
+function ligarJogo({ voltas = null } = {}) {
   ligarSom();
   const a = st.alvo;
-  if (!a) return aviso('Nada no telão para jogar agora.', 'alerta');
-  if (!a.sh.controle) return aviso(`O controle do ${NOME_MAQ[maquinaDaTela(a.sh)]} não está liberado agora.`, 'alerta');
+  const nao = (texto, ms) => {
+    aviso(texto, 'alerta', ms);
+    return false;
+  };
+  if (!a) return nao('Nada no telão para jogar agora.');
+  if (!a.sh.controle) return nao(`O controle do ${NOME_MAQ[maquinaDaTela(a.sh)]} não está liberado agora.`);
   if (!podeJogar(a.sh)) {
-    return aviso(conta
+    return nao(conta
       ? `Você não tem horário no ${NOME_MAQ[maquinaDaTela(a.sh)]} agora. Alugue pelo celular: aponte a câmera para o QR code.`
-      : 'Para jogar, alugue pelo celular: aponte a câmera para o QR code.', 'alerta', 9000);
+      : 'Para jogar, alugue pelo celular: aponte a câmera para o QR code.', 9000);
   }
+  esquecerJogo();
+  jaJogou = true;
   st.jogando = a.sh.key;
+  st.jogo = { dono: a.u.name, maquina: maquinaDaTela(a.sh), voltas: voltas || 0, desde: performance.now() };
   document.body.classList.add('jogando');
   document.activeElement?.blur?.();
+  altura = alturaLembrada(); // antes do mandarModo: é ele que leva a altura
+  alturaEm = performance.now();
   mandarModo();
+  enviarInteresse();
+  avisarTela();
   enviado = null; // o estado do controle vai inteiro de novo
   comecarRelatorio(a);
   zerarFila();
-  altura = null;
-  alturaEm = performance.now();
   culpas = {};
+  decSeguidas = 0;
+  paradaSeguidas = 0;
   paradaRefeitas = 0;
   la = null;
   sonda.ligada = true;
+  if (altura) evento('esta TV já não deu conta de mais linhas: começa na altura que aguentou', { linhas: altura });
   if (video.srcObject) evento('buffer do vídeo normal', { feitos: rtc.baixaLatencia(video.srcObject, true, BUFFER_MS) });
-  if (TURBO_NA_TV && !turboFalhou) ligarForma(proximaForma(-1));
+  if (turboPronto && !turboFalhou) turboPronto.then(() => ligarForma(proximaForma(-1)));
   mostrarSelo(10_000);
   const dica = $('#dica-jogo');
   dica.classList.remove('some');
   setTimeout(() => dica.classList.add('some'), 5000);
+  if (video.muted && video.srcObject) aviso('Sem som ainda: aperte OK no controle remoto da TV.', 'info', 6000);
   try { document.documentElement.requestFullscreen?.().catch(() => {}); } catch { /* TV sem tela cheia */ }
-  history.pushState({ jogo: true }, ''); // o Voltar do controle remoto sai do jogo, não do site
+  // o Voltar do controle remoto sai do jogo, não do site. Um passo só: o do jogo anterior, se não foi gasto, serve
+  if (!history.state?.jogo) history.pushState({ jogo: true }, '');
+  acertarTrava();
+  prepararTremor();
+  return true;
 }
 
 // "Menos atraso" (o mesmo do site, rtc.rapidoJogo lá no PC): a tela vem em 720p fixo com no máximo
@@ -432,6 +631,21 @@ function ligarJogo() {
 const ALTURAS_TV = [576, 432];
 let altura = null;
 let alturaEm = 0;
+// A altura em que esta TV parou fica guardada por uns dias: o próximo jogo já começa nela, sem passar de novo pelos
+// segundos de imagem travando até descer. O botão colorido esquece. Fora do jogo, a TV assim assiste em 540p.
+const ALTURA_CHAVE = 'sala3d-tv-altura';
+const ALTURA_VALE_MS = 3 * 86400_000;
+function alturaLembrada() {
+  const v = lerJSON(ALTURA_CHAVE, null);
+  return v && ALTURAS_TV.includes(v.h) && Date.now() - v.em < ALTURA_VALE_MS ? v.h : null;
+}
+function lembrarAltura(h) {
+  try {
+    if (h) localStorage.setItem(ALTURA_CHAVE, JSON.stringify({ h, em: Date.now() }));
+    else localStorage.removeItem(ALTURA_CHAVE);
+  } catch { /* sem armazenamento */ }
+}
+let nivelAssistir = { 576: 'medio', 432: 'baixo' }[alturaLembrada()] || 'max'; // fora do jogo: um nível do rtc.js (NIVEIS)
 const RAPIDO_CHAVE = 'sala3d-tv-rapido';
 let rapido = true;
 try { rapido = localStorage.getItem(RAPIDO_CHAVE) !== '0'; } catch { /* sem armazenamento */ }
@@ -442,14 +656,17 @@ function trocarRapido() {
   rapido = !rapido;
   altura = null; // escolheu à mão: recomeça do tamanho dela
   alturaEm = performance.now();
+  lembrarAltura(null);
+  nivelAssistir = 'max';
   try { localStorage.setItem(RAPIDO_CHAVE, rapido ? '1' : '0'); } catch { /* sem armazenamento */ }
   mandarModo();
+  enviarInteresse();
   evento(rapido ? 'menos atraso ligado (720p)' : 'menos atraso desligado (1080p)');
   aviso(rapido ? 'Menos atraso: 720p (botão colorido volta ao 1080p)' : 'Imagem em 1080p (botão colorido: menos atraso)', 'info', 4000);
   seloSempre = true;
 }
 
-function desligarJogo(avisarLa = true) {
+function desligarJogo(avisarLa = true, motivo = 'saiu do jogo') {
   const key = st.jogando;
   if (!key) return;
   if (avisarLa) {
@@ -457,13 +674,24 @@ function desligarJogo(avisarLa = true) {
     mandar(key, { t: 'modo', jogo: false });
   }
   st.jogando = null;
+  st.jogo = null;
   sonda.ligada = false;
   formaAtual = null;
-  turbo.desligar();
+  turbo?.desligar();
+  tremor?.pararTremor();
   document.body.classList.remove('jogando');
   if (video.srcObject) rtc.baixaLatencia(video.srcObject, false);
+  enviarInteresse();
+  avisarTela();
+  vigiarTempo();
+  acertarTrava();
   focar($('#btn-jogo'));
-  mandarRelatorio('saiu do jogo');
+  mandarRelatorio(motivo);
+}
+// a pessoa saiu (Voltar, Select + Start): não volta ao jogo sozinha
+function sairDoJogo() {
+  esquecerJogo();
+  desligarJogo();
 }
 
 // ------------------------------------------------------------------ Turbo e a medida da imagem
@@ -475,19 +703,25 @@ let turboFalhou = null; // o motivo: nesta página a TV fica no vídeo normal
 // WebCodecs em nenhuma forma (6 formas, 4 níveis de H.264 cada) e o processador dá 5–13 qps; o vídeo
 // normal, com a mesma placa, decodifica em ~0,1 ms a 50–60 qps. Enquanto tenta, o PC ainda segura o
 // vídeo normal no mínimo (o Turbo o substitui). ?turbo=testar liga as tentativas para uma TV nova.
-const PARAM_TURBO = new URLSearchParams(location.search).get('turbo');
-const TURBO_NA_TV = PARAM_TURBO === 'testar' || PARAM_TURBO === '1';
-const turbo = new TurboRecebe({
-  // canais confiáveis na TV (ver rtc.abrirTurbo): sem o prazo; o PC já pula quadros quando a fila do canal enche
-  abrir: (id) => rtc?.abrirTurbo(id, null),
-  abrirSom: (id) => rtc?.abrirTurboSom(id, true),
-  somDaTela: () => video,
-  volume: () => 1,
-  onEvento: (texto, dados) => evento(texto, dados),
-  onFalhou: (motivo) => formaFalhou(motivo),
-});
-// TV nunca pede H.265: a LG disse que decodificava e recusou nas três acelerações (2026-11-22 e 2026-11-23)
-turbo.semHevc = true;
+const PARAM_TURBO = params.get('turbo');
+const TURBO_NA_TV = !CONTROLE && (PARAM_TURBO === 'testar' || PARAM_TURBO === '1');
+let turbo = null; // só com ?turbo=: o turbo.js é o maior arquivo da página, e a TV não o usa de fábrica
+const turboPronto = TURBO_NA_TV && import('./turbo.js').then(({ TurboRecebe }) => {
+  turbo = new TurboRecebe({
+    // canais confiáveis na TV (ver rtc.abrirTurbo): sem o prazo; o PC já pula quadros quando a fila do canal enche
+    abrir: (id) => rtc?.abrirTurbo(id, null),
+    abrirSom: (id) => rtc?.abrirTurboSom(id, true),
+    somDaTela: () => video,
+    volume: () => 1,
+    onEvento: (texto, dados) => evento(texto, dados),
+    onFalhou: (motivo) => formaFalhou(motivo),
+  });
+  // TV nunca pede H.265: a LG disse que decodificava e recusou nas três acelerações (2026-11-22 e 2026-11-23)
+  turbo.semHevc = true;
+  // O PC leva 3–4 s para começar a mandar (mede a rede e escolhe repassar o PS5 ou codificar): com a desistência de
+  // fábrica (4 s), a TV largava o Turbo um instante antes do primeiro quadro (teste de 2026-11-23 00:34 e 00:44)
+  turbo.semImagemMs = 12_000;
+}).catch((err) => { turboFalhou = `não carregou: ${err?.message || err}`; });
 
 // ---- As formas do Turbo na TV, tentadas em ordem até uma mostrar imagem. Em um teste só sai a resposta
 // de como o Turbo roda nesta TV: a que funcionou fica guardada (FORMA_CHAVE) e é a primeira da próxima vez;
@@ -532,7 +766,7 @@ function proximaForma(depoisDe) {
   return ordem[depoisDe + 1] ? { forma: ordem[depoisDe + 1], indice: depoisDe + 1 } : null;
 }
 function ligarForma(prox) {
-  if (!prox || !st.jogando) return;
+  if (!prox || !st.jogando || !turbo) return;
   const { forma, indice } = prox;
   turbo.codecsForcados = forma.codecs;
   turbo.recodificar = forma.recodificar;
@@ -600,9 +834,6 @@ function vigiarForma(t) {
   registrarTentativa('funcionou', { qpsMedia: Math.round(media * 10) / 10, aceleracao: t.aceleracao, codecLa: t.codecLa, decAtrasou: t.decAtrasou, qps: t.qps, kbps: t.kbps, decMs: t.decMs, largura: t.largura, altura: t.altura, codec: t.codec });
   evento(`turbo: a forma ${formaOk} funciona nesta TV (guardada)`, { qps: t.qps, kbps: t.kbps, decMs: t.decMs, codec: t.codec, largura: t.largura, altura: t.altura });
 }
-// O PC leva 3–4 s para começar a mandar (mede a rede e escolhe repassar o PS5 ou codificar): com a desistência
-// de fábrica (4 s), a TV largava o Turbo um instante antes do primeiro quadro (teste de 2026-11-23 00:34 e 00:44)
-turbo.semImagemMs = 12_000;
 // os erros do Turbo (decodificador da TV) vão para o relatório: é com eles que dá para ver o que a TV recusa
 const errosTurbo = [];
 const warnOriginal = console.warn.bind(console);
@@ -667,7 +898,7 @@ async function medirVideo() {
   });
   if (!inb) return null;
   const antes = medidaAntes.get(inb.id);
-  const agora = { bytes: inb.bytesReceived, t: inb.timestamp, buf: inb.jitterBufferDelay || 0, saidos: inb.jitterBufferEmittedCount || 0, dec: inb.totalDecodeTime || 0, decodificados: inb.framesDecoded || 0 };
+  const agora = { bytes: inb.bytesReceived, t: inb.timestamp, buf: inb.jitterBufferDelay || 0, saidos: inb.jitterBufferEmittedCount || 0, dec: inb.totalDecodeTime || 0, decodificados: inb.framesDecoded || 0, descartados: inb.framesDropped ?? null };
   medidaAntes.set(inb.id, agora);
   const kbps = antes && inb.timestamp > antes.t ? Math.round(((inb.bytesReceived - antes.bytes) * 8) / (inb.timestamp - antes.t)) : null;
   // nos últimos 2 s (o jitterBufferDelay é a soma desde o começo: a média geral escondia o de agora)
@@ -683,6 +914,7 @@ async function medirVideo() {
     perdidos: inb.packetsLost ?? null,
     pacotes: inb.packetsReceived ?? null,
     descartados: inb.framesDropped ?? null,
+    jogados: antes?.descartados != null && agora.descartados != null ? Math.max(0, agora.descartados - antes.descartados) : 0, // desde a medida anterior
     congelou: inb.freezeCount ?? null,
     pli: inb.pliCount ?? null,
     nack: inb.nackCount ?? null,
@@ -697,23 +929,24 @@ function mostrarSelo(ms) {
   seloAte = performance.now() + ms;
 }
 setInterval(async () => {
-  if (CONTROLE || !st.jogando) {
+  if (CONTROLE) return;
+  if (!st.jogando) {
     $('#selo').hidden = true;
-    return;
+    return vigiarAssistindo();
   }
-  const t = turbo.ligado ? turbo.stats() : null;
+  const t = turbo?.ligado ? turbo.stats() : null;
   const v = await medirVideo();
+  if (!st.jogando) return; // saiu do jogo enquanto media
   const rtts = [...ping.rtt].sort((x, y) => x - y);
   const controle = { rttMs: rtts.length ? Math.round(rtts[rtts.length >> 1]) : null, ajudanteMs: ping.aj, pad: !!gamepad() };
   ping.rtt.length = 0;
   if (rel && rel.amostras.length < 1800) rel.amostras.push({ t: Date.now(), rapido, turbo: t, video: v, controle });
   const semTurbo = !(t && t.qps > 0);
-  const jogados = v?.descartados != null && descartadosAntes != null ? Math.max(0, v.descartados - descartadosAntes) : 0;
-  descartadosAntes = v?.descartados ?? null;
+  const jogados = v?.jogados || 0;
   let parou = false;
   if (semTurbo) {
     parou = vigiarParada(v, jogados);
-    vigiarDecodificacao(v, jogados);
+    vigiarDecodificacao(v);
     vigiarFila(v);
   }
   const deLa = la && Date.now() - la.recebido < 6000 ? la : null;
@@ -755,7 +988,6 @@ const FILA_REFAZ_MAX = 2;
 const sonda = new Sonda();
 let la = null;
 let culpas = {};
-let descartadosAntes = null;
 let paradaSeguidas = 0;
 let decSeguidas = 0;
 let paradaRefeitas = 0;
@@ -775,18 +1007,35 @@ function vigiarParada(v, jogados) {
 }
 // A TV não dá conta de decodificar (demora, e o sintoma: fila, quadros jogados fora ou poucos na tela): pede menos
 // linhas. 6 s seguidos, com 8 s de acerto depois de cada troca. Só desce; o botão colorido recomeça.
-function vigiarDecodificacao(v, jogados) {
-  const ruim = v && (v.decMs ?? 0) > 14 && ((v.bufferMs ?? 0) > 250 || jogados > 20 || (v.qps > 0 && v.qps < 45));
-  decSeguidas = ruim ? decSeguidas + 1 : 0;
+const naoDaConta = (v) => !!v && (v.decMs ?? 0) > 14 && ((v.bufferMs ?? 0) > 250 || v.jogados > 20 || (v.qps > 0 && v.qps < 45));
+function vigiarDecodificacao(v) {
+  decSeguidas = naoDaConta(v) ? decSeguidas + 1 : 0;
   if (decSeguidas < 3 || performance.now() - alturaEm < 8000) return;
   const nova = ALTURAS_TV.find((h) => !altura || h < altura);
   if (!nova) return;
   altura = nova;
   alturaEm = performance.now();
   decSeguidas = 0;
+  lembrarAltura(altura);
+  nivelAssistir = altura > 432 ? 'medio' : 'baixo';
   mandarModo();
-  evento('a TV não dá conta de decodificar: menos linhas', { linhas: altura, decMs: v.decMs, bufferMs: v.bufferMs, qps: v.qps, jogados });
-  aviso(`Esta TV não dá conta: imagem em ${altura}p`, 'info', 5000);
+  evento('a TV não dá conta de decodificar: menos linhas', { linhas: altura, decMs: v.decMs, bufferMs: v.bufferMs, qps: v.qps, jogados: v.jogados });
+  aviso(`Esta TV não dá conta: imagem em ${altura}p (botão colorido tenta de novo)`, 'info', 6000);
+}
+// Fora do jogo é o telão inteiro (1080p): a TV que não dá conta pede 540p e, se ainda não der, 540p a 30 quadros
+let assistirRuim = 0;
+let assistirEm = 0;
+async function vigiarAssistindo() {
+  if (nivelAssistir === 'baixo' || !video.srcObject || document.visibilityState !== 'visible') return void (assistirRuim = 0);
+  const v = await medirVideo();
+  if (st.jogando) return void (assistirRuim = 0);
+  assistirRuim = naoDaConta(v) ? assistirRuim + 1 : 0;
+  if (assistirRuim < 3 || performance.now() - assistirEm < 8000) return;
+  nivelAssistir = nivelAssistir === 'max' ? 'medio' : 'baixo';
+  assistirRuim = 0;
+  assistirEm = performance.now();
+  console.info('[tv] a TV não dá conta do telão: pedindo', nivelAssistir, JSON.stringify({ decMs: v.decMs, bufferMs: v.bufferMs, qps: v.qps, jogados: v.jogados }));
+  enviarInteresse();
 }
 
 let filaRuim = 0;
@@ -841,13 +1090,50 @@ function receberDireto(id, m) {
   if (m?.v && typeof m.v.key === 'string' && m.v.key.split('~')[0] === id) receberVolta(m.v.key, m.v.ev);
 }
 function receberVolta(key, ev) {
-  if (!ev || key !== st.jogando) return;
+  // quem treme é o controle que está sendo usado: o da TV, ou o celular (o dele, ou o ligado nele)
+  if (!ev || !key || key !== chaveDoPad()) return;
   if (ev.t === 'jogo-envio') la = { ...ev, recebido: Date.now() };
-  else if (ev.t === 'tremor') {
-    const a = gamepad()?.vibrationActuator;
-    a?.playEffect?.('dual-rumble', { duration: 1500, startDelay: 0, strongMagnitude: Math.min(1, Number(ev.g) || 0), weakMagnitude: Math.min(1, Number(ev.p) || 0) }).catch(() => {});
+  else if (ev.t === 'tremor' && tremor && (!CONTROLE || toque.ativo || gamepad())) tremor.tremor(ev.g, ev.p, !!ev.h);
+}
+// A vibração do pad-virtual.js (a mesma da sala: renova enquanto o jogo manda, reforça os tremores fracos e sabe
+// tremer o celular). Vem só quando há o que vibrar.
+let tremor = null;
+let pedindoTremor = false;
+function prepararTremor() {
+  if (tremor || pedindoTremor || !(CONTROLE || gamepad()?.vibrationActuator)) return;
+  pedindoTremor = true;
+  import('./pad-virtual.js').then(({ PadVirtual }) => {
+    tremor = new PadVirtual({ controle: { mandar() {} } });
+    tremor.key = 'tv'; // só vibra: os botões saem por lerControles
+    tremor.gpIndice = gpIndice;
+  }).catch(() => { pedindoTremor = false; });
+}
+
+// ------------------------------------------------------------------ a tela acesa
+// Com um controle na mão ninguém toca na tela: sem a trava, o celular apagava (e o controle parava junto) e a TV
+// podia entrar no descanso. Só enquanto joga; o navegador solta ao esconder a página, e ela volta ao mostrar.
+let trava = null;
+let pedindoTrava = false;
+const querTrava = () => (CONTROLE ? toque.ativo || !!gamepad() : !!st.jogando);
+async function acertarTrava() {
+  if (!querTrava()) {
+    trava?.release().catch(() => {});
+    trava = null;
+    return;
+  }
+  if (trava || pedindoTrava || document.visibilityState !== 'visible' || !navigator.wakeLock) return;
+  pedindoTrava = true;
+  try {
+    const l = await navigator.wakeLock.request('screen');
+    l.addEventListener('release', () => { if (trava === l) trava = null; });
+    if (querTrava()) trava = l;
+    else l.release().catch(() => {}); // parou de jogar enquanto pedia
+  } catch { /* sem trava (economia de energia, navegador antigo) */ } finally {
+    pedindoTrava = false;
   }
 }
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') acertarTrava(); });
+if (CONTROLE) document.addEventListener('pointerdown', acertarTrava); // iPhone: só com um toque
 
 // ------------------------------------------------------------------ o controle (Gamepad API)
 let gpIndice = null;
@@ -857,13 +1143,19 @@ function gamepad() {
 }
 addEventListener('gamepadconnected', (e) => {
   gpIndice = e.gamepad.index;
-  if (CONTROLE && conta) socket?.emit('tv-modo', { ligar: true }); // o controle ligado no celular: a TV entra no jogo
+  if (tremor) tremor.gpIndice = gpIndice;
+  if (CONTROLE && conta) chamarTv(true); // o controle ligado no celular: a TV entra no jogo
   aviso(`Controle ligado: ${nomeDoControle(e.gamepad)}`, 'info', 3500);
+  mandarModo(); // quem compartilha fica sabendo que agora há o que vibrar
+  prepararTremor();
+  acertarTrava();
   atualizarBotao();
   atualizarCelular();
 });
 addEventListener('gamepaddisconnected', () => {
   gpIndice = null;
+  mandarModo();
+  acertarTrava();
   atualizarBotao();
   atualizarCelular();
 });
@@ -885,8 +1177,9 @@ const dz = (v) => {
 // analógicos e gatilhos
 function estadoDoControle(g) {
   let b = 0;
+  // 17: o clique do touchpad (o Chrome dá esse botão a mais no DualSense e no DualShock 4)
   g.buttons.forEach((bt, i) => {
-    if (i <= 16 && (bt.pressed || bt.value > 0.5)) b |= 1 << i;
+    if (i <= 17 && (bt.pressed || bt.value > 0.5)) b |= 1 << i;
   });
   const ax = g.axes;
   return { b, lx: dz(ax[0]), ly: dz(ax[1]), rx: dz(ax[2]), ry: dz(ax[3]), lt: dz(g.buttons[6]?.value), rt: dz(g.buttons[7]?.value) };
@@ -900,8 +1193,14 @@ let enviado = null;
 let ultimoEnvio = 0;
 let botoesAntes = 0;
 let segurandoSair = 0;
+let leituraEm = 0;
 function lerControles() {
+  // fora do jogo, o controle só anda entre os botões da tela: 25 leituras por segundo bastam (a TV agradece)
+  const agora = performance.now();
+  if (!st.jogando && !toque.ativo && gpIndice == null && agora - leituraEm < 40) return;
+  leituraEm = agora;
   const g = gamepad();
+  if (g && gpIndice == null) gpIndice = g.index; // navegador que não avisou ('gamepadconnected')
   const e = g ? estadoDoControle(g) : { b: 0, lx: 0, ly: 0, rx: 0, ry: 0, lt: 0, rt: 0 };
   e.b |= remoto.b;
   // o controle de toque do celular soma com o de verdade: botões juntos e, em cada eixo, o mais empurrado
@@ -921,7 +1220,7 @@ function lerControles() {
     segurandoSair ||= performance.now();
     if (performance.now() - segurandoSair > SAIR_SEGURANDO_MS) {
       segurandoSair = 0;
-      desligarJogo();
+      sairDoJogo();
       botoesAntes = e.b;
       return;
     }
@@ -968,7 +1267,7 @@ addEventListener('keydown', (e) => {
   if (st.jogando) {
     if (ehVoltar(e)) {
       e.preventDefault();
-      return desligarJogo();
+      return sairDoJogo();
     }
     if (e.key in BIT_REMOTO) {
       e.preventDefault();
@@ -987,9 +1286,11 @@ addEventListener('keydown', (e) => {
 addEventListener('keyup', (e) => {
   if (e.key in BIT_REMOTO) remoto.b &= ~(1 << BIT_REMOTO[e.key]);
 });
+// a página saiu da frente com uma tecla apertada: o "soltou" não chega
+addEventListener('blur', () => { remoto.b = 0; });
 // Android TV: o Voltar vira "voltar na história" (o pushState do ligarJogo segura um passo)
 addEventListener('popstate', () => {
-  if (st.jogando) desligarJogo();
+  if (st.jogando) sairDoJogo();
 });
 
 function focaveis() {
@@ -1007,8 +1308,15 @@ function moverFoco(passo) {
   focar(lista[(i + passo + lista.length) % lista.length]);
 }
 
-$('#btn-jogo').addEventListener('click', ligarJogo);
+$('#btn-jogo').addEventListener('click', () => ligarJogo());
 $('#btn-som').addEventListener('click', ligarSom);
+$('#btn-trocar').addEventListener('click', () => {
+  const t = outraTela();
+  if (!t) return;
+  st.escolhida = t.sh.key;
+  esquecerJogo();
+  atualizar();
+});
 $('#btn-sair').addEventListener('click', () => {
   try { localStorage.removeItem(LAN_CHAVE); } catch { /* sem storage */ }
   location.reload();
@@ -1025,6 +1333,11 @@ function atualizarBotao() {
     : `Ligue o controle (PS4, PS5 ou Xbox) no <b>Bluetooth da TV</b> e aperte um botão.<br>A TV não reconhece? Use o <b>celular como controle</b>: escaneie o QR e, lá, toque em “Usar o celular como controle”.`;
   const sh = st.alvo?.sh;
   $('#btn-jogo').textContent = sh ? `▶ Modo jogo · ${NOME_MAQ[maquinaDaTela(sh)]}` : '▶ Modo jogo';
+  const outra = outraTela();
+  const trocar = $('#btn-trocar');
+  if (outra) trocar.textContent = `Ver o ${NOME_MAQ[maquinaDaTela(outra.sh)]}`;
+  if (!outra && document.activeElement === trocar) focar($('#btn-jogo')); // o foco não fica num botão que sumiu
+  trocar.hidden = !outra;
   if (!document.activeElement || document.activeElement === document.body) focar($('#btn-jogo'));
 }
 
@@ -1033,9 +1346,11 @@ function atualizarBotao() {
 // abrir, a TV desta conta entra no modo jogo sozinha ('tv-modo' pelo servidor); "Sair" tira.
 const toque = { ativo: false, b: 0, lx: 0, ly: 0, rx: 0, ry: 0, lt: 0, rt: 0 };
 let toqueTv = null;
-let travaTela = null;
-async function travarTela() {
-  try { travaTela = await navigator.wakeLock?.request('screen'); } catch { /* sem wake lock */ }
+const CHAMAR_MS = 4000; // sem resposta da TV por isto: ela não está aberta nesta conta
+// pede à TV desta conta que entre no jogo (ou saia); ela responde em que tela está ('tv-tela')
+function chamarTv(ligar) {
+  st.chamouTv = ligar ? Date.now() : 0;
+  socket?.emit('tv-modo', { ligar });
 }
 async function telaCheia() {
   try {
@@ -1048,20 +1363,39 @@ async function ligarToque() {
   toqueTv.mostrar();
   toque.ativo = true;
   enviado = null;
+  chamarTv(true);
   atualizarToque();
-  socket?.emit('tv-modo', { ligar: true });
+  prepararTremor();
+  acertarTrava();
   await telaCheia();
-  await travarTela();
 }
 function desligarToque() {
+  const key = chaveDoPad();
   toque.ativo = false;
   toqueTv.esconder();
-  const key = chaveDoPad();
+  tremor?.pararTremor();
   if (key) mandar(key, { t: 'pad', b: 0, lx: 0, ly: 0, rx: 0, ry: 0, lt: 0, rt: 0 });
-  socket?.emit('tv-modo', { ligar: false });
-  try { travaTela?.release(); } catch { /* já solta */ }
-  travaTela = null;
+  chamarTv(false);
+  lembrarToque();
+  acertarTrava();
   if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+}
+// a página recarregou (um deploy, o navegador matou a aba) com o controle aberto: ele abre de novo sozinho
+function lembrarToque() {
+  if (!CONTROLE) return;
+  try {
+    if (toque.ativo) sessionStorage.setItem(TOQUE_ABERTO, String(Date.now()));
+    else sessionStorage.removeItem(TOQUE_ABERTO);
+  } catch { /* sem storage */ }
+}
+addEventListener('pagehide', lembrarToque);
+function toqueEstavaAberto() {
+  try { return Date.now() - Number(sessionStorage.getItem(TOQUE_ABERTO) || 0) < VOLTAR_MS; } catch { return false; }
+}
+// A TV está no jogo com este celular? null: ela ainda não respondeu
+function tvNoJogo() {
+  if (st.tvRespondeu >= st.chamouTv && st.chamouTv) return !!st.telaDaTv;
+  return Date.now() - st.chamouTv < CHAMAR_MS ? null : false;
 }
 function atualizarToque() {
   if (!toque.ativo) return;
@@ -1072,7 +1406,9 @@ function atualizarToque() {
       : !sh ? ['Nada no telão', 'espera']
         : !sh.controle ? ['Controle travado', 'ruim']
           : !podeJogar(sh) ? ['Sem horário agora', 'ruim']
-            : [`${NOME_MAQ[m]}${faltaDaVez(m)}`, 'ok'];
+            : tvNoJogo() === null ? ['Chamando a TV…', 'espera']
+              : tvNoJogo() ? [`${NOME_MAQ[m]}${faltaDaVez(m)}`, 'ok']
+                : [`${NOME_MAQ[m]} · TV fora do jogo`, 'espera'];
   toqueTv.status(txt, tipo, m !== 'pc');
 }
 // " · 12 min": quanto falta da vez paga nesta máquina
@@ -1092,15 +1428,15 @@ if (CONTROLE) {
       onTelaCheia: telaCheia,
       aviso,
     });
+    if (conta && toqueEstavaAberto()) {
+      ligarToque(); // a tela cheia só entra com um toque: o primeiro dedo a pede
+      $('#toque').addEventListener('pointerup', telaCheia, { once: true });
+    }
   }).catch((err) => {
     console.error('[tv] controle de toque', err);
     aviso('O controle da tela não abriu. Recarregue a página.', 'erro', 8000);
   });
   $('#btn-toque').addEventListener('click', ligarToque);
-  // voltou para a página (a tela apagou e acendeu): a trava da tela volta (o navegador a solta ao esconder)
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && toque.ativo) travarTela();
-  });
 }
 
 function atualizarCelular() {
@@ -1117,7 +1453,11 @@ function atualizarCelular() {
   else if (!sh) el.textContent = 'Nada no telão agora. Quando o PC ou o PS5 entrar na sala, os botões vão para ele.';
   else if (!sh.controle) el.innerHTML = `<span class="ruim">O controle do ${NOME_MAQ[maquinaDaTela(sh)]} não está liberado.</span>`;
   else if (!podeJogar(sh)) el.innerHTML = `<span class="ruim">Sem horário no ${NOME_MAQ[maquinaDaTela(sh)]} agora.</span> Alugue na página de aluguel.`;
-  else el.innerHTML = `Os botões vão para o <b>${NOME_MAQ[maquinaDaTela(sh)]}</b>${g ? ' <span class="ok">· jogando</span>' : ''}.`;
+  else {
+    const tv = tvNoJogo();
+    el.innerHTML = `Os botões vão para o <b>${NOME_MAQ[maquinaDaTela(sh)]}</b>${g ? ' <span class="ok">· jogando</span>' : ''}.${
+      !st.chamouTv || tv === null ? '' : tv ? ' A TV está no jogo.' : ' A TV não está no jogo: veja se ela está aberta nesta conta.'}`;
+  }
 }
 
 const esc = (t) => String(t ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

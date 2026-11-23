@@ -1202,3 +1202,39 @@ Relatórios do lokao16001 na /jogar: 60 qps chegando do PS5 no PC que transmite,
   vieram logo depois de ~10 Mbps.
 - Ajudante 1.26: a ida e volta até o roteador (TCP, 5 por segundo) vai no pacote da carga. Pico ou falha nela = o
   Wi-Fi do PC que transmite. Fechar e abrir o Chrome de lá para ele compilar a versão nova.
+
+## /tv e /jogar: conexão sã, quedas que não derrubam e o celular junto com a TV (2026-11-23, tarde)
+
+**rtc.js (vale também para a sala).** O Chrome recusa uma oferta sem nenhuma seção viva ("max-bundle configured but
+session description has no BUNDLE group") e a conexão fica com erro de sessão: toda oferta boa depois é recusada.
+Dois caminhos davam nisso, ambos com o PC sem microfone:
+- passados os 3 s do "direto primeiro" numa conexão em que ninguém tinha voz nem tela (o liberarTurn troca os
+  servidores e reinicia o ICE). Na TV e na /jogar a tela que entrava depois levava 14,8 s (o refazer dos 14 s);
+  na sala não chegava nunca. Agora a conta dos 3 s só começa com algo para negociar: 0,4 s e 0,1 s;
+- a única tela da conexão saía do ar (só seções encerradas). Agora um canal vazio ("base") mantém a oferta válida.
+Junto: o reinício forçado do ICE não saía com a página aberta há menos de 8 s (o contador zerado valia como "reiniciou
+no instante 0"), e quem recebe o reinício da outra ponta já responde com o TURN. Só pelo TURN: de 17–20 s para ~4,3 s.
+Testes em `testes/rtc-oferta-vazia.test.mjs`.
+
+**Nos dois modos.** A conexão com o servidor que pisca entra de novo sem recarregar (reentrar; só um deploy recarrega,
+pela versão) e a pessoa volta ao jogo sozinha — 30–80 ms depois de reconectar. A tela do jogo que sai e volta também
+(tentarVoltar): na TV até 3 min, inclusive depois de recarregar; na /jogar 90 s, com a tela cheia esperando (Esc
+desiste; depois disso, o botão "Voltar ao jogo"). A tela do aparelho não apaga jogando. As páginas saem montadas
+(pagina.js paginaLeve): módulos pedidos de uma vez, com a impressão no endereço, e o socket.io menor. Numa rede de 160
+ms: TV 876 → 599 ms, /jogar 1471 → 1242 ms (já visitada, 802 → 601). O turbo.js só vem na TV com `?turbo=`.
+
+**TV.**
+- O pedido de imagem cheia sai ao entrar. Antes se perdia (a conexão ainda não existia) e, com a entrada lenta, a TV
+  ficava em 270p por ~10 s; agora 1,9 s.
+- Trocar o telão da sala não tira ninguém do jogo, e o celular-controle manda os botões para a tela em que a TV está
+  (evento `tv-tela`, TV → celular da mesma conta). O celular mostra se a TV está no jogo.
+- Tirar o mudo sem um gesto (o ✕ do controle, o celular) pausava o vídeo e a imagem congelava. Agora fica muda e avisa
+  para apertar OK no controle remoto.
+- Clique do touchpad (botão 17); vibração completa (a do pad-virtual.js: renova e reforça), também no celular como
+  controle (main.js: quem compartilha manda o tremor para o celular da conta que joga).
+- Avisos de 5 min, 1 min e 30 s do teste por cima do jogo; "Ver o PS5/PC" quando as duas máquinas estão no ar.
+- A altura que a TV aguentou (576p/432p) fica guardada 3 dias e o próximo jogo começa nela; assistindo, a TV que não dá
+  conta pede 540p. O botão colorido esquece.
+- Celular: a tela não apaga com um controle ligado nele, e o controle da tela reabre se a página recarregar.
+
+**/jogar.** Create + Options por 2 s sai do modo jogo. O "Voltar ao jogo" agora também vale quando a tela sai do ar.

@@ -443,7 +443,8 @@ export class RTC {
   // de DIRETO_PRIMEIRO_MS — ligada direto, ele fica de reserva para o próximo reinício; sem ligar,
   // reinicia o ICE já com ele. Nos relatórios de 17 a 19/11 a conexão começava pelo TURN em ~1 de cada
   // 4 sessões com quem dava para ligar direto (o par do TURN ficava pronto antes).
-  liberarTurn(peer) {
+  // reiniciar false: só troca os servidores (a outra ponta já está reiniciando, ver handleSignal).
+  liberarTurn(peer, reiniciar = true) {
     if (!peer.soStun || peer.pc.connectionState === 'closed' || this.peers.get(peer.id) !== peer) return;
     peer.soStun = false;
     try {
@@ -453,8 +454,8 @@ export class RTC {
       this.refazer(peer.id, 'sem trocar os servidores de ICE');
       return;
     }
-    if (!['connected', 'completed'].includes(peer.pc.iceConnectionState)) {
-      peer.reinicioIce = 0;
+    if (reiniciar && !['connected', 'completed'].includes(peer.pc.iceConnectionState)) {
+      peer.reinicioIce = -Infinity;
       this.restartIce(peer);
     }
   }
@@ -483,15 +484,27 @@ export class RTC {
       if (agora - peer.relayDesde < espera) return;
       peer.relayDesde = agora;
       peer.tentativasDireto = (peer.tentativasDireto || 0) + 1;
-      peer.reinicioIce = 0;
+      peer.reinicioIce = -Infinity;
       this.restartIce(peer);
     } finally {
       peer.vendoRelay = false;
     }
   }
 
-  // no máximo um reinício de ICE a cada 8 s por pessoa
+  // Já negociou, ou tem o que pôr numa oferta (voz, tela, canal)?
+  temOqueNegociar(peer) {
+    const { pc } = peer;
+    return !!(pc.localDescription || pc.remoteDescription || pc.getTransceivers().length || peer.ctrl || peer.mov || peer.turboCanal || peer.turboSomCanal);
+  }
+
+  // No máximo um reinício de ICE a cada 8 s por pessoa. Numa conexão que ainda não negociou nada (ninguém com voz
+  // nem tela) não há o que reiniciar: o restartIce e o setConfiguration (o liberarTurn, aos 3 s) faziam o navegador
+  // pedir uma oferta sem seção nenhuma, o Chrome a recusa ("max-bundle configured but ... no BUNDLE group") e a
+  // conexão fica com erro de sessão — a oferta boa que chega depois também é recusada. Era o "Carregando a
+  // imagem…" de 2026-11-22: com o PC sem microfone, a TV aberta antes de o PS5 entrar levava 14,8 s para mostrar a
+  // imagem (0,4 s com a conexão sã).
   restartIce(peer) {
+    if (!this.temOqueNegociar(peer)) return;
     const agora = performance.now();
     if (agora - peer.reinicioIce < 8000) return;
     peer.reinicioIce = agora;
@@ -525,7 +538,7 @@ export class RTC {
         // a segunda oferta seguida sem resposta: o outro lado não está negociando, refaz do zero
         if (++peer.ofertasPerdidas >= 2 && this.refazer(peer.id, 'ofertas sem resposta')) continue;
         pc.setLocalDescription({ type: 'rollback' })
-          .then(() => { peer.reinicioIce = 0; this.restartIce(peer); }) // força uma oferta nova
+          .then(() => { peer.reinicioIce = -Infinity; this.restartIce(peer); }) // força uma oferta nova
           .catch((err) => console.warn('[rtc] oferta sem resposta', err));
         continue;
       }
@@ -538,7 +551,9 @@ export class RTC {
       } else {
         peer.caiuDesde = 0;
       }
-      if (peer.soStun && agora - peer.nasceuEm > DIRETO_PRIMEIRO_MS) this.liberarTurn(peer);
+      // o "direto primeiro" só conta com algo negociando (ver restartIce)
+      if (peer.soStun && !this.temOqueNegociar(peer)) peer.nasceuEm = agora;
+      else if (peer.soStun && agora - peer.nasceuEm > DIRETO_PRIMEIRO_MS) this.liberarTurn(peer);
       if ((ice === 'connected' || ice === 'completed') && this.temTurn) this.vigiarRelay(peer, agora);
       // Negociada e sem ligar (ou caída) há 15 s, mesmo com o reinício de ICE: refaz do zero. Antes
       // ficava assim até alguém sair e entrar na sala (a voz do amigo não chegava).
@@ -1262,7 +1277,7 @@ export class RTC {
       aplicandoResposta: false, // setRemoteDescription(answer) em andamento (ver handleSignal)
       ofertaDesde: 0, // quando saiu a minha última oferta (o vigia desfaz a que nunca teve resposta)
       caiuDesde: 0, // desde quando o ICE está desconectado
-      reinicioIce: 0,
+      reinicioIce: -Infinity, // quando foi o último (performance.now); com 0, uma página aberta há menos de 8 s não reiniciava
       soStun, // ainda sem o TURN (liberarTurn)
       nasceuEm: performance.now(),
       relayDesde: 0, // desde quando está ligada pelo TURN (vigiarRelay)
@@ -1288,7 +1303,7 @@ export class RTC {
       interesse: new Map(), // key da tela -> quanto essa pessoa precisa dela (ver NIVEIS)
       pending: [],
       epoca: 0, // quantas vezes a conexão com essa pessoa foi refeita do zero (ver refazer)
-      refeitaEm: 0, // quando foi refeita pela última vez (performance.now)
+      refeitaEm: -Infinity, // quando foi refeita pela última vez (performance.now; com 0, só depois de 20 s de página)
       semLigarDesde: 0, // desde quando a conexão negociada não liga (ver vigiar)
       ofertasPerdidas: 0, // ofertas seguidas que ficaram sem resposta (ver vigiar)
       ...herdar,
@@ -1303,9 +1318,18 @@ export class RTC {
         peer.makingOffer = true;
         peer.renegociar = false;
         this.soH264(pc);
-        const oferta = await pc.createOffer();
+        let oferta = await pc.createOffer();
         // outra negociação começou enquanto a oferta era montada: o evento volta sozinho depois
         if (pc.signalingState !== 'stable') return;
+        // sem nada vivo na oferta, o Chrome a recusa e estraga a conexão (ver restartIce)
+        if (!/^a=group:BUNDLE/m.test(oferta.sdp || '')) {
+          // nada para negociar ainda: o vigia tenta de novo quando houver
+          if (!/^m=/m.test(oferta.sdp || '')) return void (peer.renegociar = true);
+          // só seções encerradas (a única tela saiu do ar, numa conexão sem voz): um canal vazio mantém a oferta válida
+          if (!peer.base || peer.base.readyState === 'closed') peer.base = pc.createDataChannel('base');
+          oferta = await pc.createOffer();
+          if (pc.signalingState !== 'stable') return;
+        }
         await pc.setLocalDescription(comEstereo(comBandaInicial(oferta, ...this.bandaSdp(peer)), null));
         peer.ofertaDesde = performance.now();
         this.send(id, { description: trocarPerfil(pc.localDescription, this.midsDeJogo(peer), '42001f', '42e01f'), e: peer.epoca });
@@ -1478,8 +1502,14 @@ export class RTC {
     if (!Array.isArray(iceServers) || !iceServers.length) return;
     this.iceServers = iceServers;
     this.temTurn = iceServers.some((s) => [].concat(s.urls).some((u) => /^turns?:/.test(u)));
-    for (const { pc, soStun } of this.peers.values()) {
-      if (pc.connectionState === 'closed' || soStun) continue; // a que ainda espera o direto recebe em liberarTurn
+    for (const peer of this.peers.values()) {
+      const { pc } = peer;
+      if (pc.connectionState === 'closed' || peer.soStun) continue; // a que ainda espera o direto recebe em liberarTurn
+      // sem nada negociado ainda, também recebe lá (ver restartIce)
+      if (!this.temOqueNegociar(peer)) {
+        Object.assign(peer, { soStun: true, nasceuEm: performance.now() });
+        continue;
+      }
       try {
         pc.setConfiguration({ ...pc.getConfiguration(), iceServers });
       } catch (err) {
@@ -1561,6 +1591,9 @@ export class RTC {
         // o som das minhas telas sai sem DTX (ver comDtx)
         const semDtx = new Set();
         for (const trs of peer.screenTransceivers.values()) for (const tr of trs) if (tr.mid) semDtx.add(tr.mid);
+        // A outra ponta reiniciou o ICE já com o TURN (liberarTurn de lá) e o daqui ainda não entrou: a resposta tem
+        // que sair com ele também, senão o reinício de lá junta candidatos à toa.
+        if (description.type === 'offer' && peer.soStun && pc.remoteDescription && ufragDe(description) !== ufragDe(pc.remoteDescription)) this.liberarTurn(peer, false);
         peer.aplicandoResposta = description.type === 'answer';
         try {
           const recebida = trocarPerfil(description, this.midsDeJogo(peer), '42e01f', '42001f');
@@ -1843,6 +1876,8 @@ const CAMPOS_ENTRADA = ['frameWidth', 'frameHeight', 'framesPerSecond', 'framesR
   'bytesReceived', 'headerBytesReceived', 'packetsReceived', 'packetsLost', 'packetsDiscarded', 'jitter', 'nackCount',
   'pliCount', 'firCount', 'qpSum', 'decoderImplementation', 'powerEfficientDecoder', 'codecId'];
 
+// a senha curta do ICE de uma descrição: muda quando a ponta de lá reinicia o ICE
+const ufragDe = (d) => /^a=ice-ufrag:(\S+)/m.exec(d?.sdp || '')?.[1] ?? null;
 const CAMPOS_SOM = ['jitterBufferDelay', 'jitterBufferTargetDelay', 'jitterBufferMinimumDelay', 'jitterBufferEmittedCount',
   'packetsLost', 'packetsReceived', 'concealedSamples', 'totalSamplesReceived', 'audioLevel', 'bytesReceived', 'silentConcealedSamples'];
 
