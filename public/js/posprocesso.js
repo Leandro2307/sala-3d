@@ -12,6 +12,9 @@
 // meias resoluções (dual Kawase), que custa pouco mais que uma cópia da tela.
 import * as THREE from 'three';
 
+// a alfa com que o vídeo das telas é desenhado quando há acabamento (senão, 1)
+export const MARCA_TELA = 250 / 255;
+
 const VERT = /* glsl */ `
   varying vec2 vUv;
   void main() {
@@ -127,8 +130,11 @@ const FINAL = /* glsl */ `
     c *= mix(0.78, 1.0, v);
     c = clamp(c, 0.0, 1.0);
     // o canvas é transparente onde o player do telão aparece por trás (buraco: alfa 0): ali e
-    // na borda dele a imagem passa como veio
-    gl_FragColor = vec4(mix(orig, c, forca * t.a), t.a);
+    // na borda dele a imagem passa como veio. O vídeo das telas vem com a alfa MARCA_TELA (world.js):
+    // passa com a cor dele, e a alfa volta a 1. O que é translúcido na frente dele pega parte do acabamento.
+    float opaco = step(0.96, t.a);
+    float marca = opaco * clamp((1.0 - t.a) / (1.0 - ${MARCA_TELA.toFixed(6)}), 0.0, 1.0);
+    gl_FragColor = vec4(mix(orig, c, forca * t.a * (1.0 - marca)), mix(t.a, 1.0, opaco));
   }`;
 
 const NIVEIS_BRILHO = 5;
@@ -197,6 +203,11 @@ export class PosProcesso {
         }));
       }
     }
+  }
+
+  // vai haver acabamento neste quadro? (antes de desenhar a cena: o vídeo das telas se marca, ver MARCA_TELA)
+  vaiDesenhar(ligado) {
+    return this.nivel > 0 && (ligado || this.forca > 0.001);
   }
 
   passar(material, alvo) {

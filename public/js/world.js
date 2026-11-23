@@ -30,7 +30,7 @@ import { construirGincana } from './gincana.js';
 import { construirPortalFantasmas } from './fantasmas.js';
 import { construirKart } from './kart.js';
 import { construirPinta } from './pinta.js';
-import { PosProcesso } from './posprocesso.js';
+import { PosProcesso, MARCA_TELA } from './posprocesso.js';
 import { MAPAS, MAPA_DA_PAGINA } from './mapas-dados.js';
 
 // Área jogável inteira (cercada): a sala do cinema num canto, em volta da origem, o
@@ -566,6 +566,21 @@ class TexturaDeTela extends THREE.VideoTexture {
   }
 }
 
+// O vídeo das telas: sem tone mapping e marcado na alfa para o acabamento de cinema (posprocesso.js), que
+// pula esses pontos — antes ele mudava o contraste e a cor da tela de quem compartilha.
+const marcaTela = { value: 1 };
+function materialDeVideo() {
+  const m = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
+  m.onBeforeCompile = (s) => {
+    s.uniforms.marcaTela = marcaTela;
+    s.fragmentShader = s.fragmentShader
+      .replace('void main() {', 'uniform float marcaTela; void main() {')
+      .replace('#include <dithering_fragment>', '#include <dithering_fragment>\n gl_FragColor.a = marcaTela;');
+  };
+  m.customProgramCacheKey = () => 'video-da-tela';
+  return m;
+}
+
 // Cartaz de monitor de posto desligado: um só por cor, para todos (são dezenas de monitores).
 const _apagados = new Map();
 function monitorApagado(accent) {
@@ -733,7 +748,7 @@ class ScreenDisplay {
 
     this.videoMesh = new THREE.Mesh(
       new THREE.PlaneGeometry(1, 1),
-      new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false }),
+      materialDeVideo(),
     );
     this.videoMesh.position.z = 0.02;
     this.videoMesh.visible = false;
@@ -4095,13 +4110,16 @@ export class World {
     }
     const medindo = this.medirGpu && this.comecarGpu();
     try {
+      const cinema = this.fora.visible && !this.cameraDentro;
+      marcaTela.value = this.pos.vaiDesenhar(cinema) ? MARCA_TELA : 1;
       this.renderer.render(this.scene, this.camera);
+      marcaTela.value = 1;
       // logo depois do desenho principal: os quadros 4x4 do aquecimento usam o mesmo contador (e
       // os desenhos do acabamento zerariam a conta)
       const info = this.renderer.info.render;
       this.ultimoQuadro.draws = info.calls;
       this.ultimoQuadro.triangulos = info.triangles;
-      this.pos.desenhar(this.fora.visible && !this.cameraDentro, dt, this.solNaTela());
+      this.pos.desenhar(cinema, dt, this.solNaTela());
     } finally {
       if (medindo) this.terminarGpu();
     }

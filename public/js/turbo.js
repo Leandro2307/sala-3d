@@ -642,6 +642,26 @@ export function descricaoSemReordenar(desc) {
   }
 }
 
+// ================================================================== a cor
+// A tela inteira chega do Chrome em BT.601 (a janela, em BT.709), e o codificador da placa não escreve isso
+// no H.264/H.265: quem joga decodificava tudo como BT.709 e as cores fortes mudavam (verde puro 255 → 216).
+// A cor vai na configuração, e o decodificador a recebe. Só a da fonte etiquetada: a câmera virtual do OBS
+// chega sem etiqueta, com a imagem em BT.709 (o padrão dele), mas o codificador do Chrome a anuncia como
+// BT.601 — sem cor nenhuma, o decodificador usa BT.709, que é a certa. Medido em 2026-11-23 (RTX 3060 Ti).
+const CORES_VALIDAS = {
+  primaries: ['bt709', 'bt470bg', 'smpte170m'],
+  transfer: ['bt709', 'smpte170m', 'iec61966-2-1'],
+  matrix: ['rgb', 'bt709', 'bt470bg', 'smpte170m'],
+};
+// só o que todo VideoDecoder entende, até o do Chrome 94 das TVs (um valor desconhecido faria o configure falhar); sem matriz: null
+export function corValida(c) {
+  if (!c || !CORES_VALIDAS.matrix.includes(c.matrix)) return null;
+  const r = { matrix: c.matrix, fullRange: !!c.fullRange };
+  for (const k of ['primaries', 'transfer']) if (CORES_VALIDAS[k].includes(c[k])) r[k] = c[k];
+  return r;
+}
+const mesmaCor = (a, b) => ['matrix', 'primaries', 'transfer', 'fullRange'].every((k) => (a?.[k] ?? null) === (b?.[k] ?? null));
+
 // ================================================================== realce de nitidez
 // Realce (2026-11-19): a imagem que chega foi comprimida (às vezes duas vezes: o PS5 e o PC de quem
 // compartilha) e perde os contornos. Na placa de quem joga, cada quadro passa por um filtro de nitidez
@@ -1379,6 +1399,7 @@ export class TurboEnvio {
         s.chave = false;
         if (s.tempos.size > 60) s.tempos.clear();
         s.tempos.set(frame.timestamp, agora);
+        s.fonteTemCor = !!frame.colorSpace?.matrix; // ver corValida
         s.enc.encode(frame, { keyFrame: chave });
       } finally {
         frame.close();
@@ -1403,8 +1424,12 @@ export class TurboEnvio {
         s.spsReescrito = !!nova;
       }
       const cfg = { codec: dc.codec || s.cfg.codec, w: s.cfg.w, h: s.cfg.h, description: d ? btoa(String.fromCharCode(...d)) : null };
+      const cor = s.fonteTemCor ? corValida(dc.colorSpace) : null;
+      if (cor) cfg.cor = cor;
       const ant = s.cfgEnviada;
-      const igual = ant && ant.codec === cfg.codec && ant.w === cfg.w && ant.h === cfg.h && (!cfg.description || cfg.description === ant.description);
+      const mesmoVideo = ant && ant.codec === cfg.codec && ant.w === cfg.w && ant.h === cfg.h;
+      if (mesmoVideo && !cfg.description) cfg.description = ant.description;
+      const igual = mesmoVideo && cfg.description === ant.description && mesmaCor(cfg.cor, ant.cor);
       if (!igual) {
         s.cfgEnviada = cfg;
         try {
@@ -1714,7 +1739,7 @@ export class TurboRecebe {
     if (!m.cfg) return;
     // a mesma configuração que já está no decodificador: nada muda (reconfigurar faria esperar um quadro-chave)
     const c = s.cfgAtual;
-    if (c && s.dec?.state === 'configured' && c.codec === m.cfg.codec && c.w === m.cfg.w && c.h === m.cfg.h && c.description === m.cfg.description) return;
+    if (c && s.dec?.state === 'configured' && c.codec === m.cfg.codec && c.w === m.cfg.w && c.h === m.cfg.h && c.description === m.cfg.description && mesmaCor(c.cor, m.cfg.cor)) return;
     s.cfgAtual = m.cfg;
     this.configurarDec(s);
   }
@@ -1755,6 +1780,8 @@ export class TurboRecebe {
       const codec = nivel && /^avc1\.[0-9a-f]{6}$/i.test(cfg.codec) ? cfg.codec.slice(0, 9) + nivel : cfg.codec;
       const config = { codec, optimizeForLatency: true };
       if (acel !== 'no-preference') config.hardwareAcceleration = acel;
+      const cor = corValida(cfg.cor);
+      if (cor) config.colorSpace = cor;
       if (cfg.description) {
         const d = Uint8Array.from(atob(cfg.description), (c) => c.charCodeAt(0));
         // O SPS reescrito sempre, já de saída (era só depois de o decodificador segurar, e isso nunca
