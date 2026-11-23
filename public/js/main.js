@@ -1535,8 +1535,8 @@ function bindSocket() {
       if (gestor !== undefined) u.gestor = gestor;
       if (desde !== undefined) u.desde = desde;
       u.avatar.setPresenca(COR_STATUS[presencaDe(u)]);
-      if (u.isSelf && gestor) {
-        pedirNotificacoes();
+      if (u.isSelf && gestor !== undefined) {
+        if (gestor) pedirNotificacoes();
         renderSala();
       }
       renderPeople();
@@ -5045,19 +5045,25 @@ function irParaEntrada() {
   if (player.veiculo) toggleVeiculo();
   player.teleport([e.pos[0] + (Math.random() - 0.5) * 4, 0, e.pos[2] + (Math.random() - 0.5) * 3], e.yaw);
 }
-// Trocar de mapa recarrega a página (mapaDaSala): quem era dono ou gestor continua sendo do outro
-// lado. As senhas passam só por essa recarga, nesta aba, e são apagadas assim que lidas.
-const CHAVE_RECARGA = 'sala3d-recarga';
-const senhasDaRecarga = (() => {
+// Quem entrou como dono ou gestor continua sendo neste aparelho (fechar a aba, recarregar, trocar de
+// mapa, queda da conexão): o que fica guardado, por sala, é o passe que o servidor devolve, nunca a
+// senha. Trocar a senha vence os passes; "Sair do modo empresa neste aparelho" apaga os daqui.
+const CHAVE_PAPEIS = 'sala3d-papeis';
+let papeis = {}; // { sala: { dono, gestor } }; só na memória se o navegador não deixa guardar
+function lerPapeis() {
   try {
-    const d = JSON.parse(sessionStorage.getItem(CHAVE_RECARGA) || 'null');
-    sessionStorage.removeItem(CHAVE_RECARGA);
-    return d && d.sala === idDaSala(params.get('sala')) ? d : {};
-  } catch {
-    return {};
-  }
-})();
-let senhaDono = senhasDaRecarga.dono || null; // só na memória: se a conexão cair, entra como dono de novo sozinho
+    const guardado = localStorage.getItem(CHAVE_PAPEIS);
+    if (guardado) papeis = JSON.parse(guardado) || {};
+  } catch { /* sem armazenamento */ }
+  return papeis;
+}
+const passeDoPapel = (papel) => lerPapeis()[state.room]?.[papel] || null;
+function guardarPapel(sala, papel, passe) {
+  lerPapeis();
+  papeis[sala] = { ...papeis[sala], [papel]: passe || undefined };
+  if (!papeis[sala].dono && !papeis[sala].gestor) delete papeis[sala];
+  try { localStorage.setItem(CHAVE_PAPEIS, JSON.stringify(papeis)); } catch { /* modo privado */ }
+}
 let formSujo = false; // o dono está mexendo no formulário: o que chega do servidor não apaga
 
 // logo da empresa: carrega a imagem uma vez por logo novo e põe no mundo e no topo da tela
@@ -5085,11 +5091,6 @@ function mapaDaSala(cfg) {
   lembrarMapa(state.room, mapa);
   if (mapa === MAPA_DA_PAGINA) return false;
   toast(`Indo para o mapa ${MAPAS[mapa].nome}…`, 'info', 6000);
-  if (senhaDono || senhaGestor) {
-    try {
-      sessionStorage.setItem(CHAVE_RECARGA, JSON.stringify({ sala: state.room, dono: senhaDono, gestor: senhaGestor }));
-    } catch { /* sem sessionStorage: entra de novo como dono pelo painel */ }
-  }
   recarregarNaSala(state.room, mapa);
   return true;
 }
@@ -5158,6 +5159,7 @@ function renderSala() {
   $('#sala-criar').hidden = cfg.temDono || state.donoDaSala;
   $('#sala-entrar').hidden = !cfg.temDono || state.donoDaSala;
   $('#sala-config').hidden = !state.donoDaSala;
+  $('#sala-sair').hidden = !state.donoDaSala && !souGestor();
   $('#chat-input').placeholder = state.donoDaSala ? 'Mensagem, /pix para dar moedas ou /tela' : 'Mensagem para todos';
   $('#entrada-status').textContent = cfg.temSenha
     ? 'Ligada: quem chega pelo link precisa digitar a senha.'
@@ -5541,7 +5543,6 @@ setInterval(() => {
 }, 1000);
 
 // ----- gestores
-let senhaGestor = senhasDaRecarga.gestor || null; // só na memória, como a de dono
 const alertas = []; // últimos avisos da equipe (para o painel do gestor)
 const souGestor = () => !!self()?.gestor;
 function avisoDoNavegador(titulo, corpo) {
@@ -5610,14 +5611,16 @@ $('#sala-gestor').addEventListener('submit', (e) => {
   pedirNotificacoes();
   socket.emit('sala-gestor', { senha }, (r) => {
     if (!r?.ok) return toast(r?.erro || 'Senha de gestor errada.', 'error');
-    senhaGestor = senha;
+    guardarPapel(state.room, 'gestor', r.passe);
     form.reset();
     toast('Você entrou como gestor: vai ver a equipe aqui e receber os alertas.', 'success', 6000);
   });
 });
 function reentrarComoGestor() {
-  if (!senhaGestor) return;
-  socket.emit('sala-gestor', { senha: senhaGestor }, (r) => { if (!r?.ok) senhaGestor = null; });
+  const sala = state.room;
+  const passe = passeDoPapel('gestor');
+  if (!passe) return;
+  socket.emit('sala-gestor', { passe }, (r) => { if (r?.vencido) guardarPapel(sala, 'gestor', null); });
 }
 // senha de gestor (o dono cria, troca ou tira; vale na hora)
 function mudarSenhaDeGestor(senha) {
@@ -6007,14 +6010,20 @@ $('#parque-lista').addEventListener('click', (e) => {
   closePanel();
 });
 
-// a conexão caiu e voltou: o servidor esqueceu quem era dono, então prova de novo com a senha
+// entrou na sala (ou a conexão caiu e voltou): prova que é dono com o passe guardado neste aparelho
 function reentrarComoDono() {
   state.donoDaSala = false;
   reentrarComoGestor();
-  if (!senhaDono) return renderSala();
-  socket.emit('sala-entrar', { senha: senhaDono }, (r) => {
+  const sala = state.room;
+  const passe = passeDoPapel('dono');
+  if (!passe) return renderSala();
+  socket.emit('sala-entrar', { passe }, (r) => {
+    if (r?.vencido) {
+      guardarPapel(sala, 'dono', null);
+      toast('A senha de dono desta sala mudou. Entre de novo com a nova.', 'warn', 7000);
+    }
+    if (state.room !== sala) return;
     state.donoDaSala = !!r?.ok;
-    if (!r?.ok) senhaDono = null;
     renderSala();
   });
 }
@@ -6026,7 +6035,7 @@ $('#sala-criar').addEventListener('submit', (e) => {
   pedirNotificacoes();
   socket.emit('sala-dono', { senha }, (r) => {
     if (!r?.ok) return toast(r?.erro || 'Não deu para criar a senha.', 'error');
-    senhaDono = senha;
+    guardarPapel(state.room, 'dono', r.passe);
     state.donoDaSala = true;
     form.reset();
     formSujo = false;
@@ -6042,11 +6051,25 @@ $('#sala-entrar').addEventListener('submit', (e) => {
   pedirNotificacoes();
   socket.emit('sala-entrar', { senha }, (r) => {
     if (!r?.ok) return toast(r?.erro || 'Senha errada.', 'error');
-    senhaDono = senha;
+    guardarPapel(state.room, 'dono', r.passe);
     state.donoDaSala = true;
     form.reset();
     formSujo = false;
     renderSala();
+  });
+});
+
+// deixa de ser dono e gestor e esquece este aparelho (PC que outra pessoa também usa)
+$('#sala-sair').addEventListener('click', () => {
+  const sala = state.room;
+  socket.emit('sala-sair', null, (r) => {
+    if (!r?.ok) return toast('Não deu para sair agora. Tente de novo.', 'error');
+    guardarPapel(sala, 'dono', null);
+    guardarPapel(sala, 'gestor', null);
+    state.donoDaSala = false;
+    formSujo = false;
+    renderSala();
+    toast('Pronto: este aparelho não entra mais sozinho no modo empresa.', 'success', 5000);
   });
 });
 
@@ -6091,7 +6114,7 @@ $('#sala-trocar').addEventListener('click', () => {
   const nova = campo.value;
   socket.emit('sala-senha', { nova }, (r) => {
     if (!r?.ok) return toast(r?.erro || 'Não deu para trocar a senha.', 'error');
-    senhaDono = nova;
+    guardarPapel(state.room, 'dono', r.passe);
     campo.value = '';
     toast('Senha de dono trocada.', 'success');
   });

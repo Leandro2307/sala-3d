@@ -724,6 +724,18 @@ function confereSenha(senha, hash) {
   const veio = crypto.scryptSync(senha, Buffer.from(sal, 'hex'), esperado.length);
   return crypto.timingSafeEqual(esperado, veio);
 }
+// Passe de dono e de gestor: quem acerta a senha guarda isto no navegador e não digita de novo ao
+// voltar. A chave é o hash da senha (que nunca sai daqui): continua valendo depois de um reinício do
+// servidor, mesmo sem PASSE_SECRET, e trocar a senha invalida os passes antigos.
+const passeDoPapel = (room, papel) => {
+  const hash = papel === 'dono' ? room.senhaHash : room.gestorHash;
+  return hash ? crypto.createHmac('sha256', hash).update(`${papel}|${room.id}`).digest('hex') : null;
+};
+function passeDoPapelValido(room, papel, passe) {
+  const certo = Buffer.from(passeDoPapel(room, papel) || '');
+  const veio = Buffer.from(typeof passe === 'string' ? passe : '');
+  return certo.length > 0 && veio.length === certo.length && crypto.timingSafeEqual(veio, certo);
+}
 // tentativas de senha por endereço: 6 a cada 5 minutos
 const tentativas = new Map();
 const bloqueado = (ip) => (tentativas.get(ip) || []).filter((t) => Date.now() - t < 5 * 60_000).length >= 6;
@@ -1707,18 +1719,34 @@ function attachSockets(io) {
       }
       dono = true;
       virarGestor();
-      r({ ok: true });
+      r({ ok: true, passe: passeDoPapel(room, 'dono') });
       io.to(room.id).emit('sala', salaPublica(room));
     });
 
     socket.on('sala-entrar', (msg, ack) => {
       const r = resposta(ack);
       if (!room?.senhaHash) return r({ ok: false, erro: 'Esta sala ainda não tem dono.' });
-      if (!podeTentar(ipDe())) return r({ ok: false, erro: 'Muitas tentativas. Espere alguns minutos.' });
-      const { senha } = obj(msg);
-      if (!senhaValida(senha) || !confereSenha(senha, room.senhaHash)) return r({ ok: false, erro: 'Senha errada.' });
+      const { senha, passe } = obj(msg);
+      // o passe guardado não gasta tentativa: vai sozinho a cada entrada e não dá para adivinhar
+      if (passe !== undefined) {
+        if (!passeDoPapelValido(room, 'dono', passe)) return r({ ok: false, vencido: true });
+      } else {
+        if (!podeTentar(ipDe())) return r({ ok: false, erro: 'Muitas tentativas. Espere alguns minutos.' });
+        if (!senhaValida(senha) || !confereSenha(senha, room.senhaHash)) return r({ ok: false, erro: 'Senha errada.' });
+      }
       dono = true;
       virarGestor();
+      r({ ok: true, passe: passeDoPapel(room, 'dono') });
+    });
+    // "Sair do modo empresa neste aparelho": deixa de ser dono e gestor (o navegador apaga os passes)
+    socket.on('sala-sair', (_msg, ack) => {
+      const r = resposta(ack);
+      if (!user) return r({ ok: false });
+      dono = false;
+      if (user.gestor) {
+        user.gestor = false;
+        io.to(room.id).emit('user-update', { id: user.id, gestor: false });
+      }
       r({ ok: true });
     });
 
@@ -1732,11 +1760,15 @@ function attachSockets(io) {
     socket.on('sala-gestor', (msg, ack) => {
       const r = resposta(ack);
       if (!room?.gestorHash) return r({ ok: false, erro: 'O dono ainda não criou a senha de gestor.' });
-      if (!podeTentar(ipDe())) return r({ ok: false, erro: 'Muitas tentativas. Espere alguns minutos.' });
-      const { senha } = obj(msg);
-      if (typeof senha !== 'string' || senha.length > 100 || !confereSenha(senha, room.gestorHash)) return r({ ok: false, erro: 'Senha de gestor errada.' });
+      const { senha, passe } = obj(msg);
+      if (passe !== undefined) {
+        if (!passeDoPapelValido(room, 'gestor', passe)) return r({ ok: false, vencido: true });
+      } else {
+        if (!podeTentar(ipDe())) return r({ ok: false, erro: 'Muitas tentativas. Espere alguns minutos.' });
+        if (typeof senha !== 'string' || senha.length > 100 || !confereSenha(senha, room.gestorHash)) return r({ ok: false, erro: 'Senha de gestor errada.' });
+      }
       virarGestor();
-      r({ ok: true });
+      r({ ok: true, passe: passeDoPapel(room, 'gestor') });
     });
     socket.on('sala-gestor-senha', async (msg, ack) => {
       const r = resposta(ack);
@@ -1869,7 +1901,7 @@ function attachSockets(io) {
         console.warn('[banco] trocando senha', err.code || err.message);
         return r({ ok: false, erro: 'Não deu para guardar agora. Tente de novo.' });
       }
-      r({ ok: true });
+      r({ ok: true, passe: passeDoPapel(room, 'dono') });
     });
 
     // senha de entrada: o dono põe, troca ou tira (vazia = sala aberta)
