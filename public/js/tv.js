@@ -405,10 +405,7 @@ function ligarJogo() {
   enviado = null; // o estado do controle vai inteiro de novo
   comecarRelatorio(a);
   if (video.srcObject) evento('buffer do vídeo normal', { feitos: rtc.baixaLatencia(video.srcObject, true, BUFFER_MS) });
-  if (!turboFalhou) {
-    turbo.ligar(st.jogando, video, 1080);
-    evento('turbo ligado');
-  }
+  if (!turboFalhou) ligarForma(proximaForma(-1));
   mostrarSelo(10_000);
   const dica = $('#dica-jogo');
   dica.classList.remove('some');
@@ -425,6 +422,7 @@ function desligarJogo(avisarLa = true) {
     mandar(key, { t: 'modo', jogo: false });
   }
   st.jogando = null;
+  formaAtual = null;
   turbo.desligar();
   document.body.classList.remove('jogando');
   if (video.srcObject) rtc.baixaLatencia(video.srcObject, false);
@@ -443,22 +441,105 @@ const turbo = new TurboRecebe({
   somDaTela: () => video,
   volume: () => 1,
   onEvento: (texto, dados) => evento(texto, dados),
-  onFalhou: (motivo) => {
-    // TV LG (webOS, Chrome 94, teste de 2026-11-22): o decodificador recusou o H.265 que ela disse
-    // aceitar. Antes de desistir, tenta uma vez só com o H.264.
-    if (motivo === 'decodificador' && !turbo.semHevc && st.jogando) {
-      turbo.semHevc = true;
-      evento('turbo: o decodificador falhou, tentando só com H.264', { erros: errosTurbo.slice(-5) });
-      turbo.ligar(st.jogando, video, 1080);
-      return;
-    }
-    turboFalhou = motivo;
-    evento('turbo falhou: vídeo normal', { motivo, erros: errosTurbo.slice(-5) });
-    if (st.jogando && video.srcObject) evento('buffer do vídeo normal', { feitos: rtc.baixaLatencia(video.srcObject, true, BUFFER_MS) });
-  },
+  onFalhou: (motivo) => formaFalhou(motivo),
 });
-// TV: a aceleração da placa pode não existir para o WebCodecs (LG webOS): tenta sem preferência e no processador
-turbo.aceleracoes = ['prefer-hardware', 'no-preference', 'prefer-software'];
+// TV nunca pede H.265: a LG disse que decodificava e recusou nas três acelerações (2026-11-22 e 2026-11-23)
+turbo.semHevc = true;
+
+// ---- As formas do Turbo na TV, tentadas em ordem até uma mostrar imagem. Em um teste só sai a resposta
+// de como o Turbo roda nesta TV: a que funcionou fica guardada (FORMA_CHAVE) e é a primeira da próxima vez;
+// todas as tentativas, com o que chegou e o que o decodificador fez, vão no relatório (turboTentativas).
+// Sempre H.264. ?turbo=testar esquece a guardada e testa tudo de novo.
+const TODOS_H264 = ['avc1.640033', 'avc1.4d0033', 'avc1.42e033', 'avc1.42001f'];
+const BASELINE = ['avc1.42e033', 'avc1.42001f'];
+const PLACA_OU_NAO = ['prefer-hardware', 'no-preference'];
+const FORMAS = [
+  // o PS5 repassado (se a rede levar) ou codificado no PC, o perfil que o PC escolher
+  { id: 'normal-1080', altura: 1080, codecs: TODOS_H264, recodificar: false, aceleracoes: PLACA_OU_NAO },
+  // codificado no PC, um perfil de cada vez (a TV pode aceitar um e recusar outro)
+  { id: 'pc-1080-high', altura: 1080, codecs: ['avc1.640033'], recodificar: true, aceleracoes: PLACA_OU_NAO },
+  { id: 'pc-1080-main', altura: 1080, codecs: ['avc1.4d0033'], recodificar: true, aceleracoes: PLACA_OU_NAO },
+  { id: 'pc-1080-baseline', altura: 1080, codecs: BASELINE, recodificar: true, aceleracoes: PLACA_OU_NAO },
+  { id: 'pc-720-baseline', altura: 720, codecs: BASELINE, recodificar: true, aceleracoes: PLACA_OU_NAO },
+  // decodificador no processador da TV: menor, para dar conta
+  { id: 'pc-720-processador', altura: 720, codecs: TODOS_H264, recodificar: true, aceleracoes: ['prefer-software'] },
+];
+const FORMA_CHAVE = 'sala3d-tv-turbo';
+const FORMA_OK_MS = 10_000; // imagem pelo Turbo por tanto tempo seguido: esta forma funciona
+let formaGuardada = null;
+try {
+  if (new URLSearchParams(location.search).get('turbo') === 'testar') localStorage.removeItem(FORMA_CHAVE);
+  formaGuardada = localStorage.getItem(FORMA_CHAVE);
+} catch { /* sem armazenamento */ }
+let formaAtual = null; // { forma, indice, desde, qpsDesde }
+let formasTentadas = []; // nesta página
+let formaOk = null;
+
+// a ordem: a guardada primeiro, depois as outras na ordem de FORMAS
+function ordemDasFormas() {
+  const g = FORMAS.find((f) => f.id === formaGuardada);
+  return g ? [g, ...FORMAS.filter((f) => f !== g)] : FORMAS;
+}
+function proximaForma(depoisDe) {
+  const ordem = ordemDasFormas();
+  return ordem[depoisDe + 1] ? { forma: ordem[depoisDe + 1], indice: depoisDe + 1 } : null;
+}
+function ligarForma(prox) {
+  if (!prox || !st.jogando) return;
+  const { forma, indice } = prox;
+  turbo.codecsForcados = forma.codecs;
+  turbo.recodificar = forma.recodificar;
+  turbo.aceleracoes = forma.aceleracoes;
+  turbo.ultimaFalha = null;
+  errosTurbo.length = 0;
+  formaAtual = { forma, indice, desde: performance.now(), qpsDesde: 0 };
+  evento(`turbo: tentando a forma ${forma.id} (${indice + 1} de ${FORMAS.length})`, { forma });
+  turbo.ligar(st.jogando, video, forma.altura);
+}
+function registrarTentativa(resultado, extra = {}) {
+  const f = formaAtual;
+  if (!f) return;
+  const t = { forma: f.forma.id, resultado, ms: Math.round(performance.now() - f.desde), ...extra };
+  formasTentadas.push(t);
+  if (rel) (rel.turboTentativas ||= []).push(t);
+}
+function formaFalhou(motivo) {
+  const f = formaAtual;
+  const diag = turbo.ultimaFalha;
+  registrarTentativa(diag?.desenhados ? `mostrou e caiu: ${motivo}` : `falhou: ${motivo}`, { diag, erros: errosTurbo.slice(-5) });
+  evento(`turbo: forma ${f?.forma.id} falhou (${motivo})`, { diag, erros: errosTurbo.slice(-5) });
+  formaAtual = null;
+  // a forma que funcionou caiu depois (a rede, não a TV): o vídeo normal segue, a forma continua guardada
+  if (formaOk && f?.forma.id === formaOk) return pararTurbo(motivo);
+  // não é a forma: sem controle liberado, sem tela, conexão fechada
+  if (['sem-controle', 'sem-tela', 'conexao'].includes(motivo)) return pararTurbo(motivo);
+  const prox = f && st.jogando ? proximaForma(f.indice) : null;
+  if (!prox) {
+    evento('turbo: nenhuma forma mostrou imagem nesta TV', { tentativas: formasTentadas });
+    return pararTurbo('nenhuma forma');
+  }
+  ligarForma(prox);
+}
+function pararTurbo(motivo) {
+  turboFalhou = motivo;
+  evento('turbo falhou: vídeo normal', { motivo });
+  if (st.jogando && video.srcObject) evento('buffer do vídeo normal', { feitos: rtc.baixaLatencia(video.srcObject, true, BUFFER_MS) });
+}
+// a forma que deu imagem por FORMA_OK_MS seguidos fica guardada
+function vigiarForma(t) {
+  const f = formaAtual;
+  if (!f || formaOk === f.forma.id) return;
+  if (!(t && t.qps > 0)) { f.qpsDesde = 0; return; }
+  f.qpsDesde ||= performance.now();
+  if (performance.now() - f.qpsDesde < FORMA_OK_MS) return;
+  formaOk = f.forma.id;
+  try { localStorage.setItem(FORMA_CHAVE, formaOk); } catch { /* sem armazenamento */ }
+  registrarTentativa('funcionou', { qps: t.qps, kbps: t.kbps, decMs: t.decMs, largura: t.largura, altura: t.altura, codec: t.codec });
+  evento(`turbo: a forma ${formaOk} funciona nesta TV (guardada)`, { qps: t.qps, kbps: t.kbps, decMs: t.decMs, codec: t.codec, largura: t.largura, altura: t.altura });
+}
+// O PC leva 3–4 s para começar a mandar (mede a rede e escolhe repassar o PS5 ou codificar): com a desistência
+// de fábrica (4 s), a TV largava o Turbo um instante antes do primeiro quadro (teste de 2026-11-23 00:34 e 00:44)
+turbo.semImagemMs = 12_000;
 // os erros do Turbo (decodificador da TV) vão para o relatório: é com eles que dá para ver o que a TV recusa
 const errosTurbo = [];
 const warnOriginal = console.warn.bind(console);
@@ -548,7 +629,7 @@ async function medirVideo() {
 }
 
 let seloAte = 0;
-let seloSempre = false;
+let seloSempre = true; // o desempenho fica na tela o jogo todo (teste das formas do Turbo); Info/cores escondem
 function mostrarSelo(ms) {
   seloAte = performance.now() + ms;
 }
@@ -563,10 +644,13 @@ setInterval(async () => {
   const controle = { rttMs: rtts.length ? Math.round(rtts[rtts.length >> 1]) : null, ajudanteMs: ping.aj, pad: !!gamepad() };
   ping.rtt.length = 0;
   if (rel && rel.amostras.length < 1800) rel.amostras.push({ t: Date.now(), turbo: t, video: v, controle });
+  if (!(t && t.qps > 0)) vigiarFila(v);
+  vigiarForma(t);
   if (rel && !rel.enviado && rel.amostras.length === 45) mandarRelatorio('90 s de jogo', true); // a TV pode desligar sem sair
   const usado = t && t.qps > 0 ? { ...t, via: 'Turbo' } : v ? { ...v, via: 'vídeo' } : null;
   const el = $('#selo');
-  el.hidden = !(seloSempre || performance.now() < seloAte) || !usado;
+  el.hidden = !(seloSempre || performance.now() < seloAte);
+  if (!usado) el.textContent = `medindo…${formaAtual ? ` · testando ${formaAtual.forma.id} (${formaAtual.indice + 1}/${FORMAS.length})` : ''}`;
   if (usado) {
     const mbps = usado.kbps != null ? `${(usado.kbps / 1000).toFixed(1)} Mbps` : '–';
     const res = usado.largura ? `${usado.largura}×${usado.altura}` : '–';
@@ -574,15 +658,29 @@ setInterval(async () => {
     // atraso que dá para medir aqui: a espera na fila do vídeo (ou o liso do Turbo) e o caminho do controle
     const espera = usado.via === 'vídeo' && usado.bufferMs != null ? ` · fila ${usado.bufferMs} ms` : usado.pontaMs != null ? ` · imagem ${Math.round(usado.pontaMs)} ms` : '';
     const ctrl = controle.rttMs != null ? ` · controle ${Math.round(controle.rttMs / 2)} ms` : '';
-    el.textContent = `${usado.via} · ${res} · ${Math.round(usado.qps || 0)} qps · ${mbps}${codec ? ` · ${codec}` : ''}${espera}${ctrl}${turboFalhou ? ` · turbo: ${turboFalhou}` : ''}`;
+    el.textContent = `${usado.via} · ${res} · ${Math.round(usado.qps || 0)} qps · ${mbps}${codec ? ` · ${codec}` : ''}${espera}${ctrl}${turboFalhou ? ` · turbo: ${turboFalhou}` : formaAtual && formaOk !== formaAtual.forma.id ? ` · testando ${formaAtual.forma.id} (${formaAtual.indice + 1}/${FORMAS.length})` : ''}`;
   }
 }, 2000);
+
+// Fila que não para de crescer no vídeo normal (teste de 2026-11-23 00:34 e 00:42): no meio do jogo o
+// decodificador da TV passou da placa para o processador (de 0,2 ms para ~19 ms por quadro, acima dos 16 ms
+// de um quadro a 60 qps) e a fila chegou a 5 s. Refazer a conexão cria um decodificador novo, na placa.
+// O rtc.refazer já espera 20 s, 40 s, 80 s… entre uma vez e outra.
+let filaRuim = 0;
+function vigiarFila(v) {
+  const a = st.alvo;
+  const lento = v && ((v.bufferMs ?? 0) > 600 || (v.decMs ?? 0) > 12);
+  filaRuim = lento ? filaRuim + 1 : 0;
+  if (filaRuim < 2 || !a) return; // 4 s seguidos
+  filaRuim = 0;
+  if (rtc.refazer(a.u.id, 'a fila do vídeo da TV não baixa')) evento('fila do vídeo alta: conexão refeita', { bufferMs: v.bufferMs, decMs: v.decMs, qps: v.qps });
+}
 
 function mandarRelatorio(motivo, parcial = false) {
   if (!rel || !rel.amostras.length) return;
   const r = { ...rel, fim: new Date().toISOString(), motivo };
   const qps = r.amostras.map((x) => x.turbo?.qps || x.video?.qps).filter((x) => x > 0);
-  r.resumo = { mediaQps: qps.length ? qps.reduce((s, x) => s + x, 0) / qps.length : null, turbo: !!r.amostras.some((x) => x.turbo?.qps), turboFalhou };
+  r.resumo = { mediaQps: qps.length ? qps.reduce((s, x) => s + x, 0) / qps.length : null, turbo: !!r.amostras.some((x) => x.turbo?.qps), turboFalhou, turboForma: formaOk, turboGuardada: formaGuardada, turboTentativas: formasTentadas };
   const corpo = JSON.stringify({ id: parcial ? `${r.id}-p` : r.id, relatorio: r, sala: SALA, nome: `${conta?.nome || 'sem conta'} (TV)`, relogio: Date.now() });
   if (parcial) rel.enviado = true;
   else rel = null;

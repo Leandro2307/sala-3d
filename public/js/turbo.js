@@ -1442,6 +1442,11 @@ export class TurboRecebe {
     this.realce = false; // realce de nitidez (Realce): vale na próxima vez que o turbo ligar
     // as acelerações tentadas no decodificador, em ordem (configurarDec, proximaAceleracao)
     this.aceleracoes = ['prefer-hardware'];
+    // formas de teste (TV, tv.js): os codecs pedidos exatamente assim (sem conferir o isConfigSupported) e
+    // a imagem codificada no PC mesmo quando o PS5 caberia repassado. Valem na próxima vez que o turbo ligar.
+    this.codecsForcados = null;
+    this.recodificar = false;
+    this.ultimaFalha = null; // o que se viu na última desistência (falhou): para o relatório
     this.realceForca = REALCE_FORCA;
     this.lisoPct = LISO_PCT; // quanto do tremido a folga do liso cobre (presets de teste)
     this.lisoMax = LISO_MAX; // a folga máxima (ms): o Turbo rápido troca o atraso pelo tremido
@@ -1524,11 +1529,17 @@ export class TurboRecebe {
     // com o H.265 pedido (presets de teste), ele vem primeiro: quem compartilha numa versão antiga escolhe o
     // primeiro que a placa codifica. De fábrica ele vai no fim da lista (a versão antiga continua no
     // H.264) e o "hevc" do pedido diz à versão nova que pode usar.
-    const lista = this.semHevc ? CODECS : s.h265 ? [...CODECS_HEVC, ...CODECS] : [...CODECS, ...CODECS_HEVC];
+    const forcados = Array.isArray(this.codecsForcados) && this.codecsForcados.length ? this.codecsForcados.filter((c) => !this.semHevc || !ehHevc(c)) : null;
+    const lista = forcados || (this.semHevc ? CODECS : s.h265 ? [...CODECS_HEVC, ...CODECS] : [...CODECS, ...CODECS_HEVC]);
+    const diz = {};
     for (const codec of lista) {
       const r = await VideoDecoder.isConfigSupported({ codec, optimizeForLatency: true }).catch(() => null);
-      if (r?.supported) codecs.push(codec);
+      diz[codec] = !!r?.supported;
+      // forçados vão mesmo com o "não": há TV que diz sim e recusa, e pode haver a que diz não e aceita
+      if (r?.supported || forcados) codecs.push(codec);
     }
+    s.recodificar = !!this.recodificar;
+    if (forcados || s.recodificar) this.onEvento?.('turbo: forma pedida', { codecs, isConfigSupported: diz, recodificar: s.recodificar, altura, aceleracoes: this.aceleracoes });
     s.hevcAqui = codecs.some(ehHevc);
     if (s.h265) this.onEvento?.(codecs.some(ehHevc) ? 'turbo: H.265 pedido' : 'turbo: este aparelho não decodifica H.265 (vai H.264)', { codecs });
     if (s.som) {
@@ -1537,7 +1548,7 @@ export class TurboRecebe {
     }
     if (this.s !== s) return;
     if (!codecs.length) return this.falhou('navegador');
-    const ligar = () => canal.send(JSON.stringify({ ligar: key, codecs, altura, versao: VERSAO, som: !!s.som, hevc: s.hevcAqui }));
+    const ligar = () => canal.send(JSON.stringify({ ligar: key, codecs, altura, versao: VERSAO, som: !!s.som, hevc: s.hevcAqui, ...(s.recodificar ? { recodificar: true } : {}) }));
     if (canal.readyState === 'open') ligar();
     else canal.addEventListener('open', ligar, { once: true });
     canal.onmessage = (e) => (typeof e.data === 'string' ? this.texto(s, e.data) : this.pedaco(s, e.data));
@@ -1598,6 +1609,7 @@ export class TurboRecebe {
               this.pedirChave(s, true);
               return;
             }
+            if (this.recusouHevc(s, err)) return;
             s.errosDec = (s.errosDec || 0) + 1;
             if (s.errosDec > 5) return this.falhou('decodificador');
             this.configurarDec(s);
@@ -1623,8 +1635,19 @@ export class TurboRecebe {
     } catch (err) {
       console.warn('[turbo] configurar', err);
       if (this.proximaAceleracao(s, err)) return this.configurarDec(s);
+      if (this.recusouHevc(s, err)) return;
       this.falhou('decodificador');
     }
+  }
+
+  // Nenhuma aceleração aceitou o H.265 (TV LG webOS com Chrome 120, teste de 2026-11-23 00:42: "Unsupported
+  // configuration" nas três): liga de novo pedindo só H.264, em vez de esperar a desistência por falta de imagem
+  recusouHevc(s, err) {
+    const msg = String(err?.message || err);
+    if (this.semHevc || !ehHevc(s.cfgAtual?.codec)) return false;
+    if (!/unsupported configuration|not ?supported/i.test(msg) && err?.name !== 'NotSupportedError') return false;
+    this.largarHevc(s, 'recusado');
+    return true;
   }
 
   // Erro de configuração (o decodificador não existe com essa aceleração): passa para a próxima de
@@ -2198,7 +2221,7 @@ export class TurboRecebe {
     }
     const graca = agora - (s.paradaEm || -1e9) < PARADA_GRACA_MS;
     // nada apareceu: este aparelho/PC não deu conta — vídeo normal de volta
-    if (!graca && !s.desenhou && agora - s.inicio > SEM_IMAGEM_MS) return this.falhou('sem-imagem');
+    if (!graca && !s.desenhou && agora - s.inicio > (this.semImagemMs || SEM_IMAGEM_MS)) return this.falhou('sem-imagem');
     // a imagem parou ou a fila não para de crescer: a conexão não aguenta (ver PAROU_MS). Parou só
     // conta com quadro a caminho (chegando aos pedaços ou à espera do quadro-chave): tela parada lá não
     // manda quadro nenhum, e aí não é a conexão.
@@ -2242,6 +2265,17 @@ export class TurboRecebe {
 
   falhou(motivo) {
     const s = this.s;
+    if (s) {
+      const c = s.cfgAtual;
+      this.ultimaFalha = {
+        motivo, ms: Math.round(performance.now() - s.inicio),
+        cfg: c ? `${c.codec} ${c.w}×${c.h}${c.description ? '' : ' sem description'}` : null, // nulo: a configuração nem chegou
+        kb: Math.round(s.conta.bytes / 1024), // o que chegou pelo canal
+        saiuDoDec: s.saiuDoDec || 0, desenhados: s.conta.desenhados,
+        aceleracao: this.aceleracoes[s.acel || 0] || null, decoder: s.dec?.state ?? null, errosDec: s.errosDec || 0,
+        canal: s.canal?.readyState ?? null,
+      };
+    }
     this.desligar();
     if (s) this.onFalhou?.(motivo);
   }
