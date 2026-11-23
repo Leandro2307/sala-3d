@@ -1360,13 +1360,16 @@ export class RTC {
 
   // Modo turbo (turbo.js), do lado de quem joga: um canal só para a imagem, ordenado e com vida
   // curta (um pedaço que perdeu a hora não segura os seguintes). Um por vez: abrir de novo fecha o anterior.
-  // vida: ms que cada pedaço vale no canal (turbo.js, TTL_MS); passou disso sem chegar, é largado
+  // vida: ms que cada pedaço vale no canal (turbo.js, TTL_MS); passou disso sem chegar, é largado.
+  // vida null: canal confiável (ordenado, sem prazo). A TV LG com Chromium 94 (2026-11-23): o canal com
+  // prazo derrubou a conexão e, ~1 min depois, o Chrome de quem compartilhava travou na thread do WebRTC
+  // (STATUS_ILLEGAL_INSTRUCTION), duas vezes. O SCTP antigo dela não combina com o "entrega parcial".
   abrirTurbo(id, vida = 250) {
     const peer = this.peers.get(id);
     if (!peer || ['failed', 'closed'].includes(peer.pc.connectionState)) return null;
     try { peer.turboCanal?.close(); } catch { /* já fechado */ }
     try {
-      peer.turboCanal = peer.pc.createDataChannel('turbo', { ordered: true, maxPacketLifeTime: Math.round(vida) });
+      peer.turboCanal = peer.pc.createDataChannel('turbo', vida == null ? { ordered: true } : { ordered: true, maxPacketLifeTime: Math.round(vida) });
       return peer.turboCanal;
     } catch {
       return null;
@@ -1375,12 +1378,12 @@ export class RTC {
 
   // O som do turbo: canal à parte, sem ordem e com vida curta — um pacote de som não espera atrás de
   // um pedaço de imagem nem de outro pacote perdido (o tocador de lá prefere uma falha de 10 ms).
-  abrirTurboSom(id) {
+  abrirTurboSom(id, confiavel = false) {
     const peer = this.peers.get(id);
     if (!peer || ['failed', 'closed'].includes(peer.pc.connectionState)) return null;
     try { peer.turboSomCanal?.close(); } catch { /* já fechado */ }
     try {
-      peer.turboSomCanal = peer.pc.createDataChannel('turbo-som', { ordered: false, maxPacketLifeTime: 60 });
+      peer.turboSomCanal = peer.pc.createDataChannel('turbo-som', confiavel ? { ordered: true } : { ordered: false, maxPacketLifeTime: 60 });
       return peer.turboSomCanal;
     } catch {
       return null;

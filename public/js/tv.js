@@ -436,8 +436,9 @@ function desligarJogo(avisarLa = true) {
 const BUFFER_MS = 40;
 let turboFalhou = null; // o motivo: nesta página a TV fica no vídeo normal
 const turbo = new TurboRecebe({
-  abrir: (id, vida) => rtc?.abrirTurbo(id, vida),
-  abrirSom: (id) => rtc?.abrirTurboSom(id),
+  // canais confiáveis na TV (ver rtc.abrirTurbo): sem o prazo; o PC já pula quadros quando a fila do canal enche
+  abrir: (id) => rtc?.abrirTurbo(id, null),
+  abrirSom: (id) => rtc?.abrirTurboSom(id, true),
   somDaTela: () => video,
   volume: () => 1,
   onEvento: (texto, dados) => evento(texto, dados),
