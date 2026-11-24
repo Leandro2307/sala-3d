@@ -55,8 +55,9 @@ export class PcDireto {
   // pedirPonte(): pede ao ajudante a porta e o token da ponte (via extensão)
   // compartilhar(fonte, { rotulo }): põe a fonte numa tela da sala; devolve a chave ou null
   // pararTela(key), onEvento(texto, dados), toast, aoAbrir, aoFechar
-  constructor({ pedirPonte, compartilhar, pararTela, onEvento, toast, aoAbrir, aoFechar }) {
-    Object.assign(this, { pedirPonte, compartilhar, pararTela, onEvento, toast, aoAbrir, aoFechar });
+  // aoParar(): alguém parou de propósito; aoCair(): a imagem caiu sozinha (ver diretas.js)
+  constructor({ pedirPonte, compartilhar, pararTela, onEvento, toast, aoAbrir, aoFechar, aoParar, aoCair }) {
+    Object.assign(this, { pedirPonte, compartilhar, pararTela, onEvento, toast, aoAbrir, aoFechar, aoParar, aoCair });
     this.ws = null;
     this.monitores = [];
     this.nvenc = null;
@@ -113,7 +114,10 @@ export class PcDireto {
           clearTimeout(fim);
           if (this.ws === ws) this.ws = null;
           resolve(false);
-          if (this.noAr) this.terminar('a ponte do PC fechou');
+          if (this.noAr) {
+            this.aoCair?.();
+            this.terminar('a ponte do PC fechou');
+          }
           this.render();
         };
         ws.onmessage = (e) => (typeof e.data === 'string' ? this.texto(e.data) : this.binario(e.data));
@@ -151,6 +155,7 @@ export class PcDireto {
         break;
       case 'conectado':
         this.conectado = m;
+        this.nomeMonitor = this.monitores.find((x) => x.i === m.monitor)?.nome ?? null;
         this.fase = 'no-ar';
         if (this.fonte?.banda) this.fonte.banda.atual = Number(m.kbps) || this.fonte.banda.atual;
         this.onEvento?.('pc direto: no ar', m);
@@ -169,7 +174,10 @@ export class PcDireto {
         this.onEvento?.('pc direto: saiu', m);
         // o "parou" da captura de antes chegando depois de recomeçar (Jogos do PC trocando de monitor)
         if (m.motivo === 'parou' && this.fase === 'abrindo') break;
-        if (m.erro) this.toast?.(`PC direto: ${ERROS[m.motivo] || m.motivo}`, 'error', 10000);
+        if (m.erro) {
+          this.aoCair?.();
+          this.toast?.(`PC direto: ${ERROS[m.motivo] || m.motivo}`, 'error', 10000);
+        }
         this.terminar(null);
         break;
       case 'aviso':
@@ -263,7 +271,14 @@ export class PcDireto {
   // Jogos do PC (o dono escolheu um jogo neste hub): sempre o monitor de 144 Hz e sempre a 60 qps, sem
   // perguntar a tela (ninguém está na frente deste PC). Já no ar noutro monitor ou noutro qps: recomeça.
   // Devolve { key, monitor } quando a imagem já está numa tela da sala, ou { erro }.
-  async ligarParaJogo() {
+  // volta: { nome, qps } de antes de uma reconexão: no mesmo monitor, nunca noutro
+  async ligarParaJogo(volta = {}) {
+    // desde já: a ponte com a imagem no ar (a página recarregou) põe a tela na sala logo que abre
+    this.paraJogo = true;
+    try { return await this.ligarSozinho(volta); } finally { this.paraJogo = false; }
+  }
+
+  async ligarSozinho({ nome = null, qps = QPS_JOGO }) {
     if (!temPcDireto()) return { erro: 'este navegador não decodifica vídeo pela página (WebCodecs)' };
     if (!(await this.ligarPonte())) return { erro: this.erro || 'a ponte do PC não abriu' };
     this.monitores = [];
@@ -271,10 +286,10 @@ export class PcDireto {
     this.mandar({ tipo: 'monitores' });
     await esperar(() => this.monitores.length && this.nvenc != null, 6000);
     if (this.nvenc === false) return { erro: ERROS[this.erroNvenc] || ERROS['sem-nvenc'] };
-    const mon = this.monitorDoJogo();
-    if (!mon) return { erro: 'a ponte não achou nenhum monitor' };
+    const mon = nome ? this.monitores.find((x) => x.nome === nome) : this.monitorDoJogo();
+    if (!mon) return { erro: nome ? 'o monitor que estava no ar não está mais ligado' : 'a ponte não achou nenhum monitor' };
     const c = this.conectado;
-    const certa = () => this.noAr && this.conectado && this.conectado.monitor === mon.i && Number(this.conectado.qps) === QPS_JOGO;
+    const certa = () => this.noAr && this.conectado && this.conectado.monitor === mon.i && Number(this.conectado.qps) === qps;
     // já no ar do jeito certo (a sessão que voltou depois de a página recarregar, ainda entrando na
     // sala): espera a tela entrar em vez de derrubar e abrir outra
     if (certa() && !this.key) await esperar(() => this.key || !certa(), 10_000);
@@ -283,10 +298,8 @@ export class PcDireto {
       this.parar();
       await new Promise((ok) => setTimeout(ok, 800)); // a ponte solta a captura e o codificador
     }
-    this.paraJogo = true;
-    await this.iniciar(mon.i, { qps: QPS_JOGO, guardar: false });
+    await this.iniciar(mon.i, { qps, guardar: false });
     await esperar(() => this.key || this.fase === 'parado', 30_000);
-    this.paraJogo = false;
     if (this.key) return { key: this.key, monitor: mon };
     if (this.fase !== 'parado') this.parar();
     return { erro: this.erro || 'a placa não começou a mandar a imagem' };
@@ -368,6 +381,7 @@ export class PcDireto {
   telaSaiu(key) {
     if (key !== this.key) return;
     this.key = null;
+    this.aoParar?.();
     this.parar();
   }
 
@@ -404,7 +418,7 @@ export class PcDireto {
       if (!b || b.disabled) return;
       const acao = b.dataset.pc;
       if (acao === 'iniciar') this.iniciar(b.dataset.i);
-      else if (acao === 'parar') this.parar();
+      else if (acao === 'parar') { this.aoParar?.(); this.parar(); }
       else if (acao === 'tentar') this.abrir();
       else if (acao === 'atualizar') this.mandar({ tipo: 'monitores' });
     });

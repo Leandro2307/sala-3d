@@ -689,8 +689,9 @@ export class Ps5Nativo {
   // losslessTodos: { ligado(), alternar() } — o Lossless deste PC para todos, pela câmera do OBS
   // somPc: { ligado(), alternar(), abafar(), alternarAbafar() } — o som do PC (Voz Universal) junto com o do PS5
   // dublagem: { ligada(), estado(), resumo(), ultimaFala(), alternar() } — o Voz Universal lendo a imagem do PS5 (voz-universal.js)
-  constructor({ pedirPonte, compartilhar, pararTela, onTremor, onGatilhos, onEvento, toast, aoAbrir, aoFechar, jogarComLossless, losslessTodos, somPc, volume, dublagem }) {
-    Object.assign(this, { pedirPonte, compartilhar, pararTela, onTremor, onGatilhos, onEvento, toast, aoAbrir, aoFechar, jogarComLossless, losslessTodos, somPc, volume, dublagem });
+  // aoParar(): alguém parou de propósito; aoCair(): a imagem caiu sozinha (ver diretas.js)
+  constructor({ pedirPonte, compartilhar, pararTela, onTremor, onGatilhos, onEvento, toast, aoAbrir, aoFechar, jogarComLossless, losslessTodos, somPc, volume, dublagem, aoParar, aoCair }) {
+    Object.assign(this, { pedirPonte, compartilhar, pararTela, onTremor, onGatilhos, onEvento, toast, aoAbrir, aoFechar, jogarComLossless, losslessTodos, somPc, volume, dublagem, aoParar, aoCair });
     this.ws = null;
     this.consoles = [];
     this.achados = null;
@@ -760,7 +761,10 @@ export class Ps5Nativo {
           clearTimeout(fim);
           if (this.ws === ws) this.ws = null;
           resolve(false);
-          if (this.noAr) this.terminar('a ponte do PS5 fechou');
+          if (this.noAr) {
+            this.aoCair?.();
+            this.terminar('a ponte do PS5 fechou');
+          }
           this.render();
         };
         ws.onmessage = (e) => (typeof e.data === 'string' ? this.texto(e.data) : this.binario(e.data));
@@ -814,6 +818,7 @@ export class Ps5Nativo {
         break;
       case 'conectado':
         this.conectado = m;
+        this.paramos = false;
         // a sessão continuou na ponte enquanto a página recarregava (ela repete o "conectado", os
         // cabeçalhos e pede um quadro inteiro): sem a fonte, a imagem não tinha para onde ir e o PS5
         // ficava ligado fora da sala. A fonte nasce aqui e a tela volta para a sala sem perguntar.
@@ -848,6 +853,10 @@ export class Ps5Nativo {
         break;
       case 'saiu': {
         this.onEvento?.('ps5 direto: saiu', m);
+        // sem erro: o PS5 foi desligado ou posto em repouso (voltar sozinho o ligaria de novo)
+        if (m.erro) this.aoCair?.();
+        else if (!this.paramos) this.aoParar?.();
+        this.paramos = false; // o fim que a própria página pediu já foi tratado em quem pediu
         if (m.erro) this.toast?.(`PS5: ${this.motivo(m)}`, 'error', 9000);
         this.terminar(null);
         break;
@@ -939,11 +948,13 @@ export class Ps5Nativo {
   }
 
   parar() {
+    this.paramos = true;
     this.mandar({ tipo: 'parar' });
     this.terminar(null);
   }
 
   dormir() {
+    this.aoParar?.();
     this.mandar({ tipo: 'dormir' });
   }
 
@@ -951,13 +962,17 @@ export class Ps5Nativo {
   telaSaiu(key) {
     if (key !== this.key) return;
     this.key = null;
+    this.aoParar?.();
     this.parar();
   }
 
   pedirPinDeLogin(errado) {
     const pin = prompt(errado ? 'PIN errado. O PIN de acesso do PS5 (o do usuário):' : 'O PS5 pede o PIN de acesso do usuário:');
     if (pin) this.mandar({ tipo: 'pin', pin: pin.replace(/\D/g, '') });
-    else this.parar();
+    else {
+      this.aoParar?.();
+      this.parar();
+    }
   }
 
   // ---------------------------------------------------------------- o controle de quem joga
@@ -1026,7 +1041,7 @@ export class Ps5Nativo {
       const acao = b.dataset.p5;
       const id = b.dataset.id;
       if (acao === 'jogar') this.jogar(id);
-      else if (acao === 'parar') this.parar();
+      else if (acao === 'parar') { this.aoParar?.(); this.parar(); }
       else if (acao === 'dormir') this.dormir();
       else if (acao === 'procurar') { this.procurando = true; this.mandar({ tipo: 'descobrir' }); this.render(); }
       else if (acao === 'importar') this.mandar({ tipo: 'importar' });
