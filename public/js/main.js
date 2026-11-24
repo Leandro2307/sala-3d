@@ -9,6 +9,7 @@ import { PcJogos } from './pc-jogos.js';
 import { Ps5Nativo, temPs5Nativo } from './ps5-nativo.js';
 import { Dublagem } from './voz-universal.js';
 import { PcDireto, temPcDireto } from './pc-direto.js';
+import { Diretas } from './diretas.js';
 import { Ps5Touchpad, temTouchpadHid } from './ps5-touchpad.js';
 import { SalasLaterais } from './salas.js';
 import { AoVivo, cartaoDoSaguao, COR_STATUS } from './aovivo.js';
@@ -33,7 +34,7 @@ import { TecladoPad } from './teclado-pad.js';
 import { MapaTeclasPainel, dicaTeclado, legendaBotoes, mapaTeclas, nomeEntrada } from './mapa-teclas.js';
 import { TutorialControle } from './tutorial-controle.js';
 import { TurboEnvio, TurboRecebe, TTL_MS, LISO_PCT, LISO_MAX } from './turbo.js';
-import { opcoesJogo, LISO_MS, PRESETS, OPCOES_DO_PRESET, htmlPresets, marcarPresets } from './jogo-opcoes.js';
+import { opcoesJogo, LISO_MS, PRESETS, OPCOES_DO_PRESET, htmlPresets, marcarPresets, alturaDoMenu } from './jogo-opcoes.js';
 import { Mesa } from './mesa.js';
 import { Qualidade, NIVEIS, nivelInicial } from './qualidade.js';
 import * as moduloQualidade from './qualidade.js';
@@ -1213,6 +1214,9 @@ async function join() {
   // primeira visita: o tutorial da interface vem antes do aviso de boas-vindas
   $('#hud').hidden = false;
   $('#bar').hidden = false;
+  quedaEm = null;
+  reconectouEm = Date.now();
+  voltarDiretas('a página recarregou');
   avisarExtensaoVelha();
   localAvatar.setName(name);
   irParaEntrada();
@@ -1451,6 +1455,7 @@ function bindSocket() {
   // houve antes dela: em 2026-11-17 tudo piorou depois de uma reconexão e o relatório não dizia)
   socket.on('disconnect', (motivo) => {
     diagJogo.marcar('caiu a conexão com o servidor', { motivo: String(motivo || '') });
+    quedaEm ??= Date.now();
     lembrarJogo(); // jogando numa tela de outra pessoa: quando ela voltar, o botão "Voltar ao jogo"
     if (state.joined) $('#reconnecting').hidden = false;
   });
@@ -1465,10 +1470,15 @@ function bindSocket() {
     // As telas no ar NÃO param: a captura continua viva e volta para a sala com a chave nova
     // (antes, qualquer piscada da internet ou reinício do servidor desligava tudo).
     const guardadas = guardarTelas();
-    pararTodasAsTelas(false);
+    const queda = quedaEm;
+    diretas.travada = true; // as que sobraram (imagem morta) saem, mas ninguém mandou parar
+    try { pararTodasAsTelas(false); } finally { diretas.travada = false; }
     for (const id of [...state.users.keys()]) if (id !== state.selfId) removeUser(id, true);
     const data = await emitJoin();
-    const largar = () => { for (const g of guardadas) for (const t of g.stream.getTracks()) t.stop(); };
+    const largar = () => {
+      aDevolver = [];
+      for (const g of guardadas) for (const t of g.stream.getTracks()) t.stop();
+    };
     if (data?.erro) {
       largar();
       return senhaRecusada(data.erro);
@@ -1477,12 +1487,16 @@ function bindSocket() {
     // A captura não sobrevive à recarga: o PC do /tela compartilha de novo sozinho depois (telaParaVoltar).
     if (data?.versao && data.versao !== state.versao) {
       lembrarTelasParaVoltar(guardadas);
+      // a imagem que caiu nesta mesma queda também volta depois da recarga
+      for (const m of diretas.paraVoltar(queda)) diretas.atualizar(m, { caiu: null });
       largar();
       return recarregarNaSala();
     }
     applyJoined(data);
     toast('Reconectado!');
-    devolverTelas(guardadas);
+    quedaEm = null;
+    reconectouEm = Date.now();
+    if (await devolverTelas()) voltarDiretas('a conexão caiu', queda);
   });
 
   socket.on('user-joined', (u) => {
@@ -2437,18 +2451,21 @@ async function capturarAbaDaExtensao({ streamId, aba, site, titulo }) {
 // Reserva uma tela no servidor e manda o stream (captura ou arquivo) para todo mundo.
 // Devolve a chave da tela, ou null se não deu.
 // qps: o ritmo da captura quando passa de 60 (a tela pelo OBS)
+// manterNaFalha: não deu, a imagem continua viva (quem chama tenta de novo)
 // reconexao: a tela já estava no ar antes da queda (tenta a mesma tela da sala; ocupada, qualquer
 // outra) e o controle volta pelas mãos de quem chama.
-async function publishShare(stream, { file = false, height = 0, aba: abaConhecida = null, tela, qps = null, reconexao = false, superficie: superficieDada = null, alvo: alvoDado = null } = {}) {
+async function publishShare(stream, { file = false, height = 0, aba: abaConhecida = null, tela, qps = null, reconexao = false, manterNaFalha = false, superficie: superficieDada = null, alvo: alvoDado = null } = {}) {
   // no escritório, numa tela da sala onde a pessoa está
   const sala = world.salaEm(player.pos.x, player.pos.z);
   // a do OBS conta como tela inteira (modo jogo, controle pelo ajudante)
   // superficieDada: a do PS5 direto ('ps5'), que não é captura nenhuma
   const superficie = superficieDada ?? (file ? null : qps ? 'monitor' : stream.getVideoTracks()[0]?.getSettings?.().displaySurface ?? null);
-  const pedir = (t) => new Promise((resolve) => socket.emit('share-start', { streamId: stream.id, sala, tela: t, superficie }, resolve));
+  // a conexão que cai no meio nunca responde: sem o prazo, a tela ficava esperando para sempre
+  const pedir = (t) => new Promise((resolve) => socket.timeout(20_000).emit('share-start', { streamId: stream.id, sala, tela: t, superficie }, (err, r) => resolve(err ? null : r)));
   let res = await pedir(tela);
   if (!res?.ok && reconexao && tela != null) res = await pedir(undefined);
   if (!res?.ok) {
+    if (manterNaFalha) return null;
     if (!file) for (const t of stream.getTracks()) t.stop();
     toast(res?.error || 'Não foi possível compartilhar.', 'error');
     return null;
@@ -3130,6 +3147,11 @@ const turboEnvio = new TurboEnvio({
 // PC direto (pc-direto.js): um monitor deste PC pela ponte do ajudante, codificado pela placa de vídeo
 // (NVENC), como o Remote Play do PS5. A mesma fonte do PS5 direto: uma cópia decodificada vira a tela da
 // sala e os quadros da placa vão como saíram para quem joga no turbo. O controle é o de uma tela inteira.
+// as que estão no ar por aqui, para voltarem sozinhas (diretas.js; a volta em voltarDiretas)
+const diretas = new Diretas({
+  sala: () => state.room,
+  guarda: (() => { try { return sessionStorage; } catch { return null; } })(),
+});
 const pcDireto = new PcDireto({
   pedirPonte: () => controle.pedir('pc-ponte', undefined, undefined, undefined, 25_000),
   compartilhar: (fonte, info) => compartilharPcDireto(fonte, info),
@@ -3144,6 +3166,8 @@ const pcDireto = new PcDireto({
   aoFechar: () => {
     if (state.joined) player.enabled = true;
   },
+  aoParar: () => diretas.larga('pc'),
+  aoCair: () => caiuDireta('pc'),
 });
 
 // a imagem do PC direto numa tela da sala, com o controle liberado (é para jogar). O som não toca aqui:
@@ -3158,28 +3182,35 @@ async function compartilharPcDireto(fonte, { rotulo, auto = false }) {
     toast('Todas as telas e o telão estão ocupados. Pare uma delas para pôr o PC.', 'warn', 6000);
     return null;
   }
+  const volta = voltandoDireta.pc;
+  if (auto) await semCompartilharAgora();
   if (shareBusy) return null;
   shareBusy = true;
   let key;
   try {
-    const tela = auto ? undefined : await escolherTela();
+    const tela = volta ? volta.slot ?? undefined : auto ? undefined : await escolherTela();
     if (tela === null) return null;
-    key = await publishShare(fonte.stream, { tela, superficie: 'monitor', alvo: { superficie: 'monitor', rotulo } });
+    key = await publishShare(fonte.stream, { tela, superficie: 'monitor', reconexao: !!volta, alvo: { superficie: 'monitor', rotulo } });
   } finally {
     shareBusy = false;
   }
   const sh = key && self()?.shares.get(key);
   if (!sh) return null;
   sh.pcDireto = fonte;
+  diretas.quer('pc', { slot: sh.slot, nome: pcDireto.nomeMonitor ?? null, qps: Number(pcDireto.conectado?.qps) || 60, lan: !!volta?.lan, controle: volta?.controle ?? true });
+  segurarDiretas();
   renderPeople();
   renderSharePop();
   // "Já permitir controle ao compartilhar" ligado: o publishShare já libera; senão, libera aqui
-  if (!(settings.controleAuto && controle.ext.ok && controle.ext.liberado)) permitirControle(key);
+  // (na volta, o controle fica como estava: voltarDireta)
+  if (!volta && !(settings.controleAuto && controle.ext.ok && controle.ext.liberado)) permitirControle(key);
   toast(`O PC está no ${ondeEsta(sh) === 'Telão' ? 'telão' : ondeEsta(sh)} pela placa de vídeo. Quem abrir a tela e ligar o modo jogo (turbo) recebe a imagem direto da placa.`, 'success', 8000);
   return key;
 }
 
 const ps5Nativo = new Ps5Nativo({
+  aoParar: () => diretas.larga('ps5'),
+  aoCair: () => caiuDireta('ps5'),
   pedirPonte: () => controle.pedir('ps5-ponte', undefined, undefined, undefined, 25_000),
   compartilhar: (fonte) => compartilharPs5(fonte),
   pararTela: (key) => stopShare(key, true),
@@ -3677,24 +3708,29 @@ async function compartilharPs5(fonte) {
     toast('Todas as telas e o telão estão ocupados. Pare uma delas para pôr o PS5.', 'warn', 6000);
     return null;
   }
+  const volta = voltandoDireta.ps5;
+  const auto = ps5SemPerguntar || ps5Nativo.retomada;
+  if (auto) await semCompartilharAgora();
   if (shareBusy) return null;
   shareBusy = true;
   let key;
   try {
     // ligado pela lan house, ou a sessão que voltou depois de a página recarregar (ninguém na frente
     // deste PC): não pergunta a tela
-    const tela = ps5SemPerguntar || ps5Nativo.retomada ? undefined : await escolherTela();
+    const tela = volta ? volta.slot ?? undefined : auto ? undefined : await escolherTela();
     if (tela === null) return null;
-    key = await publishShare(fonte.stream, { tela, superficie: 'ps5' });
+    key = await publishShare(fonte.stream, { tela, superficie: 'ps5', reconexao: !!volta });
   } finally {
     shareBusy = false;
   }
   const sh = key && self()?.shares.get(key);
   if (!sh) return null;
   Object.assign(sh, { ps5: fonte, titulo: 'PS5', superficie: 'ps5' });
+  diretas.quer('ps5', { slot: sh.slot, lan: !!volta?.lan, controle: volta?.controle ?? true });
+  segurarDiretas();
   // o nome "PS5" põe o celular de quem joga nos botões do PS5 (toque-jogo.js)
   socket.emit('share-info', { key, site: null, titulo: 'PS5' });
-  socket.emit('controle-permitir', { key, on: true });
+  if (volta?.controle !== false) socket.emit('controle-permitir', { key, on: true });
   // o som do PS5 sai aqui também (antes era a janela do chiaki-ng que tocava)
   if (fonte.stream.getAudioTracks().length) {
     sh.escuta = new Audio();
@@ -4753,6 +4789,7 @@ $('#focus-jogo-op').addEventListener('click', (e) => {
   pop.hidden = !pop.hidden;
   e.currentTarget.setAttribute('aria-expanded', String(!pop.hidden));
   e.currentTarget.blur();
+  alturaDoMenu(pop);
   $$('#jogo-op-pop [data-op]').forEach((el) => { el.checked = !!opcoesJogo.get(el.dataset.op); });
   // o volume do PS5 só aparece para quem tem o PS5 numa tela deste PC
   $('#jogo-ps5-vol-row').hidden = ![...(self()?.shares.values() || [])].some((sh) => sh.ps5 && sh.escuta);
@@ -4785,6 +4822,7 @@ $('#jogo-lossless').addEventListener('change', (e) => {
   e.target.blur();
   mostrarSelo();
 });
+addEventListener('resize', () => alturaDoMenu($('#jogo-op-pop')));
 $('#jogo-op-pop').addEventListener('change', (e) => {
   const k = e.target.dataset.op;
   if (k) opcoesJogo.set(k, e.target.checked);
@@ -7174,40 +7212,56 @@ const avisoTela = (text) => addAviso({ text, t: Date.now() });
 // ----- a tela não cai sozinha
 // Reconexão (a internet piscou, o servidor reiniciou): as capturas vivas saem da sala sem desligar e
 // voltam com a chave nova, na mesma tela da sala se ela continuar livre, com o controle como estava.
+let aDevolver = []; // as que ainda não voltaram: outra queda no meio da volta não as perde
+let voltaN = 0;
 function guardarTelas() {
-  const guardadas = [];
+  const guardadas = [...aDevolver];
   for (const sh of [...(self()?.shares.values() || [])]) {
     const stream = rtc?.screens.get(sh.key)?.stream;
     if (sh.file || !stream?.getVideoTracks().some((t) => t.readyState === 'live')) continue;
     guardadas.push({
-      stream, slot: sh.slot, aba: sh.aba, obs: !!sh.obs, superficie: sh.superficie, controle: !!sh.controle,
+      stream, chave: sh.key, slot: sh.slot, aba: sh.aba, obs: !!sh.obs, superficie: sh.superficie, controle: !!sh.controle,
       escuta: sh.escuta || null, site: sh.site, titulo: sh.titulo, doTela: sh.key === telaKey, ps5: sh.ps5 || null,
       pcDireto: sh.pcDireto || null, alvo: sh.pcDireto ? sh.alvo : null,
     });
     sh.escuta = null; // o som da aba segue tocando aqui
     stopShare(sh.key, false, { manter: true });
   }
+  aDevolver = guardadas;
   return guardadas;
 }
-async function devolverTelas(guardadas) {
+// devolve true quando terminou (false: a conexão caiu no meio, e a próxima continua)
+async function devolverTelas() {
+  const n = ++voltaN;
   let voltaram = 0;
   let refazer = null; // a do PC do /tela que não deu para devolver: compartilha de novo do zero
-  for (const g of guardadas) {
-    const viva = g.stream.getVideoTracks().some((t) => t.readyState === 'live');
-    const key = viva ? await publishShare(g.stream, { aba: g.aba, tela: g.slot ?? undefined, qps: g.obs ? QPS_OBS : null, reconexao: true, superficie: g.ps5 ? 'ps5' : g.pcDireto ? 'monitor' : null, alvo: g.alvo }) : null;
+  for (const g of [...aDevolver]) {
+    const viva = () => g.stream.getVideoTracks().some((t) => t.readyState === 'live');
+    let key = null;
+    // Sem tela livre: as desta própria pessoa, da conexão que caiu, seguram as telas até o servidor
+    // notar a queda (uns 45 s). Tenta por 1 min.
+    for (let i = 0; i < 12 && !key && viva(); i++) {
+      if (i) await new Promise((ok) => setTimeout(ok, 5000));
+      if (n !== voltaN || !socket.connected) return false;
+      if (viva()) key = await publishShare(g.stream, { aba: g.aba, tela: g.slot ?? undefined, qps: g.obs ? QPS_OBS : null, reconexao: true, manterNaFalha: true, superficie: g.ps5 ? 'ps5' : g.pcDireto ? 'monitor' : null, alvo: g.alvo });
+      if (n !== voltaN || (!key && !socket.connected)) return false;
+    }
+    aDevolver = aDevolver.filter((x) => x !== g);
     if (!key) {
+      if (viva()) toast('Uma das suas telas não voltou: todas as telas da sala estão ocupadas.', 'warn', 8000);
       for (const t of g.stream.getTracks()) t.stop();
       g.escuta?.pause();
-      if (g.ps5) {
+      // (a sessão pode já ser outra, aberta no meio da queda: essa fica)
+      if (g.ps5 && ps5Nativo.fonte === g.ps5) {
         ps5Nativo.key = null;
         ps5Nativo.parar();
       }
-      if (g.pcDireto) {
+      if (g.pcDireto && pcDireto.fonte === g.pcDireto) {
         pcDireto.key = null;
         pcDireto.parar();
       }
-      // a do PC direto e a do PS5 não voltam pela captura do Chrome (pegaria o monitor da sala): a vez
-      // da lan house as põe de novo
+      // a do PC direto e a do PS5 não voltam pela captura do Chrome (pegaria o monitor da sala): voltam
+      // pela ponte (voltarDiretas)
       if (!g.pcDireto && !g.ps5 && (g.doTela || (telaLiberadaAqui() && g.obs))) refazer = { obs: g.obs };
       continue;
     }
@@ -7224,11 +7278,13 @@ async function devolverTelas(guardadas) {
       Object.assign(sh, { pcDireto: g.pcDireto });
       pcDireto.key = key;
     }
+    if (lanAbriu.pc && lanAbriu.pc === g.chave) lanAbriu.pc = key; // o fim da vez ainda a acha
     if (g.doTela) telaKey = key;
     if (g.controle) socket.emit('controle-permitir', { key, on: true });
   }
   if (voltaram) toast(voltaram > 1 ? `As suas ${voltaram} telas continuam no ar.` : 'A sua tela continua no ar.', 'success', 4000);
   if (refazer) voltarTela({ ...refazer, motivo: 'a conexão caiu' });
+  return true;
 }
 // Antes de recarregar com a tela no ar (só no PC liberado para o /tela): lembra para voltar sozinha.
 const TELA_VOLTAR = 'sala3d-tela-voltar';
@@ -7277,6 +7333,114 @@ async function voltarTela({ obs = false, motivo = '' } = {}) {
     voltandoTela = false;
   }
 }
+
+// ----- o PS5 direto e o PC direto voltam sempre (diretas.js), com ou sem alguém alugando
+// Numa recarga a ponte segue com a imagem no ar, mas a página nova não a conhece: abre a ponte e a tela
+// volta (a mesma, se continuar livre), com o controle como estava. Sem a ponte no ar, liga de novo. O que
+// a vez alugada pôs só volta com a vez ainda valendo.
+let quedaEm = null; // quando a sala perdeu a conexão (null: conectada)
+let reconectouEm = 0;
+const voltandoDireta = { ps5: null, pc: null };
+async function semCompartilharAgora() {
+  for (let i = 0; i < 40 && shareBusy; i++) await new Promise((ok) => setTimeout(ok, 500));
+}
+// Aba duplicada herda o sessionStorage: só a que tem a imagem no ar (a tranca) volta, senão uma
+// tomaria a ponte da outra.
+let trancaDiretas = null;
+function segurarDiretas() {
+  if (!navigator.locks?.request) return Promise.resolve(true);
+  trancaDiretas ??= new Promise((resolve) => {
+    navigator.locks.request('sala3d-diretas', { ifAvailable: true }, (tranca) => {
+      resolve(!!tranca);
+      if (tranca) return new Promise(() => {}); // até a aba fechar ou recarregar
+      trancaDiretas = null;
+      return undefined;
+    }).catch(() => resolve(true));
+  });
+  return trancaDiretas;
+}
+// a tela desta máquina na sala (null: fora do ar)
+function diretaNoAr(m) {
+  const fonte = m === 'ps5' ? ps5Nativo : pcDireto;
+  return (fonte.noAr && fonte.key && self()?.shares.get(fonte.key)) || null;
+}
+// viva, esperando a vez no devolverTelas
+const diretaGuardada = (m) => aDevolver.some((g) => (m === 'ps5' ? g.ps5 : g.pcDireto));
+// A imagem caiu sozinha. Com a sala também fora, volta na reconexão; logo depois de uma reconexão (a
+// rede ainda se acertando), volta já.
+function caiuDireta(m) {
+  diretas.caiu(m);
+  if (quedaEm || voltandoDireta[m] || !diretas.lista[m] || Date.now() - reconectouEm > 60_000) return;
+  setTimeout(() => { if (!quedaEm) voltarDiretas('a conexão caiu', Date.now()); }, 3000);
+}
+async function voltarDiretas(motivo, queda = null) {
+  const lista = diretas.paraVoltar(queda).filter((m) => !diretaNoAr(m) && !diretaGuardada(m) && !voltandoDireta[m]);
+  if (!lista.length) return;
+  // a página de antes solta a tranca ao sair; outra aba com a imagem no ar não solta
+  let minha = false;
+  for (let i = 0; i < 5 && !minha; i++) {
+    if (i) await esperar(1000);
+    minha = await segurarDiretas();
+  }
+  if (!minha) {
+    for (const m of lista) diretas.larga(m);
+    return;
+  }
+  // a extensão se apresenta logo depois de a página abrir
+  for (let i = 0; i < 30 && (!state.joined || !controle.ext.ok); i++) await esperar(1000);
+  for (const m of lista) {
+    // na fila dos pedidos da lan house: um "abrir" dela no meio acha a tela já na sala
+    const vez = filaDePedidos[m].then(() => voltarDireta(m, motivo));
+    filaDePedidos[m] = vez.catch((err) => diagJogo.evento('a imagem direta não voltou', { m, erro: String(err?.message || err).slice(0, 200) }));
+  }
+}
+async function voltarDireta(m, motivo) {
+  const d = diretas.lista[m] && { ...diretas.lista[m] };
+  // pararam no meio da espera, ou já voltou
+  if (!d || !state.joined || diretaNoAr(m) || diretaGuardada(m)) return;
+  if (d.lan && lanLivre(m)) return void diretas.larga(m);
+  const nome = m === 'ps5' ? 'PS5' : 'PC';
+  diretas.atualizar(m, { caiu: null });
+  voltandoDireta[m] = d;
+  toast(`O ${nome} está voltando sozinho (${motivo})…`, 'info', 5000);
+  diagJogo.evento(`${nome} direto: voltando sozinho`, { motivo });
+  let erro = null;
+  try {
+    if (m === 'ps5') erro = await ligarPs5Sozinho(() => !!diretas.lista.ps5);
+    else if (!d.nome) erro = 'não sei qual monitor estava no ar';
+    else {
+      // como o PS5: a ponte pode estar reabrindo com a página
+      for (let i = 0; i < 4 && !diretaNoAr('pc'); i++) {
+        if (i) await esperar(10_000);
+        if (!diretas.lista.pc) break;
+        erro = (await pcDireto.ligarParaJogo({ nome: d.nome, qps: d.qps })).erro || null;
+      }
+    }
+    const sh = diretaNoAr(m);
+    if (sh) {
+      if (m === 'pc' && d.lan) lanAbriu.pc = sh.key;
+      if (m === 'pc' && d.controle !== false) await liberarControle(sh.key);
+      // desligado por quem compartilha: continua desligado
+      if (d.controle === false) socket.emit('controle-permitir', { key: sh.key, on: false });
+      return;
+    }
+  } finally {
+    voltandoDireta[m] = null;
+  }
+  // pararam, ou a conexão caiu de novo no meio: a próxima tenta outra vez
+  if (!diretas.lista[m] || quedaEm || diretaGuardada(m)) return;
+  diretas.larga(m);
+  avisoTela(`O ${nome} não voltou sozinho: ${erro || 'a tela não entrou na sala'}.`);
+}
+// como cada uma está agora (a tela da sala, o controle): é como ela volta
+function anotarDiretas() {
+  for (const m of Object.keys(diretas.lista)) {
+    const sh = diretaNoAr(m);
+    diretas.atualizar(m, sh && !voltandoDireta[m] && !quedaEm ? { slot: sh.slot, controle: !!sh.controle } : {});
+  }
+}
+setInterval(anotarDiretas, 15_000);
+window.addEventListener('pagehide', anotarDiretas);
 
 // Enquanto compartilha, o PC não dorme nem apaga/bloqueia a tela (bloqueada, a captura congela e
 // quem estava jogando de longe fica sem imagem). Pelo ajudante do Windows (1.15+), que vale com o
@@ -7502,11 +7666,12 @@ controle.aluguel = () => !!(state.lan && lanAbriu.jogo && !lanLivre('pc'));
 let ps5SemPerguntar = false;
 const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
 // a vez no PS5: liga o PS5 direto no último console usado (ou no primeiro registrado) e põe na sala
-async function pedidoPs5Lan(acao, de, responder) {
+async function pedidoPs5Lan(acao, de, responder, daLan = false) {
   // acabou a vez e ninguém pegou a seguinte: o PS5 sai da sala (mesmo que a página tenha recarregado
   // no meio da vez e não lembre quem o ligou)
   if (acao === 'fechar') {
     lanAbriu.ps5 = false;
+    diretas.larga('ps5');
     if (!ps5Nativo.noAr && !ps5Nativo.conectado) return responder(true, 'Acabou a vez no PS5.');
     ps5Nativo.parar();
     return responder(true, 'O PS5 saiu da sala: acabou a vez.');
@@ -7515,23 +7680,31 @@ async function pedidoPs5Lan(acao, de, responder) {
     if (ps5Nativo.key) socket.emit('controle-permitir', { key: ps5Nativo.key, on: true });
     return responder(true, `O PS5 já está na sala. Abra a tela de ${settings.name} para jogar.`);
   }
-  if (!temPs5Nativo()) return responder(false, 'o navegador do PC da casa não abre o PS5 direto (use o Chrome)');
   toast(`Vez de ${de} no PS5: ligando o PS5…`, 'info', 6000);
-  if (!(await ps5Nativo.ligarPonte())) return responder(false, `o PS5 não ligou: ${ps5Nativo.erro || 'a ponte não abriu'}`);
+  const erro = await ligarPs5Sozinho();
+  if (erro) return responder(false, erro);
+  lanAbriu.ps5 = true;
+  if (daLan) diretas.atualizar('ps5', { lan: true });
+  responder(true, `O PS5 está na sala. Abra a tela de ${settings.name} para jogar.`);
+}
+// liga o PS5 direto e põe na sala sem perguntar nada; devolve o erro, ou null. querAinda(): desistiram?
+async function ligarPs5Sozinho(querAinda = () => true) {
+  if (!temPs5Nativo()) return 'o navegador do PC da casa não abre o PS5 direto (use o Chrome)';
+  if (!(await ps5Nativo.ligarPonte())) return `o PS5 não ligou: ${ps5Nativo.erro || 'a ponte não abriu'}`;
   ps5Nativo.mandar({ tipo: 'consoles' });
   for (let i = 0; i < 25 && !ps5Nativo.consoles.length; i++) await esperar(200);
   const lista = ps5Nativo.consoles;
   const console_ = lista.find((c) => c.id === ps5Nativo.opcoes.ultimo) || lista[0];
-  if (!console_) return responder(false, 'nenhum PS5 registrado no PC da casa (registre em PS5 direto)');
+  if (!console_) return 'nenhum PS5 registrado no PC da casa (registre em PS5 direto)';
   ps5SemPerguntar = true;
   try {
     // Até 6 tentativas: logo depois de a sessão de antes cair (a ponte reiniciou com a página), o PS5
     // ainda a acha aberta e recusa ("Remote Play já em uso") por alguns segundos.
-    for (let tentativa = 0; tentativa < 6 && !ps5Nativo.key; tentativa++) {
+    for (let tentativa = 0; tentativa < 6 && !ps5Nativo.key && querAinda(); tentativa++) {
       if (tentativa) {
-        diagJogo.evento('lan house: PS5 recusou, tentando de novo', { tentativa });
+        diagJogo.evento('PS5 recusou, tentando de novo', { tentativa });
         await esperar(10_000);
-        if (ps5Nativo.key || ps5Nativo.noAr) break;
+        if (ps5Nativo.key || ps5Nativo.noAr || !querAinda()) break;
       }
       await ps5Nativo.jogar(console_.id);
       // conecta (e acorda o PS5 do repouso): até 90 s até a tela entrar na sala
@@ -7541,9 +7714,7 @@ async function pedidoPs5Lan(acao, de, responder) {
   } finally {
     ps5SemPerguntar = false;
   }
-  if (!ps5Nativo.key) return responder(false, 'o PS5 não conectou (ligado ou em repouso, no mesmo Wi-Fi do PC?)');
-  lanAbriu.ps5 = true;
-  responder(true, `O PS5 está na sala. Abra a tela de ${settings.name} para jogar.`);
+  return ps5Nativo.key ? null : 'o PS5 não conectou (ligado ou em repouso, no mesmo Wi-Fi do PC?)';
 }
 // um pedido de cada vez por máquina, em fila: o segundo, chegando no meio do primeiro, derrubava a
 // ponte que estava abrindo e deixava a tela dela sobrando na sala (o PC em duas telas). Na fila, um
@@ -7558,7 +7729,7 @@ function pedidoDeJogo(m) {
 async function pedidoDeJogoJa({ acao, id, de, maquina, lan: daLan }) {
   const responder = (ok, texto) => socket.emit('tela-resposta', { ok, texto, jogo: true });
   if (!telaLiberadaAqui()) return;
-  if (maquina === 'ps5') return pedidoPs5Lan(acao, de, responder);
+  if (maquina === 'ps5') return pedidoPs5Lan(acao, de, responder, !!daLan);
   if (!controle.ext.ok || !controle.ext.liberado) return responder(false, 'a extensão da Sala 3D não está liberada no Chrome de lá');
   if (acao === 'fechar') {
     // a vez acabou sem jogo aberto por ela: não há o que fechar no Windows, só a tela sai
@@ -7567,6 +7738,7 @@ async function pedidoDeJogoJa({ acao, id, de, maquina, lan: daLan }) {
     const key = lanAbriu.pc;
     lanAbriu.pc = null;
     lanAbriu.jogo = null;
+    if (daLan && diretas.lista.pc?.lan) diretas.larga('pc');
     if (daLan && key && self()?.shares.has(key)) stopShare(key, true);
     return responder(!!r?.ok, r?.ok ? r.msg || 'O PC saiu da sala: acabou a vez.' : `não fechou: ${erroDoAjudante(r)}`);
   }
@@ -7616,6 +7788,7 @@ async function pedidoDeJogoJa({ acao, id, de, maquina, lan: daLan }) {
   if (daLan) {
     if (!antes.has(key)) lanAbriu.pc = key;
     else if (lanAbriu.pc !== key) lanAbriu.pc = null;
+    if (key === pcDireto.key) diretas.atualizar('pc', { lan: lanAbriu.pc === key });
   }
   const como = monitor ? ` pelo PC direto (monitor ${monitor.i + 1}${monitor.hz ? ` de ${monitor.hz} Hz` : ''}, 60 qps)` : semDireto ? ` pelo OBS (o PC direto não abriu: ${semDireto})` : ' pelo OBS';
   const semControle = controleOk ? '' : ' (sem controle: falta o ajudante do Windows)';
@@ -7655,6 +7828,7 @@ async function pedidoRemoto({ maquina, acao, de }) {
   // PC direto
   if (parar) {
     const key = pcDireto.key;
+    diretas.larga('pc');
     if (!pcDireto.noAr && !(key && self()?.shares.has(key))) return responder(true, 'O PC direto não estava no ar.');
     if (key && self()?.shares.has(key)) stopShare(key, true);
     pcDireto.parar();
@@ -9715,6 +9889,7 @@ document.addEventListener('click', (e) => {
 }
 $('#btn-leave').addEventListener('click', () => {
   pararTodasAsTelas(true);
+  for (const m of ['ps5', 'pc']) diretas.larga(m); // inclusive a que ainda estava voltando
   socket?.disconnect();
   rtc?.closeAll();
   liberarSaida();

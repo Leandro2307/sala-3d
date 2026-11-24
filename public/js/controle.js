@@ -31,6 +31,8 @@
 const MOD = (e) => (e.altKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.metaKey ? 4 : 0) | (e.shiftKey ? 8 : 0);
 // x1 e x2: os botões do lado do mouse (voltar e avançar) — antes iam como clique esquerdo
 const BOTAO = ['left', 'middle', 'right', 'x1', 'x2'];
+// o bit de cada botão no e.buttons do navegador (a ordem não é a do e.button)
+const BIT_BOTAO = { left: 1, right: 2, middle: 4, x1: 8, x2: 16 };
 // o movimento do controle no pad (m): até onde o PS5 recebe (giroscópio ±30 rad/s, acelerômetro ±5 g)
 const LIM_MOV = [30, 30, 30, 5, 5, 5, 1, 1, 1, 1];
 // intervalo mínimo entre movimentos de mouse (ms). O servidor corta acima de 120 eventos/s.
@@ -138,7 +140,7 @@ export class Controle {
     this.moveEmVoo = false; // movimento na minha aba esperando a extensão
     this.roda = null;
     this.rodaTimer = 0;
-    this.arrastando = null; // { video, key, b, x, y, n }
+    this.arrastando = null; // { video, key, b, x, y, n, botoes: botão segurado -> n do clique }
     this.ultimoClique = null; // { video, b, x, y, t, n }: para contar duplo e triplo clique
     this.jogo = null; // { video, key }: modo jogo ligado nessa tela (ver o cabeçalho)
     this.cru = false; // o pointerrawupdate traz o movimento (aí o pointermove não manda de novo)
@@ -637,7 +639,28 @@ export class Controle {
     if (!a) return;
     this.arrastando = null;
     this.cancelarMove();
-    this.mandar(a.key, { t: 'mouse', a: 'up', x: a.x, y: a.y, b: a.b, n: a.n || 1, mod: 0 });
+    for (const [b, n] of a.botoes) this.mandar(a.key, { t: 'mouse', a: 'up', x: a.x, y: a.y, b, n: n || 1, mod: 0 });
+  }
+
+  // Dois botões do mouse juntos (segurar a mira e atirar): o navegador só dá pointerdown no primeiro que
+  // desce e pointerup no último que sobe. O que desce ou sobe no meio vem num pointermove, e só aparece no
+  // e.buttons — sem isto o segundo botão não chegava e o primeiro a soltar ficava preso do outro lado.
+  conferirBotoes(e) {
+    const a = this.arrastando;
+    if (!a || e.pointerType !== 'mouse') return;
+    for (const [b, bit] of Object.entries(BIT_BOTAO)) {
+      const desce = !!(e.buttons & bit);
+      if (desce === a.botoes.has(b)) continue;
+      const p = this.jogo?.video === a.video && !a.abs ? { x: 0.5, y: 0.5 } : this.ponto(a.video, e);
+      const n = desce ? this.contarClique(a.video, b, e) : a.botoes.get(b);
+      if (desce) a.botoes.set(b, n);
+      else a.botoes.delete(b);
+      // o movimento é do botão que continua segurado
+      if (!a.botoes.has(a.b) && a.botoes.size) [a.b, a.n] = a.botoes.entries().next().value;
+      this.cancelarMove();
+      this.mandar(a.key, { t: 'mouse', a: desce ? 'down' : 'up', x: p.x, y: p.y, b, n, mod: MOD(e), ...(a.abs ? { abs: true } : {}) });
+    }
+    if (!a.botoes.size) this.arrastando = null;
   }
 
   // 1, 2 ou 3: mesmo botão, mesma tela, perto do clique anterior e a menos de CLIQUE_MS dele
@@ -692,7 +715,7 @@ export class Controle {
       const key = this.superficies.get(v);
       const b = BOTAO[e.button] || 'left';
       const n = this.contarClique(v, b, e);
-      this.arrastando = { video: v, key, b, x: p.x, y: p.y, n, abs: livre };
+      this.arrastando = { video: v, key, b, x: p.x, y: p.y, n, abs: livre, botoes: new Map([[b, n]]) };
       this.mandar(key, { t: 'mouse', a: 'down', x: p.x, y: p.y, b, n, mod: MOD(e), ...(livre ? { abs: true } : {}) });
     });
     // o botão "voltar" do mouse: o Chrome voltaria a página da própria sala
@@ -700,14 +723,16 @@ export class Controle {
       if ((e.button === 3 || e.button === 4) && (sob(e) || this.jogo)) e.preventDefault();
     });
     document.addEventListener('pointerup', (e) => {
+      this.conferirBotoes(e); // mouse: sobe tudo o que estava segurado
       const a = this.arrastando;
-      if (!a) return;
+      if (!a || e.pointerType === 'mouse') return;
       const p = this.ponto(a.video, e);
       this.arrastando = null;
       this.cancelarMove();
       this.mandar(a.key, { t: 'mouse', a: 'up', x: p.x, y: p.y, b: BOTAO[e.button] || a.b, n: a.n, mod: MOD(e), ...(a.abs ? { abs: true } : {}) });
     });
     document.addEventListener('pointermove', (e) => {
+      this.conferirBotoes(e);
       const a = this.arrastando;
       const v = a ? a.video : sob(e);
       if (!v) return;

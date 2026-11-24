@@ -29,7 +29,7 @@ import { Controle } from './controle.js';
 import { TurboRecebe, TTL_MS, LISO_PCT, LISO_MAX } from './turbo.js';
 import { DiagJogo } from './jogo-diag.js';
 import { linhaDaCulpa } from './culpa.js';
-import { opcoesJogo, LISO_MS, PRESETS, OPCOES_DO_PRESET, htmlPresets, marcarPresets } from './jogo-opcoes.js';
+import { opcoesJogo, LISO_MS, PRESETS, OPCOES_DO_PRESET, htmlPresets, marcarPresets, alturaDoMenu } from './jogo-opcoes.js';
 import { LAYOUTS, layoutDoTitulo } from './toque-jogo.js';
 import { ControleFisico } from './gamepad-jogo.js';
 import { PadVirtual } from './pad-virtual.js';
@@ -1402,9 +1402,11 @@ $('#focus-jogo-op').addEventListener('click', (e) => {
   pop.hidden = !pop.hidden;
   e.currentTarget.setAttribute('aria-expanded', String(!pop.hidden));
   e.currentTarget.blur();
+  alturaDoMenu(pop);
   for (const el of $$('#jogo-op-pop [data-op]')) el.checked = !!opcoesJogo.get(el.dataset.op);
   atualizarBotaoTouchpad();
 });
+addEventListener('resize', () => alturaDoMenu($('#jogo-op-pop')));
 $('#jogo-op-pop').addEventListener('change', (e) => {
   const k = e.target.dataset.op;
   if (k) opcoesJogo.set(k, e.target.checked);

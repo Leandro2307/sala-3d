@@ -3943,7 +3943,13 @@ body.jogo-pc #focus:fullscreen .focus-bar { display: none; }
   right: 0;
   display: grid;
   gap: 10px;
-  width: 270px;
+  width: 284px;
+  /* não passa do fim da tela: rola por dentro (jogo-opcoes.js, alturaDoMenu, acerta pela posição do botão) */
+  max-height: calc(100dvh - 64px);
+  overflow: hidden auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
   padding: 12px 14px;
   border: 1px solid var(--line, rgba(255, 255, 255, 0.14));
   border-radius: 12px;

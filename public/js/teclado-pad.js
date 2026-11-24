@@ -5,7 +5,7 @@
 //
 //   WASD: analógico esquerdo        mouse: analógico direito (pela velocidade)
 //   (o layout de teclado e mouse mais usado, o dos adaptadores e dos jogos de PlayStation no PC)
-//   clique esquerdo: R2/ZR (atirar)   clique direito: L2/ZL (mirar)   rodinha: △ (trava; o próximo dente solta)
+//   clique esquerdo: L2/ZL (mirar)   clique direito: R2/ZR (atirar)   rodinha: △ (trava; o próximo dente solta)
 //   Espaço/Enter: ✕   C/Ctrl/⌫: ○   R: □   F: △ (pela posição: no Switch, B A Y X)
 //   Q e Mouse 4: L1/L   E e Mouse 5: R1/R   Shift: L3 (correr)   V e meio: R3
 //   Tab: Create/−   Esc: Options/+   H: PS/Home   M: clique do touchpad   setas e 1 2 3 4: direcional
@@ -182,7 +182,7 @@ export class TecladoPad {
         // o clique que prende o mouse de novo (depois de um Esc) não aperta nada
         if (ev.a === 'down' && !document.pointerLockElement) return true;
         const quem = `m:${ev.b}`;
-        // Alt + clique esquerdo: afunda o touchpad em vez do ✕ (vale até soltar o clique)
+        // Alt + clique esquerdo: afunda o touchpad em vez do L2 (vale até soltar o clique)
         if (ev.a === 'down' && this.dedo && ev.b === 'left') {
           this.cliqueTp = quem;
           this.botao(quem, TP_CLIQUE, true);

@@ -58,6 +58,12 @@ export const PRESET_INICIAL = 14; // o modo em que a página sempre entra
 export const OPCOES_DO_PRESET = ['turbo', 'turboLiso', 'rapido', 'liso'];
 const presetInicial = () => PRESETS.find((p) => p.id === PRESET_INICIAL);
 
+// o menu de opções do PC vai até o fim da janela e rola por dentro (a barra pode ter uma ou duas linhas)
+export function alturaDoMenu(pop) {
+  if (pop.hidden) return;
+  pop.style.maxHeight = `${Math.max(160, Math.round(innerHeight - pop.getBoundingClientRect().top - 12))}px`;
+}
+
 // O seletor do modo de imagem, igual no menu do PC e no painel do celular (main.js ouve o clique em
 // [data-preset]): uma grade 2×3 — colunas 720p / 1080p, linhas vídeo normal / turbo liso / turbo
 // rápido — e o Manual.

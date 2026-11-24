@@ -13,7 +13,7 @@ const CHAVE = 'sala3d-mapa-teclas';
 // entrada -> ação. Entradas: o e.code do teclado, Mouse* (botões) e Roda* (dentes da rodinha)
 // O padrão (desde 2026-11-19) é o layout de teclado e mouse mais usado para jogar no controle (o dos
 // adaptadores e programas como reWASD, XIM e Cronus, e o dos jogos de PlayStation que saíram no PC):
-// clique esquerdo atira (R2), direito mira (L2), Espaço pula (✕), C/Ctrl agacha (○), R recarrega ou
+// clique esquerdo mira (L2), direito atira (R2; pedido do usuário em 2026-11-24, o lado dos gatilhos), Espaço pula (✕), C/Ctrl agacha (○), R recarrega ou
 // interage (□), F e a rodinha trocam de arma / entram no carro (△), Shift corre (L3), V golpeia (R3).
 export const PADRAO = Object.freeze({
   Space: 'b0', Enter: 'b0',
@@ -21,7 +21,7 @@ export const PADRAO = Object.freeze({
   KeyR: 'b2',
   KeyF: 'b3', RodaCima: 'b3', RodaBaixo: 'b3',
   KeyQ: 'b4', MouseX1: 'b4', KeyE: 'b5', MouseX2: 'b5',
-  MouseRight: 'b6', MouseLeft: 'b7',
+  MouseLeft: 'b6', MouseRight: 'b7',
   ShiftLeft: 'b10', ShiftRight: 'b10', KeyV: 'b11', MouseMiddle: 'b11',
   Tab: 'b8', Escape: 'b9', KeyH: 'b16', KeyM: 'b17',
   ArrowUp: 'b12', ArrowDown: 'b13', ArrowLeft: 'b14', ArrowRight: 'b15',
@@ -30,7 +30,9 @@ export const PADRAO = Object.freeze({
   AltLeft: 'tp', AltRight: 'tp', KeyJ: 'giro',
 });
 // v2: o padrão novo. O mapa guardado na v1 (o padrão de antes, ou trocado em cima dele) dá lugar a ele.
-const VERSAO_MAPA = 2;
+// v3: esquerdo mira e direito atira. No mapa guardado na v2 só os dois cliques trocam, e só se estavam como
+// no padrão de antes.
+const VERSAO_MAPA = 3;
 
 // as direções dos analógicos: ação -> [eixo, sinal]
 export const EIXO = {
@@ -129,10 +131,11 @@ function ler() {
   const r = { mapa: { ...PADRAO }, carro: { ligado: true, t: VERSAO_CARRO, mapa: { ...CARRO_PADRAO } } };
   try {
     const o = JSON.parse(localStorage.getItem(CHAVE) || 'null');
-    if (o && (o.v === 1 || o.v === VERSAO_MAPA) && o.mapa && typeof o.mapa === 'object') {
-      if (o.v === VERSAO_MAPA) {
+    if (o && [1, 2, VERSAO_MAPA].includes(o.v) && o.mapa && typeof o.mapa === 'object') {
+      if (o.v >= 2) {
         r.mapa = {};
         for (const [e, a] of Object.entries(o.mapa)) if (POR_ID[a] && (!ehRoda(e) || ehBotao(a))) r.mapa[e] = a;
+        if (o.v === 2 && r.mapa.MouseLeft === 'b7' && r.mapa.MouseRight === 'b6') Object.assign(r.mapa, { MouseLeft: 'b6', MouseRight: 'b7' });
       }
       if (o.carro && typeof o.carro === 'object') {
         const t = Number(o.carro.t) || 0;
