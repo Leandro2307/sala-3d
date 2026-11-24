@@ -14,9 +14,9 @@ const BARRA_MS = 4000;
 const SEM_TELA_MS = 60_000; // a tela do jogo caiu: voltando antes disto, o ajuste continua
 const TV_VOLTA_MS = 20_000; // a TV recarrega para entrar na conta: quanto esperar por ela
 export const ENCAIXES = {
-  inteira: ['Imagem inteira', 'Nada cortado. Sobram faixas pretas em volta.'],
-  largura: ['Largura toda', 'Vai de um lado ao outro da TV, mas corta um pouco em cima e embaixo.'],
-  zoom: ['Com o zoom da TV', 'Ocupa a TV inteira sem cortar: ligue também o zoom vertical (ou "esticar") na TV.'],
+  zoom: ['Tela toda', 'Não corta nada e ocupa o celular todo. Com o zoom vertical (ou "esticar") da TV, ocupa a TV toda também.'],
+  inteira: ['Com faixas', 'Nada cortado, na proporção certa. Sobram faixas pretas em volta.'],
+  largura: ['Sem bordas', 'Vai de um lado ao outro, mas corta um pouco em cima e embaixo.'],
 };
 
 // A imagem do jogo (16:9) na TV, espelhada de um celular lw×lh: quanto da largura e da altura da TV (16:9)
@@ -53,7 +53,7 @@ export class NaTv {
     this.barraTimer = 0;
     let g = {};
     try { g = JSON.parse(localStorage.getItem(CHAVE) || '{}') || {}; } catch { /* sem armazenamento */ }
-    this.encaixe = ENCAIXES[g.encaixe] ? g.encaixe : 'inteira';
+    this.encaixe = ENCAIXES[g.encaixe] ? g.encaixe : 'zoom';
     this.semBotoes = !!g.semBotoes;
     this.montar();
   }
@@ -96,6 +96,12 @@ export class NaTv {
         </div>
       </div>`;
     const q = (s) => r.querySelector(s);
+    // o clique do mesmo dedo que abriu cai no que apareceu embaixo dele (e fechava o painel na hora)
+    r.addEventListener('click', (e) => {
+      if (Date.now() - this.abertoEm > 450) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    }, true);
     r.addEventListener('click', (e) => { if (e.target === r) this.fechar(); });
     // o painel fica por cima do controle de toque: nada daqui vira comando do jogo
     for (const t of ['pointerdown', 'pointermove', 'pointerup', 'keydown', 'keyup']) r.addEventListener(t, (e) => e.stopPropagation());
@@ -141,6 +147,7 @@ export class NaTv {
     q('.ntv-segunda').hidden = this.sala() !== 'principal'; // o modo TV é sempre da principal
     q('.ntv-estado').textContent = '';
     this.raiz.hidden = false;
+    this.abertoEm = Date.now();
     this.aplicar();
     if (this.sala() === 'principal') this.listar();
   }

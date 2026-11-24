@@ -25,7 +25,8 @@
 // por padrão (o Jogador 1 é um controle) e deixa o cursor do Windows à mostra, o que punha o
 // celular no "menu" e cada toque virava clique.
 
-import { opcoesJogo, htmlPresets, marcarPresets } from './jogo-opcoes.js';
+import { opcoesJogo, htmlPresets, marcarPresets, TELAS } from './jogo-opcoes.js';
+import { icon } from './icons.js';
 
 const DEAD = 0.25; // zona morta do analógico
 const CORRE = 0.95; // empurrar até a borda (para a frente) corre
@@ -36,10 +37,13 @@ const GIRO_MORTO = 4; // abaixo disso é o tremido da mão
 const GIRO_CHEIO = 160; // virando assim (na sensibilidade 1), o analógico vai até o fim
 const GIRO_BASE = 0.16; // onde o analógico começa: a zona morta dos jogos do PS5
 const MOVE_MS = 16;
+const GAVETA_MS = 8000; // a gaveta do ⋯ sem ninguém tocar nela
 const TOPO_MS = 4000; // a barra de cima, chamada com um toque (controle de verdade ligado), some depois disso
 const RAIO_DIR = 70; // layout PS5: o dedo que andou isso (px) desde onde encostou é o analógico direito no fundo
 const TOQUE_PX = 12; // no menu, o dedo que andou menos que isso até soltar clicou (mais é arrastar)
 const CHAVE_SENS = 'sala3d-toque-sens';
+const CHAVE_FORCA = 'sala3d-toque-forca'; // quanto os botões aparecem por cima do jogo (%)
+const FORCA = 55;
 const CHAVE_POS = 'sala3d-toque-pos'; // onde a pessoa arrastou cada botão, por layout (editor)
 
 // Analógico (do toque ou do controle de videogame, ver gamepad-jogo.js): dx, dy de -1 a 1 -> as
@@ -277,6 +281,15 @@ const LINHA = { p: 'var(--tj-p)', m: 'var(--tj-m)', g: 'var(--tj-g)' };
 const htmlBotao = (b) => `<button type="button"${b.cls ? ` class="${b.cls}"` : ''}${b.a ? ` data-a="${b.a}" style="grid-area:${b.a}"` : ''}>`
   + `<b>${b.r}</b>${b.k ? `<small>${b.k}</small>` : ''}</button>`;
 
+function lerForca() {
+  try {
+    const v = Number(localStorage.getItem(CHAVE_FORCA));
+    return v >= 15 && v <= 100 ? v : FORCA;
+  } catch {
+    return FORCA;
+  }
+}
+
 export function lerSens() {
   try {
     const v = Number(localStorage.getItem(CHAVE_SENS));
@@ -328,6 +341,7 @@ export class ToqueJogo {
     this.menu = false;
     this.slot = null; // item escolhido na barra do Minecraft (0-8), depois do primeiro toque nela
     this.sens = lerSens();
+    this.forca = lerForca();
     this.layoutId = null;
     this.posicoes = lerPosicoes();
     this.editando = false; // "Mover botões": arrastar muda o lugar, não aperta
@@ -341,11 +355,14 @@ export class ToqueJogo {
     r.innerHTML = `
       <div class="tj-olhar"></div>
       <div class="tj-zona"></div>
-      <button type="button" class="tj-chip" aria-haspopup="dialog"></button>
+      <button type="button" class="tj-chip" aria-haspopup="dialog" aria-label="Ajustes do modo jogo">${icon('settings', 17)}</button>
       <div class="tj-painel" role="dialog" aria-label="Botões do modo jogo" hidden>
+        <p class="tj-painel-tit">Imagem na tela</p>
+        <div class="tj-telas" role="radiogroup" aria-label="Imagem na tela">${Object.entries(TELAS).map(([id, nome]) => `<button type="button" role="radio" data-tela="${id}">${nome}</button>`).join('')}</div>
+        <label class="tj-sens tj-forca"><span>Botões na tela</span><input type="range" min="15" max="100" step="5"><output></output></label>
         <p class="tj-painel-tit">Botões do controle</p>
         <div class="tj-opcoes"></div>
-        <label class="tj-sens"><span>Sensibilidade</span><input type="range" min="0.4" max="2.5" step="0.1"><output></output></label>
+        <label class="tj-sens tj-mira"><span>Sensibilidade</span><input type="range" min="0.4" max="2.5" step="0.1"><output></output></label>
         <label class="tj-sens tj-vol"><span>Volume do jogo</span><input type="range" min="0" max="100" step="1"><output></output></label>
         <div class="tj-liga">
           ${htmlPresets()}
@@ -354,7 +371,6 @@ export class ToqueJogo {
           <label><input type="checkbox" data-op="menuAuto"><span>Menu do jogo automático</span></label>
           <label><input type="checkbox" data-op="turbo"><span>Modo turbo <small>(imagem sem buffer: bem menos atraso)</small></span></label>
           <label><input type="checkbox" data-op="turboLiso"><span>Turbo liso <small>(+~20 ms: quadros no ritmo certo)</small></span></label>
-          <label><input type="checkbox" data-op="preencher"><span>Preencher a tela <small>(sem faixas pretas: corta um pouco das bordas)</small></span></label>
           <label><input type="checkbox" data-op="nitidez"><span>Realce de nitidez <small>(turbo: contornos mais nítidos)</small></span></label>
           <label><input type="checkbox" data-op="selo"><span>Mostrar desempenho</span></label>
           <label><input type="checkbox" data-op="giro"><span>Mirar virando o celular</span></label>
@@ -369,8 +385,10 @@ export class ToqueJogo {
       </div>
       <p class="tj-editando-dica" hidden>Arraste os botões e o analógico para onde quiser <button type="button" class="tj-fim-edicao">Pronto</button></p>
       <div class="tj-topo"></div>
+      <div class="tj-gaveta" hidden></div>
       <p class="tj-dica" hidden>Menu do jogo: toque onde quer clicar · arraste para levar o cursor</p>
       <div class="tj-stick"><div class="tj-ring"></div><div class="tj-knob"></div></div>
+      <div class="tj-cruz" hidden></div>
       <div class="tj-hotbar" hidden></div>
       <div class="tj-acoes"></div>
       <form class="tj-texto" hidden>
@@ -394,7 +412,19 @@ export class ToqueJogo {
       else this.abrirPainel();
       if (this.layoutId !== antes) this.onLayout?.(this.layoutId);
     });
-    const sens = r.querySelector('.tj-sens input');
+    r.querySelector('.tj-telas').addEventListener('click', (e) => {
+      const id = e.target.closest('[data-tela]')?.dataset.tela;
+      if (id) opcoesJogo.set('tela', id);
+      this.mostrarTela();
+    });
+    const forca = r.querySelector('.tj-forca input');
+    forca.addEventListener('input', () => {
+      this.forca = Number(forca.value) || FORCA;
+      this.mostrarForca();
+      try { localStorage.setItem(CHAVE_FORCA, String(this.forca)); } catch { /* sem armazenamento */ }
+    });
+    this.mostrarForca();
+    const sens = r.querySelector('.tj-mira input');
     sens.addEventListener('input', () => {
       this.sens = Number(sens.value) || 1;
       this.mostrarSens();
@@ -478,6 +508,7 @@ export class ToqueJogo {
     };
     r.querySelectorAll('.tj-acoes button[data-a]').forEach((el) => por(el, el.dataset.a));
     por(r.querySelector('.tj-stick'), 'stick');
+    por(r.querySelector('.tj-cruz'), 'cruz');
     por(r.querySelector('.tj-hotbar'), 'hotbar');
   }
 
@@ -485,11 +516,11 @@ export class ToqueJogo {
   ligarEditor() {
     this.raiz.addEventListener('pointerdown', (e) => {
       if (!this.editando) return;
-      const el = e.target.closest('.tj-acoes button[data-a], .tj-stick, .tj-hotbar');
+      const el = e.target.closest('.tj-acoes button[data-a], .tj-stick, .tj-cruz, .tj-hotbar');
       if (!el) return;
       e.preventDefault();
       e.stopPropagation();
-      const lugar = el.classList.contains('tj-stick') ? 'stick' : el.classList.contains('tj-hotbar') ? 'hotbar' : el.dataset.a;
+      const lugar = el.classList.contains('tj-stick') ? 'stick' : el.classList.contains('tj-cruz') ? 'cruz' : el.classList.contains('tj-hotbar') ? 'hotbar' : el.dataset.a;
       const pos = (this.posicoes[this.layoutId] ||= {});
       const [x0, y0] = pos[lugar] || [0, 0];
       const sx = e.clientX;
@@ -595,22 +626,43 @@ export class ToqueJogo {
     const r = this.raiz;
     r.classList.toggle('tj-no-menu', this.menu);
     r.querySelector('.tj-dica').hidden = !this.menu;
-    r.querySelector('.tj-chip').innerHTML = `${L.nome}<span aria-hidden="true"> ▾</span>`;
 
     const topo = r.querySelector('.tj-topo');
+    // Tela limpa: no controle de videogame, as setas viram a cruz da esquerda, em cima ficam só L3, R3 e
+    // Options, e o resto (com o que não é do jogo: TV, Engasgou, Sair) mora na gaveta do ⋯
+    const cruz = r.querySelector('.tj-cruz');
+    const setas = L.virtual && !this.menu ? L.topo.filter((b) => b.pad >= 12 && b.pad <= 15) : [];
+    cruz.hidden = !setas.length;
+    cruz.innerHTML = setas.map(htmlBotao).join('');
+    cruz.querySelectorAll('button').forEach((el, i) => {
+      el.classList.add(`tj-s${setas[i].pad}`);
+      this.ligar(el, setas[i]);
+    });
+    const naGaveta = L.virtual && !this.menu ? L.topo.filter((b) => b.pad === 8 || b.pad === 16) : [];
     const doTopo = this.menu
       ? [L.escFecha ? { r: 'Fechar', k: 'Esc', tecla: 'Escape', fecha: true } : { r: 'Esc', k: 'volta', tecla: 'Escape' },
         { r: 'Voltar ao jogo', volta: true, cls: 'tj-volta' }]
-      : L.topo;
-    topo.innerHTML = doTopo.map(htmlBotao).join('')
+      : L.virtual ? [...L.topo.filter((b) => b.pad === 10 || b.pad === 11), ...L.topo.filter((b) => b.pad === 9)] : L.topo;
+    topo.innerHTML = doTopo.map(htmlBotao).join('') + '<button type="button" class="tj-mais" aria-label="Mais botões" aria-expanded="false"><b>⋯</b></button>';
+    const gaveta = r.querySelector('.tj-gaveta');
+    gaveta.innerHTML = naGaveta.map(htmlBotao).join('')
       + (this.onTv ? '<button type="button" class="tj-tv" aria-label="Colocar na TV"><b>TV</b></button>' : '')
       + '<button type="button" class="tj-engasgo" aria-label="Marcar engasgo no relatório"><b>Engasgou</b></button>'
       + '<button type="button" class="tj-sair" aria-label="Sair do modo jogo"><b>Sair</b></button>';
-    topo.querySelectorAll('button:not(.tj-sair):not(.tj-engasgo):not(.tj-tv)').forEach((el, i) => this.ligar(el, doTopo[i]));
-    const naTv = topo.querySelector('.tj-tv');
-    if (naTv) this.segurar(naTv, () => {}, (tocou) => tocou && this.onTv());
-    this.segurar(topo.querySelector('.tj-engasgo'), () => {}, (tocou) => tocou && this.onEngasgo?.());
-    this.segurar(topo.querySelector('.tj-sair'), () => {}, (tocou) => tocou && this.onSair?.());
+    topo.querySelectorAll('button:not(.tj-mais)').forEach((el, i) => this.ligar(el, doTopo[i]));
+    gaveta.querySelectorAll('button').forEach((el, i) => { if (naGaveta[i]) this.ligar(el, naGaveta[i]); });
+    this.segurar(topo.querySelector('.tj-mais'), () => {}, (tocou) => tocou && this.abrirGaveta(gaveta.hidden));
+    this.abrirGaveta(false);
+    const naTv = gaveta.querySelector('.tj-tv');
+    if (naTv) {
+      this.segurar(naTv, () => {}, (tocou) => {
+        if (!tocou) return;
+        this.abrirGaveta(false);
+        this.onTv();
+      });
+    }
+    this.segurar(gaveta.querySelector('.tj-engasgo'), () => {}, (tocou) => tocou && this.onEngasgo?.());
+    this.segurar(gaveta.querySelector('.tj-sair'), () => {}, (tocou) => tocou && this.onSair?.());
 
     const grade = this.menu ? L.menu || MENU_PADRAO : L;
     const acoes = r.querySelector('.tj-acoes');
@@ -629,6 +681,15 @@ export class ToqueJogo {
     hotbar.innerHTML = '';
     if (!hotbar.hidden) this.montarHotbar(hotbar);
     this.posicionar();
+  }
+
+  // a gaveta do ⋯: fecha nele mesmo ou depois de um tempo sem toque nela
+  abrirGaveta(sim) {
+    const g = this.raiz.querySelector('.tj-gaveta');
+    g.hidden = !sim;
+    this.raiz.querySelector('.tj-mais')?.setAttribute('aria-expanded', String(sim));
+    clearTimeout(this.gavetaTimer);
+    if (sim) this.gavetaTimer = setTimeout(() => this.abrirGaveta(false), GAVETA_MS);
   }
 
   // Barra de itens do Minecraft: 1 a 9 escolhem o item, e o ⋯ abre o inventário (como no
@@ -691,7 +752,9 @@ export class ToqueJogo {
     const opcoes = [['auto', `Automático<small>${det}</small>`], ...Object.entries(LAYOUTS).map(([id, L]) => [id, L.nome])];
     p.querySelector('.tj-opcoes').innerHTML = opcoes
       .map(([id, txt]) => `<button type="button" data-layout="${id}"${this.escolha === id ? ' class="on" aria-pressed="true"' : ''}>${txt}</button>`).join('');
-    p.querySelector('.tj-sens input').value = String(this.sens);
+    p.querySelector('.tj-mira input').value = String(this.sens);
+    p.querySelector('.tj-forca input').value = String(this.forca);
+    this.mostrarTela();
     this.mostrarSens();
     p.querySelector('.tj-vol').hidden = !this.volume;
     if (this.volume) p.querySelector('.tj-vol input').value = String(this.volume.get());
@@ -713,7 +776,18 @@ export class ToqueJogo {
     this.topoTimer = setTimeout(some, TOPO_MS);
   }
 
-  mostrarSens() { this.painel.querySelector('.tj-sens output').textContent = `${this.sens.toFixed(1)}×`; }
+  mostrarForca() {
+    this.raiz.style.setProperty('--tj-op', String(this.forca / 100));
+    this.painel.querySelector('.tj-forca output').textContent = `${this.forca}%`;
+  }
+  mostrarTela() {
+    this.painel.querySelectorAll('[data-tela]').forEach((el) => {
+      const on = el.dataset.tela === opcoesJogo.get('tela');
+      el.classList.toggle('on', on);
+      el.setAttribute('aria-checked', String(on));
+    });
+  }
+  mostrarSens() { this.painel.querySelector('.tj-mira output').textContent = `${this.sens.toFixed(1)}×`; }
   mostrarVolume() { if (this.volume) this.painel.querySelector('.tj-vol output').textContent = `${Math.round(this.volume.get())}%`; }
 
   // ---------------------------------------------------------------- texto (chat)
@@ -979,7 +1053,7 @@ export class ToqueJogo {
       return;
     }
     this.toast(this.layout === LAYOUTS.generico
-      ? `Modo jogo: analógico anda, arraste o dedo para olhar. Toque em “${nome}”, no canto, para usar os botões do Minecraft ou do God of War.`
+      ? `Modo jogo: analógico anda, arraste o dedo para olhar. Toque nos ajustes, no canto, para usar os botões do Minecraft ou do God of War.`
       : `Modo jogo com os botões do ${nome}: analógico anda, arraste o dedo para olhar. ${this.layout.dica}`, 'info', 7000);
   }
 

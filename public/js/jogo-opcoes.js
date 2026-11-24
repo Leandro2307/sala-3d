@@ -11,7 +11,9 @@
 //             do Wi-Fi, ~10–30 ms): sem ela, os quadros aparecem na hora em que chegam e a imagem treme
 //   vibrar:   o jogo do PS5 vibra o controle: treme o celular (Android) ou o controle deste aparelho
 //   preencher: a imagem ocupa a tela toda, sem as faixas pretas (corta um pouco das bordas quando a
-//             tela tem outro formato, como o celular deitado, mais comprido que 16:9)
+//             tela tem outro formato, como o celular deitado, mais comprido que 16:9). Só no PC
+//   tela:     no celular, o tamanho da imagem: 'cheia' (a tela toda sem cortar nada: estica um pouco),
+//             'inteira' (na proporção certa, com faixas pretas) ou 'cortar' (a tela toda, sem as bordas)
 
 const CHAVE = 'sala3d-jogo-opcoes';
 // Turbo ligado de fábrica (o 720p foi de fábrica até 2026-11-16; agora entra o 1080p Turbo liso): nos testes (relatório de 2026-11-01 03:35, PS5 → iPhone) o turbo
@@ -22,11 +24,14 @@ const CHAVE = 'sala3d-jogo-opcoes';
 // nitidez: o realce de nitidez no turbo (turbo.js, Realce) — ligado de fábrica, menos no iPhone/iPad/Mac
 // (o WebGL do Safari com o quadro do decodificador não foi testado: lá fica para ligar à mão)
 const APPLE = typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent);
-const PADRAO = { liso: true, menuAuto: true, selo: false, giro: false, rapido: false, turbo: true, turboLiso: true, vibrar: true, preencher: false, lossless: 0, mouseSens: 3, nitidez: !APPLE };
+// de fábrica a imagem ocupa o celular todo; num aparelho mais quadrado (iPad) ela esticaria demais
+const TELA_PADRAO = typeof screen !== 'undefined' && Math.max(screen.width, screen.height) / Math.min(screen.width, screen.height) >= 1.7 ? 'cheia' : 'inteira';
+export const TELAS = { cheia: 'Tela toda', inteira: 'Com faixas', cortar: 'Sem bordas' };
+const PADRAO = { liso: true, menuAuto: true, selo: false, giro: false, rapido: false, turbo: true, turboLiso: true, vibrar: true, preencher: false, tela: TELA_PADRAO, lossless: 0, mouseSens: 3, nitidez: !APPLE };
 // mouseSens: no PC, num jogo de controle (PS5, Switch), quanto o mouse empurra o analógico direito
 // (teclado-pad.js): 2× chega ao fim do analógico com metade do movimento// Versão das opções (v2: turbo e 720p; v3: liso; v4: os modos de imagem de 2026-11-05; v5: os 4 modos
 // de 2026-11-16). O modo de imagem não fica guardado: toda vez que a página abre entra o PRESET_INICIAL.
-const VERSAO = 6; // v6: a sensibilidade do mouse começa no máximo (3×)
+const VERSAO = 7; // v6: a sensibilidade do mouse começa no máximo (3×); v7: o tamanho da imagem no celular
 export const LISO_MS = 40;
 
 // Modos de imagem (desde 2026-11-16 só estes 4 e o Manual): a resolução (720p é o "rapido": quem
@@ -84,6 +89,8 @@ function ler() {
     if (v0 < 2) Object.assign(o, { turbo: PADRAO.turbo, rapido: PADRAO.rapido });
     if (v0 < 3) o.liso = true;
     if (v0 < 6) o.mouseSens = PADRAO.mouseSens;
+    if (v0 < 7 && o.preencher) o.tela = 'cortar'; // já tinha escolhido "Preencher a tela"
+    if (!Object.hasOwn(TELAS, o.tela)) o.tela = TELA_PADRAO;
     o.v = VERSAO;
     // toda vez que a página abre: o modo inicial, com as opções dele (o Manual dura até recarregar)
     return Object.assign(o, { preset: PRESET_INICIAL }, presetInicial().opcoes);

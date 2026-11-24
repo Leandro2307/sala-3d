@@ -3872,6 +3872,7 @@ body.touch .mu-estilos button { flex: none; }
   --tj-g: 62px;
   --tj-gap: 8px;
   --tj-stick: 140px;
+  --tj-seta: 40px;
   --tj-topo: max(10px, env(safe-area-inset-top));
   position: absolute;
   inset: 0;
@@ -3891,11 +3892,15 @@ body.toque-jogo #focus video { padding: 0; }
 .tj-zona { position: absolute; left: 0; bottom: 0; width: 42%; height: 62%; }
 #toque-jogo.tj-no-menu .tj-zona { display: none; }
 /* controle de videogame ligado no celular: os botões da tela saem do caminho */
-#toque-jogo.tj-pad .tj-stick, #toque-jogo.tj-pad .tj-zona, #toque-jogo.tj-pad .tj-acoes, #toque-jogo.tj-pad .tj-hotbar { display: none; }
+#toque-jogo.tj-pad .tj-stick, #toque-jogo.tj-pad .tj-zona, #toque-jogo.tj-pad .tj-cruz, #toque-jogo.tj-pad .tj-acoes, #toque-jogo.tj-pad .tj-hotbar { display: none; }
 /* ...e a barra de cima também: um toque na tela traz de volta por alguns segundos (tj-topo-vis) */
-#toque-jogo.tj-pad:not(.tj-topo-vis) .tj-chip, #toque-jogo.tj-pad:not(.tj-topo-vis) .tj-topo { display: none; }
+#toque-jogo.tj-pad:not(.tj-topo-vis) .tj-chip, #toque-jogo.tj-pad:not(.tj-topo-vis) :is(.tj-topo, .tj-gaveta) { display: none; }
 /* "Preencher a tela": a imagem cobre tudo, sem faixas pretas (o turbo copia o object-fit do vídeo) */
-body.jogo-preencher.toque-jogo #focus video, body.jogo-preencher.jogo-pc #focus video { object-fit: cover; }
+body.jogo-preencher.jogo-pc #focus video { object-fit: cover; }
+/* no celular o tamanho da imagem é escolhido nos ajustes (jogo-opcoes.js, tela) */
+body.toque-jogo #focus video { outline: none; }
+body.toque-jogo[data-jogo-tela="cheia"] #focus video { object-fit: fill; }
+body.toque-jogo[data-jogo-tela="cortar"] #focus video { object-fit: cover; }
 /* editor: arrastar muda o lugar dos botões */
 #toque-jogo.tj-editando .tj-olhar, #toque-jogo.tj-editando .tj-zona { pointer-events: none; }
 #toque-jogo.tj-editando .tj-acoes button, #toque-jogo.tj-editando .tj-stick, #toque-jogo.tj-editando .tj-hotbar { outline: 2px dashed rgba(251, 191, 36, 0.9); outline-offset: 2px; }
@@ -4106,13 +4111,12 @@ body.toque-jogo #jogo-selo { top: auto; bottom: max(8px, env(safe-area-inset-bot
   top: var(--tj-topo);
   left: max(12px, env(safe-area-inset-left));
   flex-direction: row;
+  width: 38px;
   height: 38px;
-  padding: 0 14px;
+  padding: 0;
   border-radius: 999px;
-  background: rgba(10, 12, 18, 0.62);
-  font-size: 13px;
+  background: rgba(10, 12, 18, 0.45);
 }
-#toque-jogo .tj-chip span { opacity: 0.7; }
 .tj-topo {
   position: absolute;
   top: var(--tj-topo);
@@ -4120,9 +4124,48 @@ body.toque-jogo #jogo-selo { top: auto; bottom: max(8px, env(safe-area-inset-bot
   display: flex;
   gap: 6px;
 }
-#toque-jogo .tj-topo button { flex-direction: row; gap: 5px; height: 38px; padding: 0 11px; font-size: 13px; }
-#toque-jogo .tj-topo .tj-sair { background: rgba(127, 29, 29, 0.55); }
-#toque-jogo .tj-topo .tj-engasgo { background: rgba(120, 83, 8, 0.6); }
+#toque-jogo .tj-topo button { flex-direction: row; gap: 5px; height: 38px; padding: 0 11px; font-size: 12.5px; border-radius: 999px; }
+#toque-jogo .tj-topo .tj-mais { width: 38px; padding: 0; font-size: 18px; }
+/* a gaveta do ⋯ */
+.tj-gaveta {
+  position: absolute;
+  z-index: 3;
+  top: calc(var(--tj-topo) + 44px);
+  right: max(12px, env(safe-area-inset-right));
+  display: flex;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  background: rgba(12, 14, 20, 0.86);
+}
+.tj-gaveta[hidden] { display: none; }
+#toque-jogo .tj-gaveta button { min-height: 40px; min-width: 44px; padding: 0 12px; border-radius: 11px; font-size: 13px; }
+/* as setas do controle, em cruz, acima do analógico */
+.tj-cruz {
+  position: absolute;
+  left: calc(max(28px, env(safe-area-inset-left)) + (var(--tj-stick) - 3 * var(--tj-seta)) / 2);
+  top: calc(var(--tj-topo) + 44px);
+  display: grid;
+  grid-template: repeat(3, var(--tj-seta)) / repeat(3, var(--tj-seta));
+}
+.tj-cruz[hidden] { display: none; }
+#toque-jogo .tj-cruz button { border-radius: 10px; font-size: 13px; }
+.tj-s12 { grid-area: 1 / 2; } .tj-s13 { grid-area: 3 / 2; } .tj-s14 { grid-area: 2 / 1; } .tj-s15 { grid-area: 2 / 3; }
+/* discretos por cima do jogo (a força vem dos ajustes), inteiros só enquanto apertados */
+#toque-jogo :is(.tj-acoes, .tj-cruz, .tj-topo) button, #toque-jogo .tj-chip { opacity: var(--tj-op, 0.55); border-width: 1px; transition: opacity 160ms; }
+#toque-jogo :is(.tj-acoes, .tj-cruz, .tj-topo) button:is(.apertado, .on), #toque-jogo .tj-mais[aria-expanded="true"] { opacity: 1; }
+#toque-jogo :is(.tj-acoes, .tj-cruz, .tj-topo) button:not(.tj-forte):not(.tj-ouro):not(.tj-volta):not(.apertado):not(.on) { background: rgba(10, 12, 18, 0.28); }
+#toque-jogo .tj-hotbar button:not(.sel):not(.apertado) { opacity: max(var(--tj-op, 0.55), 0.5); }
+#toque-jogo .tj-stick { opacity: calc(var(--tj-op, 0.55) * 0.6); background: none; transition: opacity 160ms; }
+#toque-jogo .tj-stick.ativo { opacity: 1; background: rgba(10, 12, 18, 0.3); }
+#toque-jogo .tj-stick:not(.ativo) .tj-ring { display: none; }
+#toque-jogo.tj-editando :is(.tj-acoes button, .tj-cruz button, .tj-stick) { opacity: 1; }
+#toque-jogo.tj-editando .tj-cruz { outline: 2px dashed rgba(251, 191, 36, 0.9); outline-offset: 2px; }
+.tj-telas { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+#toque-jogo .tj-telas button { min-height: 40px; border-radius: 10px; font-size: 11px; touch-action: manipulation; }
+#toque-jogo .tj-gaveta .tj-sair { background: rgba(127, 29, 29, 0.55); }
+#toque-jogo .tj-gaveta .tj-engasgo { background: rgba(120, 83, 8, 0.6); }
 #focus-engasgo kbd { margin-left: 4px; font-size: 10px; opacity: 0.7; }
 #toque-jogo .tj-topo .tj-volta { background: rgba(14, 116, 144, 0.62); border-color: rgba(125, 211, 252, 0.85); }
 .tj-dica {
@@ -4162,7 +4205,8 @@ body.toque-jogo #jogo-selo { top: auto; bottom: max(8px, env(safe-area-inset-bot
 }
 .tj-painel[hidden] { display: none; }
 .tj-painel-tit { margin: 0; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; opacity: 0.65; }
-.tj-opcoes { display: grid; gap: 6px; }
+.tj-opcoes { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+#toque-jogo .tj-opcoes [data-layout="auto"] { grid-column: 1 / -1; }
 #toque-jogo .tj-opcoes button { align-items: flex-start; gap: 3px; min-height: 38px; padding: 8px 12px; border-radius: 10px; font-size: 13px; touch-action: manipulation; }
 #toque-jogo .tj-opcoes button small { white-space: normal; text-align: left; }
 .tj-sens { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 6px 8px; font-size: 12px; }
@@ -4285,10 +4329,12 @@ body.toque-jogo #jogo-selo { top: auto; bottom: max(8px, env(safe-area-inset-bot
 #toque-jogo .tj-texto button[type="submit"] { background: rgba(56, 189, 248, 0.4); }
 
 @media (max-height: 380px) {
-  #toque-jogo { --tj-p: 34px; --tj-m: 44px; --tj-g: 54px; --tj-gap: 6px; --tj-stick: 118px; --tj-topo: max(8px, env(safe-area-inset-top)); }
+  #toque-jogo { --tj-p: 34px; --tj-m: 44px; --tj-g: 54px; --tj-gap: 6px; --tj-seta: 36px; --tj-stick: 118px; --tj-topo: max(8px, env(safe-area-inset-top)); }
   #toque-jogo .tj-acoes small { display: none; }
-  #toque-jogo .tj-acoes button:not(.tj-forte):not(.tj-redondo) { font-size: 11px; }
-  #toque-jogo .tj-chip, #toque-jogo .tj-topo button { height: 34px; }
+  #toque-jogo .tj-acoes button:not(.tj-forte):not(.tj-redondo):not(.tj-ps) { font-size: 11px; }
+  #toque-jogo .tj-topo button { height: 34px; }
+  #toque-jogo .tj-chip, #toque-jogo .tj-topo .tj-mais { width: 34px; height: 34px; }
+  .tj-cruz, .tj-gaveta { top: calc(var(--tj-topo) + 40px); }
   .tj-dica, .tj-painel, .tj-texto { top: calc(var(--tj-topo) + 40px); }
 }
 /* celular estreito: a barra de itens não cabe entre o analógico e os botões, vai para cima */

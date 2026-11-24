@@ -3967,10 +3967,12 @@ opcoesJogo.ouvir((k, v) => {
   else if (k === 'nitidez' && turboRecebe.ligado) ligarTurbo(); // o realce troca a tela: liga de novo
   else if (k === 'menuAuto' && jogandoLa) controle.cursorLivre(jogandoLa.key, v ? jogandoLa.cursorLivre : false);
   else if (k === 'preencher') document.body.classList.toggle('jogo-preencher', !!v);
+  else if (k === 'tela') document.body.dataset.jogoTela = v;
   $$('#jogo-op-pop [data-op]').forEach((el) => { el.checked = !!opcoesJogo.get(el.dataset.op); });
 });
 // "Preencher a tela" (só vale no modo jogo: o CSS junta com toque-jogo / jogo-pc)
 document.body.classList.toggle('jogo-preencher', !!opcoesJogo.get('preencher'));
+document.body.dataset.jogoTela = opcoesJogo.get('tela'); // o tamanho da imagem no celular (junto com toque-jogo)
 
 // A cada 2 s, com o modo jogo ligado de algum lado: uma amostra para o relatório. Quem compartilha
 // manda o resumo para quem joga (a mesma volta do controle).

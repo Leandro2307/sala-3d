@@ -11,12 +11,9 @@ body.espelho:not(.toque-jogo):not(.espelho-barra) #focus .focus-bar { opacity: 0
 body.espelho.espelho[data-encaixe="inteira"] #focus video { object-fit: contain; }
 body.espelho.espelho[data-encaixe="largura"] #focus video { object-fit: cover; }
 body.espelho.espelho[data-encaixe="zoom"] #focus video { object-fit: fill; }
-body.espelho-sem-botoes #toque-jogo :is(.tj-stick, .tj-acoes, .tj-hotbar) { opacity: 0; }
-@media (max-width: 740px) {
-  #toque-jogo .tj-topo { gap: 4px; }
-  #toque-jogo .tj-topo button { padding: 0 7px; font-size: 12px; }
-}
-#toque-jogo .tj-topo .tj-tv { background: rgba(14, 116, 144, 0.62); }
+body.espelho-sem-botoes #toque-jogo :is(.tj-acoes, .tj-cruz, .tj-hotbar) { opacity: 0; }
+body.espelho-sem-botoes #toque-jogo .tj-stick { opacity: 0; }
+#toque-jogo .tj-gaveta .tj-tv { background: rgba(14, 116, 144, 0.62); }
 
 #na-tv {
   position: fixed;

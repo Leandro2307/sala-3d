@@ -148,7 +148,7 @@ const PASSOS_TOQUE = [
   },
   {
     tit: 'Pronto!',
-    txt: 'Em cima ficam as setas, Create, Options, PS, L3 e R3. Toque no <b>✕</b> para começar a jogar.',
+    txt: 'As setas ficam à esquerda; L3, R3 e Options, em cima; o <b>⋯</b> abre Create e PS. Toque no <b>✕</b> para começar a jogar.',
     para: GLIFO.xis, alvos: ['xis'],
     fim: true,
   },
