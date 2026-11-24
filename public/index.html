@@ -20,6 +20,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&family=Pixelify+Sans:wght@400;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
   <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/na-tv.css">
   <script type="importmap">
     { "imports": { "three": "/vendor/three/build/three.module.js", "three/addons/": "/vendor/three/examples/jsm/" } }
   </script>
@@ -319,6 +320,7 @@
       <button type="button" class="tb big acao" id="tb-jogo-acao" hidden aria-label="Ação do jogo"><i data-icon="mira" data-size="24"></i><span class="tb-label">Ação</span></button>
     </div>
     <button type="button" class="tb corner" id="tb-full" aria-label="Tela cheia"><i data-icon="maximize" data-size="18"></i></button>
+    <button type="button" class="tb corner" id="tb-tv"><i data-icon="tv" data-size="16"></i>Colocar na TV</button>
     <!-- em jogo a barra do topo some: o ☰ traz ela de volta e o X sai dos jogos que não têm um E para sair -->
     <div class="touch-jogo-topo">
       <button type="button" class="tb small" id="tb-menu" aria-label="Mostrar a barra"><i data-icon="menu" data-size="18"></i></button>
@@ -1054,6 +1056,7 @@
           </span>
         </span>
         <button type="button" class="secondary small" id="focus-engasgo" hidden title="Marca no relatório do modo jogo o momento em que a imagem engasgou (F9)">Engasgou <kbd>F9</kbd></button>
+        <button type="button" class="secondary small" id="focus-tv" hidden><i data-icon="tv" data-size="16"></i>Colocar na TV</button>
         <button type="button" class="secondary small" id="focus-mesa" title="Todas as telas lado a lado (Tab)"><i data-icon="monitores" data-size="16"></i>Mesa</button>
         <button type="button" class="secondary small" id="focus-pin"><i data-icon="pin" data-size="16"></i>Pôr no telão</button>
         <button type="button" class="secondary small" id="focus-full"><i data-icon="maximize" data-size="16"></i>Tela cheia</button>
@@ -1061,6 +1064,9 @@
       </div>
     </div>
   </div>
+
+  <!-- "Colocar na TV" (só no celular; na-tv.js monta) -->
+  <div id="na-tv" hidden></div>
 
   <!-- ============================================================ mesa de trabalho (ver mesa.js) -->
   <div id="mesa" hidden>

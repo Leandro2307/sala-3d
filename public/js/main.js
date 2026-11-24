@@ -69,6 +69,7 @@ import { photoFromFile } from './foto.js';
 import { Musica } from './musica.js';
 import { DiagJogo } from './jogo-diag.js';
 import { linhaDaCulpa } from './culpa.js';
+import { NaTv } from './na-tv.js';
 import { isTouch, setupTouchControls, toggleFullscreen, isFullscreen, temTelaCheia } from './touch.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1262,6 +1263,7 @@ async function join() {
       voz: () => criador.vozApertar(),
       soltarVoz: () => criador.vozSoltar(),
       catalogo: () => criador.abrirCatalogo(),
+      naTv: () => naTv?.abrir(),
       fullscreen: async () => {
         const r = await toggleFullscreen();
         updateFullscreenButton();
@@ -4875,6 +4877,7 @@ const toqueJogo = new ToqueJogo({
   pad: padVirtual,
   toast,
   onEngasgo: () => marcarEngasgo(),
+  onTv: isTouch ? () => naTv.abrir() : null,
   onTutorial: () => tutorialControle.abrir('toque'),
   // trocou à mão no painel: para o PS5 abre o tutorial, para outro fecha
   onLayout: () => { if (toqueJogo.key) tutorialDoPs5(toqueJogo.key); },
@@ -4896,6 +4899,30 @@ const toqueJogo = new ToqueJogo({
   },
 });
 sincronizarPresets(); // o painel do celular também tem o seletor de presets
+// "Colocar na TV" (na-tv.js): no celular, na sala, na tela em foco e no modo jogo
+const naTv = isTouch ? new NaTv({
+  raiz: $('#na-tv'),
+  foco: $('#focus'),
+  toast,
+  // a tela do jogo em foco: a que já está, senão a do telão, senão a primeira com imagem
+  abrirTela: () => {
+    if (state.focus?.kind === 'share') return true;
+    const key = [state.main, ...[...state.users.values()].flatMap((u) => [...u.shares.keys()])]
+      .find((k) => k && shareVideo(acharTela(k)?.share));
+    if (key) enterFocus({ kind: 'share', key });
+    return state.focus?.kind === 'share';
+  },
+  token: () => tokenLan(),
+  sala: () => state.room,
+  antesDeSair: () => {
+    liberarSaida();
+    controle.desligarJogo();
+  },
+}) : null;
+if (naTv) {
+  $('#focus-tv').hidden = false;
+  $('#focus-tv').addEventListener('click', () => naTv.abrir());
+}
 // o título da tela traz o nome do jogo que está nela (ver onQual): os botões são os dele
 controle.onJogo = (video, key) => {
   if (video) padVirtual.ligar(key);
@@ -9143,6 +9170,7 @@ function exitFocus() {
     $('#crosshair').hidden = false;
   } else {
     controle.remover($('#focus-video'));
+    naTv?.saiuDaTela();
     $('#focus').hidden = true;
     $('#focus-video').srcObject = null;
     if (document.fullscreenElement === $('#focus')) document.exitFullscreen().catch(() => {});

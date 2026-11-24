@@ -260,6 +260,7 @@ function pedirCodigo() {
     if (!r?.ok) return;
     $('#qr-img').src = `/tv/qr.svg?c=${r.codigo}`;
     $('#qr-url').textContent = `${location.host}/lan?tv=${r.codigo}`;
+    $('#qr-curto').textContent = r.codigo.slice(0, 4); // na mesma rede bastam as 4 primeiras (na-tv.js)
     atualizarQr();
   });
 }

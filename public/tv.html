@@ -57,6 +57,7 @@
   #qr img { width: 100%; aspect-ratio: 1; background: #fff; border-radius: .8vw; display: block; }
   #qr h2 { margin: 0 0 .5vw; font-size: 1.8vw; }
   #qr p { margin: .7vw 0 0; color: var(--apagado); font-size: 1.15vw; line-height: 1.35; }
+  #qr .codigo-grande { font-size: 1.8vw; font-weight: 700; }
   #qr .codigo { font-family: Consolas, monospace; color: var(--texto); letter-spacing: .12em; }
 
   #aviso { position: fixed; top: 7vw; left: 0; right: 0; width: fit-content; margin: 0 auto; max-width: 70vw; padding: 1vw 1.8vw; text-align: center; font-weight: 600; z-index: 6; }
@@ -122,6 +123,7 @@
   <img id="qr-img" alt="QR code para alugar pelo celular">
   <p id="qr-txt">Aponte a câmera do celular. Lá você entra na sua conta, escolhe PC ou PS5 e paga. A TV entra na sua conta sozinha.</p>
   <p>ou abra <span class="codigo" id="qr-url"></span></p>
+  <p>No celular, em <b>Colocar na TV</b>: <span class="codigo codigo-grande" id="qr-curto"></span></p>
 </aside>
 
 <div id="dica-jogo" class="vidro">Para sair do jogo: <b>Voltar</b> no controle remoto, ou segure <b>Select + Start</b> · menos atraso ↔ 1080p: <b>botão colorido</b> · desempenho: <b>Info</b></div>

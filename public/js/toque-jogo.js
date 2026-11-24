@@ -300,9 +300,10 @@ export class ToqueJogo {
   // onEngasgo: quem joga tocou em "Engasgou" (marca no relatório do modo jogo)
   // onTutorial: "Tutorial do controle" no painel (layout PS5; ver tutorial-controle.js)
   // onLayout: a pessoa trocou o layout à mão no painel (id do novo)
+  // onTv: tocou em "TV" (colocar na TV, na-tv.js)
   // volume: { get, set } do som das telas (0 a 100), o mesmo dos Ajustes — no iPhone o volume do
   // <video> é só leitura, e sem este controle no painel não havia como baixar o som do jogo
-  constructor({ raiz, controle, pad, toast, onSair, onEngasgo, onTutorial, onLayout, volume = null }) {
+  constructor({ raiz, controle, pad, toast, onSair, onEngasgo, onTutorial, onLayout, onTv = null, volume = null }) {
     this.raiz = raiz;
     this.volume = volume;
     this.controle = controle;
@@ -312,6 +313,7 @@ export class ToqueJogo {
     this.onEngasgo = onEngasgo;
     this.onTutorial = onTutorial;
     this.onLayout = onLayout;
+    this.onTv = onTv;
     this.key = null;
     // tecla ou botão ("KeyW", "mouse:left") -> quantos botões da tela seguram agora: só sobe
     // quando o último solta (a Fúria aperta Shift com o analógico já correndo no Shift)
@@ -601,9 +603,12 @@ export class ToqueJogo {
         { r: 'Voltar ao jogo', volta: true, cls: 'tj-volta' }]
       : L.topo;
     topo.innerHTML = doTopo.map(htmlBotao).join('')
+      + (this.onTv ? '<button type="button" class="tj-tv" aria-label="Colocar na TV"><b>TV</b></button>' : '')
       + '<button type="button" class="tj-engasgo" aria-label="Marcar engasgo no relatório"><b>Engasgou</b></button>'
       + '<button type="button" class="tj-sair" aria-label="Sair do modo jogo"><b>Sair</b></button>';
-    topo.querySelectorAll('button:not(.tj-sair):not(.tj-engasgo)').forEach((el, i) => this.ligar(el, doTopo[i]));
+    topo.querySelectorAll('button:not(.tj-sair):not(.tj-engasgo):not(.tj-tv)').forEach((el, i) => this.ligar(el, doTopo[i]));
+    const naTv = topo.querySelector('.tj-tv');
+    if (naTv) this.segurar(naTv, () => {}, (tocou) => tocou && this.onTv());
     this.segurar(topo.querySelector('.tj-engasgo'), () => {}, (tocou) => tocou && this.onEngasgo?.());
     this.segurar(topo.querySelector('.tj-sair'), () => {}, (tocou) => tocou && this.onSair?.());
 

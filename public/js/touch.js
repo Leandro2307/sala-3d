@@ -220,6 +220,9 @@ export function setupTouchControls(player, actions = {}) {
     cheia.addEventListener('click', (e) => e.preventDefault());
   }
 
+  const tv = root.querySelector('#tb-tv');
+  if (tv && actions.naTv) setupButton(tv, { noSoltar: actions.naTv });
+
   const $b = (id) => root.querySelector(id);
   return {
     reset: () => {

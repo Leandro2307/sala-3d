@@ -776,7 +776,7 @@ app.get('/lan', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'lan.
 // pessoa entra na conta e a página /lan manda o token dela aqui: a TV recebe e entra com essa conta
 // (como o login da Netflix na TV). O QR some na vez de quem está na TV: no horário pago ninguém
 // troca a conta dela; fora dele, quem escanear assume a TV.
-const tvCodigos = new Map(); // código -> { socket, dados: () => ({ room, user }) }
+const tvCodigos = new Map(); // código -> { socket, ip, ua, dados: () => ({ room, user }) }
 const LETRAS_TV = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // sem 0/O e 1/I
 function novoCodigoTV() {
   let c;
@@ -785,6 +785,35 @@ function novoCodigoTV() {
   return c;
 }
 const codigoTV = (c) => String(c ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+// "Colocar na TV" no celular (na-tv.js): as 4 primeiras letras do código bastam para quem está na mesma
+// rede da TV (o IP público igual; no IPv6, o mesmo /64). De fora, só o código inteiro.
+function redeDe(ip) {
+  const s = String(ip || '').split(',')[0].trim().replace(/^::ffff:/i, '').toLowerCase();
+  if (!s.includes(':')) return s;
+  const [a, b = ''] = s.split('::');
+  const ini = a ? a.split(':') : [];
+  const fim = b ? b.split(':') : [];
+  const meio = s.includes('::') ? Array(Math.max(0, 8 - ini.length - fim.length)).fill('0') : [];
+  return [...ini, ...meio, ...fim].slice(0, 4).map((g) => g.replace(/^0+(?=.)/, '')).join(':');
+}
+function acharTV(codigo, req) {
+  if (codigo.length !== 4) return tvCodigos.get(codigo);
+  const rede = redeDe(req.headers['x-forwarded-for'] || req.socket.remoteAddress);
+  const achadas = [...tvCodigos].filter(([c, t]) => c.startsWith(codigo) && t.socket.connected && redeDe(t.ip) === rede);
+  return achadas.length === 1 ? achadas[0][1] : null;
+}
+const MARCAS_TV = [[/web0s|webos|netcast/i, 'TV LG'], [/tizen|samsung/i, 'TV Samsung'], [/philips|smart tv ph\b/i, 'TV Philips'], [/bravia|sony/i, 'TV Sony'],
+  [/roku/i, 'TV Roku'], [/vidaa|hisense/i, 'TV Hisense'], [/\baft[a-z]/i, 'Fire TV'], [/crkey|chromecast|google ?tv/i, 'Google TV']];
+const nomeDaTV = (ua) => MARCAS_TV.find(([re]) => re.test(ua || ''))?.[1] || 'TV';
+// as TVs abertas agora na conta de quem pergunta (o nome de cada uma)
+app.post('/lan/tvs', express.json({ limit: '2kb' }), (req, res) => {
+  const conta = lan.contaDoToken(req.body?.token);
+  if (!conta) return res.json({ ok: false, erro: 'login' });
+  const tvs = [...tvCodigos.values()]
+    .filter((t) => t.socket.connected && t.dados().user?.conta === conta)
+    .map((t) => nomeDaTV(t.ua));
+  res.json({ ok: true, tvs });
+});
 app.get('/tv/qr.svg', async (req, res) => {
   const codigo = codigoTV(req.query.c);
   if (codigo.length !== 8) return res.status(400).end();
@@ -799,8 +828,13 @@ app.get('/tv/qr.svg', async (req, res) => {
 app.post('/lan/tv', express.json({ limit: '2kb' }), (req, res) => {
   const conta = lan.contaDoToken(req.body?.token);
   if (!conta) return res.json({ ok: false, erro: 'login' });
-  const tv = tvCodigos.get(codigoTV(req.body?.codigo));
-  if (!tv?.socket.connected) return res.json({ ok: false, erro: 'A TV não está mais esperando. Escaneie o código que está na tela dela agora.' });
+  const codigo = codigoTV(req.body?.codigo);
+  const tv = acharTV(codigo, req);
+  if (!tv?.socket.connected) {
+    return res.json({ ok: false, erro: codigo.length === 4
+      ? 'Não achei essa TV na sua rede. Confira as letras e se o celular está no Wi-Fi da TV, ou digite o código inteiro.'
+      : 'A TV não está mais esperando. Escaneie o código que está na tela dela agora.' });
+  }
   const { room, user } = tv.dados();
   // na vez de outra pessoa (PC ou PS5), a TV continua com ela
   if (room && user?.conta && user.conta !== conta && room.config?.lanhouse?.ligada) {
@@ -1676,7 +1710,7 @@ function attachSockets(io) {
       if (!user?.tv) return r({ ok: false });
       if (!meuCodigoTV) {
         meuCodigoTV = novoCodigoTV();
-        tvCodigos.set(meuCodigoTV, { socket, dados: () => ({ room, user }) });
+        tvCodigos.set(meuCodigoTV, { socket, ip: ipDe(), ua: String(socket.handshake.headers['user-agent'] || ''), dados: () => ({ room, user }) });
         socket.on('disconnect', () => tvCodigos.delete(meuCodigoTV));
       }
       r({ ok: true, codigo: meuCodigoTV });

@@ -492,8 +492,9 @@ export class Controle {
     const vw = v.videoWidth || 16;
     const vh = v.videoHeight || 9;
     const k = (cs.objectFit === 'cover' ? Math.max : Math.min)(cw / vw, ch / vh);
-    const dw = vw * k;
-    const dh = vh * k;
+    // "fill": a imagem esticada na caixa (espelhando na TV com o zoom dela, na-tv.js)
+    const dw = cs.objectFit === 'fill' ? cw : vw * k;
+    const dh = cs.objectFit === 'fill' ? ch : vh * k;
     const x = (e.clientX - (r.left + pl + (cw - dw) / 2)) / dw;
     const y = (e.clientY - (r.top + pt + (ch - dh) / 2)) / dh;
     return { x, y, dentro: x >= 0 && x <= 1 && y >= 0 && y <= 1 };
