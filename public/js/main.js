@@ -1267,7 +1267,6 @@ async function join() {
       voz: () => criador.vozApertar(),
       soltarVoz: () => criador.vozSoltar(),
       catalogo: () => criador.abrirCatalogo(),
-      naTv: () => naTv?.abrir(),
       fullscreen: async () => {
         const r = await toggleFullscreen();
         updateFullscreenButton();
@@ -4939,7 +4938,7 @@ const toqueJogo = new ToqueJogo({
   },
 });
 sincronizarPresets(); // o painel do celular também tem o seletor de presets
-// "Colocar na TV" (na-tv.js): no celular, na sala, na tela em foco e no modo jogo
+// "Colocar na TV" (na-tv.js): no celular, na tela em foco e no modo jogo
 const naTv = isTouch ? new NaTv({
   raiz: $('#na-tv'),
   foco: $('#focus'),

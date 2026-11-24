@@ -14,8 +14,16 @@
   /* a tela em foco da sala é a página inteira aqui */
   #focus { animation: none; background: #05070d; }
   #focus .focus-bar { flex-wrap: wrap; z-index: 4; }
-  /* com a lan house a barra ocupa duas linhas: a imagem começa abaixo dela (jogando em tela cheia, sem margem) */
-  #focus:not(:fullscreen) video { padding-top: 104px; }
+  /* como no modo TV: a imagem na janela toda, e a barra por cima some com o mouse parado (jogar.js, mostrarBarra) */
+  #focus video { padding: 0; }
+  body.jg-jogando #focus video { outline: none; }
+  #focus .focus-bar { transition: opacity .25s; }
+  body.jg-limpo #focus .focus-bar { opacity: 0; pointer-events: none; }
+  body.jg-limpo:not(.jg-jogando, .jg-controlando) #focus { cursor: none; }
+  body.jg-limpo:not(.toque-jogo) #focus:not(:fullscreen) :is(#jogo-selo, #lan-vez-foco) { top: 10px; }
+  /* controlando o PC a barra fica: a imagem começa abaixo dela (duas linhas com a lan house), para o topo da tela
+     de lá continuar clicável */
+  body.jg-controlando #focus:not(:fullscreen) video { padding: 104px 16px 16px; }
   #jg-vazio { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 24px; color: #9aa4ba; pointer-events: none; }
   #jg-vazio[hidden] { display: none; }
   #jg-vazio b { display: block; color: #eef2fb; font-size: 22px; margin-bottom: 6px; }
@@ -77,7 +85,7 @@
           <label><input type="checkbox" data-op="turbo"><span>Modo turbo <small>(imagem sem buffer: bem menos atraso)</small></span></label>
           <label><input type="checkbox" data-op="turboLiso"><span>Turbo liso <small>(+~20 ms: quadros no ritmo certo)</small></span></label>
           <label><input type="checkbox" data-op="preencher"><span>Preencher a tela <small>(sem faixas pretas: corta um pouco das bordas)</small></span></label>
-          <label><input type="checkbox" id="jg-nitidez"><span>Realce de nitidez <small>(contornos mais nítidos; custa placa de vídeo)</small></span></label>
+          <label><input type="checkbox" id="jg-nitidez"><span>Realce de nitidez <small>(contornos mais nítidos; custa placa de vídeo e o Turbo da TV não usa)</small></span></label>
           <label><input type="checkbox" data-op="selo"><span>Mostrar desempenho</span></label>
           <label><input type="checkbox" data-op="vibrar"><span>Vibrar com o jogo <small>(PS5: o controle ligado neste PC treme)</small></span></label>
           <label class="jogo-op-vol"><span>Sensibilidade do mouse <small>(PS5 e Switch: o mouse vira o analógico)</small></span>

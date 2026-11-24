@@ -45,6 +45,9 @@ const CHAVE_SENS = 'sala3d-toque-sens';
 const CHAVE_FORCA = 'sala3d-toque-forca'; // quanto os botões aparecem por cima do jogo (%)
 const FORCA = 55;
 const CHAVE_POS = 'sala3d-toque-pos'; // onde a pessoa arrastou cada botão, por layout (editor)
+const CHAVE_TAM = 'sala3d-toque-tam'; // o tamanho do bloco de botões e o das setas (%), por layout (editor)
+const TAM_MIN = 30;
+const TAM_MAX = 120;
 
 // Analógico (do toque ou do controle de videogame, ver gamepad-jogo.js): dx, dy de -1 a 1 -> as
 // teclas que ele segura. Empurrado até a borda para a frente, corre (a tecla de correr do jogo).
@@ -299,10 +302,21 @@ export function lerSens() {
   }
 }
 
-// { layout: { lugar: [dx, dy] } }: o deslocamento de cada botão (e do 'stick' e da 'hotbar')
+// { layout: { lugar: [dx, dy] } }: o deslocamento de cada botão (e do 'stick', das 'setas' e da 'hotbar').
+// O antigo 'cruz' fica de lado: era contado do lugar em que as setas nasciam antes.
 function lerPosicoes() {
   try {
     const v = JSON.parse(localStorage.getItem(CHAVE_POS) || '{}');
+    return v && typeof v === 'object' ? v : {};
+  } catch {
+    return {};
+  }
+}
+
+// { layout: { acoes, cruz } }: o tamanho de cada bloco inteiro, em %
+function lerTamanhos() {
+  try {
+    const v = JSON.parse(localStorage.getItem(CHAVE_TAM) || '{}');
     return v && typeof v === 'object' ? v : {};
   } catch {
     return {};
@@ -344,7 +358,8 @@ export class ToqueJogo {
     this.forca = lerForca();
     this.layoutId = null;
     this.posicoes = lerPosicoes();
-    this.editando = false; // "Mover botões": arrastar muda o lugar, não aperta
+    this.tamanhos = lerTamanhos();
+    this.editando = false; // "Mover e redimensionar": arrastar muda o lugar, não aperta
     this.resto = { x: 0, y: 0 }; // fração de pixel do dedo e do giroscópio que ainda não foi (ver olhar)
     this.montar();
     this.ligarGiro();
@@ -378,12 +393,16 @@ export class ToqueJogo {
         </div>
         <button type="button" class="tj-tutorial" hidden>Tutorial do controle</button>
         <div class="tj-edicao">
-          <button type="button" class="tj-mover">Mover botões</button>
-          <button type="button" class="tj-restaurar">Lugar original</button>
+          <button type="button" class="tj-mover">Mover e redimensionar</button>
+          <button type="button" class="tj-restaurar">Original</button>
         </div>
         <button type="button" class="tj-ok">Pronto</button>
       </div>
-      <p class="tj-editando-dica" hidden>Arraste os botões e o analógico para onde quiser <button type="button" class="tj-fim-edicao">Pronto</button></p>
+      <div class="tj-editando-dica" hidden>
+        <p>Arraste para mudar de lugar <button type="button" class="tj-fim-edicao">Pronto</button></p>
+        <label data-tam="acoes"><span>Botões</span><input type="range" min="${TAM_MIN}" max="${TAM_MAX}" step="5"><output></output></label>
+        <label data-tam="cruz"><span>Setas</span><input type="range" min="${TAM_MIN}" max="${TAM_MAX}" step="5"><output></output></label>
+      </div>
       <div class="tj-topo"></div>
       <div class="tj-gaveta" hidden></div>
       <p class="tj-dica" hidden>Menu do jogo: toque onde quer clicar · arraste para levar o cursor</p>
@@ -477,13 +496,22 @@ export class ToqueJogo {
     r.querySelector('.tj-restaurar').addEventListener('click', () => {
       if (!this.layoutId) return;
       delete this.posicoes[this.layoutId];
+      delete this.tamanhos[this.layoutId];
       this.gravarPosicoes();
+      this.gravarTamanhos();
       this.posicionar();
+    });
+    r.querySelectorAll('[data-tam]').forEach((linha) => {
+      linha.querySelector('input').addEventListener('input', (e) => {
+        (this.tamanhos[this.layoutId] ||= {})[linha.dataset.tam] = Number(e.target.value);
+        this.gravarTamanhos();
+        this.posicionar();
+      });
     });
     this.ligarEditor();
   }
 
-  // ---------------------------------------------------------------- editor (mover botões)
+  // ---------------------------------------------------------------- editor (mover e redimensionar)
   editar(on) {
     this.editando = on;
     if (on) {
@@ -498,7 +526,18 @@ export class ToqueJogo {
     try { localStorage.setItem(CHAVE_POS, JSON.stringify(this.posicoes)); } catch { /* sem armazenamento */ }
   }
 
-  // os botões (pelo lugar na grade), o analógico e a barra de itens onde a pessoa deixou
+  gravarTamanhos() {
+    try { localStorage.setItem(CHAVE_TAM, JSON.stringify(this.tamanhos)); } catch { /* sem armazenamento */ }
+  }
+
+  // 'acoes' (o bloco da direita) ou 'cruz' (as setas): a escala do bloco inteiro
+  escala(bloco) {
+    const v = Number(this.tamanhos[this.layoutId]?.[bloco]);
+    return v ? Math.min(TAM_MAX, Math.max(TAM_MIN, v)) / 100 : 1;
+  }
+
+  // os botões (pelo lugar na grade), o analógico e a barra de itens onde a pessoa deixou, e os
+  // blocos no tamanho que ela escolheu
   posicionar() {
     const pos = this.posicoes[this.layoutId] || {};
     const r = this.raiz;
@@ -508,8 +547,17 @@ export class ToqueJogo {
     };
     r.querySelectorAll('.tj-acoes button[data-a]').forEach((el) => por(el, el.dataset.a));
     por(r.querySelector('.tj-stick'), 'stick');
-    por(r.querySelector('.tj-cruz'), 'cruz');
+    const cruz = r.querySelector('.tj-cruz');
+    por(cruz, 'setas');
     por(r.querySelector('.tj-hotbar'), 'hotbar');
+    for (const [bloco, el] of [['acoes', r.querySelector('.tj-acoes')], ['cruz', cruz]]) {
+      const e = this.escala(bloco);
+      el.style.scale = e === 1 ? '' : String(e);
+      const linha = r.querySelector(`[data-tam="${bloco}"]`);
+      linha.hidden = el.hidden;
+      linha.querySelector('input').value = Math.round(e * 100);
+      linha.querySelector('output').textContent = `${Math.round(e * 100)}%`;
+    }
   }
 
   // No modo de editar, arrastar um botão leva ele junto (na fase de captura: o botão nem fica sabendo)
@@ -520,15 +568,16 @@ export class ToqueJogo {
       if (!el) return;
       e.preventDefault();
       e.stopPropagation();
-      const lugar = el.classList.contains('tj-stick') ? 'stick' : el.classList.contains('tj-cruz') ? 'cruz' : el.classList.contains('tj-hotbar') ? 'hotbar' : el.dataset.a;
+      const lugar = el.classList.contains('tj-stick') ? 'stick' : el.classList.contains('tj-cruz') ? 'setas' : el.classList.contains('tj-hotbar') ? 'hotbar' : el.dataset.a;
       const pos = (this.posicoes[this.layoutId] ||= {});
       const [x0, y0] = pos[lugar] || [0, 0];
       const sx = e.clientX;
       const sy = e.clientY;
+      const k = el.closest('.tj-acoes') ? this.escala('acoes') : 1; // no bloco encolhido, o botão anda em pixels encolhidos
       const id = e.pointerId;
       const mover = (m) => {
         if (m.pointerId !== id) return;
-        pos[lugar] = [Math.round(x0 + m.clientX - sx), Math.round(y0 + m.clientY - sy)];
+        pos[lugar] = [Math.round(x0 + (m.clientX - sx) / k), Math.round(y0 + (m.clientY - sy) / k)];
         el.style.translate = `${pos[lugar][0]}px ${pos[lugar][1]}px`;
       };
       const fim = (m) => {

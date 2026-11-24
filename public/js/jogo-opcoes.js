@@ -54,6 +54,11 @@ export const PRESETS = [
   { id: 15, nome: '720p Turbo rápido', modo: 'Turbo rápido', desc: 'o menor atraso, mais leve; pode tremer um pouco no Wi-Fi', opcoes: { turbo: true, turboLiso: true, rapido: true, liso: true }, vida: 250, lisoPct: 0.9, lisoMax: 15 },
   { id: 16, nome: '1080p Turbo rápido', modo: 'Turbo rápido', desc: 'o menor atraso, imagem nítida; pode tremer um pouco no Wi-Fi', opcoes: { turbo: true, turboLiso: true, rapido: false, liso: true }, vida: 250, lisoMax: 15 },
 ];
+// Turbo da TV (2026-11-24, só no /jogar, e de fábrica lá): exatamente o que o /tv?turbo=1 faz — 1080p, Turbo
+// liso com a folga de sempre e nunca o realce de nitidez (semRealce). No notebook do lokao16001 (Intel UHD, as
+// duas páginas em sequência, mesmo PS5): TV 39,5 ms com o decodificador a 0,5 ms; /jogar com o realce ligado
+// nas Opções 48,8 ms com o decodificador a 5. Fora de PRESETS de propósito: a sala não o mostra.
+export const PRESET_TV = { id: 17, nome: '1080p Turbo da TV', modo: 'Turbo da TV', desc: 'igual ao modo TV: 1080p liso, sem o realce de nitidez (a placa de vídeo fica só para a imagem)', opcoes: { turbo: true, turboLiso: true, rapido: false, liso: true }, vida: 250, semRealce: true };
 export const PRESET_INICIAL = 14; // o modo em que a página sempre entra
 export const OPCOES_DO_PRESET = ['turbo', 'turboLiso', 'rapido', 'liso'];
 const presetInicial = () => PRESETS.find((p) => p.id === PRESET_INICIAL);
@@ -67,11 +72,14 @@ export function alturaDoMenu(pop) {
 // O seletor do modo de imagem, igual no menu do PC e no painel do celular (main.js ouve o clique em
 // [data-preset]): uma grade 2×3 — colunas 720p / 1080p, linhas vídeo normal / turbo liso / turbo
 // rápido — e o Manual.
-export function htmlPresets() {
+// primeiro: um modo a mais, em cima da grade e de fábrica nesta página (o Turbo da TV, no /jogar)
+export function htmlPresets(primeiro = null) {
+  const inicial = primeiro?.id ?? PRESET_INICIAL;
   const cartao = (p) => '<button type="button" class="jp-card' + (p.opcoes.turbo ? ' turbo' : '') + '" role="radio" aria-checked="false" data-preset="' + p.id + '" title="' + p.nome + ': ' + p.desc + '">'
-    + '<b>' + p.nome.split(' ')[0] + '</b><span>' + p.modo + '</span>' + (p.id === PRESET_INICIAL ? '<em>padrão</em>' : '') + '</button>';
+    + '<b>' + p.nome.split(' ')[0] + '</b><span>' + p.modo + '</span>' + (p.id === inicial ? '<em>padrão</em>' : '') + '</button>';
   return '<div class="jogo-presets" role="radiogroup" aria-label="Modo de imagem">'
     + '<span class="jp-tit">Modo de imagem</span>'
+    + (primeiro ? cartao(primeiro) : '')
     + '<div class="jp-grade">' + PRESETS.map(cartao).join('') + '</div>'
     + '<button type="button" class="jp-card jp-manual" role="radio" aria-checked="false" data-preset="0"><b>Manual</b><small>as opções abaixo</small></button>'
     + '</div>';

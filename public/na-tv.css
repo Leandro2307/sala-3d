@@ -1,7 +1,4 @@
 /* "Colocar na TV" (js/na-tv.js, só no celular) */
-#tb-tv { display: flex; align-items: center; gap: 7px; top: calc(112px + env(safe-area-inset-top)); width: auto; height: 38px; padding: 0 14px; border-radius: 999px; color: #7dd3fc; border-color: rgba(125, 211, 252, 0.5); font: 700 13px/1 system-ui, sans-serif; white-space: nowrap; }
-#tb-full[hidden] + #tb-tv { top: calc(64px + env(safe-area-inset-top)); }
-body.touch[data-jogo]:not(.barra-aberta) #tb-tv { display: none; }
 
 /* espelhando: só a imagem, do tamanho do celular; um toque traz a barra por um instante */
 body.espelho #focus { background: #000; }

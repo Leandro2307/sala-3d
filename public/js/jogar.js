@@ -18,7 +18,8 @@
 //   - o controle pela Gamepad API, lido a cada 8 ms, com o botão saindo na hora. Pelo WebHID (a sala), o
 //     giroscópio do DualSense muda sempre e ocupa o envio de 12 em 12 ms: o botão esperava a vez dele. O
 //     DualSense direto (gatilhos, touchpad, giroscópio) fica nas Opções, desligado de fábrica;
-//   - sem o realce de nitidez (um shader por quadro na placa integrada) e só H.264;
+//   - sem o realce de nitidez (um shader por quadro na placa integrada) e só H.264. O realce pode ser ligado nas
+//     Opções, mas não no modo Turbo da TV (PRESET_TV), em que a página sempre abre;
 //   - os canais do Turbo sem prazo de entrega (?canal=prazo volta ao da sala, para comparar).
 //
 // Quedas: a conexão com o servidor que pisca entra de novo sem recarregar (reentrar; só um deploy recarrega), e a
@@ -29,7 +30,7 @@ import { Controle } from './controle.js';
 import { TurboRecebe, TTL_MS, LISO_PCT, LISO_MAX } from './turbo.js';
 import { DiagJogo } from './jogo-diag.js';
 import { linhaDaCulpa } from './culpa.js';
-import { opcoesJogo, LISO_MS, PRESETS, OPCOES_DO_PRESET, htmlPresets, marcarPresets, alturaDoMenu } from './jogo-opcoes.js';
+import { opcoesJogo, LISO_MS, PRESETS, PRESET_TV, PRESET_INICIAL, OPCOES_DO_PRESET, htmlPresets, marcarPresets, alturaDoMenu } from './jogo-opcoes.js';
 import { LAYOUTS, layoutDoTitulo } from './toque-jogo.js';
 import { ControleFisico } from './gamepad-jogo.js';
 import { PadVirtual } from './pad-virtual.js';
@@ -575,6 +576,7 @@ function mostrarVideo() {
     aplicarBuffer();
   } else if (!ok && video.srcObject) video.srcObject = null;
   $('#jg-vazio').hidden = ok;
+  if (!ok) mostrarBarra();
   if (ok) return void tentarVoltar();
   $('#jg-vazio b').textContent = !st.entrou ? 'Conectando à sala…' : a ? 'Carregando a imagem…' : queda ? 'A tela do jogo saiu do ar' : 'Nada no telão agora';
   $('#jg-vazio span').textContent = !st.entrou ? 'Só um instante.'
@@ -665,6 +667,9 @@ function atualizarBarra() {
       controle.focar(video);
     }
   } else if (controle.tem(video)) controle.remover(video);
+  if (document.body.classList.toggle('jg-controlando', st.controlando && !emJogo) !== eraControlando || emJogo !== eraJogo) mostrarBarra();
+  eraControlando = st.controlando && !emJogo;
+  eraJogo = emJogo;
   const cb = $('#focus-ctrl');
   cb.hidden = !podeControlar() || emJogo;
   cb.textContent = st.controlando ? 'Só assistir' : 'Controlar';
@@ -682,6 +687,36 @@ function atualizarBarra() {
   grande.textContent = voltaAoJogo() ? '▶ Voltar ao jogo' : `▶ Modo jogo · ${a ? a.sh.titulo || NOME_MAQ[maquinaDaTela(a.sh)] : ''}`;
   atualizarBotaoTouchpad();
 }
+// Como no modo TV: a imagem ocupa a janela toda e a barra some com o mouse parado. Jogando (ou controlando em tela
+// cheia) o mouse é do jogo: a barra só volta com ele encostado no topo da janela.
+const BARRA_MS = 3500;
+let eraControlando = false;
+let eraJogo = false;
+let barraTimer = 0;
+const mouseEhDoJogo = () => !!controle.jogo || (st.controlando && !!document.fullscreenElement);
+const barraPresa = () => !$('#jg-vazio').hidden || !$('#jogo-op-pop').hidden || !$('#lan-modal').hidden
+  || (st.controlando && !controle.jogo && !document.fullscreenElement)
+  || (!document.pointerLockElement && $('.focus-bar').matches(':hover, :has(:focus-visible)')); // com o mouse preso, o :hover fica no do clique
+function mostrarBarra(ms = BARRA_MS) {
+  document.body.classList.remove('jg-limpo');
+  clearTimeout(barraTimer);
+  barraTimer = setTimeout(esconderBarra, ms);
+}
+function esconderBarra() {
+  clearTimeout(barraTimer);
+  if (barraPresa()) barraTimer = setTimeout(esconderBarra, 1000);
+  else document.body.classList.add('jg-limpo');
+}
+addEventListener('mousemove', (e) => {
+  if (document.pointerLockElement) return;
+  if (!mouseEhDoJogo()) return mostrarBarra();
+  if (e.clientY <= 4) mostrarBarra();
+  else if (e.clientY > 120 && !document.body.classList.contains('jg-limpo')) esconderBarra();
+}, { capture: true, passive: true });
+$('.focus-bar').addEventListener('focusin', () => mostrarBarra());
+addEventListener('keydown', (e) => { if (e.code === 'Tab' && !controle.jogo && !st.controlando) mostrarBarra(); });
+document.addEventListener('fullscreenchange', () => mostrarBarra());
+
 $('#jg-telas').addEventListener('click', (e) => {
   const b = e.target.closest('[data-tela]');
   if (!b || controle.jogo) return;
@@ -971,7 +1006,13 @@ turboRecebe.aceleracoes = ['prefer-hardware', 'prefer-hardware@2a', 'prefer-hard
 turboRecebe.semImagemMs = 12_000;
 turboRecebe.somCurto = !SINCRONIA;
 turboRecebe.lisoSoluco = !SINCRONIA;
-const presetAtual = () => PRESETS.find((p) => p.id === opcoesJogo.get('preset')) || null;
+const MODOS = [PRESET_TV, ...PRESETS];
+const presetAtual = () => MODOS.find((p) => p.id === opcoesJogo.get('preset')) || null;
+// a página sempre abre no Turbo da TV (o padrão do jogo-opcoes.js é o da sala)
+opcoesJogo.setVarios({ preset: PRESET_TV.id, ...PRESET_TV.opcoes });
+// no Turbo da TV (e no Manual que sai dele) o realce não vale, mesmo guardado ligado
+let realceVale = false;
+const comRealce = () => !!ajustes.nitidez && realceVale;
 function ligarTurbo() {
   if (!jogandoLa) return;
   const p = presetAtual();
@@ -980,13 +1021,14 @@ function ligarTurbo() {
   turboRecebe.h265 = !!p?.h265;
   turboRecebe.lisoPct = p?.lisoPct ?? LISO_PCT;
   turboRecebe.lisoMax = p?.lisoMax ?? LISO_MAX;
-  turboRecebe.realce = !!ajustes.nitidez;
+  turboRecebe.realce = comRealce();
   turboRecebe.ligar(jogandoLa.key, jogandoLa.video, opcoesJogo.get('rapido') ? 720 : 1080);
   diagJogo.evento('modo turbo ligado', { nitidez: turboRecebe.realce, liso: opcoesJogo.get('turboLiso'), vidaMs: turboRecebe.vidaMs, h265: turboRecebe.h265, lisoPct: turboRecebe.lisoPct, lisoMaxMs: turboRecebe.lisoMax, menosFila: !SINCRONIA, canal: CANAL_CONFIAVEL ? 'confiável' : 'com prazo' });
 }
 let aplicandoPreset = false;
 function aplicarPreset(n) {
-  const p = PRESETS.find((x) => x.id === n) || null;
+  const p = MODOS.find((x) => x.id === n) || null;
+  if (p) realceVale = !p.semRealce;
   aplicandoPreset = true;
   try { opcoesJogo.setVarios({ preset: p ? p.id : 0, ...(p ? p.opcoes : {}) }); } finally { aplicandoPreset = false; }
   turboRecebe.liso = opcoesJogo.get('turboLiso');
@@ -997,7 +1039,7 @@ function aplicarPreset(n) {
   if (p.opcoes.turbo) ligarTurbo();
   else turboRecebe.desligar();
 }
-$('#jogo-op-pop').insertAdjacentHTML('afterbegin', htmlPresets());
+$('#jogo-op-pop').insertAdjacentHTML('afterbegin', htmlPresets(PRESET_TV));
 marcarPresets(document);
 document.addEventListener('click', (e) => {
   const el = e.target.closest?.('[data-preset]');
@@ -1013,7 +1055,10 @@ opcoesJogo.ouvir((k, v) => {
     try { opcoesJogo.setVarios({ preset: 0 }); } finally { aplicandoPreset = false; }
     diagJogo.evento('preset: manual (opção mudada à mão)', { [k]: v });
   }
-  if (k === 'preset') marcarPresets(document);
+  if (k === 'preset') {
+    marcarPresets(document);
+    $('#jg-nitidez').checked = comRealce();
+  }
   if (k === 'liso') aplicarBuffer();
   else if (k === 'turboLiso') turboRecebe.liso = v;
   else if (k === 'rapido') {
@@ -1068,7 +1113,7 @@ function jogoLa(v, key) {
   diagJogo.comecar('joga', {
     gl: placaLida,
     video: v,
-    extra: { pagina: 'jogar', receita: 'tv', dualsense: ajustes.dualsense, nitidez: ajustes.nitidez, canal: CANAL_CONFIAVEL ? 'confiável' : 'com prazo', janelaDoJogo: t?.sh.titulo ?? null, toque: false, opcoes: { liso: op('liso'), menuAuto: op('menuAuto'), giro: false, rapido: op('rapido'), turbo: op('turbo'), turboLiso: op('turboLiso'), preset: op('preset') } },
+    extra: { pagina: 'jogar', receita: 'tv', dualsense: ajustes.dualsense, nitidez: comRealce(), canal: CANAL_CONFIAVEL ? 'confiável' : 'com prazo', janelaDoJogo: t?.sh.titulo ?? null, toque: false, opcoes: { liso: op('liso'), menuAuto: op('menuAuto'), giro: false, rapido: op('rapido'), turbo: op('turbo'), turboLiso: op('turboLiso'), preset: op('preset') } },
   });
   aplicarBuffer();
   mostrarSelo();
@@ -1420,10 +1465,13 @@ const mostrarSens = () => {
   $('#jogo-mouse-sens').value = String(v);
   $('#jogo-mouse-sens-n').textContent = `${v.toFixed(1)}×`;
 };
-$('#jg-nitidez').checked = ajustes.nitidez;
+$('#jg-nitidez').checked = comRealce();
 $('#jg-nitidez').addEventListener('change', (e) => {
   ajustes.nitidez = e.target.checked;
   gravarJSON(AJUSTES_CHAVE, ajustes);
+  // o Turbo da TV não tem o realce: ligá-lo passa para o 1080p Turbo liso (o mesmo, com ele)
+  if (ajustes.nitidez && presetAtual()?.semRealce) return void aplicarPreset(PRESET_INICIAL);
+  if (ajustes.nitidez) realceVale = true;
   if (turboRecebe.ligado) ligarTurbo(); // o realce troca a tela: liga de novo
 });
 mostrarSens();
