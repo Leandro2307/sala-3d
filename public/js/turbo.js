@@ -160,6 +160,21 @@ const REPASSE_BOM_MS = 60_000; // um repasse que durou isto zera as quedas
 // parou por segundos (11:03 e 11:38) a banda tinha acabado de passar de ~10 Mbps
 const TETO_RECOD = 0.8;
 const TETO_RECOD_MIN = 4_000_000;
+// O canal parado (2026-11-25): no PS5 repassado para o notebook (ida e volta ~55 ms) o canal ficava ~1,5 s sem
+// andar, o PC pulava ~100 quadros e quem joga desistia do turbo. vigiarRepasse não via: ele roda nos avisos
+// de fila de quem joga, e com o canal parado não chega quadro lá nem aviso aqui. Agora quem manda mede sozinho
+// quanto o canal andou (repasseParado) e passa a codificar aqui com PARADA_BANDA do que a rede levava.
+const PARADA_MS = 700; // sem o canal andar nada
+const PARADA_INICIO_MS = 1200; // nos primeiros REPASSE_GRACA_MS (a conexão ainda trocando de caminho)
+const PARADA_BANDA = 0.6;
+const PARADA_TETO_MS = 60_000; // por quanto tempo a banda não passa de PARADA_TETO do que ela era
+const PARADA_TETO = 0.85;
+const PARADA_ESPERA_MS = 5 * 60_000; // e o repasse não é tentado de novo
+// Com a ida e volta acima disto, o repasse nem começa: o quadro-chave do PS5 leva ~1 s para chegar e a cadeia
+// quebra antes (iPhone a ~280 ms, 2026-11-25: 7 tentativas e nenhum quadro)
+const REPASSE_RTT_MAX = 150;
+// o canal de quem está longe: um pedaço perdido precisa de tempo para ir de novo (a vida é 250 ms)
+export const vidaDoCanal = (vida, rttMs) => (vida == null || !(rttMs > 0) ? vida : Math.max(vida, Math.min(1500, Math.round(rttMs * 3 + 150))));
 const REPASSE_CALMA = 20; // avisos (10 s) seguidos sem fila nem pulo antes de tentar o repasse de novo
 const caminhoDe = (rede) => (rede ? `${rede.local || ''}|${rede.remoto || ''}|${rede.relay ? 'relay' : ''}` : null);
 const ESPERA_REDE_MS = 400; // quanto ligarSessao espera pela estimativa da rede antes de seguir sem ela
@@ -876,7 +891,8 @@ export class TurboEnvio {
 
   // quanto esperar para tentar o repasse de novo: dobra a cada vez que ele não coube, até MEMORIA_MS
   esperaRepasse(m) {
-    return Math.min(MEMORIA_MS, REPASSE_VOLTA_MS * 2 ** Math.max(0, (m?.quedasRepasse || 1) - 1));
+    const ms = Math.min(MEMORIA_MS, REPASSE_VOLTA_MS * 2 ** Math.max(0, (m?.quedasRepasse || 1) - 1));
+    return m?.parou ? Math.max(PARADA_ESPERA_MS, ms) : ms;
   }
 
   // A imagem do PS5 está sendo codificada aqui: dá para voltar a repassar como veio (a original, sem a
@@ -901,7 +917,7 @@ export class TurboEnvio {
     if (!direto && !rede.lan) return;
     s.trocando = true;
     this.onEvento?.(s.id, 'turbo: caminho direto e rede calma — tentando o PS5 repassado de novo', { filaMs: Math.round(fila), rxKbps: rx || null, ps5Kbps: s.kbpsFonte });
-    const { recodificar, bandaInicialKbps, ...pedido } = s.pedido || {};
+    const { recodificar, bandaInicialKbps, porFalha, socorro, tetoKbps, ...pedido } = s.pedido || {};
     this.ligar(s.id, s.canal, { ...pedido, ligar: s.key });
   }
 
@@ -971,7 +987,7 @@ export class TurboEnvio {
     // PC direto (a placa daqui): repassa sempre. A banda da ponte acompanha a fila (ajustarBanda) e o
     // tamanho pedido vira o da ponte (pedirAltura): o 720p não é mais decodificado e codificado de novo
     // aqui (no relatório de 2026-11-18 o codificador do Chrome levava ~20 ms, até 58, com o jogo na placa)
-    if (fonte?.banda && !recodificar) {
+    if (fonte?.banda && (!recodificar || pedido.porFalha)) { // PC direto: no socorro, a placa baixa a banda
       fonte.pedirAltura?.(id, pedida);
       return this.ligarPs5(id, canal, key, fonte, { versao, som, somMix: t.somMix, rede, pedido });
     }
@@ -982,14 +998,21 @@ export class TurboEnvio {
     // vídeo normal, é codificada de novo no tamanho pedido, como uma tela comum — com a banda acompanhando
     // a rede de quem joga (ajustarBanda). Relatórios do lorrel: 2026-11-17, 720p pedido e 1080p recebido;
     // 2026-11-18, o 1080p repassado (15 Mbps) em 5–16 qps por minutos, com a rede levando ~6.
+    // quem joga pediu o socorro (TurboRecebe.socorrer): o repasse parou lá, vale como uma queda daqui
+    if (fonte && !fonte.banda && recodificar && pedido.porFalha && pedido.socorro) this.lembrarQueda(id, true, false, Number(pedido.bandaInicialKbps) > 0 ? { kbps: Number(pedido.bandaInicialKbps), tetoKbps: Number(pedido.tetoKbps) || Number(pedido.bandaInicialKbps) } : null);
     if (fonte && !recodificar && pedida >= altFonte) {
       const kbpsPs5 = Number(fonte.kbps) || null;
       // o PS5 em H.265 só vai repassado a quem decodifica H.265 (o pedido diz: hevc)
-      const semRepasse = this.lembrado(id)?.semRepasse || (fonte.hevc && !hevc);
+      const semHevc = fonte.hevc && !hevc;
+      const longe = rede?.rttMs > REPASSE_RTT_MAX;
+      const caiuHaPouco = this.lembrado(id)?.semRepasse;
+      const semRepasse = caiuHaPouco || semHevc || longe;
       const direto = !!rede && !rede.relay && !/^relay/.test(rede.local || '') && !/^relay/.test(rede.remoto || '');
       const cabe = !semRepasse && (!kbpsPs5 || !rede || rede.lan || direto || rede.saidaKbps == null || rede.saidaKbps >= kbpsPs5 * FOLGA_REPASSE);
       if (cabe) return this.ligarPs5(id, canal, key, fonte, { versao, som, somMix: t.somMix, rede, pedido });
-      this.onEvento?.(id, semRepasse ? 'turbo: o PS5 repassado não coube há pouco — codificando aqui direto' : 'turbo: a rede de quem joga não leva o PS5 repassado — codificando aqui', { ps5Kbps: kbpsPs5, estimativaKbps: rede?.saidaKbps ?? null, caminho: rede?.local ?? null });
+      this.onEvento?.(id, semHevc ? 'turbo: o PS5 está em H.265 e quem joga pediu H.264 — codificando aqui'
+        : longe ? 'turbo: quem joga está longe (ida e volta alta) — o PS5 é codificado aqui'
+          : caiuHaPouco ? 'turbo: o PS5 repassado não coube há pouco — codificando aqui direto' : 'turbo: a rede de quem joga não leva o PS5 repassado — codificando aqui', { ps5Kbps: kbpsPs5, estimativaKbps: rede?.saidaKbps ?? null, rttMs: rede?.rttMs ?? null, caminho: rede?.local ?? null, familia: rede?.familia ?? null });
     }
     if (!temTurboEnvio()) return responder({ erro: 'navegador' });
     const original = t.stream?.getVideoTracks()[0];
@@ -1010,8 +1033,15 @@ export class TurboEnvio {
     s.recodificado = !!fonte && !fonte.banda; // a imagem do PS5 codificada aqui (e não repassada)
     s.recodPorFalha = s.recodificado && (!!pedido.porFalha || !!this.lembrado(id)?.caiu); // o repasse foi tentado e não coube
     if (s.recodPorFalha) s.ajuste.arranque = false; // a rede já mostrou o que leva: sobe no passo de sempre
+    // depois de o canal parar, a banda não volta logo para onde ele parou (a conta é em bps)
+    const freio = this.memoria.get(id)?.freio;
+    s.freio = s.recodificado && freio && Date.now() < freio.ate ? freio : null;
+    if (s.freio) {
+      s.ajuste.arranque = false;
+      s.ajuste.teto = { v: s.freio.tetoKbps * 1000, ate: performance.now() + (s.freio.ate - Date.now()) };
+    }
     s.kbpsFonte = Number(fonte?.kbps) || null; // a banda da sessão do PS5 (para o relatório)
-    s.bandaInicialKbps = Number(bandaInicialKbps) > 0 ? Number(bandaInicialKbps) : null;
+    s.bandaInicialKbps = Number(bandaInicialKbps) > 0 ? Number(bandaInicialKbps) : s.freio ? s.freio.kbps : null;
     // quem joga com a versão 2 lê o cabeçalho com a hora da captura (a antiga leria como imagem)
     s.v2 = Number(versao) >= 2;
     s.altMax = Math.min(1080, Number(altura) || 1080);
@@ -1083,7 +1113,8 @@ export class TurboEnvio {
     // 16 qps, fila de 250 ms); nos 60% da máxima (12 Mbps), o PC do lorrel (2026-11-18) nunca saiu da fila.
     if (fonte.banda) {
       const b = fonte.banda;
-      const kbps = bandaInicial({ max: b.max, min: b.min ?? PONTE_MIN_KBPS, rede, desconhecida: Math.min(b.max * 0.6, 8000) });
+      let kbps = bandaInicial({ max: b.max, min: b.min ?? PONTE_MIN_KBPS, rede, desconhecida: Math.min(b.max * 0.6, 8000) });
+      if (pedido?.porFalha && Number(pedido.bandaInicialKbps) > 0) kbps = Math.max(b.min ?? PONTE_MIN_KBPS, Math.min(kbps, Number(pedido.bandaInicialKbps)));
       b.mudar(kbps);
       this.onEvento?.(id, 'turbo: banda inicial da placa (PC direto)', { kbps, maxKbps: b.max, estimativaKbps: rede?.saidaKbps ?? null, caminho: rede?.local ?? null, lan: !!rede?.lan });
     }
@@ -1111,12 +1142,41 @@ export class TurboEnvio {
       if (s.altasRepasse < REPASSE_AVISOS && segundos < REPASSE_SEGUNDOS) return;
     }
     s.trocando = true;
-    const m0 = this.memoria.get(s.id) || {};
-    this.memoria.set(s.id, { ...m0, semRepasseEm: Date.now(), quedasRepasse: (agora - s.inicioEm > REPASSE_BOM_MS ? 0 : m0.quedasRepasse || 0) + 1 });
+    this.lembrarQueda(s.id, false, agora - s.inicioEm > REPASSE_BOM_MS);
     const rx = s.ajuste.rxs?.length ? Math.max(...s.ajuste.rxs) : null;
     const kbps = rx ? Math.round(rx * 0.85) : null;
     this.onEvento?.(s.id, 'turbo: o PS5 repassado não coube na rede de quem joga — codificando aqui', { filaMs: Math.round(fila), puladosFila2s: pulos2s, rxKbps: rx, bandaInicialKbps: kbps, ps5Kbps: Number(s.ps5?.kbps) || null });
     this.ligar(s.id, s.canal, { ...(s.pedido || { ligar: s.key, versao: s.v2 ? VERSAO : 1 }), recodificar: true, porFalha: true, bandaInicialKbps: kbps });
+  }
+
+  // o repasse caiu: quanto esperar para tentar de novo (esperaRepasse). parou: o canal ficou sem andar
+  // freio { kbps, tetoKbps }: a banda de depois de o canal parar, lembrada por PARADA_TETO_MS — quem joga
+  // ligar de novo nesse tempo (trocou o codec, o modo) não volta para a banda que parou
+  lembrarQueda(id, parou, durou = false, freio = null) {
+    const m0 = this.memoria.get(id) || {};
+    this.memoria.set(id, { ...m0, ...(freio ? { freio: { ...freio, ate: Date.now() + PARADA_TETO_MS } } : {}), semRepasseEm: Date.now(), parou: parou || undefined, quedasRepasse: (durou ? 0 : m0.quedasRepasse || 0) + 1 });
+  }
+
+  // O canal está parado? O que andou é o que já foi mandado menos o que ainda espera. A cada quadro do PS5
+  // (60 por segundo), sem depender dos avisos de quem joga. true: passou a codificar aqui.
+  repasseParado(s, fila, agora) {
+    if (s.parar || s.trocando || !s.ps5 || s.ps5.banda) return false;
+    const andou = (s.saiuTotal || 0) - fila;
+    if (fila < this.limiteFila(s) / 4 || s.andou == null || andou > s.andou) {
+      s.andou = andou;
+      s.andouEm = agora;
+      return false;
+    }
+    const parado = agora - s.andouEm;
+    if (parado < (agora - s.inicioEm < REPASSE_GRACA_MS ? PARADA_INICIO_MS : PARADA_MS)) return false;
+    s.trocando = true;
+    const rx = s.ajuste.rxs?.length ? Math.max(...s.ajuste.rxs) : null;
+    const kbps = Math.round(Math.max(1500, Math.min(8000, (rx || 5000) * PARADA_BANDA)));
+    const tetoKbps = rx ? Math.max(kbps, Math.round(rx * PARADA_TETO)) : 5000;
+    this.lembrarQueda(s.id, true, agora - s.inicioEm > REPASSE_BOM_MS, { kbps, tetoKbps });
+    this.onEvento?.(s.id, 'turbo: o canal parou com o PS5 repassado — codificando aqui com menos banda', { paradoMs: Math.round(parado), filaKB: Math.round(fila / 1024), rxKbps: rx, bandaInicialKbps: kbps, tetoKbps, ps5Kbps: Number(s.ps5?.kbps) || null, rttMs: s.rede?.rttMs ?? null, familia: s.rede?.familia ?? null });
+    this.ligar(s.id, s.canal, { ...(s.pedido || { ligar: s.key, versao: s.v2 ? VERSAO : 1 }), recodificar: true, porFalha: true, socorro: undefined, bandaInicialKbps: kbps, tetoKbps });
+    return true;
   }
 
   // um quadro do PS5 que não vai (contado no relatório). quebra: a cadeia se perdeu e só um quadro-chave
@@ -1146,6 +1206,7 @@ export class TurboEnvio {
     while (sf.length <= b) { sf.push(0); s.serie.pulados.push(0); }
     const fila = s.canal.bufferedAmount;
     if (fila / 1024 > sf[b]) sf[b] = Math.round(fila / 102.4) / 10;
+    if (this.repasseParado(s, fila, agora)) return;
     // esperando um quadro-chave (começo, perda lá ou espera longa demais aqui): os de antes não servem
     if (s.chave && !m.chave) return this.pularPs5(s, false);
     // um quadro-chave recomeça a cadeia: os que ainda esperavam ficaram velhos e não fazem falta
@@ -1180,7 +1241,8 @@ export class TurboEnvio {
       if (m.chave) {
         const cfg = { codec: s.cfgPs5.codec, w: s.cfgPs5.w, h: s.cfgPs5.h, description: s.cfgPs5.b64 };
         const ant = s.cfgEnviada;
-        if (!ant || ant.codec !== cfg.codec || ant.w !== cfg.w || ant.h !== cfg.h || ant.description !== cfg.description) {
+        if (s.reenviarCfg || !ant || ant.codec !== cfg.codec || ant.w !== cfg.w || ant.h !== cfg.h || ant.description !== cfg.description) {
+          s.reenviarCfg = false;
           s.cfgEnviada = cfg;
           try { s.canal.send(JSON.stringify({ cfg })); } catch { return; }
         }
@@ -1325,7 +1387,8 @@ export class TurboEnvio {
     // a banda lembrada só vale no mesmo caminho: no teste do kazu (2026-11-19 22:06) a conexão trocou de
     // um TURN que levava 20 Mbps para outro que não levava 1 — começar em 17 ali só encheria a fila
     const lem = primeira ? this.lembrado(s.id) : null;
-    const lembrada = lem?.bps && lem.caminho === caminhoDe(s.rede) ? lem.bps : null;
+    // depois de uma parada (freio) a lembrada também não vale: é a que parou
+    const lembrada = lem?.bps && lem.caminho === caminhoDe(s.rede) && !s.freio ? lem.bps : null;
     escolhido.bitrate = primeira
       ? Math.max(
         bandaInicial({ max, min, rede: s.bandaInicialKbps ? { saidaKbps: s.bandaInicialKbps / 0.8 } : s.rede, kbps: false }),
@@ -1361,6 +1424,9 @@ export class TurboEnvio {
       s.conta.ignorados++;
       return;
     }
+    // a configuração vai de novo junto do quadro-chave: no canal com prazo ela pode ter se perdido, e sem
+    // ela quem joga não mostra nada (a mesma de antes lá não muda nada)
+    s.reenviarCfg = true;
     s.chave = true;
     s.ps5?.pedirChave(); // PS5 direto: o quadro-chave vem de lá
   }
@@ -1522,7 +1588,12 @@ export class TurboEnvio {
         try {
           s.canal.send(JSON.stringify({ cfg }));
         } catch { /* canal fechou */ }
+        s.reenviarCfg = false;
       }
+    }
+    if (s.reenviarCfg && chunk.type === 'key' && s.cfgEnviada) {
+      s.reenviarCfg = false;
+      try { s.canal.send(JSON.stringify({ cfg: s.cfgEnviada })); } catch { /* canal fechou */ }
     }
     const dados = new Uint8Array(chunk.byteLength);
     chunk.copyTo(dados);
@@ -1568,6 +1639,7 @@ export class TurboEnvio {
         }
         msg.set(parte, cab);
         s.canal.send(msg);
+        s.saiuTotal = (s.saiuTotal || 0) + msg.length; // repasseParado
       }
       s.enviados++;
       s.conta.enviados++;
@@ -1697,6 +1769,47 @@ export class TurboRecebe {
     this.somCurto = false; // o tocador do som guarda menos (ver SOM_WORKLET): /tv e /jogar
     this.lisoSoluco = false; // o soluço do Wi-Fi não infla a folga do liso (ver LISO_SOLUCO): /tv e /jogar
     this.lisoMax = LISO_MAX; // a folga máxima (ms): o Turbo rápido troca o atraso pelo tremido
+    this.soH264 = false; // este modo pede só H.264 (o Turbo da TV na sala): vale na próxima vez que ligar
+    this.socorro = false; // antes de desistir, pede a imagem codificada lá com menos banda (socorrer): sala e /jogar
+    this.depoisDaFalha = null; // { kbps }: o turbo voltando depois de desistir já pede isso ao ligar (TurboVolta)
+  }
+
+  // só a folga do liso mudou (Turbo liso ↔ Turbo rápido): vale já, sem ligar de novo. false: está desligado
+  mudarLiso(lisoPct, lisoMax) {
+    this.lisoPct = lisoPct;
+    this.lisoMax = lisoMax;
+    const s = this.s;
+    if (!s) return false;
+    s.lisoPct = lisoPct;
+    s.lisoMax = Math.max(LISO_MIN, Math.min(LISO_MAX, Number(lisoMax) || LISO_MAX));
+    s.alvo = Math.min(s.alvo, s.lisoMax);
+    return true;
+  }
+
+  // a banda (kbps) que o socorro pede: uma fração do que chegava bem nos últimos segundos
+  bandaDoSocorro(s) {
+    const rx = s?.rxBons?.length ? Math.max(...s.rxBons) : null;
+    return Math.round(Math.max(1500, Math.min(6000, (rx || 5000) * PARADA_BANDA)));
+  }
+
+  // A imagem parou ou nunca veio: antes de desistir, uma vez, pede a quem compartilha para codificar lá com
+  // menos banda, no mesmo canal (a versão antiga de lá também entende: recodificar). true: vai esperar.
+  socorrer(s, motivo) {
+    if (!this.socorro || s.socorreu || !s.pedido || s.canal.readyState !== 'open' || s.pedido.porFalha) return false;
+    const agora = performance.now();
+    const kbps = this.bandaDoSocorro(s);
+    s.socorreu = true;
+    s.inicio = agora;
+    if (s.desenhou) s.desenhou = agora;
+    Object.assign(s, { paradaEm: agora, filaLentaDesde: 0, fundoDesde: 0, janelaViagem: [], minimos: [] });
+    this.onEvento?.('turbo: pedindo a imagem codificada lá com menos banda (antes de desistir)', { motivo, kbps, rxBom: s.rxBons?.length ? Math.max(...s.rxBons) : null });
+    s.pedido = { ...s.pedido, recodificar: true, porFalha: true, socorro: true, bandaInicialKbps: kbps, tetoKbps: Math.round(kbps * 1.4) };
+    try {
+      s.canal.send(JSON.stringify(s.pedido));
+    } catch {
+      return false;
+    }
+    return true;
   }
 
   get ligado() { return !!this.s; }
@@ -1783,7 +1896,7 @@ export class TurboRecebe {
     // primeiro que a placa codifica. De fábrica ele vai no fim da lista (a versão antiga continua no
     // H.264) e o "hevc" do pedido diz à versão nova que pode usar.
     const forcados = Array.isArray(this.codecsForcados) && this.codecsForcados.length ? this.codecsForcados.filter((c) => !this.semHevc || !ehHevc(c)) : null;
-    const lista = forcados || (this.semHevc ? CODECS : s.h265 ? [...CODECS_HEVC, ...CODECS] : [...CODECS, ...CODECS_HEVC]);
+    const lista = forcados || (this.semHevc || this.soH264 ? CODECS : s.h265 ? [...CODECS_HEVC, ...CODECS] : [...CODECS, ...CODECS_HEVC]);
     const diz = {};
     for (const codec of lista) {
       const r = await VideoDecoder.isConfigSupported({ codec, optimizeForLatency: true }).catch(() => null);
@@ -1801,7 +1914,10 @@ export class TurboRecebe {
     }
     if (this.s !== s) return;
     if (!codecs.length) return this.falhou('navegador');
-    const ligar = () => canal.send(JSON.stringify({ ligar: key, codecs, altura, versao: VERSAO, som: !!s.som, hevc: s.hevcAqui, ...(s.recodificar ? { recodificar: true } : {}) }));
+    const falha = this.depoisDaFalha;
+    s.pedido = { ligar: key, codecs, altura, versao: VERSAO, som: !!s.som, hevc: s.hevcAqui, ...(s.recodificar ? { recodificar: true } : {}),
+      ...(falha ? { recodificar: true, porFalha: true, socorro: true, bandaInicialKbps: falha.kbps, tetoKbps: Math.round(falha.kbps * 1.4) } : {}) };
+    const ligar = () => canal.send(JSON.stringify(s.pedido));
     if (canal.readyState === 'open') ligar();
     else canal.addEventListener('open', ligar, { once: true });
     canal.onmessage = (e) => (typeof e.data === 'string' ? this.texto(s, e.data) : this.pedaco(s, e.data));
@@ -2506,13 +2622,13 @@ export class TurboRecebe {
     }
     const graca = agora - (s.paradaEm || -1e9) < PARADA_GRACA_MS;
     // nada apareceu: este aparelho/PC não deu conta — vídeo normal de volta
-    if (!graca && !s.desenhou && agora - s.inicio > (this.semImagemMs || SEM_IMAGEM_MS)) return this.falhou('sem-imagem');
+    if (!graca && !s.desenhou && agora - s.inicio > (this.semImagemMs || SEM_IMAGEM_MS)) return this.desistir(s, 'sem-imagem');
     // a imagem parou ou a fila não para de crescer: a conexão não aguenta (ver PAROU_MS). Parou só
     // conta com quadro a caminho (chegando aos pedaços ou à espera do quadro-chave): tela parada lá não
     // manda quadro nenhum, e aí não é a conexão.
     const aCaminho = s.esperaChave || s.montando;
-    if (!graca && aCaminho && s.desenhou && agora - s.desenhou > PAROU_MS && s.canal.readyState === 'open') return this.falhou('lento');
-    if (!graca && s.filaLentaDesde && agora - s.filaLentaDesde > FILA_LENTA_MS) return this.falhou('lento');
+    if (!graca && aCaminho && s.desenhou && agora - s.desenhou > PAROU_MS && s.canal.readyState === 'open') return this.desistir(s, 'lento');
+    if (!graca && s.filaLentaDesde && agora - s.filaLentaDesde > FILA_LENTA_MS) return this.desistir(s, 'lento');
     if (!graca && s.fundoDesde && agora - s.fundoDesde > FILA_FUNDO_MS) {
       this.onEvento?.('turbo: no menor tamanho e a fila não baixa — vídeo normal', { altura: s.tela?.height || null, filaMs: s.filaMs });
       return this.falhou('lento');
@@ -2544,16 +2660,24 @@ export class TurboRecebe {
       s.rxBytes = 0;
       s.rxEm = agora;
       s.rxKbps = rx;
+      if (rx && s.filaMs <= FILA_REPASSE) guardar((s.rxBons ??= []), rx, 16); // os últimos ~8 s bons (socorrer)
       try { s.canal.send(JSON.stringify({ fila: { p90, base: Math.round(base * 10) / 10, rx } })); } catch { /* fechou */ }
     }
+  }
+
+  // a conexão não deu conta: primeiro o socorro (uma vez); não serviu, vídeo normal
+  desistir(s, motivo) {
+    if (this.socorrer(s, motivo)) return;
+    this.falhou(motivo);
   }
 
   falhou(motivo) {
     const s = this.s;
     if (s) {
+      s.bandaFalha = this.bandaDoSocorro(s);
       const c = s.cfgAtual;
       this.ultimaFalha = {
-        motivo, ms: Math.round(performance.now() - s.inicio),
+        motivo, bandaKbps: s.bandaFalha, socorreu: !!s.socorreu, ms: Math.round(performance.now() - s.inicio),
         cfg: c ? `${c.codec} ${c.w}×${c.h}${c.description ? '' : ' sem description'}` : null, // nulo: a configuração nem chegou
         kb: Math.round(s.conta.bytes / 1024), // o que chegou pelo canal
         saiuDoDec: s.saiuDoDec || 0, desenhados: s.conta.desenhados,

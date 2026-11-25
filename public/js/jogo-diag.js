@@ -202,7 +202,7 @@ export class DiagJogo {
     s.antes.set(`par:${chave}`, agora);
     const dt = ant ? (agora.t - ant.t) / 1000 : 0;
     const mesmo = ant && ant.par === agora.par;
-    if (ant && ant.par && agora.par && !mesmo) this.evento('o caminho da conexão trocou', { de: ant.par, para: agora.par, caminho: rede.local, relay: rede.relay });
+    if (ant && ant.par && agora.par && !mesmo) this.evento('o caminho da conexão trocou', { de: ant.par, para: agora.par, caminho: rede.local, familia: rede.familia ?? null, rttMs: rede.rtt != null ? Math.round(rede.rtt * 1000) : null, relay: rede.relay });
     const mbps = (a, b) => (mesmo && dt > 0 && a != null && b != null ? r1(((a - b) * 8) / dt / 1e6) : null);
     return {
       estado: d.conexao ?? null,
@@ -212,6 +212,7 @@ export class DiagJogo {
       tentativasDireto: d.tentativasDireto ?? null,
       par: rede.par ?? null,
       remoto: rede.remoto ?? null,
+      familia: rede.familia ?? null, // ipv4 ou ipv6 (rtc.familiaDe)
       relay: rede.relay ?? null,
       enviaMbps: mbps(agora.env, ant?.env),
       recebeMbps: mbps(agora.rec, ant?.rec),

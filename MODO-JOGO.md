@@ -1238,3 +1238,29 @@ ms: TV 876 → 599 ms, /jogar 1471 → 1242 ms (já visitada, 802 → 601). O tu
 - Celular: a tela não apaga com um controle ligado nele, e o controle da tela reabre se a página recarregar.
 
 **/jogar.** Create + Options por 2 s sai do modo jogo. O "Voltar ao jogo" agora também vale quando a tela sai do ar.
+
+## A sala saía do turbo e o modo automático (2026-11-25)
+
+Testes de 14:01–14:36 (hora local), internet nova, PC e PS5 no cabo, PS5 → PC sem nenhuma perda. O notebook, com
+ida e volta de ~55 ms e o PS5 repassado, parava ~1,5 s e saía do turbo ("lento"); o iPhone, a 260–450 ms, nunca
+mostrava imagem ("sem-imagem"). A causa da parada em si (o caminho) não está provada; o que o programa fazia errado:
+
+- O PC só trocava o repasse pelo codificado aqui nos avisos de fila de quem joga, e com o canal parado não chega
+  aviso. Agora ele mede sozinho se o canal anda (`repasseParado`, 700 ms) e troca, com 60% do que chegava; por
+  1 min não passa de 85% disso (o freio fica na memória da pessoa) e por 5 min não tenta o repasse de novo.
+- Host com host por IPv6 contava como a mesma casa (banda máxima de cara). Agora só com endereço privado, e nunca
+  acima de 80 ms de ida e volta (`caminhoPara`). Acima de 150 ms o PS5 nem é repassado.
+- Um pedaço perdido não dava tempo de ir de novo em quem está longe: a vida do canal cresce com a ida e volta
+  (`vidaDoCanal`), e a configuração do decodificador vai de novo com cada quadro-chave pedido.
+- Antes de desistir, quem joga pede uma vez a imagem codificada lá com menos banda (`socorrer`); se desistir, o
+  turbo tenta de novo sozinho em 6, 20, 60 e 120 s (`TurboVolta`).
+- O relatório grava a família do caminho (`conexao.familia`: ipv4/ipv6, nunca o endereço), o estado ao desistir
+  (evento "turbo: como estava ao desistir") e o motivo certo de o PS5 em H.265 não ser repassado a quem só pede H.264.
+
+Automático (`turbo-auto.js`, de fábrica na sala e no /jogar; escolher um modo à mão desliga): espera a banda assentar
+(10–25 s), mede o padrão por 20 s; bom, fica; ruim, mede o Turbo rápido e depois o Turbo da TV (no /jogar o padrão
+é o da TV) e fica no melhor. Ruim de novo por 30 s: mede outra vez, com 3 min entre as rodadas e no máximo 4. Nota:
+atraso + 6 × travadas/min + 0,15 × trancos/min + 4 × quadros que faltam. No celular pelo TURN vale o 1080p normal.
+Entre Turbo liso e rápido a imagem não recomeça; para o da TV na sala, sim.
+
+Testado local (PS5 de mentira no Chrome, canal parado e com perda de pedaços): as duas páginas. Não testado na rede real.

@@ -1873,11 +1873,17 @@ export class RTC {
     // candidatos "host" que vão pela internet. O endereço do outro lado pode vir escondido (mDNS, .local).
     const privado = (ip) => /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|fe80:|f[cd][0-9a-f]{2}:)/i.test(ip);
     const ip = String(remoto?.address ?? remoto?.ip ?? '');
-    const publico = /^\d+\.\d+\.\d+\.\d+$/.test(ip) && !privado(ip);
-    const lan = local?.candidateType === 'host' && ((remoto?.candidateType === 'host' && !publico) || privado(ip));
+    // IPv6 não passa por NAT: pela internet também é host com host. Só contava o IPv4, e o iPhone do usuário
+    // pela rede de fora (host/udp, 260–450 ms, 2026-11-25) era "a mesma casa": banda máxima de cara, o turbo
+    // sem conseguir mostrar um quadro. E quem está em casa não leva LAN_RTT_MS de ida e volta.
+    const publico = (/^\d+\.\d+\.\d+\.\d+$/.test(ip) || ip.includes(':')) && !privado(ip);
+    const rttMs = c.rtt != null ? Math.round(c.rtt * 1000) : null;
+    const lan = local?.candidateType === 'host' && ((remoto?.candidateType === 'host' && !publico) || privado(ip))
+      && !(rttMs != null && rttMs > LAN_RTT_MS);
     return {
       saidaKbps: c.saidaEstimada != null ? Math.round(c.saidaEstimada / 1000) : null,
-      rttMs: c.rtt != null ? Math.round(c.rtt * 1000) : null,
+      rttMs,
+      familia: c.familia,
       local: c.local,
       remoto: c.remoto,
       relay: !!c.relay,
@@ -1947,6 +1953,18 @@ function pegar(s, campos) {
   return d;
 }
 
+const LAN_RTT_MS = 80; // ida e volta acima disto não é a mesma casa (caminhoPara)
+
+// 'ipv4', 'ipv6' ou null (os dois endereços escondidos por mDNS). Só a família: o endereço não sai daqui.
+export function familiaDe(...candidatos) {
+  for (const c of candidatos) {
+    const ip = String(c?.address ?? c?.ip ?? '');
+    if (ip.includes(':')) return 'ipv6';
+    if (/^\d+\.\d+\.\d+\.\d+$/.test(ip)) return 'ipv4';
+  }
+  return null;
+}
+
 // o caminho da conexão: ida e volta, banda estimada e se é direto ou pelo TURN
 function caminhoDe(report, par) {
   const local = report.get(par.localCandidateId);
@@ -1961,6 +1979,7 @@ function caminhoDe(report, par) {
     remoto: remoto ? `${remoto.candidateType}/${remoto.protocol}` : null,
     // qual par está em uso (trocou = o caminho mudou no meio) e por qual relay
     par: par.id ?? null,
+    familia: familiaDe(local, remoto),
     relay: relay ? { lado: relay === local ? 'aqui' : 'la', ip: relay.address ?? relay.ip ?? null, porta: relay.port ?? null, url: relay.url ?? null } : null,
     // somas do par (quem lê faz a diferença): o que saiu, o que voltou e os pings de consentimento
     bytesEnviados: par.bytesSent ?? null,

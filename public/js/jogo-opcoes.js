@@ -62,6 +62,8 @@ export const PRESETS = [
 // duas páginas em sequência, mesmo PS5): TV 39,5 ms com o decodificador a 0,5 ms; /jogar com o realce ligado
 // nas Opções 48,8 ms com o decodificador a 5. Fora de PRESETS de propósito: a sala não o mostra.
 export const PRESET_TV = { id: 17, nome: '1080p Turbo da TV', modo: 'Turbo da TV', desc: 'igual ao modo TV: 1080p liso, sem o realce de nitidez (a placa de vídeo fica só para a imagem)', opcoes: { turbo: true, turboLiso: true, rapido: false, liso: true }, vida: 250, semRealce: true };
+// O automático (turbo-auto.js) tenta nesta ordem: o padrão da página, o Turbo rápido e o Turbo da TV
+export const ORDEM_AUTO = { sala: [14, 16, 17], jogar: [17, 16, 14] };
 export const PRESET_INICIAL = 14; // o modo em que a página sempre entra
 export const OPCOES_DO_PRESET = ['turbo', 'turboLiso', 'rapido', 'liso'];
 const presetInicial = () => PRESETS.find((p) => p.id === PRESET_INICIAL);
@@ -75,22 +77,25 @@ export function alturaDoMenu(pop) {
 // O seletor do modo de imagem, igual no menu do PC e no painel do celular (main.js ouve o clique em
 // [data-preset]): uma grade 2×3 — colunas 720p / 1080p, linhas vídeo normal / turbo liso / turbo
 // rápido — e o Manual.
-// primeiro: um modo a mais, em cima da grade e de fábrica nesta página (o Turbo da TV, no /jogar)
+// primeiro: um modo a mais, em cima da grade (o Turbo da TV, no /jogar). O Automático (turbo-auto.js) é o padrão.
 export function htmlPresets(primeiro = null) {
-  const inicial = primeiro?.id ?? PRESET_INICIAL;
   const cartao = (p) => '<button type="button" class="jp-card' + (p.opcoes.turbo ? ' turbo' : '') + '" role="radio" aria-checked="false" data-preset="' + p.id + '" title="' + p.nome + ': ' + p.desc + '">'
-    + '<b>' + p.nome.split(' ')[0] + '</b><span>' + p.modo + '</span>' + (p.id === inicial ? '<em>padrão</em>' : '') + '</button>';
+    + '<b>' + p.nome.split(' ')[0] + '</b><span>' + p.modo + '</span></button>';
   return '<div class="jogo-presets" role="radiogroup" aria-label="Modo de imagem">'
     + '<span class="jp-tit">Modo de imagem</span>'
+    + '<button type="button" class="jp-card jp-manual jp-auto" role="radio" aria-checked="false" data-preset="auto" title="Mede a sua conexão por alguns segundos e fica no modo que der a melhor imagem com o menor atraso"><b>Automático</b><small data-auto-estado>escolhe o melhor para você</small><em>padrão</em></button>'
     + (primeiro ? cartao(primeiro) : '')
     + '<div class="jp-grade">' + PRESETS.map(cartao).join('') + '</div>'
     + '<button type="button" class="jp-card jp-manual" role="radio" aria-checked="false" data-preset="0"><b>Manual</b><small>as opções abaixo</small></button>'
     + '</div>';
 }
 
+// o que o cartão do Automático mostra (a página muda e chama marcarPresets)
+export const autoMostra = { ligado: false, texto: 'escolhe o melhor para você' };
 // marca no seletor (em raiz) o modo de agora
 export function marcarPresets(raiz = document) {
-  const atual = String(valores.preset || 0);
+  const atual = autoMostra.ligado ? 'auto' : String(valores.preset || 0);
+  raiz.querySelectorAll('[data-auto-estado]').forEach((el) => { el.textContent = autoMostra.ligado ? autoMostra.texto : 'escolhe o melhor para você'; });
   raiz.querySelectorAll('[data-preset]').forEach((el) => {
     const on = el.dataset.preset === atual;
     el.classList.toggle('on', on);

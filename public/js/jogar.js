@@ -27,10 +27,11 @@
 // Create + Options por 2 s sai do modo jogo, como na TV.
 import { RTC } from './rtc.js';
 import { Controle } from './controle.js';
-import { TurboRecebe, TTL_MS, LISO_PCT, LISO_MAX } from './turbo.js';
+import { TurboRecebe, TTL_MS, vidaDoCanal, LISO_PCT, LISO_MAX } from './turbo.js';
+import { TurboAuto, TurboVolta } from './turbo-auto.js';
 import { DiagJogo } from './jogo-diag.js';
 import { linhaDaCulpa } from './culpa.js';
-import { opcoesJogo, LISO_MS, PRESETS, PRESET_TV, PRESET_INICIAL, OPCOES_DO_PRESET, htmlPresets, marcarPresets, alturaDoMenu } from './jogo-opcoes.js';
+import { opcoesJogo, LISO_MS, PRESETS, PRESET_TV, PRESET_INICIAL, ORDEM_AUTO, OPCOES_DO_PRESET, autoMostra, htmlPresets, marcarPresets, alturaDoMenu } from './jogo-opcoes.js';
 import { LAYOUTS, layoutDoTitulo } from './toque-jogo.js';
 import { ControleFisico } from './gamepad-jogo.js';
 import { PadVirtual } from './pad-virtual.js';
@@ -994,13 +995,16 @@ const turboRecebe = new TurboRecebe({
   onEvento: (texto, dados) => diagJogo.evento(texto, dados),
   onFalhou: (motivo) => {
     diagJogo.evento('modo turbo falhou: vídeo normal de volta', { motivo });
+    if (turboRecebe.ultimaFalha) diagJogo.evento('turbo: como estava ao desistir', turboRecebe.ultimaFalha);
+    const volta = turboVolta.falhou(motivo);
     if (turboAvisado.has(motivo)) return;
     turboAvisado.add(motivo);
-    toast(`Modo turbo desligado: ${MOTIVO_TURBO[motivo] || motivo}. A imagem voltou ao normal.`, 'warn', 8000);
+    toast(`Modo turbo desligado: ${MOTIVO_TURBO[motivo] || motivo}. A imagem voltou ao normal${volta ? ' e o turbo tenta de novo sozinho' : ''}.`, 'warn', 8000);
   },
 });
 // como na TV: só H.264, os mesmos perfis, e a placa antes de qualquer outra coisa; o PC leva 3–4 s para começar
 turboRecebe.semHevc = true;
+turboRecebe.socorro = true;
 turboRecebe.codecsForcados = ['avc1.640033', 'avc1.4d0033', 'avc1.42e033', 'avc1.42001f'];
 turboRecebe.aceleracoes = ['prefer-hardware', 'prefer-hardware@2a', 'prefer-hardware@28', 'prefer-hardware@1f', 'no-preference'];
 turboRecebe.semImagemMs = 12_000;
@@ -1018,7 +1022,9 @@ function ligarTurbo() {
   if (!jogandoLa) return;
   const p = presetAtual();
   turboRecebe.liso = opcoesJogo.get('turboLiso');
-  turboRecebe.vidaMs = p?.vida ?? TTL_MS;
+  vidaPedida = CANAL_CONFIAVEL ? null : p?.vida ?? TTL_MS;
+  turboRecebe.vidaMs = CANAL_CONFIAVEL ? p?.vida ?? TTL_MS : vidaDoCanal(vidaPedida, rttDoDono?.dono === jogandoLa.key.split('~')[0] ? rttDoDono.ms : null);
+  turboVolta.ligou();
   turboRecebe.h265 = !!p?.h265;
   turboRecebe.lisoPct = p?.lisoPct ?? LISO_PCT;
   turboRecebe.lisoMax = p?.lisoMax ?? LISO_MAX;
@@ -1028,30 +1034,97 @@ function ligarTurbo() {
   diagJogo.evento('modo turbo ligado', { nitidez: turboRecebe.realce, tratamento: turboRecebe.tratamento, liso: opcoesJogo.get('turboLiso'), vidaMs: turboRecebe.vidaMs, h265: turboRecebe.h265, lisoPct: turboRecebe.lisoPct, lisoMaxMs: turboRecebe.lisoMax, menosFila: !SINCRONIA, canal: CANAL_CONFIAVEL ? 'confiável' : 'com prazo' });
 }
 let aplicandoPreset = false;
-function aplicarPreset(n) {
+function aplicarPreset(n, porque = 'escolhido') {
   const p = MODOS.find((x) => x.id === n) || null;
+  const antes = presetAtual();
+  const realceAntes = [comRealce(), comTratamento()].join();
   if (p) realceVale = !p.semRealce;
   aplicandoPreset = true;
   try { opcoesJogo.setVarios({ preset: p ? p.id : 0, ...(p ? p.opcoes : {}) }); } finally { aplicandoPreset = false; }
   turboRecebe.liso = opcoesJogo.get('turboLiso');
   if (!jogandoLa || !p) return;
-  diagJogo.evento(`preset ${p.id}: ${p.nome} (escolhido)`, { ...p.opcoes, vidaMs: p.vida, lisoPct: p.lisoPct ?? null });
+  diagJogo.evento(`preset ${p.id}: ${p.nome} (${porque})`, { ...p.opcoes, vidaMs: p.vida, lisoPct: p.lisoPct ?? null });
+  // só a folga do liso muda (Turbo da TV, liso e rápido, com o mesmo realce): vale já, sem a imagem recomeçar
+  if (turboRecebe.ligado && antes && antes.vida === p.vida && OPCOES_DO_PRESET.every((k) => antes.opcoes[k] === p.opcoes[k])
+    && realceAntes === [comRealce(), comTratamento()].join() && turboRecebe.mudarLiso(p.lisoPct ?? LISO_PCT, p.lisoMax ?? LISO_MAX)) return;
   aplicarBuffer();
   avisarModo();
   if (p.opcoes.turbo) ligarTurbo();
-  else turboRecebe.desligar();
+  else {
+    turboVolta.parar();
+    turboRecebe.desligar();
+  }
 }
+// ---------------------------------------------------------------- automático e volta do turbo (turbo-auto.js)
+let rttDoDono = null; // { dono, ms }: a ida e volta da última amostra, para a vida do canal (vidaDoCanal)
+const nomeDoModo = (id) => MODOS.find((p) => p.id === id)?.nome || 'modo atual';
+function mostrarAuto() {
+  Object.assign(autoMostra, { ligado: turboAuto.ligado, texto: turboAuto.fase === 'fixo' ? `agora: ${nomeDoModo(turboAuto.escolhido)}` : turboAuto.fase ? 'medindo a sua conexão…' : 'escolhe o melhor para você' });
+  marcarPresets(document);
+}
+const turboAuto = new TurboAuto({
+  modos: ORDEM_AUTO.jogar,
+  aplicar: (id, porque) => aplicarPreset(id, porque),
+  onEvento: (texto, dados) => diagJogo.evento(texto, dados),
+  onEstado: () => mostrarAuto(),
+});
+const turboVolta = new TurboVolta({
+  ligar: () => {
+    turboRecebe.depoisDaFalha = { kbps: turboRecebe.ultimaFalha?.bandaKbps || 3000 };
+    ligarTurbo();
+  },
+  pode: () => !!jogandoLa && !!opcoesJogo.get('turbo') && !turboRecebe.ligado && !(rttDoDono?.ms > 250),
+  onEvento: (texto, dados) => diagJogo.evento(texto, dados),
+});
+// a cada amostra (2 s): a ida e volta de agora e o automático
+function amostraDoAuto(resumo) {
+  if (!jogandoLa || !resumo) return;
+  if (resumo.rttMs != null) {
+    const dono = jogandoLa.key.split('~')[0];
+    rttDoDono = { dono, ms: resumo.rttMs };
+    // ligou sem saber a ida e volta, e ela é longa: o canal com a vida curta perde o que precisa ir de novo
+    const vida = vidaDoCanal(vidaPedida, resumo.rttMs);
+    if (turboRecebe.ligado && !vidaAjustada && vida != null && vida > turboRecebe.vidaMs * 1.5 && resumo.rttMs > 120) {
+      vidaAjustada = true;
+      diagJogo.evento('turbo: canal com mais tempo para quem está longe', { rttMs: resumo.rttMs, vidaMs: vida });
+      ligarTurbo();
+    }
+  }
+  // o turbo que voltou já dura: o próximo ligar não precisa mais começar por baixo
+  if (turboRecebe.depoisDaFalha && turboRecebe.ligado && performance.now() - turboVolta.ligouEm > 60_000) turboRecebe.depoisDaFalha = null;
+  turboAuto.amostra(resumo, document.hidden);
+}
+let vidaPedida = TTL_MS;
+let vidaAjustada = false;
+function autoDesligado() { // escolheu à mão
+  if (!turboAuto.ligado) return;
+  turboAuto.desligar();
+  mostrarAuto();
+}
+
 $('#jogo-op-pop').insertAdjacentHTML('afterbegin', htmlPresets(PRESET_TV));
-marcarPresets(document);
+mostrarAuto();
 document.addEventListener('click', (e) => {
   const el = e.target.closest?.('[data-preset]');
   if (!el) return;
+  if (el.dataset.preset === 'auto') {
+    if (!turboAuto.ligado) {
+      const primeiro = turboAuto.modos[0];
+      if (opcoesJogo.get('preset') !== primeiro) aplicarPreset(primeiro, 'automático');
+      turboAuto.ligar(!!jogandoLa);
+    }
+    mostrarAuto();
+    el.blur();
+    return;
+  }
+  autoDesligado();
   const n = Number(el.dataset.preset) || 0;
   if (n !== (opcoesJogo.get('preset') || 0)) aplicarPreset(n);
   else marcarPresets(document);
   el.blur();
 });
 opcoesJogo.ouvir((k, v) => {
+  if (!aplicandoPreset && OPCOES_DO_PRESET.includes(k)) autoDesligado();
   if (!aplicandoPreset && OPCOES_DO_PRESET.includes(k) && opcoesJogo.get('preset')) {
     aplicandoPreset = true;
     try { opcoesJogo.setVarios({ preset: 0 }); } finally { aplicandoPreset = false; }
@@ -1069,7 +1142,10 @@ opcoesJogo.ouvir((k, v) => {
     if (turboRecebe.ligado) ligarTurbo();
   } else if (k === 'turbo' && jogandoLa) {
     if (v) ligarTurbo();
-    else turboRecebe.desligar();
+    else {
+      turboVolta.parar();
+      turboRecebe.desligar();
+    }
   } else if (k === 'selo') mostrarSelo();
   else if (k === 'menuAuto' && jogandoLa) controle.cursorLivre(jogandoLa.key, v ? jogandoLa.cursorLivre : false);
   else if (k === 'preencher') document.body.classList.toggle('jogo-preencher', !!v);
@@ -1102,14 +1178,23 @@ setTimeout(() => (window.requestIdleCallback ? requestIdleCallback(lerPlaca, { t
 const placaLida = { getExtension: () => ({ UNMASKED_RENDERER_WEBGL: 0 }), getParameter: () => nomePlaca };
 
 function jogoLa(v, key) {
+  turboVolta.parar();
+  turboAuto.parar();
   turboRecebe.desligar();
+  turboRecebe.depoisDaFalha = null;
+  vidaAjustada = false;
   if (jogandoLa) {
     diagJogo.evento('buffer normal de volta', rtc?.baixaLatencia(video.srcObject, false));
     jogandoLa = null;
     diagJogo.parar();
   }
-  if (!v) return void mostrarSelo();
+  if (!v) {
+    mostrarAuto();
+    return void mostrarSelo();
+  }
   esquecerJogo();
+  // o automático começa no modo que deu certo da última vez nesta página
+  if (turboAuto.ligado && opcoesJogo.get('turbo') && opcoesJogo.get('preset') !== turboAuto.inicial) aplicarPreset(turboAuto.inicial, 'automático');
   const t = acharTela(key);
   jogandoLa = { key, video: v, cursorLivre: false, dono: t?.u.name ?? null, maquina: maquinaDaTela(t?.sh) };
   const op = (k) => opcoesJogo.get(k);
@@ -1121,7 +1206,10 @@ function jogoLa(v, key) {
   aplicarBuffer();
   mostrarSelo();
   avisarModo();
-  if (op('turbo')) ligarTurbo();
+  if (op('turbo')) {
+    ligarTurbo();
+    if (turboAuto.ligado) turboAuto.comecar();
+  }
 }
 
 function mostrarSelo(r = null) {
@@ -1171,6 +1259,7 @@ async function amostrar() {
     if (jogandoLa?.key !== key) return;
     const resumo = diagJogo.amostraRecebe(cru, { desenha: false, teto: null, quadros2s: 0, escondida: document.hidden, foco: 'jogar', pessoas: st.users.size + 1 }, extra);
     vigiarSom(resumo);
+    amostraDoAuto(resumo);
     mostrarSelo(resumo);
     // no Turbo quem compartilha não precisa da cópia (o relatório vai ao servidor): o canal fica só do controle
     if (!resumo || turboRecebe.ligado) return;

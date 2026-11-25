@@ -33,8 +33,9 @@ import { PadVirtual } from './pad-virtual.js';
 import { TecladoPad } from './teclado-pad.js';
 import { MapaTeclasPainel, dicaTeclado, legendaBotoes, mapaTeclas, nomeEntrada } from './mapa-teclas.js';
 import { TutorialControle } from './tutorial-controle.js';
-import { TurboEnvio, TurboRecebe, TTL_MS, LISO_PCT, LISO_MAX } from './turbo.js';
-import { opcoesJogo, LISO_MS, PRESETS, OPCOES_DO_PRESET, htmlPresets, marcarPresets, alturaDoMenu } from './jogo-opcoes.js';
+import { TurboEnvio, TurboRecebe, TTL_MS, vidaDoCanal, LISO_PCT, LISO_MAX } from './turbo.js';
+import { TurboAuto, TurboVolta } from './turbo-auto.js';
+import { opcoesJogo, LISO_MS, PRESETS, PRESET_TV, ORDEM_AUTO, OPCOES_DO_PRESET, autoMostra, htmlPresets, marcarPresets, alturaDoMenu } from './jogo-opcoes.js';
 import { Mesa } from './mesa.js';
 import { Qualidade, NIVEIS, nivelInicial } from './qualidade.js';
 import * as moduloQualidade from './qualidade.js';
@@ -3778,7 +3779,7 @@ const MOTIVO_TURBO = {
 const turboAvisado = new Set(); // motivos já avisados nesta página (o turbo vem ligado de fábrica)
 const turboRecebe = new TurboRecebe({
   abrir: (id, vida) => rtc?.abrirTurbo(id, vida),
-  abrirSom: (id) => rtc?.abrirTurboSom(id),
+  abrirSom: (id) => rtc?.abrirTurboSom(id, modoTv()), // o Turbo da TV: canais sem prazo, como no /jogar
   // o som da tela toca no vídeo dela no #media-sink (o #focus-video, da imagem, é mudo)
   somDaTela: (key) => shareVideo(acharTela(key)?.share),
   // o volume vem dos Ajustes, não do <video>: no iPhone o volume dele fica sempre em 1
@@ -3786,34 +3787,46 @@ const turboRecebe = new TurboRecebe({
   onEvento: (texto, dados) => diagJogo.evento(texto, dados),
   onFalhou: (motivo) => {
     diagJogo.evento('modo turbo falhou: vídeo normal de volta', { motivo });
+    if (turboRecebe.ultimaFalha) diagJogo.evento('turbo: como estava ao desistir', turboRecebe.ultimaFalha);
+    const volta = turboVolta.falhou(motivo);
     if (turboAvisado.has(motivo)) return;
     turboAvisado.add(motivo);
-    toast(`Modo turbo desligado: ${MOTIVO_TURBO[motivo] || motivo}. A imagem voltou ao normal.`, 'warn', 8000);
+    toast(`Modo turbo desligado: ${MOTIVO_TURBO[motivo] || motivo}. A imagem voltou ao normal${volta ? ' e o turbo tenta de novo sozinho' : ''}.`, 'warn', 8000);
   },
 });
 turboRecebe.liso = opcoesJogo.get('turboLiso');
+turboRecebe.socorro = true;
+const modoTv = () => !!presetAtual()?.semRealce;
 function ligarTurbo() {
   if (!jogandoLa) return;
   turboRecebe.liso = opcoesJogo.get('turboLiso');
   const p = presetAtual();
-  turboRecebe.vidaMs = p?.vida ?? TTL_MS;
+  // o Turbo da TV na sala: a receita do /jogar (canal sem prazo, só H.264, sem realce, o soluço fora da folga)
+  const tv = modoTv();
+  vidaPedida = tv ? null : p?.vida ?? TTL_MS;
+  turboRecebe.vidaMs = vidaDoCanal(vidaPedida, rttDoDono?.dono === jogandoLa.key.split('~')[0] ? rttDoDono.ms : null);
+  turboRecebe.soH264 = tv;
+  turboRecebe.lisoSoluco = tv;
+  turboVolta.ligou();
   turboRecebe.h265 = !!p?.h265;
   turboRecebe.lisoPct = p?.lisoPct ?? LISO_PCT;
   turboRecebe.lisoMax = p?.lisoMax ?? LISO_MAX; // Turbo rápido: a folga do liso até 15 ms (e não 45)
-  turboRecebe.realce = !!opcoesJogo.get('nitidez');
-  turboRecebe.tratamento = !!opcoesJogo.get('tratamento');
+  turboRecebe.realce = !tv && !!opcoesJogo.get('nitidez');
+  turboRecebe.tratamento = !tv && !!opcoesJogo.get('tratamento');
   turboRecebe.ligar(jogandoLa.key, jogandoLa.video, opcoesJogo.get('rapido') ? 720 : 1080);
   diagJogo.evento('modo turbo ligado', { nitidez: turboRecebe.realce, tratamento: turboRecebe.tratamento, liso: opcoesJogo.get('turboLiso'), vidaMs: turboRecebe.vidaMs, h265: turboRecebe.h265, lisoPct: turboRecebe.lisoPct, lisoMaxMs: turboRecebe.lisoMax });
 }
 
 // ---------------------------------------------------------------- modos de imagem (jogo-opcoes.js)
-const presetAtual = () => PRESETS.find((p) => p.id === opcoesJogo.get('preset')) || null;
+const MODOS_IMAGEM = [...PRESETS, PRESET_TV]; // o Turbo da TV não tem cartão na sala: só o automático o usa
+const presetAtual = () => MODOS_IMAGEM.find((p) => p.id === opcoesJogo.get('preset')) || null;
 let aplicandoPreset = false;
 
 // Troca tudo de uma vez para o preset n (ou 0, manual: fica como está) e, no modo jogo, religa o que
 // precisa: buffer, 720p/1080p de quem compartilha, turbo (a vida do canal só vale ao abrir).
 function aplicarPreset(n, porque = 'escolhido') {
-  const p = PRESETS.find((x) => x.id === n) || null;
+  const p = MODOS_IMAGEM.find((x) => x.id === n) || null;
+  const antes = presetAtual();
   aplicandoPreset = true;
   try {
     opcoesJogo.setVarios({ preset: p ? p.id : 0, ...(p ? p.opcoes : {}) });
@@ -3823,11 +3836,65 @@ function aplicarPreset(n, porque = 'escolhido') {
   turboRecebe.liso = opcoesJogo.get('turboLiso');
   if (!jogandoLa || !p) return;
   diagJogo.evento(`preset ${p.id}: ${p.nome} (${porque})`, { ...p.opcoes, vidaMs: p.vida, h265: !!p.h265, lisoPct: p.lisoPct ?? null });
+  // só a folga do liso muda (Turbo liso ↔ Turbo rápido): vale já, sem a imagem recomeçar
+  if (turboRecebe.ligado && soAFolgaMuda(antes, p) && turboRecebe.mudarLiso(p.lisoPct ?? LISO_PCT, p.lisoMax ?? LISO_MAX)) return;
   aplicarBuffer();
   avisarRapido();
   if (p.opcoes.turbo) ligarTurbo();
-  else turboRecebe.desligar();
+  else {
+    turboVolta.parar();
+    turboRecebe.desligar();
+  }
 }
+const soAFolgaMuda = (a, b) => !!a && !!b && !a.semRealce && !b.semRealce && a.vida === b.vida && OPCOES_DO_PRESET.every((k) => a.opcoes[k] === b.opcoes[k]);
+
+// ---------------------------------------------------------------- automático e volta do turbo (turbo-auto.js)
+let rttDoDono = null; // { dono, ms }: a ida e volta da última amostra, para a vida do canal (vidaDoCanal)
+const nomeDoModo = (id) => MODOS_IMAGEM.find((p) => p.id === id)?.nome || 'modo atual';
+function mostrarAuto() {
+  Object.assign(autoMostra, { ligado: turboAuto.ligado, texto: turboAuto.fase === 'fixo' ? `agora: ${nomeDoModo(turboAuto.escolhido)}` : turboAuto.fase ? 'medindo a sua conexão…' : 'escolhe o melhor para você' });
+  marcarPresets(document);
+}
+const turboAuto = new TurboAuto({
+  modos: ORDEM_AUTO.sala,
+  aplicar: (id, porque) => aplicarPreset(id, porque),
+  onEvento: (texto, dados) => diagJogo.evento(texto, dados),
+  onEstado: () => mostrarAuto(),
+});
+const turboVolta = new TurboVolta({
+  ligar: () => {
+    turboRecebe.depoisDaFalha = { kbps: turboRecebe.ultimaFalha?.bandaKbps || 3000 };
+    ligarTurbo();
+  },
+  pode: () => !!jogandoLa && !!opcoesJogo.get('turbo') && !turboRecebe.ligado && !(rttDoDono?.ms > 250),
+  onEvento: (texto, dados) => diagJogo.evento(texto, dados),
+});
+// a cada amostra (2 s): a ida e volta de agora e o automático
+function amostraDoAuto(resumo) {
+  if (!jogandoLa || !resumo) return;
+  if (resumo.rttMs != null) {
+    const dono = jogandoLa.key.split('~')[0];
+    rttDoDono = { dono, ms: resumo.rttMs };
+    // ligou sem saber a ida e volta, e ela é longa: o canal com a vida curta perde o que precisa ir de novo
+    const vida = vidaDoCanal(vidaPedida, resumo.rttMs);
+    if (turboRecebe.ligado && !vidaAjustada && vida != null && vida > turboRecebe.vidaMs * 1.5 && resumo.rttMs > 120) {
+      vidaAjustada = true;
+      diagJogo.evento('turbo: canal com mais tempo para quem está longe', { rttMs: resumo.rttMs, vidaMs: vida });
+      ligarTurbo();
+    }
+  }
+  // o turbo que voltou já dura: o próximo ligar não precisa mais começar por baixo
+  if (turboRecebe.depoisDaFalha && turboRecebe.ligado && performance.now() - turboVolta.ligouEm > 60_000) turboRecebe.depoisDaFalha = null;
+  turboAuto.amostra(resumo, document.hidden);
+}
+let vidaPedida = TTL_MS;
+let vidaAjustada = false;
+function autoDesligado() { // escolheu à mão
+  if (!turboAuto.ligado) return;
+  turboAuto.desligar();
+  mostrarAuto();
+}
+
 
 // o seletor de modo de imagem (no menu do PC e no painel do celular) mostra o de agora
 function sincronizarPresets() {
@@ -3850,9 +3917,13 @@ function presetPelaRede(rede) {
   const turn = /^relay/.test(rede.local) || /^relay/.test(rede.remoto || '');
   presetRede.seguidas = turn === presetRede.turn ? presetRede.seguidas + 1 : 1;
   presetRede.turn = turn;
-  const quero = turn ? PRESET_TURN : PRESET_DIRETO;
+  // com o automático, aqui só se decide o que é do TURN no celular (e a volta dele): o resto é o automático
+  const quero = turn ? PRESET_TURN : turboAuto.ligado ? (opcoesJogo.get('preset') === PRESET_TURN && PRESET_TURN !== PRESET_DIRETO ? turboAuto.inicial : opcoesJogo.get('preset')) : PRESET_DIRETO;
   if (presetRede.seguidas < 2 || opcoesJogo.get('preset') === quero) return;
+  if (turn && PRESET_TURN === PRESET_DIRETO && turboAuto.ligado) return;
+  if (turn) turboAuto.parar();
   aplicarPreset(quero, turn ? 'automático: conexão pelo TURN' : 'automático: conexão direta');
+  if (!turn && turboAuto.ligado) turboAuto.comecar();
   if (turn && !presetRede.avisado) {
     presetRede.avisado = true;
     toast('A conexão passa por um servidor no meio: modo 1080p (mais estável que o turbo nesse caminho).', 'info', 6000);
@@ -3862,13 +3933,25 @@ function presetPelaRede(rede) {
 document.addEventListener('click', (e) => {
   const el = e.target.closest?.('[data-preset]');
   if (!el) return;
+  if (el.dataset.preset === 'auto') {
+    presetRede.auto = true;
+    if (!turboAuto.ligado) {
+      const primeiro = turboAuto.modos[0];
+      if (opcoesJogo.get('preset') !== primeiro) aplicarPreset(primeiro, 'automático');
+      turboAuto.ligar(!!jogandoLa);
+    }
+    mostrarAuto();
+    el.blur();
+    return;
+  }
   presetRede.auto = false; // escolheu à mão: a conexão não troca mais o modo (até recarregar)
+  autoDesligado();
   const n = Number(el.dataset.preset) || 0;
   if (n !== (opcoesJogo.get('preset') || 0)) aplicarPreset(n);
   else sincronizarPresets();
   el.blur();
 });
-sincronizarPresets();
+mostrarAuto();
 
 // Quem joga sentiu um engasgo: F9 no PC, botão "Engasgou" no celular e no PC. Marca a hora no relatório,
 // com os últimos 3 s do turbo quadro a quadro (a caixa-preta), para cruzar o que se sentiu com os números.
@@ -3920,15 +4003,24 @@ setInterval(conferirVoltaAoJogo, 2000);
 addEventListener('pagehide', lembrarJogo); // a página recarregando (servidor novo) no meio do jogo
 
 function jogoLa(video, key) {
+  turboVolta.parar();
+  turboAuto.parar();
   turboRecebe.desligar();
+  turboRecebe.depoisDaFalha = null;
+  vidaAjustada = false;
   if (jogandoLa) {
     const feitos = rtc?.baixaLatencia(jogandoLa.video.srcObject, false);
     diagJogo.evento('buffer normal de volta', feitos);
     jogandoLa = null;
     diagJogo.parar();
   }
-  if (!video) return void mostrarSelo();
+  if (!video) {
+    mostrarAuto();
+    return void mostrarSelo();
+  }
   esquecerJogo(); // de volta ao jogo: o "Voltar ao jogo" de uma queda anterior não vale mais
+  // o automático começa no modo que deu certo da última vez nesta página
+  if (turboAuto.ligado && opcoesJogo.get('turbo') && opcoesJogo.get('preset') !== turboAuto.inicial) aplicarPreset(turboAuto.inicial, 'automático');
   jogandoLa = { key, video, cursorLivre: false };
   diagJogo.comecar('joga', {
     gl: world.renderer.getContext(),
@@ -3939,7 +4031,10 @@ function jogoLa(video, key) {
   aplicarBuffer();
   mostrarSelo();
   avisarRapido(); // o "Menos atraso" e o que este aparelho sente (vibra, DualSense)
-  if (opcoesJogo.get('turbo')) ligarTurbo();
+  if (opcoesJogo.get('turbo')) {
+    ligarTurbo();
+    if (turboAuto.ligado) turboAuto.comecar();
+  }
 }
 
 // O buffer da imagem de quem joga: o mínimo, ou um pouco (LISO_MS) com "Imagem mais lisa"
@@ -3980,7 +4075,10 @@ function mostrarSelo(r = null) {
 
 opcoesJogo.ouvir((k, v) => {
   // mudou à mão uma opção que faz parte dos presets: agora é "Manual"
-  if (!aplicandoPreset && OPCOES_DO_PRESET.includes(k)) presetRede.auto = false;
+  if (!aplicandoPreset && OPCOES_DO_PRESET.includes(k)) {
+    presetRede.auto = false;
+    autoDesligado();
+  }
   if (!aplicandoPreset && OPCOES_DO_PRESET.includes(k) && opcoesJogo.get('preset')) {
     aplicandoPreset = true;
     try { opcoesJogo.setVarios({ preset: 0 }); } finally { aplicandoPreset = false; }
@@ -3997,7 +4095,10 @@ opcoesJogo.ouvir((k, v) => {
     if (turboRecebe.ligado) ligarTurbo(); // o turbo também manda em 720p com "Menos atraso"
   } else if (k === 'turbo' && jogandoLa) {
     if (v) ligarTurbo();
-    else turboRecebe.desligar();
+    else {
+      turboVolta.parar();
+      turboRecebe.desligar();
+    }
   }
   else if (k === 'selo') mostrarSelo();
   else if (k === 'nitidez' && turboRecebe.ligado) ligarTurbo(); // o realce troca a tela: liga de novo
@@ -4071,6 +4172,7 @@ async function amostrarJogo() {
       const cru = trilha ? await rtc.diagRecebe(trilha, som) : null;
       const resumo = trilha && diagJogo.amostraRecebe(cru, sala, extra);
       presetPelaRede(cru?.rede);
+      amostraDoAuto(resumo);
       vigiarSomQueChega(resumo);
       mostrarSelo(resumo);
       // a mesma amostra vai para quem compartilha, que baixa o relatório dos dois lados de uma vez
