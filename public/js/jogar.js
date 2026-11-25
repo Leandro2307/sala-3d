@@ -66,7 +66,7 @@ const limitar = (v, a, b) => Math.min(b, Math.max(a, Number(v) || 0));
 let conta = lerJSON(LAN_CHAVE, null); // { nome, token }: o mesmo da sala e da /lan
 let passe = lerJSON(PASSES_CHAVE, {})[SALA] || null;
 // nitidez e dualsense são daqui (as opções da sala, guardadas no mesmo navegador, não mudam)
-const ajustes = { jogo: 100, voz: 100, nitidez: false, dualsense: false, ...lerJSON(AJUSTES_CHAVE, {}) };
+const ajustes = { jogo: 100, voz: 100, nitidez: false, tratamento: false, dualsense: false, ...lerJSON(AJUSTES_CHAVE, {}) };
 const ENVIO_PAD_MS = 8;
 
 const st = {
@@ -1013,6 +1013,7 @@ opcoesJogo.setVarios({ preset: PRESET_TV.id, ...PRESET_TV.opcoes });
 // no Turbo da TV (e no Manual que sai dele) o realce não vale, mesmo guardado ligado
 let realceVale = false;
 const comRealce = () => !!ajustes.nitidez && realceVale;
+const comTratamento = () => !!ajustes.tratamento && realceVale; // a mesma regra do realce
 function ligarTurbo() {
   if (!jogandoLa) return;
   const p = presetAtual();
@@ -1022,8 +1023,9 @@ function ligarTurbo() {
   turboRecebe.lisoPct = p?.lisoPct ?? LISO_PCT;
   turboRecebe.lisoMax = p?.lisoMax ?? LISO_MAX;
   turboRecebe.realce = comRealce();
+  turboRecebe.tratamento = comTratamento();
   turboRecebe.ligar(jogandoLa.key, jogandoLa.video, opcoesJogo.get('rapido') ? 720 : 1080);
-  diagJogo.evento('modo turbo ligado', { nitidez: turboRecebe.realce, liso: opcoesJogo.get('turboLiso'), vidaMs: turboRecebe.vidaMs, h265: turboRecebe.h265, lisoPct: turboRecebe.lisoPct, lisoMaxMs: turboRecebe.lisoMax, menosFila: !SINCRONIA, canal: CANAL_CONFIAVEL ? 'confiável' : 'com prazo' });
+  diagJogo.evento('modo turbo ligado', { nitidez: turboRecebe.realce, tratamento: turboRecebe.tratamento, liso: opcoesJogo.get('turboLiso'), vidaMs: turboRecebe.vidaMs, h265: turboRecebe.h265, lisoPct: turboRecebe.lisoPct, lisoMaxMs: turboRecebe.lisoMax, menosFila: !SINCRONIA, canal: CANAL_CONFIAVEL ? 'confiável' : 'com prazo' });
 }
 let aplicandoPreset = false;
 function aplicarPreset(n) {
@@ -1058,6 +1060,7 @@ opcoesJogo.ouvir((k, v) => {
   if (k === 'preset') {
     marcarPresets(document);
     $('#jg-nitidez').checked = comRealce();
+    $('#jg-tratamento').checked = comTratamento();
   }
   if (k === 'liso') aplicarBuffer();
   else if (k === 'turboLiso') turboRecebe.liso = v;
@@ -1473,6 +1476,14 @@ $('#jg-nitidez').addEventListener('change', (e) => {
   if (ajustes.nitidez && presetAtual()?.semRealce) return void aplicarPreset(PRESET_INICIAL);
   if (ajustes.nitidez) realceVale = true;
   if (turboRecebe.ligado) ligarTurbo(); // o realce troca a tela: liga de novo
+});
+$('#jg-tratamento').checked = comTratamento();
+$('#jg-tratamento').addEventListener('change', (e) => {
+  ajustes.tratamento = e.target.checked;
+  gravarJSON(AJUSTES_CHAVE, ajustes);
+  if (ajustes.tratamento && presetAtual()?.semRealce) return void aplicarPreset(PRESET_INICIAL);
+  if (ajustes.tratamento) realceVale = true;
+  if (!turboRecebe.comTratamento(comTratamento())) ligarTurbo(); // a tela de agora não é WebGL
 });
 mostrarSens();
 $('#jogo-mouse-sens').addEventListener('input', (e) => {

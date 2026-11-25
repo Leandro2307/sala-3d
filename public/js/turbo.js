@@ -671,27 +671,79 @@ const mesmaCor = (a, b) => ['matrix', 'primaries', 'transfer', 'fullRange'].ever
 // não aceitar o quadro como textura, a tela volta ao desenho comum (2D).
 const REALCE_VS = `attribute vec2 p; varying vec2 uv;
 void main() { uv = vec2((p.x + 1.0) * 0.5, (1.0 - p.y) * 0.5); gl_Position = vec4(p, 0.0, 1.0); }`;
-const REALCE_FS = `precision mediump float;
+//
+// Tratamento de imagem (2026-11-24): na mesma passada, o que o chiaki faz com o vídeo antes de mostrar
+// (libplacebo: contra faixas + grão). O codificador troca os degradês (céu, sombra) por degraus e alisa a
+// textura fraca; aqui cada ponto vira a média de 4 pontos sorteados em volta SÓ quando todos já são quase
+// iguais (TRATAMENTO.faixas: o degrau de 8 bits; a textura de verdade passa disso e fica), e um grão fino, novo
+// a cada quadro, desfaz o degrau que sobrou e tira o ar de "lavado" das áreas lisas. O grão some onde já há
+// detalhe e no preto. Não recupera o que a compressão apagou.
+const REALCE_FS = `#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
+precision mediump float;
+#endif
 varying vec2 uv; uniform sampler2D img; uniform vec2 px; uniform float forca;
+uniform float faixas; uniform float raio; uniform float grao; uniform float semente;
+float sorte(vec2 p) {
+  vec3 q = fract(vec3(p.xyx) * 0.1031);
+  q += dot(q, q.yzx + 33.33);
+  return fract((q.x + q.y) * q.z);
+}
 void main() {
   vec3 c = texture2D(img, uv).rgb;
-  if (forca <= 0.0) { gl_FragColor = vec4(c, 1.0); return; }
+  if (forca <= 0.0 && faixas <= 0.0 && grao <= 0.0) { gl_FragColor = vec4(c, 1.0); return; }
   vec3 n = texture2D(img, uv - vec2(0.0, px.y)).rgb;
   vec3 s = texture2D(img, uv + vec2(0.0, px.y)).rgb;
   vec3 e = texture2D(img, uv + vec2(px.x, 0.0)).rgb;
   vec3 w = texture2D(img, uv - vec2(px.x, 0.0)).rgb;
   vec3 mn = min(c, min(min(n, s), min(e, w)));
   vec3 mx = max(c, max(max(n, s), max(e, w)));
-  // menos realce onde o contraste já é alto (CAS): evita halo nos contornos fortes
-  vec3 amp = sqrt(clamp(min(mn, 1.0 - mx) / max(mx, 1e-4), 0.0, 1.0));
-  vec3 r = c + forca * 2.5 * amp * (c - (n + s + e + w) * 0.25);
-  gl_FragColor = vec4(clamp(r, mn, mx), 1.0);
+  vec3 r = c;
+  if (forca > 0.0) {
+    // menos realce onde o contraste já é alto (CAS): evita halo nos contornos fortes
+    vec3 amp = sqrt(clamp(min(mn, 1.0 - mx) / max(mx, 1e-4), 0.0, 1.0));
+    r = clamp(c + forca * 2.5 * amp * (c - (n + s + e + w) * 0.25), mn, mx);
+  }
+  vec2 q = gl_FragCoord.xy + semente;
+  if (faixas > 0.0) {
+    float ang = sorte(q) * 6.2831853;
+    vec2 d = vec2(cos(ang), sin(ang)) * (1.0 + raio * sorte(q.yx + 17.0));
+    vec2 a = d * px;
+    vec2 b = vec2(-d.y, d.x) * px;
+    vec3 p1 = texture2D(img, uv + a).rgb;
+    vec3 p2 = texture2D(img, uv - a).rgb;
+    vec3 p3 = texture2D(img, uv + b).rgb;
+    vec3 p4 = texture2D(img, uv - b).rgb;
+    // cada um dos 4 (e os vizinhos) tem de ser quase igual: numa borda, só a média pode coincidir por acaso
+    vec3 pior = max(max(abs(c - p1), abs(c - p2)), max(abs(c - p3), abs(c - p4)));
+    pior = max(pior, mx - mn);
+    float dif = max(pior.r, max(pior.g, pior.b));
+    r = mix((p1 + p2 + p3 + p4 + c) * 0.2, r, smoothstep(faixas * 0.7, faixas, dif));
+  }
+  if (grao > 0.0) {
+    vec3 v = mx - mn;
+    float liso = 1.0 - smoothstep(0.02, 0.10, max(v.r, max(v.g, v.b)));
+    float luz = dot(r, vec3(0.2126, 0.7152, 0.0722));
+    float t = sorte(q + 71.0) + sorte(q.yx + 113.0) - 1.0; // triangular, média 0
+    r += t * grao * liso * smoothstep(0.004, 0.04, luz) * (1.0 - smoothstep(0.85, 1.0, luz));
+  }
+  gl_FragColor = vec4(r, 1.0);
 }`;
 export const REALCE_FORCA = 0.8;
+// faixas: até quanto os pontos em volta podem diferir para virarem a média (0 a 1 por canal);
+// raio: até onde os pontos são sorteados (px da imagem); grao: o pico do grão (0 a 1)
+export const TRATAMENTO = { faixas: 3.2 / 255, raio: 15, grao: 1.6 / 255 };
+// A placa que leva mais que isto por quadro (mediana de GPU_AMOSTRAS medidas, uma a cada GPU_CADA quadros)
+// fica sem o tratamento até recarregar a página: em 60 qps são 16,7 ms para tudo.
+const GPU_LENTA_MS = 4;
+const GPU_AMOSTRAS = 8;
+const GPU_CADA = 20;
 export class Realce {
   // devolve null se não houver WebGL
   static criar(tela) {
-    const gl = tela.getContext('webgl', { alpha: false, antialias: false, depth: false, desynchronized: true, preserveDrawingBuffer: false });
+    const opcoes = { alpha: false, antialias: false, depth: false, desynchronized: true, preserveDrawingBuffer: false };
+    const gl = tela.getContext('webgl2', opcoes) || tela.getContext('webgl', opcoes); // o 2 tem o relógio da placa
     if (!gl) return null;
     try { return new Realce(gl); } catch (err) { console.warn('[turbo] realce', err); return null; }
   }
@@ -725,10 +777,34 @@ export class Realce {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     this.uPx = gl.getUniformLocation(prog, 'px');
     this.uForca = gl.getUniformLocation(prog, 'forca');
+    this.uFaixas = gl.getUniformLocation(prog, 'faixas');
+    this.uRaio = gl.getUniformLocation(prog, 'raio');
+    this.uGrao = gl.getUniformLocation(prog, 'grao');
+    this.uSemente = gl.getUniformLocation(prog, 'semente');
+    this.relogio = gl.getExtension('EXT_disjoint_timer_query_webgl2');
+    this.quadros = 0;
+    this.gpuMs = []; // os últimos tempos da placa com o tratamento (ms)
+    this.consulta = null;
   }
 
-  // desenha o quadro (VideoFrame) com o realce; lança se a placa não aceitar o quadro como textura
-  desenhar(frame, w, h, forca) {
+  // quanto a placa leva com o tratamento (mediana, ms), ou null se ainda não deu para medir
+  get custoMs() { return this.gpuMs.length >= GPU_AMOSTRAS ? mediana(this.gpuMs) : null; }
+
+  // o tempo da placa chega uns quadros depois; interrompida (outro programa, troca de clock), não vale
+  lerRelogio() {
+    const gl = this.gl;
+    if (!this.consulta || !gl.getQueryParameter(this.consulta, gl.QUERY_RESULT_AVAILABLE)) return;
+    if (!gl.getParameter(this.relogio.GPU_DISJOINT_EXT)) {
+      this.gpuMs.push(gl.getQueryParameter(this.consulta, gl.QUERY_RESULT) / 1e6);
+      if (this.gpuMs.length > GPU_AMOSTRAS) this.gpuMs.shift();
+    }
+    gl.deleteQuery(this.consulta);
+    this.consulta = null;
+  }
+
+  // desenha o quadro (VideoFrame) com o realce e o tratamento (TRATAMENTO ou null); lança se a placa não
+  // aceitar o quadro como textura
+  desenhar(frame, w, h, forca, trat = null) {
     const gl = this.gl;
     if (gl.isContextLost()) throw new Error('contexto perdido');
     gl.viewport(0, 0, w, h);
@@ -753,7 +829,18 @@ export class Realce {
     if (erro) throw new Error(`webgl ${erro}`);
     gl.uniform2f(this.uPx, 1 / w, 1 / h);
     gl.uniform1f(this.uForca, forca);
+    gl.uniform1f(this.uFaixas, trat?.faixas ?? 0);
+    gl.uniform1f(this.uRaio, trat?.raio ?? 0);
+    gl.uniform1f(this.uGrao, trat?.grao ?? 0);
+    gl.uniform1f(this.uSemente, (this.quadros++ % 64) * 5.37);
+    let medir = false;
+    if (this.relogio) {
+      this.lerRelogio();
+      medir = !!trat && !this.consulta && this.quadros % GPU_CADA === 0;
+    }
+    if (medir) gl.beginQuery(this.relogio.TIME_ELAPSED_EXT, this.consulta = gl.createQuery());
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    if (medir) gl.endQuery(this.relogio.TIME_ELAPSED_EXT);
   }
 }
 
@@ -1603,6 +1690,9 @@ export class TurboRecebe {
     this.recodificar = false;
     this.ultimaFalha = null; // o que se viu na última desistência (falhou): para o relatório
     this.realceForca = REALCE_FORCA;
+    // tratamento de imagem (TRATAMENTO): muda com o turbo ligado se a tela já é WebGL (comTratamento)
+    this.tratamento = false;
+    this.tratamentoLento = false; // a placa daqui não deu conta: sem ele até recarregar
     this.lisoPct = LISO_PCT; // quanto do tremido a folga do liso cobre (presets de teste)
     this.somCurto = false; // o tocador do som guarda menos (ver SOM_WORKLET): /tv e /jogar
     this.lisoSoluco = false; // o soluço do Wi-Fi não infla a folga do liso (ver LISO_SOLUCO): /tv e /jogar
@@ -1623,6 +1713,12 @@ export class TurboRecebe {
     }
   }
 
+  // liga ou desliga o tratamento; false = a tela de agora não é WebGL, precisa ligar o turbo de novo
+  comTratamento(v) {
+    this.tratamento = !!v;
+    return !this.s || !this.tratamento || !!this.s.realce;
+  }
+
   // relógio de quem compartilha − o meu (pelo pong de menor ida e volta), ou null: o main.js mede com
   // ele a ida do controle sem a volta (que espera atrás da imagem no mesmo caminho)
   get dif() { return this.s?.dif ?? null; }
@@ -1638,9 +1734,9 @@ export class TurboRecebe {
     tela.className = 'turbo-tela';
     tela.hidden = true;
     video.after(tela);
-    const realce = this.realce ? Realce.criar(tela) : null;
+    const realce = this.realce || (this.tratamento && !this.tratamentoLento) ? Realce.criar(tela) : null;
     const s = {
-      key, video, canal, tela, realce, alturaPedida: altura, ctx: realce ? null : tela.getContext('2d', { alpha: false, desynchronized: true }),
+      key, video, canal, tela, realce, nitidez: this.realce, alturaPedida: altura, ctx: realce ? null : tela.getContext('2d', { alpha: false, desynchronized: true }),
       dec: null, montando: null, ultimoId: 0, esperaChave: true, pedidoEm: 0, desenhou: 0, inicio: performance.now(),
       maiorId: 0, // o quadro mais novo de que chegou algum pedaço (vai no pedido de quadro-chave)
       fimChave: null, // quando o último quadro-chave terminou de chegar, no relógio de lá (a fila dele não conta)
@@ -2304,7 +2400,12 @@ export class TurboRecebe {
       }
       if (s.realce) {
         try {
-          s.realce.desenhar(frame, w, h, this.realceForca);
+          const trat = this.tratamento && !this.tratamentoLento && s.realce.relogio ? TRATAMENTO : null; // sem o relógio não dá para proteger a placa lenta
+          s.realce.desenhar(frame, w, h, s.nitidez ? this.realceForca : 0, trat);
+          if (trat && s.realce.custoMs > GPU_LENTA_MS) {
+            this.tratamentoLento = true;
+            this.onEvento?.('turbo: tratamento de imagem desligado (placa lenta)', { gpuMs: Math.round(s.realce.custoMs * 10) / 10 });
+          }
         } catch (err) {
           // a placa não aceitou: a tela volta ao desenho comum (um canvas novo: o de WebGL não vira 2D)
           console.warn('[turbo] realce', err);

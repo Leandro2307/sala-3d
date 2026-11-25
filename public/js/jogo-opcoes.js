@@ -23,11 +23,14 @@ const CHAVE = 'sala3d-jogo-opcoes';
 // É o vídeo que entra quando o turbo não aguenta, então vale também com o turbo ligado.
 // nitidez: o realce de nitidez no turbo (turbo.js, Realce) — ligado de fábrica, menos no iPhone/iPad/Mac
 // (o WebGL do Safari com o quadro do decodificador não foi testado: lá fica para ligar à mão)
+// tratamento: o contra faixas e o grão fino no turbo (turbo.js, TRATAMENTO) — ligado de fábrica no PC; a
+// placa lenta o desliga sozinha
 const APPLE = typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent);
+const TOQUE = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
 // de fábrica a imagem ocupa o celular todo; num aparelho mais quadrado (iPad) ela esticaria demais
 const TELA_PADRAO = typeof screen !== 'undefined' && Math.max(screen.width, screen.height) / Math.min(screen.width, screen.height) >= 1.7 ? 'cheia' : 'inteira';
 export const TELAS = { cheia: 'Tela toda', inteira: 'Com faixas', cortar: 'Sem bordas' };
-const PADRAO = { liso: true, menuAuto: true, selo: false, giro: false, rapido: false, turbo: true, turboLiso: true, vibrar: true, preencher: false, tela: TELA_PADRAO, lossless: 0, mouseSens: 3, nitidez: !APPLE };
+const PADRAO = { liso: true, menuAuto: true, selo: false, giro: false, rapido: false, turbo: true, turboLiso: true, vibrar: true, preencher: false, tela: TELA_PADRAO, lossless: 0, mouseSens: 3, nitidez: !APPLE, tratamento: !APPLE && !TOQUE };
 // mouseSens: no PC, num jogo de controle (PS5, Switch), quanto o mouse empurra o analógico direito
 // (teclado-pad.js): 2× chega ao fim do analógico com metade do movimento// Versão das opções (v2: turbo e 720p; v3: liso; v4: os modos de imagem de 2026-11-05; v5: os 4 modos
 // de 2026-11-16). O modo de imagem não fica guardado: toda vez que a página abre entra o PRESET_INICIAL.
