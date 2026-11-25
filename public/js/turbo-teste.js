@@ -563,8 +563,16 @@ export class TesteJoga {
   async rodar(key, { codecs, padrao, rapido, tudo = false, toque = false }) {
     this.pular('outro teste');
     const dono = String(key).split('~')[0];
-    const ch = this.abrir(dono);
-    if (!ch) return { erro: 'conexao' };
+    // a conexão com quem compartilha ainda se acertando (entrou agora, foi refeita): tenta de novo logo depois
+    let ch = this.abrir(dono);
+    for (let i = 0; !ch && i < 4; i++) {
+      await esperar(1500);
+      ch = this.abrir(dono);
+    }
+    if (!ch) {
+      this.onEvento?.('teste da conexão: não terminou', { motivo: 'a conexão com quem compartilha não estava aberta' });
+      return { erro: 'conexao' };
+    }
     const t = this.novo(ch);
     this.t = t;
     const inicio = performance.now();
@@ -962,17 +970,33 @@ export async function codecsDaqui(listaH264, listaH265) {
 }
 
 // ---------------------------------------------------------------- o que fica lembrado
-// O resultado vale por VALE_MS com o mesmo dono e um caminho parecido (um corte no meio do jogo fica lembrado no
-// PC que compartilha: TurboEnvio.lembrarCorte).
-const VALE_MS = 10 * 60_000;
+// O resultado vale o dia todo para o mesmo PC de jogo (pelo nome de quem compartilha), guardado no aparelho: entrar de
+// novo no Modo jogo, ou recarregar a página, não testa de novo. Muda o caminho (a ida e volta ou a família), o dia, ou
+// o jogo saiu bem pior que o previsto (esquecer): aí testa. "Testar a conexão" no menu testa sempre. Um corte no meio
+// do jogo fica lembrado no PC que compartilha (TurboEnvio.lembrarCorte).
+const CHAVE_MEMORIA = 'sala3d-teste-conexao';
+const dia = (t) => new Date(t).toDateString();
+// só o que o jogo usa: os degraus e os caminhos ficam no relatório
+const ENXUTO = ['tetoKbps', 'livre', 'codec', 'modo', 'rota', 'trocarRota', 'confirmou', 'rttMs', 'nota', 'previsto', 'direto', 'jaTurn'];
 
 export class MemoriaTeste {
-  constructor(agora = () => Date.now()) {
+  // guarda: o localStorage (null em testes ou sem armazenamento: só na memória da página)
+  constructor(agora = () => Date.now(), guarda = typeof localStorage !== 'undefined' ? localStorage : null) {
     this.agora = agora;
+    this.guarda = guarda;
     this.m = new Map();
+    try { for (const [k, v] of Object.entries(JSON.parse(guarda?.getItem(CHAVE_MEMORIA) || '{}'))) if (dia(v.em) === dia(agora())) this.m.set(k, v); } catch { /* sem armazenamento */ }
   }
 
-  guardar(dono, r, rede) { this.m.set(dono, { r, em: this.agora(), familia: rede?.familia ?? null, rttMs: rede?.rttMs ?? null }); }
+  gravar() {
+    try { this.guarda?.setItem(CHAVE_MEMORIA, JSON.stringify(Object.fromEntries(this.m))); } catch { /* sem armazenamento */ }
+  }
+
+  guardar(dono, r, rede) {
+    if (!dono) return;
+    this.m.set(dono, { r: Object.fromEntries(ENXUTO.filter((k) => k in r).map((k) => [k, r[k]])), em: this.agora(), familia: rede?.familia ?? null, rttMs: rede?.rttMs ?? null });
+    this.gravar();
+  }
 
   // ainda vale? uma conexão nova (o par é outro) com a ida e volta parecida serve: o navegador alterna sozinho
   // entre pares equivalentes
@@ -980,11 +1004,14 @@ export class MemoriaTeste {
     this.porque = null;
     const v = this.m.get(dono);
     if (!v) return null;
-    if (this.agora() - v.em > VALE_MS) this.porque = 'faz mais de 10 min';
+    if (dia(v.em) !== dia(this.agora())) this.porque = 'é de outro dia';
     else if (rede?.rttMs != null && v.rttMs != null && Math.abs(rede.rttMs - v.rttMs) > Math.max(25, v.rttMs * 0.6)) this.porque = `a ida e volta mudou de ${v.rttMs} para ${rede.rttMs} ms`;
     else if (rede?.familia && v.familia && rede.familia !== v.familia && Math.abs((rede.rttMs ?? 0) - (v.rttMs ?? 0)) > 10) this.porque = `o caminho mudou de ${v.familia} para ${rede.familia}`;
     return this.porque ? null : v.r;
   }
 
-  esquecer(dono) { this.m.delete(dono); }
+  esquecer(dono) {
+    if (!this.m.delete(dono)) return;
+    this.gravar();
+  }
 }

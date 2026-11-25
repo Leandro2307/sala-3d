@@ -127,16 +127,19 @@ test('a banda sugerida para o PS5', () => {
   assert.equal(escolher({ banda: { ...banda, tetoKbps: 20000, livre: true }, ps5: { kbps: 20000 }, padrao: 17, rapido: 16 }).ps5Sugerido, null);
 });
 
-test('o teste de há pouco vale no mesmo caminho', () => {
-  let agora = 0;
-  const m = new MemoriaTeste(() => agora);
+test('o teste vale o dia no mesmo caminho', () => {
+  let agora = new Date(2026, 10, 25, 9).getTime();
+  const m = new MemoriaTeste(() => agora, null);
   m.guardar('d', { modo: 17 }, { familia: 'ipv4', rttMs: 8 });
   assert.ok(m.valido('d', { familia: 'ipv4', rttMs: 10 }));
   assert.equal(m.valido('d', { familia: 'ipv6', rttMs: 22 }), null);
   assert.equal(m.valido('d', { familia: 'ipv4', rttMs: 50 }), null);
   assert.match(m.porque, /de 8 para 50/);
-  agora = 11 * 60_000;
+  agora += 10 * 3600_000; // 19 h: o mesmo dia ainda vale
+  assert.ok(m.valido('d', { familia: 'ipv4', rttMs: 8 }));
+  agora += 6 * 3600_000; // outro dia
   assert.equal(m.valido('d', { familia: 'ipv4', rttMs: 8 }), null);
+  assert.match(m.porque, /outro dia/);
 });
 
 // ------------------------------------------------------------ o teto no PC que compartilha
@@ -348,4 +351,19 @@ test('eixo do gráfico: degraus redondos e nunca abaixo do maior', () => {
   for (const v of [0, 3, 9.5, 21, 88, 264, 900, 4000]) assert.ok(tetoDoEixo(v, 10) >= v);
   assert.equal(tetoDoEixo(3, 10), 10);
   assert.equal(tetoDoEixo(20.5, 10), 25);
+});
+
+test('a memória do dia sobrevive a recarregar a página e guarda só o que o jogo usa', () => {
+  const guarda = { v: null, getItem() { return this.v; }, setItem(_, v) { this.v = v; } };
+  const agora = () => new Date(2026, 10, 25, 20).getTime();
+  const m = new MemoriaTeste(agora, guarda);
+  m.guardar('lokao', { tetoKbps: 9000, codec: 'h264', modo: 14, rota: 'turn', degraus: [1, 2, 3], caminhos: [] }, { familia: 'ipv4', rttMs: 30 });
+  assert.ok(!/degraus/.test(guarda.v));
+  const outra = new MemoriaTeste(agora, guarda); // a página recarregou
+  assert.deepEqual(outra.valido('lokao', { familia: 'ipv4', rttMs: 31 }), { tetoKbps: 9000, codec: 'h264', modo: 14, rota: 'turn' });
+  outra.esquecer('lokao');
+  assert.equal(new MemoriaTeste(agora, guarda).valido('lokao', { familia: 'ipv4', rttMs: 31 }), null);
+  // a de ontem não volta
+  const amanha = new MemoriaTeste(() => new Date(2026, 10, 26, 8).getTime(), { getItem: () => guarda.v ?? JSON.stringify({ x: { r: {}, em: agora() } }), setItem() {} });
+  assert.equal(amanha.valido('x', null), null);
 });

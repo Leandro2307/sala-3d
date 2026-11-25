@@ -1310,3 +1310,7 @@ Painel (`turbo-teste-painel.js`): etapas, velocidade e resposta ao vivo (direto 
 100, o direto e o TURN lado a lado, atraso previsto e uma dica (`avaliarConexao`: PS5 perdendo quadros, página
 engasgando, Wi-Fi, distância, velocidade, tela lenta). "Pular" ficou discreto. Um minuto depois o relatório grava
 "teste da conexão: previsto x real", para acertar a conta.
+
+O resultado do teste vale o dia todo para o mesmo PC de jogo (pelo nome de quem compartilha), guardado no aparelho
+(localStorage): recarregar ou entrar de novo não testa. Testa de novo em outro dia, com o caminho diferente, pelo botão,
+ou se o jogo saiu bem pior que o previsto. Sem a conexão aberta ainda, o teste espera até 6 s em vez de desistir calado.

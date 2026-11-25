@@ -3970,9 +3970,10 @@ async function testarConexao(deNovo) {
   const dono = jl.key.split('~')[0];
   const rede = await Promise.resolve(rtc?.caminhoPara(dono)).catch(() => null);
   if (jogandoLa !== jl) return null;
-  let r = deNovo ? null : memoriaTeste.valido(dono, rede);
+  const quem = acharTela(jl.key)?.user?.name || dono; // o PC do jogo pelo nome: o id muda a cada entrada
+  let r = deNovo ? null : memoriaTeste.valido(quem, rede);
   let rede0 = null;
-  if (r) diagJogo.evento('teste da conexão: vale o de há pouco', { tetoKbps: r.tetoKbps, codec: r.codec, modo: r.modo });
+  if (r) diagJogo.evento('teste da conexão: vale o de hoje', { tetoKbps: r.tetoKbps, codec: r.codec, modo: r.modo });
   else {
     codecsDoTeste ??= await codecsDaqui(['avc1.640033', 'avc1.4d0033', 'avc1.42e033', 'avc1.42001f'], ['hvc1.1.6.L123.B0']);
     if (jogandoLa !== jl) return null;
@@ -3985,7 +3986,7 @@ async function testarConexao(deNovo) {
     r = await testeJoga.rodar(jl.key, { codecs: codecsDoTeste, padrao: 14, rapido: 16, tudo: deNovo, toque: isTouch });
     painelTeste.fechar();
     if (jogandoLa !== jl || r.erro) return null;
-    memoriaTeste.guardar(dono, r, rede0 || await Promise.resolve(rtc?.caminhoPara(dono)).catch(() => null));
+    memoriaTeste.guardar(quem, r, rede0 || await Promise.resolve(rtc?.caminhoPara(dono)).catch(() => null));
     if (jogandoLa !== jl) return null;
     painelTeste.resultado(r, MODOS_IMAGEM.find((p) => p.id === r.modo)?.nome || 'Turbo');
   }
@@ -4011,6 +4012,9 @@ function conferirPrevisto(resumo) {
   if (passou < 68_000) return;
   previsto = null;
   const med = (k) => { const v = p.am.map((a) => a[k]).filter((x) => x != null).sort((a, b) => a - b); return v.length ? Math.round(v[v.length >> 1] * 10) / 10 : null; };
+  const realMin = Math.round((p.am.reduce((n, a) => n + a.travadas, 0) / (p.am.length / 30)) * 10) / 10;
+  // bem pior que o previsto: na próxima entrada testa de novo
+  if (realMin > Math.max(10, (p.travadasMin || 0) * 3)) { memoriaTeste.esquecer(p.quem); diagJogo.evento('teste da conexão: o jogo saiu pior que o previsto, testa de novo na próxima', { travadasMin: realMin }); }
   diagJogo.evento('teste da conexão: previsto x real', { previsto: { atrasoMs: p.atrasoMs, travadasMin: p.travadasMin }, real: { atrasoMs: med('atraso'), qps: med('qps'), tremidoMs: med('tremido'), travadasMin: Math.round((p.am.reduce((n, a) => n + a.travadas, 0) / (p.am.length / 30)) * 10) / 10 } });
 }
 // Entrar no turbo: com o Automático, primeiro o teste; sem ele (versão antiga lá, pulado, sem conexão), direto
@@ -4035,7 +4039,7 @@ async function entrarNoTurbo(deNovo = false) {
   }
   if (jogandoLa !== jl || !opcoesJogo.get('turbo')) return;
   if (r) turboRecebe.teste = { tetoKbps: r.livre && r.rota !== 'turn' ? null : r.tetoKbps, codec: r.codec, turn: r.rota === 'turn', bom: !!r.confirmou };
-  previsto = r?.previsto ? { ...r.previsto, desde: performance.now(), am: [] } : null;
+  previsto = r?.previsto ? { ...r.previsto, desde: performance.now(), am: [], quem: acharTela(jl.key)?.user?.name || jl.key.split('~')[0] } : null;
   if (r && turboAuto.ligado && opcoesJogo.get('preset') !== r.modo) aplicarPreset(r.modo, 'teste da conexão');
   if (!turboRecebe.ligado) ligarTurbo();
   if (!turboAuto.ligado) return;
