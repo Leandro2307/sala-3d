@@ -772,7 +772,8 @@ const GPU_LENTA_MS = 4;
 // A dublagem do Voz Universal usa a mesma placa (CUDA) e tem a vez: o tratamento cede sozinho (desligarTratar).
 const TRATAR_LA = { forca: 0.45, faixas: 3.2 / 255, raio: 15, grao: 0 };
 const TRATAR_GPU_MS = 4; // o filtro levando mais que isto por quadro na placa
-const TRATAR_COD_MS = 14; // a compressão daqui atrasando (a placa ocupada com outra coisa)
+const TRATAR_COD_MS = 22; // a compressão daqui atrasando (a placa ocupada com outra coisa), duas vezes seguidas
+const TRATAR_GRACA_MS = 5000; // o começo (o primeiro quadro-chave, a placa acordando) não conta
 const TRATAR_GPU_PCT = 85; // a placa inteira acima disto em duas leituras seguidas (ajudante, a cada ~2 s)
 const TRATAR_ESPERA_MS = 5 * 60_000; // desligado por isso, não volta antes
 const GPU_AMOSTRAS = 8;
@@ -1670,6 +1671,8 @@ export class TurboEnvio {
         await this.configurar(s, frame.displayWidth, frame.displayHeight);
         if (s.tratar) {
           const tratado = this.tratarQuadro(s, frame, agora);
+          // cedeu agora: esta sessão acabou (ligar já abriu a próxima), o codificador dela está fechado
+          if (s.parar || s.trocando) break;
           if (tratado) {
             s.chave = s.chave || false;
             const chaveT = s.chave;
@@ -1873,7 +1876,7 @@ export class TurboEnvio {
       const tela = typeof OffscreenCanvas === 'function' ? new OffscreenCanvas(w, h) : Object.assign(document.createElement('canvas'), { width: w, height: h });
       const realce = Realce.criar(tela);
       if (!realce) return void this.desligarTratar(s, 'sem WebGL nesta placa');
-      s.filtro = { tela, realce, vistoEm: agora, altas: 0 };
+      s.filtro = { tela, realce, vistoEm: agora, altas: 0, lentas: 0, desde: agora };
     }
     const f = s.filtro;
     if (f.tela.width !== w || f.tela.height !== h) { f.tela.width = w; f.tela.height = h; }
@@ -1883,7 +1886,7 @@ export class TurboEnvio {
       return void this.desligarTratar(s, `a placa recusou o quadro: ${String(err?.message || err).slice(0, 60)}`);
     }
     // a placa e a compressão: vê a cada ~2 s se o tratamento ainda cabe
-    if (agora - f.vistoEm > 2000) {
+    if (agora - f.vistoEm > 2000 && agora - f.desde > TRATAR_GRACA_MS) {
       f.vistoEm = agora;
       const gpuMs = f.realce.custoMs;
       const codMs = mediana(s.conta.cod.slice(-30));
@@ -1891,7 +1894,8 @@ export class TurboEnvio {
       const alta = carga && Date.now() - carga.em < 6000 && carga.usoPct >= TRATAR_GPU_PCT;
       f.altas = alta ? f.altas + 1 : 0;
       if (gpuMs > TRATAR_GPU_MS) return void this.desligarTratar(s, 'o filtro está lento na placa', { gpuMs });
-      if (codMs > TRATAR_COD_MS) return void this.desligarTratar(s, 'a compressão daqui atrasou (a placa ocupada)', { codMs });
+      f.lentas = codMs > TRATAR_COD_MS ? f.lentas + 1 : 0;
+      if (f.lentas >= 2) return void this.desligarTratar(s, 'a compressão daqui atrasou (a placa ocupada)', { codMs });
       if (f.altas >= 2) return void this.desligarTratar(s, `a placa passou de ${TRATAR_GPU_PCT}% (a dublagem ou o jogo usando)`, { usoPct: carga.usoPct });
     }
     try {
