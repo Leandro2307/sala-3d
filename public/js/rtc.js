@@ -492,7 +492,7 @@ export class RTC {
   // até ele sair e entrar na sala (aí ligou direto). Espera VOLTA_DIRETO_MS e dobra a cada tentativa
   // sem sucesso (até VOLTA_DIRETO_MAX_MS): com quem só liga pelo TURN (4G), os reinícios ficam raros.
   async vigiarRelay(peer, agora) {
-    if (peer.polite || peer.vendoRelay || agora - (peer.relayVistoEm || 0) < 5000) return;
+    if (peer.turnEscolhido || peer.polite || peer.vendoRelay || agora - (peer.relayVistoEm || 0) < 5000) return;
     peer.vendoRelay = true;
     peer.relayVistoEm = agora;
     try {
@@ -514,6 +514,86 @@ export class RTC {
     } finally {
       peer.vendoRelay = false;
     }
+  }
+
+  // O teste da conexão (turbo-teste.js) mediu os dois e escolheu: 'turn' (só o servidor no meio, deste lado) ou 'auto' (o
+  // de sempre, direto primeiro). iPhone no 5G, 2026-11-25: direto por IPv6 com 260 ms de ida e volta; pelo TURN eram 50.
+  // O outro lado é avisado para não ficar tentando voltar ao direto (vigiarRelay).
+  usarCaminho(id, quer) {
+    const peer = this.peers.get(id);
+    if (!peer || !this.temTurn || peer.pc.connectionState === 'closed') return false;
+    const turn = quer === 'turn';
+    if (!turn && peer.turnEscolhido !== 'eu') return false;
+    if (turn && peer.turnEscolhido === 'eu') return true;
+    // Do zero: só reiniciar o ICE com a política 'relay' não basta, o Chrome segue usando as portas diretas que já
+    // tinha (testado em 2026-11-25). É o mesmo refazer de quando uma conexão falha, uns 2 s.
+    if (!this.refazer(id, turn ? 'pelo TURN, escolhido no teste da conexão' : 'de volta ao direto', null, turn ? { turnEscolhido: 'eu' } : { diretoPrimeiro: true })) return false;
+    this.send(id, { caminho: turn ? 'turn' : 'auto' });
+    return true;
+  }
+
+  // Procura de novo o melhor caminho (a conexão trocou sozinha para um bem mais lento)
+  procurarCaminho(id) {
+    const peer = this.peers.get(id);
+    if (!peer || peer.turnEscolhido) return;
+    this.restartIce(peer);
+  }
+
+  // Uma conexão à parte só para medir o TURN (quem joga): a oferta e os candidatos vão pelo canal do teste.
+  // sinal(m): manda para o outro lado. Devolve { pc, canal, dados, receber(m) } ou null sem TURN.
+  async sondaTurn(sinal) {
+    if (!this.temTurn) return null;
+    const pc = new RTCPeerConnection({ iceServers: this.iceServers, iceTransportPolicy: 'relay' });
+    const dados = pc.createDataChannel('turbo-teste-dados', { ordered: false, maxRetransmits: 0 });
+    const canal = pc.createDataChannel('turbo-teste', { ordered: true });
+    pc.onicecandidate = ({ candidate }) => { if (candidate) sinal({ candidate: candidate.toJSON() }); };
+    const fila = [];
+    const receber = async (m) => {
+      try {
+        if (m.description) {
+          await pc.setRemoteDescription(m.description);
+          for (const c of fila.splice(0)) await pc.addIceCandidate(c).catch(() => {});
+        } else if (m.candidate) {
+          if (pc.remoteDescription) await pc.addIceCandidate(m.candidate).catch(() => {});
+          else fila.push(m.candidate);
+        }
+      } catch (err) {
+        console.warn('[rtc] sonda', err);
+      }
+    };
+    try {
+      await pc.setLocalDescription(await pc.createOffer());
+    } catch (err) {
+      console.warn('[rtc] sonda', err);
+      pc.close();
+      return null;
+    }
+    sinal({ description: pc.localDescription.toJSON() });
+    return { pc, canal, dados, receber };
+  }
+
+  // O outro lado da sonda (quem compartilha): só o STUN, o TURN é o de quem joga
+  responderSonda(sinal, onCanal) {
+    const pc = new RTCPeerConnection({ iceServers: this.iceServers.map((x) => ({ ...x, urls: [].concat(x.urls).filter((u) => !/^turns?:/.test(u)) })).filter((x) => x.urls.length) });
+    pc.onicecandidate = ({ candidate }) => { if (candidate) sinal({ candidate: candidate.toJSON() }); };
+    pc.ondatachannel = ({ channel }) => onCanal(channel);
+    const fila = [];
+    const receber = async (m) => {
+      try {
+        if (m.description) {
+          await pc.setRemoteDescription(m.description);
+          await pc.setLocalDescription(await pc.createAnswer());
+          sinal({ description: pc.localDescription.toJSON() });
+          for (const c of fila.splice(0)) await pc.addIceCandidate(c).catch(() => {});
+        } else if (m.candidate) {
+          if (pc.remoteDescription) await pc.addIceCandidate(m.candidate).catch(() => {});
+          else fila.push(m.candidate);
+        }
+      } catch (err) {
+        console.warn('[rtc] sonda', err);
+      }
+    };
+    return { pc, receber };
   }
 
   // Já negociou, ou tem o que pôr numa oferta (voz, tela, canal)?
@@ -572,7 +652,9 @@ export class RTC {
       const ice = pc.iceConnectionState;
       if (ice === 'disconnected' || ice === 'failed') {
         peer.caiuDesde ||= agora;
-        if (agora - peer.caiuDesde > 3000) this.restartIce(peer);
+        // o TURN escolhido caiu (ou nunca ligou): volta a valer qualquer caminho
+        if (peer.turnEscolhido === 'eu' && agora - peer.caiuDesde > 3000 && agora - peer.turnDesde > 6000) this.usarCaminho(peer.id, 'auto');
+        else if (agora - peer.caiuDesde > 3000) this.restartIce(peer);
       } else {
         peer.caiuDesde = 0;
       }
@@ -1288,11 +1370,11 @@ export class RTC {
     // por pessoa que entrava.
     // direto primeiro (liberarTurn): só o STUN nos primeiros DIRETO_PRIMEIRO_MS. Refeita do zero (herdar:
     // a anterior falhou) já nasce com o TURN.
-    const soStun = this.temTurn && !herdar && this.iceServers.some((x) => [].concat(x.urls).some((u) => /^stun:/.test(u)));
+    const soStun = this.temTurn && (!herdar || herdar.diretoPrimeiro) && this.iceServers.some((x) => [].concat(x.urls).some((u) => /^stun:/.test(u)));
     const servidores = soStun
       ? this.iceServers.map((x) => ({ ...x, urls: [].concat(x.urls).filter((u) => !/^turns?:/.test(u)) })).filter((x) => x.urls.length)
       : this.iceServers;
-    const pc = new RTCPeerConnection({ iceServers: servidores, bundlePolicy: 'max-bundle' });
+    const pc = new RTCPeerConnection({ iceServers: servidores, bundlePolicy: 'max-bundle', ...(herdar?.turnEscolhido === 'eu' ? { iceTransportPolicy: 'relay' } : {}) });
     peer = {
       id,
       pc,
@@ -1634,20 +1716,21 @@ export class RTC {
   // (número de vezes refeita) acerta, e quem já está na época pedida não refaz de novo.
   // Espera entre uma e outra: 20 s, depois 40, 80… até 5 min enquanto não ficar ligada (cada
   // conexão nova recria a voz e o vídeo das telas: em laço, pesa demais no celular). Devolve se refez.
-  refazer(id, motivo = '', epoca = null) {
+  // escolha: refeita de propósito (usarCaminho), sem a espera nem contar como falha
+  refazer(id, motivo = '', epoca = null, escolha = null) {
     const velho = this.peers.get(id);
     if (!velho) return false;
     const agora = performance.now();
     const pedido = epoca != null; // o outro lado refez e pediu que eu refaça também
     const espera = Math.min(300_000, 20_000 * 2 ** Math.max(0, (velho.refeitas || 0) - 1));
-    if (pedido ? epoca <= velho.epoca : agora - velho.refeitaEm < espera) return false;
+    if (pedido ? epoca <= velho.epoca : !escolha && agora - velho.refeitaEm < espera) return false;
     console.warn(`[rtc] refazendo a conexão com ${id}${motivo ? `: ${motivo}` : ''}`);
     const nova = pedido ? epoca : velho.epoca + 1;
     // o que a outra pessoa já tinha dito (o que ela quer das minhas telas, se ouve a minha voz…)
     const herdar = {
       epoca: nova,
       refeitaEm: agora,
-      refeitas: (velho.refeitas || 0) + 1, // seguidas, sem a conexão ficar ligada entre elas
+      refeitas: (velho.refeitas || 0) + (escolha ? 0 : 1), // seguidas, sem a conexão ficar ligada entre elas
       ouveMic: velho.ouveMic,
       interesse: velho.interesse,
       hz: velho.hz,
@@ -1658,6 +1741,8 @@ export class RTC {
       linhasPedidas: velho.linhasPedidas,
       recuoCodec: velho.recuoCodec,
       reiniciosIce: velho.reiniciosIce,
+      ...escolha,
+      turnDesde: agora,
     };
     // primeiro o aviso (os sinais chegam na ordem: o outro lado refaz antes da minha oferta nova)
     if (!pedido) this.send(id, { refazer: nova });
@@ -1668,7 +1753,12 @@ export class RTC {
     return true;
   }
 
-  async handleSignal(from, { description, candidate, interesse, interesse2, hz, voz, refazer, e }) {
+  async handleSignal(from, { description, candidate, interesse, interesse2, hz, voz, refazer, caminho, e }) {
+    if (caminho) {
+      const p = this.peers.get(from);
+      if (p && p.turnEscolhido !== 'eu') p.turnEscolhido = caminho === 'turn' ? 'ele' : null;
+      return;
+    }
     if (refazer) {
       this.refazer(from, 'o outro lado pediu', Number(refazer) || 0);
       return;

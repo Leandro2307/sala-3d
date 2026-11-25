@@ -18,6 +18,7 @@ import { descricaoSemReordenar } from './turbo.js';
 
 export const CANAL_TESTE = 'turbo-teste';
 export const CANAL_TESTE_DADOS = 'turbo-teste-dados';
+const SONDA = '#turn'; // o teste pelo TURN da mesma pessoa, em TesteEnvio.testes
 
 const RAMPA = [3000, 6000, 9000, 12_000, 16_000, 20_000, 26_000]; // kbps
 const DEGRAU_MS = 1500;
@@ -29,9 +30,16 @@ const ALVO_MAX = 26_000;
 const CODEC_MS = 1600;
 const CODEC_KBPS_MAX = 10_000;
 const OLA_MS = 3000;
+// O TURN também é medido quando o direto não é bom (ou o teste foi pedido à mão)
+const RTT_DIRETO_BOM = 80;
+const RTT_LONGE = 150; // daqui para cima a imagem vai mais leve
+const TETO_LONGE = 6000;
+const TOPO_LONGE = 12_000;
+const SONDA_MS = 7000; // a conexão da sonda tem isto para ligar
+const AQUECE_MS = 600;
 const PAUSA_MS = 120; // entre um degrau e outro (a fila do anterior acaba)
 const RECUPERA_MS = 1200; // depois de um degrau que não passou
-const CHEIO_MS = 40_000; // o teste inteiro nunca passa disto
+const CHEIO_MS = 80_000; // o teste inteiro nunca passa disto
 // um degrau passa com tudo isto
 const CHEGOU_MIN = 0.94;
 const PERDA_MAX = 1.5; // %
@@ -42,7 +50,7 @@ export const CORTE_MS = 500; // um buraco assim é o caminho cortando tudo
 // quem compartilha: o que aceita de quem joga
 const KBPS_MAX = 40_000;
 const MS_MAX = 8000;
-const TOTAL_MS_MAX = 45_000;
+const TOTAL_MS_MAX = 90_000;
 const QPS = 60;
 const PEDACO = 1100;
 const CAB = 24;
@@ -105,8 +113,8 @@ export function resumirDegrau({ chegadas, envio, pedido, fim, travouAqui = 0 }) 
 
 // O plano do teste: um gerador que pede um degrau ({ kbps, ms, confirma }) e recebe o resumo dele. Devolve
 // { tetoKbps, livre, confirma }: livre, passou até o fim (o alvo) sem nenhum limite aparecer.
-export function* planoDaBanda({ ps5Kbps = null } = {}) {
-  const topo = Math.min(ALVO_MAX, Math.max(ALVO_MIN, Number(ps5Kbps) || 16_000));
+export function* planoDaBanda({ ps5Kbps = null, longe = false } = {}) {
+  const topo = longe ? TOPO_LONGE : Math.min(ALVO_MAX, Math.max(ALVO_MIN, Number(ps5Kbps) || 16_000));
   const rampa = [...RAMPA.filter((k) => k < topo), topo];
   let bom = 0;
   let ruim = null;
@@ -157,15 +165,33 @@ export function escolherCodec({ h264, h265, tetoKbps, livre, ps5Hevc = false }) 
 }
 
 // O modo: o padrão da página, a não ser que a conexão seja parada o bastante para a folga de 15 ms do Turbo rápido
-export function escolherModo({ padrao, rapido, confirma }) {
+export function escolherModo({ padrao, rapido, confirma, rttMs = null }) {
+  if (rttMs > RTT_LONGE) return { modo: padrao, porque: `longe (${Math.round(rttMs)} ms de ida e volta): o modo com mais folga` };
   if (!confirma?.ok) return { modo: padrao, porque: 'a conexão oscila: o modo com mais folga' };
   if (confirma.tremidoMs <= 6 && confirma.perdaPct <= 0.2 && (confirma.buracoCaminhoMs ?? confirma.buracoMs) <= 80) return { modo: rapido, porque: 'conexão muito estável: o menor atraso' };
   return { modo: padrao, porque: `a conexão oscila (treme ${confirma.tremidoMs} ms, perda ${confirma.perdaPct}%, até ${confirma.buracoMs} ms sem chegar nada): precisa da folga do liso` };
 }
 
-export function escolher({ banda, h264 = null, h265 = null, ps5 = null, padrao, rapido }) {
+// Direto ou TURN? Cada um { rttMs, banda } (ou null, não medido). O custo é em ms: a ida e volta, o tremido, o que falta
+// de banda para uma imagem boa e o que não se confirmou. O TURN só ganha com folga: passa por mais um servidor.
+export function custoDoCaminho(c) {
+  if (!c?.banda) return null;
+  const f = c.banda.confirma;
+  return Math.round((c.rttMs ?? 300) + (f?.tremidoMs || 0) + (f?.ok ? 0 : 40) + Math.max(0, (6000 - c.banda.tetoKbps) / 40));
+}
+export function escolherCaminho({ direto, turn }) {
+  const d = custoDoCaminho(direto);
+  const t = custoDoCaminho(turn);
+  if (t == null) return { caminho: 'direto', custos: { direto: d, turn: t }, porque: turn ? 'o TURN não mediu' : 'o direto é bom' };
+  if (d == null || t < d * 0.8 - 10) return { caminho: 'turn', custos: { direto: d, turn: t }, porque: 'pelo servidor (TURN) chega bem mais rápido' };
+  return { caminho: 'direto', custos: { direto: d, turn: t }, porque: 'o direto é melhor ou parecido' };
+}
+
+export function escolher({ banda: medida, h264 = null, h265 = null, ps5 = null, padrao, rapido, rttMs = null }) {
+  // longe, um pedaço perdido demora a vir de novo: menos banda, menos parada
+  const banda = rttMs > RTT_LONGE ? { ...medida, tetoKbps: Math.min(medida.tetoKbps, TETO_LONGE), livre: false } : medida;
   const c = escolherCodec({ h264, h265, tetoKbps: banda.tetoKbps, livre: banda.livre, ps5Hevc: !!ps5?.hevc });
-  const m = escolherModo({ padrao, rapido, confirma: banda.confirma });
+  const m = escolherModo({ padrao, rapido, confirma: banda.confirma, rttMs });
   const ps5Kbps = Number(ps5?.kbps) || null;
   return {
     tetoKbps: banda.tetoKbps,
@@ -175,7 +201,7 @@ export function escolher({ banda, h264 = null, h265 = null, ps5 = null, padrao, 
     modo: m.modo,
     modoPorque: m.porque,
     // a banda que o PS5 deveria ter para ir repassado (a original) sem passar do que o caminho leva
-    ps5Sugerido: ps5Kbps && !banda.livre && banda.tetoKbps < ps5Kbps ? Math.max(2000, Math.floor(banda.tetoKbps / 1000) * 1000) : null,
+    ps5Sugerido: ps5Kbps && !medida.livre && banda.tetoKbps < ps5Kbps ? Math.max(2000, Math.floor(banda.tetoKbps / 1000) * 1000) : null,
   };
 }
 
@@ -198,8 +224,9 @@ function relogio(ms, f) {
 export class TesteEnvio {
   // tela(key) -> { stream, controle, ps5 } (a do TurboEnvio); silenciar(id, key, sim): o vídeo normal para essa
   // pessoa para durante o teste; onEvento(id, texto, dados)
-  constructor({ tela, silenciar = null, onEvento = null }) {
-    Object.assign(this, { tela, silenciar, onEvento });
+  // sonda(sinal, onCanal) -> { pc, receber }: o outro lado da conexão que mede o TURN (rtc.responderSonda)
+  constructor({ tela, silenciar = null, onEvento = null, sonda = null }) {
+    Object.assign(this, { tela, silenciar, onEvento, sonda });
     this.testes = new Map(); // id de quem joga -> { canal, dados, key, gasto }
     this.canaisDados = new Map();
   }
@@ -223,7 +250,17 @@ export class TesteEnvio {
       if (m.ping != null) return this.dizer(t, { pong: m.ping, t: performance.now() });
       if (typeof m.ola === 'string') return this.ola(t, m.ola);
       if (!t.key) return;
-      if (m.degrau != null) this.degrau(t, m);
+      if (m.sonda && this.sonda && !id.endsWith(SONDA)) {
+        // os canais dela chegam como um teste à parte desta pessoa
+        if (m.sonda.description) {
+          this.fecharSonda(t);
+          t.sonda = this.sonda((x) => this.dizer(t, { sonda: x }), (ch) => {
+            if (ch.label === CANAL_TESTE) this.receber(id + SONDA, ch);
+            else if (ch.label === CANAL_TESTE_DADOS) this.receberDados(id + SONDA, ch);
+          });
+        }
+        t.sonda?.receber(m.sonda);
+      } else if (m.degrau != null) this.degrau(t, m);
       else if (m.codec != null) this.codec(t, m).catch((err) => this.dizer(t, { codecFim: m.codec, erro: String(err?.message || err).slice(0, 120) }));
       else if (m.resultado) this.onEvento?.(id, 'teste da conexão: resultado', m.resultado);
       else if (m.fim) this.acabar(id);
@@ -398,10 +435,19 @@ export class TesteEnvio {
     this.dizer(t, { codecFim: n, quadros: enviados, codP50: r1(pct(cod, 0.5)), codP95: r1(pct(cod, 0.95)), codec: config?.codec ?? null, placa: config?.hardwareAcceleration === 'prefer-hardware', ...(falhou ? { erro: falhou } : {}) });
   }
 
+  fecharSonda(t) {
+    try { t.sonda?.pc.close(); } catch { /* já fechada */ }
+    t.sonda = null;
+  }
+
   acabar(id) {
     const t = this.testes.get(id);
     if (!t) return;
     this.testes.delete(id);
+    if (t.sonda) {
+      this.acabar(id + SONDA);
+      this.fecharSonda(t);
+    }
     clearTimeout(t.prazo);
     t.parar?.();
     try { t.canal.close(); } catch { /* já fechado */ }
@@ -414,8 +460,9 @@ export class TesteEnvio {
 export class TesteJoga {
   // abrir(idDoDono) -> { canal, dados } (rtc.abrirTeste) ou null; caminho(id) -> Promise: o caminho em uso (rtc.caminhoPara);
   // caminhos(id) -> Promise: todos os pares que respondem (rtc.caminhosDe); onProgresso({ fase, parte, texto })
-  constructor({ abrir, caminho = null, caminhos = null, onProgresso = null, onEvento = null }) {
-    Object.assign(this, { abrir, caminho, caminhos, onProgresso, onEvento });
+  // sonda(sinal) -> Promise: a conexão à parte pelo TURN (rtc.sondaTurn) ou null
+  constructor({ abrir, caminho = null, caminhos = null, sonda = null, onProgresso = null, onEvento = null }) {
+    Object.assign(this, { abrir, caminho, caminhos, sonda, onProgresso, onEvento });
     this.t = null;
   }
 
@@ -428,12 +475,13 @@ export class TesteJoga {
 
   // codecs: { h264: [...], h265: [...] } que este aparelho decodifica; padrao/rapido: os modos (escolher).
   // Devolve { ...escolher(), banda, degraus, ... } ou { erro }. Nunca lança.
-  async rodar(key, { codecs, padrao, rapido }) {
+  // tudo: mede o TURN mesmo com o direto bom
+  async rodar(key, { codecs, padrao, rapido, tudo = false }) {
     this.pular('outro teste');
     const dono = String(key).split('~')[0];
     const ch = this.abrir(dono);
     if (!ch) return { erro: 'conexao' };
-    const t = { canal: ch.canal, dados: ch.dados, esperas: new Map(), chegadas: new Map(), pings: new Map(), rtts: [], cod: null, ola: null, saiu: false };
+    const t = this.novo(ch);
     this.t = t;
     const inicio = performance.now();
     const abortado = new Promise((_, erra) => { t.abortar = (motivo) => { t.saiu = true; erra(new Error(motivo)); }; });
@@ -443,9 +491,8 @@ export class TesteJoga {
     t.canal.binaryType = 'arraybuffer';
     t.dados.binaryType = 'arraybuffer';
     t.canal.onclose = () => t.abortar('o canal fechou');
-    t.dados.onmessage = (e) => this.pedaco(t, e.data);
-    t.canal.onmessage = (e) => (typeof e.data === 'string' ? this.texto(t, e.data) : this.quadroCodec(t, e.data));
     const tab = { degraus: [], caminhos: null };
+    let tt = null; // o teste pelo TURN
     try {
       await com(Promise.all([this.aberto(t.canal), this.aberto(t.dados)]).then((v) => { if (!v.every(Boolean)) throw new Error('o canal não abriu'); }));
       this.dizer(t, { ola: key });
@@ -459,38 +506,66 @@ export class TesteJoga {
       const rtt0 = r1(pct(t.rtts, 0.5));
       const rede0 = await com(Promise.resolve(this.caminho?.(dono)).catch(() => null));
 
-      const plano = planoDaBanda({ ps5Kbps: ola.ps5?.kbps ?? null });
-      let p = plano.next();
-      let n = 0;
-      while (!p.done) {
-        const d = p.value;
-        n++;
-        this.onProgresso?.({ parte: Math.min(0.8, 0.05 + n * 0.075), texto: d.confirma ? `Confirmando ${fmt(d.kbps)}…` : `Testando ${fmt(d.kbps)}…` });
-        const r = await com(this.medir(t, n, d));
+      const noTurn = !!rede0?.relay; // já está pelo TURN (nem o direto liga): é só ele
+      const nomeDireto = noTurn ? 'pelo servidor (TURN)' : 'direto';
+      const direto = { rttMs: null, banda: null };
+      direto.banda = await this.subir(t, com, { ps5Kbps: ola.ps5?.kbps ?? null, longe: rtt0 > RTT_LONGE, nome: nomeDireto, de: 0.05, ate: 0.5, degraus: tab.degraus, extra: async () => {
         const rede = await com(Promise.resolve(this.caminho?.(dono)).catch(() => null));
-        Object.assign(r, { rttMs: r.rttMs ?? null, iceRttMs: rede?.rttMs ?? null, familia: rede?.familia ?? null, par: rede?.par ?? null }, d.confirma ? { confirma: true } : {});
-        tab.degraus.push(r);
-        p = plano.next(r);
-        // o caminho que cortou leva ~1 s para voltar: o próximo degrau não paga por este
-        if (!p.done && !r.ok) await com(esperar(RECUPERA_MS));
+        return { iceRttMs: rede?.rttMs ?? null, familia: rede?.familia ?? null, par: rede?.par ?? null };
+      } });
+      direto.rttMs = r1(pct(t.rtts.slice(-12), 0.5));
+      // o TURN: outra conexão, com o mesmo teste
+      let turn = null;
+      tab.turn = null;
+      const medirTurn = !noTurn && this.sonda && (tudo || direto.rttMs > RTT_DIRETO_BOM || (!direto.banda.livre && direto.banda.tetoKbps < 10_000));
+      if (medirTurn) {
+        this.onProgresso?.({ parte: 0.5, texto: 'Abrindo o caminho pelo servidor (TURN)…' });
+        tab.turn = { erro: null, degraus: [] };
+        try {
+          tt = await com(this.abrirSonda(t, key));
+        } catch (err) {
+          if (t.saiu) throw err;
+          tab.turn.erro = String(err?.message || err).slice(0, 100);
+        }
+        if (tt) {
+          await com(esperar(700));
+          turn = { rttMs: r1(pct(tt.rtts, 0.5)), banda: null };
+          tab.turn.rttInicioMs = turn.rttMs;
+          turn.banda = await this.subir(tt, com, { ps5Kbps: ola.ps5?.kbps ?? null, longe: turn.rttMs > RTT_LONGE, nome: 'pelo servidor (TURN)', de: 0.52, ate: 0.84, degraus: tab.turn.degraus });
+          turn.rttMs = r1(pct(tt.rtts.slice(-12), 0.5));
+          Object.assign(tab.turn, { rttMs: turn.rttMs, tetoKbps: turn.banda.tetoKbps, livre: turn.banda.livre, tremidoMs: turn.banda.confirma?.tremidoMs ?? null });
+        }
+        this.fecharSonda(tt);
       }
-      const banda = p.value;
+      const qual = noTurn ? { caminho: 'turn', custos: null, porque: 'a conexão já é pelo servidor (TURN): não liga direto' } : escolherCaminho({ direto, turn });
+      const usado = qual.caminho === 'turn' && turn ? turn : direto;
+      const banda = usado.banda;
+      let n = 200;
       tab.caminhos = await com(Promise.resolve(this.caminhos?.(dono)).catch(() => null));
       const rede1 = await com(Promise.resolve(this.caminho?.(dono)).catch(() => null));
 
       const kbpsCodec = Math.min(CODEC_KBPS_MAX, Math.max(1500, Math.round(banda.tetoKbps * 0.8)));
       const res = {};
+      // a placa dos dois lados acordando: no notebook (Intel UHD) o primeiro codec medido deu 9,8 ms, e no jogo 0,9
+      if (codecs.h264?.length) await com(this.medirCodec(t, ++n, codecs.h264, kbpsCodec, AQUECE_MS));
       for (const [nome, lista, parte] of [['h264', codecs.h264, 0.86], ['h265', codecs.h265, 0.94]]) {
         if (!lista?.length) { res[nome] = { erro: 'este aparelho não decodifica' }; continue; }
         this.onProgresso?.({ parte, texto: `Comparando a imagem em ${nome === 'h264' ? 'H.264' : 'H.265'}…` });
         res[nome] = await com(this.medirCodec(t, ++n, lista, kbpsCodec));
         await com(esperar(PAUSA_MS));
       }
-      const escolha = escolher({ banda, ...res, ps5: ola.ps5, padrao, rapido });
+      const escolha = escolher({ banda, ...res, ps5: ola.ps5, padrao, rapido, rttMs: usado.rttMs });
       const r = {
         ...escolha,
         rttInicioMs: rtt0,
-        rttMs: r1(pct(t.rtts.slice(-12), 0.5)),
+        rttMs: usado.rttMs,
+        rota: qual.caminho, // 'direto' ou 'turn'
+        rotaPorque: qual.porque,
+        rotaCustos: qual.custos,
+        trocarRota: qual.caminho === 'turn' && !noTurn, // a conexão do jogo precisa passar para o TURN
+        confirmou: !!banda.confirma?.ok,
+        direto: { rttMs: direto.rttMs, tetoKbps: direto.banda.tetoKbps, livre: direto.banda.livre, tremidoMs: direto.banda.confirma?.tremidoMs ?? null },
+        turn: tab.turn,
         // o caminho trocou sozinho durante o teste (2026-11-25: de 8 para 50 ms, sem motivo conhecido)
         caminho: { de: rede0 && { par: rede0.par, rttMs: rede0.rttMs, familia: rede0.familia, local: rede0.local, remoto: rede0.remoto }, para: rede1 && { par: rede1.par, rttMs: rede1.rttMs, familia: rede1.familia, local: rede1.local, remoto: rede1.remoto }, trocou: !!(rede0?.par && rede1?.par && rede0.par !== rede1.par) },
         relay: !!rede1?.relay,
@@ -501,17 +576,18 @@ export class TesteJoga {
         duracaoMs: Math.round(performance.now() - inicio),
       };
       this.onEvento?.('teste da conexão', r);
-      const { degraus, caminhos, ...curto } = r;
-      this.dizer(t, { resultado: { ...curto, degraus: degraus.map((x) => `${x.kbps}${x.ok ? ' ok' : ` ${x.porque}`}`) } });
+      const { degraus, caminhos, turn: tr, ...curto } = r;
+      this.dizer(t, { resultado: { ...curto, turn: tr && { erro: tr.erro, rttMs: tr.rttMs, tetoKbps: tr.tetoKbps, degraus: tr.degraus.map((x) => `${x.kbps}${x.ok ? ' ok' : ` ${x.porque}`}`) }, degraus: degraus.map((x) => `${x.kbps}${x.ok ? ' ok' : ` ${x.porque}`}`) } });
       this.onProgresso?.({ parte: 1, texto: 'Pronto' });
       return r;
     } catch (err) {
       const motivo = String(err?.message || err).slice(0, 120);
-      this.onEvento?.('teste da conexão: não terminou', { motivo, degraus: tab.degraus, ms: Math.round(performance.now() - inicio) });
+      this.onEvento?.('teste da conexão: não terminou', { motivo, degraus: tab.degraus, turn: tab.turn, ms: Math.round(performance.now() - inicio) });
       return { erro: motivo };
     } finally {
       clearTimeout(limite);
       clearInterval(t.pingar);
+      this.fecharSonda(tt || t.sondaTt);
       if (this.t === t) this.t = null;
       this.dizer(t, { fim: 1 });
       t.canal.onclose = null;
@@ -526,10 +602,68 @@ export class TesteJoga {
     }
   }
 
-  aberto(canal) {
+  // o estado de um teste num par de canais
+  novo(ch) {
+    const t = { canal: ch.canal, dados: ch.dados, esperas: new Map(), chegadas: new Map(), pings: new Map(), rtts: [], cod: null, ola: null, saiu: false, n: 0 };
+    t.dados.binaryType = 'arraybuffer';
+    t.canal.binaryType = 'arraybuffer';
+    t.dados.onmessage = (e) => this.pedaco(t, e.data);
+    t.canal.onmessage = (e) => (typeof e.data === 'string' ? this.texto(t, e.data) : this.quadroCodec(t, e.data));
+    return t;
+  }
+
+  // a banda de um caminho: o plano inteiro (planoDaBanda)
+  async subir(t, com, { ps5Kbps, longe, nome, de, ate, degraus, extra = null }) {
+    const plano = planoDaBanda({ ps5Kbps, longe });
+    let p = plano.next();
+    let i = 0;
+    while (!p.done) {
+      const d = p.value;
+      t.n++;
+      i++;
+      this.onProgresso?.({ parte: Math.min(ate, de + i * (ate - de) / 9), texto: `${nome[0].toUpperCase()}${nome.slice(1)}: ${d.confirma ? 'confirmando' : 'testando'} ${fmt(d.kbps)}…` });
+      const r = await com(this.medir(t, t.n, d));
+      Object.assign(r, extra ? await extra() : {}, d.confirma ? { confirma: true } : {});
+      degraus.push(r);
+      p = plano.next(r);
+      // o caminho que cortou leva ~1 s para voltar: o próximo degrau não paga por este
+      if (!p.done && !r.ok) await com(esperar(RECUPERA_MS));
+    }
+    return p.value;
+  }
+
+  // a conexão à parte pelo TURN, com a oferta e os candidatos pelo canal do teste
+  async abrirSonda(t, key) {
+    const prontas = [];
+    let s = null;
+    t.sinalSonda = (m) => (s ? s.receber(m) : prontas.push(m));
+    s = await this.sonda((m) => this.dizer(t, { sonda: m }));
+    if (!s) throw new Error('sem TURN');
+    for (const m of prontas) s.receber(m);
+    const tt = this.novo(s);
+    tt.pc = s.pc;
+    t.sondaTt = tt; // fecha mesmo se o teste for pulado no meio
+    const abriu = await Promise.race([Promise.all([this.aberto(tt.canal, SONDA_MS), this.aberto(tt.dados, SONDA_MS)]), esperar(SONDA_MS).then(() => [false])]);
+    if (!abriu.every(Boolean)) { this.fecharSonda(tt); throw new Error('o TURN não ligou'); }
+    this.dizer(tt, { ola: key });
+    const ola = await this.resposta(tt, 'ola', OLA_MS);
+    if (!ola || ola.erro) { this.fecharSonda(tt); throw new Error(ola?.erro || 'sem resposta pelo TURN'); }
+    tt.pingar = setInterval(() => this.ping(tt), 150);
+    return tt;
+  }
+
+  fecharSonda(tt) {
+    if (!tt || tt.fechada) return;
+    tt.fechada = true;
+    clearInterval(tt.pingar);
+    this.dizer(tt, { fim: 1 });
+    setTimeout(() => { try { tt.pc.close(); } catch { /* já fechada */ } }, 300);
+  }
+
+  aberto(canal, prazo = OLA_MS + 1000) {
     if (canal.readyState === 'open') return Promise.resolve(true);
     return new Promise((ok) => {
-      const fim = setTimeout(() => ok(false), OLA_MS + 1000);
+      const fim = setTimeout(() => ok(false), prazo);
       canal.addEventListener('open', () => { clearTimeout(fim); ok(true); }, { once: true });
     });
   }
@@ -558,6 +692,7 @@ export class TesteJoga {
       if (em != null) { t.pings.delete(m.pong); t.rtts.push(performance.now() - em); if (t.rtts.length > 200) t.rtts.shift(); }
       return;
     }
+    if (m.sonda) return void t.sinalSonda?.(m.sonda);
     if (m.ola || m.erro) t.esperas.get('ola')?.(m);
     if (m.acabou != null) t.esperas.get(`d${m.acabou}`)?.(m);
     if (m.codecCfg != null) this.cfgCodec(t, m);
@@ -593,11 +728,11 @@ export class TesteJoga {
   }
 
   // ------------------------------------------------------------ codec
-  async medirCodec(t, n, lista, kbps) {
+  async medirCodec(t, n, lista, kbps, ms = CODEC_MS) {
     const c = { n, partes: null, dec: null, sub: new Map(), tempos: [], saiu: 0, quadros: 0, erro: null, filaMax: 0, filas: [] };
     t.cod = c;
-    this.dizer(t, { codec: n, codecs: lista, kbps, ms: CODEC_MS });
-    const fim = await this.resposta(t, `c${n}`, CODEC_MS + 5000);
+    this.dizer(t, { codec: n, codecs: lista, kbps, ms });
+    const fim = await this.resposta(t, `c${n}`, ms + 5000);
     await esperar(150);
     const r = { codec: fim?.codec ?? null, kbps, quadros: c.quadros, saiu: c.saiu, decP50: r1(pct(c.tempos, 0.5)), decP95: r1(pct(c.tempos, 0.95)), codP50: fim?.codP50 ?? null, codP95: fim?.codP95 ?? null, placaLa: fim?.placa ?? null, chegaram: fim?.quadros ?? null };
     // guardando: o decodificador só solta o quadro com vários na frente (a espera vira atraso fixo)
@@ -714,7 +849,7 @@ export class PainelTeste {
     const el = document.createElement('div');
     el.className = 'tc-painel';
     el.setAttribute('role', 'status');
-    el.innerHTML = '<div class="tc-caixa"><b>Testando a conexão com o PC do jogo</b><p>Uns 15 a 25 segundos, para escolher a melhor imagem agora.</p><div class="tc-barra"><i></i></div><div class="tc-linha"><span></span><button type="button">Pular (F7)</button></div></div>';
+    el.innerHTML = '<div class="tc-caixa"><b>Testando a conexão com o PC do jogo</b><p>Uns 20 a 50 segundos, para escolher o melhor caminho e a melhor imagem agora.</p><div class="tc-barra"><i></i></div><div class="tc-linha"><span></span><button type="button">Pular (F7)</button></div></div>';
     el.querySelector('button').addEventListener('click', () => this.onPular?.());
     this.el = el;
     this.dentro()?.append(el);
@@ -756,7 +891,7 @@ export class PainelTeste {
 
 export function textoDoResultado(r) {
   const banda = r.livre ? `mais de ${fmt(r.tetoKbps)}` : `até ${fmt(r.tetoKbps)}`;
-  return `${banda} · ${r.rttMs != null ? `${Math.round(r.rttMs)} ms` : '–'} · ${r.codec === 'h265' ? 'H.265' : 'H.264'}`;
+  return `${r.rota === 'turn' ? 'TURN · ' : 'direto · '}${banda} · ${r.rttMs != null ? `${Math.round(r.rttMs)} ms` : '–'} · ${r.codec === 'h265' ? 'H.265' : 'H.264'}`;
 }
 
 // ---------------------------------------------------------------- o que fica lembrado

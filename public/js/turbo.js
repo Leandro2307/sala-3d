@@ -180,6 +180,8 @@ const ACIMA = 1.15; // o PS5 repassado num segundo inteiro acima disto do teto..
 const ACIMA_FORTE = 1.4; // ...ou meio segundo acima disto
 const ACIMA_VOLTA = 0.8; // volta a repassar quando o PS5 passa 10 s sem passar disto do teto
 const ACIMA_ESPERA_MS = 30_000; // e só depois disto (dobra a cada vez, até 4 min)
+// longe, um pedaço perdido já custa isto para vir de novo: não é parada (a 260 ms os 700 disparavam à toa)
+const paradaLonge = (rtt) => (rtt > 80 ? Math.min(3000, rtt * 4 + 300) : 0);
 // Com a ida e volta acima disto, o repasse nem começa: o quadro-chave do PS5 leva ~1 s para chegar e a cadeia
 // quebra antes (iPhone a ~280 ms, 2026-11-25: 7 tentativas e nenhum quadro)
 const REPASSE_RTT_MAX = 150;
@@ -199,6 +201,8 @@ const PING_MS = 500;
 // fila dele chegou a 2500 quadros — a imagem minutos atrasada): mais que isto esperando, joga a fila fora
 // (reset) e recomeça no próximo quadro-chave. Melhor pular que atrasar.
 const DEC_FILA_MAX = 8;
+const DEC_RAPIDO_MS = 10; // quem decodifica em até isto...
+const DEC_FILA_RAJADA = 36; // ...esvazia uma rajada deste tamanho em menos de 0,4 s
 const SEGURANDO = 3; // quadros dentro do decodificador depois de ele já ter soltado algum...
 const SEGURANDO_QUADROS = 15; // ...em tantos quadros seguidos: ele está guardando (TurboRecebe.segurando)
 const pct = (v, p) => {
@@ -952,8 +956,10 @@ export class TurboEnvio {
     if (!teto && lem?.caiu && rx < (s.kbpsFonte || 0) * 0.4) return; // com o teto conhecido, cabeNoTeto já disse
     const rede = this.rede ? await this.rede(s.id).catch(() => null) : null;
     if (s.parar || s.trocando || this.sessoes.get(s.id) !== s || !rede) return;
+    // longe o repasse nem começa (ligarSessao): sem isto recomeçava a cada 2 s (iPhone a 260 ms, 2026-11-25 18:29)
+    if (rede.rttMs > REPASSE_RTT_MAX) return;
     const direto = !rede.relay && !/^relay/.test(rede.local || '') && !/^relay/.test(rede.remoto || '');
-    if (!direto && !rede.lan) return;
+    if (!direto && !rede.lan && !(Number(s.pedido?.teto) > 0)) return; // pelo TURN, só com ele medido no teste
     s.trocando = true;
     this.onEvento?.(s.id, 'turbo: caminho direto e rede calma — tentando o PS5 repassado de novo', { filaMs: Math.round(fila), rxKbps: rx || null, ps5Kbps: s.kbpsFonte });
     const { recodificar, bandaInicialKbps, porFalha, socorro, tetoKbps, ...pedido } = s.pedido || {};
@@ -1049,7 +1055,7 @@ export class TurboEnvio {
       const passa = !!this.lembrado(id)?.acima || !this.cabeNoTeto(teto, fonte);
       const semRepasse = caiuHaPouco || semHevc || longe || passa;
       const direto = !!rede && !rede.relay && !/^relay/.test(rede.local || '') && !/^relay/.test(rede.remoto || '');
-      const cabe = !semRepasse && (!kbpsPs5 || !rede || rede.lan || direto || rede.saidaKbps == null || rede.saidaKbps >= kbpsPs5 * FOLGA_REPASSE);
+      const cabe = !semRepasse && (!kbpsPs5 || !rede || rede.lan || direto || Number(pedido.teto) > 0 || rede.saidaKbps == null || rede.saidaKbps >= kbpsPs5 * FOLGA_REPASSE);
       if (cabe) return this.ligarPs5(id, canal, key, fonte, { versao, som, somMix: t.somMix, rede, pedido });
       this.onEvento?.(id, semHevc ? 'turbo: o PS5 está em H.265 e quem joga pediu H.264 — codificando aqui'
         : longe ? 'turbo: quem joga está longe (ida e volta alta) — o PS5 é codificado aqui'
@@ -1212,7 +1218,7 @@ export class TurboEnvio {
       return false;
     }
     const parado = agora - s.andouEm;
-    if (parado < (agora - s.inicioEm < REPASSE_GRACA_MS ? PARADA_INICIO_MS : PARADA_MS)) return false;
+    if (parado < Math.max(agora - s.inicioEm < REPASSE_GRACA_MS ? PARADA_INICIO_MS : PARADA_MS, paradaLonge(s.rede?.rttMs))) return false;
     s.trocando = true;
     const rx = s.ajuste.rxs?.length ? Math.max(...s.ajuste.rxs) : null;
     const aprendido = this.lembrarCorte(s.id, rx);
@@ -1255,7 +1261,7 @@ export class TurboEnvio {
       return;
     }
     const parado = agora - s.andouEm;
-    if (parado < PARADA_MS || agora - (s.paradaVista || 0) < 4000 || s.enc?.state !== 'configured' || !s.config) return;
+    if (parado < Math.max(PARADA_MS, paradaLonge(s.rede?.rttMs)) || agora - (s.paradaVista || 0) < 4000 || s.enc?.state !== 'configured' || !s.config) return;
     s.paradaVista = agora;
     const rx = s.ajuste.rxs?.length ? Math.max(...s.ajuste.rxs) : null;
     const aprendido = this.lembrarCorte(s.id, rx);
@@ -2284,7 +2290,9 @@ export class TurboRecebe {
       // logo depois de a página ficar parada, os quadros se acumulam por isso, não pelo decodificador
       if (performance.now() - (s.paradaEm || -1e9) > PARADA_GRACA_MS) this.segurando(s);
     }
-    if ((s.dec.decodeQueueSize ?? 0) > DEC_FILA_MAX) {
+    // um decodificador rápido com a fila cheia é rajada (a rede parou e entregou tudo junto): ele esvazia sozinho
+    const decMs = mediana(s.conta.decMs);
+    if ((s.dec.decodeQueueSize ?? 0) > (decMs != null && decMs <= DEC_RAPIDO_MS ? DEC_FILA_RAJADA : DEC_FILA_MAX)) {
       s.conta.decAtrasou = (s.conta.decAtrasou || 0) + 1;
       if (performance.now() - (s.decAtrasouEm || 0) > 5000) {
         s.decAtrasouEm = performance.now();

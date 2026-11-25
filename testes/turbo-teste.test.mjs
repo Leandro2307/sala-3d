@@ -1,7 +1,7 @@
 // O teste da conexão (turbo-teste.js): as contas, o plano da banda com caminhos de mentira e as escolhas
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resumirDegrau, planoDaBanda, escolher, escolherCodec, escolherModo, MemoriaTeste } from '../public/js/turbo-teste.js';
+import { resumirDegrau, planoDaBanda, escolher, escolherCaminho, escolherCodec, escolherModo, MemoriaTeste } from '../public/js/turbo-teste.js';
 import { TurboEnvio } from '../public/js/turbo.js';
 import { TurboAuto, avaliar, foraDoModo } from '../public/js/turbo-auto.js';
 
@@ -240,4 +240,37 @@ test('o caminho trocou no meio da medida: recomeça', () => {
   assert.ok(ev.some((x) => /recomeçando/.test(x)));
   passar({ par: 'outro' }, 20);
   assert.equal(a.fase, 'fixo');
+});
+
+// ------------------------------------------------------------ direto e TURN
+const via = (rttMs, o = {}) => ({ rttMs, banda: { tetoKbps: o.teto ?? 12000, livre: o.livre ?? true, confirma: { ok: o.ok ?? true, tremidoMs: o.tremido ?? 5, perdaPct: 0, buracoMs: 30 } } });
+
+test('caminho: o TURN ganha só com folga', () => {
+  assert.equal(escolherCaminho({ direto: via(260), turn: via(50) }).caminho, 'turn'); // o iPhone no 5G
+  assert.equal(escolherCaminho({ direto: via(8), turn: via(30) }).caminho, 'direto');
+  assert.equal(escolherCaminho({ direto: via(50), turn: via(45) }).caminho, 'direto'); // parecido: sem o servidor no meio
+  assert.equal(escolherCaminho({ direto: via(90), turn: null }).caminho, 'direto');
+  assert.equal(escolherCaminho({ direto: via(60, { teto: 2000, ok: false }), turn: via(55) }).caminho, 'turn'); // o direto não leva a banda
+  assert.equal(escolherCaminho({ direto: via(120), turn: via(50, { teto: 1500, ok: false }) }).caminho, 'direto'); // nem o TURN
+  assert.equal(escolherCaminho({ direto: via(120), turn: { rttMs: 40, banda: null } }).caminho, 'direto'); // não mediu
+});
+
+test('longe: menos banda, modo com folga, e o teste não passa de 12 Mbps', () => {
+  const r = escolher({ banda: { tetoKbps: 20000, livre: true, confirma: { ok: true, tremidoMs: 2, perdaPct: 0, buracoMs: 20 } }, ps5: { kbps: 20000 }, padrao: 14, rapido: 16, rttMs: 260 });
+  assert.deepEqual([r.tetoKbps, r.livre, r.modo], [6000, false, 14]);
+  assert.match(r.modoPorque, /longe/);
+  const g = planoDaBanda({ ps5Kbps: 20000, longe: true });
+  let p = g.next();
+  let maior = 0;
+  while (!p.done) { maior = Math.max(maior, p.value.kbps); p = g.next({ ok: true, chegouKbps: p.value.kbps }); }
+  assert.equal(maior, 12000);
+});
+
+test('longe: uma espera normal de 260 ms não é canal parado', () => {
+  const { e } = envio();
+  const s = { id: 'a', key: 'k', canal: {}, ps5: { kbps: 20000 }, rede: { rttMs: 260 }, pedido: {}, inicioEm: -60_000, saiuTotal: 500_000, ajuste: {} };
+  let fila = 90_000;
+  assert.equal(e.repasseParado(s, fila, 0), false);
+  for (let x = 16; x < 1300; x += 16) { s.saiuTotal += 2000; fila += 2000; assert.equal(e.repasseParado(s, fila, x), false, String(x)); }
+  assert.equal(e.repasseParado(s, fila, 1500), true);
 });

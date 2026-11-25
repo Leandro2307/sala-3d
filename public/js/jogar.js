@@ -1095,6 +1095,34 @@ function amostraDoAuto(resumo) {
   // o turbo que voltou já dura: o próximo ligar não precisa mais começar por baixo
   if (turboRecebe.depoisDaFalha && turboRecebe.ligado && performance.now() - turboVolta.ligouEm > 60_000) turboRecebe.depoisDaFalha = null;
   turboAuto.amostra(resumo, document.hidden);
+  verCaminho(resumo);
+}
+// O navegador trocou de caminho sozinho (2026-11-25: de 8 para 50 ms, duas vezes): guarda os caminhos que havia e, se o
+// novo é bem mais lento, procura outro uma vez por jogo.
+const vigiaCaminho = { par: null, rtt: [], procurou: false };
+function verCaminho(resumo) {
+  const par = resumo.conexao?.par;
+  const rtt = resumo.rttMs;
+  if (!par || rtt == null) return;
+  const v = vigiaCaminho;
+  if (v.par && v.par !== par) {
+    const antes = v.rtt.length ? [...v.rtt].sort((a, b) => a - b)[v.rtt.length >> 1] : null;
+    const dono = jogandoLa.key.split('~')[0];
+    v.troca = { antes, desde: performance.now() };
+    Promise.resolve(rtc?.caminhosDe(dono)).then((caminhos) => diagJogo.evento('os caminhos na hora da troca', { antesMs: antes, caminhos })).catch(() => {});
+    v.rtt = [];
+  }
+  v.par = par;
+  v.rtt.push(rtt);
+  if (v.rtt.length > 10) v.rtt.shift();
+  if (!v.troca || v.procurou || v.troca.antes == null || v.rtt.length < 4) return;
+  const agora = [...v.rtt].sort((a, b) => a - b)[v.rtt.length >> 1];
+  if (agora > v.troca.antes * 2.5 && agora > v.troca.antes + 25) {
+    v.procurou = true;
+    diagJogo.evento('o caminho novo é bem mais lento: procurando outro', { antesMs: v.troca.antes, agoraMs: agora });
+    rtc?.procurarCaminho(jogandoLa.key.split('~')[0]);
+  }
+  v.troca = null;
 }
 // ---------------------------------------------------------------- o teste da conexão antes do turbo (turbo-teste.js)
 const memoriaTeste = new MemoriaTeste();
@@ -1103,10 +1131,20 @@ const testeJoga = new TesteJoga({
   abrir: (id) => rtc?.abrirTeste(id) ?? null,
   caminho: (id) => rtc?.caminhoPara(id) ?? null,
   caminhos: (id) => rtc?.caminhosDe(id) ?? null,
+  sonda: (sinal) => rtc?.sondaTurn(sinal) ?? null,
   onProgresso: (p) => painelTeste.progresso(p),
   onEvento: (texto, dados) => diagJogo.evento(texto, dados),
 });
 let codecsDoTeste = null;
+// espera (até 10 s) a conexão estar pelo TURN (ou direto)
+async function esperarRota(dono, turn) {
+  for (let i = 0; i < 40; i++) {
+    const c = await Promise.resolve(rtc?.caminhoPara(dono)).catch(() => null);
+    if (c && c.relay === turn) return true;
+    await new Promise((ok) => setTimeout(ok, 250));
+  }
+  return false;
+}
 // Testa (ou usa o teste de há pouco, com a conexão parecida) e prepara o turbo. Devolve o resultado ou null.
 async function testarConexao(deNovo) {
   const jl = jogandoLa;
@@ -1114,18 +1152,30 @@ async function testarConexao(deNovo) {
   const rede = await Promise.resolve(rtc?.caminhoPara(dono)).catch(() => null);
   if (jogandoLa !== jl) return null;
   let r = deNovo ? null : memoriaTeste.valido(dono, rede);
+  let rede0 = null;
   if (r) diagJogo.evento('teste da conexão: vale o de há pouco', { tetoKbps: r.tetoKbps, codec: r.codec, modo: r.modo });
   else {
     codecsDoTeste ??= await codecsDaqui(['avc1.640033', 'avc1.4d0033', 'avc1.42e033', 'avc1.42001f'], ['hvc1.1.6.L123.B0']);
     if (jogandoLa !== jl) return null;
     if (!deNovo && memoriaTeste.porque) diagJogo.evento('teste da conexão: o de há pouco não vale mais', { porque: memoriaTeste.porque });
+    // testar de novo com o TURN escolhido antes: primeiro volta ao direto, para comparar os dois
+    if (rtc?.usarCaminho(dono, 'auto')) await esperarRota(dono, false);
+    if (jogandoLa !== jl) return null;
     painelTeste.mostrar();
-    r = await testeJoga.rodar(jl.key, { codecs: codecsDoTeste, padrao: PRESET_TV.id, rapido: 16 });
+    rede0 = await Promise.resolve(rtc?.caminhoPara(dono)).catch(() => null); // o teste vale para este caminho direto
+    r = await testeJoga.rodar(jl.key, { codecs: codecsDoTeste, padrao: PRESET_TV.id, rapido: 16, tudo: deNovo });
     painelTeste.fechar();
     if (jogandoLa !== jl || r.erro) return null;
-    memoriaTeste.guardar(dono, r, await Promise.resolve(rtc?.caminhoPara(dono)).catch(() => null));
+    memoriaTeste.guardar(dono, r, rede0 || await Promise.resolve(rtc?.caminhoPara(dono)).catch(() => null));
     if (jogandoLa !== jl) return null;
     painelTeste.resultado(r, MODOS.find((p) => p.id === r.modo)?.nome || 'Turbo');
+  }
+  if (r.trocarRota && rtc?.usarCaminho(dono, 'turn')) {
+    const foi = await esperarRota(dono, true);
+    diagJogo.evento('teste da conexão: passando para o TURN', { foi });
+    if (jogandoLa === jl) aplicarBuffer();
+    if (!foi && jogandoLa === jl) rtc.usarCaminho(dono, 'auto'); // não ligou: volta a valer qualquer caminho
+    if (jogandoLa !== jl) return null;
   }
   autoMostra.teste = textoDoResultado(r);
   marcarPresets(document);
@@ -1152,7 +1202,7 @@ async function entrarNoTurbo(deNovo = false) {
     if (entrando === jl) entrando = false;
   }
   if (jogandoLa !== jl || !opcoesJogo.get('turbo')) return;
-  if (r) turboRecebe.teste = { tetoKbps: r.livre ? null : r.tetoKbps, codec: r.codec };
+  if (r) turboRecebe.teste = { tetoKbps: r.livre && r.rota !== 'turn' ? null : r.tetoKbps, codec: r.codec, turn: r.rota === 'turn', bom: !!r.confirmou };
   if (r && turboAuto.ligado && opcoesJogo.get('preset') !== r.modo) aplicarPreset(r.modo, 'teste da conexão');
   if (!turboRecebe.ligado) ligarTurbo();
   if (!turboAuto.ligado) return;
@@ -1254,6 +1304,8 @@ function jogoLa(v, key) {
   turboVolta.parar();
   turboAuto.parar();
   testeJoga.pular('saiu do jogo');
+  if (jogandoLa) rtc?.usarCaminho(jogandoLa.key.split('~')[0], 'auto'); // o TURN escolhido vale só para o jogo
+  Object.assign(vigiaCaminho, { par: null, rtt: [], procurou: false });
   painelTeste.fechar();
   turboRecebe.desligar();
   turboRecebe.depoisDaFalha = null;

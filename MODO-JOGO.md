@@ -1282,3 +1282,18 @@ Automático: amostras com o caminho parado ou o PS5 fora do ritmo não contam, a
 de ganho e recomeça a medir se o caminho ou o repasse mudar. Depois do teste já começa decidido.
 
 Testado local, com um limite de 12 Mbps simulado. Não testado na rede real.
+
+## Direto ou TURN pela medida (2026-11-25)
+
+iPhone no 5G às 18:29: direto por IPv6 com 260 ms de ida e volta (pelo TURN, de manhã, 50). O teste da conexão agora
+mede os dois: abre uma conexão à parte só pelo TURN (`rtc.sondaTurn`, sinalizada pelo canal do teste) e roda os mesmos
+degraus. Mede o TURN quando o direto passa de 80 ms, não leva 10 Mbps, ou o teste foi pedido no menu. Custo = ida e
+volta + tremido + banda que falta para 6 Mbps + 40 sem confirmar; o TURN só ganha com 20% e 10 ms de folga. Ganhou: a
+conexão é refeita do zero só com candidatos relay (`rtc.usarCaminho`; reiniciar o ICE não basta, o Chrome segue nas
+portas diretas) e volta ao direto ao sair do jogo. Não ligou em 10 s: volta a valer qualquer caminho.
+
+Quem está longe (mais de 150 ms): no máximo 6 Mbps, modo com folga, `voltarAoRepasse` não tenta (recomeçava a cada 2 s)
+e o canal parado espera 4 x ida e volta + 300 ms. Decodificador rápido (até 10 ms) não joga a fila fora numa rajada.
+O caminho que troca sozinho no meio do jogo grava "os caminhos na hora da troca" e, 2,5x mais lento, procura outro uma vez.
+
+Testado local com o TURN de verdade (29 ms, 20 Mbps) e o direto atrasado em 260 ms. Não testado no 5G.
