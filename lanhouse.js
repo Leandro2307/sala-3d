@@ -11,6 +11,8 @@
 //
 // Sem webhook: a volta do checkout confirma na hora (/lan/confirmar) e, a cada minuto, o servidor
 // pergunta à Stripe pelas reservas que ainda estão esperando o pagamento.
+// Formas de pagamento: as ligadas no painel da Stripe (cartão e Pix). O Pix vence em PIX_MS; boleto tem
+// que ficar desligado lá, porque a hora é solta quando o prazo do Pix acaba.
 const crypto = require('crypto');
 const express = require('express');
 
@@ -23,6 +25,9 @@ const MAX_HORAS = 8; // horas numa compra só
 const MAQUINAS = { pc: 'PC', ps5: 'PS5' };
 const maquinaDe = (m) => (Object.hasOwn(MAQUINAS, m) ? m : 'pc');
 const ESPERA_CHECKOUT = 31 * 60_000; // a Stripe exige pelo menos 30 min até a sessão expirar
+const PIX_MS = 10 * 60_000; // validade do código Pix (o padrão da Stripe é 4 h: seguraria a hora à toa)
+const FOLGA_PIX = 60_000; // o Pix pago no último segundo ainda chega a tempo
+const VIGIA_MS = 15 * 60_000; // checkout já solto: ainda confere este tempo se caiu um pagamento atrasado
 const TOKEN_DIAS = 30;
 // Teste grátis: com a máquina sem ninguém alugado, cada pessoa joga 2 min uma vez só. O tempo conta
 // do primeiro comando que ela manda ao jogo. Fica marcado na conta e no IP: outra conta criada no
@@ -155,16 +160,37 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
     for (const sala of new Set(lista.map((r) => r.sala))) aoMudar?.(sala);
   }
 
+  // Pago tarde demais: a hora já acabou, ou foi solta e outra reserva está com ela. Não entra na agenda;
+  // o dono devolve o valor no painel da Stripe.
+  const tardeDemais = (r, agora) => r.inicio + HORA <= agora
+    || [...reservas.values()].some((o) => o !== r && o.sala === r.sala && maquinaDe(o.maquina) === maquinaDe(r.maquina) && o.inicio === r.inicio && segura(o, agora));
+
   // pergunta à Stripe como está a sessão e acerta as reservas dela
   async function conferirSessao(sessao) {
     const lista = [...reservas.values()].filter((r) => r.sessao === sessao);
     if (!lista.length) return null;
     const s = await stripe('GET', `checkout/sessions/${encodeURIComponent(sessao)}`);
-    if (s.payment_status === 'paid' || s.payment_status === 'no_payment_required') await mudarStatus(lista, 'paga');
-    else if (s.status === 'expired') await mudarStatus(lista, 'cancelada');
-    // pagamento que ainda vai cair (boleto etc.): segura a hora até ela começar
+    const agora = Date.now();
+    const pendentes = lista.filter((r) => r.status === 'pendente');
+    if (s.payment_status === 'paid' || s.payment_status === 'no_payment_required') {
+      // cancelada com expira 0: o dono encerrou a vez (ver encerrar), não volta
+      const novas = lista.filter((r) => r.status === 'pendente' || (r.status === 'cancelada' && r.expira));
+      const tarde = novas.filter((r) => tardeDemais(r, agora));
+      await mudarStatus(novas.filter((r) => !tarde.includes(r)), 'paga');
+      await mudarStatus(tarde, 'devolver');
+      for (const r of tarde) console.warn(`[lan] DEVOLVER ${r.conta}: pagou ${diaDe(r.inicio)} ${horaDe(r.inicio)}h tarde demais (${sessao.slice(0, 24)})`);
+    } else if (s.status === 'expired') await mudarStatus(pendentes, 'cancelada');
+    // Pix gerado e ainda não pago: segura a hora só até o código vencer. O prazo conta de quando o
+    // servidor viu (nunca antes do de verdade), e não passa do último Pix possível deste checkout.
     else if (s.status === 'complete') {
-      for (const r of lista) if (r.status === 'pendente') r.expira = Math.max(r.expira, r.inicio);
+      for (const r of pendentes) {
+        if (r.pixAte) continue;
+        r.pixAte = Math.min(agora + PIX_MS, r.criada + ESPERA_CHECKOUT + PIX_MS) + FOLGA_PIX;
+        r.expira = r.pixAte;
+        await guardar(r);
+      }
+      const vencidas = pendentes.filter((r) => r.pixAte <= agora);
+      if (vencidas.length) await mudarStatus(vencidas, 'cancelada');
     }
     return lista;
   }
@@ -175,7 +201,10 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
     conferindo = true;
     try {
       const agora = Date.now();
-      const sessoes = new Set([...reservas.values()].filter((r) => r.status === 'pendente' && r.sessao).map((r) => r.sessao));
+      // as que esperam o pagamento e as soltas há pouco (um Pix pago no limite ainda pode cair)
+      const sessoes = new Set([...reservas.values()]
+        .filter((r) => r.sessao?.startsWith('cs_') && (r.status === 'pendente' || (r.status === 'cancelada' && r.expira > agora - VIGIA_MS)))
+        .map((r) => r.sessao));
       for (const s of sessoes) {
         try {
           await conferirSessao(s);
@@ -315,7 +344,7 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
       if (!conta) return res.json({ ok: false, erro: 'login' });
       const agora = Date.now();
       const lista = [...reservas.values()]
-        .filter((r) => r.conta === conta && r.inicio + HORA > agora && segura(r, agora))
+        .filter((r) => r.conta === conta && r.inicio + HORA > agora && (segura(r, agora) || r.status === 'devolver'))
         .sort((a, b) => a.inicio - b.inicio)
         .map((r) => ({ sala: r.sala, maquina: MAQUINAS[maquinaDe(r.maquina)], jogo: r.jogoNome || null, inicio: r.inicio, dia: diaDe(r.inicio), hora: horaDe(r.inicio), status: r.status }));
       res.json({ ok: true, conta, lista });
@@ -358,9 +387,17 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
         try {
           await stripe('POST', `checkout/sessions/${encodeURIComponent(sessao)}/expire`, {});
         } catch (err) {
-          // já pago nesse meio-tempo? confere antes de soltar
+          // não fechou: já pago, com um Pix em aberto ou já vencido. Só solta se a Stripe confirmar
           const l = await conferirSessao(sessao).catch(() => null);
-          if (l?.[0]?.status === 'paga') return res.json({ ok: false, erro: 'Esse horário já foi pago por você. Veja em "Minhas reservas".' });
+          if (!l) return res.json({ ok: false, erro: 'Não deu para falar com a Stripe agora. Tente de novo em 1 minuto.' });
+          if (l.some((r) => r.status === 'paga')) return res.json({ ok: false, erro: 'Esse horário já foi pago por você. Veja em "Minhas reservas".' });
+          const aberta = l.find((r) => r.status === 'pendente');
+          if (aberta) {
+            const min = Math.max(1, Math.ceil((aberta.expira - Date.now()) / 60_000));
+            return res.json({ ok: false, erro: aberta.pixAte
+              ? `Você já tem um Pix em aberto para esse horário. Pague por ele ou espere vencer (uns ${min} min) para tentar de novo.`
+              : 'O pagamento anterior desse horário ainda está aberto. Tente de novo em 1 minuto.' });
+          }
         }
       }
       if (velhas.length) await mudarStatus([...reservas.values()].filter((r) => velhas.some((v) => v.sessao && v.sessao === r.sessao) || velhas.includes(r)), 'cancelada');
@@ -382,6 +419,7 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
           success_url: `${volta}&pago={CHECKOUT_SESSION_ID}`,
           cancel_url: `${volta}&cancelado=1`,
           expires_at: String(Math.floor((agora + ESPERA_CHECKOUT) / 1000)),
+          'payment_method_options[pix][expires_after_seconds]': String(PIX_MS / 1000),
           client_reference_id: conta,
           'metadata[sala]': sala,
           'metadata[maquina]': MAQUINAS[maquina],
@@ -411,7 +449,9 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
       try {
         const lista = await conferirSessao(sessao);
         if (!lista) return res.json({ ok: false });
-        res.json({ ok: true, status: lista[0].status, horas: lista.map((r) => ({ sala: r.sala, maquina: MAQUINAS[maquinaDe(r.maquina)], jogo: r.jogoNome || null, dia: diaDe(r.inicio), hora: horaDe(r.inicio) })) });
+        // algumas horas podem ter ficado e outras não (ver tardeDemais): o que vale é o que a pessoa ganhou
+        const status = ['paga', 'devolver', 'pendente'].find((x) => lista.some((r) => r.status === x)) || lista[0].status;
+        res.json({ ok: true, status, pixAte: lista.find((r) => r.status === 'pendente')?.pixAte || null, devolver: lista.some((r) => r.status === 'devolver'), horas: lista.filter((r) => r.status === status).map((r) => ({ sala: r.sala, maquina: MAQUINAS[maquinaDe(r.maquina)], jogo: r.jogoNome || null, dia: diaDe(r.inicio), hora: horaDe(r.inicio) })) });
       } catch (err) {
         console.warn('[lan] confirmar', err.message);
         res.json({ ok: false, erro: 'Não deu para falar com a Stripe agora. O pagamento é conferido de novo em 1 minuto.' });
@@ -503,9 +543,10 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
       const r = daHora(sala, m, h);
       if (r && r.conta === atual.conta && r.status === 'paga') lista.push(r);
     }
+    for (const r of lista) r.expira = 0; // marca: conferir o pagamento de novo não devolve a vez
     await mudarStatus(lista, 'cancelada');
     return { ok: true, conta: atual.conta, maquina: MAQUINAS[m] };
   }
 
-  return { iniciar, rotas, contaDoToken, jogadorAgora, liberar, encerrar, teste, comecarTeste, TESTE_MS, MAQUINAS: Object.keys(MAQUINAS) };
+  return { iniciar, rotas, conferirPendentes, contaDoToken, jogadorAgora, liberar, encerrar, teste, comecarTeste, TESTE_MS, MAQUINAS: Object.keys(MAQUINAS) };
 };

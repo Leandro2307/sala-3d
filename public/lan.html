@@ -433,7 +433,7 @@
     if (sairPorLogin(r)) return;
     if (!r.ok) return;
     $('#minhas-lista').innerHTML = r.lista.length
-      ? r.lista.map((m) => `<li><span><b>${m.maquina}</b>${m.jogo ? ` · ${esc(m.jogo)}` : ''} · ${dataBr(m.dia)} · ${hh(m.hora)}–${hh((m.hora + 1) % 24)}${m.sala !== sala ? ` · sala ${m.sala}` : ''}</span><span class="tag ${m.status === 'paga' ? '' : 'esperando'}">${m.status === 'paga' ? 'pago' : 'aguardando pagamento'}</span></li>`).join('')
+      ? r.lista.map((m) => `<li><span><b>${m.maquina}</b>${m.jogo ? ` · ${esc(m.jogo)}` : ''} · ${dataBr(m.dia)} · ${hh(m.hora)}–${hh((m.hora + 1) % 24)}${m.sala !== sala ? ` · sala ${m.sala}` : ''}</span><span class="tag ${m.status === 'paga' ? '' : 'esperando'}">${m.status === 'paga' ? 'pago' : m.status === 'devolver' ? 'pago tarde: será devolvido' : 'aguardando pagamento'}</span></li>`).join('')
       : '<li class="vazia">Nenhuma reserva ainda. Escolha a máquina e o horário acima.</li>';
   }
 
@@ -533,12 +533,20 @@
 
   // ------------------------------------------------ volta do checkout
   async function confirmar(sessao, tentativa = 0) {
-    aviso('Conferindo o pagamento…', 'info');
+    if (!tentativa) aviso('Conferindo o pagamento…', 'info');
     const r = await post('/lan/confirmar', { sessao });
     if (r.ok && r.status === 'paga') {
       const quando = r.horas.map((h) => `${dataBr(h.dia)} às ${hh(h.hora)}`).join(', ');
       const h0 = r.horas[0] || {};
-      aviso(`Pagamento confirmado! ${h0.maquina || ''}${h0.jogo ? ` (${h0.jogo})` : ''}: ${quando}. Na hora, entre na sala com a sua conta${h0.jogo ? ': o jogo já vai estar abrindo' : ' para jogar'}. Pode fechar esta aba.`, 'ok');
+      aviso(`Pagamento confirmado! ${h0.maquina || ''}${h0.jogo ? ` (${h0.jogo})` : ''}: ${quando}. Na hora, entre na sala com a sua conta${h0.jogo ? ': o jogo já vai estar abrindo' : ' para jogar'}. Pode fechar esta aba.${r.devolver ? ' Parte das horas já tinha sido ocupada quando o pagamento caiu: o valor delas será devolvido.' : ''}`, r.devolver ? 'info' : 'ok');
+    } else if (r.ok && r.status === 'devolver') {
+      aviso('O pagamento caiu depois que o horário foi liberado, e ele não está mais disponível. O valor será devolvido: fale com o dono da sala.', 'erro');
+    } else if (r.ok && r.status === 'cancelada') {
+      aviso('O prazo do pagamento acabou e o horário foi liberado. Escolha de novo para reservar.', 'info');
+    } else if (r.ok && r.status === 'pendente' && r.pixAte && tentativa < 200) {
+      // Pix gerado: espera aqui até ele cair ou vencer (10 min)
+      aviso('Esperando o Pix… Assim que você pagar no app do banco, o horário fica seu. O código vale 10 minutos.', 'info');
+      return setTimeout(() => confirmar(sessao, tentativa + 1), 5000);
     } else if (tentativa < 5) {
       return setTimeout(() => confirmar(sessao, tentativa + 1), 3000);
     } else {
