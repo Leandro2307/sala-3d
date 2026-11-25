@@ -367,3 +367,29 @@ test('a memória do dia sobrevive a recarregar a página e guarda só o que o jo
   const amanha = new MemoriaTeste(() => new Date(2026, 10, 26, 8).getTime(), { getItem: () => guarda.v ?? JSON.stringify({ x: { r: {}, em: agora() } }), setItem() {} });
   assert.equal(amanha.valido('x', null), null);
 });
+
+// ------------------------------------------------------------ imagem tratada no PC do jogo
+test('tratar: só com banda sobrando e perto; aí o H.265 se os dois dão conta', () => {
+  const conf = { ok: true, tremidoMs: 2, perdaPct: 0, buracoMs: 20 };
+  const bom = { quadros: 90, saiu: 90, decP50: 1, decP95: 3, codP50: 6, codP95: 9, segurando: false };
+  const r = escolher({ banda: { tetoKbps: 20000, livre: true, confirma: conf }, h264: bom, h265: { ...bom, codP50: 9 }, padrao: 14, rapido: 16, rttMs: 30 });
+  assert.deepEqual([r.tratar, r.codec], [true, 'h265']);
+  assert.equal(escolher({ banda: { tetoKbps: 8000, livre: false, confirma: conf }, h264: bom, h265: bom, padrao: 14, rapido: 16, rttMs: 30 }).tratar, false);
+  assert.equal(escolher({ banda: { tetoKbps: 20000, livre: true, confirma: conf }, padrao: 14, rapido: 16, rttMs: 260 }).tratar, false);
+  // sem H.265 que preste, fica no H.264 tratado
+  assert.deepEqual((({ tratar, codec }) => [tratar, codec])(escolher({ banda: { tetoKbps: 20000, livre: true, confirma: conf }, h264: bom, h265: { erro: 'x' }, padrao: 14, rapido: 16, rttMs: 8 })), [true, 'h264']);
+});
+
+test('tratar: o teto da banda é o do caminho, e quando cede não volta por 5 min', () => {
+  const { e, eventos } = envio();
+  const s = { id: 'a', key: 'k', canal: {}, tratar: true, recodificado: true, kbpsFonte: 20000, tetoKbps: 18000, pedido: { ligar: 'k', tratar: true, teto: 18000 } };
+  assert.equal(e.tetoBanda(s, 1080), 18_000_000); // e não 16 (80% do PS5)
+  assert.equal(e.tetoBanda({ ...s, tratar: false }, 1080), 16_000_000);
+  e.desligarTratar(s, 'a placa passou de 85%');
+  assert.equal(s.tratar, false);
+  assert.equal(e.ligados[0].tratar, undefined);
+  assert.equal(e.semTratar('a'), true);
+  assert.match(eventos.at(-1), /tratamento da imagem nesta placa desligado/);
+  e.desligarTratar(s, 'de novo'); // já cedeu: nada
+  assert.equal(e.ligados.length, 1);
+});

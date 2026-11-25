@@ -766,6 +766,15 @@ export const TRATAMENTO = { faixas: 3.2 / 255, raio: 15, grao: 1.6 / 255 };
 // A placa que leva mais que isto por quadro (mediana de GPU_AMOSTRAS medidas, uma a cada GPU_CADA quadros)
 // fica sem o tratamento até recarregar a página: em 60 qps são 16,7 ms para tudo.
 const GPU_LENTA_MS = 4;
+// Imagem tratada no PC do jogo (2026-11-25): o PS5 que iria repassado como veio passa antes pela placa daqui — um
+// realce leve e o contra faixas, sem o grão (grão antes de comprimir só gasta banda) — e é comprimido de novo aqui
+// (NVENC, H.264 High ou H.265). O Carlin achou o Lossless (que faz isso pelo OBS) "bem melhor" que o direto.
+// A dublagem do Voz Universal usa a mesma placa (CUDA) e tem a vez: o tratamento cede sozinho (desligarTratar).
+const TRATAR_LA = { forca: 0.45, faixas: 3.2 / 255, raio: 15, grao: 0 };
+const TRATAR_GPU_MS = 4; // o filtro levando mais que isto por quadro na placa
+const TRATAR_COD_MS = 14; // a compressão daqui atrasando (a placa ocupada com outra coisa)
+const TRATAR_GPU_PCT = 85; // a placa inteira acima disto em duas leituras seguidas (ajudante, a cada ~2 s)
+const TRATAR_ESPERA_MS = 5 * 60_000; // desligado por isso, não volta antes
 const GPU_AMOSTRAS = 8;
 const GPU_CADA = 20;
 export class Realce {
@@ -879,7 +888,9 @@ export class TurboEnvio {
   // rede(id) -> Promise<{ saidaKbps, lan, local, remoto } | null>: o caminho até quem joga, pelo WebRTC
   //   (rtc.caminhoPara) — a banda inicial e o repasse do PS5 saem dele
   // onEvento(id, texto, dados): o que o turbo decidiu, para o relatório
-  constructor({ tela, onMudou, rede = null, onEvento = null }) {
+  // gpu() -> { usoPct, em } da placa deste PC (o ajudante manda com a carga do PC), para o tratamento ceder
+  constructor({ tela, onMudou, rede = null, onEvento = null, gpu = null }) {
+    this.gpu = gpu;
     this.tela = tela;
     this.onMudou = onMudou;
     this.rede = rede;
@@ -939,7 +950,7 @@ export class TurboEnvio {
   // A imagem do PS5 está sendo codificada aqui: dá para voltar a repassar como veio (a original, sem a
   // segunda compressão)? Só por caminho direto, com a rede calma, e respeitando a espera de quem já caiu.
   async voltarAoRepasse(s, fila, pulou) {
-    if (!s.recodificado || s.trocando || s.parar || s.pedido?.recodificar === true && !s.recodPorFalha) return;
+    if (!s.recodificado || s.tratar || s.trocando || s.parar || s.pedido?.recodificar === true && !s.recodPorFalha) return;
     s.calmos = fila < FILA_ALTA && !pulou ? (s.calmos || 0) + 1 : 0;
     const agora = performance.now();
     if (s.calmos < (s.recodPorFalha ? REPASSE_CALMA : 4) || agora - (s.vendoRepasseEm || 0) < 3000) return;
@@ -1045,7 +1056,10 @@ export class TurboEnvio {
     // 2026-11-18, o 1080p repassado (15 Mbps) em 5–16 qps por minutos, com a rede levando ~6.
     // quem joga pediu o socorro (TurboRecebe.socorrer): o repasse parou lá, vale como uma queda daqui
     if (fonte && !fonte.banda && recodificar && pedido.porFalha && pedido.socorro) this.lembrarQueda(id, true, false, Number(pedido.bandaInicialKbps) > 0 ? { kbps: Number(pedido.bandaInicialKbps), tetoKbps: Number(pedido.tetoKbps) || Number(pedido.bandaInicialKbps) } : null);
-    if (fonte && !recodificar && pedida >= altFonte) {
+    // quem joga pediu a imagem tratada aqui (o teste viu banda sobrando): o PS5 passa pela placa e é comprimido de novo
+    const tratar = pedido.tratar === true && !!fonte && !fonte.banda && !this.semTratar(id);
+    if (tratar) this.onEvento?.(id, 'turbo: imagem do PS5 tratada nesta placa e comprimida de novo', { ps5Kbps: Number(fonte.kbps) || null, tetoKbps: this.tetoDe(id, pedido) ?? null });
+    if (fonte && !recodificar && !tratar && pedida >= altFonte) {
       const kbpsPs5 = Number(fonte.kbps) || null;
       // o PS5 em H.265 só vai repassado a quem decodifica H.265 (o pedido diz: hevc)
       const semHevc = fonte.hevc && !hevc;
@@ -1079,6 +1093,8 @@ export class TurboEnvio {
     s.rede = rede;
     s.inicioEm = performance.now();
     s.recodificado = !!fonte && !fonte.banda; // a imagem do PS5 codificada aqui (e não repassada)
+    s.tratar = s.recodificado && pedido.tratar === true && !this.semTratar(id);
+    if (s.tratar && s.bandaInicialKbps == null) s.ajuste.arranque = true; // sem teto medido: sobe rápido até o que o caminho leva
     s.recodPorFalha = s.recodificado && (!!pedido.porFalha || !!this.lembrado(id)?.caiu); // o repasse foi tentado e não coube
     if (s.recodPorFalha) s.ajuste.arranque = false; // a rede já mostrou o que leva: sobe no passo de sempre
     // depois de o canal parar, a banda não volta logo para onde ele parou (a conta é em bps)
@@ -1505,7 +1521,8 @@ export class TurboEnvio {
   // a banda máxima desta sessão na altura h: a da altura e, com a imagem do PS5 codificada aqui, perto da dele
   tetoBanda(s, h) {
     const max = bandaDe(h);
-    const porFonte = s.recodificado && s.kbpsFonte ? Math.min(max, Math.max(TETO_RECOD_MIN, s.kbpsFonte * 1000 * TETO_RECOD)) : max;
+    // tratada aqui: a máxima qualidade é toda a banda que o caminho leva (até a do 1080p), e não a do PS5
+    const porFonte = s.tratar ? max : s.recodificado && s.kbpsFonte ? Math.min(max, Math.max(TETO_RECOD_MIN, s.kbpsFonte * 1000 * TETO_RECOD)) : max;
     // o que o caminho leva (tetoDe), sem descer do mínimo da altura
     return s.tetoKbps ? Math.max(bandaMinDe(h), Math.min(porFonte, s.tetoKbps * 1000)) : porFonte;
   }
@@ -1651,6 +1668,19 @@ export class TurboEnvio {
         const passo = 1000 / QPS_TURBO;
         s.proximoEnvio = s.proximoEnvio && agora - s.proximoEnvio < passo ? s.proximoEnvio + passo : agora + passo;
         await this.configurar(s, frame.displayWidth, frame.displayHeight);
+        if (s.tratar) {
+          const tratado = this.tratarQuadro(s, frame, agora);
+          if (tratado) {
+            s.chave = s.chave || false;
+            const chaveT = s.chave;
+            s.chave = false;
+            if (s.tempos.size > 60) s.tempos.clear();
+            s.tempos.set(tratado.timestamp, agora);
+            s.fonteTemCor = false; // a cor sai da placa já em RGB: o codificador marca a dele
+            try { s.enc.encode(tratado, { keyFrame: chaveT }); } finally { tratado.close(); }
+            continue;
+          }
+        }
         const chave = s.chave;
         s.chave = false;
         if (s.tempos.size > 60) s.tempos.clear();
@@ -1791,6 +1821,7 @@ export class TurboEnvio {
       // a do codificador agora (ajustarBanda) ou, no PC direto, a da ponte (a placa daqui)
       bandaKbps: s.banda ? Math.round(s.banda / 1000) : s.ps5?.banda ? Math.round(s.ps5.banda.atual) : null,
       tetoKbps: this.tetoDe(id, s.pedido) ?? null, // o que o caminho leva (teste da conexão, cortes)
+      tratada: s.tratar ? { gpuMs: s.filtro?.realce?.custoMs != null ? Math.round(s.filtro.realce.custoMs * 10) / 10 : null } : null, // a imagem passou pela placa daqui
       bandaMinKbps: s.enc && s.cfg ? bandaMinDe(s.cfg.h) / 1000 : s.ps5?.banda ? (s.ps5.banda.min ?? PONTE_MIN_KBPS) : null,
       bandaMaxKbps: s.enc && s.cfg ? this.tetoBanda(s, s.cfg.h) / 1000 : s.ps5?.banda ? s.ps5.banda.max : null,
       // PS5: repassado como veio ou codificado aqui (a rede não levava a banda dele), e a banda da sessão
@@ -1826,6 +1857,61 @@ export class TurboEnvio {
     s.maiorRajada = 0;
     Object.assign(s.conta, { enviados: 0, bytes: 0, pulados: 0, fila: 0, cod: [], chaves: 0, chaveMax: 0, ignorados: 0, ultimo: agora });
     return r;
+  }
+
+  // o tratamento cedeu há pouco para essa pessoa (desligarTratar)?
+  semTratar(id) {
+    const m = this.memoria.get(id);
+    return !!m?.semTratarAte && Date.now() < m.semTratarAte;
+  }
+
+  // O quadro do PS5 pela placa: devolve um VideoFrame novo (quem chama fecha) ou null (vai o original, ou já cedeu)
+  tratarQuadro(s, frame, agora) {
+    const w = frame.displayWidth;
+    const h = frame.displayHeight;
+    if (!s.filtro) {
+      const tela = typeof OffscreenCanvas === 'function' ? new OffscreenCanvas(w, h) : Object.assign(document.createElement('canvas'), { width: w, height: h });
+      const realce = Realce.criar(tela);
+      if (!realce) return void this.desligarTratar(s, 'sem WebGL nesta placa');
+      s.filtro = { tela, realce, vistoEm: agora, altas: 0 };
+    }
+    const f = s.filtro;
+    if (f.tela.width !== w || f.tela.height !== h) { f.tela.width = w; f.tela.height = h; }
+    try {
+      f.realce.desenhar(frame, w, h, TRATAR_LA.forca, TRATAR_LA);
+    } catch (err) {
+      return void this.desligarTratar(s, `a placa recusou o quadro: ${String(err?.message || err).slice(0, 60)}`);
+    }
+    // a placa e a compressão: vê a cada ~2 s se o tratamento ainda cabe
+    if (agora - f.vistoEm > 2000) {
+      f.vistoEm = agora;
+      const gpuMs = f.realce.custoMs;
+      const codMs = mediana(s.conta.cod.slice(-30));
+      const carga = this.gpu?.();
+      const alta = carga && Date.now() - carga.em < 6000 && carga.usoPct >= TRATAR_GPU_PCT;
+      f.altas = alta ? f.altas + 1 : 0;
+      if (gpuMs > TRATAR_GPU_MS) return void this.desligarTratar(s, 'o filtro está lento na placa', { gpuMs });
+      if (codMs > TRATAR_COD_MS) return void this.desligarTratar(s, 'a compressão daqui atrasou (a placa ocupada)', { codMs });
+      if (f.altas >= 2) return void this.desligarTratar(s, `a placa passou de ${TRATAR_GPU_PCT}% (a dublagem ou o jogo usando)`, { usoPct: carga.usoPct });
+    }
+    try {
+      return new VideoFrame(f.tela, { timestamp: frame.timestamp, duration: frame.duration ?? undefined });
+    } catch (err) {
+      this.desligarTratar(s, 'o quadro tratado não saiu da placa');
+      return null;
+    }
+  }
+
+  // O tratamento cede: a pessoa volta ao que teria sem ele (o PS5 repassado, se couber) e ele não volta por um tempo
+  desligarTratar(s, motivo, dados = {}) {
+    if (s.parar || s.trocando || !s.tratar) return;
+    s.tratar = false;
+    s.trocando = true;
+    const m0 = this.memoria.get(s.id) || {};
+    this.memoria.set(s.id, { ...m0, semTratarAte: Date.now() + TRATAR_ESPERA_MS });
+    this.onEvento?.(s.id, 'turbo: tratamento da imagem nesta placa desligado', { motivo, ...dados });
+    const { tratar, ...pedido } = s.pedido || {};
+    this.ligar(s.id, s.canal, { ...pedido, ligar: s.key });
   }
 
   // a tela saiu do ar: quem jogava nela volta ao vídeo normal
@@ -1952,7 +2038,9 @@ export class TurboRecebe {
     tela.className = 'turbo-tela';
     tela.hidden = true;
     video.after(tela);
-    const realce = this.realce || (this.tratamento && !this.tratamentoLento) ? Realce.criar(tela) : null;
+    // a imagem tratada lá (no PC do jogo) não leva o realce daqui de novo: ficaria áspera
+    const tratarLa = !!this.teste?.tratar;
+    const realce = !tratarLa && (this.realce || (this.tratamento && !this.tratamentoLento)) ? Realce.criar(tela) : null;
     const s = {
       key, video, canal, tela, realce, nitidez: this.realce, alturaPedida: altura, ctx: realce ? null : tela.getContext('2d', { alpha: false, desynchronized: true }),
       dec: null, montando: null, ultimoId: 0, esperaChave: true, pedidoEm: 0, desenhou: 0, inicio: performance.now(),
@@ -2024,7 +2112,7 @@ export class TurboRecebe {
     if (this.s !== s) return;
     if (!codecs.length) return this.falhou('navegador');
     const falha = this.depoisDaFalha;
-    s.pedido = { ligar: key, codecs, altura, versao: VERSAO, som: !!s.som, hevc: s.hevcAqui, ...(this.teste?.tetoKbps ? { teto: this.teste.tetoKbps } : {}), ...(s.recodificar ? { recodificar: true } : {}),
+    s.pedido = { ligar: key, codecs, altura, versao: VERSAO, som: !!s.som, hevc: s.hevcAqui, ...(this.teste?.tetoKbps ? { teto: this.teste.tetoKbps } : {}), ...(tratarLa ? { tratar: true } : {}), ...(s.recodificar ? { recodificar: true } : {}),
       ...(falha ? { recodificar: true, porFalha: true, socorro: true, bandaInicialKbps: falha.kbps, tetoKbps: Math.round(falha.kbps * 1.4) } : {}) };
     const ligar = () => canal.send(JSON.stringify(s.pedido));
     if (canal.readyState === 'open') ligar();

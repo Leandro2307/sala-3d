@@ -2924,6 +2924,7 @@ let wifiChegouEm = 0; // a última vez que o Wi-Fi e a carga do PC chegaram (ped
 controle.onWifi = (w) => {
   const { pc, carga, redes, roteador, ...wifi } = w || {};
   wifiChegouEm = Date.now();
+  if (Number.isFinite(carga?.nv?.usoPct)) Object.assign(cargaDaPlaca, { usoPct: carga.nv.usoPct, em: Date.now() });
   diagJogo.wifiChegou(wifi);
   diagJogo.pcChegou({ memoria: pc ?? null, carga: carga ?? null, redes: redes ?? null, roteador: roteador ?? null });
   memoriaDoPc(pc);
@@ -3127,7 +3128,10 @@ addEventListener('gamepaddisconnected', () => avisarRapido());
 // eu liguei (ou desliguei) o modo jogo numa tela de outra pessoa
 // Modo turbo (turbo.js). Quem compartilha: manda a imagem de uma tela minha liberada para quem
 // pediu, e o vídeo da conexão para essa pessoa para. Quem joga: liga com a opção "Modo turbo".
+// a placa deste PC (o ajudante manda com a carga do PC): o tratamento da imagem cede quando ela enche
+const cargaDaPlaca = { usoPct: null, em: 0 };
 const turboEnvio = new TurboEnvio({
+  gpu: () => (cargaDaPlaca.usoPct != null ? cargaDaPlaca : null),
   tela: (key) => {
     const sh = self()?.shares.get(key);
     const scr = rtc?.screens.get(key);
@@ -4038,7 +4042,7 @@ async function entrarNoTurbo(deNovo = false) {
     if (entrando === jl) entrando = false;
   }
   if (jogandoLa !== jl || !opcoesJogo.get('turbo')) return;
-  if (r) turboRecebe.teste = { tetoKbps: r.livre && r.rota !== 'turn' ? null : r.tetoKbps, codec: r.codec, turn: r.rota === 'turn', bom: !!r.confirmou };
+  if (r) turboRecebe.teste = { tratar: !!r.tratar, tetoKbps: r.livre && r.rota !== 'turn' ? null : r.tetoKbps, codec: r.codec, turn: r.rota === 'turn', bom: !!r.confirmou };
   previsto = r?.previsto ? { ...r.previsto, desde: performance.now(), am: [], quem: acharTela(jl.key)?.user?.name || jl.key.split('~')[0] } : null;
   if (r && turboAuto.ligado && opcoesJogo.get('preset') !== r.modo) aplicarPreset(r.modo, 'teste da conexão');
   if (!turboRecebe.ligado) ligarTurbo();

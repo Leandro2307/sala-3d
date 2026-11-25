@@ -249,7 +249,7 @@ export class PainelTeste {
     caixa.innerHTML = `<div class="tc-nota" style="--c:${cor}"><div class="tc-n">${num(r.nota?.nota)}</div><div><b></b><span></span></div></div>
 <table class="tc-rotas"><thead><tr><th>Caminho</th><th>Resposta</th><th>Velocidade</th><th>Oscilação</th></tr></thead><tbody>${linha('direto', 'Direto', direto)}${linha('turn', 'Servidor (TURN)', turn)}</tbody></table><p class="tc-dica"></p>`;
     caixa.querySelector('.tc-nota b').textContent = `${simbolo} Conexão ${r.nota?.rotulo || ''}`.trim();
-    caixa.querySelector('.tc-nota span').textContent = `${nomeDoModo} · ${r.codec === 'h265' ? 'H.265' : 'H.264'}${r.previsto ? ` · atraso de uns ${num(Math.round(r.previsto.atrasoMs / 5) * 5)} ms` : ''}`;
+    caixa.querySelector('.tc-nota span').textContent = `${nomeDoModo} · ${r.codec === 'h265' ? 'H.265' : 'H.264'}${r.tratar ? ' · imagem tratada no PC do jogo' : ''}${r.previsto ? ` · atraso de uns ${num(Math.round(r.previsto.atrasoMs / 5) * 5)} ms` : ''}`;
     const dica = caixa.querySelector('.tc-dica');
     if (r.nota?.dicas?.length) dica.textContent = r.nota.dicas[0];
     else dica.remove();

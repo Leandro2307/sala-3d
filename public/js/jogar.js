@@ -1222,7 +1222,7 @@ async function entrarNoTurbo(deNovo = false) {
     if (entrando === jl) entrando = false;
   }
   if (jogandoLa !== jl || !opcoesJogo.get('turbo')) return;
-  if (r) turboRecebe.teste = { tetoKbps: r.livre && r.rota !== 'turn' ? null : r.tetoKbps, codec: r.codec, turn: r.rota === 'turn', bom: !!r.confirmou };
+  if (r) turboRecebe.teste = { tratar: !!r.tratar, tetoKbps: r.livre && r.rota !== 'turn' ? null : r.tetoKbps, codec: r.codec, turn: r.rota === 'turn', bom: !!r.confirmou };
   previsto = r?.previsto ? { ...r.previsto, desde: performance.now(), am: [], quem: jl.dono || jl.key.split('~')[0] } : null;
   if (r && turboAuto.ligado && opcoesJogo.get('preset') !== r.modo) aplicarPreset(r.modo, 'teste da conexão');
   if (!turboRecebe.ligado) ligarTurbo();

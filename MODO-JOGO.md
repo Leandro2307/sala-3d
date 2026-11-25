@@ -1314,3 +1314,12 @@ engasgando, Wi-Fi, distância, velocidade, tela lenta). "Pular" ficou discreto. 
 O resultado do teste vale o dia todo para o mesmo PC de jogo (pelo nome de quem compartilha), guardado no aparelho
 (localStorage): recarregar ou entrar de novo não testa. Testa de novo em outro dia, com o caminho diferente, pelo botão,
 ou se o jogo saiu bem pior que o previsto. Sem a conexão aberta ainda, o teste espera até 6 s em vez de desistir calado.
+
+## Imagem tratada no PC do jogo (2026-11-25)
+
+O Carlin achou o Lossless "bem melhor" que o direto: lá o PS5 passa pela placa do PC e é comprimido de novo (NVENC,
+High). Agora, quando o teste vê banda sobrando (livre ou 10 Mbps ou mais) e até 150 ms, quem joga pede `tratar`: o PC
+pega o PS5 já decodificado, passa o realce leve e o contra faixas (sem grão) na placa (`TurboEnvio.tratarQuadro`, o mesmo
+shader do Realce) e comprime de novo com toda a banda do caminho (até 20 Mbps), em H.265 se os dois dão conta dele. Quem
+joga não repete o realce. Cede sozinho, por 5 min, se o filtro passar de 4 ms na placa, a compressão de 14 ms ou a placa
+de 85% duas vezes (a dublagem do Voz Universal usa a mesma placa e tem a vez); aí volta ao repasse. Não testado no PC real.

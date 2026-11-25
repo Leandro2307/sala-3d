@@ -41,6 +41,7 @@ const TOPO_LONGE = 12_000;
 const TETO_CELULAR = 8000; // no celular por uma rede que não é a de casa, começa com menos banda (5G, 2026-11-25)
 const TRAVADA_MS = 80; // dois quadros seguidos do jogo com isto entre eles: quem joga vê
 const RAPIDO_RTT = 60;
+const TRATAR_KBPS = 10_000; // com menos que isto, a segunda compressão perde mais do que o tratamento ganha
 const SONDA_MS = 7000; // a conexão da sonda tem isto para ligar
 const AQUECE_MS = 600;
 const PAUSA_MS = 120; // entre um degrau e outro (a fila do anterior acaba)
@@ -227,7 +228,12 @@ export function escolher({ banda: medida, h264 = null, h265 = null, ps5 = null, 
   // longe, um pedaço perdido demora a vir de novo: menos banda, menos parada
   const limite = rttMs > RTT_LONGE ? TETO_LONGE : toque && (rota === 'turn' || rttMs > 40) ? TETO_CELULAR : null;
   const banda = limite ? { ...medida, tetoKbps: Math.min(medida.tetoKbps, limite), livre: false } : medida;
-  const c = escolherCodec({ h264, h265, tetoKbps: banda.tetoKbps, livre: banda.livre, ps5Hevc: !!ps5?.hevc });
+  // banda sobrando e perto: a imagem do PS5 passa pela placa do PC do jogo antes (TurboEnvio.tratarQuadro)
+  const tratar = (banda.livre || banda.tetoKbps >= TRATAR_KBPS) && !(rttMs > RTT_LONGE);
+  const c0 = escolherCodec({ h264, h265, tetoKbps: banda.tetoKbps, livre: banda.livre, ps5Hevc: !!ps5?.hevc });
+  // a máxima qualidade: comprimindo de novo no PC do jogo, o H.265 dá mais imagem na mesma banda — se os dois dão conta dele
+  const c = tratar && c0.codec === 'h264' && serve(h265) && (h265.decP50 + (h265.codP50 || 0)) - (h264?.decP50 ?? 0) - (h264?.codP50 ?? 0) <= 6
+    ? { codec: 'h265', porque: 'imagem tratada no PC do jogo: o H.265 dá mais nitidez na mesma banda' } : c0;
   const m = escolherModo({ padrao, rapido, confirma: banda.confirma, rttMs, rota, toque });
   const ps5Kbps = Number(ps5?.kbps) || null;
   return {
@@ -238,6 +244,8 @@ export function escolher({ banda: medida, h264 = null, h265 = null, ps5 = null, 
     modo: m.modo,
     modoPorque: m.porque,
     // a banda que o PS5 deveria ter para ir repassado (a original) sem passar do que o caminho leva
+    // banda sobrando e perto: a imagem do PS5 passa pela placa do PC do jogo antes (TurboEnvio.tratarQuadro)
+    tratar,
     ps5Sugerido: ps5Kbps && !medida.livre && banda.tetoKbps < ps5Kbps ? Math.max(2000, Math.floor(banda.tetoKbps / 1000) * 1000) : null,
   };
 }
@@ -977,7 +985,7 @@ export async function codecsDaqui(listaH264, listaH265) {
 const CHAVE_MEMORIA = 'sala3d-teste-conexao';
 const dia = (t) => new Date(t).toDateString();
 // só o que o jogo usa: os degraus e os caminhos ficam no relatório
-const ENXUTO = ['tetoKbps', 'livre', 'codec', 'modo', 'rota', 'trocarRota', 'confirmou', 'rttMs', 'nota', 'previsto', 'direto', 'jaTurn'];
+const ENXUTO = ['tratar', 'tetoKbps', 'livre', 'codec', 'modo', 'rota', 'trocarRota', 'confirmou', 'rttMs', 'nota', 'previsto', 'direto', 'jaTurn'];
 
 export class MemoriaTeste {
   // guarda: o localStorage (null em testes ou sem armazenamento: só na memória da página)
