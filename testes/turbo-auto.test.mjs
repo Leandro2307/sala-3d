@@ -169,7 +169,7 @@ test('canal parado no repasse: passa a codificar aqui com menos banda, sem aviso
   assert.match(eventos[0].texto, /canal parou/);
   assert.equal(envio.lembrado('a').semRepasse, true);
   assert.equal(envio.memoria.get('a').freio.tetoKbps, 10_200); // ligar de novo em 1 min não volta à banda que parou
-  assert.ok(envio.esperaRepasse(envio.memoria.get('a')) >= 5 * 60_000);
+  assert.ok(envio.esperaRepasse(envio.memoria.get('a')) >= 2 * 60_000);
   assert.equal(envio.repasseParado(s, fila, t + 2000), false); // já trocando
 });
 

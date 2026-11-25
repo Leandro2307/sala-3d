@@ -1264,3 +1264,21 @@ atraso + 6 × travadas/min + 0,15 × trancos/min + 4 × quadros que faltam. No c
 Entre Turbo liso e rápido a imagem não recomeça; para o da TV na sala, sim.
 
 Testado local (PS5 de mentira no Chrome, canal parado e com perda de pedaços): as duas páginas. Não testado na rede real.
+
+## Teste da conexão antes do jogo e teto do caminho (2026-11-25)
+
+Testes de 16:11–17:04: acima de ~12 Mbps o caminho até o notebook do lokao16001 cortava tudo por ~1 s (10 de 34
+amostras; 2 de 133 entre 8 e 10), e o automático mediu os três modos depois de um corte. Agora (`turbo-teste.js`),
+com o Automático ligado, entrar no Modo jogo testa antes de ligar o turbo (15 a 25 s; F7 pula; vale 10 min no mesmo
+caminho; "Testar a conexão" no menu testa de novo): a banda sobe em degraus de 3 Mbps até a do PS5, repete o degrau
+que falhou, tenta o meio e confirma por 5 s; depois a imagem de verdade em H.264 e H.265 (tempo de codificar lá e de
+decodificar aqui). Sai o teto, o codec e o modo. Evento "teste da conexão" no relatório, com todos os degraus e os
+caminhos que o navegador tem (tipos e ida e volta, nunca o endereço). PC que compartilha antigo: entra direto em ~4 s.
+
+O teto (do teste ou 80% do que passava num corte de verdade, por 15 min) limita a banda codificada no PC; o PS5
+repassado que passa dele vira codificado aqui antes do corte, e volta quando o PS5 baixa a 80% do teto.
+
+Automático: amostras com o caminho parado ou o PS5 fora do ritmo não contam, as 2 piores de 10 saem, troca só com 15%
+de ganho e recomeça a medir se o caminho ou o repasse mudar. Depois do teste já começa decidido.
+
+Testado local, com um limite de 12 Mbps simulado. Não testado na rede real.

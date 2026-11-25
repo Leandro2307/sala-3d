@@ -1385,6 +1385,9 @@ export class RTC {
       // modo turbo: quem joga pediu a imagem de uma tela minha por fora do vídeo (turbo.js)
       else if (channel.label === 'turbo') this.onTurbo?.(peer.id, channel);
       else if (channel.label === 'turbo-som') this.onTurboSom?.(peer.id, channel);
+      // o teste da conexão antes do jogo (turbo-teste.js)
+      else if (channel.label === 'turbo-teste') this.onTeste?.(peer.id, channel);
+      else if (channel.label === 'turbo-teste-dados') this.onTesteDados?.(peer.id, channel);
     };
     pc.ontrack = (ev) => {
       const stream = ev.streams[0] || new MediaStream([ev.track]);
@@ -1500,6 +1503,50 @@ export class RTC {
     } catch {
       return null;
     }
+  }
+
+  // O teste da conexão (turbo-teste.js), do lado de quem joga: um canal confiável e um sem reenvio
+  abrirTeste(id) {
+    const peer = this.peers.get(id);
+    if (!peer || ['failed', 'closed'].includes(peer.pc.connectionState)) return null;
+    for (const c of peer.testeCanais || []) { try { c.close(); } catch { /* já fechado */ } }
+    try {
+      // o dos dados primeiro: quando o outro abre lá, este já chegou
+      const dados = peer.pc.createDataChannel('turbo-teste-dados', { ordered: false, maxRetransmits: 0 });
+      const canal = peer.pc.createDataChannel('turbo-teste', { ordered: true });
+      peer.testeCanais = [canal, dados];
+      return { canal, dados };
+    } catch {
+      return null;
+    }
+  }
+
+  // Todos os caminhos que responderam até uma pessoa, para o relatório (por que o navegador troca de um de 8 ms
+  // para um de 50): tipos, rede, família e ida e volta — nunca o endereço.
+  async caminhosDe(id) {
+    const peer = this.peers.get(id);
+    if (!peer) return null;
+    let report;
+    try { report = await peer.pc.getStats(); } catch { return null; }
+    let usado = null;
+    report.forEach((s) => { if (s.type === 'transport' && s.selectedCandidatePairId) usado = s.selectedCandidatePairId; });
+    const lista = [];
+    report.forEach((s) => {
+      if (s.type !== 'candidate-pair') return;
+      const l = report.get(s.localCandidateId);
+      const r = report.get(s.remoteCandidateId);
+      lista.push({
+        par: s.id, usado: s.id === usado, estado: s.state, nomeado: !!s.nominated,
+        local: l ? `${l.candidateType}/${l.protocol}${l.networkType ? ` ${l.networkType}` : ''}${l.vpn ? ' vpn' : ''}` : null,
+        remoto: r ? `${r.candidateType}/${r.protocol}` : null,
+        familia: familiaDe(l, r),
+        prioridade: [l?.priority ?? null, r?.priority ?? null],
+        rttMs: s.currentRoundTripTime != null ? Math.round(s.currentRoundTripTime * 1000) : null,
+        pings: s.requestsSent ?? null, respostas: s.responsesReceived ?? null,
+      });
+    });
+    // os que respondem primeiro, e poucos: o relatório tem limite
+    return lista.sort((a, b) => Number(b.usado) - Number(a.usado) || (a.rttMs ?? 1e9) - (b.rttMs ?? 1e9)).slice(0, 12);
   }
 
   // Do lado de quem compartilha: enquanto essa pessoa recebe a tela pelo turbo, o vídeo da conexão
@@ -1883,6 +1930,7 @@ export class RTC {
     return {
       saidaKbps: c.saidaEstimada != null ? Math.round(c.saidaEstimada / 1000) : null,
       rttMs,
+      par: c.par,
       familia: c.familia,
       local: c.local,
       remoto: c.remoto,

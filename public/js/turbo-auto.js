@@ -16,7 +16,14 @@ const MEDIR = 10; // amostras (de 2 s) por modo
 const JANELA = 15;
 const RODADAS = 4;
 const RODADA_MS = 180_000;
-const MARGEM = 0.05; // só troca para outro se ele for pelo menos 5% melhor que o padrão
+const MARGEM = 0.15; // só troca para outro se ele for pelo menos 15% melhor que o padrão
+// O que não é do modo não entra na conta (2026-11-25, 16:52: os três modos foram julgados com o caminho cortando
+// e o PS5 perdendo pacotes até o PC, e um soluço só decidiu a escolha):
+const FORA_SILENCIO_MS = 500; // o caminho parou de entregar tudo
+const FORA_FONTE = 0.06; // a fonte (PS5 ou captura) fora do ritmo dela mais que isto
+const PIORES = 2; // das 10 amostras, as 2 com mais travadas e trancos não contam
+const RECOMECOS = 2; // o caminho ou a forma de envio trocou no meio da medida: recomeça, até tantas vezes por modo
+const FORA_MAX = 20; // amostras de fora seguidas (40 s): mede com o que tiver
 const SEM_ATRASO = 250; // amostra sem atraso medido (o vídeo normal entrou, por exemplo)
 
 const media = (v) => (v.length ? v.reduce((a, b) => a + b, 0) / v.length : null);
@@ -40,12 +47,36 @@ export function resumirAmostra(r) {
     travadas: quantos(r.ritmo?.travadas),
     trancos: quantos(r.ritmo?.trancos),
     bandaKbps: r.la?.turbo?.bandaKbps ?? null,
+    par: r.conexao?.par ?? null,
+    repasse: r.la?.turbo ? r.la.turbo.bandaKbps == null : null,
+    fora: foraDoModo(r),
   };
 }
 
+// a amostra fala de outra coisa que não o modo? (o motivo, ou null)
+export function foraDoModo(r) {
+  if (r.turbo?.silencioMaxMs >= FORA_SILENCIO_MS) return 'caminho';
+  if (r.somWebrtc?.inventadoPct >= 10) return 'caminho'; // o som do WebRTC também faltou: foi o caminho
+  const manda = r.la?.ps5?.manda;
+  if (manda > 0) {
+    const ritmo = manda > 45 ? 60 : 30;
+    if (Math.abs(manda - ritmo) / ritmo > FORA_FONTE) return 'fonte';
+  }
+  return null;
+}
+
+// sem as piores (por travadas e trancos): um soluço isolado não decide
+function semAsPiores(am) {
+  if (am.length < MEDIR) return am;
+  const peso = (a) => a.travadas * 10 + a.trancos + Math.max(0, 60 - (a.qps ?? 0)) + (a.turbo ? 0 : 100);
+  const fora = new Set(am.map((_, i) => i).sort((a, b) => peso(am[b]) - peso(am[a])).slice(0, PIORES));
+  return am.filter((a, i) => !fora.has(i) || !a.turbo); // sem turbo é sempre para contar
+}
+
 // O que se viu num modo: a nota (menor é melhor, na unidade de ms de atraso) e se está bom
-export function avaliar(am, segPorAmostra = 2) {
-  if (!am.length) return null;
+export function avaliar(todas, segPorAmostra = 2) {
+  if (!todas.length) return null;
+  const am = semAsPiores(todas);
   const min = (am.length * segPorAmostra) / 60;
   const atraso = mediana(am.map((a) => a.atrasoMs ?? SEM_ATRASO));
   const qps = media(am.map((a) => a.qps ?? 0));
@@ -86,9 +117,22 @@ export class TurboAuto {
     this.rodada(this.inicial, ESPERA_MIN_MS, ESPERA_MAX_MS);
   }
 
+  // o teste da conexão (turbo-teste.js) já escolheu: começa decidido e só mede de novo se piorar
+  comecarCom(modo) {
+    this.parar();
+    if (!this.ligado) return;
+    this.rodadas = 1;
+    this.fase = 'fixo';
+    this.escolhido = modo;
+    this.decidiuEm = this.agora();
+    this.onEstado?.('fixo', modo);
+  }
+
   parar() {
     this.fase = null;
     this.am = [];
+    this.ultima = null;
+    this.foras = 0;
   }
 
   desligar() {
@@ -107,6 +151,7 @@ export class TurboAuto {
     this.ordem = [primeiro, ...this.modos.filter((m) => m !== primeiro)];
     this.notas = new Map();
     this.i = 0;
+    this.recomecos = 0;
     this.esperar(min, max);
   }
 
@@ -116,6 +161,7 @@ export class TurboAuto {
     this.min = min;
     this.max = max;
     this.am = [];
+    this.foras = 0;
     this.bandas = [];
     this.onEstado?.('medindo', this.atual);
   }
@@ -131,7 +177,21 @@ export class TurboAuto {
       return;
     }
     const a = resumirAmostra(r);
+    // o caminho trocou, ou o PS5 passou de repassado a codificado lá (ou o contrário): o que se mediu até aqui
+    // era outra coisa
+    const u = this.ultima;
+    this.ultima = a;
+    const trocou = u && ((u.par && a.par && u.par !== a.par) || (u.repasse != null && a.repasse != null && u.repasse !== a.repasse));
+    if (trocou && this.fase === 'mede' && this.recomecos < RECOMECOS) {
+      this.recomecos++;
+      this.onEvento?.('turbo automático: a conexão mudou no meio da medida, recomeçando', { modo: this.atual, caminho: u.par !== a.par, repasse: a.repasse });
+      return this.esperar(ESPERA_TROCA_MS, ESPERA_TROCA_MS);
+    }
+    if (trocou && this.fase === 'espera') this.desde = this.agora() - Math.min(this.agora() - this.desde, Math.max(0, this.min - ESPERA_TROCA_MS));
+    if (trocou && this.fase === 'fixo') this.am = [];
     if (this.fase === 'espera') return this.noEsperar(a);
+    if (a.fora && ++this.foras < FORA_MAX) return;
+    if (!a.fora) this.foras = 0;
     this.am.push(a);
     if (this.fase === 'mede') {
       if (this.am.length >= MEDIR) this.mediu();
@@ -160,6 +220,7 @@ export class TurboAuto {
     if (av.bom) return this.decidir(id, 'bom');
     if (this.i + 1 < this.ordem.length) {
       this.i++;
+      this.recomecos = 0;
       this.aplicar(this.ordem[this.i], 'automático: testando');
       this.esperar(ESPERA_TROCA_MS, ESPERA_TROCA_MS);
       return;

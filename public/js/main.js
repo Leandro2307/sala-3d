@@ -36,6 +36,7 @@ import { ModoCarroTela } from './modo-carro.js';
 import { TutorialControle } from './tutorial-controle.js';
 import { TurboEnvio, TurboRecebe, TTL_MS, vidaDoCanal, LISO_PCT, LISO_MAX } from './turbo.js';
 import { TurboAuto, TurboVolta } from './turbo-auto.js';
+import { TesteEnvio, TesteJoga, PainelTeste, MemoriaTeste, codecsDaqui, textoDoResultado } from './turbo-teste.js';
 import { opcoesJogo, LISO_MS, PRESETS, PRESET_TV, ORDEM_AUTO, OPCOES_DO_PRESET, autoMostra, htmlPresets, marcarPresets, alturaDoMenu } from './jogo-opcoes.js';
 import { Mesa } from './mesa.js';
 import { Qualidade, NIVEIS, nivelInicial } from './qualidade.js';
@@ -1163,6 +1164,8 @@ async function join() {
   rtc.onControle = receberDireto;
   rtc.onTurbo = (id, canal) => turboEnvio.receber(id, canal);
   rtc.onTurboSom = (id, canal) => turboEnvio.receberSom(id, canal);
+  rtc.onTeste = (id, canal) => testeEnvio.receber(id, canal);
+  rtc.onTesteDados = (id, canal) => testeEnvio.receberDados(id, canal);
   // a credencial do TURN vence (48 h na Cloudflare): renova com a página aberta
   setInterval(() => {
     fetch('/config').then((r) => r.json()).then((c) => rtc.trocarIce(c.iceServers)).catch(() => {});
@@ -3142,6 +3145,14 @@ const turboEnvio = new TurboEnvio({
   onEvento: (id, texto, dados) => diagJogo.evento(texto, { para: state.users.get(id)?.name ?? id, ...dados }),
 });
 
+// o teste da conexão de quem vai jogar numa tela minha (turbo-teste.js)
+const testeEnvio = new TesteEnvio({
+  tela: (key) => turboEnvio.tela(key),
+  // o vídeo normal para durante o teste (disputaria a mesma conexão); o turbo que liga em seguida cuida do resto
+  silenciar: (id, key, sim) => { if (sim || !turboEnvio.sessoes.has(id)) rtc?.turboPara(id, key, sim); },
+  onEvento: (id, texto, dados) => diagJogo.evento(texto, { para: state.users.get(id)?.name ?? id, ...dados }),
+});
+
 // PS5 direto (ps5-nativo.js): o Remote Play pela ponte do ajudante, sem a janela do chiaki-ng. A imagem
 // do PS5 entra numa tela da sala (uma cópia decodificada aqui) e vai do jeito que o PS5 fez para quem
 // joga no turbo. O controle de quem joga vai para a ponte (controle.onPs5) e chega como um DualSense.
@@ -3799,7 +3810,7 @@ turboRecebe.liso = opcoesJogo.get('turboLiso');
 turboRecebe.socorro = true;
 const modoTv = () => !!presetAtual()?.semRealce;
 function ligarTurbo() {
-  if (!jogandoLa) return;
+  if (!jogandoLa || entrando === jogandoLa) return; // no meio do teste da conexão: entrarNoTurbo liga no fim
   turboRecebe.liso = opcoesJogo.get('turboLiso');
   const p = presetAtual();
   // o Turbo da TV na sala: a receita do /jogar (canal sem prazo, só H.264, sem realce, o soluço fora da folga)
@@ -3888,6 +3899,77 @@ function amostraDoAuto(resumo) {
   if (turboRecebe.depoisDaFalha && turboRecebe.ligado && performance.now() - turboVolta.ligouEm > 60_000) turboRecebe.depoisDaFalha = null;
   turboAuto.amostra(resumo, document.hidden);
 }
+// ---------------------------------------------------------------- o teste da conexão antes do turbo (turbo-teste.js)
+const memoriaTeste = new MemoriaTeste();
+const painelTeste = new PainelTeste({ dentro: () => $('#focus'), onPular: () => testeJoga.pular() });
+const testeJoga = new TesteJoga({
+  abrir: (id) => rtc?.abrirTeste(id) ?? null,
+  caminho: (id) => rtc?.caminhoPara(id) ?? null,
+  caminhos: (id) => rtc?.caminhosDe(id) ?? null,
+  onProgresso: (p) => painelTeste.progresso(p),
+  onEvento: (texto, dados) => diagJogo.evento(texto, dados),
+});
+let codecsDoTeste = null;
+// Testa (ou usa o teste de há pouco, com a conexão parecida) e prepara o turbo. Devolve o resultado ou null.
+async function testarConexao(deNovo) {
+  const jl = jogandoLa;
+  const dono = jl.key.split('~')[0];
+  const rede = await Promise.resolve(rtc?.caminhoPara(dono)).catch(() => null);
+  if (jogandoLa !== jl) return null;
+  let r = deNovo ? null : memoriaTeste.valido(dono, rede);
+  if (r) diagJogo.evento('teste da conexão: vale o de há pouco', { tetoKbps: r.tetoKbps, codec: r.codec, modo: r.modo });
+  else {
+    codecsDoTeste ??= await codecsDaqui(['avc1.640033', 'avc1.4d0033', 'avc1.42e033', 'avc1.42001f'], ['hvc1.1.6.L123.B0']);
+    if (jogandoLa !== jl) return null;
+    if (!deNovo && memoriaTeste.porque) diagJogo.evento('teste da conexão: o de há pouco não vale mais', { porque: memoriaTeste.porque });
+    painelTeste.mostrar();
+    r = await testeJoga.rodar(jl.key, { codecs: codecsDoTeste, padrao: 14, rapido: 16 });
+    painelTeste.fechar();
+    if (jogandoLa !== jl || r.erro) return null;
+    memoriaTeste.guardar(dono, r, await Promise.resolve(rtc?.caminhoPara(dono)).catch(() => null));
+    if (jogandoLa !== jl) return null;
+    painelTeste.resultado(r, MODOS_IMAGEM.find((p) => p.id === r.modo)?.nome || 'Turbo');
+  }
+  autoMostra.teste = textoDoResultado(r);
+  marcarPresets(document);
+  return r;
+}
+// Entrar no turbo: com o Automático, primeiro o teste; sem ele (versão antiga lá, pulado, sem conexão), direto
+let entrando = false;
+async function entrarNoTurbo(deNovo = false) {
+  const jl = jogandoLa;
+  if (!jl || entrando === jl) return;
+  entrando = jl;
+  let r = null;
+  try {
+    turboRecebe.teste = null;
+    if (turboAuto.ligado || deNovo) {
+      turboVolta.parar();
+      turboAuto.parar();
+      turboRecebe.desligar();
+      r = await testarConexao(deNovo);
+    }
+  } catch (err) {
+    console.warn('[teste]', err);
+  } finally {
+    if (entrando === jl) entrando = false;
+  }
+  if (jogandoLa !== jl || !opcoesJogo.get('turbo')) return;
+  if (r) turboRecebe.teste = { tetoKbps: r.livre ? null : r.tetoKbps, codec: r.codec };
+  if (r && turboAuto.ligado && opcoesJogo.get('preset') !== r.modo) aplicarPreset(r.modo, 'teste da conexão');
+  if (!turboRecebe.ligado) ligarTurbo();
+  if (!turboAuto.ligado) return;
+  if (r) turboAuto.comecarCom(r.modo);
+  else turboAuto.comecar();
+}
+document.addEventListener('click', (e) => {
+  const el = e.target.closest?.('[data-testar]');
+  if (!el) return;
+  el.blur();
+  if (jogandoLa && opcoesJogo.get('turbo')) entrarNoTurbo(true);
+  else toast('O teste roda com o Modo jogo ligado (e o modo turbo).', 'info', 4000);
+});
+
 let vidaPedida = TTL_MS;
 let vidaAjustada = false;
 function autoDesligado() { // escolheu à mão
@@ -4006,6 +4088,8 @@ addEventListener('pagehide', lembrarJogo); // a página recarregando (servidor n
 function jogoLa(video, key) {
   turboVolta.parar();
   turboAuto.parar();
+  testeJoga.pular('saiu do jogo');
+  painelTeste.fechar();
   turboRecebe.desligar();
   turboRecebe.depoisDaFalha = null;
   vidaAjustada = false;
@@ -4032,10 +4116,7 @@ function jogoLa(video, key) {
   aplicarBuffer();
   mostrarSelo();
   avisarRapido(); // o "Menos atraso" e o que este aparelho sente (vibra, DualSense)
-  if (opcoesJogo.get('turbo')) {
-    ligarTurbo();
-    if (turboAuto.ligado) turboAuto.comecar();
-  }
+  if (opcoesJogo.get('turbo')) entrarNoTurbo();
 }
 
 // O buffer da imagem de quem joga: o mínimo, ou um pouco (LISO_MS) com "Imagem mais lisa"
@@ -4138,6 +4219,8 @@ async function amostrarJogo() {
       const medida = cru.envios.find((e) => e.captura)?.captura;
       if (medida) rtc.capturaMedida(key, medida.width, medida.height);
       for (const id of quem.keys()) {
+        // testando a conexão (turbo-teste.js): o vídeo está parado de propósito, não é para avisar nem ajustar nada
+        if (testeEnvio.testes.has(id)) continue;
         // no turbo, os números da imagem dessa pessoa são os do canal turbo (o vídeo da conexão está parado)
         const turbo = turboEnvio.stats(id, key);
         const resumo = diagJogo.amostraEnvio(key, cru, id, sala, turbo, self()?.shares.get(key)?.titulo ?? null);
@@ -4162,7 +4245,7 @@ async function amostrarJogo() {
         controle.emitir('controle-volta', { key, para: id, ev: { t: 'jogo-envio', quando: t, captura, enviado, codificado, altura, kbps, limite, motivo, codificador, placa, imagemBaixa, codMs, filaMs, turbo: tb || null, ps5, sonda: resumo.sonda ?? null, roteador: resumo.pc?.roteador ?? null } });
       }
     }
-    if (jogandoLa) {
+    if (jogandoLa && entrando !== jogandoLa) { // no teste da conexão a imagem está parada: nada a medir
       const dono = jogandoLa.key.split('~')[0];
       // o atraso do controle: um "ping" pelo canal do mouse e do teclado; a volta (receberDireto)
       // traz também quanto o PC de lá leva até o ajudante

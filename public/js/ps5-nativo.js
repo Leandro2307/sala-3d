@@ -319,7 +319,21 @@ export class Ps5Fonte {
     return () => this.assinantes.delete(fn);
   }
 
+  // a banda que o PS5 manda de verdade (kbps), dos últimos seg segundos inteiros: a da sessão é só o teto dele
+  taxa(seg = 10) {
+    const agora = Math.floor(performance.now() / 1000);
+    const v = [];
+    for (const [s, b] of this.porSegundo || []) if (s < agora && s >= agora - seg) v.push((b * 8) / 1000);
+    return v.length ? { media: Math.round(v.reduce((a, b) => a + b, 0) / v.length), pico: Math.round(Math.max(...v)) } : null;
+  }
+
   avisar(m) {
+    if (m.quadro) {
+      const seg = Math.floor(performance.now() / 1000);
+      this.porSegundo ??= new Map();
+      this.porSegundo.set(seg, (this.porSegundo.get(seg) || 0) + m.quadro.byteLength);
+      if (this.porSegundo.size > 40) this.porSegundo.delete(this.porSegundo.keys().next().value);
+    }
     for (const fn of this.assinantes) {
       try { fn(m); } catch (err) { console.warn('[ps5] assinante', err); }
     }

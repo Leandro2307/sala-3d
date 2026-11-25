@@ -29,6 +29,7 @@ import { RTC } from './rtc.js';
 import { Controle } from './controle.js';
 import { TurboRecebe, TTL_MS, vidaDoCanal, LISO_PCT, LISO_MAX } from './turbo.js';
 import { TurboAuto, TurboVolta } from './turbo-auto.js';
+import { TesteJoga, PainelTeste, MemoriaTeste, codecsDaqui, textoDoResultado } from './turbo-teste.js';
 import { DiagJogo } from './jogo-diag.js';
 import { linhaDaCulpa } from './culpa.js';
 import { opcoesJogo, LISO_MS, PRESETS, PRESET_TV, PRESET_INICIAL, ORDEM_AUTO, OPCOES_DO_PRESET, autoMostra, htmlPresets, marcarPresets, alturaDoMenu } from './jogo-opcoes.js';
@@ -1020,7 +1021,7 @@ let realceVale = false;
 const comRealce = () => !!ajustes.nitidez && realceVale;
 const comTratamento = () => !!ajustes.tratamento && realceVale; // a mesma regra do realce
 function ligarTurbo() {
-  if (!jogandoLa) return;
+  if (!jogandoLa || entrando === jogandoLa) return; // no meio do teste da conexão: entrarNoTurbo liga no fim
   const p = presetAtual();
   turboRecebe.liso = opcoesJogo.get('turboLiso');
   vidaPedida = CANAL_CONFIAVEL ? null : p?.vida ?? TTL_MS;
@@ -1095,6 +1096,77 @@ function amostraDoAuto(resumo) {
   if (turboRecebe.depoisDaFalha && turboRecebe.ligado && performance.now() - turboVolta.ligouEm > 60_000) turboRecebe.depoisDaFalha = null;
   turboAuto.amostra(resumo, document.hidden);
 }
+// ---------------------------------------------------------------- o teste da conexão antes do turbo (turbo-teste.js)
+const memoriaTeste = new MemoriaTeste();
+const painelTeste = new PainelTeste({ dentro: () => $('#focus'), onPular: () => testeJoga.pular() });
+const testeJoga = new TesteJoga({
+  abrir: (id) => rtc?.abrirTeste(id) ?? null,
+  caminho: (id) => rtc?.caminhoPara(id) ?? null,
+  caminhos: (id) => rtc?.caminhosDe(id) ?? null,
+  onProgresso: (p) => painelTeste.progresso(p),
+  onEvento: (texto, dados) => diagJogo.evento(texto, dados),
+});
+let codecsDoTeste = null;
+// Testa (ou usa o teste de há pouco, com a conexão parecida) e prepara o turbo. Devolve o resultado ou null.
+async function testarConexao(deNovo) {
+  const jl = jogandoLa;
+  const dono = jl.key.split('~')[0];
+  const rede = await Promise.resolve(rtc?.caminhoPara(dono)).catch(() => null);
+  if (jogandoLa !== jl) return null;
+  let r = deNovo ? null : memoriaTeste.valido(dono, rede);
+  if (r) diagJogo.evento('teste da conexão: vale o de há pouco', { tetoKbps: r.tetoKbps, codec: r.codec, modo: r.modo });
+  else {
+    codecsDoTeste ??= await codecsDaqui(['avc1.640033', 'avc1.4d0033', 'avc1.42e033', 'avc1.42001f'], ['hvc1.1.6.L123.B0']);
+    if (jogandoLa !== jl) return null;
+    if (!deNovo && memoriaTeste.porque) diagJogo.evento('teste da conexão: o de há pouco não vale mais', { porque: memoriaTeste.porque });
+    painelTeste.mostrar();
+    r = await testeJoga.rodar(jl.key, { codecs: codecsDoTeste, padrao: PRESET_TV.id, rapido: 16 });
+    painelTeste.fechar();
+    if (jogandoLa !== jl || r.erro) return null;
+    memoriaTeste.guardar(dono, r, await Promise.resolve(rtc?.caminhoPara(dono)).catch(() => null));
+    if (jogandoLa !== jl) return null;
+    painelTeste.resultado(r, MODOS.find((p) => p.id === r.modo)?.nome || 'Turbo');
+  }
+  autoMostra.teste = textoDoResultado(r);
+  marcarPresets(document);
+  return r;
+}
+// Entrar no turbo: com o Automático, primeiro o teste; sem ele (versão antiga lá, pulado, sem conexão), direto
+let entrando = false;
+async function entrarNoTurbo(deNovo = false) {
+  const jl = jogandoLa;
+  if (!jl || entrando === jl) return;
+  entrando = jl;
+  let r = null;
+  try {
+    turboRecebe.teste = null;
+    if (turboAuto.ligado || deNovo) {
+      turboVolta.parar();
+      turboAuto.parar();
+      turboRecebe.desligar();
+      r = await testarConexao(deNovo);
+    }
+  } catch (err) {
+    console.warn('[teste]', err);
+  } finally {
+    if (entrando === jl) entrando = false;
+  }
+  if (jogandoLa !== jl || !opcoesJogo.get('turbo')) return;
+  if (r) turboRecebe.teste = { tetoKbps: r.livre ? null : r.tetoKbps, codec: r.codec };
+  if (r && turboAuto.ligado && opcoesJogo.get('preset') !== r.modo) aplicarPreset(r.modo, 'teste da conexão');
+  if (!turboRecebe.ligado) ligarTurbo();
+  if (!turboAuto.ligado) return;
+  if (r) turboAuto.comecarCom(r.modo);
+  else turboAuto.comecar();
+}
+document.addEventListener('click', (e) => {
+  const el = e.target.closest?.('[data-testar]');
+  if (!el) return;
+  el.blur();
+  if (jogandoLa && opcoesJogo.get('turbo')) entrarNoTurbo(true);
+  else toast('O teste roda com o Modo jogo ligado (e o modo turbo).', 'info', 4000);
+});
+
 let vidaPedida = TTL_MS;
 let vidaAjustada = false;
 function autoDesligado() { // escolheu à mão
@@ -1181,6 +1253,8 @@ const placaLida = { getExtension: () => ({ UNMASKED_RENDERER_WEBGL: 0 }), getPar
 function jogoLa(v, key) {
   turboVolta.parar();
   turboAuto.parar();
+  testeJoga.pular('saiu do jogo');
+  painelTeste.fechar();
   turboRecebe.desligar();
   turboRecebe.depoisDaFalha = null;
   vidaAjustada = false;
@@ -1207,10 +1281,7 @@ function jogoLa(v, key) {
   aplicarBuffer();
   mostrarSelo();
   avisarModo();
-  if (op('turbo')) {
-    ligarTurbo();
-    if (turboAuto.ligado) turboAuto.comecar();
-  }
+  if (op('turbo')) entrarNoTurbo();
 }
 
 function mostrarSelo(r = null) {
@@ -1248,7 +1319,7 @@ function vigiarSom(r) {
 
 // a cada 2 s jogando: a mesma amostra da sala (e a cópia para quem compartilha)
 async function amostrar() {
-  if (!rtc || !jogandoLa || !diagJogo.ativo) return;
+  if (!rtc || !jogandoLa || !diagJogo.ativo || entrando === jogandoLa) return; // no teste da conexão a imagem está parada
   try {
     const { key } = jogandoLa;
     const dono = key.split('~')[0];

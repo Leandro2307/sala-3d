@@ -84,6 +84,7 @@ export function htmlPresets(primeiro = null) {
   return '<div class="jogo-presets" role="radiogroup" aria-label="Modo de imagem">'
     + '<span class="jp-tit">Modo de imagem</span>'
     + '<button type="button" class="jp-card jp-manual jp-auto" role="radio" aria-checked="false" data-preset="auto" title="Mede a sua conexão por alguns segundos e fica no modo que der a melhor imagem com o menor atraso"><b>Automático</b><small data-auto-estado>escolhe o melhor para você</small><em>padrão</em></button>'
+    + '<button type="button" class="jp-card jp-manual" data-testar title="Mede de novo a banda, o atraso e o codec entre este PC e o PC do jogo (uns 20 segundos)"><b>Testar a conexão</b><small data-teste-estado>15 a 25 segundos</small></button>'
     + (primeiro ? cartao(primeiro) : '')
     + '<div class="jp-grade">' + PRESETS.map(cartao).join('') + '</div>'
     + '<button type="button" class="jp-card jp-manual" role="radio" aria-checked="false" data-preset="0"><b>Manual</b><small>as opções abaixo</small></button>'
@@ -96,6 +97,7 @@ export const autoMostra = { ligado: false, texto: 'escolhe o melhor para você' 
 export function marcarPresets(raiz = document) {
   const atual = autoMostra.ligado ? 'auto' : String(valores.preset || 0);
   raiz.querySelectorAll('[data-auto-estado]').forEach((el) => { el.textContent = autoMostra.ligado ? autoMostra.texto : 'escolhe o melhor para você'; });
+  raiz.querySelectorAll('[data-teste-estado]').forEach((el) => { el.textContent = autoMostra.teste || '15 a 25 segundos'; });
   raiz.querySelectorAll('[data-preset]').forEach((el) => {
     const on = el.dataset.preset === atual;
     el.classList.toggle('on', on);
