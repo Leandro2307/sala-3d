@@ -13,7 +13,7 @@ const CHAVE = 'sala3d-mapa-teclas';
 // entrada -> ação. Entradas: o e.code do teclado, Mouse* (botões) e Roda* (dentes da rodinha)
 // O padrão (desde 2026-11-19) é o layout de teclado e mouse mais usado para jogar no controle (o dos
 // adaptadores e programas como reWASD, XIM e Cronus, e o dos jogos de PlayStation que saíram no PC):
-// clique esquerdo mira (L2), direito atira (R2; pedido do usuário em 2026-11-24, o lado dos gatilhos), Espaço pula (✕), C/Ctrl agacha (○), R recarrega ou
+// clique direito mira (L2), esquerdo atira (R2; pedido do usuário em 2026-11-25), Espaço pula (✕), C/Ctrl agacha (○), R recarrega ou
 // interage (□), F e a rodinha trocam de arma / entram no carro (△), Shift corre (L3), V golpeia (R3).
 export const PADRAO = Object.freeze({
   Space: 'b0', Enter: 'b0',
@@ -21,7 +21,7 @@ export const PADRAO = Object.freeze({
   KeyR: 'b2',
   KeyF: 'b3', RodaCima: 'b3', RodaBaixo: 'b3',
   KeyQ: 'b4', MouseX1: 'b4', KeyE: 'b5', MouseX2: 'b5',
-  MouseLeft: 'b6', MouseRight: 'b7',
+  MouseRight: 'b6', MouseLeft: 'b7',
   ShiftLeft: 'b10', ShiftRight: 'b10', KeyV: 'b11', MouseMiddle: 'b11',
   Tab: 'b8', Escape: 'b9', KeyH: 'b16', KeyM: 'b17',
   ArrowUp: 'b12', ArrowDown: 'b13', ArrowLeft: 'b14', ArrowRight: 'b15',
@@ -30,9 +30,9 @@ export const PADRAO = Object.freeze({
   AltLeft: 'tp', AltRight: 'tp', KeyJ: 'giro',
 });
 // v2: o padrão novo. O mapa guardado na v1 (o padrão de antes, ou trocado em cima dele) dá lugar a ele.
-// v3: esquerdo mira e direito atira. No mapa guardado na v2 só os dois cliques trocam, e só se estavam como
-// no padrão de antes.
-const VERSAO_MAPA = 3;
+// v3 (um dia só): esquerdo mirava e direito atirava. v4: direito mira e esquerdo atira. No mapa guardado na
+// v3 só os dois cliques trocam, e só se estavam como no padrão dela.
+const VERSAO_MAPA = 4;
 
 // as direções dos analógicos: ação -> [eixo, sinal]
 export const EIXO = {
@@ -120,33 +120,45 @@ export function nomeEntrada(e) {
 // Serve para acertar o modo sem o △ (que no jogo entra/sai do carro).
 // Desde 2026-11-20 o modo carro já vem ligado (antes quem jogava tinha que ir marcar nas opções).
 export const CARRO_PADRAO = Object.freeze({ KeyW: 'b7', KeyS: 'b6', Backquote: 'troca' });
-// t do carro gravado: 1 = com a tecla de troca; 2 = ligado e com o ' no padrão (ver ler())
-const VERSAO_CARRO = 2;
+// Como o modo carro trabalha (pedido do usuário em 2026-11-25: o W anda e acelera):
+//   soma   (padrão) o △ troca; no carro o W acelera E continua andando, então com o modo trocado dá para andar
+//   troca  o △ troca; no carro o W só acelera (avião e moto, onde o analógico para frente abaixa o bico)
+//   sempre não troca nada: o W anda e acelera o tempo todo (corrida; no GTA ele atira andando a pé)
+//   off    o △ é só o △
+export const MODOS_CARRO = [
+  { id: 'soma', nome: 'Troca, e o W anda e acelera no carro (recomendado)' },
+  { id: 'troca', nome: 'Troca, e no carro o W só acelera (avião, moto)' },
+  { id: 'sempre', nome: 'O W anda e acelera sempre, sem trocar (corrida; no GTA atira a pé)' },
+  { id: 'off', nome: 'Desligado' },
+];
+// t do carro gravado: 1 = com a tecla de troca; 2 = ligado e com o ' no padrão; 3 = com o modo (ver ler())
+const VERSAO_CARRO = 3;
 export const CARRO_ACOES = ['b7', 'b6', 'troca']; // as ações que o painel deixa pôr no carro
 const CARRO_NOME = { b7: 'Acelerar (no carro)', b6: 'Frear / ré (no carro)', troca: 'Só troca a pé / no carro (não aperta nada)' };
 const rotuloCarro = (id, layout) => (id === 'troca' ? '🚗' : rotulo(id, layout));
 export const ENTRA_CARRO = 'b3';
 
 function ler() {
-  const r = { mapa: { ...PADRAO }, carro: { ligado: true, t: VERSAO_CARRO, mapa: { ...CARRO_PADRAO } } };
+  const r = { mapa: { ...PADRAO }, carro: { modo: 'soma', t: VERSAO_CARRO, mapa: { ...CARRO_PADRAO } } };
   try {
     const o = JSON.parse(localStorage.getItem(CHAVE) || 'null');
-    if (o && [1, 2, VERSAO_MAPA].includes(o.v) && o.mapa && typeof o.mapa === 'object') {
+    if (o && [1, 2, 3, VERSAO_MAPA].includes(o.v) && o.mapa && typeof o.mapa === 'object') {
       if (o.v >= 2) {
         r.mapa = {};
         for (const [e, a] of Object.entries(o.mapa)) if (POR_ID[a] && (!ehRoda(e) || ehBotao(a))) r.mapa[e] = a;
-        if (o.v === 2 && r.mapa.MouseLeft === 'b7' && r.mapa.MouseRight === 'b6') Object.assign(r.mapa, { MouseLeft: 'b6', MouseRight: 'b7' });
+        if (o.v === 3 && r.mapa.MouseLeft === 'b6' && r.mapa.MouseRight === 'b7') Object.assign(r.mapa, { MouseLeft: 'b7', MouseRight: 'b6' });
       }
       if (o.carro && typeof o.carro === 'object') {
         const t = Number(o.carro.t) || 0;
         // gravado antes da v2: o modo carro liga (era desligado no padrão e ninguém sabia marcar);
-        // depois dela vale o que a pessoa escolheu
-        r.carro.ligado = t >= VERSAO_CARRO ? !!o.carro.ligado : true;
+        // depois dela vale o que a pessoa escolheu. Na v2 era só liga/desliga: ligado vira 'soma'
+        if (t >= 3) r.carro.modo = MODOS_CARRO.some((m) => m.id === o.carro.modo) ? o.carro.modo : 'soma';
+        else if (t === 2 && !o.carro.ligado) r.carro.modo = 'off';
         if (o.carro.mapa && typeof o.carro.mapa === 'object') {
           r.carro.mapa = {};
           for (const [e, a] of Object.entries(o.carro.mapa)) if (CARRO_ACOES.includes(a) && !ehRoda(e)) r.carro.mapa[e] = a;
           // antes da v2: a troca do padrão passa do Num * para o ' (se o ' está livre no carro)
-          if (t < VERSAO_CARRO && !r.carro.mapa.Backquote) {
+          if (t < 2 && !r.carro.mapa.Backquote) {
             if (r.carro.mapa.NumpadMultiply === 'troca') delete r.carro.mapa.NumpadMultiply;
             r.carro.mapa.Backquote = 'troca';
           }
@@ -192,22 +204,32 @@ export const mapaTeclas = {
     for (const e of Object.keys(mapa)) if (mapa[e] === id) { delete mapa[e]; mudou = true; }
     if (mudou) gravar();
   },
-  // "Voltar ao padrão" volta as teclas do carro também (o liga/desliga do modo carro fica como está)
+  // "Voltar ao padrão" volta as teclas do carro também (o modo carro escolhido fica como está)
   restaurar() {
     mapa = { ...PADRAO };
     carro.mapa = { ...CARRO_PADRAO };
     gravar();
   },
   // ---- modo carro
-  carroLigado: () => carro.ligado,
-  ligarCarro(sim) {
-    carro.ligado = !!sim;
+  carroLigado: () => carro.modo !== 'off',
+  modoCarro: () => carro.modo,
+  definirModoCarro(id) {
+    if (!MODOS_CARRO.some((m) => m.id === id)) return;
+    carro.modo = id;
     gravar();
   },
-  // a ação da entrada no carro (a camada do carro por cima do mapa)
-  acaoCarro: (entrada) => (carro.mapa[entrada] && carro.mapa[entrada] !== 'troca' ? carro.mapa[entrada] : mapa[entrada]),
+  // a pé e no carro são dois modos (△ e a tecla de troca passam de um para o outro)
+  carroTroca: () => carro.modo === 'soma' || carro.modo === 'troca',
+  // as ações de uma entrada, a pé ou no carro. No carro, a tecla de acelerar/frear que também anda faz as
+  // duas coisas (W: R2 e para frente), menos no modo 'troca'
+  acoes(entrada, noCarro) {
+    const base = mapa[entrada];
+    const doCarro = carro.mapa[entrada];
+    if (!noCarro || carro.modo === 'off' || !doCarro || doCarro === 'troca') return base ? [base] : [];
+    return carro.modo !== 'troca' && /^l[xy]/.test(base || '') ? [doCarro, base] : [doCarro];
+  },
   // a entrada só troca de modo (vale a pé e no carro)
-  trocaCarro: (entrada) => carro.mapa[entrada] === 'troca',
+  trocaCarro: (entrada) => (carro.modo === 'soma' || carro.modo === 'troca') && carro.mapa[entrada] === 'troca',
   entradasCarro: (id) => Object.keys(carro.mapa).filter((e) => carro.mapa[e] === id),
   definirCarro(id, entrada, somar = false) {
     if (!CARRO_ACOES.includes(id)) return { erro: 'ação desconhecida' };
@@ -256,11 +278,33 @@ export function teclasDe(id) {
 // Uma tecla só por botão (a primeira, sem a rodinha), com o nome curto: a legenda fica pequena.
 const CURTO = { MouseLeft: '🖱 esq', MouseRight: '🖱 dir', MouseMiddle: '🖱 meio', MouseX1: '🖱 4', MouseX2: '🖱 5', ShiftRight: 'Shift', ControlRight: 'Ctrl' };
 const LEGENDA = ['b0', 'b1', 'b2', 'b3', 'b4', 'b6', 'b5', 'b7', 'b10', 'b11', 'tp'];
-export function legendaBotoes(layout = 'ps5') {
+// noCarro: o L2 e o R2 mostram as teclas do carro (S e W), e vêm com carro: true
+export function legendaBotoes(layout = 'ps5', noCarro = false) {
   return LEGENDA.filter((id) => !POR_ID[id].so || POR_ID[id].so === layout).map((id) => {
-    const e = visiveis(id).find((x) => !ehRoda(x));
-    return { id, botao: id === 'tp' ? 'Touch' : rotulo(id, layout), teclas: e ? CURTO[e] || nomeEntrada(e) : '—' };
+    const c = noCarro && mapaTeclas.carroLigado() ? mapaTeclas.entradasCarro(id)[0] : null;
+    const e = c || visiveis(id).find((x) => !ehRoda(x));
+    return { id, botao: id === 'tp' ? 'Touch' : rotulo(id, layout), teclas: e ? CURTO[e] || nomeEntrada(e) : '—', ...(c ? { carro: true } : {}) };
   });
+}
+
+// o aviso grande do modo carro (o quadro do canto e o do meio da tela, os dois montados no modo-carro.js):
+// { icone, nome, faz ('W anda + acelera · S ré + freia'), troca (' F ou \' ') }; null com o modo desligado
+export function textoModoCarro(noCarro) {
+  const modo = mapaTeclas.modoCarro();
+  if (modo === 'off') return null;
+  const nome1 = (e) => CURTO[e] || nomeEntrada(e);
+  const c = (id) => mapaTeclas.entradasCarro(id);
+  const anda = (e) => mapaTeclas.acoes(e, true).length > 1;
+  const acel = c('b7').map((e) => `${nome1(e)} ${anda(e) ? 'anda + acelera' : 'acelera'}`)[0];
+  const freia = c('b6').map((e) => `${nome1(e)} freia / ré`)[0];
+  const carro = [acel, freia].filter(Boolean).join(' · ');
+  if (modo === 'sempre') return { icone: '🚶🚗', nome: 'A PÉ + CARRO', faz: carro, troca: '', noCarro: true };
+  const teclas = [...visiveis(ENTRA_CARRO).filter((e) => !ehRoda(e)).slice(0, 1), ...c('troca').slice(0, 1)].map(nome1);
+  const ks = ['ly-', 'lx-', 'ly+', 'lx+'].map((id) => mapaTeclas.entradas(id).map(nome1)[0]);
+  const andar = ks.every((k) => k?.length === 1) ? `${ks.join('')} anda` : 'as teclas de andar';
+  return noCarro
+    ? { icone: '🚗', nome: 'NO CARRO', faz: carro, troca: teclas.join(' ou '), noCarro: true }
+    : { icone: '🚶', nome: 'A PÉ', faz: andar, troca: teclas.join(' ou '), noCarro: false };
 }
 
 // o recado que aparece ao entrar no modo jogo, montado do mapa de agora
@@ -280,7 +324,8 @@ export function dicaTeclado(layout) {
   let noCarro = '';
   // a rodinha não troca o modo carro (ela trava o botão; teclado-pad.js)
   const entra = visiveis(ENTRA_CARRO).filter((e) => !ehRoda(e)).map(nomeEntrada).join(' / ');
-  if (mapaTeclas.carroLigado() && entra) {
+  if (mapaTeclas.modoCarro() === 'sempre') noCarro = ` ${textoModoCarro(true).faz}, sempre.`;
+  else if (mapaTeclas.carroLigado() && entra) {
     const c = (id) => mapaTeclas.entradasCarro(id).map(nomeEntrada).join(' / ');
     noCarro = ` Modo carro: ${entra} entra no carro e ${[c('b7') && `${c('b7')} acelera`, c('b6') && `${c('b6')} freia`].filter(Boolean).join(', ') || 'troca as teclas'}; ${entra} de novo volta a pé${c('troca') ? ` (${c('troca')} só troca o modo)` : ''}.`;
   }
@@ -389,7 +434,8 @@ export class MapaTeclasPainel {
     }
     html += '</div>';
     html += `<h3 class="mt-grupo">No carro (GTA e parecidos)</h3>
-      <label class="mt-carro-liga"><input type="checkbox" data-carro-liga><span>O <b>${esc(rotulo(ENTRA_CARRO, l))}</b> (<span data-carro-tecla></span>) entra no carro e troca as teclas abaixo; <b>${esc(rotulo(ENTRA_CARRO, l))}</b> de novo volta a pé. A pé elas andam; no carro, aceleram e freiam.</span></label>
+      <label class="mt-carro-liga"><span>O <b>${esc(rotulo(ENTRA_CARRO, l))}</b> (<span data-carro-tecla></span>) entra no carro e liga as teclas abaixo; <b>${esc(rotulo(ENTRA_CARRO, l))}</b> de novo volta a pé.</span>
+        <select data-carro-modo aria-label="Modo carro">${MODOS_CARRO.map((m) => `<option value="${m.id}">${esc(m.nome)}</option>`).join('')}</select></label>
       <div class="mt-lista" data-carro-lista>`;
     for (const id of CARRO_ACOES) {
       html += `<div class="mt-linha" data-carro="${id}">
@@ -430,11 +476,13 @@ export class MapaTeclasPainel {
       mapaTeclas.restaurar();
       this.avisar('Tudo de volta ao padrão.');
     });
-    r.querySelector('[data-carro-liga]').addEventListener('change', (e) => {
-      mapaTeclas.ligarCarro(e.target.checked);
-      this.avisar(e.target.checked
-        ? `Modo carro ligado: no jogo, ${r.querySelector('[data-carro-tecla]').textContent} (${rotulo(ENTRA_CARRO, this.layout)}) entra no carro e troca as teclas; de novo, volta a pé.`
-        : `Modo carro desligado: ${rotulo(ENTRA_CARRO, this.layout)} é só ${rotulo(ENTRA_CARRO, this.layout)}.`);
+    r.querySelector('[data-carro-modo]').addEventListener('change', (e) => {
+      mapaTeclas.definirModoCarro(e.target.value);
+      const b = rotulo(ENTRA_CARRO, this.layout);
+      const t = textoModoCarro(true);
+      this.avisar(!t ? `Modo carro desligado: ${b} é só ${b}.`
+        : e.target.value === 'sempre' ? `${t.faz}, sempre. A pé, com arma na mão, acelerar (${rotulo('b7', this.layout)}) atira.`
+          : `No carro: ${t.faz}. ${t.troca} troca a pé / no carro.`, e.target.value === 'sempre');
     });
     r.querySelector('.mt-rolar').addEventListener('click', (e) => {
       const tirarC = e.target.closest('[data-tirar-carro]');
@@ -513,7 +561,7 @@ export class MapaTeclasPainel {
   atualizar() {
     const r = this.raiz;
     const ligado = mapaTeclas.carroLigado();
-    r.querySelector('[data-carro-liga]').checked = ligado;
+    r.querySelector('[data-carro-modo]').value = mapaTeclas.modoCarro();
     r.querySelector('[data-carro-tecla]').textContent = visiveis(ENTRA_CARRO).filter((e) => !ehRoda(e)).map(nomeEntrada).join(' / ') || 'sem tecla';
     r.querySelector('[data-carro-lista]').classList.toggle('mt-carro-off', !ligado);
     for (const linha of r.querySelectorAll('.mt-linha[data-carro]')) {
@@ -618,7 +666,7 @@ export class MapaTeclasPainel {
     if (desce) {
       if (e.repeat) return;
       const id = mapaTeclas.acao(e.code);
-      if (mapaTeclas.trocaCarro(e.code)) this.avisar(`${nomeEntrada(e.code)} → troca a pé / no carro${mapaTeclas.carroLigado() ? '' : ' (marque a caixa do modo carro)'}`);
+      if (mapaTeclas.trocaCarro(e.code)) this.avisar(`${nomeEntrada(e.code)} → troca a pé / no carro`);
       else if (id) {
         this.acesas.set(e.code, id);
         this.acender(id);

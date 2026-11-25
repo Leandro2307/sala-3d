@@ -101,3 +101,101 @@ test('legenda do canto: botões, ombros, gatilhos, L3/R3 e touchpad (sem analóg
   // no Switch não tem touchpad
   assert.equal(legendaBotoes('switch').some((b) => b.id === 'tp'), false);
 });
+
+test('clique direito é o L2', () => {
+  mapaTeclas.restaurar();
+  const { pad, tp } = novoPad();
+  tp.evento({ t: 'mouse', a: 'down', b: 'right' });
+  assert.equal(pad.ultimo.lt, 1);
+  assert.equal(pad.ultimo.rt, 0);
+});
+
+test('mapa guardado na v3 (esquerdo L2): os cliques trocam; o trocado à mão fica', async () => {
+  const ler = async (v, mapa, carro) => {
+    guardado.set('sala3d-mapa-teclas', JSON.stringify({ v, mapa, ...(carro ? { carro } : {}) }));
+    return (await import(`../public/js/mapa-teclas.js?v=${Math.random()}`)).mapaTeclas;
+  };
+  let m = await ler(3, { MouseLeft: 'b6', MouseRight: 'b7', KeyP: 'b0' });
+  assert.deepEqual([m.acao('MouseLeft'), m.acao('MouseRight'), m.acao('KeyP')], ['b7', 'b6', 'b0']);
+  m = await ler(3, { MouseLeft: 'b0', MouseRight: 'b7' });
+  assert.deepEqual([m.acao('MouseLeft'), m.acao('MouseRight')], ['b0', 'b7']);
+  m = await ler(4, { MouseLeft: 'b6', MouseRight: 'b7' });
+  assert.equal(m.acao('MouseLeft'), 'b6');
+  m = await ler(3, {}, { ligado: false, t: 2, mapa: { KeyW: 'b7' } });
+  assert.equal(m.modoCarro(), 'off');
+  m = await ler(3, {}, { ligado: true, t: 2, mapa: { KeyW: 'b7' } });
+  assert.equal(m.modoCarro(), 'soma');
+  m = await ler(4, {}, { modo: 'sempre', t: 3, mapa: { KeyW: 'b7' } });
+  assert.equal(m.modoCarro(), 'sempre');
+});
+
+const tecla = (tp, code, a = 'down') => tp.evento({ t: 'tecla', a, code });
+test('modo carro soma: a pé o W só anda; no carro anda e acelera, sem soltar o andar na troca', () => {
+  mapaTeclas.restaurar();
+  mapaTeclas.definirModoCarro('soma');
+  const { pad, tp } = novoPad();
+  tecla(tp, 'KeyW');
+  assert.deepEqual([pad.ultimo.ly, pad.ultimo.rt], [-1, 0]);
+  tecla(tp, 'KeyF');
+  assert.deepEqual([pad.ultimo.ly, pad.ultimo.rt], [-1, 1]);
+  tecla(tp, 'KeyA'); // o volante vai até o fim com o W segurado
+  assert.deepEqual([pad.ultimo.lx, pad.ultimo.ly], [-1, -1]);
+  tecla(tp, 'KeyW'); // a repetição da tecla não muda nada
+  tecla(tp, 'KeyW', 'up');
+  assert.equal(pad.ultimo.ly, 0);
+  tecla(tp, 'KeyF', 'up');
+  tecla(tp, 'Backquote'); // volta a pé
+  assert.equal(tp.carro, false);
+  tecla(tp, 'KeyW');
+  assert.equal(Math.round(pad.ultimo.ly * 100), -71); // a pé a diagonal é de analógico
+  tp.desligar();
+});
+
+test('modo carro troca: no carro o W só acelera', () => {
+  mapaTeclas.definirModoCarro('troca');
+  const { pad, tp } = novoPad();
+  tecla(tp, 'Backquote');
+  tecla(tp, 'KeyW');
+  assert.deepEqual([pad.ultimo.ly, pad.ultimo.rt], [0, 1]);
+  tp.desligar();
+});
+
+test('modo carro sempre: o W anda e acelera e o △ não troca; desligado: só anda', () => {
+  mapaTeclas.definirModoCarro('sempre');
+  let { pad, tp } = novoPad();
+  tecla(tp, 'KeyF');
+  assert.equal(tp.carro, false);
+  tecla(tp, 'KeyW');
+  assert.deepEqual([pad.ultimo.ly, pad.ultimo.rt], [-1, 1]);
+  tecla(tp, 'KeyS');
+  assert.equal(pad.ultimo.lt, 1);
+  tp.desligar();
+  mapaTeclas.definirModoCarro('off');
+  ({ pad, tp } = novoPad());
+  tecla(tp, 'KeyF');
+  tecla(tp, 'KeyW');
+  assert.deepEqual([pad.ultimo.ly, pad.ultimo.rt], [-1, 0]);
+  tp.desligar();
+  mapaTeclas.definirModoCarro('soma');
+});
+
+test('o aviso do modo e a legenda no carro', async () => {
+  mapaTeclas.restaurar();
+  const { textoModoCarro, legendaBotoes } = await import('../public/js/mapa-teclas.js');
+  assert.deepEqual(textoModoCarro(false), { icone: '🚶', nome: 'A PÉ', faz: 'WASD anda', troca: "F ou '", noCarro: false });
+  assert.equal(textoModoCarro(true).faz, 'W anda + acelera · S freia / ré');
+  const l = Object.fromEntries(legendaBotoes('ps5', true).map((b) => [b.botao, b.teclas]));
+  assert.deepEqual([l.L2, l.R2], ['S', 'W']);
+});
+
+test('no tutorial (treino) o F e a tecla de troca não ligam o modo carro', () => {
+  mapaTeclas.restaurar();
+  const { pad, tp } = novoPad();
+  pad.treino = () => {};
+  for (const c of ['KeyF', 'Backquote']) { tecla(tp, c); tecla(tp, c, 'up'); }
+  assert.equal(tp.carro, false);
+  pad.treino = null;
+  tecla(tp, 'Backquote');
+  assert.equal(tp.carro, true);
+  tp.desligar();
+});

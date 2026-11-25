@@ -36,7 +36,8 @@ import { LAYOUTS, layoutDoTitulo } from './toque-jogo.js';
 import { ControleFisico } from './gamepad-jogo.js';
 import { PadVirtual } from './pad-virtual.js';
 import { TecladoPad } from './teclado-pad.js';
-import { MapaTeclasPainel, dicaTeclado, legendaBotoes, mapaTeclas, nomeEntrada } from './mapa-teclas.js';
+import { MapaTeclasPainel, dicaTeclado, legendaBotoes, mapaTeclas } from './mapa-teclas.js';
+import { ModoCarroTela } from './modo-carro.js';
 import { TutorialControle } from './tutorial-controle.js';
 import { Ps5Touchpad, temTouchpadHid } from './ps5-touchpad.js';
 import { AvisoDoSite } from './aviso-site.js';
@@ -1312,14 +1313,17 @@ setInterval(() => {
 const entradaDeAgora = () => (touchpad.ligado && touchpad.ativo ? 'dualsense' : fisico.pad() ? 'gamepad' : 'teclado');
 let layoutLegenda = null;
 let noCarro = false;
+const modoCarroTela = new ModoCarroTela({ quadro: $('#jogo-modo'), aviso: $('#jogo-modo-aviso') });
 const tecladoPad = new TecladoPad({
   pad: padVirtual,
   sens: () => opcoesJogo.get('mouseSens'),
   aviso: (texto) => toast(texto, 'info', 5000),
   onCarro: (sim) => {
     if (sim !== noCarro) diagJogo.evento(sim ? 'modo carro: no carro' : 'modo carro: a pé');
+    const trocou = sim !== noCarro;
     noCarro = sim;
     if (layoutLegenda) mostrarLegenda(layoutLegenda);
+    if (trocou && layoutLegenda && tecladoPad.ativo) modoCarroTela.trocou(sim);
   },
 });
 padVirtual.onErroTremor = (erro) => diagJogo.evento('o controle não aceitou o tremor', { erro, ...padVirtual.comoVibra() });
@@ -1348,12 +1352,14 @@ function mostrarLegenda(layout) {
   const el = $('#jogo-legenda');
   // com controle não serve para nada, e menos coisa por cima da imagem é menos trabalho para mostrá-la
   el.hidden = !layout || entradaDeAgora() !== 'teclado';
-  if (el.hidden) return void (el.innerHTML = '');
-  const troca = mapaTeclas.carroLigado() ? mapaTeclas.entradasCarro('troca').map(nomeEntrada).join(' / ') : '';
-  const carro = !mapaTeclas.carroLigado() ? ''
-    : `<span class="lg-carro${noCarro ? ' on' : ''}"><b>${noCarro ? '🚗 No carro' : '🚶 A pé'}</b><kbd>${esc(troca || '△ troca')}</kbd></span>`;
-  el.innerHTML = carro + legendaBotoes(layout)
-    .map((b) => `<span${b.id === 'b4' ? ' class="lg-sep"' : ''}><b class="${layout === 'ps5' ? CLASSE_LEGENDA[b.id] || '' : ''}">${esc(b.botao)}</b><kbd>${esc(b.teclas)}</kbd></span>`).join('');
+  if (el.hidden) {
+    modoCarroTela.esconder();
+    return void (el.innerHTML = '');
+  }
+  // modo carro: a pé ou no carro, sempre à vista
+  modoCarroTela.mostrar(noCarro);
+  el.innerHTML = legendaBotoes(layout, noCarro || mapaTeclas.modoCarro() === 'sempre')
+    .map((b) => `<span class="${b.id === 'b4' ? 'lg-sep' : ''}${b.carro ? ' lg-no-carro' : ''}"><b class="${layout === 'ps5' ? CLASSE_LEGENDA[b.id] || '' : ''}">${esc(b.botao)}</b><kbd>${esc(b.teclas)}</kbd></span>`).join('');
 }
 mapaTeclas.ouvir(() => { if (layoutLegenda) mostrarLegenda(layoutLegenda); });
 for (const ev of ['gamepadconnected', 'gamepaddisconnected']) addEventListener(ev, () => { if (layoutLegenda) mostrarLegenda(layoutLegenda); });

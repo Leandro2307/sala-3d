@@ -64,9 +64,9 @@ const PASSOS_PC_PADRAO = [
     de: teclas('F') + '<span class="tut-mais">/</span>' + mouse('cima'), para: GLIFO.tri, feito: apertou('tri'),
   },
   {
-    tit: 'Clique esquerdo = L2 · direito = R2',
-    txt: 'Clique com o botão <b>esquerdo</b> (mirar) e com o <b>direito</b> (atirar, acelerar). Dá para segurar os dois juntos.',
-    de: mouse('esq') + mouse('dir'), para: GLIFO.l2 + GLIFO.r2, feito: apertou('l2', 'r2'),
+    tit: 'Clique direito = L2 · esquerdo = R2',
+    txt: 'Clique com o botão <b>direito</b> (mirar) e com o <b>esquerdo</b> (atirar). Dá para segurar os dois juntos.',
+    de: mouse('dir') + mouse('esq'), para: GLIFO.l2 + GLIFO.r2, feito: apertou('l2', 'r2'),
   },
   { tit: 'Q = L1 · E = R1', txt: 'Aperte <b>Q</b> e depois <b>E</b>.', de: teclas('Q', 'E'), para: GLIFO.l1 + GLIFO.r1, feito: apertou('l1', 'r1') },
   {

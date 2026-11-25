@@ -5,7 +5,7 @@
 //
 //   WASD: analógico esquerdo        mouse: analógico direito (pela velocidade)
 //   (o layout de teclado e mouse mais usado, o dos adaptadores e dos jogos de PlayStation no PC)
-//   clique esquerdo: L2/ZL (mirar)   clique direito: R2/ZR (atirar)   rodinha: △ (trava; o próximo dente solta)
+//   clique direito: L2/ZL (mirar)   clique esquerdo: R2/ZR (atirar)   rodinha: △ (trava; o próximo dente solta)
 //   Espaço/Enter: ✕   C/Ctrl/⌫: ○   R: □   F: △ (pela posição: no Switch, B A Y X)
 //   Q e Mouse 4: L1/L   E e Mouse 5: R1/R   Shift: L3 (correr)   V e meio: R3
 //   Tab: Create/−   Esc: Options/+   H: PS/Home   M: clique do touchpad   setas e 1 2 3 4: direcional
@@ -25,7 +25,7 @@
 // para o controle (botão do mouse sem ação não faz nada).
 
 import { Fusao, inclinado } from './movimento.js';
-import { mapaTeclas, EIXO, MOUSE, ENTRA_CARRO, nomeEntrada } from './mapa-teclas.js';
+import { mapaTeclas, EIXO, MOUSE, ENTRA_CARRO } from './mapa-teclas.js';
 
 // roda: TRAVA o botão. Um dente para baixo aperta □ (para cima △) e deixa apertado; o próximo dente,
 // para qualquer lado, solta. A roda só manda pulsos, não dá para "segurar" nela — antes o botão soltava
@@ -57,7 +57,7 @@ const MIN_MS = 60;
 export class TecladoPad {
   // sens(): a sensibilidade do mouse escolhida nas opções do modo jogo (1 = VEL_CHEIA)
   // aviso(texto): um recado curto para quem joga (ligou/desligou a inclinação)
-  // onCarro(sim): o modo carro trocou (a legenda da tela mostra a pé / no carro o tempo todo)
+  // onCarro(sim): o modo carro trocou (modo-carro.js mostra a pé / no carro o tempo todo)
   constructor({ pad, sens = () => 1, aviso = () => {}, onCarro = () => {} }) {
     this.pad = pad;
     this.sens = sens;
@@ -69,29 +69,44 @@ export class TecladoPad {
     this.zerar();
   }
 
-  // a ação de uma entrada agora (a pé ou no carro)
-  acaoDe(entrada) {
-    return this.carro && mapaTeclas.carroLigado() ? mapaTeclas.acaoCarro(entrada) : mapaTeclas.acao(entrada);
+  // as teclas do carro valem agora? (no modo 'sempre' do mapa, o tempo todo)
+  noCarro() {
+    return mapaTeclas.modoCarro() === 'sempre' || (this.carro && mapaTeclas.carroTroca());
+  }
+
+  // as ações de uma entrada agora (a pé ou no carro; no carro o W são duas: acelerar e andar)
+  acoesDe(entrada) {
+    return mapaTeclas.acoes(entrada, this.noCarro());
+  }
+
+  // aperta/solta todas; true se alguma virou controle
+  acionarTodas(quem, ids, desce) {
+    let foi = false;
+    for (const id of ids) foi = this.acionar(quem, id, desce) || foi;
+    return foi;
   }
 
   // uma tecla/botão do mouse desceu ou subiu: a subida solta o que a descida apertou (mesmo que o
   // modo tenha trocado no meio). O △ que desce troca o modo carro, se ele está ligado nas opções.
   entrada(quem, ent, desce) {
     // a tecla só de troca (' no padrão): troca o modo e não aperta nada no jogo
-    if (mapaTeclas.carroLigado() && mapaTeclas.trocaCarro(ent)) {
-      if (desce && !this.trocaSegura.has(quem)) this.trocarCarro();
+    if (mapaTeclas.trocaCarro(ent)) {
+      if (desce && !this.trocaSegura.has(quem) && !this.pad.treino) this.trocarCarro();
       if (desce) this.trocaSegura.add(quem);
       else this.trocaSegura.delete(quem);
       return true;
     }
     const antes = this.seguras.get(quem);
-    const id = desce ? this.acaoDe(ent) : antes?.id;
+    // a repetição da tecla segurada fica com o que a descida apertou
+    const ids = antes ? antes.ids : this.acoesDe(ent);
     if (!desce) {
       this.seguras.delete(quem);
-      if (!antes) return this.acionar(quem, this.acaoDe(ent), false);
-    } else if (id) this.seguras.set(quem, { ent, id });
-    const foi = this.acionar(quem, id, desce);
-    if (desce && !antes && id === ENTRA_CARRO && mapaTeclas.carroLigado()) this.trocarCarro();
+      return this.acionarTodas(quem, ids, false);
+    }
+    if (ids.length) this.seguras.set(quem, { ent, ids });
+    const foi = this.acionarTodas(quem, ids, true);
+    // no tutorial (treino) o botão não chega no jogo: não entrou em carro nenhum
+    if (!antes && ids.includes(ENTRA_CARRO) && mapaTeclas.carroTroca() && !this.pad.treino) this.trocarCarro();
     return foi;
   }
 
@@ -102,22 +117,13 @@ export class TecladoPad {
     this.carro = sim;
     this.onCarro(sim);
     for (const [quem, s] of [...this.seguras]) {
-      const novo = this.acaoDe(s.ent);
-      if (novo === s.id) continue;
-      this.acionar(quem, s.id, false);
-      if (novo) {
-        this.acionar(quem, novo, true);
-        this.seguras.set(quem, { ent: s.ent, id: novo });
-      } else this.seguras.delete(quem);
+      const novas = this.acoesDe(s.ent);
+      // o que vale nos dois modos (o andar do W) continua apertado, sem soltar no meio
+      this.acionarTodas(quem, s.ids.filter((id) => !novas.includes(id)), false);
+      this.acionarTodas(quem, novas.filter((id) => !s.ids.includes(id)), true);
+      if (novas.length) this.seguras.set(quem, { ent: s.ent, ids: novas });
+      else this.seguras.delete(quem);
     }
-    const teclas = (id) => mapaTeclas.entradasCarro(id).map(nomeEntrada).join(' / ');
-    const r2 = this.layout === 'switch' ? 'ZR' : 'R2';
-    const l2 = this.layout === 'switch' ? 'ZL' : 'L2';
-    const troca = teclas('troca');
-    const partes = [teclas('b7') && `${teclas('b7')} acelera (${r2})`, teclas('b6') && `${teclas('b6')} freia (${l2})`].filter(Boolean);
-    this.aviso(sim
-      ? `🚗 Modo carro: ${partes.join(', ') || 'as teclas do carro valem'}. Saiu do carro? O mesmo botão${troca ? ` ou ${troca}` : ''} volta a pé.`
-      : '🚶 A pé: as teclas voltam ao normal.');
   }
 
   zerar() {
@@ -138,7 +144,7 @@ export class TecladoPad {
     this.timers = new Map(); // botão -> soltura adiada (MIN_MS)
     this.desceu = new Map(); // botão -> quando desceu
     this.trocaSegura = new Set(); // as teclas de troca do modo carro seguradas (a repetição não troca de novo)
-    this.seguras = new Map(); // tecla/botão do mouse segurado -> { ent: a entrada, id: a ação que apertou }
+    this.seguras = new Map(); // tecla/botão do mouse segurado -> { ent: a entrada, ids: as ações que apertou }
     this.fontes = new Map(); // botão -> quantas teclas/botões o seguram (Shift esq. e dir.)
     this.eixos = new Map(); // direção do analógico (ly-, rx+...) -> as entradas que seguram
     this.b = 0;
@@ -182,7 +188,7 @@ export class TecladoPad {
         // o clique que prende o mouse de novo (depois de um Esc) não aperta nada
         if (ev.a === 'down' && !document.pointerLockElement) return true;
         const quem = `m:${ev.b}`;
-        // Alt + clique esquerdo: afunda o touchpad em vez do L2 (vale até soltar o clique)
+        // Alt + clique esquerdo: afunda o touchpad em vez do R2 (vale até soltar o clique)
         if (ev.a === 'down' && this.dedo && ev.b === 'left') {
           this.cliqueTp = quem;
           this.botao(quem, TP_CLIQUE, true);
@@ -408,7 +414,8 @@ export class TecladoPad {
     const tem = (id) => (this.eixos.get(id)?.size ? 1 : 0);
     let lx = tem('lx+') - tem('lx-');
     let ly = tem('ly+') - tem('ly-');
-    if (lx && ly) { lx *= Math.SQRT1_2; ly *= Math.SQRT1_2; }
+    // no carro não: o W também é para frente, e o volante (W + A) viraria só 70%
+    if (lx && ly && !this.noCarro()) { lx *= Math.SQRT1_2; ly *= Math.SQRT1_2; }
     // o analógico direito pelo teclado soma com o mouse
     let kx = tem('rx+') - tem('rx-');
     let ky = tem('ry+') - tem('ry-');

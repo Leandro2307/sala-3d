@@ -31,7 +31,8 @@ import { ToqueJogo, jogoDaJanela, LAYOUTS, layoutDoTitulo } from './toque-jogo.j
 import { ControleFisico } from './gamepad-jogo.js';
 import { PadVirtual } from './pad-virtual.js';
 import { TecladoPad } from './teclado-pad.js';
-import { MapaTeclasPainel, dicaTeclado, legendaBotoes, mapaTeclas, nomeEntrada } from './mapa-teclas.js';
+import { MapaTeclasPainel, dicaTeclado, legendaBotoes, mapaTeclas } from './mapa-teclas.js';
+import { ModoCarroTela } from './modo-carro.js';
 import { TutorialControle } from './tutorial-controle.js';
 import { TurboEnvio, TurboRecebe, TTL_MS, vidaDoCanal, LISO_PCT, LISO_MAX } from './turbo.js';
 import { TurboAuto, TurboVolta } from './turbo-auto.js';
@@ -4940,6 +4941,7 @@ document.addEventListener('pointerdown', (e) => {
 // Controle virtual (pad-virtual.js): no layout PS5 o toque e o controle de videogame viram um
 // controle de Xbox no PC de quem compartilha, em vez de teclado e mouse
 const padVirtual = new PadVirtual({ controle });
+const modoCarroTela = new ModoCarroTela({ quadro: $('#jogo-modo'), aviso: $('#jogo-modo-aviso') });
 const tecladoPad = new TecladoPad({
   pad: padVirtual,
   sens: () => opcoesJogo.get('mouseSens'),
@@ -4948,8 +4950,10 @@ const tecladoPad = new TecladoPad({
   // trocado e o W atira em vez de andar. A legenda mostra o modo o tempo todo para isso saltar à vista.
   onCarro: (sim) => {
     if (sim !== noCarro) diagJogo.evento(sim ? 'modo carro: no carro' : 'modo carro: a pé');
+    const trocou = sim !== noCarro;
     noCarro = sim;
     if (layoutLegenda) mostrarLegendaJogo(layoutLegenda);
+    if (trocou && layoutLegenda && tecladoPad.ativo) modoCarroTela.trocou(sim);
   },
 });
 // tremores que chegaram aqui (quem joga), para o relatório (ver receberVolta)
@@ -5120,13 +5124,14 @@ function mostrarLegendaJogo(layout) {
   layoutLegenda = layout;
   const el = $('#jogo-legenda');
   el.hidden = !layout;
-  if (!layout) return void (el.innerHTML = '');
-  // modo carro ligado nas opções: a pé ou no carro, sempre à vista, com a tecla que acerta o modo
-  const troca = mapaTeclas.carroLigado() ? mapaTeclas.entradasCarro('troca').map(nomeEntrada).join(' / ') : '';
-  const carro = !mapaTeclas.carroLigado() ? ''
-    : `<span class="lg-carro${noCarro ? ' on' : ''}"><b>${noCarro ? '🚗 No carro' : '🚶 A pé'}</b><kbd>${esc(troca || '△ troca')}</kbd></span>`;
-  el.innerHTML = carro + legendaBotoes(layout)
-    .map((b) => `<span${b.id === 'b4' ? ' class="lg-sep"' : ''}><b class="${layout === 'ps5' ? CLASSE_LEGENDA[b.id] || '' : ''}">${esc(b.botao)}</b><kbd>${esc(b.teclas)}</kbd></span>`).join('');
+  if (!layout) {
+    modoCarroTela.esconder();
+    return void (el.innerHTML = '');
+  }
+  // modo carro: a pé ou no carro, sempre à vista
+  modoCarroTela.mostrar(noCarro);
+  el.innerHTML = legendaBotoes(layout, noCarro || mapaTeclas.modoCarro() === 'sempre')
+    .map((b) => `<span class="${b.id === 'b4' ? 'lg-sep' : ''}${b.carro ? ' lg-no-carro' : ''}"><b class="${layout === 'ps5' ? CLASSE_LEGENDA[b.id] || '' : ''}">${esc(b.botao)}</b><kbd>${esc(b.teclas)}</kbd></span>`).join('');
 }
 mapaTeclas.ouvir(() => { if (layoutLegenda) mostrarLegendaJogo(layoutLegenda); });
 // Tutorial do controle toda vez que entra no modo jogo numa tela de PS5 (no PC, só sem controle de
