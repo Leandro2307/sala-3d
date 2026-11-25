@@ -327,9 +327,20 @@ export class Ps5Fonte {
     return v.length ? { media: Math.round(v.reduce((a, b) => a + b, 0) / v.length), pico: Math.round(Math.max(...v)) } : null;
   }
 
+  // como o PS5 está chegando neste PC, dos últimos seg segundos inteiros: quadros por segundo, e o pior segundo
+  saude(seg = 10) {
+    const agora = Math.floor(performance.now() / 1000);
+    const v = [];
+    for (const [s, n] of this.quadrosPorSegundo || []) if (s < agora && s >= agora - seg) v.push(n);
+    return v.length > 2 ? { qps: Math.round(v.reduce((a, b) => a + b, 0) / v.length), pior: Math.min(...v.slice(1)) } : null;
+  }
+
   avisar(m) {
     if (m.quadro) {
       const seg = Math.floor(performance.now() / 1000);
+      this.quadrosPorSegundo ??= new Map();
+      this.quadrosPorSegundo.set(seg, (this.quadrosPorSegundo.get(seg) || 0) + 1);
+      if (this.quadrosPorSegundo.size > 40) this.quadrosPorSegundo.delete(this.quadrosPorSegundo.keys().next().value);
       this.porSegundo ??= new Map();
       this.porSegundo.set(seg, (this.porSegundo.get(seg) || 0) + m.quadro.byteLength);
       if (this.porSegundo.size > 40) this.porSegundo.delete(this.porSegundo.keys().next().value);

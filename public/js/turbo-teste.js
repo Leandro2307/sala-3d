@@ -8,6 +8,7 @@
 //
 // 1. a banda sobe em degraus (RAMPA) até um que não passa; o que passou é confirmado por CONFIRMA_MS;
 // 2. a imagem da tela, de verdade, codificada lá em H.264 e em H.265 e decodificada aqui;
+// A confirmação imita o jogo (resumirJogo); a nota e as dicas são para quem joga (avaliarConexao).
 // 3. escolher(): o teto da banda, o codec e o modo de imagem. O teto vai no pedido do turbo (TurboEnvio.tetoDe).
 //
 // Dois canais: "turbo-teste" (ordenado e confiável: as mensagens e a imagem do passo 2) e
@@ -18,11 +19,13 @@ import { descricaoSemReordenar } from './turbo.js';
 
 export const CANAL_TESTE = 'turbo-teste';
 export const CANAL_TESTE_DADOS = 'turbo-teste-dados';
+export const CANAL_TESTE_JOGO = 'turbo-teste-jogo'; // ordenado e com prazo, como o do turbo (a confirmação)
 const SONDA = '#turn'; // o teste pelo TURN da mesma pessoa, em TesteEnvio.testes
 
 const RAMPA = [3000, 6000, 9000, 12_000, 16_000, 20_000, 26_000]; // kbps
 const DEGRAU_MS = 1500;
-const CONFIRMA_MS = 5000;
+const CONFIRMA_MS = 6000;
+const CONFIRMA_OSCILA_MS = 8000; // celular, TURN ou longe: a rede muda mais, olha por mais tempo
 const CONFIRMA_VEZES = 3;
 const QUEDA = 0.75; // a confirmação não passou: a próxima é com esta fração
 const ALVO_MIN = 12_000; // testa pelo menos até aqui
@@ -35,11 +38,14 @@ const RTT_DIRETO_BOM = 80;
 const RTT_LONGE = 150; // daqui para cima a imagem vai mais leve
 const TETO_LONGE = 6000;
 const TOPO_LONGE = 12_000;
+const TETO_CELULAR = 8000; // no celular por uma rede que não é a de casa, começa com menos banda (5G, 2026-11-25)
+const TRAVADA_MS = 80; // dois quadros seguidos do jogo com isto entre eles: quem joga vê
+const RAPIDO_RTT = 60;
 const SONDA_MS = 7000; // a conexão da sonda tem isto para ligar
 const AQUECE_MS = 600;
 const PAUSA_MS = 120; // entre um degrau e outro (a fila do anterior acaba)
 const RECUPERA_MS = 1200; // depois de um degrau que não passou
-const CHEIO_MS = 80_000; // o teste inteiro nunca passa disto
+const CHEIO_MS = 120_000; // o teste inteiro nunca passa disto
 // um degrau passa com tudo isto
 const CHEGOU_MIN = 0.94;
 const PERDA_MAX = 1.5; // %
@@ -50,7 +56,7 @@ export const CORTE_MS = 500; // um buraco assim é o caminho cortando tudo
 // quem compartilha: o que aceita de quem joga
 const KBPS_MAX = 40_000;
 const MS_MAX = 8000;
-const TOTAL_MS_MAX = 90_000;
+const TOTAL_MS_MAX = 130_000;
 const QPS = 60;
 const PEDACO = 1100;
 const CAB = 24;
@@ -111,9 +117,34 @@ export function resumirDegrau({ chegadas, envio, pedido, fim, travouAqui = 0 }) 
   return r;
 }
 
+// A confirmação é com quadros como os do jogo: tamanhos variados, um grande de tempos em tempos, num canal igual ao do
+// turbo. Com pacotes todos iguais o 5G do iPhone previa 5 ms de tremido e no jogo eram 12, com picos de 170.
+// quadros: [{ seq, t0, em }] os que chegaram inteiros; enviados: quantos saíram de lá
+export function resumirJogo({ quadros, enviados, ms, travou = 0 }) {
+  const n = quadros.length;
+  if (!n || !enviados) return { quadros: n, enviados: enviados || 0, perdidosPct: enviados ? 100 : null, travadas: 0, travMin: 0, tremidoMs: null, filaP90: null, maiorMs: ms, ok: false };
+  const viagens = quadros.map((q) => q.em - q.t0);
+  const menor = viagens.reduce((a, b) => Math.min(a, b));
+  const em = quadros.map((q) => q.em).sort((a, b) => a - b);
+  let travadas = 0;
+  let maior = 0;
+  for (let i = 1; i < em.length; i++) {
+    const d = em[i] - em[i - 1];
+    if (d > TRAVADA_MS && d <= travou * 1.4) continue; // a página de um dos lados parou, não a rede
+    maior = Math.max(maior, d);
+    if (d > TRAVADA_MS) travadas++;
+  }
+  const r = {
+    quadros: n, enviados, perdidosPct: r1((1 - n / enviados) * 100), travadas, travMin: r1(travadas / (ms / 60_000)),
+    tremidoMs: r1(pct(viagens, 0.95) - pct(viagens, 0.5)), filaP90: r1(pct(viagens, 0.9) - menor), maiorMs: Math.round(maior),
+  };
+  r.ok = r.perdidosPct <= 2 && travadas <= 2 && r.filaP90 <= 110;
+  return r;
+}
+
 // O plano do teste: um gerador que pede um degrau ({ kbps, ms, confirma }) e recebe o resumo dele. Devolve
 // { tetoKbps, livre, confirma }: livre, passou até o fim (o alvo) sem nenhum limite aparecer.
-export function* planoDaBanda({ ps5Kbps = null, longe = false } = {}) {
+export function* planoDaBanda({ ps5Kbps = null, longe = false, oscila = false } = {}) {
   const topo = longe ? TOPO_LONGE : Math.min(ALVO_MAX, Math.max(ALVO_MIN, Number(ps5Kbps) || 16_000));
   const rampa = [...RAMPA.filter((k) => k < topo), topo];
   let bom = 0;
@@ -141,7 +172,7 @@ export function* planoDaBanda({ ps5Kbps = null, longe = false } = {}) {
   let livre = !ruim && alvo === topo;
   let confirma = null;
   for (let i = 0; i < CONFIRMA_VEZES; i++) {
-    confirma = yield { kbps: alvo, ms: CONFIRMA_MS, confirma: true };
+    confirma = yield { kbps: alvo, ms: oscila || longe ? CONFIRMA_OSCILA_MS : CONFIRMA_MS, confirma: true, jogo: true };
     if (confirma.ok) return { tetoKbps: alvo, livre, confirma };
     livre = false;
     alvo = Math.max(1200, Math.round(alvo * QUEDA));
@@ -165,10 +196,15 @@ export function escolherCodec({ h264, h265, tetoKbps, livre, ps5Hevc = false }) 
 }
 
 // O modo: o padrão da página, a não ser que a conexão seja parada o bastante para a folga de 15 ms do Turbo rápido
-export function escolherModo({ padrao, rapido, confirma, rttMs = null }) {
+export function escolherModo({ padrao, rapido, confirma, rttMs = null, rota = 'direto', toque = false }) {
+  // 5G pelo TURN (2026-11-25 19:10): a folga de 15 ms deu 26 travadas por minuto
+  if (toque || rota === 'turn') return { modo: padrao, porque: toque ? 'no celular a rede oscila mais: a folga do liso' : 'pelo servidor (TURN): a folga do liso' };
   if (rttMs > RTT_LONGE) return { modo: padrao, porque: `longe (${Math.round(rttMs)} ms de ida e volta): o modo com mais folga` };
   if (!confirma?.ok) return { modo: padrao, porque: 'a conexão oscila: o modo com mais folga' };
-  if (confirma.tremidoMs <= 6 && confirma.perdaPct <= 0.2 && (confirma.buracoCaminhoMs ?? confirma.buracoMs) <= 80) return { modo: rapido, porque: 'conexão muito estável: o menor atraso' };
+  if (rttMs > RAPIDO_RTT) return { modo: padrao, porque: `${Math.round(rttMs)} ms de ida e volta: a folga do liso` };
+  const j = confirma.jogo;
+  if (j ? j.tremidoMs <= 8 && !j.travadas && j.perdidosPct <= 0.5 : confirma.tremidoMs <= 6 && confirma.perdaPct <= 0.2 && (confirma.buracoCaminhoMs ?? confirma.buracoMs) <= 80) return { modo: rapido, porque: 'conexão muito estável: o menor atraso' };
+  if (j) return { modo: padrao, porque: `a imagem oscila (${j.tremidoMs} ms, ${j.travadas} travadas em ${Math.round(confirma.ms / 1000)} s): precisa da folga do liso` };
   return { modo: padrao, porque: `a conexão oscila (treme ${confirma.tremidoMs} ms, perda ${confirma.perdaPct}%, até ${confirma.buracoMs} ms sem chegar nada): precisa da folga do liso` };
 }
 
@@ -177,7 +213,7 @@ export function escolherModo({ padrao, rapido, confirma, rttMs = null }) {
 export function custoDoCaminho(c) {
   if (!c?.banda) return null;
   const f = c.banda.confirma;
-  return Math.round((c.rttMs ?? 300) + (f?.tremidoMs || 0) + (f?.ok ? 0 : 40) + Math.max(0, (6000 - c.banda.tetoKbps) / 40));
+  return Math.round((c.rttMs ?? 300) + (f?.jogo?.tremidoMs ?? f?.tremidoMs ?? 0) + (f?.jogo?.travadas || 0) * 8 + (f?.ok ? 0 : 40) + Math.max(0, (6000 - c.banda.tetoKbps) / 40));
 }
 export function escolherCaminho({ direto, turn }) {
   const d = custoDoCaminho(direto);
@@ -187,11 +223,12 @@ export function escolherCaminho({ direto, turn }) {
   return { caminho: 'direto', custos: { direto: d, turn: t }, porque: 'o direto é melhor ou parecido' };
 }
 
-export function escolher({ banda: medida, h264 = null, h265 = null, ps5 = null, padrao, rapido, rttMs = null }) {
+export function escolher({ banda: medida, h264 = null, h265 = null, ps5 = null, padrao, rapido, rttMs = null, rota = 'direto', toque = false }) {
   // longe, um pedaço perdido demora a vir de novo: menos banda, menos parada
-  const banda = rttMs > RTT_LONGE ? { ...medida, tetoKbps: Math.min(medida.tetoKbps, TETO_LONGE), livre: false } : medida;
+  const limite = rttMs > RTT_LONGE ? TETO_LONGE : toque && (rota === 'turn' || rttMs > 40) ? TETO_CELULAR : null;
+  const banda = limite ? { ...medida, tetoKbps: Math.min(medida.tetoKbps, limite), livre: false } : medida;
   const c = escolherCodec({ h264, h265, tetoKbps: banda.tetoKbps, livre: banda.livre, ps5Hevc: !!ps5?.hevc });
-  const m = escolherModo({ padrao, rapido, confirma: banda.confirma, rttMs });
+  const m = escolherModo({ padrao, rapido, confirma: banda.confirma, rttMs, rota, toque });
   const ps5Kbps = Number(ps5?.kbps) || null;
   return {
     tetoKbps: banda.tetoKbps,
@@ -203,6 +240,38 @@ export function escolher({ banda: medida, h264 = null, h265 = null, ps5 = null, 
     // a banda que o PS5 deveria ter para ir repassado (a original) sem passar do que o caminho leva
     ps5Sugerido: ps5Kbps && !medida.livre && banda.tetoKbps < ps5Kbps ? Math.max(2000, Math.floor(banda.tetoKbps / 1000) * 1000) : null,
   };
+}
+
+// A nota da conexão (0 a 100), para quem joga entender, e o que dá para fazer. Só orienta: quem decide é escolher().
+export function avaliarConexao({ rttMs, confirma, tetoKbps, livre, rota, relay = false, ps5Saude = null, telaHz = null, wifi = false, travouLa = 0, travouAqui = 0 }) {
+  const j = confirma?.jogo;
+  const tremido = j?.tremidoMs ?? confirma?.tremidoMs ?? 20;
+  let n = 100;
+  n -= Math.min(40, Math.max(0, (rttMs ?? 200) - 15) * 0.35);
+  n -= Math.min(20, Math.max(0, tremido - 3) * 0.8);
+  n -= Math.min(30, (j?.travadas || 0) * 5 + (j?.perdidosPct || 0) * 3);
+  if (!livre) n -= Math.min(25, Math.max(0, 12_000 - tetoKbps) / 400);
+  if (!confirma?.ok) n -= 10;
+  if (ps5Saude && ps5Saude.qps >= 50 && ps5Saude.pior < 55) n -= 5;
+  const nota = Math.max(0, Math.round(n));
+  const [nivel, rotulo] = nota >= 85 ? ['otima', 'ótima'] : nota >= 65 ? ['boa', 'boa'] : nota >= 45 ? ['regular', 'regular'] : ['ruim', 'ruim'];
+  const dicas = [];
+  if (ps5Saude && ps5Saude.qps >= 50 && ps5Saude.pior < 55) dicas.push('O PS5 está perdendo quadros até o PC do jogo: confira o cabo de rede dele.');
+  if (travouLa > 250) dicas.push('A página do PC do jogo engasgou durante o teste: feche o que estiver pesado lá.');
+  if (travouAqui > 250) dicas.push('Este aparelho engasgou durante o teste: feche outras abas e programas.');
+  if (wifi && ((j?.travadas || 0) > 0 || tremido > 12)) dicas.push('O Wi-Fi está oscilando: no cabo, ou mais perto do roteador, fica melhor.');
+  if (rttMs > 100) dicas.push('A distância pesa: a imagem fica boa, mas o comando demora um pouco mais.');
+  if (!livre && tetoKbps < 6000) dicas.push('A velocidade está baixa: pausar downloads e vídeos na rede ajuda.');
+  if (telaHz && telaHz < 55) dicas.push(`A tela deste aparelho está a ${telaHz} quadros por segundo: ligue o carregador ou o modo de desempenho.`);
+  return { nota, nivel, rotulo, dicas };
+}
+
+// O que o jogo deve dar com isto: conferido depois contra o de verdade (páginas, conferirPrevisto)
+export function preverJogo({ rttMs, confirma, modo, rapido, decMs = 2 }) {
+  const j = confirma?.jogo;
+  const tremido = j?.tremidoMs ?? confirma?.tremidoMs ?? 10;
+  const folga = modo === rapido ? 12 : Math.min(45, 14 + tremido * 1.5);
+  return { atrasoMs: Math.round(33 + 8 + (rttMs ?? 100) + folga + tremido / 2 + decMs), travadasMin: j?.travMin ?? null };
 }
 
 // ---------------------------------------------------------------- quem compartilha
@@ -229,12 +298,14 @@ export class TesteEnvio {
     Object.assign(this, { tela, silenciar, onEvento, sonda });
     this.testes = new Map(); // id de quem joga -> { canal, dados, key, gasto }
     this.canaisDados = new Map();
+    this.canaisJogo = new Map();
   }
 
   receberDados(id, canal) {
     canal.binaryType = 'arraybuffer';
-    this.canaisDados.set(id, canal);
-    canal.onclose = () => { if (this.canaisDados.get(id) === canal) this.canaisDados.delete(id); };
+    const m = canal.label === CANAL_TESTE_JOGO ? this.canaisJogo : this.canaisDados;
+    m.set(id, canal);
+    canal.onclose = () => { if (m.get(id) === canal) m.delete(id); };
   }
 
   receber(id, canal) {
@@ -256,7 +327,7 @@ export class TesteEnvio {
           this.fecharSonda(t);
           t.sonda = this.sonda((x) => this.dizer(t, { sonda: x }), (ch) => {
             if (ch.label === CANAL_TESTE) this.receber(id + SONDA, ch);
-            else if (ch.label === CANAL_TESTE_DADOS) this.receberDados(id + SONDA, ch);
+            else if (ch.label === CANAL_TESTE_DADOS || ch.label === CANAL_TESTE_JOGO) this.receberDados(id + SONDA, ch);
           });
         }
         t.sonda?.receber(m.sonda);
@@ -279,16 +350,18 @@ export class TesteEnvio {
       t.prazo = setTimeout(() => this.acabar(t.id), TOTAL_MS_MAX);
     }
     const f = tela.ps5;
-    this.dizer(t, { ola: 1, ps5: f ? { kbps: Number(f.kbps) || null, hevc: !!f.hevc, pcDireto: !!f.banda, taxa: f.taxa?.() ?? null } : null });
+    this.dizer(t, { ola: 1, ps5: f ? { kbps: Number(f.kbps) || null, hevc: !!f.hevc, pcDireto: !!f.banda, taxa: f.taxa?.() ?? null, saude: f.saude?.() ?? null } : null });
   }
 
   // manda kbps por ms em quadros (60 por segundo), como a imagem
-  degrau(t, { degrau, kbps, ms }) {
+  // jogo: quadros como os do jogo (tamanhos variados, um grande a cada 1,5 s), no canal igual ao do turbo
+  degrau(t, { degrau, kbps, ms, jogo = false }) {
     const k = Math.min(KBPS_MAX, Math.max(200, Number(kbps) || 0));
     const dura = Math.min(MS_MAX, Math.max(200, Number(ms) || 0));
     t.parar?.();
     t.gasto += dura;
-    const dados = this.canaisDados.get(t.id);
+    const doJogo = jogo ? this.canaisJogo.get(t.id) : null;
+    const dados = doJogo?.readyState === 'open' ? doJogo : this.canaisDados.get(t.id);
     if (t.gasto > TOTAL_MS_MAX || !dados || dados.readyState !== 'open') return this.dizer(t, { acabou: degrau, erro: 'canal' });
     const porQuadro = Math.max(PEDACO, Math.round((k * 1000) / 8 / QPS));
     const total = Math.round((dura / 1000) * QPS);
@@ -301,7 +374,7 @@ export class TesteEnvio {
     const acabou = () => {
       parar();
       if (t.parar === parar) t.parar = null;
-      this.dizer(t, { acabou: degrau, ...conta });
+      this.dizer(t, { acabou: degrau, jogo: !!doJogo, ...conta });
     };
     const passo = () => {
       if (dados.readyState !== 'open') return acabou();
@@ -317,6 +390,13 @@ export class TesteEnvio {
         conta.filaMax = Math.max(conta.filaMax, dados.bufferedAmount);
         if (dados.bufferedAmount > filaMax) { conta.adiados++; continue; }
         let falta = porQuadro;
+        if (doJogo) {
+          const acaso = Math.sin(feitos * 12.9898) * 43_758.5453; // sempre a mesma sequência: dois caminhos comparáveis
+          falta = Math.round(porQuadro * (feitos % 90 === 45 ? 3 : 0.5 + (acaso - Math.floor(acaso)) * 0.96));
+        }
+        const total = Math.ceil(falta / PEDACO);
+        const t0 = performance.now();
+        let i = 0;
         while (falta > 0) {
           const tam = Math.min(PEDACO, Math.max(64, falta));
           const msg = new Uint8Array(CAB + tam);
@@ -324,7 +404,9 @@ export class TesteEnvio {
           v.setUint8(0, 1);
           v.setUint16(2, degrau);
           v.setUint32(4, feitos);
-          v.setFloat64(8, performance.now());
+          v.setFloat64(8, t0);
+          v.setUint16(16, i++);
+          v.setUint16(18, total);
           msg.set(enchimento.subarray(0, tam), CAB);
           try { dados.send(msg); } catch { conta.adiados++; break; }
           conta.bytes += msg.length;
@@ -452,6 +534,7 @@ export class TesteEnvio {
     t.parar?.();
     try { t.canal.close(); } catch { /* já fechado */ }
     try { this.canaisDados.get(id)?.close(); } catch { /* já fechado */ }
+    try { this.canaisJogo.get(id)?.close(); } catch { /* já fechado */ }
     if (t.key) this.silenciar?.(id, t.key, false);
   }
 }
@@ -461,8 +544,8 @@ export class TesteJoga {
   // abrir(idDoDono) -> { canal, dados } (rtc.abrirTeste) ou null; caminho(id) -> Promise: o caminho em uso (rtc.caminhoPara);
   // caminhos(id) -> Promise: todos os pares que respondem (rtc.caminhosDe); onProgresso({ fase, parte, texto })
   // sonda(sinal) -> Promise: a conexão à parte pelo TURN (rtc.sondaTurn) ou null
-  constructor({ abrir, caminho = null, caminhos = null, sonda = null, onProgresso = null, onEvento = null }) {
-    Object.assign(this, { abrir, caminho, caminhos, sonda, onProgresso, onEvento });
+  constructor({ abrir, caminho = null, caminhos = null, sonda = null, onProgresso = null, onVivo = null, onEvento = null }) {
+    Object.assign(this, { abrir, caminho, caminhos, sonda, onProgresso, onVivo, onEvento });
     this.t = null;
   }
 
@@ -476,7 +559,8 @@ export class TesteJoga {
   // codecs: { h264: [...], h265: [...] } que este aparelho decodifica; padrao/rapido: os modos (escolher).
   // Devolve { ...escolher(), banda, degraus, ... } ou { erro }. Nunca lança.
   // tudo: mede o TURN mesmo com o direto bom
-  async rodar(key, { codecs, padrao, rapido, tudo = false }) {
+  // toque: celular; oscila mais e a imagem começa mais leve
+  async rodar(key, { codecs, padrao, rapido, tudo = false, toque = false }) {
     this.pular('outro teste');
     const dono = String(key).split('~')[0];
     const ch = this.abrir(dono);
@@ -492,6 +576,20 @@ export class TesteJoga {
     t.dados.binaryType = 'arraybuffer';
     t.canal.onclose = () => t.abortar('o canal fechou');
     const tab = { degraus: [], caminhos: null };
+    // ao vivo, para o painel: o que chegou nos últimos 100 ms e a resposta mais nova
+    const vivo = setInterval(() => {
+      for (const x of [t, tt]) {
+        if (!x || x.fechada) continue;
+        const mbps = (x.vivoBytes * 8) / 100 / 1000;
+        x.vivoBytes = 0;
+        x.vivoMbps = x.vivoMbps == null ? mbps : x.vivoMbps * 0.6 + mbps * 0.4;
+        const rttMs = x.rttNovo ? x.rtts.at(-1) : null;
+        x.rttNovo = false;
+        if (x === t && tt && !tt.fechada) continue; // o painel mostra o caminho que está sendo medido
+        if (x.medindo || rttMs != null) this.onVivo?.({ rota: x.rota, mbps: x.medindo ? x.vivoMbps : null, rttMs });
+      }
+    }, 100);
+    const telaHz = medirTela();
     let tt = null; // o teste pelo TURN
     try {
       await com(Promise.all([this.aberto(t.canal), this.aberto(t.dados)]).then((v) => { if (!v.every(Boolean)) throw new Error('o canal não abriu'); }));
@@ -501,15 +599,17 @@ export class TesteJoga {
       if (ola.erro) throw new Error(ola.erro);
       t.ps5 = ola.ps5;
       t.pingar = setInterval(() => this.ping(t), 150);
-      this.onProgresso?.({ parte: 0.02, texto: 'Medindo o tempo de resposta…' });
-      await com(esperar(500));
+      this.onProgresso?.({ etapa: 'resposta', texto: 'Medindo o tempo de resposta…' });
+      await com(esperar(1000));
       const rtt0 = r1(pct(t.rtts, 0.5));
       const rede0 = await com(Promise.resolve(this.caminho?.(dono)).catch(() => null));
 
+      const wifi = /wifi/.test(rede0?.local || '');
       const noTurn = !!rede0?.relay; // já está pelo TURN (nem o direto liga): é só ele
       const nomeDireto = noTurn ? 'pelo servidor (TURN)' : 'direto';
+      if (noTurn) t.rota = 'turn';
       const direto = { rttMs: null, banda: null };
-      direto.banda = await this.subir(t, com, { ps5Kbps: ola.ps5?.kbps ?? null, longe: rtt0 > RTT_LONGE, nome: nomeDireto, de: 0.05, ate: 0.5, degraus: tab.degraus, extra: async () => {
+      direto.banda = await this.subir(t, com, { ps5Kbps: ola.ps5?.kbps ?? null, longe: rtt0 > RTT_LONGE, oscila: toque || noTurn, nome: nomeDireto, etapa: noTurn ? 'turn' : 'direto', degraus: tab.degraus, extra: async () => {
         const rede = await com(Promise.resolve(this.caminho?.(dono)).catch(() => null));
         return { iceRttMs: rede?.rttMs ?? null, familia: rede?.familia ?? null, par: rede?.par ?? null };
       } });
@@ -519,7 +619,7 @@ export class TesteJoga {
       tab.turn = null;
       const medirTurn = !noTurn && this.sonda && (tudo || direto.rttMs > RTT_DIRETO_BOM || (!direto.banda.livre && direto.banda.tetoKbps < 10_000));
       if (medirTurn) {
-        this.onProgresso?.({ parte: 0.5, texto: 'Abrindo o caminho pelo servidor (TURN)…' });
+        this.onProgresso?.({ etapa: 'turn', texto: 'Abrindo o caminho pelo servidor (TURN)…' });
         tab.turn = { erro: null, degraus: [] };
         try {
           tt = await com(this.abrirSonda(t, key));
@@ -531,9 +631,9 @@ export class TesteJoga {
           await com(esperar(700));
           turn = { rttMs: r1(pct(tt.rtts, 0.5)), banda: null };
           tab.turn.rttInicioMs = turn.rttMs;
-          turn.banda = await this.subir(tt, com, { ps5Kbps: ola.ps5?.kbps ?? null, longe: turn.rttMs > RTT_LONGE, nome: 'pelo servidor (TURN)', de: 0.52, ate: 0.84, degraus: tab.turn.degraus });
+          turn.banda = await this.subir(tt, com, { ps5Kbps: ola.ps5?.kbps ?? null, longe: turn.rttMs > RTT_LONGE, oscila: true, nome: 'pelo servidor (TURN)', etapa: 'turn', degraus: tab.turn.degraus });
           turn.rttMs = r1(pct(tt.rtts.slice(-12), 0.5));
-          Object.assign(tab.turn, { rttMs: turn.rttMs, tetoKbps: turn.banda.tetoKbps, livre: turn.banda.livre, tremidoMs: turn.banda.confirma?.tremidoMs ?? null });
+          Object.assign(tab.turn, { rttMs: turn.rttMs, tetoKbps: turn.banda.tetoKbps, livre: turn.banda.livre, tremidoMs: turn.banda.confirma?.jogo?.tremidoMs ?? turn.banda.confirma?.tremidoMs ?? null, jogo: turn.banda.confirma?.jogo ?? null });
         }
         this.fecharSonda(tt);
       }
@@ -548,13 +648,18 @@ export class TesteJoga {
       const res = {};
       // a placa dos dois lados acordando: no notebook (Intel UHD) o primeiro codec medido deu 9,8 ms, e no jogo 0,9
       if (codecs.h264?.length) await com(this.medirCodec(t, ++n, codecs.h264, kbpsCodec, AQUECE_MS));
-      for (const [nome, lista, parte] of [['h264', codecs.h264, 0.86], ['h265', codecs.h265, 0.94]]) {
+      this.onProgresso?.({ etapa: 'imagem', texto: 'Preparando a imagem do jogo…' });
+      for (const [nome, lista] of [['h264', codecs.h264], ['h265', codecs.h265]]) {
         if (!lista?.length) { res[nome] = { erro: 'este aparelho não decodifica' }; continue; }
-        this.onProgresso?.({ parte, texto: `Comparando a imagem em ${nome === 'h264' ? 'H.264' : 'H.265'}…` });
+        this.onProgresso?.({ etapa: 'imagem', texto: `Comparando a imagem em ${nome === 'h264' ? 'H.264' : 'H.265'}…` });
         res[nome] = await com(this.medirCodec(t, ++n, lista, kbpsCodec));
         await com(esperar(PAUSA_MS));
       }
-      const escolha = escolher({ banda, ...res, ps5: ola.ps5, padrao, rapido, rttMs: usado.rttMs });
+      const escolha = escolher({ banda, ...res, ps5: ola.ps5, padrao, rapido, rttMs: usado.rttMs, rota: qual.caminho, toque });
+      const hz = await Promise.race([telaHz, esperar(50).then(() => null)]);
+      const degrausUsados = usado === turn ? tab.turn.degraus : tab.degraus;
+      const pior = (k) => Math.max(0, ...degrausUsados.map((d) => d[k] || 0));
+      const decMs = res[escolha.codec]?.decP50 ?? 2;
       const r = {
         ...escolha,
         rttInicioMs: rtt0,
@@ -562,9 +667,14 @@ export class TesteJoga {
         rota: qual.caminho, // 'direto' ou 'turn'
         rotaPorque: qual.porque,
         rotaCustos: qual.custos,
+        jaTurn: noTurn,
+        nota: avaliarConexao({ rttMs: usado.rttMs, confirma: banda.confirma, tetoKbps: banda.tetoKbps, livre: banda.livre, rota: qual.caminho, ps5Saude: ola.ps5?.saude, telaHz: hz, wifi, travouLa: pior('travouLaMs'), travouAqui: pior('travouAquiMs') }),
+        previsto: preverJogo({ rttMs: usado.rttMs, confirma: banda.confirma, modo: escolha.modo, rapido, decMs }),
+        telaHz: hz,
+        wifi,
         trocarRota: qual.caminho === 'turn' && !noTurn, // a conexão do jogo precisa passar para o TURN
         confirmou: !!banda.confirma?.ok,
-        direto: { rttMs: direto.rttMs, tetoKbps: direto.banda.tetoKbps, livre: direto.banda.livre, tremidoMs: direto.banda.confirma?.tremidoMs ?? null },
+        direto: { rttMs: direto.rttMs, tetoKbps: direto.banda.tetoKbps, livre: direto.banda.livre, tremidoMs: direto.banda.confirma?.jogo?.tremidoMs ?? direto.banda.confirma?.tremidoMs ?? null, jogo: direto.banda.confirma?.jogo ?? null },
         turn: tab.turn,
         // o caminho trocou sozinho durante o teste (2026-11-25: de 8 para 50 ms, sem motivo conhecido)
         caminho: { de: rede0 && { par: rede0.par, rttMs: rede0.rttMs, familia: rede0.familia, local: rede0.local, remoto: rede0.remoto }, para: rede1 && { par: rede1.par, rttMs: rede1.rttMs, familia: rede1.familia, local: rede1.local, remoto: rede1.remoto }, trocou: !!(rede0?.par && rede1?.par && rede0.par !== rede1.par) },
@@ -578,7 +688,7 @@ export class TesteJoga {
       this.onEvento?.('teste da conexão', r);
       const { degraus, caminhos, turn: tr, ...curto } = r;
       this.dizer(t, { resultado: { ...curto, turn: tr && { erro: tr.erro, rttMs: tr.rttMs, tetoKbps: tr.tetoKbps, degraus: tr.degraus.map((x) => `${x.kbps}${x.ok ? ' ok' : ` ${x.porque}`}`) }, degraus: degraus.map((x) => `${x.kbps}${x.ok ? ' ok' : ` ${x.porque}`}`) } });
-      this.onProgresso?.({ parte: 1, texto: 'Pronto' });
+      this.onProgresso?.({ etapa: 'fim', texto: 'Pronto' });
       return r;
     } catch (err) {
       const motivo = String(err?.message || err).slice(0, 120);
@@ -587,42 +697,48 @@ export class TesteJoga {
     } finally {
       clearTimeout(limite);
       clearInterval(t.pingar);
+      clearInterval(vivo);
       this.fecharSonda(tt || t.sondaTt);
       if (this.t === t) this.t = null;
       this.dizer(t, { fim: 1 });
       t.canal.onclose = null;
       t.canal.onmessage = null;
       t.dados.onmessage = null;
+      if (t.jogo) t.jogo.onmessage = null;
       try { t.cod?.dec?.close(); } catch { /* já fechado */ }
       // o "fim" ainda precisa sair antes de o canal fechar
       setTimeout(() => {
         try { t.canal.close(); } catch { /* já fechado */ }
         try { t.dados.close(); } catch { /* já fechado */ }
+        try { t.jogo?.close(); } catch { /* já fechado */ }
       }, 300);
     }
   }
 
   // o estado de um teste num par de canais
   novo(ch) {
-    const t = { canal: ch.canal, dados: ch.dados, esperas: new Map(), chegadas: new Map(), pings: new Map(), rtts: [], cod: null, ola: null, saiu: false, n: 0 };
+    const t = { rota: ch.pc ? 'turn' : 'direto', vivoBytes: 0, canal: ch.canal, dados: ch.dados, jogo: ch.jogo ?? null, esperas: new Map(), chegadas: new Map(), pings: new Map(), rtts: [], cod: null, ola: null, saiu: false, n: 0 };
     t.dados.binaryType = 'arraybuffer';
     t.canal.binaryType = 'arraybuffer';
     t.dados.onmessage = (e) => this.pedaco(t, e.data);
+    if (t.jogo) {
+      t.jogo.binaryType = 'arraybuffer';
+      t.jogo.onmessage = t.dados.onmessage;
+    }
     t.canal.onmessage = (e) => (typeof e.data === 'string' ? this.texto(t, e.data) : this.quadroCodec(t, e.data));
     return t;
   }
 
   // a banda de um caminho: o plano inteiro (planoDaBanda)
-  async subir(t, com, { ps5Kbps, longe, nome, de, ate, degraus, extra = null }) {
-    const plano = planoDaBanda({ ps5Kbps, longe });
+  async subir(t, com, { ps5Kbps, longe, oscila = false, nome, etapa, degraus, extra = null }) {
+    const plano = planoDaBanda({ ps5Kbps, longe, oscila });
     let p = plano.next();
-    let i = 0;
     while (!p.done) {
       const d = p.value;
       t.n++;
-      i++;
-      this.onProgresso?.({ parte: Math.min(ate, de + i * (ate - de) / 9), texto: `${nome[0].toUpperCase()}${nome.slice(1)}: ${d.confirma ? 'confirmando' : 'testando'} ${fmt(d.kbps)}…` });
-      const r = await com(this.medir(t, t.n, d));
+      this.onProgresso?.({ etapa, texto: `${nome[0].toUpperCase()}${nome.slice(1)}: ${d.confirma ? 'simulando o jogo a' : 'testando'} ${fmt(d.kbps)}…` });
+      t.medindo = true;
+      const r = await com(this.medir(t, t.n, d)).finally(() => { t.medindo = false; });
       Object.assign(r, extra ? await extra() : {}, d.confirma ? { confirma: true } : {});
       degraus.push(r);
       p = plano.next(r);
@@ -689,7 +805,7 @@ export class TesteJoga {
     try { m = JSON.parse(txt); } catch { return; }
     if (m.pong != null) {
       const em = t.pings.get(m.pong);
-      if (em != null) { t.pings.delete(m.pong); t.rtts.push(performance.now() - em); if (t.rtts.length > 200) t.rtts.shift(); }
+      if (em != null) { t.pings.delete(m.pong); t.rttNovo = true; t.rtts.push(performance.now() - em); if (t.rtts.length > 200) t.rtts.shift(); }
       return;
     }
     if (m.sonda) return void t.sinalSonda?.(m.sonda);
@@ -705,7 +821,8 @@ export class TesteJoga {
     if (v.getUint8(0) !== 1) return;
     const n = v.getUint16(2);
     const l = t.chegadas.get(n);
-    if (l) l.push({ em: performance.now(), t0: v.getFloat64(8), bytes: buf.byteLength });
+    t.vivoBytes += buf.byteLength;
+    if (l) l.push({ em: performance.now(), t0: v.getFloat64(8), bytes: buf.byteLength, seq: v.getUint32(4), total: v.getUint16(18) });
   }
 
   async medir(t, n, d) {
@@ -715,7 +832,7 @@ export class TesteJoga {
     let travou = 0;
     let antes = performance.now();
     const vigia = setInterval(() => { const a = performance.now(); travou = Math.max(travou, a - antes - 20); antes = a; }, 20);
-    this.dizer(t, { degrau: n, kbps: d.kbps, ms: d.ms });
+    this.dizer(t, { degrau: n, kbps: d.kbps, ms: d.ms, ...(d.jogo ? { jogo: true } : {}) });
     const fim = await this.resposta(t, `d${n}`, d.ms + 4000);
     const acabou = performance.now();
     await esperar(PAUSA_MS + Math.min(300, pct(t.rtts.slice(-8), 0.5) || 0));
@@ -724,6 +841,22 @@ export class TesteJoga {
     const r = resumirDegrau({ chegadas, envio: fim && !fim.erro ? fim : null, pedido: d, fim: acabou, travouAqui: travou });
     const novos = t.rtts.slice(Math.min(rtts, t.rtts.length - 1));
     r.rttMs = r1(pct(novos, 0.5));
+    r.rttP95 = r1(pct(novos, 0.95)); // o comando indo e voltando com a imagem no mesmo caminho
+    if (fim?.jogo) {
+      // os quadros que chegaram inteiros
+      const m = new Map();
+      for (const c of chegadas) {
+        const q = m.get(c.seq) || { seq: c.seq, t0: c.t0, n: 0, total: c.total, em: 0 };
+        q.n++;
+        q.em = Math.max(q.em, c.em);
+        m.set(c.seq, q);
+      }
+      r.jogo = resumirJogo({ quadros: [...m.values()].filter((q) => q.n >= q.total), enviados: fim.quadros, ms: d.ms, travou: Math.max(r.travouLaMs, r.travouAquiMs) });
+      if (!r.jogo.ok) {
+        r.ok = false;
+        r.porque = [r.porque, 'o jogo travaria'].filter(Boolean).join(', ');
+      }
+    }
     return r;
   }
 
@@ -731,6 +864,7 @@ export class TesteJoga {
   async medirCodec(t, n, lista, kbps, ms = CODEC_MS) {
     const c = { n, partes: null, dec: null, sub: new Map(), tempos: [], saiu: 0, quadros: 0, erro: null, filaMax: 0, filas: [] };
     t.cod = c;
+    t.medindo = true;
     this.dizer(t, { codec: n, codecs: lista, kbps, ms });
     const fim = await this.resposta(t, `c${n}`, ms + 5000);
     await esperar(150);
@@ -740,6 +874,7 @@ export class TesteJoga {
     const erro = c.erro || fim?.erro || (!fim ? 'sem resposta' : null);
     if (erro) r.erro = erro;
     t.cod = null;
+    t.medindo = false;
     try { if (c.dec && c.dec.state !== 'closed') c.dec.close(); } catch { /* já fechado */ }
     return r;
   }
@@ -767,6 +902,7 @@ export class TesteJoga {
 
   quadroCodec(t, buf) {
     const c = t.cod;
+    t.vivoBytes += buf.byteLength || 0;
     if (!c || !(buf instanceof ArrayBuffer) || buf.byteLength < CAB) return;
     const v = new DataView(buf);
     if (v.getUint8(0) !== 2 || v.getUint16(2) !== c.n) return;
@@ -793,6 +929,23 @@ export class TesteJoga {
   }
 }
 
+// quantos quadros por segundo a tela deste aparelho desenha agora (economia de energia derruba para 30)
+function medirTela(ms = 1200) {
+  if (typeof requestAnimationFrame !== 'function') return Promise.resolve(null);
+  return new Promise((ok) => {
+    const t0 = performance.now();
+    let n = 0;
+    const volta = () => {
+      n++;
+      const d = performance.now() - t0;
+      if (d < ms) requestAnimationFrame(volta);
+      else ok(Math.round((n * 1000) / d));
+    };
+    requestAnimationFrame(volta);
+    setTimeout(() => ok(null), ms + 3000); // a página em segundo plano não desenha
+  });
+}
+
 const fmt = (kbps) => `${(kbps / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} Mbps`;
 
 // os codecs que este aparelho decodifica, nas listas que o teste manda
@@ -806,92 +959,6 @@ export async function codecsDaqui(listaH264, listaH265) {
     return r;
   };
   return { h264: await ver(listaH264), h265: await ver(listaH265) };
-}
-
-// ---------------------------------------------------------------- o painel na tela de quem joga
-const CSS = `
-.tc-painel{position:absolute;inset:0;z-index:60;display:flex;align-items:flex-end;justify-content:center;padding-bottom:84px;pointer-events:none;background:rgba(6,8,14,.35);color:#eef2ff;font:15px/1.45 system-ui,sans-serif}
-.tc-caixa{pointer-events:auto;width:min(440px,calc(100% - 32px));padding:22px 24px;border-radius:14px;background:#141927;border:1px solid #2b3450;box-shadow:0 12px 40px rgba(0,0,0,.5)}
-.tc-caixa b{display:block;font-size:17px;margin-bottom:4px}
-.tc-caixa p{margin:0 0 14px;color:#aab4d0}
-.tc-barra{height:8px;border-radius:99px;background:#232b42;overflow:hidden}
-.tc-barra i{display:block;height:100%;width:0;border-radius:99px;background:#5b8cff;transition:width .3s}
-.tc-linha{display:flex;gap:12px;align-items:center;justify-content:space-between;margin-top:14px}
-.tc-linha span{color:#cdd6f4}
-.tc-caixa button{background:none;border:1px solid #3b4668;color:#cdd6f4;border-radius:8px;padding:7px 14px;font:inherit;cursor:pointer}
-.tc-caixa button:hover{border-color:#5b8cff}
-.tc-fim{background:none;align-items:flex-start;padding:0}
-.tc-fim .tc-caixa{pointer-events:none;margin-top:56px;padding:14px 18px}
-.tc-fim p{margin:0}`;
-let estilo = null;
-// Registrado já no import, antes do teclado do jogo (que segura as teclas na mesma fase)
-let aberto = null;
-if (typeof addEventListener === 'function' && typeof document !== 'undefined') addEventListener('keydown', (e) => {
-  if (e.key !== 'F7' || !aberto) return;
-  e.preventDefault();
-  e.stopImmediatePropagation();
-  aberto.onPular?.();
-}, true);
-
-export class PainelTeste {
-  // dentro: o elemento da tela cheia (#focus); onPular(): o botão ou a tecla F7 (com o mouse preso não há clique)
-  constructor({ dentro, onPular }) {
-    Object.assign(this, { dentro, onPular, el: null });
-  }
-
-  mostrar() {
-    if (!estilo) {
-      estilo = document.createElement('style');
-      estilo.textContent = CSS;
-      document.head.append(estilo);
-    }
-    this.fechar();
-    const el = document.createElement('div');
-    el.className = 'tc-painel';
-    el.setAttribute('role', 'status');
-    el.innerHTML = '<div class="tc-caixa"><b>Testando a conexão com o PC do jogo</b><p>Uns 20 a 50 segundos, para escolher o melhor caminho e a melhor imagem agora.</p><div class="tc-barra"><i></i></div><div class="tc-linha"><span></span><button type="button">Pular (F7)</button></div></div>';
-    el.querySelector('button').addEventListener('click', () => this.onPular?.());
-    this.el = el;
-    this.dentro()?.append(el);
-    aberto = this;
-  }
-
-  progresso({ parte, texto }) {
-    if (!this.el) return;
-    this.el.querySelector('i').style.width = `${Math.round(Math.max(0, Math.min(1, parte)) * 100)}%`;
-    this.el.querySelector('span').textContent = texto || '';
-  }
-
-  // o resultado por uns segundos, sem tapar o jogo
-  resultado(r, nomeDoModo) {
-    this.fechar();
-    const el = document.createElement('div');
-    el.className = 'tc-painel tc-fim';
-    el.setAttribute('role', 'status');
-    const caixa = document.createElement('div');
-    caixa.className = 'tc-caixa';
-    const b = document.createElement('b');
-    b.textContent = nomeDoModo;
-    const p = document.createElement('p');
-    p.textContent = textoDoResultado(r);
-    caixa.append(b, p);
-    el.append(caixa);
-    this.el = el;
-    this.dentro()?.append(el);
-    this.some = setTimeout(() => this.fechar(), 6000);
-  }
-
-  fechar() {
-    clearTimeout(this.some);
-    if (aberto === this) aberto = null;
-    this.el?.remove();
-    this.el = null;
-  }
-}
-
-export function textoDoResultado(r) {
-  const banda = r.livre ? `mais de ${fmt(r.tetoKbps)}` : `até ${fmt(r.tetoKbps)}`;
-  return `${r.rota === 'turn' ? 'TURN · ' : 'direto · '}${banda} · ${r.rttMs != null ? `${Math.round(r.rttMs)} ms` : '–'} · ${r.codec === 'h265' ? 'H.265' : 'H.264'}`;
 }
 
 // ---------------------------------------------------------------- o que fica lembrado
@@ -915,7 +982,7 @@ export class MemoriaTeste {
     if (!v) return null;
     if (this.agora() - v.em > VALE_MS) this.porque = 'faz mais de 10 min';
     else if (rede?.rttMs != null && v.rttMs != null && Math.abs(rede.rttMs - v.rttMs) > Math.max(25, v.rttMs * 0.6)) this.porque = `a ida e volta mudou de ${v.rttMs} para ${rede.rttMs} ms`;
-    else if (rede?.familia && v.familia && rede.familia !== v.familia) this.porque = `o caminho mudou de ${v.familia} para ${rede.familia}`;
+    else if (rede?.familia && v.familia && rede.familia !== v.familia && Math.abs((rede.rttMs ?? 0) - (v.rttMs ?? 0)) > 10) this.porque = `o caminho mudou de ${v.familia} para ${rede.familia}`;
     return this.porque ? null : v.r;
   }
 

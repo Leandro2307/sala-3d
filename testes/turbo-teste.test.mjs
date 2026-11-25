@@ -1,7 +1,8 @@
 // O teste da conexão (turbo-teste.js): as contas, o plano da banda com caminhos de mentira e as escolhas
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resumirDegrau, planoDaBanda, escolher, escolherCaminho, escolherCodec, escolherModo, MemoriaTeste } from '../public/js/turbo-teste.js';
+import { resumirDegrau, resumirJogo, avaliarConexao, preverJogo, planoDaBanda, escolher, escolherCaminho, escolherCodec, escolherModo, MemoriaTeste } from '../public/js/turbo-teste.js';
+import { tetoDoEixo } from '../public/js/turbo-teste-painel.js';
 import { TurboEnvio } from '../public/js/turbo.js';
 import { TurboAuto, avaliar, foraDoModo } from '../public/js/turbo-auto.js';
 
@@ -131,7 +132,7 @@ test('o teste de há pouco vale no mesmo caminho', () => {
   const m = new MemoriaTeste(() => agora);
   m.guardar('d', { modo: 17 }, { familia: 'ipv4', rttMs: 8 });
   assert.ok(m.valido('d', { familia: 'ipv4', rttMs: 10 }));
-  assert.equal(m.valido('d', { familia: 'ipv6', rttMs: 10 }), null);
+  assert.equal(m.valido('d', { familia: 'ipv6', rttMs: 22 }), null);
   assert.equal(m.valido('d', { familia: 'ipv4', rttMs: 50 }), null);
   assert.match(m.porque, /de 8 para 50/);
   agora = 11 * 60_000;
@@ -273,4 +274,78 @@ test('longe: uma espera normal de 260 ms não é canal parado', () => {
   assert.equal(e.repasseParado(s, fila, 0), false);
   for (let x = 16; x < 1300; x += 16) { s.saiuTotal += 2000; fila += 2000; assert.equal(e.repasseParado(s, fila, x), false, String(x)); }
   assert.equal(e.repasseParado(s, fila, 1500), true);
+});
+
+// ------------------------------------------------------------ a confirmação como o jogo, a nota e o previsto
+function jogo({ n = 360, viagem = () => 20, some = () => false } = {}) {
+  const quadros = [];
+  for (let i = 0; i < n; i++) { const t0 = i * (1000 / 60); if (!some(i)) quadros.push({ seq: i, t0, em: t0 + viagem(i) }); }
+  return { quadros, enviados: n, ms: n * (1000 / 60) };
+}
+
+test('jogo: liso passa; parar 300 ms três vezes, perder quadros ou fila reprova', () => {
+  const bom = resumirJogo(jogo());
+  assert.deepEqual([bom.ok, bom.travadas, bom.perdidosPct], [true, 0, 0]);
+  // três paradas: os quadros delas chegam todos juntos no fim
+  const pausa = resumirJogo(jogo({ viagem: (i) => ([60, 160, 260].some((k) => i >= k && i < k + 18) ? 20 + (18 - ((i - 60) % 100)) * 16.7 : 20) }));
+  assert.equal(pausa.travadas, 3);
+  assert.equal(pausa.ok, false);
+  assert.equal(resumirJogo(jogo({ some: (i) => i % 20 === 0 })).ok, false);
+  assert.equal(resumirJogo(jogo({ viagem: (i) => 20 + i })).ok, false);
+  assert.equal(resumirJogo({ quadros: [], enviados: 360, ms: 6000 }).ok, false);
+});
+
+test('jogo: a página parada não é travada da rede', () => {
+  const d = jogo({ viagem: (i) => (i >= 60 && i < 72 ? 20 + (72 - i) * 16.7 : 20) });
+  assert.equal(resumirJogo(d).travadas, 1);
+  assert.equal(resumirJogo({ ...d, travou: 200 }).travadas, 0);
+});
+
+test('a confirmação é com o jogo, e mais longa no celular e pelo TURN', () => {
+  for (const [op, ms] of [[{}, 6000], [{ oscila: true }, 8000]]) {
+    const g = planoDaBanda({ ps5Kbps: 20000, ...op });
+    let p = g.next();
+    while (!p.done && !p.value.confirma) p = g.next({ ok: true, chegouKbps: p.value.kbps });
+    assert.deepEqual([p.value.jogo, p.value.ms], [true, ms]);
+  }
+});
+
+test('modo: celular e TURN nunca no rápido; o rápido exige o jogo liso e perto', () => {
+  const c = (j) => ({ ok: true, ms: 6000, tremidoMs: 1, perdaPct: 0, buracoMs: 20, jogo: { tremidoMs: 4, travadas: 0, perdidosPct: 0, ...j } });
+  const m = (o) => escolherModo({ padrao: 14, rapido: 16, rttMs: 8, confirma: c(), ...o }).modo;
+  assert.equal(m({}), 16);
+  assert.equal(m({ toque: true }), 14);
+  assert.equal(m({ rota: 'turn' }), 14);
+  assert.equal(m({ rttMs: 80 }), 14);
+  assert.equal(m({ confirma: c({ travadas: 1 }) }), 14);
+  assert.equal(m({ confirma: c({ tremidoMs: 14 }) }), 14);
+});
+
+test('celular fora de casa começa em 8 Mbps; em casa não', () => {
+  const banda = { tetoKbps: 15000, livre: false, confirma: { ok: true, tremidoMs: 2, perdaPct: 0, buracoMs: 20 } };
+  assert.equal(escolher({ banda, padrao: 14, rapido: 16, rttMs: 71, rota: 'turn', toque: true }).tetoKbps, 8000);
+  assert.equal(escolher({ banda, padrao: 14, rapido: 16, rttMs: 5, toque: true }).tetoKbps, 15000);
+});
+
+test('nota: a conexão das 17:55 é ótima e a do 5G direto é ruim, com a dica certa', () => {
+  const conf = (j) => ({ ok: true, jogo: { tremidoMs: 3, travadas: 0, perdidosPct: 0, ...j } });
+  assert.equal(avaliarConexao({ rttMs: 8, confirma: conf(), tetoKbps: 20000, livre: true }).nivel, 'otima');
+  const ruim = avaliarConexao({ rttMs: 265, confirma: conf({ tremidoMs: 25, travadas: 3 }), tetoKbps: 6000, livre: false });
+  assert.equal(ruim.nivel, 'ruim');
+  assert.match(ruim.dicas.join(), /distância/);
+  assert.match(avaliarConexao({ rttMs: 8, confirma: conf(), tetoKbps: 20000, livre: true, ps5Saude: { qps: 58, pior: 40 } }).dicas[0], /PS5/);
+  assert.match(avaliarConexao({ rttMs: 8, confirma: conf({ travadas: 2 }), tetoKbps: 20000, livre: true, wifi: true }).dicas.join(), /Wi-Fi/);
+});
+
+test('previsto: perto do que deu de verdade nos dois testes reais', () => {
+  const casa = preverJogo({ rttMs: 8, confirma: { jogo: { tremidoMs: 4, travMin: 0 } }, modo: 16, rapido: 16, decMs: 1 });
+  assert.ok(Math.abs(casa.atrasoMs - 63) <= 8, String(casa.atrasoMs));
+  const g5 = preverJogo({ rttMs: 72, confirma: { jogo: { tremidoMs: 12, travMin: 5 } }, modo: 16, rapido: 16, decMs: 5 });
+  assert.ok(Math.abs(g5.atrasoMs - 146) <= 15, String(g5.atrasoMs));
+});
+
+test('eixo do gráfico: degraus redondos e nunca abaixo do maior', () => {
+  for (const v of [0, 3, 9.5, 21, 88, 264, 900, 4000]) assert.ok(tetoDoEixo(v, 10) >= v);
+  assert.equal(tetoDoEixo(3, 10), 10);
+  assert.equal(tetoDoEixo(20.5, 10), 25);
 });

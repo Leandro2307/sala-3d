@@ -545,6 +545,7 @@ export class RTC {
     if (!this.temTurn) return null;
     const pc = new RTCPeerConnection({ iceServers: this.iceServers, iceTransportPolicy: 'relay' });
     const dados = pc.createDataChannel('turbo-teste-dados', { ordered: false, maxRetransmits: 0 });
+    const jogo = pc.createDataChannel('turbo-teste-jogo', { ordered: true, maxPacketLifeTime: 250 });
     const canal = pc.createDataChannel('turbo-teste', { ordered: true });
     pc.onicecandidate = ({ candidate }) => { if (candidate) sinal({ candidate: candidate.toJSON() }); };
     const fila = [];
@@ -569,7 +570,7 @@ export class RTC {
       return null;
     }
     sinal({ description: pc.localDescription.toJSON() });
-    return { pc, canal, dados, receber };
+    return { pc, canal, dados, jogo, receber };
   }
 
   // O outro lado da sonda (quem compartilha): só o STUN, o TURN é o de quem joga
@@ -1469,7 +1470,7 @@ export class RTC {
       else if (channel.label === 'turbo-som') this.onTurboSom?.(peer.id, channel);
       // o teste da conexão antes do jogo (turbo-teste.js)
       else if (channel.label === 'turbo-teste') this.onTeste?.(peer.id, channel);
-      else if (channel.label === 'turbo-teste-dados') this.onTesteDados?.(peer.id, channel);
+      else if (/^turbo-teste-(dados|jogo)$/.test(channel.label)) this.onTesteDados?.(peer.id, channel);
     };
     pc.ontrack = (ev) => {
       const stream = ev.streams[0] || new MediaStream([ev.track]);
@@ -1595,9 +1596,10 @@ export class RTC {
     try {
       // o dos dados primeiro: quando o outro abre lá, este já chegou
       const dados = peer.pc.createDataChannel('turbo-teste-dados', { ordered: false, maxRetransmits: 0 });
+      const jogo = peer.pc.createDataChannel('turbo-teste-jogo', { ordered: true, maxPacketLifeTime: 250 }); // como o do turbo
       const canal = peer.pc.createDataChannel('turbo-teste', { ordered: true });
-      peer.testeCanais = [canal, dados];
-      return { canal, dados };
+      peer.testeCanais = [canal, dados, jogo];
+      return { canal, dados, jogo };
     } catch {
       return null;
     }

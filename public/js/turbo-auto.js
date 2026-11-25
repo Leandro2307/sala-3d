@@ -16,6 +16,7 @@ const MEDIR = 10; // amostras (de 2 s) por modo
 const JANELA = 15;
 const RODADAS = 4;
 const RODADA_MS = 180_000;
+const PRESSA_MS = 45_000; // depois do teste da conexão, o modo escolhido que se mostra ruim não espera os 3 min
 const MARGEM = 0.15; // só troca para outro se ele for pelo menos 15% melhor que o padrão
 // O que não é do modo não entra na conta (2026-11-25, 16:52: os três modos foram julgados com o caminho cortando
 // e o PS5 perdendo pacotes até o PC, e um soluço só decidiu a escolha):
@@ -125,6 +126,7 @@ export class TurboAuto {
     this.fase = 'fixo';
     this.escolhido = modo;
     this.decidiuEm = this.agora();
+    this.espera = PRESSA_MS;
     this.onEstado?.('fixo', modo);
   }
 
@@ -148,6 +150,7 @@ export class TurboAuto {
 
   rodada(primeiro, min, max) {
     this.rodadas++;
+    this.espera = RODADA_MS;
     this.ordem = [primeiro, ...this.modos.filter((m) => m !== primeiro)];
     this.notas = new Map();
     this.i = 0;
@@ -245,7 +248,7 @@ export class TurboAuto {
   // decidido: se ficar ruim por JANELA amostras seguidas, mede de novo começando pelo que está
   vigiar() {
     if (this.am.length > JANELA) this.am.shift();
-    if (this.am.length < JANELA || this.rodadas >= RODADAS || this.agora() - this.decidiuEm < RODADA_MS) return;
+    if (this.am.length < JANELA || this.rodadas >= RODADAS || this.agora() - this.decidiuEm < (this.espera ?? RODADA_MS)) return;
     const av = avaliar(this.am);
     if (av.bom) return;
     this.onEvento?.('turbo automático: piorou, medindo de novo', { modo: this.escolhido, ...av });

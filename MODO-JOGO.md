@@ -1297,3 +1297,16 @@ e o canal parado espera 4 x ida e volta + 300 ms. Decodificador rápido (até 10
 O caminho que troca sozinho no meio do jogo grava "os caminhos na hora da troca" e, 2,5x mais lento, procura outro uma vez.
 
 Testado local com o TURN de verdade (29 ms, 20 Mbps) e o direto atrasado em 260 ms. Não testado no 5G.
+
+## O teste imita o jogo, dá nota e mostra gráficos (2026-11-25)
+
+iPhone no 5G às 19:10: o teste previa 5 ms de oscilação e no jogo foram 12 (p90 170), com 26 travadas por minuto. A
+confirmação agora manda quadros como os do jogo (tamanhos variados, um 3x maior a cada 1,5 s) num canal igual ao do turbo
+("turbo-teste-jogo", ordenado, 250 ms), por 6 s (8 no celular, pelo TURN ou longe), e conta travadas (80 ms entre
+quadros inteiros), quadros perdidos e oscilação (`resumirJogo`). Turbo rápido só no PC, direto, até 60 ms e com o jogo
+liso; celular fora de casa começa em 8 Mbps; o modo que se mostra ruim depois do teste é revisto em 45 s (era 3 min).
+
+Painel (`turbo-teste-painel.js`): etapas, velocidade e resposta ao vivo (direto azul, TURN laranja) e, no fim, nota de 0 a
+100, o direto e o TURN lado a lado, atraso previsto e uma dica (`avaliarConexao`: PS5 perdendo quadros, página
+engasgando, Wi-Fi, distância, velocidade, tela lenta). "Pular" ficou discreto. Um minuto depois o relatório grava
+"teste da conexão: previsto x real", para acertar a conta.
