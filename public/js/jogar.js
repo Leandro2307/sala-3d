@@ -142,10 +142,11 @@ function pedirEntrada({ conta: pedeConta = false, sala = false, erro = '' }) {
   $('#entrada').hidden = false;
   fundoDaEntrada(true);
   $('#en-nome-l').hidden = !pedeConta;
-  $('#en-senha-l').hidden = !pedeConta;
+  // a senha só aparece quando o nome digitado é de uma conta que tem senha (o servidor responde precisaSenha)
+  $('#en-senha-l').hidden = true;
   $('#en-sala-l').hidden = !sala;
   $('#en-texto').textContent = pedeConta
-    ? 'Primeira vez? Só o seu nome: o teste grátis não pede senha (a senha é criada quando você for alugar). Já tem senha? Digite também.'
+    ? 'Digite o seu nome para entrar.'
     : 'A sala principal tem senha. Peça a quem te convidou.';
   erroEntrada(erro);
   const campo = formEntrada.elements[pedeConta ? 'nome' : 'sala'];
@@ -171,6 +172,13 @@ function guardarPasse() {
   else delete passes[SALA];
   gravarJSON(PASSES_CHAVE, passes);
 }
+// trocou o nome: a senha era de outro nome, some de novo
+formEntrada.elements.nome.addEventListener('input', () => {
+  if ($('#en-senha-l').hidden) return;
+  $('#en-senha-l').hidden = true;
+  formEntrada.elements.senha.value = '';
+  erroEntrada('');
+});
 formEntrada.addEventListener('submit', async (e) => {
   e.preventDefault();
   const f = formEntrada.elements;
@@ -184,7 +192,12 @@ formEntrada.addEventListener('submit', async (e) => {
       let r;
       try { r = await post('/lan/conta', { nome, senha: f.senha.value || undefined }); } catch { r = { ok: false, erro: 'Sem conexão. Tente de novo.' }; }
       if (!r.ok) {
-        if (r.precisaSenha) f.senha.focus();
+        if (r.precisaSenha) {
+          const mostrou = $('#en-senha-l').hidden;
+          $('#en-senha-l').hidden = false;
+          f.senha.focus();
+          return erroEntrada(mostrou ? 'Esse nome tem senha. Digite a senha dele.' : r.erro || 'Senha errada.');
+        }
         return erroEntrada(r.erro || 'Não deu para entrar.');
       }
       conta = { nome, token: r.token };
@@ -917,7 +930,14 @@ function deixarJogar() {
   if (!a) return false;
   if (podeJogarLan(maquinaDaTela(a.sh))) return true;
   const m = maquinaDaTela(a.sh);
-  toast(lanLivre(m) ? `Seu teste grátis já foi usado. Alugue o ${NOME_MAQ[m]} para jogar.` : `Agora é a vez de ${st.lan[m].conta} no ${NOME_MAQ[m]}.`, 'warn', 7000);
+  // liberado "até alguém novo": quem ainda tem o teste espera uns segundos (o servidor tira a vez de lá); quem
+  // já usou o teste (por esta conta ou por outra na mesma internet) não conta como pessoa nova
+  const v = st.lan?.[m];
+  const texto = lanLivre(m) ? `Seu teste grátis já foi usado. Alugue o ${NOME_MAQ[m]} para jogar.`
+    : !v.aberta ? `Agora é a vez de ${v.conta} no ${NOME_MAQ[m]}.`
+      : semTeste() ? `O teste grátis já foi usado nesta conta ou nesta internet, então o ${NOME_MAQ[m]} continua com ${v.conta}. Para jogar, alugue.`
+        : `O ${NOME_MAQ[m]} está com ${v.conta} até alguém novo chegar: em alguns segundos ele fica livre para o seu teste.`;
+  toast(texto, 'warn', 8000);
   if (lanLivre(m)) abrirAluguel();
   return false;
 }
