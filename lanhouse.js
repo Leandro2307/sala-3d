@@ -127,17 +127,24 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
   // (o teste curto do dono que já acabou não segura mais nada: antes, depois de um reinício do servidor,
   // ele ficava "pago" o resto da hora e o "Liberar" achava que a hora já era da pessoa)
   const segura = (r, agora = Date.now()) => (r.status === 'paga' && !(r.fimCedo && r.fimCedo <= agora)) || (r.status === 'pendente' && r.expira > agora);
-  const daHora = (sala, maquina, inicio) => [...reservas.values()].find((r) => r.sala === sala && maquinaDe(r.maquina) === maquina && r.inicio === inicio && segura(r));
+  const daHora = (sala, maquina, inicio, agora = Date.now()) => [...reservas.values()].find((r) => r.sala === sala && maquinaDe(r.maquina) === maquina && r.inicio === inicio && segura(r, agora));
 
   // quem joga agora nesta máquina da sala: { conta, inicio, fim } (horas pagas seguidas da mesma conta viram uma só)
   function jogadorAgora(sala, maquina = 'pc', agora = Date.now()) {
     const h = Math.floor(agora / HORA) * HORA;
-    const r = daHora(sala, maquina, h);
+    const r = daHora(sala, maquina, h, agora);
     if (!r || r.status !== 'paga') return null;
-    // liberação curta (teste do dono, ver liberar com minutos): acaba antes da hora cheia
+    // liberação que acaba antes da hora cheia (o liberado pelo dono, ver comecarLiberadas)
     if (r.fimCedo) return agora >= r.fimCedo ? null : { conta: r.conta, inicio: h, fim: r.fimCedo, jogo: r.jogo || null, jogoNome: r.jogoNome || null };
     let fim = h + HORA;
-    while (daHora(sala, maquina, fim)?.conta === r.conta && daHora(sala, maquina, fim).status === 'paga') fim += HORA;
+    for (let p = daHora(sala, maquina, fim, agora); p?.conta === r.conta && p.status === 'paga'; p = daHora(sala, maquina, fim, agora)) {
+      // a seguinte dela acaba cedo (o liberado que passou da hora cheia): a vez vai até ali
+      if (p.fimCedo) {
+        fim = p.fimCedo;
+        break;
+      }
+      fim += HORA;
+    }
     // jogo: o que a pessoa escolheu para esta hora (o PC da casa abre sozinho, ver vigiarJogoLan)
     return { conta: r.conta, inicio: h, fim, jogo: r.jogo || null, jogoNome: r.jogoNome || null };
   }
@@ -459,77 +466,83 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
     });
   }
 
-  // o dono libera horas de graça para uma conta (sem Stripe): a partir da hora cheia de agora,
-  // seguidas. Hora que já é de outra pessoa (paga ou no checkout) fica de fora.
+  // a vez curta (fimCedo) vira cancelada quando o fim chega
+  function vigiarFimCedo(r) {
+    const f = r.fimCedo;
+    if (f) setTimeout(() => { if (r.fimCedo === f) mudarStatus([r], 'cancelada').catch(() => {}); }, f - Date.now() + 500).unref?.();
+  }
+
+  // O dono libera tempo de graça para uma conta: fica "aguardando" (expira = a duração em ms) e só começa a
+  // contar quando a pessoa entra na sala (começarLiberadas, chamado no join). Já estando na sala, começa na hora.
+  // Quem compra pela Stripe segue igual (a hora cheia). Espera até 2 dias (o que o servidor lê do banco).
   async function liberar({ sala, maquina, conta, horas, minutos, jogo: jogoId }) {
     const nome = limparNome(conta);
     if (!nomeValido(nome)) return { ok: false, erro: 'Nome de conta inválido.' };
     const c = await banco.lerConta(nome).catch(() => null);
     if (!c) return { ok: false, erro: `Não existe a conta "${nome}". Ela precisa entrar uma vez com nome e senha.` };
     const m = maquinaDe(maquina);
-    // PC: o jogo que abre sozinho na vez (do catálogo do PC da casa); sem ele, só a tela do PC
     let jogo = null;
     if (m === 'pc' && jogoId) {
       jogo = (await jogosDaSala(sala).catch(() => [])).find((j) => j.id === String(jogoId)) || null;
       if (!jogo) return { ok: false, erro: 'Esse jogo não está na lista do PC da casa.' };
     }
-    const doJogo = { jogo: jogo?.id || null, jogoNome: jogo?.nome || null };
-    // Teste do dono: alguns minutos a partir de agora (a vez começa e acaba sem esperar a hora cheia).
-    // O fim curto fica só na memória; quando chega, a reserva vira cancelada (também no banco).
     const min = Math.floor(Number(minutos)) || 0;
-    if (min > 0) {
-      const agora = Date.now();
-      const h0 = Math.floor(agora / HORA) * HORA;
-      const fimCedo = Math.min(agora + Math.min(min, 59) * 60_000, h0 + HORA);
-      let r = daHora(sala, m, h0);
-      if (r && r.conta !== nome) return { ok: false, erro: `O ${MAQUINAS[m]} já é de ${r.conta} nesta hora.` };
-      if (!r) {
-        r = { id: crypto.randomBytes(12).toString('hex'), sala, maquina: m, conta: nome, inicio: h0, status: 'paga', sessao: 'cortesia', expira: h0 + HORA, criada: agora, ...doJogo };
-        reservas.set(r.id, r);
-      }
-      r.status = 'paga';
-      if (m === 'pc') Object.assign(r, doJogo);
-      r.fimCedo = fimCedo;
-      r.expira = fimCedo; // gravado: o fim curto sobrevive a um reinício do servidor (ver iniciar)
-      await guardar(r);
-      setTimeout(() => { if (r.fimCedo === fimCedo) mudarStatus([r], 'cancelada').catch(() => {}); }, fimCedo - agora + 500).unref?.();
-      console.log(`[lan] ${sala} ${MAQUINAS[m]} (${nome}): teste de ${min} min, até ${new Date(fimCedo).toISOString()}`);
-      aoMudar?.(sala);
-      return { ok: true, conta: nome, maquina: MAQUINAS[m], horas: [], minutos: min, pulou: [], jogoNome: doJogo.jogoNome };
-    }
-    const n = Math.min(MAX_HORAS, Math.max(1, Math.floor(Number(horas)) || 1));
+    const dur = min > 0 ? Math.min(min, 59) * 60_000 : Math.min(MAX_HORAS, Math.max(1, Math.floor(Number(horas)) || 1)) * HORA;
     const agora = Date.now();
-    const h0 = Math.floor(agora / HORA) * HORA;
-    const lista = [];
-    const pulou = [];
-    for (let i = 0; i < n; i++) {
-      const inicio = h0 + i * HORA;
-      const tem = daHora(sala, m, inicio);
-      if (tem && tem.conta !== nome) { pulou.push(horaDe(inicio)); continue; }
-      // o teste de minutos dela nesta hora (ainda correndo): vira a hora inteira
-      if (tem?.status === 'paga' && tem.fimCedo) {
-        delete tem.fimCedo;
-        tem.expira = inicio + HORA;
-        if (m === 'pc') Object.assign(tem, doJogo);
-        await guardar(tem);
-        lista.push(null);
-        continue;
+    // liberou de novo antes de ela entrar: soma
+    const antes = [...reservas.values()].find((r) => r.status === 'aguardando' && r.sala === sala && maquinaDe(r.maquina) === m && r.conta === nome);
+    const r = antes || { id: crypto.randomBytes(12).toString('hex'), sala, maquina: m, conta: nome, inicio: agora, status: 'aguardando', sessao: 'cortesia', expira: 0, criada: agora };
+    r.expira += dur;
+    if (m === 'pc' && jogo) Object.assign(r, { jogo: jogo.id, jogoNome: jogo.nome });
+    reservas.set(r.id, r);
+    await guardar(r);
+    console.log(`[lan] ${sala} ${MAQUINAS[m]} (${nome}): ${Math.round(r.expira / 60_000)} min liberados, esperando entrar`);
+    return { ok: true, conta: nome, maquina: MAQUINAS[m], minutosTotal: Math.round(r.expira / 60_000), jogoNome: r.jogoNome || null };
+  }
+
+  // A pessoa entrou: o tempo liberado para ela começa agora (ou no fim da vez dela que já está correndo). Vira
+  // reservas pagas de cortesia nas horas cheias, a última com o fim cedo. Hora de outra pessoa no caminho corta
+  // o resto; máquina ocupada por outra pessoa agora: continua esperando. Devolve as máquinas que começaram.
+  async function comecarLiberadas(sala, conta, agora = Date.now()) {
+    const nome = limparNome(conta);
+    const comecou = [];
+    for (const r of [...reservas.values()].filter((x) => x.status === 'aguardando' && x.sala === sala && x.conta === nome)) {
+      const m = maquinaDe(r.maquina);
+      const atual = jogadorAgora(sala, m, agora);
+      if (atual && atual.conta !== nome) continue;
+      let pos = atual ? atual.fim : agora;
+      let resto = r.expira;
+      const feitas = [];
+      while (resto > 0) {
+        const s = Math.floor(pos / HORA) * HORA;
+        const fimHora = s + HORA;
+        const tem = daHora(sala, m, s, agora);
+        if (tem && tem.conta !== nome) break;
+        // a hora inteira já é dela (comprada): não gasta o liberado
+        if (tem && !tem.fimCedo) { pos = fimHora; continue; }
+        const ate = Math.min(pos + resto, fimHora);
+        // dela com o fim cedo (a vez que acaba em pos): estica
+        const x = tem || { id: crypto.randomBytes(12).toString('hex'), sala, maquina: m, conta: nome, inicio: s, status: 'paga', sessao: 'cortesia', criada: agora, jogo: r.jogo || null, jogoNome: r.jogoNome || null };
+        if (ate < fimHora) Object.assign(x, { fimCedo: ate, expira: ate });
+        else {
+          delete x.fimCedo;
+          x.expira = fimHora;
+        }
+        reservas.set(x.id, x);
+        await guardar(x);
+        vigiarFimCedo(x);
+        resto -= ate - pos;
+        pos = ate;
+        feitas.push(x);
       }
-      if (tem?.status === 'paga') continue; // já é dela
-      if (tem) { tem.status = 'cancelada'; await guardar(tem); } // o checkout dela mesma: vira cortesia
-      lista.push({
-        id: crypto.randomBytes(12).toString('hex'), sala, maquina: m, conta: nome, inicio, status: 'paga', sessao: 'cortesia', expira: inicio + HORA, criada: agora,
-        ...doJogo,
-      });
-    }
-    const novas = lista.filter(Boolean);
-    for (const r of novas) {
-      reservas.set(r.id, r);
+      if (!feitas.length) continue;
+      r.status = 'usada';
       await guardar(r);
-      console.log(`[lan] ${sala} ${MAQUINAS[m]} ${diaDe(r.inicio)} ${horaDe(r.inicio)}h (${nome}): cortesia do dono`);
+      console.log(`[lan] ${sala} ${MAQUINAS[m]} (${nome}): entrou, o liberado começa (até ${new Date(pos).toISOString()})`);
+      comecou.push(MAQUINAS[m]);
     }
-    aoMudar?.(sala);
-    return { ok: true, conta: nome, maquina: MAQUINAS[m], horas: [...(lista.includes(null) ? [horaDe(h0)] : []), ...novas.map((r) => horaDe(r.inicio))], pulou, jogoNome: doJogo.jogoNome };
+    if (comecou.length) aoMudar?.(sala);
+    return comecou;
   }
 
   // o dono encerra a vez de agora nesta máquina (a hora atual e as seguidas da mesma conta): a máquina
@@ -548,5 +561,5 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
     return { ok: true, conta: atual.conta, maquina: MAQUINAS[m] };
   }
 
-  return { iniciar, rotas, conferirPendentes, contaDoToken, jogadorAgora, liberar, encerrar, teste, comecarTeste, TESTE_MS, MAQUINAS: Object.keys(MAQUINAS) };
+  return { iniciar, rotas, conferirPendentes, contaDoToken, jogadorAgora, liberar, comecarLiberadas, encerrar, teste, comecarTeste, TESTE_MS, MAQUINAS: Object.keys(MAQUINAS) };
 };

@@ -940,6 +940,11 @@ function podeJogarLan(room, user, donoDaTela, tela) {
   if (atual) return !!user.conta && user.conta === atual.conta;
   return !!user.conta && !lan.teste(room.id, user.conta, user.ip).acabou;
 }
+// lan house: a pessoa entrou na sala (ou na conta): o tempo que o dono liberou para ela começa a contar agora
+function comecarLiberadasDe(room, conta) {
+  if (!conta || !room.config?.lanhouse?.ligada) return;
+  lan.comecarLiberadas(room.id, conta).catch((err) => console.warn('[lan] começando o liberado', err.message));
+}
 // Só jogar de verdade começa o teste: entrar no modo jogo ('modo'), o "ainda estou aqui" ('vivo', a cada
 // 0,5 s) e o controle todo solto não. Quem joga também segura os comandos enquanto o diagnóstico e o
 // tutorial estão abertos (jogar.js e main.js seguraNoPreparo): os 2 min começam depois deles.
@@ -1693,6 +1698,7 @@ function attachSockets(io) {
       });
       socket.to(roomId).emit('user-joined', publicUser(user));
       if (user.conta) avisarLan(room);
+      comecarLiberadasDe(room, user.conta);
       avisarGestores(room, user, 'entrou', `${user.name} entrou no sistema`);
       lobbyMudou();
     });
@@ -1708,6 +1714,7 @@ function attachSockets(io) {
       if (user.conta === conta) return r({ ok: true, conta, lan: estadoLan(room) });
       user.conta = conta;
       avisarLan(room);
+      comecarLiberadasDe(room, conta);
       r({ ok: true, conta, lan: estadoLan(room) });
     });
 
@@ -1886,7 +1893,10 @@ function attachSockets(io) {
       if (!room.config?.lanhouse?.ligada) return r({ ok: false, erro: 'Ligue a lan house primeiro.' });
       const { conta, maquina, horas, minutos, jogo } = obj(msg);
       try {
-        r(await lan.liberar({ sala: room.id, conta, maquina, horas, minutos, jogo }));
+        const res = await lan.liberar({ sala: room.id, conta, maquina, horas, minutos, jogo });
+        // já está na sala: começa agora
+        if (res.ok && [...room.users.values()].some((u) => u.conta === res.conta)) res.comecou = (await lan.comecarLiberadas(room.id, res.conta)).length > 0;
+        r(res);
       } catch (err) {
         console.warn('[lan] liberar', err.message);
         r({ ok: false, erro: 'Não deu para liberar agora. Tente de novo.' });
@@ -2855,6 +2865,8 @@ async function main() {
       if (!room.users.size) continue;
       avisarLan(room);
       vigiarJogoLan(room).catch((err) => console.warn('[lan] jogo', err.message));
+      // o liberado de quem está na sala esperando a máquina ficar livre
+      for (const conta of new Set([...room.users.values()].map((u) => u.conta).filter(Boolean))) comecarLiberadasDe(room, conta);
     }
   }, 5000).unref();
 

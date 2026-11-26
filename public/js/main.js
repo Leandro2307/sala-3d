@@ -6245,7 +6245,7 @@ function fecharAluguel() {
   $('#lan-modal').hidden = true;
   $('#lan-frame').src = 'about:blank';
 }
-// dono: libera horas de graça para uma conta, a partir da hora cheia de agora (sem Stripe)
+// dono: libera tempo de graça para uma conta (sem Stripe); começa a contar quando a pessoa entra
 $('#lan-liberar').addEventListener('click', () => {
   const f = $('#sala-config').elements;
   const conta = f.lanLiberarConta.value.trim();
@@ -6258,9 +6258,10 @@ $('#lan-liberar').addEventListener('click', () => {
   socket.emit('lan-liberar', { conta, maquina, horas: minutos ? 0 : Number(v), minutos, jogo }, (r) => {
     if (!r?.ok) return toast(r?.erro || 'Não deu para liberar.', 'error');
     const comJogo = r.jogoNome ? `, com ${r.jogoNome}` : '';
-    if (r.minutos) return toast(`${r.maquina} liberado para ${r.conta} por ${r.minutos} minutos${comJogo} (teste).`, 'success');
-    const horas = r.horas.map((h) => `${h}h`).join(', ');
-    toast(`${r.maquina} liberado para ${r.conta}${horas ? ` (${horas})` : ' (já estava)'}${r.pulou.length ? ` — ocupado por outra pessoa: ${r.pulou.map((h) => `${h}h`).join(', ')}` : ''}.`, 'success');
+    const t = r.minutosTotal;
+    const tempo = t % 60 ? `${t} minutos` : `${t / 60} hora${t > 60 ? 's' : ''}`;
+    // o tempo só começa a contar quando a pessoa entra (lanhouse.js comecarLiberadas)
+    toast(`${r.maquina} liberado para ${r.conta}: ${tempo}${comJogo}. ${r.comecou ? 'Já está na sala: começou agora.' : 'Começa a contar quando a pessoa entrar.'}`, 'success', 7000);
   });
 });
 // a lista de jogos do PC da casa no "Jogo (PC)" do Liberar: carrega ao abrir a lista

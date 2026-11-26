@@ -254,7 +254,7 @@ export class PainelTeste {
     if (r.nota?.dicas?.length) dica.textContent = r.nota.dicas[0];
     else dica.remove();
     el.append(caixa);
-    this.some = setTimeout(() => this.fechar(), 9000);
+    this.some = setTimeout(() => this.fechar(), 2000); // 2 s bastam (o dono pediu: 9 s tapava o começo do jogo)
   }
 
   fechar() {
