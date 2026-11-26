@@ -825,8 +825,8 @@ app.get('/tv/qr.svg', async (req, res) => {
     res.status(500).end();
   }
 });
-app.post('/lan/tv', express.json({ limit: '2kb' }), (req, res) => {
-  const conta = lan.contaDoToken(req.body?.token);
+app.post('/lan/tv', express.json({ limit: '2kb' }), async (req, res) => {
+  const conta = await lan.contaValida(req.body?.token);
   if (!conta) return res.json({ ok: false, erro: 'login' });
   const codigo = codigoTV(req.body?.codigo);
   const tv = acharTV(codigo, req);
@@ -855,9 +855,10 @@ app.post('/lan/tv', express.json({ limit: '2kb' }), (req, res) => {
 const ANTECIPA_PC_MS = 60_000;
 function vezLan(room, m) {
   const a = lan.jogadorAgora(room.id, m);
-  if (a || m !== 'pc') return a;
+  if ((a && !a.aberta) || m !== 'pc') return a;
+  // o liberado "até alguém novo" (a.aberta) também dá lugar à hora paga que vai começar
   const prox = lan.jogadorAgora(room.id, m, Date.now() + ANTECIPA_PC_MS);
-  return prox ? { ...prox, preparando: true } : null;
+  return prox && !prox.aberta ? { ...prox, preparando: true } : a;
 }
 function estadoLan(room) {
   if (!room.config?.lanhouse?.ligada) return { ligada: false };
@@ -865,7 +866,8 @@ function estadoLan(room) {
   for (const m of lan.MAQUINAS) {
     const atual = vezLan(room, m);
     const ids = atual ? [...room.users.values()].filter((u) => u.conta === atual.conta).map((u) => u.id) : [];
-    e[m] = { conta: atual?.conta ?? null, inicio: atual?.inicio ?? null, fim: atual?.fim ?? null, preparando: !!atual?.preparando, ids };
+    // aberta: liberado até alguém novo entrar (sem fim)
+    e[m] = { conta: atual?.conta ?? null, inicio: atual?.inicio ?? null, fim: atual?.fim ?? null, preparando: !!atual?.preparando, aberta: !!atual?.aberta, ids };
   }
   // teste grátis (máquina sem ninguém alugado): quem está com os 2 min correndo (id -> fim) e quem já
   // usou o seu (pela conta ou pelo IP) e não joga mais de graça
@@ -1621,7 +1623,7 @@ function attachSockets(io) {
       const roomId = idDaSala(data?.room);
       // todo mundo entra com a conta (nome e senha, ver lanhouse.js); o nome na sala é o dela, do
       // jeito que a pessoa escreveu (só muda maiúscula/minúscula)
-      const contaLan = data?.lan ? lan.contaDoToken(data.lan) : null;
+      const contaLan = data?.lan ? await lan.contaValida(data.lan) : null;
       // a TV (public/tv.html) entra sem conta para mostrar o telão e o QR do aluguel; só joga depois
       // que alguém a liga na conta pelo celular (ver 'tv-codigo' e /lan/tv)
       const tvSemConta = !contaLan && data?.tv === true;
@@ -1699,6 +1701,7 @@ function attachSockets(io) {
       socket.to(roomId).emit('user-joined', publicUser(user));
       if (user.conta) avisarLan(room);
       comecarLiberadasDe(room, user.conta);
+      verNovoLan();
       avisarGestores(room, user, 'entrou', `${user.name} entrou no sistema`);
       lobbyMudou();
     });
@@ -1706,17 +1709,39 @@ function attachSockets(io) {
     // ---------------------------------------------------------- lan house
     // A página guarda o token da conta (login em /lan) e manda aqui ao entrar: daí em diante o
     // servidor sabe de quem é esta conexão, e ela joga quando for o horário dela.
-    socket.on('lan-entrar', (msg, ack) => {
+    socket.on('lan-entrar', async (msg, ack) => {
       const r = resposta(ack);
       if (!room) return r({ ok: false });
-      const conta = msg?.token ? lan.contaDoToken(msg.token) : null;
+      const conta = msg?.token ? await lan.contaValida(msg.token) : null;
+      if (!room) return r({ ok: false });
       if (msg?.token && !conta) return r({ ok: false, erro: 'login' });
       if (user.conta === conta) return r({ ok: true, conta, lan: estadoLan(room) });
       user.conta = conta;
       avisarLan(room);
       comecarLiberadasDe(room, conta);
+      verNovoLan();
       r({ ok: true, conta, lan: estadoLan(room) });
     });
+
+    // Lan house: entrou alguém que ainda tem o teste grátis: o liberado "até alguém novo entrar" acaba e a
+    // máquina fica livre para ela testar (lanhouse.js chegouNovo). Espera uns segundos para não contar o PC
+    // da casa (marca '/tela liberar' logo ao entrar) nem o dono (o passe dele vai sozinho ao entrar).
+    function verNovoLan() {
+      setTimeout(async () => {
+        if (!room?.config?.lanhouse?.ligada || !user?.conta || !socket.connected || dono || socket.data.tela || user.shares.size) return;
+        try {
+          const paradas = await lan.chegouNovo(room.id, user.conta, user.ip);
+          if (!paradas.length) return;
+          // a máquina continua na sala para a pessoa nova testar (o vigiarJogoLan não tira o PS5 nem fecha o jogo)
+          for (const m of paradas) if (room.lanMaquinas?.[m]) room.lanMaquinas[m].aberto = false;
+          // o aviso antes do estado novo: a página de quem jogava ainda sabe que a vez era "até alguém novo"
+          io.to(room.id).emit('lan-novo', { nome: user.name, id: user.id, maquinas: paradas });
+          avisarLan(room, true);
+        } catch (err) {
+          console.warn('[lan] chegou alguém novo', err.message);
+        }
+      }, 5000).unref?.();
+    }
 
     // TV: o código do QR (ver /lan/tv). Um por conexão; some quando a TV sai.
     let meuCodigoTV = null;
@@ -1891,9 +1916,9 @@ function attachSockets(io) {
       const r = resposta(ack);
       if (!room || !dono) return r({ ok: false, erro: 'Só o dono da sala libera horário.' });
       if (!room.config?.lanhouse?.ligada) return r({ ok: false, erro: 'Ligue a lan house primeiro.' });
-      const { conta, maquina, horas, minutos, jogo } = obj(msg);
+      const { conta, maquina, horas, minutos, jogo, ateNovo } = obj(msg);
       try {
-        const res = await lan.liberar({ sala: room.id, conta, maquina, horas, minutos, jogo });
+        const res = await lan.liberar({ sala: room.id, conta, maquina, horas, minutos, jogo, ateNovo: ateNovo === true });
         // já está na sala: começa agora
         if (res.ok && [...room.users.values()].some((u) => u.conta === res.conta)) res.comecou = (await lan.comecarLiberadas(room.id, res.conta)).length > 0;
         r(res);

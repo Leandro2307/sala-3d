@@ -145,7 +145,7 @@ function pedirEntrada({ conta: pedeConta = false, sala = false, erro = '' }) {
   $('#en-senha-l').hidden = !pedeConta;
   $('#en-sala-l').hidden = !sala;
   $('#en-texto').textContent = pedeConta
-    ? 'Entre com a sua conta da sala. Primeira vez? A senha que você digitar vira a da sua conta.'
+    ? 'Primeira vez? Só o seu nome: o teste grátis não pede senha (a senha é criada quando você for alugar). Já tem senha? Digite também.'
     : 'A sala principal tem senha. Peça a quem te convidou.';
   erroEntrada(erro);
   const campo = formEntrada.elements[pedeConta ? 'nome' : 'sala'];
@@ -180,10 +180,13 @@ formEntrada.addEventListener('submit', async (e) => {
   try {
     if (!conta) {
       const nome = f.nome.value.trim().replace(/\s+/g, ' ');
-      if (!nome || !f.senha.value) return erroEntrada('Digite o nome e a senha.');
+      if (!nome) return erroEntrada('Digite o seu nome.');
       let r;
-      try { r = await post('/lan/conta', { nome, senha: f.senha.value }); } catch { r = { ok: false, erro: 'Sem conexão. Tente de novo.' }; }
-      if (!r.ok) return erroEntrada(r.erro || 'Não deu para entrar.');
+      try { r = await post('/lan/conta', { nome, senha: f.senha.value || undefined }); } catch { r = { ok: false, erro: 'Sem conexão. Tente de novo.' }; }
+      if (!r.ok) {
+        if (r.precisaSenha) f.senha.focus();
+        return erroEntrada(r.erro || 'Não deu para entrar.');
+      }
       conta = { nome, token: r.token };
       gravarJSON(LAN_CHAVE, conta);
       f.senha.value = '';
@@ -354,6 +357,12 @@ function ligarSocket() {
     atualizar();
   });
   socket.on('lan', aplicarLan);
+  // chegou alguém novo: o liberado "até alguém novo" acabou e a pessoa nova testa
+  socket.on('lan-novo', (m) => {
+    const maqs = (m?.maquinas || []).map((x) => NOME_MAQ[x]).filter(Boolean).join(' e ');
+    if (m?.id === st.selfId) toast(`Pode testar: ${maqs} livre para os seus 2 minutos grátis.`, 'success', 8000);
+    else if ((m?.maquinas || []).some((x) => lanEraAberta.has(x))) toast(`${m.nome} chegou para testar: o seu tempo liberado no ${maqs} acabou.`, 'warn', 10000);
+  });
   socket.on('sala', aplicarSala);
   socket.on('passe', (p) => {
     passe = p;
@@ -769,6 +778,7 @@ let meuTesteLan = null;
 let pediuAluguelEm = 0;
 let tirandoDoJogo = false;
 const avisouFim = new Set();
+let lanEraAberta = new Set(); // as minhas que eram "até alguém novo" (o fim delas avisa pelo 'lan-novo')
 const idsDaVez = (m) => st.lan?.[m]?.ids || [];
 const lanLivre = (m) => !st.lan?.[m]?.conta;
 const semTeste = () => !!st.lan?.semTeste?.includes(st.selfId);
@@ -791,8 +801,10 @@ function textoVez(m) {
     }
     return { texto: semTeste() ? `${NOME_MAQ[m]} livre · alugue para jogar` : `${NOME_MAQ[m]} livre · 2 min grátis`, livre: true };
   }
-  const f = falta(v.fim);
   const minha = idsDaVez(m).includes(st.selfId);
+  // liberado até alguém novo entrar: sem fim
+  if (v.aberta) return { texto: `${minha ? 'Sua vez' : `Vez de ${v.conta}`} no ${NOME_MAQ[m]} · até alguém novo chegar`, minha };
+  const f = falta(v.fim);
   if (v.preparando && v.inicio) {
     const c = falta(v.inicio);
     if (c.s > 0) return { texto: `${minha ? 'Sua vez' : `Vez de ${v.conta}`} no ${NOME_MAQ[m]} começa em ${c.texto} · preparando`, minha, s: f.s };
@@ -834,10 +846,15 @@ function aplicarLan(e) {
   for (const m of agora) {
     if (lanEraMinha.has(m)) continue;
     const v = st.lan[m];
+    if (v.aberta) {
+      toast(`O ${NOME_MAQ[m]} foi liberado para você até alguém novo chegar para testar. Bom jogo!`, 'success', 8000);
+      continue;
+    }
     toast(v.preparando ? `Seu horário no ${NOME_MAQ[m]} começa às ${hora(v.inicio)}. Joga até ${hora(v.fim)}.` : `Seu horário no ${NOME_MAQ[m]} começou: você joga até ${hora(v.fim)}. Bom jogo!`, 'success', 8000);
   }
-  for (const m of lanEraMinha) if (!agora.has(m)) toast(`Seu horário no ${NOME_MAQ[m]} acabou. Para jogar mais, alugue outro horário.`, 'warn', 9000);
+  for (const m of lanEraMinha) if (!agora.has(m) && !lanEraAberta.has(m)) toast(`Seu horário no ${NOME_MAQ[m]} acabou. Para jogar mais, alugue outro horário.`, 'warn', 9000);
   lanEraMinha = agora;
+  lanEraAberta = new Set([...agora].filter((m) => st.lan[m]?.aberta));
   const fimTeste = st.lan?.teste?.[st.selfId] || null;
   if (fimTeste && !meuTesteLan) toast('Teste grátis: você tem 2 minutos para jogar. Depois, é só alugar o PC ou o PS5.', 'info', 7000);
   if (meuTesteLan && !fimTeste && semTeste()) {

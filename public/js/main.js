@@ -1753,6 +1753,12 @@ function bindSocket() {
     guardarPasse(state.room, passe);
   });
   socket.on('lan', aplicarLan);
+  // chegou alguém novo: o liberado "até alguém novo" acabou e a pessoa nova testa
+  socket.on('lan-novo', (m) => {
+    const maqs = (m?.maquinas || []).map((x) => MAQUINAS_LAN[x]).filter(Boolean).join(' e ');
+    if (m?.id === state.selfId) toast(`Pode testar: ${maqs} livre para os seus 2 minutos grátis.`, 'success', 8000);
+    else if ((m?.maquinas || []).some((x) => lanEraAberta.has(x))) toast(`${m.nome} chegou para testar: o seu tempo liberado no ${maqs} acabou.`, 'info', 10000);
+  });
   socket.on('sala', (cfg) => {
     aplicarSala(cfg);
     if (cfg.por && cfg.por !== settings.name) toast(`${cfg.por} atualizou a sala`, 'info', 3500);
@@ -6138,6 +6144,7 @@ function pedirAluguelTeste() {
 let meuTesteLan = null; // o fim dos meus 2 min (correndo), para avisar no começo e no fim
 const minhasMaquinas = () => Object.keys(MAQUINAS_LAN).filter((m) => idsDaVez(m).includes(state.selfId));
 let lanEraMinha = new Set();
+let lanEraAberta = new Set(); // as minhas que eram "até alguém novo" (o fim delas avisa pelo 'lan-novo')
 const horaCurta = (ms) => new Date(ms).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 // quanto falta para o fim da vez, pelo relógio do servidor (dif: a hora de lá menos a daqui)
 let lanDif = 0;
@@ -6160,8 +6167,10 @@ function textoVezLan(m) {
     if (semTesteLan(state.selfId)) return { texto: `${MAQUINAS_LAN[m]} livre · alugue para jogar`, livre: true };
     return { texto: `${MAQUINAS_LAN[m]} livre · 2 min grátis`, livre: true };
   }
-  const f = faltaLan(v.fim);
   const minha = idsDaVez(m).includes(state.selfId);
+  // liberado até alguém novo entrar: sem fim
+  if (v.aberta) return { texto: `${minha ? 'Sua vez' : `Vez de ${v.conta}`} no ${MAQUINAS_LAN[m]} · até alguém novo chegar`, minha };
+  const f = faltaLan(v.fim);
   // o PC sendo preparado (o jogo abrindo) no minuto antes da vez: conta até a vez começar
   if (v.preparando && v.inicio) {
     const c = faltaLan(v.inicio);
@@ -6222,12 +6231,17 @@ function aplicarLan(e) {
   for (const m of agora) {
     if (lanEraMinha.has(m)) continue;
     const v = state.lan[m];
+    if (v.aberta) {
+      toast(`O ${MAQUINAS_LAN[m]} foi liberado para você até alguém novo chegar para testar. Bom jogo!`, 'success', 8000);
+      continue;
+    }
     toast(v.preparando
       ? `Seu horário no ${MAQUINAS_LAN[m]} começa às ${horaCurta(v.inicio)}: o ${MAQUINAS_LAN[m]} já está sendo preparado e você já pode entrar. Joga até ${horaCurta(v.fim)}.`
       : `Seu horário no ${MAQUINAS_LAN[m]} começou: você joga até ${horaCurta(v.fim)}. Bom jogo!`, 'success', 8000);
   }
-  for (const m of lanEraMinha) if (!agora.has(m)) toast(lanLivre(m) ? `Seu horário no ${MAQUINAS_LAN[m]} acabou. Ninguém alugou a próxima hora: a tela fica livre para todos.` : `Seu horário no ${MAQUINAS_LAN[m]} acabou. Para jogar mais, toque em "Alugar PC ou PS5".`, 'info', 10000);
+  for (const m of lanEraMinha) if (!agora.has(m) && !lanEraAberta.has(m)) toast(lanLivre(m) ? `Seu horário no ${MAQUINAS_LAN[m]} acabou. Ninguém alugou a próxima hora: a tela fica livre para todos.` : `Seu horário no ${MAQUINAS_LAN[m]} acabou. Para jogar mais, toque em "Alugar PC ou PS5".`, 'info', 10000);
   lanEraMinha = agora;
+  lanEraAberta = new Set([...agora].filter((m) => state.lan[m]?.aberta));
   // o meu teste grátis: começou (primeiro comando ao jogo) ou acabou (abre o aluguel)
   const fimTeste = state.lan?.teste?.[state.selfId] || null;
   if (fimTeste && !meuTesteLan) toast('Teste grátis: você tem 2 minutos para jogar. Depois, para continuar, é só alugar o PC ou o PS5.', 'info', 7000);
@@ -6263,13 +6277,16 @@ $('#lan-liberar').addEventListener('click', () => {
   const conta = f.lanLiberarConta.value.trim();
   if (!conta) return toast('Escreva o nome da conta.', 'error');
   // "2m": teste de 2 minutos (a vez começa e acaba sem esperar a hora cheia)
+  // "novo": sem fim, até entrar alguém que ainda tem o teste grátis (lanhouse.js chegouNovo)
   const v = f.lanLiberarHoras.value;
+  const ateNovo = v === 'novo';
   const minutos = /m$/.test(v) ? parseInt(v, 10) : 0;
   const maquina = f.lanLiberarMaquina.value;
   const jogo = maquina === 'pc' ? f.lanLiberarJogo.value : '';
-  socket.emit('lan-liberar', { conta, maquina, horas: minutos ? 0 : Number(v), minutos, jogo }, (r) => {
+  socket.emit('lan-liberar', { conta, maquina, horas: minutos || ateNovo ? 0 : Number(v), minutos, jogo, ateNovo }, (r) => {
     if (!r?.ok) return toast(r?.erro || 'Não deu para liberar.', 'error');
     const comJogo = r.jogoNome ? `, com ${r.jogoNome}` : '';
+    if (r.ateNovo) return toast(`${r.maquina} liberado para ${r.conta}${comJogo} até alguém novo entrar para testar. ${r.comecou ? 'Já está na sala: começou agora.' : 'Começa quando a pessoa entrar.'}`, 'success', 8000);
     const t = r.minutosTotal;
     const tempo = t % 60 ? `${t} minutos` : `${t / 60} hora${t > 60 ? 's' : ''}`;
     // o tempo só começa a contar quando a pessoa entra (lanhouse.js comecarLiberadas)

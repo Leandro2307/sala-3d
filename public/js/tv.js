@@ -300,7 +300,8 @@ function aplicarLan(e) {
     if (!eraMinha || eraMinha.has(m)) continue;
     st.escolhida = null; // começou a minha vez: a TV vai para a máquina alugada
     const v = st.lan[m];
-    if (!CONTROLE) aviso(v.preparando ? `Seu horário no ${NOME_MAQ[m]} começa às ${hora(v.inicio)}.` : `Seu horário no ${NOME_MAQ[m]} começou: você joga até ${hora(v.fim)}. Bom jogo!`, 'info', 8000);
+    if (!CONTROLE && v.aberta) aviso(`O ${NOME_MAQ[m]} foi liberado para você até alguém novo chegar para testar. Bom jogo!`, 'info', 8000);
+    else if (!CONTROLE) aviso(v.preparando ? `Seu horário no ${NOME_MAQ[m]} começa às ${hora(v.inicio)}.` : `Seu horário no ${NOME_MAQ[m]} começou: você joga até ${hora(v.fim)}. Bom jogo!`, 'info', 8000);
   }
   eraMinha = agora;
   atualizar();
@@ -335,7 +336,7 @@ function atualizarTempo() {
     const fim = st.lan[m].fim;
     const falta = Math.max(0, fim - (Date.now() + st.lanDif));
     const min = Math.ceil(falta / 60_000);
-    texto = st.lan[m].preparando ? `Sua vez no <b>${NOME_MAQ[m]}</b> já vai começar` : `Sua vez no <b>${NOME_MAQ[m]}</b> · faltam <b>${min} min</b>`;
+    texto = st.lan[m].aberta ? `Sua vez no <b>${NOME_MAQ[m]}</b> · até alguém novo chegar` : st.lan[m].preparando ? `Sua vez no <b>${NOME_MAQ[m]}</b> já vai começar` : `Sua vez no <b>${NOME_MAQ[m]}</b> · faltam <b>${min} min</b>`;
   } else if (st.lan && st.selfId) {
     const fimTeste = st.lan.teste?.[st.selfId];
     if (fimTeste) texto = `Teste grátis · <b>${Math.max(0, Math.ceil((fimTeste - Date.now() - st.lanDif) / 1000))} s</b>`;

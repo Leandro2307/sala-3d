@@ -159,7 +159,7 @@
       </div>
     </div>
     <form id="form-senha" class="row" hidden style="margin-top:10px">
-      <label>Senha atual <input name="atual" type="password" autocomplete="current-password" required></label>
+      <label id="senha-atual-l">Senha atual <input name="atual" type="password" autocomplete="current-password" required></label>
       <label>Senha nova <input name="nova" type="password" autocomplete="new-password" minlength="6" required></label>
       <div class="row" style="flex-basis:100%"><button type="submit" class="primary">Salvar senha</button></div>
     </form>
@@ -309,17 +309,29 @@
     carregar();
   });
   $('#sair').addEventListener('click', () => { guardarConta(null); escolhidas.clear(); carregar(); });
-  $('#trocar-senha').addEventListener('click', () => { $('#form-senha').hidden = !$('#form-senha').hidden; });
+  $('#trocar-senha').addEventListener('click', () => { mostrarFormSenha(false, $('#form-senha').hidden); });
+  // nova: a conta entrou só com o nome (teste grátis do /jogar) e cria a primeira senha (sem a atual)
+  function mostrarFormSenha(nova, aberto = true) {
+    const f = $('#form-senha');
+    f.dataset.nova = nova ? '1' : '';
+    $('#senha-atual-l').hidden = nova;
+    f.elements.atual.required = !nova;
+    f.querySelector('button[type=submit]').textContent = nova ? 'Criar senha e continuar' : 'Salvar senha';
+    f.hidden = !aberto;
+    if (aberto) f.elements[nova ? 'nova' : 'atual'].focus();
+  }
   $('#form-senha').addEventListener('submit', async (e) => {
     e.preventDefault();
     const f = e.currentTarget.elements;
-    const r = await post('/lan/senha', { token: conta?.token, atual: f.atual.value, nova: f.nova.value });
+    const form = e.currentTarget;
+    const nova = form.dataset.nova === '1';
+    const r = await post('/lan/senha', { token: conta?.token, atual: nova ? undefined : f.atual.value, nova: f.nova.value });
     if (sairPorLogin(r)) return;
     if (!r.ok) return aviso(r.erro, 'erro');
     guardarConta({ ...conta, token: r.token });
-    e.currentTarget.reset();
-    e.currentTarget.hidden = true;
-    aviso('Senha trocada.', 'ok');
+    form.reset();
+    mostrarFormSenha(false, false);
+    aviso(nova ? 'Senha criada: use o seu nome e essa senha para entrar de outros aparelhos. Agora é só pagar.' : 'Senha trocada.', 'ok');
   });
 
   // ------------------------------------------------ dias e horas
@@ -519,6 +531,13 @@
     // página); a aba é aberta já no toque, senão o navegador bloqueia
     const aba = embed ? window.open('', '_blank') : null;
     const r = await post('/lan/reservar', { token: conta.token, sala, maquina, jogo: maquina === 'pc' ? jogo : null, inicios: [...escolhidas] });
+    // entrou só com o nome (teste grátis): cria a senha antes de pagar
+    if (r.erro === 'senha') {
+      aba?.close();
+      $('#pagar').disabled = false;
+      mostrarFormSenha(true);
+      return aviso('Para alugar, crie uma senha para a sua conta (assim só você usa as horas pagas).', 'info');
+    }
     if (sairPorLogin(r) || !r.ok) {
       aba?.close();
       if (r.ok === false && r.erro !== 'login') aviso(r.erro, 'erro');

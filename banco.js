@@ -274,7 +274,8 @@ async function lerRelatorio(id) {
 // ---------------------------------------------------------- lan house (ver lanhouse.js)
 // { nome, senhaHash } ou null
 async function lerConta(nome) {
-  if (!pool) return contasArq.mapa[nome] ? { nome, senhaHash: contasArq.mapa[nome] } : null;
+  // senhaHash '' é a conta sem senha (entrou só com o nome para o teste grátis, ver lanhouse.js)
+  if (!pool) return Object.hasOwn(contasArq.mapa, nome) ? { nome, senhaHash: contasArq.mapa[nome] } : null;
   const [linhas] = await pool.query('SELECT senha_hash FROM sala3d_contas WHERE nome = ?', [nome]);
   return linhas.length ? { nome, senhaHash: linhas[0].senha_hash } : null;
 }
@@ -282,7 +283,7 @@ async function lerConta(nome) {
 // false se o nome já existe
 async function criarConta(nome, senhaHash) {
   if (!pool) {
-    if (contasArq.mapa[nome]) return false;
+    if (Object.hasOwn(contasArq.mapa, nome)) return false;
     contasArq.mapa[nome] = senhaHash;
     contasArq.salvar();
     return true;

@@ -33,6 +33,7 @@ const TOKEN_DIAS = 30;
 // do primeiro comando que ela manda ao jogo. Fica marcado na conta e no IP: outra conta criada no
 // mesmo lugar não ganha outro teste.
 const TESTE_MS = 2 * 60_000;
+const ATE_NOVO = 'ate-novo'; // a sessão do liberado "até alguém novo entrar" (ver abertaDe)
 
 // o nome é o da pessoa (com acento e espaço); a conta é ele em minúsculas, então "Ana" e "ana" são a mesma
 const limparNome = (n) => String(n ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
@@ -85,19 +86,32 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
   }
 
   // ---------------------------------------------------------- contas
+  // Conta sem senha (o teste grátis do /jogar entra só com o nome): o token leva a marca ":s" no fim e
+  // só vale enquanto a conta continuar sem senha (contaValida). A senha é pedida na hora de alugar.
   const assinar = (txt) => crypto.createHmac('sha256', SEGREDO).update(txt).digest('hex').slice(0, 32);
-  const tokenDe = (nome) => {
+  const tokenDe = (nome, semSenha = false) => {
     const ate = Date.now() + TOKEN_DIAS * 86400_000;
-    return `${nome}:${ate}:${assinar(`${nome}:${ate}`)}`;
+    return semSenha ? `${nome}:${ate}:${assinar(`${nome}:${ate}:s`)}:s` : `${nome}:${ate}:${assinar(`${nome}:${ate}`)}`;
   };
-  // o nome da conta, se o token vale
-  function contaDoToken(token) {
+  // { nome, semSenha } se o token vale
+  function lerToken(token) {
     if (typeof token !== 'string' || token.length > 120) return null;
-    const [nome, ate, assin] = token.split(':');
-    if (!nomeValido(nome) || !(Number(ate) > Date.now()) || !assin) return null;
-    const certa = assinar(`${nome}:${ate}`);
+    const [nome, ate, assin, marca] = token.split(':');
+    if (!nomeValido(nome) || !(Number(ate) > Date.now()) || !assin || (marca !== undefined && marca !== 's')) return null;
+    const certa = assinar(marca ? `${nome}:${ate}:${marca}` : `${nome}:${ate}`);
     if (assin.length !== certa.length || !crypto.timingSafeEqual(Buffer.from(assin), Buffer.from(certa))) return null;
-    return nome;
+    return { nome, semSenha: marca === 's' };
+  }
+  // o nome da conta, se o token vale (sem olhar o banco: serve para mostrar, não para jogar ou pagar)
+  const contaDoToken = (token) => lerToken(token)?.nome || null;
+  // o nome da conta, conferindo no banco o token sem senha: a conta que ganhou senha não aceita mais o
+  // token de quando entrou só com o nome (outra pessoa podia ter digitado o mesmo nome)
+  async function contaValida(token) {
+    const t = lerToken(token);
+    if (!t) return null;
+    if (!t.semSenha) return t.nome;
+    const c = await banco.lerConta(t.nome).catch(() => null);
+    return c && !c.senhaHash ? t.nome : null;
   }
 
   // ---------------------------------------------------------- teste grátis
@@ -130,10 +144,16 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
   const daHora = (sala, maquina, inicio, agora = Date.now()) => [...reservas.values()].find((r) => r.sala === sala && maquinaDe(r.maquina) === maquina && r.inicio === inicio && segura(r, agora));
 
   // quem joga agora nesta máquina da sala: { conta, inicio, fim } (horas pagas seguidas da mesma conta viram uma só)
+  // Liberado "até alguém novo entrar" (status 'aberta', sessao ATE_NOVO): sem fim, só vale com a máquina sem
+  // hora paga; chegou alguém que ainda tem o teste grátis, acaba (chegouNovo) e a pessoa nova testa.
+  const abertaDe = (sala, maquina) => [...reservas.values()].find((r) => r.status === 'aberta' && r.sala === sala && maquinaDe(r.maquina) === maquina);
   function jogadorAgora(sala, maquina = 'pc', agora = Date.now()) {
     const h = Math.floor(agora / HORA) * HORA;
     const r = daHora(sala, maquina, h, agora);
-    if (!r || r.status !== 'paga') return null;
+    if (!r || r.status !== 'paga') {
+      const a = abertaDe(sala, maquina);
+      return a ? { conta: a.conta, inicio: a.inicio, fim: null, aberta: true, jogo: a.jogo || null, jogoNome: a.jogoNome || null } : null;
+    }
     // liberação que acaba antes da hora cheia (o liberado pelo dono, ver comecarLiberadas)
     if (r.fimCedo) return agora >= r.fimCedo ? null : { conta: r.conta, inicio: h, fim: r.fimCedo, jogo: r.jogo || null, jogoNome: r.jogoNome || null };
     let fim = h + HORA;
@@ -222,6 +242,13 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
       // pendente sem sessão (o checkout nem abriu) ou vencida: libera a hora
       const vencidas = [...reservas.values()].filter((r) => r.status === 'pendente' && (!r.sessao || r.expira < agora - 5 * 60_000) && r.inicio + HORA < agora);
       if (vencidas.length) await mudarStatus(vencidas, 'cancelada');
+      // o liberado "até alguém novo" que já corre há um dia: renova o começo (o servidor só lê do banco
+      // as reservas dos últimos 2 dias, e a de baixo tira da memória)
+      for (const r of reservas.values()) {
+        if (r.status !== 'aberta' || r.inicio > agora - 86400_000) continue;
+        r.inicio = agora;
+        await guardar(r);
+      }
       // fora da memória o que já passou faz tempo
       for (const [id, r] of reservas) if (r.inicio < agora - 2 * 86400_000) reservas.delete(id);
     } finally {
@@ -268,45 +295,54 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
   const json = express.json({ limit: '4kb' });
 
   function rotas(app) {
-    // entrar ou criar a conta: devolve o token que a página guarda
+    // entrar ou criar a conta: devolve o token que a página guarda. Sem senha (o teste grátis do /jogar):
+    // nome novo vira conta sem senha; nome de conta sem senha entra; nome de conta com senha pede a senha.
+    // Com senha numa conta que ainda não tinha: essa vira a senha dela.
     app.post('/lan/conta', json, async (req, res) => {
       const b = req.body || {};
       const nome = limparNome(b.nome);
       if (!nomeValido(nome)) return res.json({ ok: false, erro: 'O nome pode ter de 2 a 20 letras, números, espaço, ponto, traço ou _.' });
-      if (!senhaValida(b.senha)) return res.json({ ok: false, erro: 'A senha precisa ter de 6 a 100 caracteres.' });
+      const comSenha = typeof b.senha === 'string' && b.senha !== '';
+      if (comSenha && !senhaValida(b.senha)) return res.json({ ok: false, erro: 'A senha precisa ter de 6 a 100 caracteres.' });
       // conta só o que falhou (senha errada) e as contas criadas: várias pessoas no mesmo Wi-Fi entram normalmente
       const ip = ipDe(req);
       if (bloqueado(ip)) return res.json({ ok: false, erro: 'Muitas tentativas. Espere alguns minutos.' });
-      // nome novo: cria a conta com esta senha; nome que já existe: confere a senha
       let criou = false;
+      let semSenha = false;
       try {
         const c = await banco.lerConta(nome);
-        if (c) {
+        if (c?.senhaHash) {
+          if (!comSenha) return res.json({ ok: false, precisaSenha: true, erro: 'Esse nome já tem senha. Digite a senha (ou use outro nome).' });
           if (!confereSenha(b.senha, c.senhaHash)) {
             podeTentar(ip);
-            return res.json({ ok: false, erro: 'Senha errada para esse nome. Se é a sua primeira vez, escolha outro nome.' });
+            return res.json({ ok: false, precisaSenha: true, erro: 'Senha errada para esse nome. Se é a sua primeira vez, escolha outro nome.' });
           }
+        } else if (c) {
+          if (comSenha) await banco.trocarSenhaConta(nome, hashSenha(b.senha));
+          else semSenha = true;
         } else {
           if (!podeTentar(ip)) return res.json({ ok: false, erro: 'Muitas contas criadas daqui. Espere alguns minutos.' });
-          criou = await banco.criarConta(nome, hashSenha(b.senha));
+          criou = await banco.criarConta(nome, comSenha ? hashSenha(b.senha) : '');
           if (!criou) return res.json({ ok: false, erro: 'Esse nome acabou de ser usado. Tente de novo.' });
+          semSenha = !comSenha;
         }
       } catch (err) {
         console.warn('[lan] conta', err.code || err.message);
         return res.json({ ok: false, erro: 'Não deu para acessar as contas agora. Tente de novo.' });
       }
-      return res.json({ ok: true, nome, token: tokenDe(nome), criou });
+      return res.json({ ok: true, nome, token: tokenDe(nome, semSenha), criou, semSenha });
     });
 
-    // trocar a senha (precisa da atual)
+    // trocar a senha (precisa da atual) ou criar a primeira (conta que entrou só com o nome)
     app.post('/lan/senha', json, async (req, res) => {
       const b = req.body || {};
-      const nome = contaDoToken(b.token);
+      const nome = await contaValida(b.token);
       if (!nome) return res.json({ ok: false, erro: 'login' });
       if (!senhaValida(b.nova)) return res.json({ ok: false, erro: 'A senha nova precisa ter de 6 a 100 caracteres.' });
       if (bloqueado(ipDe(req))) return res.json({ ok: false, erro: 'Muitas tentativas. Espere alguns minutos.' });
       const c = await banco.lerConta(nome).catch(() => null);
-      if (!c || typeof b.atual !== 'string' || !confereSenha(b.atual, c.senhaHash)) {
+      if (!c) return res.json({ ok: false, erro: 'login' });
+      if (c.senhaHash && (typeof b.atual !== 'string' || !confereSenha(b.atual, c.senhaHash))) {
         podeTentar(ipDe(req));
         return res.json({ ok: false, erro: 'Senha atual errada.' });
       }
@@ -346,8 +382,8 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
     });
 
     // as minhas reservas daqui para a frente
-    app.post('/lan/minhas', json, (req, res) => {
-      const conta = contaDoToken(req.body?.token);
+    app.post('/lan/minhas', json, async (req, res) => {
+      const conta = await contaValida(req.body?.token);
       if (!conta) return res.json({ ok: false, erro: 'login' });
       const agora = Date.now();
       const lista = [...reservas.values()]
@@ -360,8 +396,10 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
     // reservar uma ou mais horas (do mesmo dia ou não) e ir pagar
     app.post('/lan/reservar', json, async (req, res) => {
       const b = req.body || {};
-      const conta = contaDoToken(b.token);
+      const conta = await contaValida(b.token);
       if (!conta) return res.json({ ok: false, erro: 'login' });
+      // entrou só com o nome (teste grátis): para alugar, cria a senha antes (lan.html mostra o campo)
+      if (lerToken(b.token).semSenha) return res.json({ ok: false, erro: 'senha' });
       if (!CHAVE) return res.json({ ok: false, erro: 'O pagamento ainda não foi configurado nesta sala.' });
       const sala = idDaSala(b.sala);
       const maquina = maquinaDe(b.maquina);
@@ -475,22 +513,34 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
   // O dono libera tempo de graça para uma conta: fica "aguardando" (expira = a duração em ms) e só começa a
   // contar quando a pessoa entra na sala (começarLiberadas, chamado no join). Já estando na sala, começa na hora.
   // Quem compra pela Stripe segue igual (a hora cheia). Espera até 2 dias (o que o servidor lê do banco).
-  async function liberar({ sala, maquina, conta, horas, minutos, jogo: jogoId }) {
+  async function liberar({ sala, maquina, conta, horas, minutos, jogo: jogoId, ateNovo = false }) {
     const nome = limparNome(conta);
     if (!nomeValido(nome)) return { ok: false, erro: 'Nome de conta inválido.' };
     const c = await banco.lerConta(nome).catch(() => null);
-    if (!c) return { ok: false, erro: `Não existe a conta "${nome}". Ela precisa entrar uma vez com nome e senha.` };
+    if (!c) return { ok: false, erro: `Não existe a conta "${nome}". Ela precisa entrar uma vez (no /jogar basta o nome).` };
     const m = maquinaDe(maquina);
     let jogo = null;
     if (m === 'pc' && jogoId) {
       jogo = (await jogosDaSala(sala).catch(() => [])).find((j) => j.id === String(jogoId)) || null;
       if (!jogo) return { ok: false, erro: 'Esse jogo não está na lista do PC da casa.' };
     }
+    // até alguém novo entrar: espera a pessoa entrar como o liberado com tempo (comecarLiberadas)
+    if (ateNovo) {
+      const agora = Date.now();
+      const ja = [...reservas.values()].find((r) => r.sessao === ATE_NOVO && ['aguardando', 'aberta'].includes(r.status) && r.sala === sala && maquinaDe(r.maquina) === m && r.conta === nome);
+      const r = ja || { id: crypto.randomBytes(12).toString('hex'), sala, maquina: m, conta: nome, inicio: agora, status: 'aguardando', sessao: ATE_NOVO, expira: 0, criada: agora };
+      if (m === 'pc' && jogo) Object.assign(r, { jogo: jogo.id, jogoNome: jogo.nome });
+      reservas.set(r.id, r);
+      await guardar(r);
+      if (r.status === 'aberta') aoMudar?.(sala);
+      console.log(`[lan] ${sala} ${MAQUINAS[m]} (${nome}): liberado até alguém novo entrar${r.status === 'aberta' ? '' : ', esperando entrar'}`);
+      return { ok: true, conta: nome, maquina: MAQUINAS[m], ateNovo: true, jogoNome: r.jogoNome || null };
+    }
     const min = Math.floor(Number(minutos)) || 0;
     const dur = min > 0 ? Math.min(min, 59) * 60_000 : Math.min(MAX_HORAS, Math.max(1, Math.floor(Number(horas)) || 1)) * HORA;
     const agora = Date.now();
     // liberou de novo antes de ela entrar: soma
-    const antes = [...reservas.values()].find((r) => r.status === 'aguardando' && r.sala === sala && maquinaDe(r.maquina) === m && r.conta === nome);
+    const antes = [...reservas.values()].find((r) => r.status === 'aguardando' && r.sessao !== ATE_NOVO && r.sala === sala && maquinaDe(r.maquina) === m && r.conta === nome);
     const r = antes || { id: crypto.randomBytes(12).toString('hex'), sala, maquina: m, conta: nome, inicio: agora, status: 'aguardando', sessao: 'cortesia', expira: 0, criada: agora };
     r.expira += dur;
     if (m === 'pc' && jogo) Object.assign(r, { jogo: jogo.id, jogoNome: jogo.nome });
@@ -508,7 +558,28 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
     const comecou = [];
     for (const r of [...reservas.values()].filter((x) => x.status === 'aguardando' && x.sala === sala && x.conta === nome)) {
       const m = maquinaDe(r.maquina);
-      const atual = jogadorAgora(sala, m, agora);
+      let atual = jogadorAgora(sala, m, agora);
+      // até alguém novo: começa já se a máquina está livre ou com outro "até alguém novo" (o novo toma o lugar)
+      if (r.sessao === ATE_NOVO) {
+        if (atual && !atual.aberta) continue;
+        const outra = abertaDe(sala, m);
+        if (outra) outra.status = 'usada';
+        if (outra) await guardar(outra);
+        Object.assign(r, { status: 'aberta', inicio: agora });
+        await guardar(r);
+        console.log(`[lan] ${sala} ${MAQUINAS[m]} (${nome}): entrou, liberado até alguém novo entrar`);
+        comecou.push(MAQUINAS[m]);
+        continue;
+      }
+      // tempo liberado ou comprado passa na frente do "até alguém novo" (de outra pessoa, ele acaba; dela, volta depois)
+      if (atual?.aberta) {
+        if (atual.conta !== nome) {
+          const a = abertaDe(sala, m);
+          a.status = 'usada';
+          await guardar(a);
+        }
+        atual = null;
+      }
       if (atual && atual.conta !== nome) continue;
       let pos = atual ? atual.fim : agora;
       let resto = r.expira;
@@ -551,6 +622,10 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
     const m = maquinaDe(maquina);
     const atual = jogadorAgora(sala, m);
     if (!atual) return { ok: false, erro: `Ninguém está com a vez no ${MAQUINAS[m]} agora.` };
+    if (atual.aberta) {
+      await mudarStatus([abertaDe(sala, m)], 'usada');
+      return { ok: true, conta: atual.conta, maquina: MAQUINAS[m] };
+    }
     const lista = [];
     for (let h = atual.inicio; h < atual.fim; h += HORA) {
       const r = daHora(sala, m, h);
@@ -561,5 +636,20 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
     return { ok: true, conta: atual.conta, maquina: MAQUINAS[m] };
   }
 
-  return { iniciar, rotas, conferirPendentes, contaDoToken, jogadorAgora, liberar, comecarLiberadas, encerrar, teste, comecarTeste, TESTE_MS, MAQUINAS: Object.keys(MAQUINAS) };
+  // Entrou alguém que ainda tem o teste grátis (nunca usou, nem pela conta nem pelo IP): o liberado "até
+  // alguém novo entrar" de outra conta acaba nas máquinas desta sala, e a pessoa nova testa. Devolve as
+  // máquinas que pararam ('pc', 'ps5').
+  async function chegouNovo(sala, conta, ip) {
+    const nome = limparNome(conta);
+    if (!nome) return [];
+    const t = teste(sala, nome, ip);
+    if (t.fim || t.acabou) return [];
+    const paradas = [...reservas.values()].filter((r) => r.status === 'aberta' && r.sala === sala && r.conta !== nome);
+    if (!paradas.length) return [];
+    for (const r of paradas) console.log(`[lan] ${sala} ${MAQUINAS[maquinaDe(r.maquina)]}: ${nome} chegou para testar, acaba o liberado de ${r.conta}`);
+    await mudarStatus(paradas, 'usada');
+    return paradas.map((r) => maquinaDe(r.maquina));
+  }
+
+  return { iniciar, rotas, conferirPendentes, contaDoToken, contaValida, jogadorAgora, liberar, comecarLiberadas, encerrar, chegouNovo, teste, comecarTeste, TESTE_MS, MAQUINAS: Object.keys(MAQUINAS) };
 };
