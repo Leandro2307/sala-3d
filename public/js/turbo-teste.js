@@ -197,9 +197,12 @@ export function escolherCodec({ h264, h265, tetoKbps, livre, ps5Hevc = false }) 
 }
 
 // O modo: o padrão da página, a não ser que a conexão seja parada o bastante para a folga de 15 ms do Turbo rápido
-export function escolherModo({ padrao, rapido, confirma, rttMs = null, rota = 'direto', toque = false }) {
+export function escolherModo({ padrao, rapido, confirma, rttMs = null, rota = 'direto', toque = false, wifi = false }) {
   // 5G pelo TURN (2026-11-25 19:10): a folga de 15 ms deu 26 travadas por minuto
   if (toque || rota === 'turn') return { modo: padrao, porque: toque ? 'no celular a rede oscila mais: a folga do liso' : 'pelo servidor (TURN): a folga do liso' };
+  // Wi-Fi em quem joga (2026-11-26, este PC no Wi-Fi a 45 ms): o teste mediu 1–8 ms de tremido e no jogo deu 10–12;
+  // o Turbo rápido, com a folga de 15 ms, deu 180–360 trancos por minuto em todas as entradas (o liso: 30–40)
+  if (wifi) return { modo: padrao, porque: 'no Wi-Fi a imagem oscila mais do que o teste vê: a folga do liso' };
   if (rttMs > RTT_LONGE) return { modo: padrao, porque: `longe (${Math.round(rttMs)} ms de ida e volta): o modo com mais folga` };
   if (!confirma?.ok) return { modo: padrao, porque: 'a conexão oscila: o modo com mais folga' };
   if (rttMs > RAPIDO_RTT) return { modo: padrao, porque: `${Math.round(rttMs)} ms de ida e volta: a folga do liso` };
@@ -224,7 +227,7 @@ export function escolherCaminho({ direto, turn }) {
   return { caminho: 'direto', custos: { direto: d, turn: t }, porque: 'o direto é melhor ou parecido' };
 }
 
-export function escolher({ banda: medida, h264 = null, h265 = null, ps5 = null, padrao, rapido, rttMs = null, rota = 'direto', toque = false }) {
+export function escolher({ banda: medida, h264 = null, h265 = null, ps5 = null, padrao, rapido, rttMs = null, rota = 'direto', toque = false, wifi = false }) {
   // longe, um pedaço perdido demora a vir de novo: menos banda, menos parada
   const limite = rttMs > RTT_LONGE ? TETO_LONGE : toque && (rota === 'turn' || rttMs > 40) ? TETO_CELULAR : null;
   const banda = limite ? { ...medida, tetoKbps: Math.min(medida.tetoKbps, limite), livre: false } : medida;
@@ -234,7 +237,7 @@ export function escolher({ banda: medida, h264 = null, h265 = null, ps5 = null, 
   // a máxima qualidade: comprimindo de novo no PC do jogo, o H.265 dá mais imagem na mesma banda — se os dois dão conta dele
   const c = tratar && c0.codec === 'h264' && serve(h265) && (h265.decP50 + (h265.codP50 || 0)) - (h264?.decP50 ?? 0) - (h264?.codP50 ?? 0) <= 6
     ? { codec: 'h265', porque: 'imagem tratada no PC do jogo: o H.265 dá mais nitidez na mesma banda' } : c0;
-  const m = escolherModo({ padrao, rapido, confirma: banda.confirma, rttMs, rota, toque });
+  const m = escolherModo({ padrao, rapido, confirma: banda.confirma, rttMs, rota, toque, wifi });
   const ps5Kbps = Number(ps5?.kbps) || null;
   return {
     tetoKbps: banda.tetoKbps,
@@ -671,7 +674,7 @@ export class TesteJoga {
         res[nome] = await com(this.medirCodec(t, ++n, lista, kbpsCodec));
         await com(esperar(PAUSA_MS));
       }
-      const escolha = escolher({ banda, ...res, ps5: ola.ps5, padrao, rapido, rttMs: usado.rttMs, rota: qual.caminho, toque });
+      const escolha = escolher({ banda, ...res, ps5: ola.ps5, padrao, rapido, rttMs: usado.rttMs, rota: qual.caminho, toque, wifi });
       const hz = await Promise.race([telaHz, esperar(50).then(() => null)]);
       const degrausUsados = usado === turn ? tab.turn.degraus : tab.degraus;
       const pior = (k) => Math.max(0, ...degrausUsados.map((d) => d[k] || 0));

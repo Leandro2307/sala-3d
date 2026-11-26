@@ -431,3 +431,9 @@ test('o automático ficou noutro modo: a próxima entrada começa nele', () => {
   assert.equal(m.trocarModo('ninguem', 17), false);
   assert.equal(new MemoriaTeste(agora, guarda).valido('lokao', { familia: 'ipv4', rttMs: 46 }).modo, 17);
 });
+
+test('no Wi-Fi o teste não escolhe o Turbo rápido (2026-11-26: 180–360 trancos por minuto nele)', () => {
+  const c = { ok: true, tremidoMs: 2, perdaPct: 0, buracoMs: 20, jogo: { tremidoMs: 1.3, travadas: 0, perdidosPct: 0 } };
+  assert.equal(escolherModo({ padrao: 14, rapido: 16, rttMs: 8, confirma: c }).modo, 16);
+  assert.equal(escolherModo({ padrao: 14, rapido: 16, rttMs: 8, confirma: c, wifi: true }).modo, 14);
+});
