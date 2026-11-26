@@ -1315,9 +1315,12 @@ opcoesJogo.ouvir((k, v) => {
   } else if (k === 'selo') mostrarSelo();
   else if (k === 'menuAuto' && jogandoLa) controle.cursorLivre(jogandoLa.key, v ? jogandoLa.cursorLivre : false);
   else if (k === 'preencher') document.body.classList.toggle('jogo-preencher', !!v);
+  else if (k === 'tela') document.body.dataset.jogoTela = v;
   for (const el of $$('#jogo-op-pop [data-op]')) el.checked = !!opcoesJogo.get(el.dataset.op);
 });
 document.body.classList.toggle('jogo-preencher', !!opcoesJogo.get('preencher'));
+// celular: Tela toda / Com faixas / Sem bordas, no painel do controle de toque (style.css body.toque-jogo[data-jogo-tela])
+document.body.dataset.jogoTela = opcoesJogo.get('tela');
 
 function aplicarBuffer() {
   if (!jogandoLa || !video.srcObject) return;
