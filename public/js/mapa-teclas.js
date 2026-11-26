@@ -115,11 +115,12 @@ export function nomeEntrada(e) {
 // padrão) troca de modo a cada toque: no carro valem as teclas desta camada por cima do mapa; △ de
 // novo volta a pé. A sala não vê o jogo por dentro: se o △ não entrou no carro, um △ longe de carro
 // acerta o modo. Desligado (o padrão), o △ é só o △.
-// 'troca': uma tecla que só troca de modo (a pé / no carro) sem apertar nada no jogo — o ' no padrão
-// (a tecla à esquerda do 1: Backquote, que todo teclado tem; o Num * de antes faltava nos notebooks).
+// 'troca': uma tecla que só troca de modo (a pé / no carro) sem apertar nada no jogo — o Y no padrão
+// (pedido do usuário em 2026-11-26: mais fácil de entender que o ' de antes; o Num * de antes do ' faltava
+// nos notebooks).
 // Serve para acertar o modo sem o △ (que no jogo entra/sai do carro).
 // Desde 2026-11-20 o modo carro já vem ligado (antes quem jogava tinha que ir marcar nas opções).
-export const CARRO_PADRAO = Object.freeze({ KeyW: 'b7', KeyS: 'b6', Backquote: 'troca' });
+export const CARRO_PADRAO = Object.freeze({ KeyW: 'b7', KeyS: 'b6', KeyY: 'troca' });
 // Como o modo carro trabalha (pedido do usuário em 2026-11-25: o W anda e acelera):
 //   soma   (padrão) o △ troca; no carro o W acelera E continua andando, então com o modo trocado dá para andar
 //   troca  o △ troca; no carro o W só acelera (avião e moto, onde o analógico para frente abaixa o bico)
@@ -131,8 +132,9 @@ export const MODOS_CARRO = [
   { id: 'sempre', nome: 'O W anda e acelera sempre, sem trocar (corrida; no GTA atira a pé)' },
   { id: 'off', nome: 'Desligado' },
 ];
-// t do carro gravado: 1 = com a tecla de troca; 2 = ligado e com o ' no padrão; 3 = com o modo (ver ler())
-const VERSAO_CARRO = 3;
+// t do carro gravado: 1 = com a tecla de troca; 2 = ligado e com o ' no padrão; 3 = com o modo;
+// 4 = troca no Y (ver ler())
+const VERSAO_CARRO = 4;
 export const CARRO_ACOES = ['b7', 'b6', 'troca']; // as ações que o painel deixa pôr no carro
 const CARRO_NOME = { b7: 'Acelerar (no carro)', b6: 'Frear / ré (no carro)', troca: 'Só troca a pé / no carro (não aperta nada)' };
 const rotuloCarro = (id, layout) => (id === 'troca' ? '🚗' : rotulo(id, layout));
@@ -157,10 +159,11 @@ function ler() {
         if (o.carro.mapa && typeof o.carro.mapa === 'object') {
           r.carro.mapa = {};
           for (const [e, a] of Object.entries(o.carro.mapa)) if (CARRO_ACOES.includes(a) && !ehRoda(e)) r.carro.mapa[e] = a;
-          // antes da v2: a troca do padrão passa do Num * para o ' (se o ' está livre no carro)
-          if (t < 2 && !r.carro.mapa.Backquote) {
-            if (r.carro.mapa.NumpadMultiply === 'troca') delete r.carro.mapa.NumpadMultiply;
-            r.carro.mapa.Backquote = 'troca';
+          // antes da v4: a troca do padrão (Num * antes da v2, ' depois) passa para o Y; quem pôs outra
+          // tecla fica com a dela
+          if (t < 4) {
+            for (const v of ['NumpadMultiply', 'Backquote']) if (r.carro.mapa[v] === 'troca') delete r.carro.mapa[v];
+            if (!Object.values(r.carro.mapa).includes('troca') && !r.carro.mapa.KeyY) r.carro.mapa.KeyY = 'troca';
           }
         }
       }
