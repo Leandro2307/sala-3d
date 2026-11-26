@@ -23,6 +23,8 @@ const ENVIO_MS = 60_000; // de quanto em quanto tempo o relatório da sessão va
 const SONDA_MS = 500;
 const SONDA_PICO_MS = 80; // acima da menor dos últimos ~30 s: pico
 const PS5 = /chiaki|\bps5\b|playstation/i; // a janela do Remote Play do PS5 (o mesmo título de toque-jogo.js)
+// o selo diz "seu celular" (e não "seu PC") a quem joga pelo toque
+const CELULAR = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches && !matchMedia('(pointer: fine)').matches;
 
 const kbps = (bytesPorSeg) => (bytesPorSeg == null ? null : Math.round((bytesPorSeg * 8) / 100) / 10);
 const r1 = (v) => (v == null || !Number.isFinite(v) ? null : Math.round(v * 10) / 10);
@@ -481,7 +483,7 @@ export class DiagJogo {
     resumo.sonda = this.tirarSonda();
     // de quem é a culpa desta amostra (o selo mostra) e a conta da sessão
     // (as 2 primeiras amostras, 4 s, são o jogo entrando: não contam)
-    resumo.culpa = s.amostras.length < 2 ? null : culpaDe(resumo, la);
+    resumo.culpa = s.amostras.length < 2 ? null : culpaDe(resumo, la, CELULAR ? 'seu celular' : 'seu PC');
     s.culpas = contarCulpa(s.culpas || {}, resumo.culpa);
     s.amostras.push({ ...resumo, sala, cru: s.amostras.length % 15 === 0 ? cru : undefined });
     if (s.amostras.length > GUARDA) s.amostras.shift();

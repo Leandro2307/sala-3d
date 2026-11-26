@@ -1113,6 +1113,10 @@ export class TurboEnvio {
     s.v2 = Number(versao) >= 2;
     s.altMax = Math.min(1080, Number(altura) || 1080);
     s.altTeto = s.altMax; // o tamanho pedido: decidirAltura desce dele com a rede apertada e volta até ele
+    // O caminho já se mostrou estreito (teto do teste de quem joga, ou um corte lembrado): começa no tamanho cujo
+    // piso cabe na banda inicial, e não em 1080p no piso de 2,5 Mbps. 2026-11-26, Altair (iPhone, ~1,1 Mbps): 30 s de
+    // fila de 0,5–1,2 s até descer sozinho a 720p e 540p. altTeto continua o pedido: com folga, sobe de novo.
+    if (teto) s.altMax = ALTURAS.find((x) => x <= s.altMax && bandaMinDe(x) <= teto * 1000 * 0.8) ?? ALTURAS.at(-1);
     s.aceitos = (Array.isArray(codecs) ? codecs : []).filter((c) => CODECS.includes(c) || CODECS_HEVC.includes(c));
     // Quem joga decodifica H.265 (versão nova: hevc no pedido, com ele no fim da lista): ele vem primeiro.
     // A mesma banda dá uns 30–40% mais nitidez — e é a banda que a rede de quem joga leva que limita a
@@ -2966,7 +2970,10 @@ export class TurboRecebe {
       filaMs: s.filaMs, // a última fila mandada a quem compartilha (viagem p90 − a menor)
       // ver segurando: 'sps' = o SPS foi reescrito (já ao configurar, ou depois de segurar); 'processador'
       decAjuste: s.ajusteDec ? ([null, 'sps', 'processador', 'sem-saida'][s.ajusteDec] ?? null) : s.spsReescrito ? 'sps' : null,
-      decAtrasou: s.conta.decAtrasou || 0, // vezes que a fila do decodificador foi jogada fora (DEC_FILA_MAX)
+      decAtrasou: s.conta.decAtrasou || 0, // vezes que a fila do decodificador foi jogada fora (DEC_FILA_MAX), no turbo todo
+      // só as desta amostra: o selo (culpa.js) olhava o total e culpava o decodificador o jogo inteiro depois de uma vez
+      // só (2026-11-26, wedneyMiguel: 90 s de "o decodificador não dá conta" decodificando em 4–15 ms)
+      decAtrasouAgora: (s.conta.decAtrasou || 0) - (s.decAtrasouVisto || 0),
       aceleracao: this.aceleracoes[s.acel || 0] || null,
       filaDec: mediana(s.filaDec), // a fila do decodificador (pedidos esperando): lento, e não segurando
       rxKbps: s.rxKbps ?? null, // o que chegou no último aviso de fila (vai para quem compartilha)
@@ -2987,6 +2994,7 @@ export class TurboRecebe {
       liso: this._liso ? { alvoMs: Math.round(s.alvo * 10) / 10, fila: s.fila.length, pausado: !!s.lisoPausado, ...s.lisoConta } : null,
     };
     s.silencioMax = 0;
+    s.decAtrasouVisto = s.conta.decAtrasou || 0;
     s.lisoConta = { atrasados: 0, trocados: 0, cheia: 0 };
     Object.assign(s.conta, { desenhados: 0, perdidos: 0, pedidos: 0, bytes: 0, montagem: [], cod: [], ponta: [], viagem: [], chaves: 0, chaveMax: 0, ultimo: agora });
     return r;

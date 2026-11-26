@@ -47,6 +47,19 @@ const CSS = `
 .tc-rotas tr.usa td{font-weight:650}
 .tc-rotas em{font-style:normal;font-size:11px;border:1px solid #4a587f;border-radius:99px;padding:0 7px;margin-left:8px;font-weight:400;color:#cdd6f4}
 .tc-dica{margin:10px 0 0;color:#cdd6f4;font-size:13px}
+.tc-alerta{margin-top:12px;padding:12px 14px;border-radius:10px;background:#2a1f0b;border:1px solid #fbb315;display:flex;gap:12px;align-items:flex-start}
+.tc-alerta .tc-perigo{flex:none;display:grid;place-items:center;width:34px;height:34px;border-radius:50%;background:#fbb315;color:#1a1300;font-size:20px;font-weight:800;line-height:1}
+.tc-alerta b{display:block;font-size:15px;color:#ffd166}
+.tc-alerta p{margin:4px 0 0;font-size:13px;color:#eef2ff}
+.tc-alerta ul{margin:6px 0 0;padding-left:18px;font-size:13px;color:#cdd6f4}
+.tc-alerta .tc-botoes{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.tc-alerta button{font:inherit;font-size:13px;border-radius:8px;padding:7px 12px;cursor:pointer}
+.tc-alerta .tc-fica{background:#0aac23;border:1px solid #0aac23;color:#fff;font-weight:650}
+.tc-alerta .tc-sai{background:none;border:1px solid #6b5a2a;color:#e9d9a8}
+.tc-alerta button:focus-visible{outline:2px solid #fff;outline-offset:2px}
+.tc-painel.tc-avisando .tc-graficos{display:none}
+.tc-painel.tc-avisando .tc-caixa{overflow:auto}
+@media (max-height:460px){.tc-painel.tc-avisando .tc-etapas,.tc-painel.tc-avisando .tc-pe{display:none}.tc-alerta{margin-top:6px;padding:8px 10px}.tc-alerta ul{margin-top:3px}.tc-alerta .tc-botoes{margin-top:6px}}
 @media (max-height:460px){.tc-painel{padding:6px 10px}.tc-caixa{padding:10px 14px}.tc-topo p{display:none}.tc-etapas{margin:6px 0}.tc-graficos canvas{height:80px}.tc-graficos figcaption strong{font-size:18px}.tc-fim{padding-top:8px}}
 @media (max-width:520px) and (min-height:461px){.tc-graficos{grid-template-columns:1fr;gap:8px}.tc-graficos canvas{height:84px}.tc-etapas li{font-size:11px}.tc-legenda{display:none}}`;
 
@@ -57,7 +70,7 @@ if (typeof addEventListener === 'function' && typeof document !== 'undefined') a
   if (e.key !== 'F7' || !aberto) return;
   e.preventDefault();
   e.stopImmediatePropagation();
-  aberto.onPular?.();
+  aberto.pedirPular();
 }, true);
 
 // Um degrau "bonito" acima do maior valor, para o eixo não pular a cada ponto
@@ -162,9 +175,49 @@ class Grafico {
 const SIMBOLO = { otima: ['✓', '#0aac23'], boa: ['✓', '#0aac23'], regular: ['!', '#fbb315'], ruim: ['✕', '#dc3c3d'] };
 
 export class PainelTeste {
-  // dentro: o elemento da tela cheia (#focus); onPular(): o botão ou a tecla F7 (com o mouse preso não há clique)
-  constructor({ dentro, onPular }) {
-    Object.assign(this, { dentro, onPular, el: null });
+  // dentro: o elemento da tela cheia (#focus); onPular(): pulou de verdade (o botão ou a tecla F7, duas vezes: com o
+  // mouse preso não há clique); onEvento(texto, dados): para o relatório
+  constructor({ dentro, onPular, onEvento = null }) {
+    Object.assign(this, { dentro, onPular, onEvento, el: null });
+  }
+
+  // O 1º pedido mostra o perigo; o 2º (ou "Pular mesmo assim") pula. 2026-11-26: os dois celulares de fora pularam o
+  // teste e começaram em 1080p numa internet de ~1 Mbps — 20–30 s de imagem parada (o dono pediu o aviso).
+  pedirPular() {
+    if (!this.el || !this.v) return;
+    if (this.alerta) {
+      this.onEvento?.('teste da conexão: pulou mesmo com o aviso', { aposMs: Math.round(performance.now() - this.alerta.em) });
+      return this.onPular?.();
+    }
+    const caixa = this.el.querySelector('.tc-caixa');
+    const a = document.createElement('div');
+    a.className = 'tc-alerta';
+    a.setAttribute('role', 'alertdialog');
+    a.setAttribute('aria-labelledby', 'tc-alerta-titulo');
+    a.innerHTML = `<div class="tc-perigo" aria-hidden="true">!</div><div>
+<b id="tc-alerta-titulo">Tem certeza que quer pular o teste?</b>
+<p>Ele é o que faz o jogo funcionar bem na <strong>sua</strong> internet. Leva menos de 1 minuto e só precisa rodar uma vez por dia.</p>
+<ul><li>Sem ele, a imagem começa no máximo e pode <strong>travar, atrasar ou ficar parada</strong> nos primeiros 30 segundos.</li>
+<li>No celular, no 4G ou no Wi-Fi fraco a diferença é ainda maior.</li>
+<li>Ele também escolhe o caminho mais rápido até o PC do jogo.</li></ul>
+<div class="tc-botoes"><button type="button" class="tc-fica">Continuar o teste (recomendado)</button><button type="button" class="tc-sai">Pular mesmo assim (F7)</button></div>
+<p style="color:#aab4d0;font-size:12px">Com o mouse preso no jogo: não faça nada para continuar, ou aperte F7 de novo para pular.</p></div>`;
+    caixa.querySelector('.tc-topo').after(a);
+    this.el.classList.add('tc-avisando');
+    this.alerta = { el: a, em: performance.now() };
+    a.querySelector('.tc-fica').addEventListener('click', () => this.ficar());
+    a.querySelector('.tc-sai').addEventListener('click', () => this.pedirPular());
+    a.querySelector('.tc-fica').focus({ preventScroll: true });
+    this.onEvento?.('teste da conexão: aviso de pular mostrado');
+  }
+
+  // desistiu de pular: o teste segue (ele nunca parou)
+  ficar() {
+    if (!this.alerta) return;
+    this.onEvento?.('teste da conexão: desistiu de pular', { aposMs: Math.round(performance.now() - this.alerta.em) });
+    this.alerta.el.remove();
+    this.alerta = null;
+    this.el?.classList.remove('tc-avisando');
   }
 
   base(classe = '') {
@@ -191,7 +244,7 @@ export class PainelTeste {
 <figure><figcaption>Tempo de resposta<span><strong data-v="rtt">–</strong> <small>ms</small></span></figcaption><canvas data-g="rtt" role="img" aria-label="Tempo de resposta ao longo do teste"></canvas></figure>
 </div>
 <div class="tc-pe"><span data-v="texto"></span><span class="tc-legenda"><span><i style="background:${COR.direto}"></i>direto</span><span><i style="background:${COR.turn}"></i>servidor (TURN)</span></span></div></div>`;
-    el.querySelector('button').addEventListener('click', () => this.onPular?.());
+    el.querySelector('button').addEventListener('click', () => this.pedirPular());
     const q = (s) => el.querySelector(s);
     this.v = { mbps: q('[data-v="mbps"]'), rtt: q('[data-v="rtt"]'), texto: q('[data-v="texto"]') };
     this.g = { mbps: new Grafico(q('[data-g="mbps"]'), { minimo: 10, area: true }), rtt: new Grafico(q('[data-g="rtt"]'), { minimo: 20 }) };
@@ -262,7 +315,7 @@ export class PainelTeste {
     cancelAnimationFrame(this.raf);
     if (aberto === this) aberto = null;
     this.el?.remove();
-    this.el = this.v = this.g = null;
+    this.el = this.v = this.g = this.alerta = null;
   }
 }
 

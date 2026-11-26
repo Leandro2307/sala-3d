@@ -63,3 +63,11 @@ test('TV: decodificador lento no vídeo normal, e a imagem parada (a Philips, 20
   assert.equal(culpaDe({ ...tv, fpsFinal: null, parou: true }, la, 'a TV').onde, 'parou');
   assert.equal(culpaDe({ ...tv, decMs: 0.2, bufferMs: 60 }, la, 'a TV'), null);
 });
+
+test('o decodificador só leva a culpa pelo que atrasou nesta amostra (2026-11-26, wedneyMiguel)', () => {
+  // o total da sessão ficou em 23 e o decodificador já estava em 4 ms: era a internet
+  const c = com({ turbo: { qps: 30, decMs: 4, decAtrasou: 23, decAtrasouAgora: 0 }, sonda: { picos: 2, falhas: 0 } }, {});
+  assert.equal(c.onde, 'rede');
+  assert.equal(com({ turbo: { qps: 30, decMs: 4, decAtrasou: 23, decAtrasouAgora: 1 } }, {}).onde, 'aparelho');
+  assert.match(culpaDe({ turbo: { qps: 20, decMs: 30 } }, null, 'seu celular').texto, /^seu celular/);
+});

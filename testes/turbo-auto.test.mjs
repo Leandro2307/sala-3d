@@ -235,3 +235,12 @@ test('a folga do liso muda na hora, sem ligar de novo', () => {
   assert.equal(tr.s.lisoMax, 15);
   assert.equal(tr.s.alvo, 15);
 });
+
+test('automático: avisa a página quando fica num modo (para a próxima entrada começar nele)', () => {
+  const decidiu = [];
+  const r = { t: 0 };
+  const auto = new TurboAuto({ modos: [16, 17], agora: () => r.t, aplicar() {}, onDecidiu: (id, porque) => decidiu.push([id, porque]) });
+  auto.comecar();
+  for (let i = 0; i < 30; i++) { r.t += 2000; auto.amostra(auto.atual === 16 ? PESSIMA : BOA); }
+  assert.deepEqual(decidiu, [[17, 'bom']]);
+});

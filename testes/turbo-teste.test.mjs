@@ -405,3 +405,29 @@ test('tratar: o teto da banda é o do caminho, e quando cede não volta por 5 mi
   e.desligarTratar(s, 'de novo'); // já cedeu: nada
   assert.equal(e.ligados.length, 1);
 });
+
+// ------------------------------------------------------------ teste pulado e o modo do automático (2026-11-26)
+test('teste pulado: o degrau que não passou vira o teto, e vale para a próxima entrada do dia', async () => {
+  const { tetoDoParcial } = await import('../public/js/turbo-teste.js');
+  // wedneyMiguel: o 1º degrau (3 Mbps) chegou a 1,1 Mbps com 18% de perda
+  assert.equal(tetoDoParcial([{ kbps: 3000, chegouKbps: 1113, perdaPct: 18.3, ok: false }]), 890);
+  assert.equal(tetoDoParcial([{ kbps: 3000, chegouKbps: 3069, ok: true }]), null); // passou: não diz o teto
+  assert.equal(tetoDoParcial([]), null);
+  assert.equal(tetoDoParcial([{ kbps: 3000, chegouKbps: 200, ok: false }]), 500);
+  const guarda = { k: {}, getItem(c) { return this.k[c] ?? null; }, setItem(c, v) { this.k[c] = v; } };
+  const agora = () => new Date(2026, 10, 26, 13).getTime();
+  new MemoriaTeste(agora, guarda).guardarParcial('lokao', 890);
+  assert.equal(new MemoriaTeste(agora, guarda).parcial('lokao'), 890);
+  assert.equal(new MemoriaTeste(() => new Date(2026, 10, 27, 9).getTime(), guarda).parcial('lokao'), null);
+});
+
+test('o automático ficou noutro modo: a próxima entrada começa nele', () => {
+  const guarda = { k: {}, getItem(c) { return this.k[c] ?? null; }, setItem(c, v) { this.k[c] = v; } };
+  const agora = () => new Date(2026, 10, 26, 16).getTime();
+  const m = new MemoriaTeste(agora, guarda);
+  m.guardar('lokao', { tetoKbps: 11400, codec: 'h264', modo: 16 }, { familia: 'ipv4', rttMs: 45 });
+  assert.equal(m.trocarModo('lokao', 17), true);
+  assert.equal(m.trocarModo('lokao', 17), false); // já é
+  assert.equal(m.trocarModo('ninguem', 17), false);
+  assert.equal(new MemoriaTeste(agora, guarda).valido('lokao', { familia: 'ipv4', rttMs: 46 }).modo, 17);
+});

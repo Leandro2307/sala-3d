@@ -1129,6 +1129,10 @@ const turboAuto = new TurboAuto({
   aplicar: (id, porque) => aplicarPreset(id, porque),
   onEvento: (texto, dados) => diagJogo.evento(texto, dados),
   onEstado: () => mostrarAuto(),
+  onDecidiu: (id) => {
+    const quem = jogandoLa && (jogandoLa.dono || jogandoLa.key.split('~')[0]);
+    if (quem && memoriaTeste.trocarModo(quem, id)) diagJogo.evento('teste da conexão: a próxima entrada começa no modo do automático', { modo: id });
+  },
 });
 const turboVolta = new TurboVolta({
   ligar: () => {
@@ -1187,7 +1191,7 @@ function verCaminho(resumo) {
 }
 // ---------------------------------------------------------------- o teste da conexão antes do turbo (turbo-teste.js)
 const memoriaTeste = new MemoriaTeste();
-const painelTeste = new PainelTeste({ dentro: () => $('#focus'), onPular: () => testeJoga.pular() });
+const painelTeste = new PainelTeste({ dentro: () => $('#focus'), onPular: () => testeJoga.pular(), onEvento: (texto, dados) => diagJogo.evento(texto, dados) });
 const testeJoga = new TesteJoga({
   abrir: (id) => rtc?.abrirTeste(id) ?? null,
   caminho: (id) => rtc?.caminhoPara(id) ?? null,
@@ -1228,6 +1232,7 @@ async function testarConexao(deNovo) {
     rede0 = await Promise.resolve(rtc?.caminhoPara(dono)).catch(() => null); // o teste vale para este caminho direto
     r = await testeJoga.rodar(jl.key, { codecs: codecsDoTeste, padrao: PRESET_TV.id, rapido: 16, tudo: deNovo, toque: false });
     painelTeste.fechar();
+    if (r.tetoParcialKbps) memoriaTeste.guardarParcial(quem, r.tetoParcialKbps);
     if (jogandoLa !== jl || r.erro) return null;
     memoriaTeste.guardar(quem, r, rede0 || await Promise.resolve(rtc?.caminhoPara(dono)).catch(() => null));
     if (jogandoLa !== jl) return null;
@@ -1286,6 +1291,14 @@ async function entrarNoTurbo(deNovo = false) {
   }
   if (jogandoLa !== jl || !opcoesJogo.get('turbo')) return;
   if (r) turboRecebe.teste = { tratar: !!r.tratar, tetoKbps: r.livre && r.rota !== 'turn' ? null : r.tetoKbps, codec: r.codec, turn: r.rota === 'turn', bom: !!r.confirmou };
+  else {
+    // sem teste (pulado): o que um teste pulado de hoje chegou a medir já diz quanto o caminho leva
+    const parcial = memoriaTeste.parcial(jl.dono || jl.key.split('~')[0]);
+    if (parcial) {
+      turboRecebe.teste = { tetoKbps: parcial };
+      diagJogo.evento('turbo: começando no que o teste pulado mediu', { tetoKbps: parcial });
+    }
+  }
   previsto = r?.previsto ? { ...r.previsto, desde: performance.now(), am: [], quem: jl.dono || jl.key.split('~')[0] } : null;
   if (r && turboAuto.ligado && opcoesJogo.get('preset') !== r.modo) aplicarPreset(r.modo, 'teste da conexão');
   if (!turboRecebe.ligado) ligarTurbo();

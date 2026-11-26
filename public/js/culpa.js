@@ -41,9 +41,11 @@ export function culpaDe(r, la = r?.la ?? null, aparelho = 'seu PC') {
 
   // o aparelho daqui: a página travou, o decodificador atrasou, ou a tela não mostrou o que chegou
   const aqui = causas.filter((c) => /^(aqui|decodificador)/.test(c)).length;
-  if ((tb?.decAtrasou || 0) > 0 || (tb?.decMs ?? r.decMs ?? 0) > DEC_LENTO || (aqui > 0 && aqui === causas.length)
+  // decAtrasou é o total do turbo; decAtrasouAgora, só desta amostra (versão antiga sem ele: o total)
+  const decAtrasou = tb?.decAtrasouAgora ?? tb?.decAtrasou ?? 0;
+  if (decAtrasou > 0 || (tb?.decMs ?? r.decMs ?? 0) > DEC_LENTO || (aqui > 0 && aqui === causas.length)
     || (r.pagina?.maiorMs || 0) > PAGINA_RUIM) {
-    const porque = (tb?.decAtrasou || 0) > 0 || (tb?.decMs ?? r.decMs ?? 0) > DEC_LENTO ? 'o decodificador não dá conta'
+    const porque = decAtrasou > 0 || (tb?.decMs ?? r.decMs ?? 0) > DEC_LENTO ? 'o decodificador não dá conta'
       : (r.pagina?.maiorMs || 0) > PAGINA_RUIM ? 'a página travou' : 'a tela demorou a mostrar';
     return { lado: 'voce', onde: 'aparelho', texto: `${aparelho}: ${porque}` };
   }

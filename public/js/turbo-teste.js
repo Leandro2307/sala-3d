@@ -708,8 +708,9 @@ export class TesteJoga {
       return r;
     } catch (err) {
       const motivo = String(err?.message || err).slice(0, 120);
-      this.onEvento?.('teste da conexão: não terminou', { motivo, degraus: tab.degraus, turn: tab.turn, ms: Math.round(performance.now() - inicio) });
-      return { erro: motivo };
+      const tetoParcialKbps = tetoDoParcial(tab.degraus);
+      this.onEvento?.('teste da conexão: não terminou', { motivo, degraus: tab.degraus, turn: tab.turn, ms: Math.round(performance.now() - inicio), tetoParcialKbps });
+      return { erro: motivo, tetoParcialKbps };
     } finally {
       clearTimeout(limite);
       clearInterval(t.pingar);
@@ -982,7 +983,18 @@ export async function codecsDaqui(listaH264, listaH265) {
 // novo no Modo jogo, ou recarregar a página, não testa de novo. Muda o caminho (a ida e volta ou a família), o dia, ou
 // o jogo saiu bem pior que o previsto (esquecer): aí testa. "Testar a conexão" no menu testa sempre. Um corte no meio
 // do jogo fica lembrado no PC que compartilha (TurboEnvio.lembrarCorte).
+// O teste foi pulado (ou caiu) no meio: um degrau que não passou já diz quanto o caminho leva. 2026-11-26, os dois
+// celulares de fora (wedneyMiguel, Altair) pularam o teste com o 1º degrau mostrando ~1,1 Mbps e 15–18% de perda,
+// e o turbo começou em 1080p a 2,5–5,6 Mbps: 20–30 s de imagem parada e perdida até a banda descer sozinha.
+// Devolve o teto (kbps) ou null (nada medido, ou tudo que se mediu passou).
+export function tetoDoParcial(degraus) {
+  const ruins = (degraus || []).filter((d) => d && !d.ok && Number(d.chegouKbps) > 0);
+  if (!ruins.length) return null;
+  return Math.max(500, Math.round(Math.min(...ruins.map((d) => d.chegouKbps)) * 0.8));
+}
+
 const CHAVE_MEMORIA = 'sala3d-teste-conexao';
+const CHAVE_PARCIAL = 'sala3d-teste-parcial';
 const dia = (t) => new Date(t).toDateString();
 // só o que o jogo usa: os degraus e os caminhos ficam no relatório
 const ENXUTO = ['tratar', 'tetoKbps', 'livre', 'codec', 'modo', 'rota', 'trocarRota', 'confirmou', 'rttMs', 'nota', 'previsto', 'direto', 'jaTurn'];
@@ -993,11 +1005,36 @@ export class MemoriaTeste {
     this.agora = agora;
     this.guarda = guarda;
     this.m = new Map();
+    this.parciais = new Map(); // dono -> { kbps, em }: o teto de um teste pulado (tetoDoParcial)
     try { for (const [k, v] of Object.entries(JSON.parse(guarda?.getItem(CHAVE_MEMORIA) || '{}'))) if (dia(v.em) === dia(agora())) this.m.set(k, v); } catch { /* sem armazenamento */ }
+    try { for (const [k, v] of Object.entries(JSON.parse(guarda?.getItem(CHAVE_PARCIAL) || '{}'))) if (dia(v.em) === dia(agora())) this.parciais.set(k, v); } catch { /* sem armazenamento */ }
   }
 
   gravar() {
     try { this.guarda?.setItem(CHAVE_MEMORIA, JSON.stringify(Object.fromEntries(this.m))); } catch { /* sem armazenamento */ }
+  }
+
+  // o teste pulado com um degrau medido: vale para as próximas entradas de hoje que também pularem
+  guardarParcial(dono, kbps) {
+    if (!dono || !(kbps > 0)) return;
+    this.parciais.set(dono, { kbps, em: this.agora() });
+    try { this.guarda?.setItem(CHAVE_PARCIAL, JSON.stringify(Object.fromEntries(this.parciais))); } catch { /* sem armazenamento */ }
+  }
+
+  parcial(dono) {
+    const v = this.parciais.get(dono);
+    return v && dia(v.em) === dia(this.agora()) ? v.kbps : null;
+  }
+
+  // O automático (turbo-auto.js) mediu e ficou em outro modo: a próxima entrada já começa nele. 2026-11-26, o PC com
+  // Intel UHD: o teste escolhia o Turbo rápido (16), o automático achava o Turbo da TV (17) melhor (nota 120 x 163)
+  // depois de 70–100 s, e a entrada seguinte voltava ao 16 e perdia esse tempo de novo.
+  trocarModo(dono, modo) {
+    const v = this.m.get(dono);
+    if (!v || modo == null || v.r.modo === modo) return false;
+    v.r = { ...v.r, modo };
+    this.gravar();
+    return true;
   }
 
   guardar(dono, r, rede) {

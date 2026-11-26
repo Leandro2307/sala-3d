@@ -101,9 +101,10 @@ export function avaliar(todas, segPorAmostra = 2) {
 
 export class TurboAuto {
   // modos: os ids na ordem de tentar; aplicar(id, motivo): troca o modo; onEvento(texto, dados);
-  // onEstado(estado, id): para a página mostrar ('medindo' ou 'fixo')
-  constructor({ modos, aplicar, onEvento = null, onEstado = null, agora = () => performance.now() }) {
-    Object.assign(this, { modos, aplicar, onEvento, onEstado, agora });
+  // onEstado(estado, id): para a página mostrar ('medindo' ou 'fixo'); onDecidiu(id, porque): mediu e ficou num
+  // modo (a página guarda, para a próxima entrada começar nele)
+  constructor({ modos, aplicar, onEvento = null, onEstado = null, onDecidiu = null, agora = () => performance.now() }) {
+    Object.assign(this, { modos, aplicar, onEvento, onEstado, onDecidiu, agora });
     this.ligado = true; // o usuário pode escolher um modo à mão (desligar)
     this.fase = null; // null, 'espera', 'mede' ou 'fixo'
     this.escolhido = null; // o da última vez que decidiu: o próximo jogo começa nele
@@ -249,6 +250,7 @@ export class TurboAuto {
     this.onEvento?.('turbo automático: ficou neste modo', { modo: id, porque, rodada: this.rodadas, notas: Object.fromEntries([...this.notas].map(([k, v]) => [k, v.nota])) });
     if (id !== era) this.aplicar(id, 'automático: o melhor');
     this.onEstado?.('fixo', id);
+    this.onDecidiu?.(id, porque);
   }
 
   // decidido: se ficar ruim por JANELA amostras seguidas, mede de novo começando pelo que está
