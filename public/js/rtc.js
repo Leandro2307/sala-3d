@@ -182,6 +182,24 @@ function preferirCodecDeJogo(transceiver, seguro) {
   }
 }
 
+// Fecha um canal de dados sem pegar o Chrome no meio da abertura. Os travamentos da aba
+// (STATUS_ILLEGAL_INSTRUCTION na thread WebRTC_W_and_N, 22/11 a 25/11, Chrome 157 e 158; e os da TV LG
+// em 23/11) quebram em SctpDataChannel::CloseAbruptlyWithDataChannelFailure: dentro de um
+// setLocalDescription, quando o transporte dos canais fica pronto, o Chrome manda o que um canal
+// esperava sem ele ter o número de stream (sid). Um canal fechado ainda em 'connecting' fica em
+// 'closing' para sempre (testado no 158). Ainda abrindo: fica mudo agora (send não faz nada, para um
+// "open" antigo não mandar o pedido de quem já trocou de canal) e fecha quando abrir.
+function fecharCanal(c) {
+  if (!c) return;
+  if (c.readyState === 'connecting') {
+    c.send = () => {};
+    c.onmessage = null;
+    c.addEventListener('open', () => { try { c.close(); } catch { /* já fechado */ } }, { once: true });
+    return;
+  }
+  try { c.close(); } catch { /* já fechado */ }
+}
+
 // O Constrained Baseline (42e01f) do outro lado vira Baseline (42001f) aqui dentro, nas seções das
 // telas que vão para quem joga: o Chrome codifica na placa, e o que sai é o mesmo para o
 // decodificador do iPhone (o Baseline do codificador não usa nada fora do Constrained). Para
@@ -642,6 +660,10 @@ export class RTC {
       if (pc.signalingState === 'have-local-offer' && !peer.makingOffer && agora - peer.ofertaDesde > 6000) {
         peer.ofertaDesde = agora;
         // a segunda oferta seguida sem resposta: o outro lado não está negociando, refaz do zero
+        // a oferta trazia os primeiros canais de dados: o rollback derruba o transporte deles, e o
+        // canal criado antes nunca chega lá (testado no Chrome 158); refazer é o caminho limpo (ver fecharCanal)
+        const canalNovo = /^m=application/m.test(pc.localDescription?.sdp || '') && !/^m=application/m.test(pc.currentRemoteDescription?.sdp || '');
+        if (canalNovo) { this.refazer(peer.id, 'oferta com canal novo sem resposta'); continue; }
         if (++peer.ofertasPerdidas >= 2 && this.refazer(peer.id, 'ofertas sem resposta')) continue;
         pc.setLocalDescription({ type: 'rollback' })
           .then(() => { peer.reinicioIce = -Infinity; this.restartIce(peer); }) // força uma oferta nova
@@ -1565,7 +1587,7 @@ export class RTC {
   abrirTurbo(id, vida = 250) {
     const peer = this.peers.get(id);
     if (!peer || ['failed', 'closed'].includes(peer.pc.connectionState)) return null;
-    try { peer.turboCanal?.close(); } catch { /* já fechado */ }
+    fecharCanal(peer.turboCanal);
     try {
       peer.turboCanal = peer.pc.createDataChannel('turbo', vida == null ? { ordered: true } : { ordered: true, maxPacketLifeTime: Math.round(vida) });
       return peer.turboCanal;
@@ -1579,7 +1601,7 @@ export class RTC {
   abrirTurboSom(id, confiavel = false) {
     const peer = this.peers.get(id);
     if (!peer || ['failed', 'closed'].includes(peer.pc.connectionState)) return null;
-    try { peer.turboSomCanal?.close(); } catch { /* já fechado */ }
+    fecharCanal(peer.turboSomCanal);
     try {
       peer.turboSomCanal = peer.pc.createDataChannel('turbo-som', confiavel ? { ordered: true } : { ordered: false, maxPacketLifeTime: 60 });
       return peer.turboSomCanal;
@@ -1592,7 +1614,7 @@ export class RTC {
   abrirTeste(id) {
     const peer = this.peers.get(id);
     if (!peer || ['failed', 'closed'].includes(peer.pc.connectionState)) return null;
-    for (const c of peer.testeCanais || []) { try { c.close(); } catch { /* já fechado */ } }
+    for (const c of peer.testeCanais || []) fecharCanal(c);
     try {
       // o dos dados primeiro: quando o outro abre lá, este já chegou
       const dados = peer.pc.createDataChannel('turbo-teste-dados', { ordered: false, maxRetransmits: 0 });
