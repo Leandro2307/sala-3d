@@ -34,7 +34,7 @@ import { PainelTeste, textoDoResultado } from './turbo-teste-painel.js';
 import { DiagJogo } from './jogo-diag.js';
 import { linhaDaCulpa } from './culpa.js';
 import { opcoesJogo, LISO_MS, PRESETS, PRESET_TV, PRESET_INICIAL, ORDEM_AUTO, OPCOES_DO_PRESET, autoMostra, htmlPresets, marcarPresets, alturaDoMenu } from './jogo-opcoes.js';
-import { LAYOUTS, layoutDoTitulo } from './toque-jogo.js';
+import { LAYOUTS, layoutDoTitulo, ToqueJogo } from './toque-jogo.js';
 import { ControleFisico } from './gamepad-jogo.js';
 import { PadVirtual } from './pad-virtual.js';
 import { TecladoPad } from './teclado-pad.js';
@@ -126,8 +126,21 @@ function erroEntrada(txt) {
   $('#en-erro').hidden = !txt;
   $('#en-erro').textContent = txt || '';
 }
+// a imagem do PS5 atrás da entrada (a página da TV só com o vídeo): sai junto com a entrada, para não ficar
+// recebendo imagem à toa
+function fundoDaEntrada(ligar) {
+  const f = $('#entrada-fundo');
+  const url = ligar ? '/tv?fundo=1' : 'about:blank';
+  if ((f.getAttribute('src') || 'about:blank') !== url) f.src = url;
+  f.hidden = !ligar;
+}
+function fecharEntrada() {
+  $('#entrada').hidden = true;
+  fundoDaEntrada(false);
+}
 function pedirEntrada({ conta: pedeConta = false, sala = false, erro = '' }) {
   $('#entrada').hidden = false;
+  fundoDaEntrada(true);
   $('#en-nome-l').hidden = !pedeConta;
   $('#en-senha-l').hidden = !pedeConta;
   $('#en-sala-l').hidden = !sala;
@@ -176,7 +189,7 @@ formEntrada.addEventListener('submit', async (e) => {
       f.senha.value = '';
     }
     if (!(await liberarSala(f.sala.value))) return;
-    $('#entrada').hidden = true;
+    fecharEntrada();
     conectar();
   } finally {
     botao.disabled = false;
@@ -184,10 +197,6 @@ formEntrada.addEventListener('submit', async (e) => {
 });
 
 async function iniciar() {
-  if (isTouch) {
-    $('#jg-vazio').innerHTML = '<div><b>Esta página é para o computador</b><span>No celular, use a sala.</span></div>';
-    return;
-  }
   if (!conta?.token) {
     conta = null;
     return pedirEntrada({ conta: true });
@@ -720,6 +729,8 @@ addEventListener('mousemove', (e) => {
 $('.focus-bar').addEventListener('focusin', () => mostrarBarra());
 addEventListener('keydown', (e) => { if (e.code === 'Tab' && !controle.jogo && !st.controlando) mostrarBarra(); });
 document.addEventListener('fullscreenchange', () => mostrarBarra());
+// no celular não há mouse: um toque fora do jogo traz a barra
+addEventListener('pointerdown', (e) => { if (e.pointerType !== 'mouse' && !controle.jogo) mostrarBarra(); }, { capture: true, passive: true });
 
 $('#jg-telas').addEventListener('click', (e) => {
   const b = e.target.closest('[data-tela]');
@@ -1489,7 +1500,29 @@ controle.paraPad = (ev) => {
 };
 const touchpad = new Ps5Touchpad({ pad: padVirtual, onMudou: () => { atualizarBotaoTouchpad(); avisarModo(); } });
 padVirtual.hid = touchpad;
-const fisico = new ControleFisico({ controle, pad: padVirtual, toast, onAtivo: () => {} });
+const fisico = new ControleFisico({ controle, pad: padVirtual, toast, onAtivo: (sim) => $('#toque-jogo').classList.toggle('tj-pad', sim) });
+// Celular: o mesmo controle de toque da sala (toque-jogo.js) por cima da imagem no modo jogo
+const toqueJogo = new ToqueJogo({
+  raiz: $('#toque-jogo'),
+  controle,
+  pad: padVirtual,
+  toast,
+  onEngasgo: () => marcarEngasgo(),
+  onTutorial: () => tutorial.abrir('toque'),
+  onLayout: () => { if (toqueJogo.key && toqueJogo.layoutId === 'ps5') tutorial.abrir('toque'); },
+  volume: {
+    get: () => ajustes.jogo,
+    set: (v) => {
+      ajustes.jogo = limitar(v, 0, 100);
+      $('#jg-vol-jogo').value = String(ajustes.jogo);
+      gravarJSON(AJUSTES_CHAVE, ajustes);
+      volumes();
+    },
+  },
+  onSair: () => sairDoJogo(),
+});
+controle.onCursorLivre = (livre) => toqueJogo.cursorDoJogo(livre);
+if (isTouch) document.body.classList.add('touch'); // a barra no jeito do celular (style.css body.touch, jogar.html)
 
 const CLASSE_LEGENDA = { b0: 'lg-xis', b1: 'lg-bol', b2: 'lg-qua', b3: 'lg-tri' };
 function mostrarLegenda(layout) {
@@ -1543,9 +1576,13 @@ $('#jogo-touchpad').addEventListener('click', async (e) => {
 
 // sem controle de verdade numa tela de PS5: o tutorial do teclado. true: abriu (ou vai abrir)
 function tutorialDoPs5(key) {
-  if (!ehPs5(acharTela(key)?.sh)) {
+  if (isTouch ? toqueJogo.layoutId !== 'ps5' || toqueJogo.key !== key : !ehPs5(acharTela(key)?.sh)) {
     tutorial.fechar(false);
     return false;
+  }
+  if (isTouch) {
+    if (!tutorial.ativo) setTimeout(() => { if (controle.jogo?.key === key) tutorial.abrir('toque'); }, 900);
+    return true;
   }
   const temControle = () => fisico.pad() || touchpad.ligado;
   if (tutorial.ativo || temControle()) return false;
@@ -1560,10 +1597,14 @@ controle.onJogo = (v, key) => {
     padVirtual.ligar(key);
     fisico.ligar(key, sh?.titulo);
   } else fisico.desligar();
+  if (v && isTouch) toqueJogo.mostrar(key, sh?.titulo);
+  else toqueJogo.esconder();
   const layout = sh ? layoutDa(sh) : null;
-  if (layout === 'ps5' && ajustes.dualsense) touchpad.ligar().then(atualizarBotaoTouchpad);
+  if (layout === 'ps5' && ajustes.dualsense && !isTouch) touchpad.ligar().then(atualizarBotaoTouchpad);
   else touchpad.desligar();
-  const virtual = layout && LAYOUTS[layout]?.virtual ? layout : null;
+  // no celular o teclado e a legenda não valem: quem joga é o controle de toque (ou um de verdade)
+  const virtual = !isTouch && layout && LAYOUTS[layout]?.virtual ? layout : null;
+  if (isTouch && v) tutorialDoPs5(key);
   if (virtual) {
     padVirtual.acordar();
     tecladoPad.ligar(virtual);
@@ -1587,6 +1628,7 @@ controle.onJogo = (v, key) => {
   }, 0);
 };
 controle.onEscondeu = () => {
+  toqueJogo.soltarTudo();
   fisico.soltarTudo();
   tecladoPad.soltarTudo();
 };
@@ -1607,6 +1649,15 @@ async function jogoNoPc(ligar) {
   if (!ligar) {
     navigator.keyboard?.unlock?.();
     if (document.fullscreenElement === $('#focus')) document.exitFullscreen().catch(() => {});
+    if (isTouch) screen.orientation?.unlock?.();
+    return;
+  }
+  // celular: tela cheia deitada, sem teclado para travar nem mouse para prender
+  if (isTouch) {
+    try {
+      if (document.fullscreenElement !== $('#focus')) await $('#focus').requestFullscreen?.({ navigationUI: 'hide' });
+      await screen.orientation?.lock?.('landscape');
+    } catch { /* iPhone: sem tela cheia de elemento nem trava de giro; a página deitada já serve */ }
     return;
   }
   try {
@@ -1619,7 +1670,7 @@ async function jogoNoPc(ligar) {
   controle.travarPonteiro(); // a tela cheia pode ter soltado o ponteiro
 }
 document.addEventListener('fullscreenchange', () => {
-  document.body.classList.toggle('jogo-pc', !!document.fullscreenElement && !!controle.jogo);
+  document.body.classList.toggle('jogo-pc', !isTouch && !!document.fullscreenElement && !!controle.jogo);
   if (!document.fullscreenElement && queda) desistirDeVoltar(); // saiu da tela cheia esperando: só pelo botão
 });
 
@@ -1634,6 +1685,7 @@ function alternarJogo() {
   if (!jogavel() || !video.srcObject) return void toast('A imagem ainda não chegou.', 'warn');
   if (!deixarJogar()) return;
   entrarNoJogo(true);
+  if (isTouch) return; // o controle de toque avisa com que botões entrou
   if (ehPs5(st.alvo.sh) && entradaDeAgora() === 'teclado') {
     toast('Vai jogar no controle? Aperte um botão dele. Se não responder, desligue e ligue o controle (a sala pode ter deixado ele no modo direto).', 'info', 10000);
   }

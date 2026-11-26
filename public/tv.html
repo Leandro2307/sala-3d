@@ -29,6 +29,11 @@
   button { font: inherit; color: inherit; }
 
   #tela { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+  /* fora do jogo a imagem cobre a tela toda, sem faixas pretas (no jogo continua inteira: não corta o placar) */
+  body:not(.jogando) #tela { object-fit: cover; }
+  /* ?fundo=1 (atrás da entrada do /jogar): só a imagem */
+  body.fundo > :not(#tela) { display: none !important; }
+  body.fundo #tela { pointer-events: none; }
   #vazio { position: fixed; inset: 0; display: grid; place-items: center; text-align: center; color: var(--apagado); padding: 4vw; }
   #vazio b { display: block; color: var(--texto); font-size: 2.6vw; margin-bottom: .6vw; }
 
@@ -58,6 +63,8 @@
   #qr h2 { margin: 0 0 .5vw; font-size: 1.8vw; }
   #qr p { margin: .7vw 0 0; color: var(--apagado); font-size: 1.15vw; line-height: 1.35; }
   #qr .codigo-grande { font-size: 1.8vw; font-weight: 700; }
+  #qr .whats-tv { color: #4ade80; }
+  #qr .whats-tv b { color: var(--texto); white-space: nowrap; }
   #qr .codigo { font-family: Consolas, monospace; color: var(--texto); letter-spacing: .12em; }
 
   #aviso { position: fixed; top: 7vw; left: 0; right: 0; width: fit-content; margin: 0 auto; max-width: 70vw; padding: 1vw 1.8vw; text-align: center; font-weight: 600; z-index: 6; }
@@ -124,6 +131,7 @@
   <p id="qr-txt">Aponte a câmera do celular. Lá você entra na sua conta, escolhe PC ou PS5 e paga. A TV entra na sua conta sozinha.</p>
   <p>ou abra <span class="codigo" id="qr-url"></span></p>
   <p>No celular, em <b>Colocar na TV</b>: <span class="codigo codigo-grande" id="qr-curto"></span></p>
+  <p class="whats-tv">💬 Dúvidas ou para alugar: WhatsApp <b>(62) 99860-9537</b></p>
 </aside>
 
 <div id="dica-jogo" class="vidro">Para sair do jogo: <b>Voltar</b> no controle remoto, ou segure <b>Select + Start</b> · menos atraso ↔ 1080p: <b>botão colorido</b> · desempenho: <b>Info</b></div>
@@ -145,6 +153,7 @@
   <p><button class="btn grande" id="btn-toque" type="button" style="width:100%">🎮 Abrir o controle na tela</button></p>
   <div class="cartao vidro" id="cel-alvo">Procurando o jogo no telão…</div>
   <div class="cartao vidro" id="cel-vez"></div>
+  <p><a class="btn" href="https://wa.me/5562998609537?text=Gostaria%20de%20alugar." target="_blank" rel="noopener" style="display:block;text-align:center;text-decoration:none;border-color:rgba(37,211,102,.55);color:#4ade80">💬 Alugar pelo WhatsApp</a></p>
   <p class="sub">Deixe esta página aberta enquanto joga. A tela do celular fica acesa; se apagar, o controle para.</p>
 </main>
 

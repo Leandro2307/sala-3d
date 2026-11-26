@@ -177,6 +177,14 @@ body:not([data-jogo="futebol"]) #touch:not(.carro) #tb-run { display: none !impo
   border-color: #6ee7b7;
   color: #fff;
 }
+/* WhatsApp para alugar (sala e /jogar): é um <a>, então tira o sublinhado e a cor de link */
+a.whats-btn { text-decoration: none; color: #4ade80; }
+.chip-btn.whats-btn {
+  background: rgba(37, 211, 102, 0.16);
+  border-color: rgba(37, 211, 102, 0.55);
+}
+.chip-btn.whats-btn:hover, .secondary.whats-btn:hover { background: rgba(37, 211, 102, 0.3); color: #fff; }
+.secondary.whats-btn { border-color: rgba(37, 211, 102, 0.55); }
 .chip-btn.chip-social {
   background: linear-gradient(135deg, rgba(59, 130, 246, 0.22), rgba(99, 102, 241, 0.28));
   border-color: rgba(129, 140, 248, 0.55);

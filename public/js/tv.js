@@ -43,13 +43,18 @@ const VOLTAR_MS = 3 * 60_000;
 const VOLTAR_MAX = 3; // a página recarregou tantas vezes seguidas, sem 1 min de jogo entre elas: só pelo botão
 const TOQUE_ABERTO = 'sala3d-tv-toque-aberto';
 
+// ?fundo=1: só a imagem do PS5, muda, atrás da tela de entrada do /jogar (num iframe). Entra como TV sem conta,
+// sem QR, sem controle nem teclado.
+const FUNDO = params.get('fundo') === '1';
+
 window.__tvOk = true;
 if (CONTROLE) document.body.classList.add('controle');
+if (FUNDO) document.body.classList.add('fundo');
 
 const lerJSON = (k, padrao) => {
   try { return JSON.parse(localStorage.getItem(k) || 'null') ?? padrao; } catch { return padrao; }
 };
-const conta = lerJSON(LAN_CHAVE, null); // { nome, token } (o mesmo da página /lan)
+const conta = FUNDO ? null : lerJSON(LAN_CHAVE, null); // { nome, token } (o mesmo da página /lan)
 let passe = lerJSON('sala3d-passes', {})[SALA] || null;
 function guardarPasse(p) {
   passe = p;
@@ -162,7 +167,7 @@ function entrou(data) {
   $('#conta-chip').innerHTML = conta ? `Conta <b>${esc(conta.nome)}</b>` : 'Sem conta';
   $('#btn-sair').hidden = !conta;
   $('#cel-conta').textContent = conta ? `Conta ${conta.nome} · sala ${SALA}` : 'Entre na sua conta pela página de aluguel primeiro.';
-  if (!CONTROLE) pedirCodigo();
+  if (!CONTROLE && !FUNDO) pedirCodigo();
   else if (toque.ativo || (conta && gamepad())) chamarTv(true); // a conexão voltou com o controle na mão
   atualizar();
 }
@@ -368,6 +373,7 @@ function telasNoAr() {
 // (PS5 ou PC); fora dela, a que está no telão da sala; sem telão, a primeira com o controle liberado.
 function escolherAlvo() {
   const telas = telasNoAr();
+  if (FUNDO) return telas.find((x) => maquinaDaTela(x.sh) === 'ps5') || telas.find((x) => x.sh.key === st.main) || telas[0] || null;
   const doJogo = telas.find((x) => x.sh.key === (CONTROLE ? st.telaDaTv : st.jogando) && x.sh.controle);
   if (doJogo) return doJogo;
   const escolhida = telas.find((x) => x.sh.key === st.escolhida);
@@ -454,6 +460,10 @@ function mostrarVideo() {
 let vezDeTocar = 0;
 function tocar() {
   const vez = ++vezDeTocar;
+  if (FUNDO) {
+    video.muted = true;
+    return void video.play().catch(() => {});
+  }
   video.muted = false;
   video.play().then(() => {
     $('#btn-som').hidden = true;
@@ -1215,6 +1225,7 @@ let botoesAntes = 0;
 let segurandoSair = 0;
 let leituraEm = 0;
 function lerControles() {
+  if (FUNDO) return;
   // fora do jogo, o controle só anda entre os botões da tela: 25 leituras por segundo bastam (a TV agradece)
   const agora = performance.now();
   if (!st.jogando && !toque.ativo && gpIndice == null && agora - leituraEm < 40) return;
@@ -1272,7 +1283,7 @@ const ehVoltar = (e) => VOLTAR.has(e.keyCode) || ['Escape', 'GoBack', 'BrowserBa
 const SELO = new Set([457]);
 const CORES = new Set([403, 404, 405, 406]);
 addEventListener('keydown', (e) => {
-  if (CONTROLE) return;
+  if (CONTROLE || FUNDO) return;
   ligarSom();
   if (SELO.has(e.keyCode) || ['Info', 'i', 'I'].includes(e.key)) {
     e.preventDefault();
