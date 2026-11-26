@@ -192,7 +192,7 @@ test('cabe no teto pelo que o PS5 manda de verdade', () => {
 });
 
 // ------------------------------------------------------------ o automático depois do teste
-const amostra = (o = {}) => ({ turbo: { silencioMaxMs: 40, ...o.turbo }, fpsFinal: o.qps ?? 60, atrasoMs: o.atraso ?? 100, rttMs: 50, la: { captura: 60, turbo: { bandaKbps: o.banda ?? null }, ps5: { manda: o.manda ?? 60 } }, ritmo: { trancos: o.trancos ?? 1, travadas: o.travadas ?? [] }, conexao: { par: o.par ?? 'p' }, somWebrtc: { inventadoPct: o.inventado ?? 0 } });
+const amostra = (o = {}) => ({ turbo: { silencioMaxMs: 40, ...o.turbo }, fpsFinal: o.qps ?? 60, atrasoMs: o.atraso ?? 100, rttMs: 50, la: { captura: 60, turbo: { bandaKbps: o.banda ?? null }, ps5: { manda: o.manda ?? 60, danos: o.danos ?? 0 } }, ritmo: { trancos: o.trancos ?? 1, travadas: o.travadas ?? [] }, conexao: { par: o.par ?? 'p' }, somWebrtc: { inventadoPct: o.inventado ?? 0 } });
 
 test('o que não é do modo não conta', () => {
   assert.equal(foraDoModo(amostra()), null);
@@ -200,6 +200,18 @@ test('o que não é do modo não conta', () => {
   assert.equal(foraDoModo(amostra({ inventado: 50 })), 'caminho');
   assert.equal(foraDoModo(amostra({ manda: 47 })), 'fonte');
   assert.equal(foraDoModo(amostra({ manda: 30 })), null);
+  // o PS5 parou ou perdeu imagem até o PC de lá (Gerp, 2026-11-26)
+  assert.equal(foraDoModo(amostra({ manda: 0 })), 'fonte');
+  assert.equal(foraDoModo(amostra({ danos: 3 })), 'fonte');
+});
+
+test('a travada do PS5 que aparece na amostra seguinte também não reprova o modo', () => {
+  const { a, ev, passar } = auto();
+  a.comecarCom(16);
+  passar({}, 25);
+  for (let i = 0; i < 6; i++) { passar({ manda: 0 }); passar({ travadas: [{ ms: 2400 }, { ms: 2400 }, { ms: 2400 }] }); }
+  passar({}, 20);
+  assert.ok(!ev.some((t) => t.includes('piorou')), ev.join(' | '));
 });
 
 test('um soluço isolado não reprova o modo (era o caso do Turbo da TV às 16:53)', () => {

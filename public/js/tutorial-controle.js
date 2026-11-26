@@ -157,11 +157,12 @@ const PASSOS_TOQUE = [
 export class TutorialControle {
   // raiz: a camada do tutorial (dentro do #focus, que é o que vai para a tela cheia)
   // pad: o controle virtual; toqueRaiz: o controle de toque (para acender o botão da vez)
-  constructor({ raiz, pad, toqueRaiz, onFechou }) {
+  constructor({ raiz, pad, toqueRaiz, onFechou, onAbriu }) {
     this.raiz = raiz;
     this.pad = pad;
     this.toqueRaiz = toqueRaiz;
     this.onFechou = onFechou;
+    this.onAbriu = onAbriu;
     this.modo = null;
     this.i = 0;
     this.antes = 0;
@@ -184,11 +185,13 @@ export class TutorialControle {
     this.raiz.hidden = false;
     this.raiz.dataset.modo = modo;
     this.mostrar();
+    this.onAbriu?.(modo);
   }
 
   // concluiu: terminou ou pulou; false: o modo jogo acabou no meio
   fechar(concluiu) {
     if (!this.modo) return;
+    const onde = { passo: this.i + 1, de: this.passos?.length ?? null };
     clearTimeout(this.esperando);
     this.esperando = 0;
     this.modo = null;
@@ -196,7 +199,7 @@ export class TutorialControle {
     this.raiz.hidden = true;
     this.raiz.innerHTML = '';
     this.pad.treinar(null);
-    this.onFechou?.(concluiu);
+    this.onFechou?.(concluiu, onde);
   }
 
   // PC: P ou Esc pulam (o ponteiro preso não deixa clicar no botão). true: a tecla foi usada aqui

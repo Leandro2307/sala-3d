@@ -890,6 +890,8 @@ export class Ps5Nativo {
         // Erros da biblioteca: no console na hora; no relatório, juntos a cada 30 s (quadro corrompido
         // vem às centenas e empurrava o resto dos 300 eventos para fora)
         if (m.nivel === 'E') console.warn('[ps5]', m.texto);
+        // imagem que se perdeu entre o PS5 e este PC: quem joga longe não põe essas travadas na conta da conexão
+        if (/corrupt|Missing (unit|reference)|FEC failed|Failed to complete frame|could not flush|Takion dropping/i.test(m.texto)) this.danos = (this.danos || 0) + 1;
         const tipo = String(m.texto).replace(/[0-9]+/g, '#').slice(0, 80);
         this.avisos ??= new Map();
         this.avisos.set(tipo, (this.avisos.get(tipo) || 0) + 1);

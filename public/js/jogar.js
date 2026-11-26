@@ -28,7 +28,7 @@
 import { RTC } from './rtc.js';
 import { Controle } from './controle.js';
 import { TurboRecebe, TTL_MS, vidaDoCanal, LISO_PCT, LISO_MAX } from './turbo.js';
-import { TurboAuto, TurboVolta } from './turbo-auto.js';
+import { TurboAuto, TurboVolta, foraDoModo } from './turbo-auto.js';
 import { TesteJoga, MemoriaTeste, codecsDaqui } from './turbo-teste.js';
 import { PainelTeste, textoDoResultado } from './turbo-teste-painel.js';
 import { DiagJogo } from './jogo-diag.js';
@@ -1214,14 +1214,18 @@ function conferirPrevisto(resumo) {
   if (!p || !turboRecebe.ligado || document.hidden) return;
   const passou = performance.now() - p.desde;
   if (passou < 8000) return;
-  p.am.push({ atraso: resumo.atrasoMs, qps: resumo.fpsFinal, travadas: resumo.ritmo?.travadas?.length || 0, tremido: resumo.turbo?.viagemP90 != null ? resumo.turbo.viagemP90 - resumo.turbo.viagemMs : null });
+  // travadas da fonte (o PS5 perdendo imagem até o PC de lá, inclusive a que aparece na amostra seguinte) não são da conexão
+  const fonte = foraDoModo(resumo) === 'fonte' || (p.fonteAntes && resumo.ritmo?.travadas?.length > 0);
+  p.fonteAntes = foraDoModo(resumo) === 'fonte';
+  if (fonte) p.daFonte = (p.daFonte || 0) + (resumo.ritmo?.travadas?.length || 0);
+  p.am.push({ atraso: resumo.atrasoMs, qps: resumo.fpsFinal, travadas: fonte ? 0 : resumo.ritmo?.travadas?.length || 0, tremido: resumo.turbo?.viagemP90 != null ? resumo.turbo.viagemP90 - resumo.turbo.viagemMs : null });
   if (passou < 68_000) return;
   previsto = null;
   const med = (k) => { const v = p.am.map((a) => a[k]).filter((x) => x != null).sort((a, b) => a - b); return v.length ? Math.round(v[v.length >> 1] * 10) / 10 : null; };
   const realMin = Math.round((p.am.reduce((n, a) => n + a.travadas, 0) / (p.am.length / 30)) * 10) / 10;
   // bem pior que o previsto: na próxima entrada testa de novo
   if (realMin > Math.max(10, (p.travadasMin || 0) * 3)) { memoriaTeste.esquecer(p.quem); diagJogo.evento('teste da conexão: o jogo saiu pior que o previsto, testa de novo na próxima', { travadasMin: realMin }); }
-  diagJogo.evento('teste da conexão: previsto x real', { previsto: { atrasoMs: p.atrasoMs, travadasMin: p.travadasMin }, real: { atrasoMs: med('atraso'), qps: med('qps'), tremidoMs: med('tremido'), travadasMin: Math.round((p.am.reduce((n, a) => n + a.travadas, 0) / (p.am.length / 30)) * 10) / 10 } });
+  diagJogo.evento('teste da conexão: previsto x real', { previsto: { atrasoMs: p.atrasoMs, travadasMin: p.travadasMin }, real: { atrasoMs: med('atraso'), qps: med('qps'), tremidoMs: med('tremido'), travadasMin: realMin, travadasDaFonte: p.daFonte || 0 } });
 }
 // Entrar no turbo: com o Automático, primeiro o teste; sem ele (versão antiga lá, pulado, sem conexão), direto
 let entrando = false;
@@ -1497,7 +1501,7 @@ const tecladoPad = new TecladoPad({
   },
 });
 padVirtual.onErroTremor = (erro) => diagJogo.evento('o controle não aceitou o tremor', { erro, ...padVirtual.comoVibra() });
-const tutorial = new TutorialControle({ raiz: $('#tut-controle'), pad: padVirtual, toqueRaiz: $('#toque-jogo') });
+const tutorial = new TutorialControle({ raiz: $('#tut-controle'), pad: padVirtual, toqueRaiz: $('#toque-jogo'), onAbriu: (modo) => diagJogo.evento('tutorial aberto', { modo }), onFechou: (concluiu, onde) => diagJogo.evento(concluiu ? 'tutorial fechado (terminou ou pulou)' : 'tutorial fechado no meio (o jogo acabou)', onde) });
 const mapaPainel = new MapaTeclasPainel({
   raiz: $('#mapa-teclas'),
   onAbriu: () => tecladoPad.soltarTudo(),

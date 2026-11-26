@@ -35,7 +35,7 @@ import { MapaTeclasPainel, dicaTeclado, legendaBotoes, mapaTeclas } from './mapa
 import { ModoCarroTela } from './modo-carro.js';
 import { TutorialControle } from './tutorial-controle.js';
 import { TurboEnvio, TurboRecebe, TTL_MS, vidaDoCanal, LISO_PCT, LISO_MAX } from './turbo.js';
-import { TurboAuto, TurboVolta } from './turbo-auto.js';
+import { TurboAuto, TurboVolta, foraDoModo } from './turbo-auto.js';
 import { TesteEnvio, TesteJoga, MemoriaTeste, codecsDaqui } from './turbo-teste.js';
 import { PainelTeste, textoDoResultado } from './turbo-teste-painel.js';
 import { opcoesJogo, LISO_MS, PRESETS, PRESET_TV, ORDEM_AUTO, OPCOES_DO_PRESET, autoMostra, htmlPresets, marcarPresets, alturaDoMenu } from './jogo-opcoes.js';
@@ -3688,14 +3688,22 @@ function medidorQps() {
 const medePs5Manda = medidorQps();
 const medePs5Tela = medidorQps();
 // o desempenho do PS5 direto deste PC, em qps (a última medida, a cada 1 s)
-let ps5Agora = { manda: null, tela: null, lossless: null };
+let ps5Agora = { manda: null, tela: null, lossless: null, danos: 0 };
+let ps5DanosAntes = 0;
 setInterval(() => {
   const st = ps5Nativo.key ? ps5Nativo.fonte?.stats?.() : null;
   const sh = ps5Nativo.key && self()?.shares.get(ps5Nativo.key);
+  // quadros perdidos entre o PS5 e este PC nos últimos 3 s (a amostra de quem joga é de 2 s e chega depois)
+  const danosAgora = ps5Nativo.danos || 0;
+  ps5Nativo.danos = 0;
+  const danos = [ps5DanosAntes, ps5Agora.danos1 || 0, danosAgora];
+  ps5DanosAntes = ps5Agora.danos1 || 0;
   ps5Agora = {
     manda: medePs5Manda(st ? st.quadros : null),
     tela: medePs5Tela(st ? st.desenhados : null),
     lossless: null,
+    danos: danos[0] + danos[1] + danos[2],
+    danos1: danosAgora,
   };
   // o selo na própria tela do PS5 (modo jogo neste PC): o que o PS5 manda e o que aparece aqui
   const j = controle.jogo;
@@ -4013,14 +4021,18 @@ function conferirPrevisto(resumo) {
   if (!p || !turboRecebe.ligado || document.hidden) return;
   const passou = performance.now() - p.desde;
   if (passou < 8000) return;
-  p.am.push({ atraso: resumo.atrasoMs, qps: resumo.fpsFinal, travadas: resumo.ritmo?.travadas?.length || 0, tremido: resumo.turbo?.viagemP90 != null ? resumo.turbo.viagemP90 - resumo.turbo.viagemMs : null });
+  // travadas da fonte (o PS5 perdendo imagem até o PC de lá, inclusive a que aparece na amostra seguinte) não são da conexão
+  const fonte = foraDoModo(resumo) === 'fonte' || (p.fonteAntes && resumo.ritmo?.travadas?.length > 0);
+  p.fonteAntes = foraDoModo(resumo) === 'fonte';
+  if (fonte) p.daFonte = (p.daFonte || 0) + (resumo.ritmo?.travadas?.length || 0);
+  p.am.push({ atraso: resumo.atrasoMs, qps: resumo.fpsFinal, travadas: fonte ? 0 : resumo.ritmo?.travadas?.length || 0, tremido: resumo.turbo?.viagemP90 != null ? resumo.turbo.viagemP90 - resumo.turbo.viagemMs : null });
   if (passou < 68_000) return;
   previsto = null;
   const med = (k) => { const v = p.am.map((a) => a[k]).filter((x) => x != null).sort((a, b) => a - b); return v.length ? Math.round(v[v.length >> 1] * 10) / 10 : null; };
   const realMin = Math.round((p.am.reduce((n, a) => n + a.travadas, 0) / (p.am.length / 30)) * 10) / 10;
   // bem pior que o previsto: na próxima entrada testa de novo
   if (realMin > Math.max(10, (p.travadasMin || 0) * 3)) { memoriaTeste.esquecer(p.quem); diagJogo.evento('teste da conexão: o jogo saiu pior que o previsto, testa de novo na próxima', { travadasMin: realMin }); }
-  diagJogo.evento('teste da conexão: previsto x real', { previsto: { atrasoMs: p.atrasoMs, travadasMin: p.travadasMin }, real: { atrasoMs: med('atraso'), qps: med('qps'), tremidoMs: med('tremido'), travadasMin: Math.round((p.am.reduce((n, a) => n + a.travadas, 0) / (p.am.length / 30)) * 10) / 10 } });
+  diagJogo.evento('teste da conexão: previsto x real', { previsto: { atrasoMs: p.atrasoMs, travadasMin: p.travadasMin }, real: { atrasoMs: med('atraso'), qps: med('qps'), tremidoMs: med('tremido'), travadasMin: realMin, travadasDaFonte: p.daFonte || 0 } });
 }
 // Entrar no turbo: com o Automático, primeiro o teste; sem ele (versão antiga lá, pulado, sem conexão), direto
 let entrando = false;
@@ -4334,7 +4346,7 @@ async function amostrarJogo() {
         // no turbo, o que só se vê daqui (a banda do codificador, os quadros pulados, os quadros-chave)
         // vai junto: o relatório de quem joga explica sozinho uma queda de banda ou de quadros
         const tb = turbo && { bandaKbps: turbo.bandaKbps, pulados: turbo.pulados, puladosFila: turbo.puladosFila, trocasDeBanda: turbo.trocasDeBanda, filaLaMs: turbo.filaLaMs, chaves: turbo.chaves, chaveKB: turbo.chaveKB, chavesIgnoradas: turbo.chavesIgnoradas, som: turbo.som };
-        const ps5 = self()?.shares.get(key)?.ps5 ? { manda: ps5Agora.manda, lossless: null } : null;
+        const ps5 = self()?.shares.get(key)?.ps5 ? { manda: ps5Agora.manda, lossless: null, danos: ps5Agora.danos } : null;
         controle.emitir('controle-volta', { key, para: id, ev: { t: 'jogo-envio', quando: t, captura, enviado, codificado, altura, kbps, limite, motivo, codificador, placa, imagemBaixa, codMs, filaMs, turbo: tb || null, ps5, sonda: resumo.sonda ?? null, roteador: resumo.pc?.roteador ?? null } });
       }
     }
@@ -5137,7 +5149,7 @@ const tremoresAqui = { n: 0, como: {}, primeiro: false, desde: 0 };
 padVirtual.onErroTremor = (erro) => diagJogo.evento('o controle não aceitou o tremor', { erro, ...padVirtual.comoVibra() });
 // Tutorial do controle (tutorial-controle.js): toda vez que entra no modo jogo numa tela de PS5.
 // Aberto, o teclado e o mouse ficam todos com ele: nada vai para o jogo (P ou Esc pulam).
-const tutorialControle = new TutorialControle({ raiz: $('#tut-controle'), pad: padVirtual, toqueRaiz: $('#toque-jogo') });
+const tutorialControle = new TutorialControle({ raiz: $('#tut-controle'), pad: padVirtual, toqueRaiz: $('#toque-jogo'), onAbriu: (modo) => diagJogo.evento('tutorial aberto', { modo }), onFechou: (concluiu, onde) => diagJogo.evento(concluiu ? 'tutorial fechado (terminou ou pulou)' : 'tutorial fechado no meio (o jogo acabou)', onde) });
 // Mapear teclas (mapa-teclas.js): pelas Opções do modo jogo. Aberto, o teclado e o mouse são do painel
 // (nada vai para o jogo) e o que o teclado segurava no controle solta.
 const mapaPainel = new MapaTeclasPainel({

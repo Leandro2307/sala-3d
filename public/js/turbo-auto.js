@@ -59,6 +59,10 @@ export function foraDoModo(r) {
   if (r.turbo?.silencioMaxMs >= FORA_SILENCIO_MS) return 'caminho';
   if (r.somWebrtc?.inventadoPct >= 10) return 'caminho'; // o som do WebRTC também faltou: foi o caminho
   const manda = r.la?.ps5?.manda;
+  // a imagem se perdeu entre o PS5 e o PC de lá (quadro corrompido, FEC; 2026-11-26: duas travadas de 2,4 s
+  // do Gerp com o PS5 mandando 0 qps fizeram o teste e o automático culparem a conexão)
+  if (r.la?.ps5?.danos > 0) return 'fonte';
+  if (r.la?.ps5 && manda === 0) return 'fonte';
   if (manda > 0) {
     const ritmo = manda > 45 ? 60 : 30;
     if (Math.abs(manda - ritmo) / ritmo > FORA_FONTE) return 'fonte';
@@ -180,6 +184,8 @@ export class TurboAuto {
       return;
     }
     const a = resumirAmostra(r);
+    // a travada da fonte só aparece quando o quadro volta: na amostra seguinte
+    if (!a.fora && this.ultima?.fora === 'fonte' && a.travadas) a.fora = 'fonte';
     // o caminho trocou, ou o PS5 passou de repassado a codificado lá (ou o contrário): o que se mediu até aqui
     // era outra coisa
     const u = this.ultima;

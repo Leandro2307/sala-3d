@@ -1152,7 +1152,7 @@ function voltaDoControle(raw) {
         ? Object.fromEntries(['bandaKbps', 'pulados', 'puladosFila', 'trocasDeBanda', 'filaLaMs', 'chaves', 'chaveKB', 'chavesIgnoradas'].map((k) => [k, num(e.turbo[k])]))
         : null,
       // PS5 direto: os qps que o PS5 manda e, com o Lossless no PC de lá, os qps da câmera do OBS
-      ps5: e.ps5 && typeof e.ps5 === 'object' ? { manda: num(e.ps5.manda), lossless: num(e.ps5.lossless) } : null,
+      ps5: e.ps5 && typeof e.ps5 === 'object' ? { manda: num(e.ps5.manda), lossless: num(e.ps5.lossless), danos: num(e.ps5.danos) } : null,
       // a sonda e o ping do roteador de lá (culpa.js: de quem é a culpa)
       sonda: e.sonda && typeof e.sonda === 'object' ? Object.fromEntries(['n', 'p50', 'max', 'base', 'picos', 'falhas'].map((k) => [k, num(e.sonda[k])])) : null,
       roteador: e.roteador && typeof e.roteador === 'object' ? Object.fromEntries(['n', 'p50', 'max', 'falhas'].map((k) => [k, num(e.roteador[k])])) : null,
