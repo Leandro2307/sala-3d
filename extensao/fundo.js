@@ -1140,3 +1140,81 @@ chrome.runtime.onInstalled.addListener(async () => {
     chrome.scripting.executeScript({ target: { tabId: t.id }, files: ['conteudo.js'] }).catch(() => {});
   }
 });
+
+// ------------------------------------------------------------------ vigia da aba da sala
+// O Chrome às vezes derruba a aba da sala ("Ah, não!" STATUS_ILLEGAL_INSTRUCTION, defeito dele nos
+// canais de dados) e o PC fica fora até alguém apertar Recarregar. A cada 5 min a extensão olha as
+// abas: a que está dentro de uma sala (body.na-sala) fica anotada com o endereço (?sala=...); se
+// uma anotada não responde mais (aba caída), olha de novo em 20 s e, caída ainda, abre o mesmo
+// endereço com ?entrar=1 — a página entra sozinha com o nome guardado. Se a reentrada parar no
+// saguão (servidor fora, por exemplo), tenta de novo na próxima volta; quem saiu da sala por
+// conta própria deixa de ser vigiado.
+const VIGIA = 'vigia-sala';
+const VIGIA_MIN = 5;
+
+async function ligarVigia() {
+  if (!(await chrome.alarms.get(VIGIA).catch(() => null))) {
+    chrome.alarms.create(VIGIA, { delayInMinutes: VIGIA_MIN, periodInMinutes: VIGIA_MIN });
+  }
+}
+ligarVigia();
+chrome.runtime.onStartup.addListener(ligarVigia);
+chrome.alarms.onAlarm.addListener((a) => {
+  if (a.name === VIGIA) vigiarSalas().catch(() => {});
+});
+
+// null = aba caída (ou sem acesso); senão, o que a página mostra agora
+async function olharAba(id) {
+  try {
+    const [r] = await chrome.scripting.executeScript({
+      target: { tabId: id },
+      func: () => ({
+        sala: !!document.querySelector('meta[name="sala3d"]'),
+        dentro: !!document.body?.classList.contains('na-sala'),
+        url: location.href,
+      }),
+    });
+    return r?.result || null;
+  } catch {
+    return null;
+  }
+}
+
+async function anotarReentrada(registro) {
+  const { reentradas = [] } = await chrome.storage.local.get('reentradas').catch(() => ({}));
+  reentradas.push(registro);
+  chrome.storage.local.set({ reentradas: reentradas.slice(-30) }).catch(() => {});
+}
+
+async function vigiarSalas() {
+  const { vigiadas = {} } = await chrome.storage.session.get('vigiadas').catch(() => ({}));
+  const abas = await chrome.tabs.query({});
+  const existe = new Set(abas.map((t) => t.id));
+  for (const id of Object.keys(vigiadas)) if (!existe.has(Number(id))) delete vigiadas[id];
+  const caidas = [];
+  for (const t of abas) {
+    if (t.discarded) continue;
+    const v = vigiadas[t.id];
+    const r = await olharAba(t.id);
+    if (r?.sala && r.dentro) vigiadas[t.id] = { url: r.url };
+    else if (!v) continue;
+    else if (!r) caidas.push(t.id);
+    else if (r.sala && v.reentrou) caidas.push(t.id); // reentrou e parou no saguão: tenta de novo
+    else delete vigiadas[t.id]; // saiu da sala ou foi para outro site
+  }
+  await chrome.storage.session.set({ vigiadas }).catch(() => {});
+  if (!caidas.length) return;
+
+  await new Promise((ok) => setTimeout(ok, 20_000)); // pode estar só carregando: confirma
+  for (const id of caidas) {
+    const r = await olharAba(id);
+    if (r?.dentro) continue;
+    const url = new URL(vigiadas[id].url);
+    url.searchParams.set('entrar', '1');
+    url.searchParams.delete('compartilhar');
+    vigiadas[id] = { ...vigiadas[id], reentrou: Date.now() };
+    await chrome.tabs.update(id, { url: url.href }).catch(() => {});
+    anotarReentrada({ quando: new Date().toISOString(), aba: id, url: url.href, estava: r ? 'saguao' : 'caida' });
+  }
+  await chrome.storage.session.set({ vigiadas }).catch(() => {});
+}
