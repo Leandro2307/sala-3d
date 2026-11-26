@@ -863,6 +863,16 @@ function barrado(key) {
   const t = acharTela(key);
   return !!t && !podeJogarLan(maquinaDaTela(t.sh));
 }
+// De graça: enquanto o diagnóstico (teste da conexão) ou o tutorial do controle estão na tela, nada vai ao jogo,
+// e os 2 min só começam quando terminam ou são pulados (o servidor não conta o 'modo' nem o 'vivo')
+function seguraNoPreparo(key, ev) {
+  if (!st.lan || meuTesteLan || ev?.t === 'modo' || ev?.t === 'vivo') return false;
+  if (!testeJoga.testando && !tutorial.ativo) return false;
+  const t = acharTela(key);
+  if (!t) return false;
+  const m = maquinaDaTela(t.sh);
+  return lanLivre(m) && !idsDaVez(m).includes(st.selfId);
+}
 function tirarDoJogo() {
   if (tirandoDoJogo) return; // desligar manda comandos (soltar tudo), que voltam aqui
   tirandoDoJogo = true;
@@ -921,11 +931,12 @@ addEventListener('storage', (e) => {
 const controle = new Controle({
   emitir: (ev, data, volatil) => {
     if (ev === 'controle' && !tirandoDoJogo && barrado(data.key)) return void pedirAluguel();
+    if (ev === 'controle' && seguraNoPreparo(data.key, data.ev)) return;
     if (ev === 'controle' && rtc?.mandarControle(String(data.key).split('~')[0], { c: data })) return;
     return volatil ? socket?.volatile.emit(ev, data) : socket?.emit(ev, data);
   },
   direto: (key) => !!rtc?.canalControle(String(key).split('~')[0]),
-  movimento: (key, total) => (barrado(key) ? (pedirAluguel(), true) : !!rtc?.mandarMovimento(String(key).split('~')[0], { m: { key, ...total } })),
+  movimento: (key, total) => (barrado(key) ? (pedirAluguel(), true) : seguraNoPreparo(key, { t: 'mouse' }) || !!rtc?.mandarMovimento(String(key).split('~')[0], { m: { key, ...total } })),
   toast,
   onExtensao: () => {},
   minha: () => null,

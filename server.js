@@ -940,6 +940,14 @@ function podeJogarLan(room, user, donoDaTela, tela) {
   if (atual) return !!user.conta && user.conta === atual.conta;
   return !!user.conta && !lan.teste(room.id, user.conta, user.ip).acabou;
 }
+// Só jogar de verdade começa o teste: entrar no modo jogo ('modo'), o "ainda estou aqui" ('vivo', a cada
+// 0,5 s) e o controle todo solto não. Quem joga também segura os comandos enquanto o diagnóstico e o
+// tutorial estão abertos (jogar.js e main.js seguraNoPreparo): os 2 min começam depois deles.
+function contaNoTesteLan(ev) {
+  if (!ev || ev.t === 'modo' || ev.t === 'vivo') return false;
+  if (ev.t === 'pad') return !!(ev.b || ev.tp || ev.m || ['lx', 'ly', 'rx', 'ry', 'lt', 'rt'].some((k) => ev[k]));
+  return true;
+}
 // o primeiro comando ao jogo numa máquina livre começa os 2 min do teste grátis desta pessoa; no
 // fim, a sala fica sabendo (a tela de quem joga deixa de aceitar e abre o aluguel para ela)
 function comecarTesteLan(room, user, tela) {
@@ -2111,7 +2119,7 @@ function attachSockets(io) {
       if (++ctrlConta > (repete ? 120 : 240)) return;
       const ev = eventoDeControle(msg.ev);
       if (!ev) return;
-      if (ev.t !== 'modo' && user !== dono) comecarTesteLan(room, user, dono.shares.get(msg.key));
+      if (contaNoTesteLan(ev) && user !== dono) comecarTesteLan(room, user, dono.shares.get(msg.key));
       // quem mexeu em cada tela, e quando: só essa pessoa recebe a volta do controle (controle-volta)
       user.controlou ??= new Map();
       user.controlou.set(msg.key, agora);

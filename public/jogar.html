@@ -57,7 +57,10 @@
   body.touch .focus-actions { flex: 1 1 100%; flex-wrap: wrap; gap: 6px; }
   body.touch .jg-vol, body.touch #focus-full { display: none; }
   body.touch #jg-jogar { font-size: 17px; padding: 14px 24px; max-width: 92vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; bottom: max(7%, env(safe-area-inset-bottom)); }
-  body.touch #toasts { left: 8px; right: 8px; bottom: 8px; }
+  /* os avisos nunca pegam o toque (o botão de um aviso pega sozinho, ver toast); no celular ficam em cima à
+     direita, estreitos: embaixo estão o analógico e os botões do controle de toque */
+  #toasts { pointer-events: none; }
+  body.touch #toasts { top: max(8px, env(safe-area-inset-top)); bottom: auto; left: auto; right: max(8px, env(safe-area-inset-right)); width: min(300px, 42vw); justify-items: end; }
   body.touch #entrada form { padding: 20px; }
 </style>
 </head>

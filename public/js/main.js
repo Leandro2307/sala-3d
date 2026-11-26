@@ -2778,6 +2778,7 @@ const controle = new Controle({
   emitir: (ev, data, volatil) => {
     // lan house: o teste grátis acabou nesta máquina livre: nada vai, e abre o aluguel
     if (ev === 'controle' && barradoNoTesteLan(data.key)) return void pedirAluguelTeste();
+    if (ev === 'controle' && seguraNoPreparo(data.key, data.ev)) return;
     if (ev === 'controle' && rtc?.mandarControle(String(data.key).split('~')[0], { c: data })) return;
     if (ev === 'controle-volta' && rtc?.mandarControle(data.para, { v: { key: data.key, ev: data.ev } })) return;
     return volatil ? socket?.volatile.emit(ev, data) : socket?.emit(ev, data);
@@ -2785,7 +2786,7 @@ const controle = new Controle({
   // o canal com o dono da tela está aberto (o modo jogo manda o mouse mais vezes por ele)
   direto: (key) => !!rtc?.canalControle(String(key).split('~')[0]),
   // modo jogo: o total andado pelo mouse, no canal sem ordem (ver rtc.canalMovimento e receberDireto)
-  movimento: (key, total) => (barradoNoTesteLan(key) ? (pedirAluguelTeste(), true) : !!rtc?.mandarMovimento(String(key).split('~')[0], { m: { key, ...total } })),
+  movimento: (key, total) => (barradoNoTesteLan(key) ? (pedirAluguelTeste(), true) : seguraNoPreparo(key, { t: 'mouse' }) || !!rtc?.mandarMovimento(String(key).split('~')[0], { m: { key, ...total } })),
   semPonteiro: isTouch,
   // as minhas telas: o evento vai direto para a extensão, sem ida e volta pelo servidor
   minha: (key) => self()?.shares.get(key) ?? null,
@@ -2807,7 +2808,7 @@ function receberControle(msg) {
   // WebRTC não passa por ele.
   if (msg.deId && msg.deId !== state.selfId && !podeJogarLan(maquinaDaTela(sh), msg.deId)) return;
   // máquina livre: o primeiro comando de quem joga (não o "entrar no modo jogo") começa o teste grátis
-  if (msg.deId && msg.deId !== state.selfId && sh?.controle && state.lan && lanLivre(maquinaDaTela(sh)) && msg.ev?.t !== 'modo') avisarTesteLan(msg.deId, msg.key);
+  if (msg.deId && msg.deId !== state.selfId && sh?.controle && state.lan && lanLivre(maquinaDaTela(sh)) && contaNoTesteLan(msg.ev)) avisarTesteLan(msg.deId, msg.key);
   if (sh?.controle) turboDaTela(msg.key);
   controle.receber(sh, msg.deId === state.selfId ? { ...msg, deId: null } : msg);
 }
@@ -6069,6 +6070,23 @@ function avisarTesteLan(id, key) {
   if (state.lan?.teste?.[id] || Date.now() - (pediuTesteLan.get(id) || 0) < 3000) return;
   pediuTesteLan.set(id, Date.now());
   socket?.emit('lan-teste', { id, key });
+}
+// Só jogar de verdade começa o teste (o mesmo do servidor, contaNoTesteLan): entrar no modo jogo, o "ainda
+// estou aqui" (a cada 0,5 s) e o controle todo solto não
+function contaNoTesteLan(ev) {
+  if (!ev || ev.t === 'modo' || ev.t === 'vivo') return false;
+  if (ev.t === 'pad') return !!(ev.b || ev.tp || ev.m || ['lx', 'ly', 'rx', 'ry', 'lt', 'rt'].some((k) => ev[k]));
+  return true;
+}
+// Quem joga de graça: enquanto o diagnóstico (teste da conexão) ou o tutorial do controle estão na tela, nada
+// vai ao jogo, e os 2 min só começam quando terminam ou são pulados
+function seguraNoPreparo(key, ev) {
+  if (!state.lan || state.lan.teste?.[state.selfId] || ev?.t === 'modo' || ev?.t === 'vivo') return false;
+  if (!testeJoga.testando && !tutorialControle.ativo) return false;
+  const dono = String(key).split('~')[0];
+  if (dono === state.selfId) return false;
+  const sh = state.users.get(dono)?.shares.get(key);
+  return !!sh && lanLivre(maquinaDaTela(sh)) && !idsDaVez(maquinaDaTela(sh)).includes(state.selfId);
 }
 // Quem joga: o teste grátis acabou e a máquina continua livre (sem ser a minha vez): o comando não
 // sai, e abre o aluguel.
