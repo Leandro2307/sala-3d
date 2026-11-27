@@ -195,6 +195,15 @@ function preferirCodecDeJogo(transceiver, seguro) {
 // esperava sem ele ter o número de stream (sid). Um canal fechado ainda em 'connecting' fica em
 // 'closing' para sempre (testado no 158). Ainda abrindo: fica mudo agora (send não faz nada, para um
 // "open" antigo não mandar o pedido de quem já trocou de canal) e fecha quando abrir.
+//
+// A causa de verdade (27/11, quatro travamentos em 47 min, todos no mesmo endereço): o transporte dos
+// canais só nascia quando o primeiro canal era pedido (teste da conexão, turbo, controle), numa
+// renegociação com a conexão já ligada. O Chrome cria o transporte em cima do DTLS pronto, avisa na hora
+// que dá para mandar e o canal que ainda espera o número quebra a aba. Por isso a primeira oferta de
+// toda conexão já leva um canal combinado dos dois lados (negotiated, número fixo: não manda pedido de
+// abertura nem espera número). O transporte nasce antes de ligar, como em qualquer conexão com canal
+// desde o começo, e os canais de depois entram num transporte que já existe.
+const CANAL_BASE_ID = 1000;
 function fecharCanal(c) {
   if (!c) return;
   if (c.readyState === 'connecting') {
@@ -1482,6 +1491,12 @@ export class RTC {
           if (!/^m=/m.test(oferta.sdp || '')) return void (peer.renegociar = true);
           // só seções encerradas (a única tela saiu do ar, numa conexão sem voz): um canal vazio mantém a oferta válida
           if (!peer.base || peer.base.readyState === 'closed') peer.base = pc.createDataChannel('base');
+          oferta = await pc.createOffer();
+          if (pc.signalingState !== 'stable') return;
+        }
+        // A primeira oferta da conexão já leva o transporte dos canais de dados (ver CANAL_BASE_ID)
+        if (!pc.currentLocalDescription && !pc.currentRemoteDescription && !peer.base && !/^m=application/m.test(oferta.sdp || '')) {
+          peer.base = pc.createDataChannel('base', { negotiated: true, id: CANAL_BASE_ID });
           oferta = await pc.createOffer();
           if (pc.signalingState !== 'stable') return;
         }
