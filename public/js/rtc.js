@@ -1868,6 +1868,42 @@ export class RTC {
     return true;
   }
 
+  // Defeito do Chrome 158 (27/11, reproduzido com duas RTCPeerConnection puras): o lado "polite" que já
+  // aplicou a primeira oferta (vídeo e depois o canal de dados) e recebe a do outro com o canal em outro
+  // lugar (só canais: quem joga, logo depois de refazer) desfaz a sua e a resposta falha ("Failed to
+  // start SCTP transport"). Nada mais negocia: o outro lado espera a resposta e a tela fica preta até o
+  // vigia refazer tudo (uns 40 s). Acontecia toda vez que o modo jogo refazia a conexão (TURN ou direto),
+  // porque os dois lados oferecem ao mesmo tempo. Como essa conexão ainda não negociou nada, troca por
+  // uma nova, na mesma época e sem avisar ninguém, e ela responde à oferta que chegou.
+  trocarConexao(id) {
+    const velho = this.peers.get(id);
+    if (!velho) return null;
+    console.warn(`[rtc] conexão com ${id} trocada: colisão na primeira oferta`);
+    const herdar = {
+      epoca: velho.epoca,
+      refeitaEm: velho.refeitaEm,
+      refeitas: velho.refeitas,
+      ouveMic: velho.ouveMic,
+      interesse: velho.interesse,
+      hz: velho.hz,
+      semPiso: velho.semPiso,
+      balanceado: velho.balanceado,
+      linhasJogo: velho.linhasJogo,
+      rapido: velho.rapido,
+      linhasPedidas: velho.linhasPedidas,
+      recuoCodec: velho.recuoCodec,
+      reiniciosIce: velho.reiniciosIce,
+      turnEscolhido: velho.turnEscolhido,
+      diretoPrimeiro: velho.soStun,
+      turnDesde: velho.turnDesde,
+    };
+    this.peers.delete(id);
+    try { velho.pc.close(); } catch { /* já fechada */ }
+    const peer = this.getPeer(id, herdar);
+    this.onRefeita?.(id);
+    return peer;
+  }
+
   async handleSignal(from, { description, candidate, interesse, interesse2, hz, voz, refazer, caminho, e }) {
     if (caminho) {
       const p = this.peers.get(from);
@@ -1887,6 +1923,12 @@ export class RTC {
       // a outra pessoa já refez e o aviso se perdeu: refaz também e segue com a conexão nova
       this.refazer(from, 'época nova', e);
       return this.handleSignal(from, { description, candidate, e });
+    }
+    // colisão na primeira oferta, do lado que cede: desfazer a minha quebra o SCTP (ver trocarConexao)
+    if (description?.type === 'offer' && peer.polite && peer.pc.signalingState === 'have-local-offer'
+      && !peer.pc.currentRemoteDescription && /^m=application/m.test(peer.pc.localDescription?.sdp || '')
+      && this.trocarConexao(from)) {
+      return this.handleSignal(from, { description, e });
     }
     const { pc } = peer;
     try {
