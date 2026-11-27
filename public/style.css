@@ -4877,7 +4877,8 @@ body.touch :is(.hk-lista, #help-extra, #help-mais-btn) { display: none !importan
   font: 800 14px/1 'Plus Jakarta Sans', system-ui, sans-serif;
   white-space: nowrap;
   animation: aviso-entra .12s ease-out;
-  transition: left .1s linear, top .1s linear;
+  /* a posição chega a cada ~40 ms (os recortes do avisos-botoes-worker.js): desliza entre uma e outra */
+  transition: left 45ms linear, top 45ms linear;
 }
 /* o mouse desenhado (clique esquerdo/direito/rodinha aceso, ou as setas do R de mexer a câmera) */
 #jogo-avisos kbd svg { display: block; height: 70%; width: auto; max-width: 86%; }

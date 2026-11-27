@@ -77,3 +77,22 @@ test('acha o □ no anel vazado, e anel sem símbolo não é aviso', () => {
   }
   assert.deepEqual(detectar(vazio), []);
 });
+
+// o aviso de contorno preto (△ sobre a pedra, ✕ cinza sobre o bege): o fundo claro em volta não o derruba
+function contornado(W, H, cx, cy, r, segs, disco, fundo, e = 0.15) {
+  const data = new Uint8ClampedArray(W * H * 4);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const u = (x + 0.5 - cx) / r, w = (y + 0.5 - cy) / r, d = Math.hypot(u, w);
+    let c = fundo;
+    if (d <= 1.12) c = d > 1 ? [20, 20, 20] : segs.some((s) => distSeg(u, w, ...s) <= e) ? [25, 25, 25] : [disco, disco, disco];
+    data.set([...c, 255], (y * W + x) * 4);
+  }
+  return { width: W, height: H, data };
+}
+test('acha o aviso de contorno preto sobre fundo claro, branco ou cinza', () => {
+  for (const r of [8, 10, 12]) {
+    assert.equal(detectar(contornado(320, 180, 100, 90, r, TRI, 240, [205, 200, 195], 0.13))[0]?.simbolo, 'triangulo', `△ branco, raio ${r}`);
+    assert.equal(detectar(contornado(320, 180, 100, 90, r, XIS, 105, [215, 190, 165]))[0]?.simbolo, 'xis', `✕ cinza, raio ${r}`);
+  }
+  assert.deepEqual(detectar(contornado(320, 180, 100, 90, 10, [], 240, [205, 200, 195])), []);
+});

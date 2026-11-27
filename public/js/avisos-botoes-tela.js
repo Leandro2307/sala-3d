@@ -5,10 +5,14 @@
 // De onde vem o quadro: no modo turbo, do próprio decodificador (turbo.js chama espiar() com cada quadro e
 // a gente clona um de vez em quando); no vídeo normal, um VideoFrame tirado do <video>. Um quadro por vez
 // no worker, no máximo a cada INTERVALO_MS: a tecla aparece ~0,5 s depois do ícone (2 análises seguidas).
+// Com tecla na tela, entre uma análise e outra vai um quadro a cada SEGUIR_MS só para o worker olhar um
+// recorte pequeno em volta de cada aviso: a tecla acompanha o ícone quando a câmera mexe (e desliza entre as
+// posições, no style.css) sem pesar como a análise inteira.
 
 import { visiveis, nomeEntrada, mapaTeclas } from './mapa-teclas.js';
 
 const INTERVALO_MS = 250; // 150 pesava no PC com placa fraca (ver avisos-botoes-worker.js)
+const SEGUIR_MS = 40;
 // a cor de cada símbolo, a mesma da legenda do PS5 (✕ azul, ○ vermelho, □ rosa, △ verde)
 const COR = { b0: '#93c5fd', b1: '#fca5a5', b2: '#f9a8d4', b3: '#6ee7b7', andar: '#e5e7eb', olhar: '#e5e7eb', b4: '#e5e7eb', b5: '#e5e7eb', b6: '#e5e7eb', b7: '#e5e7eb' };
 
@@ -73,6 +77,7 @@ export class AvisosBotoes {
     this.worker = null;
     this.ocupado = false;
     this.enviadoEm = 0;
+    this.completaEm = 0;
     this.seq = 0;
     this.avisos = [];
     this.falhou = false;
@@ -84,7 +89,7 @@ export class AvisosBotoes {
     if (sim === this.ligado) return;
     this.ligado = sim;
     if (sim) {
-      this.relogio = setInterval(() => this.doVideo(), INTERVALO_MS);
+      this.relogio = setInterval(() => this.doVideo(), SEGUIR_MS);
     } else {
       clearInterval(this.relogio);
       this.worker?.postMessage({ limpar: true });
@@ -105,9 +110,10 @@ export class AvisosBotoes {
     this.worker.onmessage = ({ data }) => {
       this.ocupado = false;
       if (data.erro) return void console.warn('[avisos]', data.erro);
-      this.msAnalise = data.ms;
       if (!this.ligado) return;
       this.mostrar(data.avisos);
+      if (data.seguir) return;
+      this.msAnalise = data.ms;
       this.vistoCarro = data.carro ? this.vistoCarro + 1 : 0;
       if (this.vistoCarro === 2) this.onCarro();
     };
@@ -120,24 +126,30 @@ export class AvisosBotoes {
     return this.worker;
   }
 
-  // é hora de mandar outro quadro?
+  // é hora de mandar outro quadro? 'tudo' (a análise inteira), 'seguir' (só os recortes dos avisos) ou null
   quer() {
-    return this.ligado && !this.ocupado && performance.now() - this.enviadoEm >= INTERVALO_MS;
+    if (!this.ligado || this.ocupado) return null;
+    const agora = performance.now();
+    if (agora - this.completaEm >= INTERVALO_MS) return 'tudo';
+    return this.avisos.length && agora - this.enviadoEm >= SEGUIR_MS ? 'seguir' : null;
   }
 
-  enviar(quadro) {
+  enviar(quadro, tipo) {
     const w = this.abrirWorker();
     if (!w) return void quadro.close?.();
     this.ocupado = true;
     this.enviadoEm = performance.now();
+    if (tipo === 'seguir') return void w.postMessage({ id: ++this.seq, quadro, seguir: true }, [quadro]);
+    this.completaEm = this.enviadoEm;
     w.postMessage({ id: ++this.seq, quadro, carro: !!this.querCarro() }, [quadro]);
   }
 
   // o turbo.js chama com cada quadro desenhado (que ele fecha logo depois: aqui vai uma cópia)
   espiar(frame) {
-    if (!this.quer()) return;
+    const tipo = this.quer();
+    if (!tipo) return;
     try {
-      this.enviar(frame.clone());
+      this.enviar(frame.clone(), tipo);
     } catch {
       this.ocupado = false;
     }
@@ -146,15 +158,16 @@ export class AvisosBotoes {
   // sem o turbo à vista, o quadro vem do <video>
   doVideo() {
     if (this.ocupado && performance.now() - this.enviadoEm > 2000) this.ocupado = false; // resposta perdida
-    if (this.telaTurbo() || !this.quer()) return;
+    const tipo = this.telaTurbo() ? null : this.quer();
+    if (!tipo) return;
     const v = this.video;
     if (v.readyState < 2 || !v.videoWidth) return;
     try {
-      this.enviar(new VideoFrame(v));
+      this.enviar(new VideoFrame(v), tipo);
     } catch {
       this.ocupado = true;
       this.enviadoEm = performance.now();
-      createImageBitmap(v).then((b) => { this.ocupado = false; if (this.ligado) this.enviar(b); else b.close(); }, () => { this.ocupado = false; });
+      createImageBitmap(v).then((b) => { this.ocupado = false; if (this.ligado) this.enviar(b, tipo); else b.close(); }, () => { this.ocupado = false; });
     }
   }
 

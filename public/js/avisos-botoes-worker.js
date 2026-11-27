@@ -13,6 +13,32 @@ const LARGURA = 960;
 let tela = null, ctx = null;
 const rastreio = new Rastreio();
 
+// Entre uma análise e outra (a cada ~40 ms, enquanto há aviso na tela): para cada aviso, só um recorte de
+// ~8 raios em volta dele, na mesma escala da análise, procurado de novo; o mesmo símbolo achado mais perto
+// leva o aviso para lá. Recorte pequeno: pouco para desenhar e trazer da placa.
+let telaR = null, ctxR = null;
+function seguir(q, k, w, h) {
+  for (const it of rastreio.visiveis()) {
+    const cx = it.x * w, cy = it.y * h, meio = Math.max(20, Math.round(it.r * h * 4));
+    const x0 = Math.max(0, Math.round(cx - meio)), y0 = Math.max(0, Math.round(cy - meio));
+    const lw = Math.min(w, Math.round(cx + meio)) - x0, lh = Math.min(h, Math.round(cy + meio)) - y0;
+    if (lw < 12 || lh < 12) continue;
+    if (!telaR || telaR.width < lw || telaR.height < lh) {
+      telaR = new OffscreenCanvas(Math.max(lw, telaR?.width || 0), Math.max(lh, telaR?.height || 0));
+      ctxR = telaR.getContext('2d', { alpha: false });
+    }
+    ctxR.drawImage(q, x0 / k, y0 / k, lw / k, lh / k, 0, 0, lw, lh);
+    const achados = detectar(ctxR.getImageData(0, 0, lw, lh));
+    let par = null, dist = Infinity;
+    for (const a of achados) {
+      if (a.simbolo !== it.simbolo) continue;
+      const d = Math.hypot(x0 + a.x * lw - cx, y0 + a.y * lh - cy);
+      if (d < dist) { par = a; dist = d; }
+    }
+    if (par) rastreio.mover(it, (x0 + par.x * lw) / w, (y0 + par.y * lh) / h);
+  }
+}
+
 self.onmessage = ({ data }) => {
   if (data.limpar) {
     rastreio.limpar();
@@ -27,6 +53,14 @@ self.onmessage = ({ data }) => {
     if (!tela || tela.width !== w || tela.height !== h) {
       tela = new OffscreenCanvas(w, h);
       ctx = tela.getContext('2d', { alpha: false });
+    }
+    if (data.seguir) {
+      // só os recortes em volta dos avisos já na tela (o ícone acompanha a câmera sem a análise inteira)
+      const t = performance.now();
+      seguir(q, k, w, h);
+      q.close?.();
+      self.postMessage({ id: data.id, avisos: rastreio.visiveis(), seguir: true, ms: performance.now() - t });
+      return;
     }
     ctx.drawImage(q, 0, 0, w, h);
     q.close?.();

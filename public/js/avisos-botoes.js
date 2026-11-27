@@ -10,7 +10,7 @@
 // farol e letra de texto caem no (3) ou no (4).
 
 // o R e o L no círculo são os analógicos (mexer a câmera / andar), não o afundar: no teclado, o mouse e o WASD
-export const SIMBOLOS = { xis: 'b0', bola: 'b1', quadrado: 'b2', triangulo: 'b3', L: 'andar', R: 'olhar', L1: 'b4', R1: 'b5', L2: 'b6', R2: 'b7' };
+export const SIMBOLOS = { xis: 'b0', bola: 'b1', quadrado: 'b2', triangulo: 'b3', L: 'andar', R: 'olhar', L1: 'b4', R1: 'b5', L2: 'b6', R2: 'b7', R3: 'b11' };
 
 const N = 12; // a grade do símbolo
 const LADO = 0.8; // a grade cobre [-LADO, LADO] × raio em volta do centro
@@ -85,12 +85,29 @@ const MEDIDOS = {
   ],
   triangulo: ['610026610016100069950001000399993000001795697100004971289400028930049810169600017950399301113992799777778996699999999995223333333322610000000015'],
   // o ○ grande (anel escuro grosso com o miolo branco): sem ele saía como o □ grande
-  bola: ['721134421048204799986104048976689720288411137950596100003882793000001793793000001793694000002882388300015961159864479820115899997302411356642027'],
+  bola: ['721134421048204799986104048976689720288411137950596100003882793000001793793000001793694000002882388300015961159864479820115899997302411356642027',
+    // o ○ do disco cinza (~100) de "Soltar" no menu de armas: anel escuro com o miolo cinza
+    '621367875213215898899731048853236972179410002695387100000397496100000287386100000387288300001596059731124883126987779851412589987411841124431125'],
   // o □ grande do aviso de segurar (entrar no carro), traço grosso quase até a borda
-  quadrado: ['720000010028268788888852089999999960188222224960188000003960188000003960088000003970088000003960088322224960089999999960168888888842610000000028'],
+  quadrado: ['720000010028268788888852089999999960188222224960188000003960188000003960088000003970088000003960088322224960089999999960168888888842610000000028',
+    // o □ preto no disco cinza de contorno preto ("Zombar")
+    '562100000146533333333333269999999982069777667982069311112782069200001782179200001782069200001782069300001782069644445882169999999982346666666652'],
   // o L de empurrar o analógico (com o tracinho e o arco do lado para onde empurrar)
   L: ['730000000027300010000002000143000000000287100022000297100067000297100179000297100179000298321156000289884111000156663000200011110002730000000026'],
   R: ['400000000016000111100001000588862000001798896100001793498100001798896000000798992000001794793000000782397100000341144100100000000002610000000027'],
+  // R3 (afundar o analógico direito: "Examinar", o R3 do menu de armas), letras pretas no disco de contorno preto
+  R3: [
+    '100000000016344311344432899973899950873793259710885882179820899960145960875952621880861785987950530252378510000000001004300000000038951000001599',
+    '300000000017222100122222788852788882887894579961873695159830898982068971888961222793873884863893861595799971320132145411100000000004610000000148',
+  ],
+  // L2 em letras cinza-claras dentro do disco de dentro (o aviso de chamar alguém: "Shirley"), com o contorno da
+  // placa em volta das letras
+  L2: [
+    '853222223479521000000137321000133214353102567523375102667743375101335743375100136622376321477523368654688643234432344323100000000003211111111114',
+    '732111123699210000111269220002443138561015787338671025457527671001257427672001475127686535886338466545665339122212222139000000000039433334444579',
+    // o disco inteiro (a faixa branca de fora com o anel preto de dentro), quando o de dentro não sai sozinho
+    '933899998349359876778944497311113792893100010487972611665279962610236269972610262269982664665279891000000287393222222492439877789825943799997259',
+  ],
 };
 // os do anel vazado: os desenhados (os medidos são do disco branco do GTA) e o □ do The Last of Us (medido no
 // print de "Largar": o contorno de 0,45 a 0,57 do raio e um quadrado cheio menor, até 0,28, no meio)
@@ -111,15 +128,72 @@ const MODELOS = [
 // claro e sem cor: o branco do disco (o vídeo comprimido o deixa entre 200 e 250 no GTA; o The Last of Us
 // põe o disco meio transparente, ~180, e no vídeo ao vivo ele caía abaixo de 170 e o aviso sumia)
 const BRANCO_MIN = 120;
-const claro = (d, i) => {
+// Os discos são procurados em três passadas, cada uma com o seu "claro": a de sempre; a do branco estrito (o
+// disco de contorno preto sobre fundo bege ou de pedra: com 120 o fundo se emendava no disco pelas falhas do
+// contorno e a mancha ficava grande demais); e a do cinza (o disco cinza ~100 do ○ de "Soltar", o ✕ cinza).
+// (o branco estrito acha a mancha, mas a borda do disco, já misturada com o contorno, fica abaixo dele: os
+// anéis de conferência usam o claro de sempre, "anel: 0")
+const PASSADAS = [{ min: BRANCO_MIN, croma: 50 }, { min: 200, croma: 30, anel: 0 }, { min: 78, croma: 30 }];
+const claroCom = ({ min, croma }) => (d, i) => {
   const r = d[i], g = d[i + 1], b = d[i + 2];
   const mx = r > g ? (r > b ? r : b) : (g > b ? g : b), mn = r < g ? (r < b ? r : b) : (g < b ? g : b);
-  return mn > BRANCO_MIN && mx - mn < 50;
+  return mn > min && mx - mn < croma;
 };
+const claro = claroCom(PASSADAS[0]);
 const lum = (d, i) => (d[i] * 2 + d[i + 1] * 5 + d[i + 2]) / 8;
 
+// O contorno escuro do disco (os avisos de contorno preto: o △ sobre a pedra, o □ e o ✕ sobre o bege): logo
+// fora da borda (de 0,95 a 1,3 do raio), em quase toda a volta, passa um traço bem mais escuro que o disco.
+// Com ele o disco vale mesmo com o fundo claro em volta.
+function fracContorno(img, cx, cy, r, branco) {
+  const { width: W, height: H, data: d } = img;
+  const lim = Math.min(115, branco * 0.6);
+  let sim = 0, tot = 0;
+  for (let k = 0; k < 32; k++) {
+    const a = (k / 32) * Math.PI * 2, c = Math.cos(a), s = Math.sin(a);
+    let m = 255;
+    for (let f = 0.92; f <= 1.32; f += 0.08) {
+      const x = Math.round(cx + c * r * f), y = Math.round(cy + s * r * f);
+      if (x >= 0 && y >= 0 && x < W && y < H) m = Math.min(m, lum(d, (y * W + x) * 4));
+    }
+    tot++;
+    if (m < lim) sim++;
+  }
+  return sim / tot;
+}
+function contornado(img, cx, cy, r, branco) {
+  return fracContorno(img, cx, cy, r, branco) >= 0.85;
+}
+// No vídeo reduzido o contorno fino se mistura com o fundo e a mancha clara erra o disco (pega um pedaço do
+// fundo, ou só o miolo): procura em volta o centro e o raio em que o anel de dentro é claro e o contorno passa
+// escuro logo fora. { cx, cy, r } ou null.
+function ajustarContorno(img, cx, cy, r, claro) {
+  // a busca é cara: só entra a mancha que já tem jeito de contornada (metade da volta escura), e o passo grosso
+  // vem primeiro, o fino só em volta do melhor grosso
+  if (fracContorno(img, cx, cy, r * 1.05, brancoDo(img, cx, cy, r)) < 0.25) return null;
+  const grosso = procurarContorno(img, cx, cy, r, claro, 2, 1, 0.75, 1.3, 0.1);
+  if (!grosso || grosso.f < 0.6) return null;
+  const fino = procurarContorno(img, grosso.cx, grosso.cy, grosso.r, claro, 0.5, 0.5, 0.92, 1.08, 0.04);
+  const melhor = fino && fino.f >= grosso.f ? fino : grosso;
+  return melhor.f >= 0.85 ? melhor : null;
+}
+function procurarContorno(img, cx, cy, r, claro, raio, passo, k0, k1, dk) {
+  let melhor = null;
+  for (let dy = -raio; dy <= raio; dy += passo) for (let dx = -raio; dx <= raio; dx += passo) {
+    const x = cx + dx, y = cy + dy;
+    for (let k = k0; k <= k1 + 1e-9; k += dk) {
+      const rr = r * k;
+      if (rr * 2 < MIN_D - 2) continue;
+      if (anelClaro(img, x, y, rr * 0.8, 24, claro) < 0.8) continue;
+      const f = fracContorno(img, x, y, rr, brancoDo(img, x, y, rr));
+      if (!melhor || f > melhor.f) melhor = { cx: x, cy: y, r: rr, f };
+    }
+  }
+  return melhor;
+}
+
 // a fração do anel de raio rr em volta de (cx, cy) que é clara
-function anelClaro(img, cx, cy, rr, n = 40) {
+function anelClaro(img, cx, cy, rr, n = 40, claro = claroCom(PASSADAS[0])) {
   const { width: W, height: H, data: d } = img;
   let sim = 0, tot = 0;
   for (let k = 0; k < n; k++) {
@@ -132,10 +206,9 @@ function anelClaro(img, cx, cy, rr, n = 40) {
   return tot ? sim / tot : 0;
 }
 
-// o símbolo dentro do disco: a grade de escuridão (0 = branco do disco, 1 = bem escuro)
-function grade(img, cx, cy, r) {
+// o branco de referência do disco: a mediana do anel a 0,88 do raio
+function brancoDo(img, cx, cy, r) {
   const { width: W, height: H, data: d } = img;
-  // o branco de referência: a mediana do anel a 0,88 do raio
   const ref = [];
   for (let k = 0; k < 32; k++) {
     const a = (k / 32) * Math.PI * 2;
@@ -143,8 +216,22 @@ function grade(img, cx, cy, r) {
     if (x >= 0 && y >= 0 && x < W && y < H) ref.push(lum(d, (y * W + x) * 4));
   }
   ref.sort((a, b) => a - b);
-  const branco = ref[ref.length >> 1] || 230;
-  const faixa = Math.max(60, branco * 0.75);
+  return ref[ref.length >> 1] || 230;
+}
+
+// o símbolo dentro do disco: a grade de escuridão (0 = branco do disco, 1 = bem escuro)
+function grade(img, cx, cy, r) {
+  const { width: W, height: H, data: d } = img;
+  // o símbolo de traço cinza-claro (o L2 dentro do disco, ~195 sobre 250): a faixa vai até o mais escuro de
+  // dentro, senão o traço ficava fraco demais para contar (o disco liso continua sem tinta: a faixa mínima)
+  const dentroL = [];
+  for (let y = Math.round(cy - r * 0.7); y <= cy + r * 0.7; y++) for (let x = Math.round(cx - r * 0.7); x <= cx + r * 0.7; x++) {
+    if (x >= 0 && y >= 0 && x < W && y < H && Math.hypot(x - cx, y - cy) <= r * 0.7) dentroL.push(lum(d, (y * W + x) * 4));
+  }
+  dentroL.sort((a, b) => a - b);
+  const branco = Math.max(brancoDo(img, cx, cy, r), dentroL[Math.floor(dentroL.length * 0.85)] ?? 0);
+  const escuro = dentroL[Math.floor(dentroL.length * 0.05)] ?? 0;
+  const faixa = Math.max(45, Math.min(Math.max(60, branco * 0.75), branco - escuro));
   const v = new Float32Array(N * N);
   const amostra = (x, y) => {
     // bilinear na luminância
@@ -168,7 +255,12 @@ function grade(img, cx, cy, r) {
 // do GTA 6 (MEDIDOS_PLACA); só a de cima e por boa margem vale (L1 e R1 diferem numa letra).
 const MEDIDOS_PLACA = {
   L1: ['122122222211000000000000000620046000001930389000001930699100001930249100001930039000001930039000101965549101400888838004810222212019971000000289'],
-  R1: ['000000000000000000000000006665004600009879439910009418969910009769833910009999203910009578003910109439203911509318803915923102301329984000000489'],
+  R1: [
+    '000000000000000000000000006665004600009879439910009418969910009769833910009999203910009578003910109439203911509318803915923102301329984000000489',
+    // a placa de "Escanear" (dentro de um anel cinza; a caixa da mancha pega um pouco do vão escuro em volta)
+    '876666666666200000000000202444101310205999426820206868758820206736756820206999512820206889302820406748502821616615712823952100100237996211111489',
+    '866655555556400000000000401333002200403887336700404746658800404877525800404989304700604868204801814625404705953302312429992000000179799877778998',
+  ],
   L2: ['983000001389710000000028100000001003068000599810068001964940068000101940068000028700068221288320069995999960012220211110000000000000000000000000'],
   R2: ['983000001399710000000028200000001003099980089940095486683870095396010770099970005930093780069630093095699991020011111110000000000000000000000000'],
 };
@@ -281,17 +373,21 @@ export function medir(img, cx, cy, r) {
 // dir (L e R: para onde empurrar, se o jogo mostra), x, y, r, score }]
 // com x, y, r em frações da largura/altura da imagem.
 export function detectar(img, { minScore = MIN_SCORE, minMargem = MIN_MARGEM } = {}) {
+  const { width: W, height: H } = img;
+  const achados = [];
+  const pilha = new Int32Array(W * H);
+  for (const passada of PASSADAS) discos(img, achados, passada, pilha, minScore, minMargem);
+  aneis(img, achados, minScore, minMargem);
+  return achados.map(({ cx, cy, rp, ...a }) => a);
+}
+
+// os discos claros com o símbolo escuro, com o "claro" de uma das PASSADAS
+function discos(img, achados, passada, pilha, minScore, minMargem) {
   const { width: W, height: H, data: d } = img;
+  const claro = claroCom(passada), claroAnel = passada.anel != null ? claroCom(PASSADAS[passada.anel]) : claro;
   // os claros numa passada só (vis: 0 escuro, 1 claro, 2 já visto)
   const vis = new Uint8Array(W * H);
-  for (let p = 0, i = 0; p < W * H; p++, i += 4) {
-    const r = d[i], g = d[i + 1], b = d[i + 2];
-    if (r <= BRANCO_MIN || g <= BRANCO_MIN || b <= BRANCO_MIN) continue;
-    const mx = r > g ? (r > b ? r : b) : (g > b ? g : b), mn = r < g ? (r < b ? r : b) : (g < b ? g : b);
-    if (mx - mn < 50) vis[p] = 1;
-  }
-  const pilha = new Int32Array(W * H);
-  const achados = [];
+  for (let p = 0, i = 0; p < W * H; p++, i += 4) if (claro(d, i)) vis[p] = 1;
   // 1) as manchas claras (pinta cada uma inteira para não voltar nela); as grandes demais ficam de fora
   const pedacos = [];
   for (let s = 0; s < W * H; s++) {
@@ -340,7 +436,7 @@ export function detectar(img, { minScore = MIN_SCORE, minMargem = MIN_MARGEM } =
     const w = x1 - x0 + 1, h = y1 - y0 + 1;
     if (w < MIN_D || h < MIN_D || w > MAX_D || h > MAX_D) continue;
     const preench = cnt / (w * h);
-    const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, r = (w + h) / 4;
+    let cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, r = (w + h) / 4;
     // a placa de L1/R1/L2/R2 (mais cheia que o disco: só o nome escuro dentro)
     if (preench >= 0.5 && preench <= 0.9) {
       const p = placa(img, x0, y0, w, h);
@@ -353,10 +449,16 @@ export function detectar(img, { minScore = MIN_SCORE, minMargem = MIN_MARGEM } =
       }
     }
     if (Math.abs(w - h) > Math.max(w, h) * 0.2) continue; // o disco é redondo (a placa pode ser mais larga)
-    if (preench < 0.3 || preench > 0.8) continue; // disco cheio (sem símbolo) dá ~0,78 ou mais
-    if (anelClaro(img, cx, cy, r * 0.88) < 0.8) continue;
+    // disco cheio (sem símbolo) dá ~0,78 ou mais; o de contorno escuro com o símbolo cinza-claro (o L2, que passa
+    // por claro) vai até 0,92 (o disco liso cai depois, sem tinta)
+    if (preench < 0.3 || (preench > 0.8 && (preench > 0.92 || !contornado(img, cx, cy, r, brancoDo(img, cx, cy, r))))) continue;
     // (a letra O do texto cai no modelo 'nada'; o anel a 0,78 que a barrava também barrava o ○ grande)
-    if (anelClaro(img, cx, cy, r * 1.3) > 0.35) continue;
+    if (anelClaro(img, cx, cy, r * 0.88, 40, claroAnel) < 0.8 || (anelClaro(img, cx, cy, r * 1.3, 40, claroAnel) > 0.35 && !contornado(img, cx, cy, r, brancoDo(img, cx, cy, r)))) {
+      // o disco de contorno escuro: centro e raio acertados pelo contorno
+      const a = ajustarContorno(img, cx, cy, r, claroAnel);
+      if (!a) continue;
+      ({ cx, cy, r } = a);
+    }
     const v = grade(img, cx, cy, r);
     const t = tinta(v);
     if (t < 0.12 || t > 0.65) continue;
@@ -385,8 +487,6 @@ export function detectar(img, { minScore = MIN_SCORE, minMargem = MIN_MARGEM } =
     const dir = melhor.nome === 'L' || melhor.nome === 'R' ? direcao(img, cx, cy, r) : null;
     achados.push({ cx, cy, rp: r, simbolo: melhor.nome, id: SIMBOLOS[melhor.nome], ...(dir ? { dir } : {}), x: cx / W, y: cy / H, r: r / H, score: +melhor.c.toFixed(3), margem: +(melhor.c - seg).toFixed(3) });
   }
-  aneis(img, achados, minScore, minMargem);
-  return achados.map(({ cx, cy, rp, ...a }) => a);
 }
 
 // O outro jeito de ícone (The Last of Us e outros, na lista de ações do canto): um anel fino cinza ou branco,
@@ -507,8 +607,11 @@ export class Rastreio {
     }
     this.itens = this.itens.filter((it) => it.faltas < this.sair);
     for (const a of livres) this.itens.push({ simbolo: a.simbolo, id: a.id, dir: a.dir, x: a.x, y: a.y, r: a.r, vistos: 1, faltas: 0 });
-    return this.itens.filter((it) => it.vistos >= this.entrar);
+    return this.visiveis();
   }
+  visiveis() { return this.itens.filter((it) => it.vistos >= this.entrar); }
+  // o recorte entre análises achou o aviso aqui (só a posição: entrar e sair seguem nas análises inteiras)
+  mover(it, x, y) { Object.assign(it, { x, y }); }
   limpar() { this.itens = []; }
 }
 
