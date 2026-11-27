@@ -953,7 +953,13 @@ function textoVez(m) {
 function textoVez0(m) {
   const v = st.lan?.[m];
   if (!v?.conta) {
-    const fimTeste = st.lan?.teste?.[st.selfId];
+    // alguém no teste grátis desta máquina: quem é (eu ou outra pessoa)
+    if (v?.teste) {
+      const t = falta(v.teste.fim);
+      if (v.teste.ids?.includes(st.selfId)) return { texto: `Teste grátis no ${NOME_MAQ[m]} · faltam ${t.texto}`, minha: true, acabando: t.s <= 30, s: t.s, teste: true };
+      return { texto: `Teste - ${v.teste.conta} jogando no ${NOME_MAQ[m]} · faltam ${t.texto}` };
+    }
+    const fimTeste = !Object.keys(NOME_MAQ).some((k) => st.lan?.[k]?.teste) && st.lan?.teste?.[st.selfId];
     if (fimTeste) {
       const t = falta(fimTeste);
       return { texto: `Teste grátis no ${NOME_MAQ[m]} · faltam ${t.texto}`, minha: true, acabando: t.s <= 30, s: t.s, teste: true };

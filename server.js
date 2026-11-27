@@ -891,6 +891,9 @@ function estadoLan(room) {
     // aberta: liberado até alguém novo entrar (sem fim)
     // semDublagem: quem alugou desmarcou a dublagem (o PC da casa manda só o som do jogo para ela)
     e[m] = { conta: atual?.conta ?? null, inicio: atual?.inicio ?? null, fim: atual?.fim ?? null, preparando: !!atual?.preparando, aberta: !!atual?.aberta, semDublagem: !!atual?.semDublagem, ids };
+    // máquina sem aluguel com alguém no teste grátis: quem é e até quando (a barra mostra "Teste - João")
+    const tm = room.lanTesteMaq?.[m];
+    if (!atual && tm && tm.fim > Date.now()) e[m].teste = { conta: tm.conta, fim: tm.fim, ids: idsDaConta(room, tm.conta) };
   }
   // teste grátis (máquina sem ninguém alugado): quem está com os 2 min correndo (id -> fim) e quem já
   // usou o seu (pela conta ou pelo IP) e não joga mais de graça

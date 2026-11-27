@@ -6230,7 +6230,13 @@ function faltaLan(fim) {
 function textoVezLan(m) {
   const v = state.lan?.[m];
   if (!v?.conta) {
-    const fimTeste = state.lan?.teste?.[state.selfId];
+    // alguém no teste grátis desta máquina: quem é (eu ou outra pessoa)
+    if (v?.teste) {
+      const t = faltaLan(v.teste.fim);
+      if (v.teste.ids?.includes(state.selfId)) return { texto: `Teste grátis no ${MAQUINAS_LAN[m]} · faltam ${t.texto}`, minha: true, acabando: t.s <= 30, s: t.s, teste: true };
+      return { texto: `Teste - ${v.teste.conta} jogando no ${MAQUINAS_LAN[m]} · faltam ${t.texto}` };
+    }
+    const fimTeste = !Object.keys(MAQUINAS_LAN).some((k) => state.lan?.[k]?.teste) && state.lan?.teste?.[state.selfId];
     if (fimTeste) {
       const t = faltaLan(fimTeste);
       return { texto: `Teste grátis no ${MAQUINAS_LAN[m]} · faltam ${t.texto}`, minha: true, acabando: t.s <= 30, s: t.s, teste: true };
