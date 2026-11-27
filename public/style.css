@@ -4856,7 +4856,7 @@ body.touch :is(.hk-lista, #help-extra, #help-mais-btn) { display: none !importan
   opacity: 0.7;
 }
 #jogo-legenda[hidden] { display: none; }
-/* a tecla em cima dos avisos de botão do jogo (avisos-botoes-tela.js): no lugar do ícone, com a cor dele */
+/* a tecla em cima dos avisos de botão do jogo (avisos-botoes-tela.js): um círculo do tamanho do ícone, com a cor dele */
 #jogo-avisos { position: absolute; inset: 0; z-index: 5; pointer-events: none; overflow: hidden; }
 #jogo-avisos[hidden] { display: none; }
 #jogo-avisos kbd {
@@ -4866,7 +4866,7 @@ body.touch :is(.hk-lista, #help-extra, #help-mais-btn) { display: none !importan
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0 .45em;
+  padding: 0;
   border-radius: 999px;
   border: 2px solid var(--cor, #fff);
   background: rgba(10, 8, 18, 0.92);
@@ -4877,10 +4877,8 @@ body.touch :is(.hk-lista, #help-extra, #help-mais-btn) { display: none !importan
   animation: aviso-entra .12s ease-out;
   transition: left .1s linear, top .1s linear;
 }
-#jogo-avisos kbd.longa { border-radius: 8px; }
 /* o mouse desenhado (clique esquerdo/direito/rodinha aceso, ou as setas do R de mexer a câmera) */
-#jogo-avisos kbd.icone { padding: 0 .25em; }
-#jogo-avisos kbd svg { display: block; height: 74%; width: auto; }
+#jogo-avisos kbd svg { display: block; height: 70%; width: auto; max-width: 86%; }
 @keyframes aviso-entra { from { opacity: 0; transform: translate(-50%, -50%) scale(.8); } }
 @media (prefers-reduced-motion: reduce) { #jogo-avisos kbd { animation: none; transition: none; } }
 #jogo-legenda span {

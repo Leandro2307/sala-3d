@@ -13,31 +13,56 @@ const INTERVALO_MS = 150;
 const COR = { b0: '#93c5fd', b1: '#fca5a5', b2: '#f9a8d4', b3: '#6ee7b7', andar: '#e5e7eb', olhar: '#e5e7eb' };
 
 // O mouse desenhado: o botão que a ação usa aceso (esquerdo, direito ou a rodinha) ou, para o R (mexer a
-// câmera), as setas dos lados
+// câmera), setas do lado para onde mexer (as duas de lado quando o jogo não diz)
 const CORPO = '<rect x="7" y="2.5" width="10" height="17" rx="5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M7.5 9.5h9M12 3v6.5" stroke="currentColor" stroke-width="1.5"/>';
 const ACESO = {
   MouseLeft: '<path d="M12 3.4a4.2 4.2 0 0 0-4.2 4.2v1.9H12z" fill="var(--cor)"/>',
   MouseRight: '<path d="M12 3.4a4.2 4.2 0 0 1 4.2 4.2v1.9H12z" fill="var(--cor)"/>',
   MouseMiddle: '<rect x="10.6" y="4.6" width="2.8" height="4.2" rx="1.4" fill="var(--cor)"/>',
 };
-const SETAS = '<path d="M4.5 8.5 1.5 11l3 2.5M19.5 8.5l3 2.5-3 2.5" fill="none" stroke="var(--cor)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>';
-const mouse = (dentro, setas = false) => `<svg viewBox="${setas ? '0' : '4'} 0 ${setas ? 24 : 16} 22" aria-hidden="true">${CORPO}${dentro}${setas ? SETAS : ''}</svg>`;
+const SETA = {
+  esq: 'M4.5 8.5 1.5 11l3 2.5',
+  dir: 'M19.5 8.5l3 2.5-3 2.5',
+  cima: 'M1.5 12l2.2-3 2.2 3M18.1 12l2.2-3 2.2 3',
+  baixo: 'M1.5 10l2.2 3 2.2-3M18.1 10l2.2 3 2.2-3',
+};
+SETA.lados = SETA.esq + SETA.dir;
+const seta = (d) => `<path d="${d}" fill="none" stroke="var(--cor)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>`;
+const mouse = (dentro, setas = null) => `<svg viewBox="${setas ? '0 0 24' : '4 0 16'} 22" aria-hidden="true">${CORPO}${dentro}${setas ? seta(SETA[setas]) : ''}</svg>`;
+// a barra de espaço desenhada (a palavra "Espaço" não cabe no lugar do ícone e cobria o texto do jogo)
+const ESPACO = '<svg viewBox="0 0 24 22" aria-hidden="true"><path d="M3 9v6h18V9" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+// nomes curtos: no lugar do ícone cabem 1 a 4 letras
+const CURTO = { ShiftLeft: '⇧', ShiftRight: '⇧', Enter: '↵', Tab: '⇥', Backspace: '⌫', CapsLock: 'Caps', ControlLeft: 'Ctrl', ControlRight: 'Ctrl', AltLeft: 'Alt', AltRight: 'AltGr' };
+// o analógico esquerdo empurrado para um lado: a tecla daquela direção (W, A, S, D no padrão)
+const ANDAR = { cima: 'ly-', baixo: 'ly+', esq: 'lx-', dir: 'lx+' };
 
-// o que aparece no lugar do ícone: { html, texto (para comparar), longa } ou null (o botão não tem tecla)
-function rotuloDe(id) {
-  if (id === 'olhar') return { html: mouse('', true), texto: 'mouse', icone: true };
-  if (id === 'andar') return { html: 'WASD', texto: 'WASD', longa: true };
-  const e = visiveis(id).find((x) => !/^Roda/.test(x));
-  if (!e) return null;
+const esc = (t) => t.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+// o rótulo de uma entrada (tecla ou botão do mouse)
+function daEntrada(e) {
   if (ACESO[e]) return { html: mouse(ACESO[e]), texto: e, icone: true };
-  const t = nomeEntrada(e);
-  return { html: t.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])), texto: t, longa: t.length > 2 };
+  if (e === 'Space') return { html: ESPACO, texto: e, icone: true };
+  const t = CURTO[e] || nomeEntrada(e);
+  return { html: esc(t), texto: t, letras: [...t].length };
+}
+// o que aparece no lugar do ícone: { html, texto (para comparar), icone | letras } ou null (sem tecla)
+function rotuloDe(id, dir) {
+  if (id === 'olhar') return { html: mouse('', dir || 'lados'), texto: `mouse ${dir || ''}`, icone: true };
+  if (id === 'andar') {
+    const e = dir && visiveis(ANDAR[dir])[0];
+    return e ? daEntrada(e) : { html: 'WASD', texto: 'WASD', letras: 4 };
+  }
+  const e = visiveis(id).find((x) => !/^Roda/.test(x));
+  return e ? daEntrada(e) : null;
 }
 
 export class AvisosBotoes {
   // camada: a div por cima da imagem; video: o <video> da tela; telaTurbo(): o canvas do turbo à vista (ou null)
-  constructor({ camada, video, telaTurbo }) {
+  // querCarro(): procurar também o quadro do carro; onCarro(): ele apareceu (visto em 2 análises seguidas)
+  constructor({ camada, video, telaTurbo, querCarro = () => false, onCarro = () => {} }) {
     this.camada = camada;
+    this.querCarro = querCarro;
+    this.onCarro = onCarro;
+    this.vistoCarro = 0;
     this.video = video;
     this.telaTurbo = telaTurbo;
     this.ligado = false;
@@ -77,7 +102,10 @@ export class AvisosBotoes {
       this.ocupado = false;
       if (data.erro) return void console.warn('[avisos]', data.erro);
       this.msAnalise = data.ms;
-      if (this.ligado) this.mostrar(data.avisos);
+      if (!this.ligado) return;
+      this.mostrar(data.avisos);
+      this.vistoCarro = data.carro ? this.vistoCarro + 1 : 0;
+      if (this.vistoCarro === 2) this.onCarro();
     };
     this.worker.onerror = (e) => {
       console.warn('[avisos] o worker caiu', e.message);
@@ -98,7 +126,7 @@ export class AvisosBotoes {
     if (!w) return void quadro.close?.();
     this.ocupado = true;
     this.enviadoEm = performance.now();
-    w.postMessage({ id: ++this.seq, quadro }, [quadro]);
+    w.postMessage({ id: ++this.seq, quadro, carro: !!this.querCarro() }, [quadro]);
   }
 
   // o turbo.js chama com cada quadro desenhado (que ele fecha logo depois: aqui vai uma cópia)
@@ -143,8 +171,9 @@ export class AvisosBotoes {
 
   mostrar(lista) {
     const rotulos = {};
-    for (const av of lista) if (!(av.id in rotulos)) rotulos[av.id] = rotuloDe(av.id);
-    const avisos = lista.filter((av) => rotulos[av.id]); // botão sem tecla: nada a mostrar
+    const chave = (av) => `${av.id} ${av.dir || ''}`;
+    for (const av of lista) if (!(chave(av) in rotulos)) rotulos[chave(av)] = rotuloDe(av.id, av.dir);
+    const avisos = lista.filter((av) => rotulos[chave(av)]); // botão sem tecla: nada a mostrar
     this.avisos = avisos;
     const cam = this.camada;
     if (!avisos.length) {
@@ -158,7 +187,7 @@ export class AvisosBotoes {
     // reaproveita as que já estão (só mexe na posição): não pisca a cada análise
     const velhas = [...cam.children];
     avisos.forEach((av, i) => {
-      const r = rotulos[av.id];
+      const r = rotulos[chave(av)];
       let el = velhas[i];
       if (!el) {
         el = document.createElement('kbd');
@@ -168,9 +197,10 @@ export class AvisosBotoes {
         el.dataset.t = r.texto;
         el.innerHTML = r.html;
       }
-      const d = Math.max(26, av.r * 2 * a.h * 1.1);
-      el.style.cssText = `left:${a.x + av.x * a.w}px;top:${a.y + av.y * a.h}px;height:${d}px;min-width:${d}px;font-size:${Math.max(12, d * 0.42)}px;--cor:${COR[av.id] || '#fff'}`;
-      el.classList.toggle('longa', !!r.longa);
+      // do tamanho do ícone do jogo (um pouco maior): não cobre o texto do lado. Nome comprido diminui a letra
+      const d = Math.max(24, av.r * 2 * a.h * 1.12);
+      const fonte = r.letras > 1 ? Math.min(d * 0.46, (d * 1.15) / (r.letras * 0.62)) : d * 0.5;
+      el.style.cssText = `left:${a.x + av.x * a.w}px;top:${a.y + av.y * a.h}px;width:${d}px;height:${d}px;font-size:${Math.max(9, fonte)}px;--cor:${COR[av.id] || '#fff'}`;
       el.classList.toggle('icone', !!r.icone);
     });
     for (const el of velhas.slice(avisos.length)) el.remove();

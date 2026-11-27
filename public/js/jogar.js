@@ -40,7 +40,6 @@ import { ControleFisico } from './gamepad-jogo.js';
 import { PadVirtual } from './pad-virtual.js';
 import { TecladoPad } from './teclado-pad.js';
 import { MapaTeclasPainel, mapaTeclas } from './mapa-teclas.js';
-import { ModoCarroTela } from './modo-carro.js';
 import { AvisosBotoes } from './avisos-botoes-tela.js';
 import { Ps5Touchpad, temTouchpadHid } from './ps5-touchpad.js';
 import { AvisoDoSite } from './aviso-site.js';
@@ -1172,6 +1171,14 @@ const avisosBotoes = new AvisosBotoes({
   camada: $('#jogo-avisos'),
   video,
   telaTurbo: () => video.parentElement.querySelector('.turbo-tela:not([hidden])'),
+  // GTA: o quadro do motor e da gasolina (em cima do minimapa) só aparece dentro do veículo. Visto, o modo
+  // carro entra sozinho (o W acelera), mesmo que o △ não tenha trocado; a pé de novo continua pelo △.
+  querCarro: () => mapaTeclas.carroTroca() && !tecladoPad.carro,
+  onCarro: () => {
+    if (tecladoPad.carro || !mapaTeclas.carroTroca()) return;
+    diagJogo.evento('modo carro: o quadro do carro apareceu no jogo');
+    tecladoPad.trocarCarro(true);
+  },
 });
 turboRecebe.espiar = (frame) => avisosBotoes.espiar(frame);
 turboRecebe.socorro = true;
@@ -1774,17 +1781,14 @@ setInterval(() => {
 const entradaDeAgora = () => (touchpad.ligado && touchpad.ativo ? 'dualsense' : fisico.pad() ? 'gamepad' : 'teclado');
 let layoutLegenda = null;
 let noCarro = false;
-const modoCarroTela = new ModoCarroTela({ quadro: $('#jogo-modo'), aviso: $('#jogo-modo-aviso') });
 const tecladoPad = new TecladoPad({
   pad: padVirtual,
   sens: () => opcoesJogo.get('mouseSens'),
   aviso: (texto) => toast(texto, 'info', 5000),
+  // sem o quadro "a pé / no carro" na tela (desde 2026-11-27): o modo vem do △ e do quadro do carro no jogo
   onCarro: (sim) => {
     if (sim !== noCarro) diagJogo.evento(sim ? 'modo carro: no carro' : 'modo carro: a pé');
-    const trocou = sim !== noCarro;
     noCarro = sim;
-    if (layoutLegenda) mostrarLegenda(layoutLegenda);
-    if (trocou && layoutLegenda && tecladoPad.ativo) modoCarroTela.trocou(sim);
   },
 });
 padVirtual.onErroTremor = (erro) => diagJogo.evento('o controle não aceitou o tremor', { erro, ...padVirtual.comoVibra() });
@@ -1829,16 +1833,13 @@ controle.onCursorLivre = (livre) => toqueJogo.cursorDoJogo(livre);
 if (isTouch) document.body.classList.add('touch'); // a barra no jeito do celular (style.css body.touch, jogar.html)
 
 // Sem a legenda dos botões no canto (desde 2026-11-27, pedido do usuário): as teclas aparecem em cima dos
-// avisos do próprio jogo (avisos-botoes-tela.js). Fica o quadro do modo carro (a pé / no carro).
+// avisos do próprio jogo (avisos-botoes-tela.js). Nem o quadro do modo carro: ele entra sozinho (avisosBotoes.onCarro).
 function mostrarLegenda(layout) {
   layoutLegenda = layout;
   // com controle não serve para nada, e menos coisa por cima da imagem é menos trabalho para mostrá-la
   const noTeclado = !!layout && entradaDeAgora() === 'teclado';
   // a tecla em cima dos avisos de botão do jogo: só com os ícones do PS5 e jogando no teclado
   avisosBotoes.ligar(noTeclado && layout === 'ps5' && opcoesJogo.get('avisos'));
-  if (!noTeclado) return void modoCarroTela.esconder();
-  // modo carro: a pé ou no carro, sempre à vista
-  modoCarroTela.mostrar(noCarro);
 }
 mapaTeclas.ouvir(() => { if (layoutLegenda) mostrarLegenda(layoutLegenda); });
 for (const ev of ['gamepadconnected', 'gamepaddisconnected']) addEventListener(ev, () => { if (layoutLegenda) mostrarLegenda(layoutLegenda); });

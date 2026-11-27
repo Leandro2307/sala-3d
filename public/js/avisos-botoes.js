@@ -85,6 +85,8 @@ const MEDIDOS = {
   triangulo: ['610026610016100069950001000399993000001795697100004971289400028930049810169600017950399301113992799777778996699999999995223333333322610000000015'],
   // o □ grande do aviso de segurar (entrar no carro), traço grosso quase até a borda
   quadrado: ['720000010028268788888852089999999960188222224960188000003960188000003960088000003970088000003960088322224960089999999960168888888842610000000028'],
+  // o L de empurrar o analógico (com o tracinho e o arco do lado para onde empurrar)
+  L: ['730000000027300010000002000143000000000287100022000297100067000297100179000297100179000298321156000289884111000156663000200011110002730000000026'],
   R: ['400000000016000111100001000588862000001798896100001793498100001798896000000798992000001794793000000782397100000341144100100000000002610000000027'],
 };
 const deTexto = (t) => Float32Array.from(t, (c) => +c / 9);
@@ -146,6 +148,34 @@ function grade(img, cx, cy, r) {
   return v;
 }
 
+// Para onde empurrar o analógico (L e R): o jogo põe um tracinho claro fora do disco, do lado da direção
+// (e um arco atrás dele). Compara o brilho na linha daquele lado (de 1,15 a 1,8 do raio) com o brilho logo
+// ao lado dela (o fundo): o tracinho destoa. null: sem direção clara (empurrar para qualquer lado).
+export const DIRECOES = { dir: 0, baixo: Math.PI / 2, esq: Math.PI, cima: -Math.PI / 2 };
+function direcao(img, cx, cy, r) {
+  const { width: W, height: H, data: d } = img;
+  const lumEm = (x, y) => {
+    x = Math.round(x); y = Math.round(y);
+    return x < 0 || y < 0 || x >= W || y >= H ? null : lum(d, (y * W + x) * 4);
+  };
+  const media = (ang) => {
+    let s = 0, n = 0;
+    for (let k = 0; k <= 8; k++) {
+      const v = lumEm(cx + Math.cos(ang) * r * (1.15 + k * 0.08), cy + Math.sin(ang) * r * (1.15 + k * 0.08));
+      if (v != null) { s += v; n++; }
+    }
+    return n ? s / n : null;
+  };
+  let melhor = null, seg = 0;
+  for (const [nome, ang] of Object.entries(DIRECOES)) {
+    const no = media(ang), lados = [media(ang - 0.45), media(ang + 0.45)].filter((v) => v != null);
+    if (no == null || !lados.length) continue;
+    const c = no - lados.reduce((a, b) => a + b, 0) / lados.length;
+    if (!melhor || c > melhor.c) { seg = melhor ? Math.max(seg, melhor.c) : seg; melhor = { nome, c }; } else seg = Math.max(seg, c);
+  }
+  return melhor && melhor.c > 30 && melhor.c - seg > 15 ? melhor.nome : null;
+}
+
 // a escuridão média das células de dentro (quanto símbolo tem no disco)
 function tinta(v) {
   let s = 0, n = 0;
@@ -158,7 +188,8 @@ export function medir(img, cx, cy, r) {
   return Array.from(grade(img, cx, cy, r), (x) => Math.round(x * 9)).join('');
 }
 
-// img: { width, height, data (RGBA) }. Devolve [{ simbolo, id (o botão do mapa-teclas), x, y, r, score }]
+// img: { width, height, data (RGBA) }. Devolve [{ simbolo, id (o botão do mapa-teclas, ou 'andar'/'olhar'),
+// dir (L e R: para onde empurrar, se o jogo mostra), x, y, r, score }]
 // com x, y, r em frações da largura/altura da imagem.
 export function detectar(img, { minScore = MIN_SCORE, minMargem = MIN_MARGEM } = {}) {
   const { width: W, height: H, data: d } = img;
@@ -243,7 +274,8 @@ export function detectar(img, { minScore = MIN_SCORE, minMargem = MIN_MARGEM } =
     // o mesmo disco achado inteiro e em pedaços: fica o de maior correlação
     const igual = achados.findIndex((o) => Math.hypot(o.cx - cx, o.cy - cy) < r);
     if (igual >= 0) { if (achados[igual].score >= melhor.c) continue; achados.splice(igual, 1); }
-    achados.push({ cx, cy, rp: r, simbolo: melhor.nome, id: SIMBOLOS[melhor.nome], x: cx / W, y: cy / H, r: r / H, score: +melhor.c.toFixed(3), margem: +(melhor.c - seg).toFixed(3) });
+    const dir = melhor.nome === 'L' || melhor.nome === 'R' ? direcao(img, cx, cy, r) : null;
+    achados.push({ cx, cy, rp: r, simbolo: melhor.nome, id: SIMBOLOS[melhor.nome], ...(dir ? { dir } : {}), x: cx / W, y: cy / H, r: r / H, score: +melhor.c.toFixed(3), margem: +(melhor.c - seg).toFixed(3) });
   }
   return achados.map(({ cx, cy, rp, ...a }) => a);
 }
@@ -254,7 +286,7 @@ export class Rastreio {
   constructor({ entrar = 2, sair = 2 } = {}) {
     this.entrar = entrar;
     this.sair = sair;
-    this.itens = []; // { simbolo, id, x, y, r, vistos, faltas }
+    this.itens = []; // { simbolo, id, dir, x, y, r, vistos, faltas }
   }
   // achados de uma análise -> os avisos que devem aparecer agora
   passo(achados) {
@@ -268,12 +300,76 @@ export class Rastreio {
       }
       if (par) {
         livres.delete(par);
-        Object.assign(it, { x: par.x, y: par.y, r: par.r, vistos: it.vistos + 1, faltas: 0 });
+        Object.assign(it, { x: par.x, y: par.y, r: par.r, dir: par.dir ?? it.dir, vistos: it.vistos + 1, faltas: 0 });
       } else it.faltas++;
     }
     this.itens = this.itens.filter((it) => it.faltas < this.sair);
-    for (const a of livres) this.itens.push({ simbolo: a.simbolo, id: a.id, x: a.x, y: a.y, r: a.r, vistos: 1, faltas: 0 });
+    for (const a of livres) this.itens.push({ simbolo: a.simbolo, id: a.id, dir: a.dir, x: a.x, y: a.y, r: a.r, vistos: 1, faltas: 0 });
     return this.itens.filter((it) => it.vistos >= this.entrar);
   }
   limpar() { this.itens = []; }
+}
+
+// Dentro de um veículo o GTA 6 mostra, em cima do minimapa, o quadro com a marca e o modelo (texto branco)
+// e dois ícones redondos escuros lado a lado: o motor e a gasolina. É isso que se procura aqui: duas
+// manchas escuras redondas do mesmo tamanho, na mesma altura, com os centros a ~2,7 raios um do outro,
+// num painel cinza um pouco mais claro e com texto claro logo acima. true: está no veículo.
+// Só o canto de baixo à esquerda (onde fica o minimapa) é olhado: menos conta e menos chance de engano.
+export function veiculo(img) {
+  const { width: W, height: H, data: d } = img;
+  const xMax = Math.round(W * 0.5), yMin = Math.round(H * 0.45);
+  const L = (x, y) => lum(d, (y * W + x) * 4);
+  const vis = new Uint8Array(W * H);
+  for (let y = yMin; y < H; y++) for (let x = 0; x < xMax; x++) if (L(x, y) < 58) vis[y * W + x] = 1;
+  const pilha = new Int32Array(W * H);
+  const discos = [];
+  for (let y = yMin; y < H; y++) for (let x = 0; x < xMax; x++) {
+    const s = y * W + x;
+    if (vis[s] !== 1) continue;
+    let topo = 0, cnt = 0, x0 = W, y0 = H, x1 = -1, y1 = -1;
+    pilha[topo++] = s;
+    vis[s] = 2;
+    while (topo) {
+      const p = pilha[--topo];
+      cnt++;
+      const px = p % W, py = (p / W) | 0;
+      if (px < x0) x0 = px;
+      if (px > x1) x1 = px;
+      if (py < y0) y0 = py;
+      if (py > y1) y1 = py;
+      if (px > 0 && vis[p - 1] === 1) { vis[p - 1] = 2; pilha[topo++] = p - 1; }
+      if (px < xMax - 1 && vis[p + 1] === 1) { vis[p + 1] = 2; pilha[topo++] = p + 1; }
+      if (py > yMin && vis[p - W] === 1) { vis[p - W] = 2; pilha[topo++] = p - W; }
+      if (py < H - 1 && vis[p + W] === 1) { vis[p + W] = 2; pilha[topo++] = p + W; }
+    }
+    const w = x1 - x0 + 1, h = y1 - y0 + 1;
+    if (w < 8 || h < 8 || w > 70 || h > 70 || Math.abs(w - h) > Math.max(w, h) * 0.2) continue;
+    const f = cnt / (w * h);
+    if (f < 0.45 || f > 0.82) continue; // disco escuro com o desenho (mais claro) dentro
+    discos.push({ cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, r: (w + h) / 4 });
+  }
+  const anel = (c, k) => {
+    const v = [];
+    for (let i = 0; i < 24; i++) {
+      const a = (i / 24) * Math.PI * 2, x = Math.round(c.cx + Math.cos(a) * c.r * k), y = Math.round(c.cy + Math.sin(a) * c.r * k);
+      if (x >= 0 && y >= 0 && x < W && y < H) v.push(L(x, y));
+    }
+    v.sort((a, b) => a - b);
+    return v[v.length >> 1] ?? 0;
+  };
+  for (const a of discos) for (const b of discos) {
+    if (b.cx <= a.cx) continue;
+    const r = (a.r + b.r) / 2, dx = b.cx - a.cx;
+    if (Math.abs(a.r - b.r) > r * 0.25 || Math.abs(a.cy - b.cy) > r * 0.3 || dx < r * 2.3 || dx > r * 3.2) continue;
+    // o painel em volta: cinza, mais claro que o miolo dos discos
+    const painel = (anel(a, 1.35) + anel(b, 1.35)) / 2, miolo = (anel(a, 0.75) + anel(b, 0.75)) / 2;
+    if (painel < 45 || painel > 140 || painel - miolo < 8) continue;
+    // o nome do carro logo acima (texto claro)
+    let claros = 0, tot = 0;
+    const ya = Math.max(0, Math.round(a.cy - r * 5)), yb = Math.round(a.cy - r * 1.4);
+    const xa = Math.max(0, Math.round(a.cx - r * 3)), xb = Math.min(W - 1, Math.round(b.cx + r * 3));
+    for (let y = ya; y < yb; y++) for (let x = xa; x <= xb; x++) { tot++; if (L(x, y) > 150) claros++; }
+    if (tot && claros / tot >= 0.02) return true;
+  }
+  return false;
 }

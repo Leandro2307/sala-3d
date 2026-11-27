@@ -1,8 +1,9 @@
 // O worker dos avisos de botão (avisos-botoes.js): recebe um quadro do jogo (VideoFrame ou ImageBitmap),
 // reduz para no máximo 1280 de largura (os ícones ficam com ~20 px, o tamanho em que foram medidos),
-// procura os ícones e devolve os que estão firmes na tela. Fora da página para não pesar no jogo.
+// procura os ícones e devolve os que estão firmes na tela (e, se pedido, se o quadro do carro está lá).
+// Fora da página para não pesar no jogo.
 
-import { detectar, Rastreio } from './avisos-botoes.js';
+import { detectar, veiculo, Rastreio } from './avisos-botoes.js';
 
 const LARGURA = 1280;
 let tela = null, ctx = null;
@@ -25,8 +26,11 @@ self.onmessage = ({ data }) => {
     }
     ctx.drawImage(q, 0, 0, w, h);
     const t = performance.now();
-    const achados = detectar(ctx.getImageData(0, 0, w, h));
-    self.postMessage({ id: data.id, avisos: rastreio.passo(achados), ms: performance.now() - t });
+    const img = ctx.getImageData(0, 0, w, h);
+    const achados = detectar(img);
+    // dentro do carro? (o quadro do motor e da gasolina em cima do minimapa)
+    const carro = data.carro ? veiculo(img) : false;
+    self.postMessage({ id: data.id, avisos: rastreio.passo(achados), carro, ms: performance.now() - t });
   } catch (err) {
     self.postMessage({ id: data.id, erro: String(err?.message || err) });
   } finally {
