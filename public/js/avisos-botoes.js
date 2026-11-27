@@ -445,7 +445,8 @@ function discos(img, achados, passada, pilha, minScore, minMargem) {
     // a placa de L1/R1/L2/R2 (mais cheia que o disco: só o nome escuro dentro)
     if (preench >= 0.5 && preench <= 0.9) {
       const p = placa(img, x0, y0, w, h);
-      if (p && p.c >= MIN_PLACA && p.c - p.seg >= 0.08) {
+      // (borrada pelo vídeo a placa cai para ~0,78, mas segue bem à frente da segunda: vale com margem folgada)
+      if (p && ((p.c >= MIN_PLACA && p.c - p.seg >= 0.08) || (p.c >= 0.75 && p.c - p.seg >= 0.15))) {
         if (globalThis.__avisosPlaca) globalThis.__avisosPlaca(p, x0, y0, w, h);
         // a placa dentro do anel também passa por disco (e lá o R2 parecia R3): fica a de maior parecença
         const igual = achados.findIndex((o) => Math.hypot(o.cx - cx, o.cy - cy) < Math.max(r, o.rp));
@@ -479,11 +480,18 @@ function discos(img, achados, passada, pilha, minScore, minMargem) {
       if (!(c <= por[m.nome])) por[m.nome] = c;
     }
     const ord = Object.entries(por).sort((a, b) => b[1] - a[1]);
-    const melhor = { nome: ord[0][0], c: ord[0][1] }, seg = ord[1][1];
-    if (melhor.nome === 'nada' || melhor.c < minScore || melhor.c - seg < minMargem) continue;
+    const melhor = { nome: ord[0][0], c: ord[0][1] };
+    if (melhor.nome === 'nada' || melhor.c < minScore) continue;
+    // A margem é para o segundo símbolo de verdade. O 'nada' (o miolo escuro da letra o) fica perto do R e das
+    // letras compactas (o R do anel lilás: 0,94 contra 0,88 do 'nada', e caía em metade dos quadros): perto
+    // dele só vale com parecença alta
+    const outros = ord.filter(([n]) => n !== 'nada'), seg = outros[1]?.[1] ?? 0, nada = por.nada ?? -1;
+    if (melhor.c - seg < minMargem || (melhor.c - nada < minMargem && (melhor.c < 0.88 || melhor.c - nada < 0.03))) continue;
     // o ○ tem o miolo branco; a letra o do texto (legendas), escuro. E o vão entre letras de legenda às vezes
     // desenha um anel com ponto (0,83–0,89 nos prints): o ○ pede mais parecença
     if (melhor.nome === 'bola' && melhor.c < 0.9) continue;
+    // a placa L1 pequena (16×13 no vídeo) parecia o □: o □ vem num disco, sem a caixa achatada
+    if (melhor.nome === 'quadrado' && Math.abs(w - h) > Math.max(w, h) * 0.15) continue;
     if (melhor.nome === 'bola') {
       let claros = 0;
       for (const [dx, dy] of [[0, 0], [0.12, 0], [-0.12, 0], [0, 0.12], [0, -0.12]]) if (claro(d, (Math.round(cy + dy * r) * W + Math.round(cx + dx * r)) * 4)) claros++;
