@@ -6,11 +6,33 @@
 // a gente clona um de vez em quando); no vídeo normal, um VideoFrame tirado do <video>. Um quadro por vez
 // no worker, no máximo a cada INTERVALO_MS: a tecla aparece ~0,3 s depois do ícone (2 análises seguidas).
 
-import { legendaBotoes } from './mapa-teclas.js';
+import { visiveis, nomeEntrada } from './mapa-teclas.js';
 
 const INTERVALO_MS = 150;
-// a cor de cada símbolo, a mesma da legenda do canto (style.css #jogo-legenda)
-const COR = { b0: '#93c5fd', b1: '#fca5a5', b2: '#f9a8d4', b3: '#6ee7b7', b10: '#e5e7eb', b11: '#e5e7eb' };
+// a cor de cada símbolo, a mesma da legenda do PS5 (✕ azul, ○ vermelho, □ rosa, △ verde)
+const COR = { b0: '#93c5fd', b1: '#fca5a5', b2: '#f9a8d4', b3: '#6ee7b7', andar: '#e5e7eb', olhar: '#e5e7eb' };
+
+// O mouse desenhado: o botão que a ação usa aceso (esquerdo, direito ou a rodinha) ou, para o R (mexer a
+// câmera), as setas dos lados
+const CORPO = '<rect x="7" y="2.5" width="10" height="17" rx="5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M7.5 9.5h9M12 3v6.5" stroke="currentColor" stroke-width="1.5"/>';
+const ACESO = {
+  MouseLeft: '<path d="M12 3.4a4.2 4.2 0 0 0-4.2 4.2v1.9H12z" fill="var(--cor)"/>',
+  MouseRight: '<path d="M12 3.4a4.2 4.2 0 0 1 4.2 4.2v1.9H12z" fill="var(--cor)"/>',
+  MouseMiddle: '<rect x="10.6" y="4.6" width="2.8" height="4.2" rx="1.4" fill="var(--cor)"/>',
+};
+const SETAS = '<path d="M4.5 8.5 1.5 11l3 2.5M19.5 8.5l3 2.5-3 2.5" fill="none" stroke="var(--cor)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>';
+const mouse = (dentro, setas = false) => `<svg viewBox="${setas ? '0' : '4'} 0 ${setas ? 24 : 16} 22" aria-hidden="true">${CORPO}${dentro}${setas ? SETAS : ''}</svg>`;
+
+// o que aparece no lugar do ícone: { html, texto (para comparar), longa } ou null (o botão não tem tecla)
+function rotuloDe(id) {
+  if (id === 'olhar') return { html: mouse('', true), texto: 'mouse', icone: true };
+  if (id === 'andar') return { html: 'WASD', texto: 'WASD', longa: true };
+  const e = visiveis(id).find((x) => !/^Roda/.test(x));
+  if (!e) return null;
+  if (ACESO[e]) return { html: mouse(ACESO[e]), texto: e, icone: true };
+  const t = nomeEntrada(e);
+  return { html: t.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])), texto: t, longa: t.length > 2 };
+}
 
 export class AvisosBotoes {
   // camada: a div por cima da imagem; video: o <video> da tela; telaTurbo(): o canvas do turbo à vista (ou null)
@@ -120,8 +142,9 @@ export class AvisosBotoes {
   }
 
   mostrar(lista) {
-    const teclas = Object.fromEntries(legendaBotoes('ps5').map((b) => [b.id, b.teclas]));
-    const avisos = lista.filter((av) => teclas[av.id] && teclas[av.id] !== '—'); // botão sem tecla: nada a mostrar
+    const rotulos = {};
+    for (const av of lista) if (!(av.id in rotulos)) rotulos[av.id] = rotuloDe(av.id);
+    const avisos = lista.filter((av) => rotulos[av.id]); // botão sem tecla: nada a mostrar
     this.avisos = avisos;
     const cam = this.camada;
     if (!avisos.length) {
@@ -135,16 +158,20 @@ export class AvisosBotoes {
     // reaproveita as que já estão (só mexe na posição): não pisca a cada análise
     const velhas = [...cam.children];
     avisos.forEach((av, i) => {
-      const tecla = teclas[av.id];
+      const r = rotulos[av.id];
       let el = velhas[i];
       if (!el) {
         el = document.createElement('kbd');
         cam.append(el);
       }
-      if (el.textContent !== tecla) el.textContent = tecla;
+      if (el.dataset.t !== r.texto) {
+        el.dataset.t = r.texto;
+        el.innerHTML = r.html;
+      }
       const d = Math.max(26, av.r * 2 * a.h * 1.1);
       el.style.cssText = `left:${a.x + av.x * a.w}px;top:${a.y + av.y * a.h}px;height:${d}px;min-width:${d}px;font-size:${Math.max(12, d * 0.42)}px;--cor:${COR[av.id] || '#fff'}`;
-      el.classList.toggle('longa', tecla.length > 2);
+      el.classList.toggle('longa', !!r.longa);
+      el.classList.toggle('icone', !!r.icone);
     });
     for (const el of velhas.slice(avisos.length)) el.remove();
   }

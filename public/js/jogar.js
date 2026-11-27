@@ -39,7 +39,7 @@ import { LAYOUTS, layoutDoTitulo, ToqueJogo } from './toque-jogo.js';
 import { ControleFisico } from './gamepad-jogo.js';
 import { PadVirtual } from './pad-virtual.js';
 import { TecladoPad } from './teclado-pad.js';
-import { MapaTeclasPainel, dicaTeclado, mapaTeclas } from './mapa-teclas.js';
+import { MapaTeclasPainel, mapaTeclas } from './mapa-teclas.js';
 import { ModoCarroTela } from './modo-carro.js';
 import { AvisosBotoes } from './avisos-botoes-tela.js';
 import { Ps5Touchpad, temTouchpadHid } from './ps5-touchpad.js';
@@ -492,7 +492,6 @@ function tentarVoltar() {
   queda = null;
   entrarNoJogo(!!document.fullscreenElement);
   diagJogo.evento('a tela voltou: de volta ao jogo sozinho', { foraS: fora, telaCheia: !!document.fullscreenElement });
-  toast('A tela voltou: você está no jogo de novo.', 'success', 4000);
 }
 setInterval(tentarVoltar, 1000);
 
@@ -1096,7 +1095,7 @@ const controle = new Controle({
 const avisoSite = new AvisoDoSite({ raiz: $('#aviso-site'), controle, responder: (key, ev) => controle.mandar(key, ev) });
 
 // o aviso do relatório só para o dono da sala (o passe de dono que a sala guardou neste aparelho)
-const diagJogo = new DiagJogo({ toast, contexto: () => ({ sala: SALA, nome: conta ? `${conta.nome} (jogar)` : null }), verRelatorio: () => !!lerJSON('sala3d-papeis', {})[SALA]?.dono });
+const diagJogo = new DiagJogo({ toast, contexto: () => ({ sala: SALA, nome: conta ? `${conta.nome} (jogar)` : null }), verRelatorio: () => false }); // sem aviso de relatório no /jogar: ele vai para o servidor (banco) do mesmo jeito
 let jogandoLa = null; // { key, video, cursorLivre, ps5 }
 const avisos = new Map();
 const tremores = { n: 0, como: {}, primeiro: false, desde: 0 };
@@ -1154,17 +1153,6 @@ function receberDireto(id, m) {
 }
 
 // ------------------------------------------------------------------ Turbo e modos de imagem (como na sala)
-const MOTIVO_TURBO = {
-  navegador: 'este navegador não tem o que o modo turbo precisa',
-  'sem-controle': 'a tela não está com o controle liberado',
-  'sem-tela': 'a tela saiu do ar',
-  codificador: 'o PC de quem compartilha não conseguiu codificar',
-  decodificador: 'este aparelho não conseguiu decodificar',
-  conexao: 'a conexão direta com quem compartilha não está aberta',
-  'sem-imagem': 'nenhuma imagem chegou em 4 s',
-  lento: 'a conexão com quem compartilha não aguenta (a imagem atrasava ou parava)',
-};
-const turboAvisado = new Set();
 const turboRecebe = new TurboRecebe({
   abrir: (id, vida) => rtc?.abrirTurbo(id, CANAL_CONFIAVEL ? null : vida),
   abrirSom: (id) => rtc?.abrirTurboSom(id, CANAL_CONFIAVEL),
@@ -1174,10 +1162,7 @@ const turboRecebe = new TurboRecebe({
   onFalhou: (motivo) => {
     diagJogo.evento('modo turbo falhou: vídeo normal de volta', { motivo });
     if (turboRecebe.ultimaFalha) diagJogo.evento('turbo: como estava ao desistir', turboRecebe.ultimaFalha);
-    const volta = turboVolta.falhou(motivo);
-    if (turboAvisado.has(motivo)) return;
-    turboAvisado.add(motivo);
-    toast(`Modo turbo desligado: ${MOTIVO_TURBO[motivo] || motivo}. A imagem voltou ao normal${volta ? ' e o turbo tenta de novo sozinho' : ''}.`, 'warn', 8000);
+    turboVolta.falhou(motivo); // sem aviso na tela: o vídeo normal entra sozinho e o relatório guarda o motivo
   },
 });
 // como na TV: só H.264, os mesmos perfis, e a placa antes de qualquer outra coisa; o PC leva 3–4 s para começar
@@ -1751,7 +1736,7 @@ setInterval(amostrar, 2000);
 
 function marcarEngasgo() {
   if (!jogandoLa) return;
-  if (diagJogo.marcarEngasgo(turboRecebe.ligado ? turboRecebe.caixaPreta() : null)) toast('Engasgo marcado no relatório', 'info', 1500);
+  diagJogo.marcarEngasgo(turboRecebe.ligado ? turboRecebe.caixaPreta() : null);
 }
 $('#focus-engasgo').addEventListener('click', (e) => {
   e.currentTarget.blur();
@@ -1827,7 +1812,7 @@ const toqueJogo = new ToqueJogo({
   raiz: $('#toque-jogo'),
   controle,
   pad: padVirtual,
-  toast,
+  toast: (texto, tipo, ...resto) => { if (tipo !== 'info') toast(texto, tipo, ...resto); }, // sem os avisos de entrada (pedido do usuário)
   onEngasgo: () => marcarEngasgo(),
   volume: {
     get: () => ajustes.jogo,
@@ -1918,9 +1903,6 @@ controle.onJogo = (v, key) => {
   if (virtual) {
     padVirtual.acordar();
     tecladoPad.ligar(virtual);
-    const dica = dicaTeclado(virtual);
-    // a dica só para quem joga no teclado (com controle não serve)
-    if (dica && entradaDeAgora() === 'teclado') toast(`Teclado e mouse viram o controle. ${dica}`, 'info', 12000);
   } else tecladoPad.desligar();
   mostrarLegenda(virtual);
   if (!v) {
@@ -1940,9 +1922,6 @@ controle.onEscondeu = () => {
   toqueJogo.soltarTudo();
   fisico.soltarTudo();
   tecladoPad.soltarTudo();
-};
-controle.onJogoSoltou = () => {
-  if (controle.jogoNo) toast('Esc soltou o mouse (o jogo recebeu o Esc). Clique na tela para voltar a jogar, ou F8 para desligar o modo jogo.', 'info', 6000);
 };
 
 const TECLAS_TRAVADAS = [
@@ -1994,12 +1973,7 @@ function alternarJogo() {
   if (!jogavel() || !video.srcObject) return void toast('A imagem ainda não chegou.', 'warn');
   if (soVerLan()) return void verOuAlugar();
   if (!deixarJogar()) return;
-  entrarNoJogo(true);
-  if (isTouch) return; // o controle de toque avisa com que botões entrou
-  if (ehPs5(st.alvo.sh) && entradaDeAgora() === 'teclado') {
-    toast('Vai jogar no controle? Aperte um botão dele. Se não responder, desligue e ligue o controle (a sala pode ter deixado ele no modo direto).', 'info', 10000);
-  }
-  toast(`Modo jogo ligado. Esc duas vezes (ou F8) desliga${fisico.pad() ? '; no controle, segure Create + Options' : ''}; segure Esc para sair da tela cheia.`, 'info', 7000);
+  entrarNoJogo(true); // sem avisos ao ligar (pedido do usuário em 2026-11-27)
 }
 // cheia: com a tela cheia e o teclado travado (só com um gesto, ou se a página já está em tela cheia)
 function entrarNoJogo(cheia) {
@@ -2011,7 +1985,6 @@ function sairDoJogo() {
   esquecerJogo();
   controle.desligarJogo();
   jogoNoPc(false);
-  toast('Modo jogo desligado.', 'info', 3000);
 }
 for (const id of ['#focus-jogo', '#jg-jogar']) {
   $(id).addEventListener('click', (e) => {

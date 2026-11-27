@@ -1,5 +1,5 @@
 // Acha na imagem do jogo os avisos de botão do PS5 (o GTA e outros põem um círculo branco com o símbolo
-// escuro dentro: ✕ ○ □ △, e R/L para afundar os analógicos) para o /jogar mostrar em cima a tecla do
+// escuro dentro: ✕ ○ □ △, e R/L dos analógicos) para o /jogar mostrar em cima a tecla do
 // teclado que faz aquele botão (mapa-teclas.js). Roda num worker (avisos-botoes-worker.js) sobre uma cópia
 // pequena do quadro; aqui fica só a conta, sem nada do navegador, para o teste rodar no Node.
 //
@@ -9,7 +9,8 @@
 // 12×12) com os desenhos de cada símbolo feitos aqui (proporções medidas em prints do GTA 6). Poste,
 // farol e letra de texto caem no (3) ou no (4).
 
-export const SIMBOLOS = { xis: 'b0', bola: 'b1', quadrado: 'b2', triangulo: 'b3', L: 'b10', R: 'b11' };
+// o R e o L no círculo são os analógicos (mexer a câmera / andar), não o afundar: no teclado, o mouse e o WASD
+export const SIMBOLOS = { xis: 'b0', bola: 'b1', quadrado: 'b2', triangulo: 'b3', L: 'andar', R: 'olhar' };
 
 const N = 12; // a grade do símbolo
 const LADO = 0.8; // a grade cobre [-LADO, LADO] × raio em volta do centro
@@ -74,14 +75,16 @@ function desenhado(f) {
   return v;
 }
 // Os medidos em prints do GTA 6 (a grade() de cada ícone, de 0 a 9 por célula): o ✕ do menu de
-// interação, o ✕ pequeno do aviso de segurar (com o anel de progresso), o △ e o R do afundar o
-// analógico. Valem mais que os desenhados: são o desenho de verdade, já com o borrado do vídeo.
+// interação, o ✕ pequeno do aviso de segurar (com o anel de progresso), o △, o □ grande e o R do
+// analógico direito. Valem mais que os desenhados: são o desenho de verdade, já com o borrado do vídeo.
 const MEDIDOS = {
   xis: [
     '830000000039216100002503059710028920017971289500001797895000000189960000000289971000002895797100028950179710069510017940224000001513820000000038',
     '310000000027101100011002002530252001001683771000000388940000000179710000000179820000000595960000002861582000002420142001110100011003310010000138',
   ],
   triangulo: ['610026610016100069950001000399993000001795697100004971289400028930049810169600017950399301113992799777778996699999999995223333333322610000000015'],
+  // o □ grande do aviso de segurar (entrar no carro), traço grosso quase até a borda
+  quadrado: ['720000010028268788888852089999999960188222224960188000003960188000003960088000003970088000003960088322224960089999999960168888888842610000000028'],
   R: ['400000000016000111100001000588862000001798896100001793498100001798896000000798992000001794793000000782397100000341144100100000000002610000000027'],
 };
 const deTexto = (t) => Float32Array.from(t, (c) => +c / 9);
@@ -193,7 +196,7 @@ export function detectar(img, { minScore = MIN_SCORE, minMargem = MIN_MARGEM } =
     pedacos.push({ x0, y0, x1, y1, cnt });
   }
   // 2) Pequeno, o símbolo corta o disco em pedaços (o ✕ em quatro, a base do △ separa a de baixo): os
-  // pedaços cheios que se encostam (até 2 px) formam um candidato a mais. Anel (o de segurar) é vazado e
+  // pedaços cheios que se encostam (até 4 px: o traço grosso do □ grande) formam um candidato a mais. Anel (o de segurar) é vazado e
   // não entra, senão engoliria o disco.
   const pai = pedacos.map((_, i) => i);
   const raiz = (i) => (pai[i] === i ? i : (pai[i] = raiz(pai[i])));
@@ -201,9 +204,9 @@ export function detectar(img, { minScore = MIN_SCORE, minMargem = MIN_MARGEM } =
   const ordem = pedacos.map((_, i) => i).filter((i) => cheio(pedacos[i])).sort((i, j) => pedacos[i].x0 - pedacos[j].x0);
   for (let a = 0; a < ordem.length; a++) {
     const p = pedacos[ordem[a]];
-    for (let b = a + 1; b < ordem.length && pedacos[ordem[b]].x0 <= p.x1 + 2; b++) {
+    for (let b = a + 1; b < ordem.length && pedacos[ordem[b]].x0 <= p.x1 + 4; b++) {
       const q = pedacos[ordem[b]];
-      if (q.y0 <= p.y1 + 2 && p.y0 <= q.y1 + 2) pai[raiz(ordem[a])] = raiz(ordem[b]);
+      if (q.y0 <= p.y1 + 4 && p.y0 <= q.y1 + 4) pai[raiz(ordem[a])] = raiz(ordem[b]);
     }
   }
   const grupos = new Map();

@@ -4878,6 +4878,9 @@ body.touch :is(.hk-lista, #help-extra, #help-mais-btn) { display: none !importan
   transition: left .1s linear, top .1s linear;
 }
 #jogo-avisos kbd.longa { border-radius: 8px; }
+/* o mouse desenhado (clique esquerdo/direito/rodinha aceso, ou as setas do R de mexer a câmera) */
+#jogo-avisos kbd.icone { padding: 0 .25em; }
+#jogo-avisos kbd svg { display: block; height: 74%; width: auto; }
 @keyframes aviso-entra { from { opacity: 0; transform: translate(-50%, -50%) scale(.8); } }
 @media (prefers-reduced-motion: reduce) { #jogo-avisos kbd { animation: none; transition: none; } }
 #jogo-legenda span {
