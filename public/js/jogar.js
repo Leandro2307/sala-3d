@@ -1237,8 +1237,47 @@ function receberDireto(id, m) {
   } else if (typeof m.pe === 'number' && jogandoLa?.key.split('~')[0] === id) {
     const dif = turboRecebe.dif;
     const ida = typeof m.t === 'number' && dif != null ? Math.max(0, Math.round((m.t - dif - m.pe) * 10) / 10) : null;
-    Object.assign(ping, { rtt: Math.round((performance.now() - m.pe) * 10) / 10, ida, ajudante: typeof m.aj === 'number' ? m.aj : null });
+    Object.assign(ping, { rtt: Math.round((performance.now() - m.pe) * 10) / 10, ida, ajudante: typeof m.aj === 'number' ? m.aj : null, novo: true });
+    // o canal é ordenado: esta volta responde também por todos os pings de antes dela
+    while (comando.fora.length && comando.fora[0] <= m.pe) comando.fora.shift();
+    comando.viu = true;
   }
+}
+
+// Comando preso no caminho direto (2026-11-27, cucafado1 e cudeporra: o mesmo PC, 4G, Chrome 156). A imagem chegava
+// em dia (~100 ms), mas o caminho direto perdia metade dos pacotes de lá para cá (45 pings da conexão, 21 respostas):
+// o canal do controle, que é confiável, esperava cada reenvio e o comando chegava ao PC de 1 a 43 s depois (a ida e
+// volta do ping do controle foi de 0,6 a 15, 27 e 43 s). Quando a conexão passou sozinha pelo TURN, o comando voltou
+// a 70 ms. Agora: o ping do controle sem volta há COMANDO_PRESO_MS (ou voltando com isso) em COMANDO_AMOSTRAS amostras
+// seguidas, no caminho direto, passa a conexão para o TURN — uma vez por sessão de jogo.
+const COMANDO_PRESO_MS = 1500;
+const COMANDO_AMOSTRAS = 2; // amostras de 2 s
+// viu: já voltou algum ping nesta conexão (um PC que não responde não é comando preso)
+const comando = { fora: [], pc: null, viu: false, seguidas: 0, turnEm: null };
+async function vigiarComando(key, dono) {
+  if (!comando.viu) return;
+  const agora = performance.now();
+  const espera = comando.fora.length ? agora - comando.fora[0] : 0;
+  const voltou = ping.novo ? ping.rtt : 0;
+  ping.novo = false;
+  if (Math.max(espera, voltou) < COMANDO_PRESO_MS) {
+    comando.seguidas = 0;
+    return;
+  }
+  if (++comando.seguidas < COMANDO_AMOSTRAS || comando.turnEm === key) return;
+  const c = await Promise.resolve(rtc?.caminhoPara(dono)).catch(() => null);
+  if (!c || c.relay || jogandoLa?.key !== key) return; // já pelo TURN (ou sem conexão): não é o caminho direto
+  comando.turnEm = key;
+  comando.seguidas = 0;
+  const dados = { esperaMs: Math.round(espera), rttMs: ping.rtt, iceRttMs: c.rttMs, caminho: `${c.local} → ${c.remoto}` };
+  if (!rtc.usarCaminho(dono, 'turn')) return void diagJogo.evento('comando preso no caminho direto (sem TURN para passar)', dados);
+  comando.fora.length = 0;
+  diagJogo.evento('comando preso no caminho direto: passando para o TURN', dados);
+  const foi = await esperarRota(dono, true);
+  diagJogo.evento('comando preso: TURN', { foi });
+  if (jogandoLa?.key !== key) return;
+  aplicarBuffer();
+  if (!foi) rtc.usarCaminho(dono, 'auto'); // não ligou: volta a valer qualquer caminho
 }
 
 // ------------------------------------------------------------------ Turbo e modos de imagem (como na sala)
@@ -1747,6 +1786,7 @@ function jogoLa(v, key) {
   // o de segundo plano segue (entrando no jogo, testarConexao espera por ele; saindo, ele termina e fica guardado)
   if (!fundo) testeJoga.pular('saiu do jogo');
   if (jogandoLa) rtc?.usarCaminho(jogandoLa.key.split('~')[0], 'auto'); // o TURN escolhido vale só para o jogo
+  comando.turnEm = null;
   Object.assign(vigiaCaminho, { par: null, rtt: [], procurou: false });
   previsto = null;
   painelTeste.fechar();
@@ -1818,7 +1858,20 @@ async function amostrar() {
   try {
     const { key } = jogandoLa;
     const dono = key.split('~')[0];
-    rtc.mandarControle(dono, { p: performance.now() });
+    // a conexão refeita (outra RTCPeerConnection) perde os pings que estavam no caminho
+    const pc = rtc.peers.get(dono)?.pc || null;
+    if (pc !== comando.pc) {
+      comando.pc = pc;
+      comando.fora.length = 0;
+      comando.seguidas = 0;
+      comando.viu = false;
+    }
+    vigiarComando(key, dono).catch(() => {});
+    const pe = performance.now();
+    if (rtc.mandarControle(dono, { p: pe })) {
+      comando.fora.push(pe);
+      if (comando.fora.length > 60) comando.fora.shift();
+    }
     const trilha = video.srcObject?.getVideoTracks()[0];
     if (!trilha) return;
     const extra = { preset: opcoesJogo.get('preset') || 0, turbo: turboRecebe.stats(), controleRttMs: ping.rtt, controleIdaMs: ping.ida, ajudanteMs: ping.ajudante, movimentoCru: controle.movimentoCru, controleFisico: fisico.usado, entrada: entradaDeAgora(), cursorLivre: jogandoLa.cursorLivre };

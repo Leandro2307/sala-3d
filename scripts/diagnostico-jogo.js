@@ -119,6 +119,13 @@ function main() {
   console.log(`quem joga: ${joga.inicio} → ${joga.fim} · ${joga.ambiente?.navegador?.match(/iPhone|Android|Windows|Mac/)?.[0] ?? '?'} · ${joga.amostras?.length ?? 0} amostras`);
   if (!comp) console.log('quem hospeda: relatório não achado na mesma hora (só o lado de quem joga)');
   else console.log(`quem hospeda: ${comp.inicio} → ${comp.fim} · ${comp.amostras?.length ?? 0} amostras`);
+  // o comando (ida e volta do ping do controle): a imagem pode estar em dia com o comando chegando segundos depois
+  // (2026-11-27, cucafado1: até 43 s pelo caminho direto que perdia pacotes de lá para cá)
+  const cmd = (joga.amostras || []).map((a) => a.controleRttMs).filter((x) => x != null).sort((a, b) => a - b);
+  if (cmd.length) {
+    const lentos = cmd.filter((x) => x > 1000).length;
+    console.log(`comando (ida e volta até o PC): mediana ${Math.round(cmd[cmd.length >> 1])} ms, pior ${Math.round(cmd.at(-1))} ms${lentos ? ` · ${lentos} amostras acima de 1 s: COMANDO PRESO` : ''}`);
+  }
   const dj = deslocamento(joga);
   const dh = deslocamento(comp);
   const conta = {};
