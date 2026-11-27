@@ -5142,19 +5142,21 @@ async function acabouVezAssistindo(m, conta) {
   const nome = { pc: 'PC', ps5: 'PS5' }[m];
   const temTeste = !state.lan?.semTeste?.includes(state.selfId);
   toast(`A vez de ${conta || 'quem jogava'} no ${nome} acabou: o ${nome} está livre.${temTeste ? ' Use seus 2 min grátis ou alugue para jogar.' : ' Alugue para jogar agora.'}`, 'info', 10000);
-  if (!state.lan || !lanLivre(m) || !$('#lan-modal').hidden) return; // alguém pegou nesse meio-tempo, ou já está aberto
+  if (!state.lan || !lanLivre(m) || testeDeOutroLan(m, state.selfId) || !$('#lan-modal').hidden) return; // alguém pegou nesse meio-tempo, ou já está aberto
   abrirAluguel({ maquina: m, agora: true }); // o "Jogar agora" do aluguel: começa no minuto seguinte
 }
 document.addEventListener('visibilitychange', () => {
   const p = fimVezPendente;
-  if (p && document.visibilityState === 'visible' && state.lan && lanLivre(p.m)) acabouVezAssistindo(p.m, p.conta);
+  if (p && document.visibilityState === 'visible' && state.lan && lanLivre(p.m) && !testeDeOutroLan(p.m, state.selfId)) acabouVezAssistindo(p.m, p.conta);
 });
 // antes da 1ª tela cheia desta vez: a oferta do próximo horário livre (oferta-aluguel.js)
 async function verOuAlugar() {
   const t = state.focus?.kind === 'share' ? acharTela(state.focus.key) : null;
   if (!t) return;
   const m = maquinaDaTela(t.share);
-  const vez = state.lan?.[m];
+  const v = state.lan?.[m];
+  // no teste grátis de outra pessoa, a "vez" é a dela até o fim dos 2 min
+  const vez = !v?.conta && v?.teste ? { conta: v.teste.conta, fim: v.teste.fim } : v;
   if (document.fullscreenElement || !precisaOferecer(m, vez)) return telaCheiaSoVer();
   const r = await oferecerAluguel({ sala: state.room || '', maquina: m, vez });
   if (r === 'ver') telaCheiaSoVer();
@@ -6137,7 +6139,9 @@ const lanLivre = (m) => !state.lan?.[m]?.conta;
 const semTesteLan = (id) => !!state.lan?.semTeste?.includes(id);
 // a fila da vez (fila-lan.js): com gente na fila e a máquina livre, só joga quem o servidor pôs em livres
 const livreNaFilaLan = (m, id) => !state.lan?.fila?.[m]?.livres || state.lan.fila[m].livres.includes(id);
-const podeJogarLan = (m, id) => !state.lan || idsDaVez(m).includes(id) || (lanLivre(m) && !semTesteLan(id) && livreNaFilaLan(m, id));
+// outra pessoa (não id) no teste grátis desta máquina: até acabar, a máquina é dela (server.js testeNaMaquina)
+const testeDeOutroLan = (m, id) => { const t = state.lan?.[m]?.teste; return !!t && !t.ids?.includes(id); };
+const podeJogarLan = (m, id) => !state.lan || idsDaVez(m).includes(id) || (lanLivre(m) && !testeDeOutroLan(m, id) && !semTesteLan(id) && livreNaFilaLan(m, id));
 // A máquina está alugada para outra pessoa e eu não sou da vez: só assisto (o mesmo do /jogar). No "até alguém
 // novo", quem ainda tem o teste grátis não entra aqui: em segundos a vez é dela.
 // a máquina da tela em foco, se eu estou só assistindo a vez de outra pessoa nela
@@ -6149,7 +6153,8 @@ function soVerLan(sh) {
   if (!state.lan || !sh) return false;
   const m = maquinaDaTela(sh);
   const v = state.lan[m];
-  if (!v?.conta || idsDaVez(m).includes(state.selfId)) return false;
+  if (idsDaVez(m).includes(state.selfId)) return false;
+  if (!v?.conta) return testeDeOutroLan(m, state.selfId); // livre, mas no teste grátis de outra pessoa
   return !v.aberta || semTesteLan(state.selfId);
 }
 // Quem compartilha a tela: o primeiro comando de quem joga de graça numa máquina livre começa os 2
@@ -6295,9 +6300,9 @@ function mostrarVezLan() {
 setInterval(() => { if (state.lan || !$('#lan-vez-foco')?.hidden) mostrarVezLan(); }, 1000);
 function aplicarLan(e) {
   const assistia = assistindoLan(); // a máquina que eu assistia sem ser a minha vez
-  const vezQueAssistia = assistia ? state.lan[assistia].conta : null;
+  const vezQueAssistia = assistia ? state.lan[assistia].conta || state.lan[assistia].teste?.conta : null;
   state.lan = e?.ligada ? e : null;
-  if (assistia && state.lan && lanLivre(assistia)) acabouVezAssistindo(assistia, vezQueAssistia);
+  if (assistia && state.lan && lanLivre(assistia) && !testeDeOutroLan(assistia, state.selfId)) acabouVezAssistindo(assistia, vezQueAssistia);
   if (typeof e?.agora === 'number') lanDif = e.agora - Date.now();
   // a vez mudou: quem jogava numa tela minha e não pode mais (a hora passou, ou alguém alugou a
   // máquina que estava livre) sai do modo jogo deste PC (a sala volta a ser desenhada normalmente)
@@ -6324,8 +6329,12 @@ function aplicarLan(e) {
   lanEraAberta = new Set([...agora].filter((m) => state.lan[m]?.aberta));
   // o meu teste grátis: começou (primeiro comando ao jogo) ou acabou (abre o aluguel)
   const fimTeste = state.lan?.teste?.[state.selfId] || null;
-  if (fimTeste && !meuTesteLan) toast('Teste grátis: você tem 2 minutos para jogar. Depois, para continuar, é só alugar o PC ou o PS5.', 'info', 7000);
+  if (fimTeste && !meuTesteLan) {
+    toast('Teste grátis: você tem 2 minutos para jogar. Depois, para continuar, é só alugar o PC ou o PS5.', 'info', 7000);
+    diagJogo.marcar('lan: teste grátis começou', { faltaS: faltaLan(fimTeste).s });
+  }
   if (meuTesteLan && !fimTeste && semTesteLan(state.selfId)) {
+    diagJogo.marcar('lan: teste grátis acabou, abrindo o aluguel', { jogando: !!controle.jogo });
     pediuAluguelEm = Date.now();
     toast('Seu teste grátis de 2 minutos acabou. Para continuar jogando, alugue o PC ou o PS5.', 'warn', 10000);
     tirarDoJogoLan();

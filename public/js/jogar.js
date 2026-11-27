@@ -869,7 +869,9 @@ const semTeste = () => !!st.lan?.semTeste?.includes(st.selfId);
 const filaDe = (m) => st.lan?.fila?.[m] || null;
 const livreNaFila = (m) => !filaDe(m)?.livres || filaDe(m).livres.includes(st.selfId);
 const minhaPosFila = (m) => (filaDe(m)?.lista || []).findIndex((x) => x.ids.includes(st.selfId)); // -1: fora
-const podeJogarLan = (m) => !st.lan || idsDaVez(m).includes(st.selfId) || (lanLivre(m) && !semTeste() && livreNaFila(m));
+// outra pessoa no teste grátis desta máquina: até acabar, a máquina é dela (server.js testeNaMaquina)
+const testeDeOutro = (m) => { const t = st.lan?.[m]?.teste; return !!t && !t.ids?.includes(st.selfId); };
+const podeJogarLan = (m) => !st.lan || idsDaVez(m).includes(st.selfId) || (lanLivre(m) && !testeDeOutro(m) && !semTeste() && livreNaFila(m));
 function minhasMaquinas() { return Object.keys(NOME_MAQ).filter((m) => idsDaVez(m).includes(st.selfId)); }
 // A máquina está alugada para outra pessoa: quem não é da vez só assiste. O "Modo jogo" vira "Tela cheia": a
 // imagem na tela toda, sem controle, sem tutorial e sem o teste da conexão (nada disso iria ao jogo). No
@@ -879,10 +881,12 @@ function soVerLan(sh = st.alvo?.sh) {
   const m = maquinaDaTela(sh);
   const v = st.lan[m];
   if (idsDaVez(m).includes(st.selfId)) return false;
-  if (!v?.conta) return !livreNaFila(m); // livre, mas é a vez do 1º da fila
+  if (!v?.conta) return testeDeOutro(m) || !livreNaFila(m); // no teste de outra pessoa, ou é a vez do 1º da fila
   return !v.aberta || semTeste();
 }
-const vezDeQuem = () => (st.alvo ? st.lan?.[maquinaDaTela(st.alvo.sh)]?.conta || 'outra pessoa' : 'outra pessoa');
+// quem está com a máquina: a vez (aluguel, liberado) ou o teste grátis
+const contaNaMaquina = (m) => st.lan?.[m]?.conta || st.lan?.[m]?.teste?.conta || null;
+const vezDeQuem = () => (st.alvo ? contaNaMaquina(maquinaDaTela(st.alvo.sh)) || 'outra pessoa' : 'outra pessoa');
 // Eu assistia a vez de outra pessoa e ela acabou com a máquina livre: sai da tela cheia e abre o aluguel no
 // "Jogar agora" (começa no minuto seguinte). Com a página escondida, fica para quando voltar a ela.
 let fimVezPendente = null;
@@ -899,17 +903,19 @@ async function acabouVezAssistindo(m, conta) {
   }
   if (minhaPosFila(m) === 0) return; // a chamada já avisa e abre o aluguel
   toast(`A vez de ${conta || 'quem jogava'} no ${nome} acabou: o ${nome} está livre.${temTeste ? ' Use seus 2 min grátis ou alugue para jogar.' : ' Alugue para jogar agora.'}`, 'info', 10000);
-  if (!st.lan || !lanLivre(m) || !$('#lan-modal').hidden) return; // alguém pegou nesse meio-tempo, ou já está aberto
+  if (!st.lan || !lanLivre(m) || testeDeOutro(m) || !$('#lan-modal').hidden) return; // alguém pegou nesse meio-tempo, ou já está aberto
   abrirAluguel({ maquina: m, agora: true }); // o "Jogar agora" do aluguel: começa no minuto seguinte
 }
 document.addEventListener('visibilitychange', () => {
   const p = fimVezPendente;
-  if (p && document.visibilityState === 'visible' && st.lan && lanLivre(p.m)) acabouVezAssistindo(p.m, p.conta);
+  if (p && document.visibilityState === 'visible' && st.lan && lanLivre(p.m) && !testeDeOutro(p.m)) acabouVezAssistindo(p.m, p.conta);
 });
 // antes da 1ª tela cheia desta vez: a oferta do próximo horário livre (oferta-aluguel.js)
 async function verOuAlugar() {
   const m = maquinaDaTela(st.alvo.sh);
-  const vez = st.lan?.[m];
+  const v = st.lan?.[m];
+  // no teste grátis de outra pessoa, a "vez" é a dela até o fim dos 2 min
+  const vez = !v?.conta && v?.teste ? { conta: v.teste.conta, fim: v.teste.fim } : v;
   if (document.fullscreenElement || !precisaOferecer(m, vez)) return telaCheiaSoVer();
   const r = await oferecerAluguel({ sala: SALA, maquina: m, vez });
   diagJogo.marcar('lan: oferta de aluguel ao assistir', { maquina: m, escolheu: r?.alugar ? 'alugar' : r || 'fechou' });
@@ -1009,9 +1015,9 @@ setInterval(() => { if (st.lan) mostrarVezLan(); }, 1000);
 
 function aplicarLan(e) {
   const assistia = st.alvo && soVerLan() ? maquinaDaTela(st.alvo.sh) : null; // a máquina que eu assistia sem ser a minha vez
-  const vezQueAssistia = assistia ? st.lan[assistia].conta : null;
+  const vezQueAssistia = assistia ? contaNaMaquina(assistia) : null;
   st.lan = e?.ligada ? e : null;
-  if (assistia && st.lan && lanLivre(assistia)) acabouVezAssistindo(assistia, vezQueAssistia);
+  if (assistia && st.lan && lanLivre(assistia) && !testeDeOutro(assistia)) acabouVezAssistindo(assistia, vezQueAssistia);
   if (typeof e?.agora === 'number') lanDif = e.agora - Date.now();
   const agora = new Set(minhasMaquinas());
   for (const m of agora) {
@@ -1027,8 +1033,12 @@ function aplicarLan(e) {
   lanEraMinha = agora;
   lanEraAberta = new Set([...agora].filter((m) => st.lan[m]?.aberta));
   const fimTeste = st.lan?.teste?.[st.selfId] || null;
-  if (fimTeste && !meuTesteLan) toast('Teste grátis: você tem 2 minutos para jogar. Depois, é só alugar o PC ou o PS5.', 'info', 7000);
+  if (fimTeste && !meuTesteLan) {
+    toast('Teste grátis: você tem 2 minutos para jogar. Depois, é só alugar o PC ou o PS5.', 'info', 7000);
+    diagJogo.marcar('lan: teste grátis começou', { faltaS: falta(fimTeste).s, maquina: st.alvo ? maquinaDaTela(st.alvo.sh) : null });
+  }
   if (meuTesteLan && !fimTeste && semTeste()) {
+    diagJogo.marcar('lan: teste grátis acabou, abrindo o aluguel', { jogando: !!controle.jogo });
     pediuAluguelEm = Date.now();
     toast('Seu teste grátis de 2 minutos acabou. Para continuar jogando, alugue o PC ou o PS5.', 'warn', 10000);
     tirarDoJogo();
@@ -1039,8 +1049,10 @@ function aplicarLan(e) {
   const sh = st.alvo?.sh;
   if (sh && (controle.jogo || st.controlando) && !podeJogarLan(maquinaDaTela(sh))) {
     const m = maquinaDaTela(sh);
+    diagJogo.marcar('lan: tirado do jogo', { maquina: m, vez: contaNaMaquina(m), teste: testeDeOutro(m), fila: !livreNaFila(m), semTeste: semTeste() });
     tirarDoJogo();
     if (!lanLivre(m)) toast(`Agora é a vez de ${st.lan[m].conta} no ${NOME_MAQ[m]}. Para jogar, alugue outro horário.`, 'warn', 9000);
+    else if (testeDeOutro(m)) toast(`${st.lan[m].teste.conta} começou o teste grátis no ${NOME_MAQ[m]} antes: entre na fila para ser o próximo.`, 'warn', 9000);
   }
   $('#lan-reservar').hidden = !st.lan;
   mostrarBotaoFila();
@@ -1053,7 +1065,7 @@ function mostrarBotaoFila() {
   const sh = st.alvo?.sh;
   const m = sh ? maquinaDaTela(sh) : null;
   const naFila = m ? minhaPosFila(m) >= 0 : false;
-  const mostra = !!(st.lan && m && conta && !idsDaVez(m).includes(st.selfId) && (naFila || !lanLivre(m) || filaDe(m)?.lista?.length));
+  const mostra = !!(st.lan && m && conta && !idsDaVez(m).includes(st.selfId) && (naFila || !lanLivre(m) || testeDeOutro(m) || filaDe(m)?.lista?.length));
   bt.hidden = !mostra;
   if (!mostra) return;
   bt.dataset.maquina = m;
@@ -1120,13 +1132,14 @@ function deixarJogar() {
   // liberado "até alguém novo": quem ainda tem o teste espera uns segundos (o servidor tira a vez de lá); quem
   // já usou o teste (por esta conta ou por outra na mesma internet) não conta como pessoa nova
   const v = st.lan?.[m];
-  const texto = lanLivre(m) && !livreNaFila(m) ? `Agora é a vez de ${filaDe(m).lista[0]?.conta}, o 1º da fila do ${NOME_MAQ[m]}.${minhaPosFila(m) < 0 ? ' Entre na fila para ser chamado.' : ''}`
+  const texto = lanLivre(m) && testeDeOutro(m) ? `${v.teste.conta} está no teste grátis do ${NOME_MAQ[m]}.${minhaPosFila(m) < 0 ? ' Entre na fila para ser o próximo.' : ''}`
+    : lanLivre(m) && !livreNaFila(m) ? `Agora é a vez de ${filaDe(m).lista[0]?.conta}, o 1º da fila do ${NOME_MAQ[m]}.${minhaPosFila(m) < 0 ? ' Entre na fila para ser chamado.' : ''}`
     : lanLivre(m) ? `Seu teste grátis já foi usado. Alugue o ${NOME_MAQ[m]} para jogar.`
     : !v.aberta ? `Agora é a vez de ${v.conta} no ${NOME_MAQ[m]}.`
       : semTeste() ? `O teste grátis já foi usado nesta conta ou nesta internet, então o ${NOME_MAQ[m]} continua com ${v.conta}. Para jogar, alugue.`
         : `O ${NOME_MAQ[m]} está com ${v.conta} até alguém novo chegar: em alguns segundos ele fica livre para o seu teste.`;
   toast(texto, 'warn', 8000);
-  if (lanLivre(m) && livreNaFila(m)) abrirAluguel();
+  if (lanLivre(m) && livreNaFila(m) && !testeDeOutro(m)) abrirAluguel();
   return false;
 }
 // pedido: { maquina, dia, inicio } — a página do aluguel já abre nessa máquina, com essa hora escolhida

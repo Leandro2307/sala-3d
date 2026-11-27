@@ -871,8 +871,16 @@ const idsDaConta = (room, conta) => [...room.users.values()].filter((u) => u.con
 function contasDaFila(room, m, agora = Date.now()) {
   const primeiro = filaDe(room).lista(m)[0]?.conta;
   if (!primeiro) return null;
+  const t = testeNaMaquina(room, m, agora);
+  return t && t.conta !== primeiro ? [primeiro, t.conta] : [primeiro];
+}
+// O teste grátis correndo nesta máquina ({ conta, fim }), com quem testa ainda na sala: enquanto dura, a máquina
+// é só dessa pessoa (pedido de 2026-11-27: duas pessoas no teste mexiam no mesmo PS5 ao mesmo tempo); quem
+// chega assiste e entra na fila. Saiu da sala, a máquina fica livre antes do fim.
+function testeNaMaquina(room, m, agora = Date.now()) {
   const t = room.lanTesteMaq?.[m];
-  return t && t.fim > agora && t.conta !== primeiro ? [primeiro, t.conta] : [primeiro];
+  if (!t || t.fim <= agora) return null;
+  return [...room.users.values()].some((u) => u.conta === t.conta) ? t : null;
 }
 function estadoLan(room) {
   if (!room.config?.lanhouse?.ligada) return { ligada: false };
@@ -892,8 +900,8 @@ function estadoLan(room) {
     // semDublagem: quem alugou desmarcou a dublagem (o PC da casa manda só o som do jogo para ela)
     e[m] = { conta: atual?.conta ?? null, inicio: atual?.inicio ?? null, fim: atual?.fim ?? null, preparando: !!atual?.preparando, aberta: !!atual?.aberta, semDublagem: !!atual?.semDublagem, ids };
     // máquina sem aluguel com alguém no teste grátis: quem é e até quando (a barra mostra "Teste - João")
-    const tm = room.lanTesteMaq?.[m];
-    if (!atual && tm && tm.fim > Date.now()) e[m].teste = { conta: tm.conta, fim: tm.fim, ids: idsDaConta(room, tm.conta) };
+    const tm = testeNaMaquina(room, m);
+    if (!atual && tm) e[m].teste = { conta: tm.conta, fim: tm.fim, ids: idsDaConta(room, tm.conta) };
   }
   // teste grátis (máquina sem ninguém alugado): quem está com os 2 min correndo (id -> fim) e quem já
   // usou o seu (pela conta ou pelo IP) e não joga mais de graça
@@ -969,6 +977,8 @@ function podeJogarLan(room, user, donoDaTela, tela) {
   const m = maquinaDaTela(tela);
   const atual = vezLan(room, m);
   if (atual) return !!user.conta && user.conta === atual.conta;
+  const tm = testeNaMaquina(room, m);
+  if (tm) return !!user.conta && user.conta === tm.conta;
   const fila = contasDaFila(room, m);
   if (fila && !fila.includes(user.conta)) return false;
   return !!user.conta && !lan.teste(room.id, user.conta, user.ip).acabou;
@@ -991,6 +1001,7 @@ function contaNoTesteLan(ev) {
 function comecarTesteLan(room, user, tela) {
   const m = maquinaDaTela(tela);
   if (!room.config?.lanhouse?.ligada || vezLan(room, m)) return;
+  if (testeNaMaquina(room, m)) return; // outra pessoa já está no teste desta máquina (a própria já começou)
   const fila = contasDaFila(room, m);
   if (fila && !fila.includes(user.conta)) return;
   const fim = lan.comecarTeste(room.id, user.conta, user.ip);
@@ -998,7 +1009,11 @@ function comecarTesteLan(room, user, tela) {
   (room.lanTesteMaq ??= {})[m] = { conta: user.conta, fim };
   filaDe(room).comecouTeste(m, user.conta, fim);
   avisarLan(room, true);
-  setTimeout(() => avisarLan(room, true), fim - Date.now() + 300).unref?.();
+  // acabou: a sala fica sabendo e a fila anda já (o 1º é chamado sem esperar a volta de 5 s)
+  setTimeout(() => {
+    vigiarFilaLan(room);
+    avisarLan(room, true);
+  }, fim - Date.now() + 300).unref?.();
 }
 
 // A fila andando (a cada 5 s, e quando alguém entra ou sai): a máquina ficou livre, o 1º é chamado e tem 2 min
@@ -1023,7 +1038,7 @@ function vigiarFilaLan(room) {
       }).catch((err) => console.warn('[lan] fila: encerrando o liberado', err.message));
       continue;
     }
-    for (const ev of fila.passo(m, { vez: vez?.conta ?? null, testando: room.lanTesteMaq?.[m] || null, presentes })) {
+    for (const ev of fila.passo(m, { vez: vez?.conta ?? null, testando: testeNaMaquina(room, m), presentes })) {
       mudou = true;
       console.log(`[lan] ${room.id} ${m}: fila, ${ev.tipo} ${ev.conta}`);
       if (ev.tipo !== 'chamada' && ev.tipo !== 'passou') continue;
@@ -2915,6 +2930,7 @@ function attachSockets(io) {
       room.mudou.delete(user.n);
       if (user.legado) room.legado--;
       io.to(room.id).emit('user-left', { id: user.id });
+      if (user.conta) avisarLan(room); // saiu no meio do teste grátis: a máquina fica livre já (testeNaMaquina)
       if (socket.data.hub) io.to(room.id).emit('hub-mudou'); // o PC de jogos saiu
       avisarGestores(room, user, 'saiu', `${user.name} saiu do sistema`);
       lobbyMudou();
