@@ -998,6 +998,7 @@ export function tetoDoParcial(degraus) {
 
 const CHAVE_MEMORIA = 'sala3d-teste-conexao';
 const CHAVE_PARCIAL = 'sala3d-teste-parcial';
+const CHAVE_PULO = 'sala3d-teste-pulado';
 const dia = (t) => new Date(t).toDateString();
 // só o que o jogo usa: os degraus e os caminhos ficam no relatório
 const ENXUTO = ['tratar', 'tetoKbps', 'livre', 'codec', 'modo', 'rota', 'trocarRota', 'confirmou', 'rttMs', 'nota', 'previsto', 'direto', 'jaTurn'];
@@ -1011,6 +1012,26 @@ export class MemoriaTeste {
     this.parciais = new Map(); // dono -> { kbps, em }: o teto de um teste pulado (tetoDoParcial)
     try { for (const [k, v] of Object.entries(JSON.parse(guarda?.getItem(CHAVE_MEMORIA) || '{}'))) if (dia(v.em) === dia(agora())) this.m.set(k, v); } catch { /* sem armazenamento */ }
     try { for (const [k, v] of Object.entries(JSON.parse(guarda?.getItem(CHAVE_PARCIAL) || '{}'))) if (dia(v.em) === dia(agora())) this.parciais.set(k, v); } catch { /* sem armazenamento */ }
+    this.pulos = new Map(); // dono -> quando pulou (o teste não volta sozinho no mesmo dia)
+    try { for (const [k, v] of Object.entries(JSON.parse(guarda?.getItem(CHAVE_PULO) || '{}'))) if (dia(v) === dia(agora())) this.pulos.set(k, v); } catch { /* sem armazenamento */ }
+  }
+
+  // Uma vez por dia (pedido de 2026-11-27: o teste rodava em toda entrada). O teste de hoje vale mesmo com a
+  // ida e volta diferente (o turbo automático se acerta no jogo); pulado hoje, não roda de novo sozinho.
+  doDia(dono) {
+    const v = this.m.get(dono);
+    return v && dia(v.em) === dia(this.agora()) ? v.r : null;
+  }
+
+  marcarPulado(dono) {
+    if (!dono) return;
+    this.pulos.set(dono, this.agora());
+    try { this.guarda?.setItem(CHAVE_PULO, JSON.stringify(Object.fromEntries(this.pulos))); } catch { /* sem armazenamento */ }
+  }
+
+  pulouHoje(dono) {
+    const v = this.pulos.get(dono);
+    return v != null && dia(v) === dia(this.agora());
   }
 
   gravar() {

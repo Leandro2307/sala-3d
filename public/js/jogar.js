@@ -1171,9 +1171,10 @@ const avisosBotoes = new AvisosBotoes({
   camada: $('#jogo-avisos'),
   video,
   telaTurbo: () => video.parentElement.querySelector('.turbo-tela:not([hidden])'),
-  // GTA: o quadro do motor e da gasolina (em cima do minimapa) só aparece dentro do veículo. Visto, o modo
-  // carro entra sozinho (o W acelera), mesmo que o △ não tenha trocado; a pé de novo continua pelo △.
-  querCarro: () => mapaTeclas.carroTroca() && !tecladoPad.carro,
+  // GTA: o quadro do motor e da gasolina (em cima do minimapa) só aparece dentro do veículo. Ele aparecendo,
+  // o modo carro entra (o W acelera); o △ seguinte volta a pé (tecladoPad.soSaiNoTriangulo) e o carro só
+  // volta quando o quadro some e aparece de novo (onCarro é na chegada dele, ver avisos-botoes-tela.js).
+  querCarro: () => mapaTeclas.carroTroca(),
   onCarro: () => {
     if (tecladoPad.carro || !mapaTeclas.carroTroca()) return;
     diagJogo.evento('modo carro: o quadro do carro apareceu no jogo');
@@ -1307,7 +1308,7 @@ function verCaminho(resumo) {
 // ---------------------------------------------------------------- o teste da conexão antes do turbo (turbo-teste.js)
 const memoriaTeste = new MemoriaTeste();
 let pulouTesteEm = 0; // o "pular" do painel: o teste de segundo plano que acabou assim não roda de novo no jogo
-const painelTeste = new PainelTeste({ dentro: () => $('#focus'), onPular: () => { pulouTesteEm = Date.now(); testeJoga.pular(); }, onEvento: (texto, dados) => diagJogo.evento(texto, dados) });
+const painelTeste = new PainelTeste({ dentro: () => $('#focus'), onPular: () => { pulouTesteEm = Date.now(); memoriaTeste.marcarPulado(fundo?.quem || jogandoLa?.dono || jogandoLa?.key.split('~')[0]); testeJoga.pular(); }, onEvento: (texto, dados) => diagJogo.evento(texto, dados) });
 // onde o teste está (para a entrada e o aviso sobre a imagem)
 const PCT_ETAPA = { resposta: 8, direto: 25, turn: 55, imagem: 80, fim: 100 };
 const diagAgora = { etapa: null, texto: '', pct: null };
@@ -1354,11 +1355,12 @@ async function diagnosticoFundoTalvez() {
   if (t && (t.n >= 2 || Date.now() - t.em < 60_000)) return;
   const rede = await Promise.resolve(rtc.caminhoPara(dono)).catch(() => null);
   if (!rede || fundo || testeJoga.testando || controle.jogo || st.alvo?.sh.key !== a.sh.key) return;
-  const valeu = memoriaTeste.valido(quem, rede);
+  const valeu = memoriaTeste.valido(quem, rede) || memoriaTeste.doDia(quem);
   if (valeu) {
     ultimoDiag ||= resumoDoTeste(valeu);
     return;
   }
+  if (memoriaTeste.pulouHoje(quem)) return; // pulado hoje: não volta sozinho
   tentouFundo.set(quem, { n: (t?.n || 0) + 1, em: Date.now() });
   diagnosticarFundo(a.sh.key, quem, dono, naEntrada);
 }
@@ -1453,7 +1455,12 @@ async function testarConexao(deNovo) {
   }
   const rede = await Promise.resolve(rtc?.caminhoPara(dono)).catch(() => null);
   if (jogandoLa !== jl) return null;
-  let r = deNovo ? null : memoriaTeste.valido(quem, rede);
+  // uma vez por dia: o de hoje vale (mesmo com a ida e volta diferente); pulado hoje, entra sem testar
+  let r = deNovo ? null : memoriaTeste.valido(quem, rede) || memoriaTeste.doDia(quem);
+  if (!r && !deNovo && memoriaTeste.pulouHoje(quem)) {
+    diagJogo.evento('teste da conexão: pulado hoje, entrando sem testar');
+    return null;
+  }
   let rede0 = null;
   if (r) {
     diagJogo.evento(esperou ? 'teste da conexão: vale o de segundo plano' : 'teste da conexão: vale o de hoje', { tetoKbps: r.tetoKbps, codec: r.codec, modo: r.modo });
@@ -1507,8 +1514,8 @@ function conferirPrevisto(resumo) {
   previsto = null;
   const med = (k) => { const v = p.am.map((a) => a[k]).filter((x) => x != null).sort((a, b) => a - b); return v.length ? Math.round(v[v.length >> 1] * 10) / 10 : null; };
   const realMin = Math.round((p.am.reduce((n, a) => n + a.travadas, 0) / (p.am.length / 30)) * 10) / 10;
-  // bem pior que o previsto: na próxima entrada testa de novo
-  if (realMin > Math.max(10, (p.travadasMin || 0) * 3)) { memoriaTeste.esquecer(p.quem); diagJogo.evento('teste da conexão: o jogo saiu pior que o previsto, testa de novo na próxima', { travadasMin: realMin }); }
+  // bem pior que o previsto: só anota (o teste não volta sozinho no mesmo dia; "Testar de novo" nas Opções roda)
+  if (realMin > Math.max(10, (p.travadasMin || 0) * 3)) diagJogo.evento('teste da conexão: o jogo saiu pior que o previsto', { travadasMin: realMin });
   diagJogo.evento('teste da conexão: previsto x real', { previsto: { atrasoMs: p.atrasoMs, travadasMin: p.travadasMin }, real: { atrasoMs: med('atraso'), qps: med('qps'), tremidoMs: med('tremido'), travadasMin: realMin, travadasDaFonte: p.daFonte || 0 } });
 }
 // Entrar no turbo: com o Automático, primeiro o teste; sem ele (versão antiga lá, pulado, sem conexão), direto
@@ -1791,6 +1798,7 @@ const tecladoPad = new TecladoPad({
     noCarro = sim;
   },
 });
+tecladoPad.soSaiNoTriangulo = true; // o modo carro entra pelo quadro do carro no jogo (avisosBotoes.onCarro)
 padVirtual.onErroTremor = (erro) => diagJogo.evento('o controle não aceitou o tremor', { erro, ...padVirtual.comoVibra() });
 // Sem tutorial do controle (desde 2026-11-27, pedido do usuário): no teclado e mouse, os avisos de botão do
 // jogo já trazem a tecla (avisos-botoes-tela.js); no celular e com controle não precisa.

@@ -4,11 +4,11 @@
 //
 // De onde vem o quadro: no modo turbo, do próprio decodificador (turbo.js chama espiar() com cada quadro e
 // a gente clona um de vez em quando); no vídeo normal, um VideoFrame tirado do <video>. Um quadro por vez
-// no worker, no máximo a cada INTERVALO_MS: a tecla aparece ~0,3 s depois do ícone (2 análises seguidas).
+// no worker, no máximo a cada INTERVALO_MS: a tecla aparece ~0,5 s depois do ícone (2 análises seguidas).
 
 import { visiveis, nomeEntrada } from './mapa-teclas.js';
 
-const INTERVALO_MS = 150;
+const INTERVALO_MS = 250; // 150 pesava no PC com placa fraca (ver avisos-botoes-worker.js)
 // a cor de cada símbolo, a mesma da legenda do PS5 (✕ azul, ○ vermelho, □ rosa, △ verde)
 const COR = { b0: '#93c5fd', b1: '#fca5a5', b2: '#f9a8d4', b3: '#6ee7b7', andar: '#e5e7eb', olhar: '#e5e7eb' };
 

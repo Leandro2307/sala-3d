@@ -1,11 +1,15 @@
 // O worker dos avisos de botão (avisos-botoes.js): recebe um quadro do jogo (VideoFrame ou ImageBitmap),
-// reduz para no máximo 1280 de largura (os ícones ficam com ~20 px, o tamanho em que foram medidos),
-// procura os ícones e devolve os que estão firmes na tela (e, se pedido, se o quadro do carro está lá).
-// Fora da página para não pesar no jogo.
+// reduz para no máximo 960 de largura (os ícones ficam com ~17 px) e procura os ícones; devolve os que estão
+// firmes na tela (e, se pedido, se o quadro do carro está lá). Fora da página para não pesar no jogo.
+//
+// Leve de propósito (2026-11-27: com 1280 e um quadro a cada 150 ms, o PC com Intel UHD passou de ~3% para
+// 13–33% de amostras travadas): a redução é na placa (canvas sem willReadFrequently) e só a imagem pequena
+// volta para a memória; o quadro do decodificador fecha logo depois de desenhado (segurá-lo durante a busca
+// tirava quadro do decodificador).
 
 import { detectar, veiculo, Rastreio } from './avisos-botoes.js';
 
-const LARGURA = 1280;
+const LARGURA = 960;
 let tela = null, ctx = null;
 const rastreio = new Rastreio();
 
@@ -22,9 +26,10 @@ self.onmessage = ({ data }) => {
     const w = Math.round(w0 * k), h = Math.round(h0 * k);
     if (!tela || tela.width !== w || tela.height !== h) {
       tela = new OffscreenCanvas(w, h);
-      ctx = tela.getContext('2d', { willReadFrequently: true, alpha: false });
+      ctx = tela.getContext('2d', { alpha: false });
     }
     ctx.drawImage(q, 0, 0, w, h);
+    q.close?.();
     const t = performance.now();
     const img = ctx.getImageData(0, 0, w, h);
     const achados = detectar(img);

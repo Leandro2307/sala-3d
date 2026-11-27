@@ -437,3 +437,20 @@ test('no Wi-Fi o teste não escolhe o Turbo rápido (2026-11-26: 180–360 tranc
   assert.equal(escolherModo({ padrao: 14, rapido: 16, rttMs: 8, confirma: c }).modo, 16);
   assert.equal(escolherModo({ padrao: 14, rapido: 16, rttMs: 8, confirma: c, wifi: true }).modo, 14);
 });
+
+test('MemoriaTeste: uma vez por dia — o de hoje vale com outra ida e volta, e pulado hoje fica pulado', () => {
+  let agora = new Date(2026, 10, 27, 10).getTime();
+  const guarda = new Map();
+  const ls = { getItem: (k) => guarda.get(k) ?? null, setItem: (k, v) => guarda.set(k, v) };
+  const m = new MemoriaTeste(() => agora, ls);
+  m.guardar('lokao', { modo: 17, tetoKbps: 15000 }, { rttMs: 9 });
+  assert.equal(m.valido('lokao', { rttMs: 79 }), null);
+  assert.equal(m.doDia('lokao')?.modo, 17);
+  assert.equal(m.pulouHoje('outro'), false);
+  m.marcarPulado('outro');
+  assert.equal(new MemoriaTeste(() => agora, ls).pulouHoje('outro'), true);
+  agora += 24 * 3600e3;
+  const amanha = new MemoriaTeste(() => agora, ls);
+  assert.equal(amanha.doDia('lokao'), null);
+  assert.equal(amanha.pulouHoje('outro'), false);
+});

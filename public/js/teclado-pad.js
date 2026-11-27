@@ -66,6 +66,9 @@ export class TecladoPad {
     this.ativo = false;
     this.layout = null;
     this.carro = false; // no modo carro (mapa-teclas.js): a camada do carro vale por cima do mapa
+    // só sai no △: o △ a pé não entra no modo carro (quem entra é a página, quando vê o carro no jogo:
+    // o /jogar com o quadro do motor e da gasolina do GTA). No carro, o △ volta a pé.
+    this.soSaiNoTriangulo = false;
     this.zerar();
   }
 
@@ -106,7 +109,7 @@ export class TecladoPad {
     if (ids.length) this.seguras.set(quem, { ent, ids });
     const foi = this.acionarTodas(quem, ids, true);
     // no tutorial (treino) o botão não chega no jogo: não entrou em carro nenhum
-    if (!antes && ids.includes(ENTRA_CARRO) && mapaTeclas.carroTroca() && !this.pad.treino) this.trocarCarro();
+    if (!antes && ids.includes(ENTRA_CARRO) && mapaTeclas.carroTroca() && !this.pad.treino && (this.carro || !this.soSaiNoTriangulo)) this.trocarCarro();
     return foi;
   }
 
