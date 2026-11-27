@@ -67,8 +67,9 @@ export const ACOES = [
   { id: 'b13', ps5: '↓', nome: 'Baixo' },
   { id: 'b14', ps5: '←', nome: 'Esquerda' },
   { id: 'b15', ps5: '→', nome: 'Direita' },
-  { id: 'b8', grupo: 'Menu', ps5: 'Create', sw: '−', nome: 'Botão da esquerda do meio' },
-  { id: 'b9', ps5: 'Options', sw: '+', nome: 'Botão da direita do meio (pausa)' },
+  // Create e Options: só no Switch (− e +). No PS5 saíram do mapa e ficam travados como o PS (ps5-nativo.js)
+  { id: 'b8', grupo: 'Menu', ps5: 'Create', sw: '−', nome: 'Botão da esquerda do meio', so: 'switch' },
+  { id: 'b9', ps5: 'Options', sw: '+', nome: 'Botão da direita do meio (pausa)', so: 'switch' },
   { id: 'b16', ps5: 'PS', sw: 'Home', nome: 'Botão do meio' },
   { id: 'tp', grupo: 'Só no PS5', ps5: 'Touchpad', nome: 'Segure e mexa o mouse: o dedo no touchpad (com clique esquerdo, afunda)', so: 'ps5' },
   { id: 'b17', ps5: 'Afundar touchpad', nome: 'Clique do touchpad', so: 'ps5' },
@@ -370,7 +371,7 @@ function desenho(layout) {
     ${ombro('b6', 100, 18, 30)}${ombro('b7', 444, 18, 30)}
     ${ombro('b4', 100, 54, 22)}${ombro('b5', 444, 54, 22)}
     ${ps5 ? `<g class="mt-p" data-acao="tp"><rect x="236" y="90" width="168" height="74" rx="12"/><text x="320" y="122" class="mt-g mt-g-p">touchpad</text><text x="320" y="142" class="mt-t" text-anchor="middle" data-rot="tp"></text></g>` : ''}
-    ${seta('b8', 204, 96, 26, 16, ps5 ? '' : '−')}${seta('b9', 410, 96, 26, 16, ps5 ? '' : '+')}
+    ${ps5 ? '' : `${seta('b8', 204, 96, 26, 16, '−')}${seta('b9', 410, 96, 26, 16, '+')}`}
     ${seta('b12', 138, 134, 24, 28, '▲')}${seta('b13', 138, 178, 24, 28, '▼')}
     ${seta('b14', 112, 158, 28, 24, '◀')}${seta('b15', 160, 158, 28, 24, '▶')}
     ${face('b3', 490, 128)}${face('b0', 490, 206)}${face('b2', 451, 167)}${face('b1', 529, 167)}
@@ -426,9 +427,12 @@ export class MapaTeclasPainel {
   montar() {
     const l = this.layout;
     let html = '';
+    let grupo = null; // o título de um grupo cujo primeiro item não vale neste layout passa para o seguinte
     for (const a of ACOES) {
-      if (a.so && a.so !== l) continue;
-      if (a.grupo) html += `${html ? '</div>' : ''}<h3 class="mt-grupo">${esc(a.grupo)}</h3><div class="mt-lista">`;
+      if (a.so && a.so !== l) { grupo = a.grupo || grupo; continue; }
+      const g = a.grupo || grupo;
+      grupo = null;
+      if (g) html += `${html ? '</div>' : ''}<h3 class="mt-grupo">${esc(g)}</h3><div class="mt-lista">`;
       html += `<div class="mt-linha" data-acao="${a.id}">
         <button type="button" class="mt-qual" data-trocar="${a.id}" title="Trocar a tecla"><b class="mt-glifo">${esc(rotulo(a.id, l))}</b><span class="mt-nome">${esc(a.nome)}</span></button>
         <span class="mt-teclas"></span>

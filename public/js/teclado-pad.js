@@ -8,7 +8,7 @@
 //   clique direito: L2/ZL (mirar)   clique esquerdo: R2/ZR (atirar)   rodinha: △ (trava; o próximo dente solta)
 //   Espaço/Enter: ✕   C/Ctrl/⌫: ○   R: □   F: △ (pela posição: no Switch, B A Y X)
 //   Q e Mouse 4: L1/L   E e Mouse 5: R1/R   Shift: L3 (correr)   V e meio: R3
-//   Tab: Create/−   Esc: Options/+   H: PS/Home   M: clique do touchpad   setas e 1 2 3 4: direcional
+//   Tab: −   Esc: +  (só no Switch; no PS5 o Create e o Options saíram do mapa)   H: PS/Home   M: clique do touchpad   setas e 1 2 3 4: direcional
 //   Alt segurado: o mouse vira um dedo no touchpad (encosta no meio ao descer o Alt, sai ao soltar);
 //   Alt + clique esquerdo afunda o touchpad. O touchpad só chega no PS5 direto (a ponte); o controle
 //   de Xbox (emulador, chiaki-ng) não tem.
@@ -224,6 +224,9 @@ export class TecladoPad {
       this.alt(this.altSegura.size > 0);
       return true;
     }
+    // Create e Options saíram do mapa do PS5 (travados como o PS; o dono aperta pelo painel): a tecla não
+    // vira botão nem vai como tecla para o PC
+    if ((id === 'b8' || id === 'b9') && this.layout === 'ps5') return true;
     if (id === 'giro') {
       // só no PS5; no Switch a tecla vai como tecla
       if (this.layout !== 'ps5') return false;

@@ -89,7 +89,7 @@ const PASSOS_PC_PADRAO = [
   },
   {
     tit: 'Pronto!',
-    txt: 'Mais: <b>Shift</b> L3 (correr) · <b>V</b> R3 · <b>Tab</b> Create · <b>Esc</b> Options · <b>H</b> PS · <b>M</b> clique do touchpad · <b>setas</b> ou <b>1 2 3 4</b> direcional.<br>O que cada botão faz fica no canto de baixo, à direita. Aperte <b>Espaço</b> (✕) para começar a jogar.',
+    txt: 'Mais: <b>Shift</b> L3 (correr) · <b>V</b> R3 · <b>H</b> PS · <b>M</b> clique do touchpad · <b>setas</b> ou <b>1 2 3 4</b> direcional.<br>O que cada botão faz fica no canto de baixo, à direita. Aperte <b>Espaço</b> (✕) para começar a jogar.',
     de: teclas('Espaço'), para: GLIFO.xis,
     fim: true,
   },
@@ -112,7 +112,7 @@ function passosPc() {
   const andar = ['ly-', 'lx-', 'ly+', 'lx+'];
   const andarPadrao = andar.every((id) => mapaTeclas.padrao(id));
   const ks = andar.map((id) => mapaTeclas.entradas(id).map(nomeEntrada)[0]);
-  const fim = [['b8', 'Create'], ['b9', 'Options'], ['b16', 'PS'], ['b10', 'L3'], ['b11', 'R3'], ['b12', '↑'], ['b13', '↓'], ['b14', '←'], ['b15', '→']]
+  const fim = [['b16', 'PS'], ['b10', 'L3'], ['b11', 'R3'], ['b12', '↑'], ['b13', '↓'], ['b14', '←'], ['b15', '→']]
     .filter(([id]) => tem(id)).map(([id, n]) => `<b>${teclasDe(id)}</b> ${n}`).join(' · ');
   const xis = tem('b0') ? `${teclasDe('b0')} (✕)` : 'P';
   return [
@@ -148,7 +148,7 @@ const PASSOS_TOQUE = [
   },
   {
     tit: 'Pronto!',
-    txt: 'As setas ficam à esquerda; L3, R3 e Options, em cima; o <b>⋯</b> abre Create e PS. Toque no <b>✕</b> para começar a jogar.',
+    txt: 'As setas ficam à esquerda; L3 e R3, em cima; o <b>⋯</b> abre o PS. Toque no <b>✕</b> para começar a jogar.',
     para: GLIFO.xis, alvos: ['xis'],
     fim: true,
   },

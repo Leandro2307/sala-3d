@@ -27,7 +27,7 @@ const TRI = icone('<path d="M12 4 21 19.5H3Z"/>');
 const QUA = icone('<rect x="4.5" y="4.5" width="15" height="15"/>');
 const BOL = icone('<circle cx="12" cy="12" r="8.5"/>');
 const XIS = icone('<path d="M5 5 19 19M19 5 5 19"/>');
-const TOPO = [['L3', 10], ['R3', 11], ['Create', 8], ['Touch', 17], ['PS', 16], ['Options', 9]];
+const TOPO = [['L3', 10], ['R3', 11], ['Touch', 17], ['PS', 16]]; // sem Create e Options: travados como o PS
 const ACOES = [
   ['L2', 6, 'l2', ''], [TRI, 3, 'tri', 'tt-ps tt-tri'], ['R2', 7, 'r2', ''],
   [QUA, 2, 'qua', 'tt-ps tt-qua'], [BOL, 1, 'bol', 'tt-ps tt-bol'],

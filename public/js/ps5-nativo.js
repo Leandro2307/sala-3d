@@ -22,12 +22,14 @@ const CHAVE_MS = 300; // intervalo mínimo entre pedidos de quadro-chave ao PS5
 // também. O PS5 não manda quadro-chave sozinho de tempos em tempos: sem pedir, a cópia ficaria parada.
 const CHAVE_LOCAL_MS = 2000;
 const PAD_SOLTA_MS = 1500; // sem notícia do controle de quem joga por tanto tempo: solta tudo
-const OPCOES = 'sala3d-ps5'; // localStorage: { altura, qps, kbps, codec, ultimo, v, psTravado }
+const OPCOES = 'sala3d-ps5'; // localStorage: { altura, qps, kbps, codec, ultimo, v, psTravado, menuTravado }
 // kbps 0: automática pela resolução (BANDA). codec 'auto': H.265 se este navegador decodifica.
 // psTravado: o botão PS de quem joga (no controle ou o H do teclado) não chega ao PS5 — ninguém sai do
 // jogo para o menu; daqui, o "Apertar PS" do painel ainda chega.
-const PADRAO = { altura: 1080, qps: 60, kbps: 0, codec: 'auto', ultimo: null, v: 2, psTravado: true };
+// menuTravado: o mesmo para o Create e o Options (pausa, menu e captura do jogo); o painel ainda aperta.
+const PADRAO = { altura: 1080, qps: 60, kbps: 0, codec: 'auto', ultimo: null, v: 2, psTravado: true, menuTravado: true };
 const BIT_PS = 1 << 16; // o botão PS/Home no mapa padrão do navegador
+const BIT_CREATE = 1 << 8, BIT_OPTIONS = 1 << 9; // Create e Options no mesmo mapa
 // A banda que o PS5 usa para cada resolução. Antes era 6 Mbps fixos (1080p a 60 ficava borrado no
 // movimento: o próprio chiaki-ng usa 15 em 1080p). Dá para pôr à mão até 50 Mbps.
 const BANDA = { 720: 10000, 1080: 15000 };
@@ -1010,7 +1012,9 @@ export class Ps5Nativo {
     const m = Array.isArray(ev.m) && ev.m.length === 10 ? ev.m : null;
     this.padSolto = !ev.b && !ev.lx && !ev.ly && !ev.rx && !ev.ry && !ev.lt && !ev.rt && tp[0] < 0 && tp[2] < 0 && !m;
     // os dedos no touchpad vão em números soltos (a ponte lê campo a campo): -1 é sem dedo
-    const b = this.opcoes.psTravado && !livre ? ev.b & ~BIT_PS : ev.b;
+    let b = ev.b;
+    if (!livre && this.opcoes.psTravado) b &= ~BIT_PS;
+    if (!livre && this.opcoes.menuTravado) b &= ~(BIT_CREATE | BIT_OPTIONS);
     const msg = { tipo: 'pad', b, lx: ev.lx, ly: ev.ly, rx: ev.rx, ry: ev.ry, lt: ev.lt, rt: ev.rt, t0x: tp[0], t0y: tp[1], t1x: tp[2], t1y: tp[3] };
     // o movimento também (ponte 1.1+): giroscópio, acelerômetro e orientação; sem ele, deitado e parado
     if (m) [msg.gx, msg.gy, msg.gz, msg.ax, msg.ay, msg.az, msg.ox, msg.oy, msg.oz, msg.ow] = m;
@@ -1018,11 +1022,11 @@ export class Ps5Nativo {
     this.mandar(msg);
   }
 
-  // o botão PS apertado daqui (vale mesmo travado): um toque curto por cima do que quem joga segura
-  apertarPs() {
+  // um botão apertado daqui (vale mesmo travado): um toque curto por cima do que quem joga segura
+  apertarPs(bit = BIT_PS) {
     const base = this.ultimaMsgPad || { tipo: 'pad', b: 0, lx: 0, ly: 0, rx: 0, ry: 0, lt: 0, rt: 0 };
-    this.mandar({ ...base, b: base.b | BIT_PS });
-    setTimeout(() => this.mandar(this.ultimaMsgPad || { ...base, b: base.b & ~BIT_PS }), 150);
+    this.mandar({ ...base, b: base.b | bit });
+    setTimeout(() => this.mandar(this.ultimaMsgPad || { ...base, b: base.b & ~bit }), 150);
   }
 
   // o "estou aqui" do modo jogo
@@ -1082,6 +1086,9 @@ export class Ps5Nativo {
       else if (acao === 'som-pc-abafar') { this.somPc?.alternarAbafar(); this.render(); }
       else if (acao === 'ps-travar') { this.opcoes.psTravado = !this.opcoes.psTravado; this.guardarOpcoes(); this.render(); }
       else if (acao === 'ps-apertar') this.apertarPs();
+      else if (acao === 'menu-travar') { this.opcoes.menuTravado = !this.opcoes.menuTravado; this.guardarOpcoes(); this.render(); }
+      else if (acao === 'create-apertar') this.apertarPs(BIT_CREATE);
+      else if (acao === 'options-apertar') this.apertarPs(BIT_OPTIONS);
       else if (acao === 'ls-todos') Promise.resolve(this.losslessTodos?.alternar()).finally(() => this.render());
     });
     // o volume muda enquanto arrasta (sem desenhar a janela de novo, que soltaria o controle)
@@ -1217,6 +1224,11 @@ export class Ps5Nativo {
         <span><b>Botão PS travado</b>${on ? pilula('ligado', '#4ade80') : ''}
         <small>O PS do controle e o H do teclado de quem joga não chegam ao PS5: ninguém sai do jogo para o menu. Daqui, o "Apertar PS" ainda funciona.</small></span>
         <span class="p5-acoes"><button type="button" class="secondary small" data-p5="ps-apertar"${c ? '' : ' disabled'}>Apertar PS</button><button type="button" class="${on ? 'secondary' : 'primary'} small" data-p5="ps-travar">${on ? 'Destravar' : 'Travar'}</button></span></div>`);
+      const menu = this.opcoes.menuTravado;
+      extras.push(`<div class="p5-item"><span class="p5-ic">${icon('console', 18)}</span>
+        <span><b>Create e Options travados</b>${menu ? pilula('ligado', '#4ade80') : ''}
+        <small>O Create e o Options de quem joga (controle, teclado ou toque) não chegam ao PS5: ninguém pausa, abre o menu do jogo nem captura. Daqui, os botões abaixo ainda funcionam.</small></span>
+        <span class="p5-acoes"><button type="button" class="secondary small" data-p5="create-apertar"${c ? '' : ' disabled'}>Apertar Create</button><button type="button" class="secondary small" data-p5="options-apertar"${c ? '' : ' disabled'}>Apertar Options</button><button type="button" class="${menu ? 'secondary' : 'primary'} small" data-p5="menu-travar">${menu ? 'Destravar' : 'Travar'}</button></span></div>`);
     }
     if (noAr && this.key && this.losslessTodos) {
       const on = this.losslessTodos.ligado();

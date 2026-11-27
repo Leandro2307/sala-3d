@@ -212,7 +212,7 @@ export const LAYOUTS = {
     virtual: true,
     topo: [
       { r: '▲', pad: 12 }, { r: '▼', pad: 13 }, { r: '◀', pad: 14 }, { r: '▶', pad: 15 },
-      { r: 'Create', pad: 8 }, { r: 'Options', pad: 9 }, { r: 'PS', pad: 16 },
+      { r: 'PS', pad: 16 }, // Create e Options saíram: travados como o PS (o dono aperta pelo painel)
       { r: 'L3', pad: 10 }, { r: 'R3', pad: 11 },
     ],
     areas: ['l2 tri r2', 'qua . bol', 'l1 xis r1'],
@@ -679,7 +679,7 @@ export class ToqueJogo {
 
     const topo = r.querySelector('.tj-topo');
     // Tela limpa: no controle de videogame, as setas viram a cruz da esquerda, em cima ficam só L3, R3 e
-    // Options, e o resto (com o que não é do jogo: TV, Engasgou, Sair) mora na gaveta do ⋯
+    // Options (no Switch; o PS5 não tem mais o Create nem o Options), e o resto (com o que não é do jogo: TV, Engasgou, Sair) mora na gaveta do ⋯
     const cruz = r.querySelector('.tj-cruz');
     const setas = L.virtual && !this.menu ? L.topo.filter((b) => b.pad >= 12 && b.pad <= 15) : [];
     cruz.hidden = !setas.length;
