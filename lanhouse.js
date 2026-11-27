@@ -53,7 +53,7 @@ const diaDe = (ms) => new Date(ms + FUSO * HORA).toISOString().slice(0, 10);
 const horaDe = (ms) => new Date(ms + FUSO * HORA).getUTCHours();
 
 // jogosDaSala(sala): o catálogo do PC da casa ([{ id, nome, steam, icone }], ver 'hub-jogos' no server.js)
-module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTentar, bloqueado, configDaSala, jogosDaSala, aoMudar }) {
+module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTentar, bloqueado, configDaSala, jogosDaSala, aoMudar, filaBloqueia }) {
   const CHAVE = process.env.STRIPE_KEY || '';
   const PRODUTO = process.env.STRIPE_PRODUTO || PRODUTO_PADRAO;
   const PRODUTO_AGORA = process.env.STRIPE_PRODUTO_AGORA || PRODUTO_AGORA_PADRAO;
@@ -505,6 +505,11 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
       const inicios = plano ? plano.slots : [...new Set(Array.isArray(b.inicios) ? b.inicios : [])].map(Number);
       if (!inicios.length) return res.json({ ok: false, erro: 'Escolha pelo menos um horário.' });
       if (!plano && inicios.length > MAX_HORAS) return res.json({ ok: false, erro: 'Horários demais numa compra só.' });
+      // a fila da vez (fila-lan.js): com gente na fila, a máquina livre agora é do 1º dela
+      if (plano || inicios.includes(Math.floor(agora / HORA) * HORA)) {
+        const primeiro = filaBloqueia?.(sala, maquina, conta);
+        if (primeiro) return res.json({ ok: false, erro: `${primeiro} é o 1º da fila do ${MAQUINAS[maquina]} e tem a preferência agora. Entre na fila no /jogar para ser chamado, ou escolha um horário mais à frente.` });
+      }
       for (const inicio of plano ? [] : inicios) {
         const h = horaDe(inicio);
         const valido = Number.isInteger(inicio) && inicio % HORA === 0 && h >= cfg.abre && h < cfg.fecha

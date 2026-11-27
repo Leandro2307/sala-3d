@@ -420,6 +420,16 @@ function ligarSocket() {
     if (m?.id === st.selfId) toast(`Pode testar: ${maqs} livre para os seus 2 minutos grátis.`, 'success', 8000);
     else if ((m?.maquinas || []).some((x) => lanEraAberta.has(x))) toast(`${m.nome} chegou para testar: o seu tempo liberado no ${maqs} acabou.`, 'warn', 10000);
   });
+  // a fila da vez: chegou a minha vez (tenho 2 min para começar) ou ela passou
+  socket.on('lan-fila-vez', ({ maquina: m, tipo } = {}) => {
+    if (!NOME_MAQ[m]) return;
+    if (tipo === 'passou') return void toast(`Sua vez na fila do ${NOME_MAQ[m]} passou (2 min sem começar). Entre na fila de novo para esperar outra vez.`, 'warn', 10000);
+    const teste = !semTeste();
+    toast(`Sua vez chegou: o ${NOME_MAQ[m]} é seu. Você tem 2 min para ${teste ? 'começar o teste grátis (é só entrar no Modo jogo) ou alugar' : 'alugar'}.`, 'success', 12000);
+    try { navigator.vibrate?.([200, 100, 200]); } catch { /* sem vibrar */ }
+    diagJogo.marcar('lan: chamado na fila', { maquina: m });
+    if (!teste && $('#lan-modal').hidden) abrirAluguel({ maquina: m, agora: true });
+  });
   socket.on('sala', aplicarSala);
   socket.on('passe', (p) => {
     passe = p;
@@ -854,7 +864,12 @@ let lanEraAberta = new Set(); // as minhas que eram "até alguém novo" (o fim d
 const idsDaVez = (m) => st.lan?.[m]?.ids || [];
 const lanLivre = (m) => !st.lan?.[m]?.conta;
 const semTeste = () => !!st.lan?.semTeste?.includes(st.selfId);
-const podeJogarLan = (m) => !st.lan || idsDaVez(m).includes(st.selfId) || (lanLivre(m) && !semTeste());
+// A fila da vez (fila-lan.js no servidor): com gente na fila e a máquina livre, só joga quem o servidor pôs em
+// livres (o 1º da fila, chamado). filaDe(m): { lista: [{ conta, ids }], chamada: { conta, ate }, livres }
+const filaDe = (m) => st.lan?.fila?.[m] || null;
+const livreNaFila = (m) => !filaDe(m)?.livres || filaDe(m).livres.includes(st.selfId);
+const minhaPosFila = (m) => (filaDe(m)?.lista || []).findIndex((x) => x.ids.includes(st.selfId)); // -1: fora
+const podeJogarLan = (m) => !st.lan || idsDaVez(m).includes(st.selfId) || (lanLivre(m) && !semTeste() && livreNaFila(m));
 function minhasMaquinas() { return Object.keys(NOME_MAQ).filter((m) => idsDaVez(m).includes(st.selfId)); }
 // A máquina está alugada para outra pessoa: quem não é da vez só assiste. O "Modo jogo" vira "Tela cheia": a
 // imagem na tela toda, sem controle, sem tutorial e sem o teste da conexão (nada disso iria ao jogo). No
@@ -863,7 +878,8 @@ function soVerLan(sh = st.alvo?.sh) {
   if (!st.lan || !sh) return false;
   const m = maquinaDaTela(sh);
   const v = st.lan[m];
-  if (!v?.conta || idsDaVez(m).includes(st.selfId)) return false;
+  if (idsDaVez(m).includes(st.selfId)) return false;
+  if (!v?.conta) return !livreNaFila(m); // livre, mas é a vez do 1º da fila
   return !v.aberta || semTeste();
 }
 const vezDeQuem = () => (st.alvo ? st.lan?.[maquinaDaTela(st.alvo.sh)]?.conta || 'outra pessoa' : 'outra pessoa');
@@ -876,6 +892,12 @@ async function acabouVezAssistindo(m, conta) {
   if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
   const nome = { pc: 'PC', ps5: 'PS5' }[m];
   const temTeste = !st.lan?.semTeste?.includes(st.selfId);
+  // com fila, quem não é o 1º continua assistindo (o 1º recebe a chamada: 'lan-fila-vez')
+  if (!livreNaFila(m)) {
+    const pos = minhaPosFila(m);
+    return void toast(`A vez de ${conta || 'quem jogava'} no ${nome} acabou. ${pos >= 0 ? `Você é o ${pos + 1}º da fila.` : `${filaDe(m).lista[0]?.conta || 'Outra pessoa'} é o próximo da fila.`}`, 'info', 8000);
+  }
+  if (minhaPosFila(m) === 0) return; // a chamada já avisa e abre o aluguel
   toast(`A vez de ${conta || 'quem jogava'} no ${nome} acabou: o ${nome} está livre.${temTeste ? ' Use seus 2 min grátis ou alugue para jogar.' : ' Alugue para jogar agora.'}`, 'info', 10000);
   if (!st.lan || !lanLivre(m) || !$('#lan-modal').hidden) return; // alguém pegou nesse meio-tempo, ou já está aberto
   abrirAluguel({ maquina: m, agora: true }); // o "Jogar agora" do aluguel: começa no minuto seguinte
@@ -912,7 +934,23 @@ function falta(fim) {
   const m = Math.floor((s % 3600) / 60);
   return { s, texto: h ? `${h}h${String(m).padStart(2, '0')}min` : `${m}:${String(s % 60).padStart(2, '0')}` };
 }
+// o pedaço da fila no texto da vez: " · você é o 2º da fila" ou " · 3 na fila"
+function textoFila(m) {
+  const f = filaDe(m);
+  if (!f?.lista?.length) return '';
+  const pos = minhaPosFila(m);
+  if (pos === 0 && f.chamada?.conta === f.lista[0].conta && lanLivre(m)) {
+    const c = falta(f.chamada.ate);
+    return ` · sua vez na fila: comece em ${c.texto}`;
+  }
+  if (pos >= 0) return pos === 0 ? ' · você é o próximo' : ` · você é o ${pos + 1}º da fila`;
+  return ` · ${f.lista.length} na fila`;
+}
 function textoVez(m) {
+  const t = textoVez0(m);
+  return { ...t, texto: t.texto + textoFila(m) };
+}
+function textoVez0(m) {
   const v = st.lan?.[m];
   if (!v?.conta) {
     const fimTeste = st.lan?.teste?.[st.selfId];
@@ -920,6 +958,8 @@ function textoVez(m) {
       const t = falta(fimTeste);
       return { texto: `Teste grátis no ${NOME_MAQ[m]} · faltam ${t.texto}`, minha: true, acabando: t.s <= 30, s: t.s, teste: true };
     }
+    const f = filaDe(m);
+    if (f?.livres && !f.livres.includes(st.selfId)) return { texto: `${NOME_MAQ[m]}: vez de ${f.chamada?.conta || f.lista[0]?.conta} (1º da fila)` };
     return { texto: semTeste() ? `${NOME_MAQ[m]} livre · alugue para jogar` : `${NOME_MAQ[m]} livre · 2 min grátis`, livre: true };
   }
   const minha = idsDaVez(m).includes(st.selfId);
@@ -933,6 +973,7 @@ function textoVez(m) {
   return { texto: `${minha ? 'Sua vez' : `Vez de ${v.conta}`} no ${NOME_MAQ[m]} · faltam ${f.texto}`, minha, acabando: f.s <= 300, s: f.s };
 }
 function mostrarVezLan() {
+  mostrarBotaoFila();
   for (const m of Object.keys(NOME_MAQ)) {
     const el = $(`#lan-vez-${m}`);
     el.hidden = !st.lan;
@@ -996,8 +1037,37 @@ function aplicarLan(e) {
     if (!lanLivre(m)) toast(`Agora é a vez de ${st.lan[m].conta} no ${NOME_MAQ[m]}. Para jogar, alugue outro horário.`, 'warn', 9000);
   }
   $('#lan-reservar').hidden = !st.lan;
+  mostrarBotaoFila();
   atualizar();
 }
+// O botão da fila, para a máquina da tela que está aberta: aparece para quem não é da vez quando a máquina está
+// ocupada ou já tem fila (com ela livre e sem fila, é só jogar)
+function mostrarBotaoFila() {
+  const bt = $('#lan-fila');
+  const sh = st.alvo?.sh;
+  const m = sh ? maquinaDaTela(sh) : null;
+  const naFila = m ? minhaPosFila(m) >= 0 : false;
+  const mostra = !!(st.lan && m && conta && !idsDaVez(m).includes(st.selfId) && (naFila || !lanLivre(m) || filaDe(m)?.lista?.length));
+  bt.hidden = !mostra;
+  if (!mostra) return;
+  bt.dataset.maquina = m;
+  bt.dataset.naFila = naFila ? '1' : '';
+  bt.textContent = naFila ? `Sair da fila (${minhaPosFila(m) + 1}º)` : `Entrar na fila do ${NOME_MAQ[m]}`;
+}
+$('#lan-fila').addEventListener('click', () => {
+  const bt = $('#lan-fila');
+  const m = bt.dataset.maquina;
+  if (!m || !socket) return;
+  const entrar = !bt.dataset.naFila;
+  bt.disabled = true;
+  socket.emit('lan-fila', { maquina: m, entrar }, (r) => {
+    bt.disabled = false;
+    if (!r?.ok) return void toast(r?.erro || 'Não deu para mexer na fila agora. Tente de novo.', 'warn', 6000);
+    if (entrar) toast(r.posicao === 0 && lanLivre(m) ? `Você é o 1º da fila do ${NOME_MAQ[m]}: já pode começar.` : `Você entrou na fila do ${NOME_MAQ[m]}: é o ${r.posicao + 1}º. Quando a vez chegar, você é chamado e tem 2 min para começar.`, 'success', 8000);
+    else toast(`Você saiu da fila do ${NOME_MAQ[m]}.`, 'info', 5000);
+    diagJogo.marcar(entrar ? 'lan: entrou na fila' : 'lan: saiu da fila', { maquina: m, posicao: r.posicao });
+  });
+});
 // o comando que não pode sair: o teste grátis acabou e a máquina continua livre
 function barrado(key) {
   if (!st.lan) return false;
@@ -1044,12 +1114,13 @@ function deixarJogar() {
   // liberado "até alguém novo": quem ainda tem o teste espera uns segundos (o servidor tira a vez de lá); quem
   // já usou o teste (por esta conta ou por outra na mesma internet) não conta como pessoa nova
   const v = st.lan?.[m];
-  const texto = lanLivre(m) ? `Seu teste grátis já foi usado. Alugue o ${NOME_MAQ[m]} para jogar.`
+  const texto = lanLivre(m) && !livreNaFila(m) ? `Agora é a vez de ${filaDe(m).lista[0]?.conta}, o 1º da fila do ${NOME_MAQ[m]}.${minhaPosFila(m) < 0 ? ' Entre na fila para ser chamado.' : ''}`
+    : lanLivre(m) ? `Seu teste grátis já foi usado. Alugue o ${NOME_MAQ[m]} para jogar.`
     : !v.aberta ? `Agora é a vez de ${v.conta} no ${NOME_MAQ[m]}.`
       : semTeste() ? `O teste grátis já foi usado nesta conta ou nesta internet, então o ${NOME_MAQ[m]} continua com ${v.conta}. Para jogar, alugue.`
         : `O ${NOME_MAQ[m]} está com ${v.conta} até alguém novo chegar: em alguns segundos ele fica livre para o seu teste.`;
   toast(texto, 'warn', 8000);
-  if (lanLivre(m)) abrirAluguel();
+  if (lanLivre(m) && livreNaFila(m)) abrirAluguel();
   return false;
 }
 // pedido: { maquina, dia, inicio } — a página do aluguel já abre nessa máquina, com essa hora escolhida

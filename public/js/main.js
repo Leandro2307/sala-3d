@@ -6135,7 +6135,9 @@ const idsDaVez = (m) => state.lan?.[m]?.ids || [];
 // pessoa, uma vez (conta e IP, ver lanhouse.js teste). Quem já usou o seu não joga mais de graça.
 const lanLivre = (m) => !state.lan?.[m]?.conta;
 const semTesteLan = (id) => !!state.lan?.semTeste?.includes(id);
-const podeJogarLan = (m, id) => !state.lan || idsDaVez(m).includes(id) || (lanLivre(m) && !semTesteLan(id));
+// a fila da vez (fila-lan.js): com gente na fila e a máquina livre, só joga quem o servidor pôs em livres
+const livreNaFilaLan = (m, id) => !state.lan?.fila?.[m]?.livres || state.lan.fila[m].livres.includes(id);
+const podeJogarLan = (m, id) => !state.lan || idsDaVez(m).includes(id) || (lanLivre(m) && !semTesteLan(id) && livreNaFilaLan(m, id));
 // A máquina está alugada para outra pessoa e eu não sou da vez: só assisto (o mesmo do /jogar). No "até alguém
 // novo", quem ainda tem o teste grátis não entra aqui: em segundos a vez é dela.
 // a máquina da tela em foco, se eu estou só assistindo a vez de outra pessoa nela

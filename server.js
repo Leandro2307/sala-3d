@@ -12,6 +12,7 @@ const { execFile } = require('child_process');
 const crypto = require('crypto');
 const QRCode = require('qrcode');
 const banco = require('./banco');
+const { FilaLan } = require('./fila-lan.js');
 const { ligarFutebol } = require('./futebol-servidor.js');
 const { ligarQuadras } = require('./quadras-servidor.js');
 const { ligarPingue } = require('./pingue-servidor.js');
@@ -767,6 +768,8 @@ const lan = require('./lanhouse')({
     return (Array.isArray(lista) ? lista : []).map((j) => ({ ...j, icone: icones.get(j.id) || null }));
   },
   aoMudar: (id) => { const r = rooms.get(id); if (r) avisarLan(r, true); },
+  // a fila da vez (fila-lan.js): com a máquina livre e gente na fila, só o 1º aluga a hora de agora
+  filaBloqueia: (id, maquina, conta) => { const r = rooms.get(id); return r ? filaDe(r).bloqueia(maquina, conta) : null; },
 });
 lan.rotas(app);
 app.get('/lan', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'lan.html')));
@@ -860,9 +863,28 @@ function vezLan(room, m) {
   const prox = lan.jogadorAgora(room.id, m, Date.now() + ANTECIPA_PC_MS);
   return prox && !prox.aberta ? { ...prox, preparando: true } : a;
 }
+// A fila da vez de cada máquina (fila-lan.js), na memória da sala
+const filaDe = (room) => (room.filaLan ??= new FilaLan(lan.MAQUINAS));
+const idsDaConta = (room, conta) => [...room.users.values()].filter((u) => u.conta === conta).map((u) => u.id);
+// Com gente na fila e a máquina livre, só estas contas jogam: o 1º da fila (o chamado) e quem já estava no
+// teste grátis de 2 min nesta máquina antes de a fila existir. null: sem fila, vale a regra de sempre.
+function contasDaFila(room, m, agora = Date.now()) {
+  const primeiro = filaDe(room).lista(m)[0]?.conta;
+  if (!primeiro) return null;
+  const t = room.lanTesteMaq?.[m];
+  return t && t.fim > agora && t.conta !== primeiro ? [primeiro, t.conta] : [primeiro];
+}
 function estadoLan(room) {
   if (!room.config?.lanhouse?.ligada) return { ligada: false };
   const e = { ligada: true };
+  // a fila: as contas em ordem (com os ids de cada uma na sala), o chamado e até quando, e quem pode jogar com
+  // a máquina livre (livres: ids; null sem fila)
+  e.fila = {};
+  for (const m of lan.MAQUINAS) {
+    const f = filaDe(room).estado(m);
+    const contas = contasDaFila(room, m);
+    e.fila[m] = { lista: f.lista.map((conta) => ({ conta, ids: idsDaConta(room, conta) })), chamada: f.chamada, livres: contas ? contas.flatMap((c) => idsDaConta(room, c)) : null };
+  }
   for (const m of lan.MAQUINAS) {
     const atual = vezLan(room, m);
     const ids = atual ? [...room.users.values()].filter((u) => u.conta === atual.conta).map((u) => u.id) : [];
@@ -941,8 +963,11 @@ async function vigiarJogoLan(room) {
 // correndo ou ainda não começados)
 function podeJogarLan(room, user, donoDaTela, tela) {
   if (!room.config?.lanhouse?.ligada || user === donoDaTela) return true;
-  const atual = vezLan(room, maquinaDaTela(tela));
+  const m = maquinaDaTela(tela);
+  const atual = vezLan(room, m);
   if (atual) return !!user.conta && user.conta === atual.conta;
+  const fila = contasDaFila(room, m);
+  if (fila && !fila.includes(user.conta)) return false;
   return !!user.conta && !lan.teste(room.id, user.conta, user.ip).acabou;
 }
 // lan house: a pessoa entrou na sala (ou na conta): o tempo que o dono liberou para ela começa a contar agora
@@ -961,11 +986,48 @@ function contaNoTesteLan(ev) {
 // o primeiro comando ao jogo numa máquina livre começa os 2 min do teste grátis desta pessoa; no
 // fim, a sala fica sabendo (a tela de quem joga deixa de aceitar e abre o aluguel para ela)
 function comecarTesteLan(room, user, tela) {
-  if (!room.config?.lanhouse?.ligada || vezLan(room, maquinaDaTela(tela))) return;
+  const m = maquinaDaTela(tela);
+  if (!room.config?.lanhouse?.ligada || vezLan(room, m)) return;
+  const fila = contasDaFila(room, m);
+  if (fila && !fila.includes(user.conta)) return;
   const fim = lan.comecarTeste(room.id, user.conta, user.ip);
   if (!fim) return;
+  (room.lanTesteMaq ??= {})[m] = { conta: user.conta, fim };
+  filaDe(room).comecouTeste(m, user.conta, fim);
   avisarLan(room, true);
   setTimeout(() => avisarLan(room, true), fim - Date.now() + 300).unref?.();
+}
+
+// A fila andando (a cada 5 s, e quando alguém entra ou sai): a máquina ficou livre, o 1º é chamado e tem 2 min
+// para começar (teste grátis ou aluguel); não começou, passa para o seguinte. O liberado "até alguém novo" de
+// outra pessoa acaba quando há fila (é o "alguém novo").
+function vigiarFilaLan(room) {
+  if (!ioLan || !room.config?.lanhouse?.ligada || !room.filaLan) return;
+  const fila = room.filaLan;
+  const presentes = new Set([...room.users.values()].map((u) => u.conta).filter(Boolean));
+  let mudou = false;
+  for (const m of lan.MAQUINAS) {
+    if (!fila.lista(m).length && !fila.chamada(m)) continue;
+    const vez = vezLan(room, m);
+    const primeiro = fila.lista(m)[0]?.conta;
+    if (vez?.aberta && primeiro && vez.conta !== primeiro && presentes.has(primeiro)) {
+      lan.encerrar({ sala: room.id, maquina: m }).then((r) => {
+        if (!r.ok) return;
+        if (room.lanMaquinas?.[m]) room.lanMaquinas[m].aberto = false; // a máquina fica na sala para o chamado
+        ioLan.to(room.id).emit('lan-novo', { nome: primeiro, id: null, maquinas: [m] });
+        vigiarFilaLan(room);
+        avisarLan(room, true);
+      }).catch((err) => console.warn('[lan] fila: encerrando o liberado', err.message));
+      continue;
+    }
+    for (const ev of fila.passo(m, { vez: vez?.conta ?? null, testando: room.lanTesteMaq?.[m] || null, presentes })) {
+      mudou = true;
+      console.log(`[lan] ${room.id} ${m}: fila, ${ev.tipo} ${ev.conta}`);
+      if (ev.tipo !== 'chamada' && ev.tipo !== 'passou') continue;
+      for (const id of idsDaConta(room, ev.conta)) ioLan.to(id).emit('lan-fila-vez', { maquina: m, tipo: ev.tipo, ate: ev.ate ?? null });
+    }
+  }
+  if (mudou) avisarLan(room, true);
 }
 
 // Prêmios. Cada um tem um intervalo mínimo por pessoa, para ninguém "farmar" repetindo.
@@ -1803,6 +1865,21 @@ function attachSockets(io) {
       const quem = room?.users.get(id);
       if (!tela?.controle || !quem || quem === user) return;
       comecarTesteLan(room, quem, tela);
+    });
+
+    // lan house: entrar ou sair da fila da vez de uma máquina (fila-lan.js)
+    socket.on('lan-fila', (msg, ack) => {
+      const r = resposta(ack);
+      const { maquina, entrar } = obj(msg);
+      if (!room?.config?.lanhouse?.ligada || !user?.conta) return r({ ok: false, erro: 'Entre com a sua conta para entrar na fila.' });
+      if (!lan.MAQUINAS.includes(maquina)) return r({ ok: false });
+      const fila = filaDe(room);
+      if (!entrar) fila.sair(maquina, user.conta);
+      else if (vezLan(room, maquina)?.conta === user.conta) return r({ ok: false, erro: 'A vez já é sua.' });
+      else fila.entrar(maquina, user.conta);
+      vigiarFilaLan(room);
+      avisarLan(room, true);
+      r({ ok: true, posicao: fila.posicao(maquina, user.conta) });
     });
 
     // ---------------------------------------------------------- dono da sala
@@ -2908,6 +2985,7 @@ async function main() {
   setInterval(() => {
     for (const room of rooms.values()) {
       if (!room.users.size) continue;
+      vigiarFilaLan(room);
       avisarLan(room);
       vigiarJogoLan(room).catch((err) => console.warn('[lan] jogo', err.message));
       // o liberado de quem está na sala esperando a máquina ficar livre
