@@ -5,7 +5,7 @@
 // A sala continua a principal; esta página não muda nada nela.
 //
 // O que é igual à sala: teclado e mouse (mouse preso, menu automático), controle de videogame, DualSense
-// pelo WebHID (gatilhos, vibração, touchpad), modo carro, legenda, mapear teclas, tutorial, modos de imagem,
+// pelo WebHID (gatilhos, vibração, touchpad), modo carro, legenda, mapear teclas, a tecla nos avisos do jogo, modos de imagem,
 // Turbo com as mesmas vidas e folgas, som, lan house (vez, contador, teste grátis, aluguel) e o relatório
 // ("conta (jogar)" na lista do npm run relatorios). O que fica de fora: 3D, minijogos, webcams, chat, e
 // compartilhar a própria tela.
@@ -41,7 +41,7 @@ import { PadVirtual } from './pad-virtual.js';
 import { TecladoPad } from './teclado-pad.js';
 import { MapaTeclasPainel, dicaTeclado, legendaBotoes, mapaTeclas } from './mapa-teclas.js';
 import { ModoCarroTela } from './modo-carro.js';
-import { TutorialControle } from './tutorial-controle.js';
+import { AvisosBotoes } from './avisos-botoes-tela.js';
 import { Ps5Touchpad, temTouchpadHid } from './ps5-touchpad.js';
 import { AvisoDoSite } from './aviso-site.js';
 import { isTouch } from './touch.js';
@@ -1006,11 +1006,11 @@ function barrado(key) {
   const t = acharTela(key);
   return !!t && !podeJogarLan(maquinaDaTela(t.sh));
 }
-// De graça: enquanto o diagnóstico (teste da conexão) ou o tutorial do controle estão na tela, nada vai ao jogo,
+// De graça: enquanto o diagnóstico (teste da conexão) está na tela, nada vai ao jogo,
 // e os 2 min só começam quando terminam ou são pulados (o servidor não conta o 'modo' nem o 'vivo')
 function seguraNoPreparo(key, ev) {
   if (!st.lan || meuTesteLan || ev?.t === 'modo' || ev?.t === 'vivo') return false;
-  if (!testeJoga.testando && !tutorial.ativo) return false;
+  if (!testeJoga.testando) return false;
   const t = acharTela(key);
   if (!t) return false;
   const m = maquinaDaTela(t.sh);
@@ -1182,6 +1182,13 @@ const turboRecebe = new TurboRecebe({
 });
 // como na TV: só H.264, os mesmos perfis, e a placa antes de qualquer outra coisa; o PC leva 3–4 s para começar
 turboRecebe.semHevc = true;
+// os avisos de botão do jogo (△, ✕…) com a tecla do teclado em cima: olham os quadros do turbo
+const avisosBotoes = new AvisosBotoes({
+  camada: $('#jogo-avisos'),
+  video,
+  telaTurbo: () => video.parentElement.querySelector('.turbo-tela:not([hidden])'),
+});
+turboRecebe.espiar = (frame) => avisosBotoes.espiar(frame);
 turboRecebe.socorro = true;
 turboRecebe.codecsForcados = ['avc1.640033', 'avc1.4d0033', 'avc1.42e033', 'avc1.42001f'];
 turboRecebe.aceleracoes = ['prefer-hardware', 'prefer-hardware@2a', 'prefer-hardware@28', 'prefer-hardware@1f', 'no-preference'];
@@ -1610,6 +1617,7 @@ opcoesJogo.ouvir((k, v) => {
       turboRecebe.desligar();
     }
   } else if (k === 'selo') mostrarSelo();
+  else if (k === 'avisos') mostrarLegenda(layoutLegenda);
   else if (k === 'menuAuto' && jogandoLa) controle.cursorLivre(jogandoLa.key, v ? jogandoLa.cursorLivre : false);
   else if (k === 'preencher') document.body.classList.toggle('jogo-preencher', !!v);
   else if (k === 'tela') document.body.dataset.jogoTela = v;
@@ -1795,7 +1803,8 @@ const tecladoPad = new TecladoPad({
   },
 });
 padVirtual.onErroTremor = (erro) => diagJogo.evento('o controle não aceitou o tremor', { erro, ...padVirtual.comoVibra() });
-const tutorial = new TutorialControle({ raiz: $('#tut-controle'), pad: padVirtual, toqueRaiz: $('#toque-jogo'), onAbriu: (modo) => diagJogo.evento('tutorial aberto', { modo }), onFechou: (concluiu, onde) => diagJogo.evento(concluiu ? 'tutorial fechado (terminou ou pulou)' : 'tutorial fechado no meio (o jogo acabou)', onde) });
+// Sem tutorial do controle (desde 2026-11-27, pedido do usuário): no teclado e mouse, os avisos de botão do
+// jogo já trazem a tecla (avisos-botoes-tela.js); no celular e com controle não precisa.
 const mapaPainel = new MapaTeclasPainel({
   raiz: $('#mapa-teclas'),
   onAbriu: () => tecladoPad.soltarTudo(),
@@ -1806,13 +1815,13 @@ const mapaPainel = new MapaTeclasPainel({
 });
 controle.paraPad = (ev) => {
   if (mapaPainel.aberto) return true;
-  if (!tutorial.ativo) return tecladoPad.evento(ev);
-  if (!tutorial.tecla(ev)) tecladoPad.evento(ev);
-  return true;
+  return tecladoPad.evento(ev);
 };
-const touchpad = new Ps5Touchpad({ pad: padVirtual, onMudou: () => { atualizarBotaoTouchpad(); avisarModo(); } });
+// controle ligado ou desligado: a legenda e as teclas nos avisos são só para quem joga no teclado
+const entradaMudou = () => { if (layoutLegenda) mostrarLegenda(layoutLegenda); };
+const touchpad = new Ps5Touchpad({ pad: padVirtual, onMudou: () => { atualizarBotaoTouchpad(); avisarModo(); entradaMudou(); } });
 padVirtual.hid = touchpad;
-const fisico = new ControleFisico({ controle, pad: padVirtual, toast, onAtivo: (sim) => $('#toque-jogo').classList.toggle('tj-pad', sim) });
+const fisico = new ControleFisico({ controle, pad: padVirtual, toast, onAtivo: (sim) => { $('#toque-jogo').classList.toggle('tj-pad', sim); entradaMudou(); } });
 // Celular: o mesmo controle de toque da sala (toque-jogo.js) por cima da imagem no modo jogo
 const toqueJogo = new ToqueJogo({
   raiz: $('#toque-jogo'),
@@ -1820,8 +1829,6 @@ const toqueJogo = new ToqueJogo({
   pad: padVirtual,
   toast,
   onEngasgo: () => marcarEngasgo(),
-  onTutorial: () => tutorial.abrir('toque'),
-  onLayout: () => { if (toqueJogo.key && toqueJogo.layoutId === 'ps5') tutorial.abrir('toque'); },
   volume: {
     get: () => ajustes.jogo,
     set: (v) => {
@@ -1842,6 +1849,8 @@ function mostrarLegenda(layout) {
   const el = $('#jogo-legenda');
   // com controle não serve para nada, e menos coisa por cima da imagem é menos trabalho para mostrá-la
   el.hidden = !layout || entradaDeAgora() !== 'teclado';
+  // a tecla em cima dos avisos de botão do jogo: só com os ícones do PS5 e jogando no teclado
+  avisosBotoes.ligar(!el.hidden && layout === 'ps5' && opcoesJogo.get('avisos'));
   if (el.hidden) {
     modoCarroTela.esconder();
     return void (el.innerHTML = '');
@@ -1897,22 +1906,6 @@ $('#jogo-touchpad').addEventListener('click', async (e) => {
   atualizarBotaoTouchpad();
 });
 
-// sem controle de verdade numa tela de PS5: o tutorial do teclado. true: abriu (ou vai abrir)
-function tutorialDoPs5(key) {
-  if (isTouch ? toqueJogo.layoutId !== 'ps5' || toqueJogo.key !== key : !ehPs5(acharTela(key)?.sh)) {
-    tutorial.fechar(false);
-    return false;
-  }
-  if (isTouch) {
-    if (!tutorial.ativo) setTimeout(() => { if (controle.jogo?.key === key) tutorial.abrir('toque'); }, 900);
-    return true;
-  }
-  const temControle = () => fisico.pad() || touchpad.ligado;
-  if (tutorial.ativo || temControle()) return false;
-  setTimeout(() => { if (controle.jogo?.key === key && !temControle()) tutorial.abrir('pc'); }, 900);
-  return true;
-}
-
 // ------------------------------------------------------------------ ligar e desligar o modo jogo
 controle.onJogo = (v, key) => {
   const sh = v ? acharTela(key)?.sh : null;
@@ -1927,17 +1920,15 @@ controle.onJogo = (v, key) => {
   else touchpad.desligar();
   // no celular o teclado e a legenda não valem: quem joga é o controle de toque (ou um de verdade)
   const virtual = !isTouch && layout && LAYOUTS[layout]?.virtual ? layout : null;
-  if (isTouch && v) tutorialDoPs5(key);
   if (virtual) {
     padVirtual.acordar();
     tecladoPad.ligar(virtual);
     const dica = dicaTeclado(virtual);
-    if (!tutorialDoPs5(key) && dica) toast(`Teclado e mouse viram o controle. ${dica}`, 'info', 12000);
+    // a dica só para quem joga no teclado (com controle não serve)
+    if (dica && entradaDeAgora() === 'teclado') toast(`Teclado e mouse viram o controle. ${dica}`, 'info', 12000);
   } else tecladoPad.desligar();
   mostrarLegenda(virtual);
-  $('#jogo-tutorial').hidden = layout !== 'ps5';
   if (!v) {
-    tutorial.fechar(false);
     mapaPainel.fechar();
     padVirtual.desligar(); // depois do controle: o último estado é tudo solto
     if (!caindo && document.body.classList.contains('jogo-pc')) jogoNoPc(false); // caindo: a tela cheia espera a volta
@@ -2114,13 +2105,7 @@ $('#jogo-lossless').addEventListener('change', (e) => {
 $('#jogo-mapear').addEventListener('click', (e) => {
   e.currentTarget.blur();
   $('#jogo-op-pop').hidden = true;
-  tutorial.fechar(true);
   mapaPainel.abrir(layoutDa(st.alvo?.sh) === 'switch' ? 'switch' : 'ps5');
-});
-$('#jogo-tutorial').addEventListener('click', (e) => {
-  e.currentTarget.blur();
-  $('#jogo-op-pop').hidden = true;
-  tutorial.abrir('pc');
 });
 
 volumes();

@@ -4856,6 +4856,30 @@ body.touch :is(.hk-lista, #help-extra, #help-mais-btn) { display: none !importan
   opacity: 0.7;
 }
 #jogo-legenda[hidden] { display: none; }
+/* a tecla em cima dos avisos de botão do jogo (avisos-botoes-tela.js): no lugar do ícone, com a cor dele */
+#jogo-avisos { position: absolute; inset: 0; z-index: 5; pointer-events: none; overflow: hidden; }
+#jogo-avisos[hidden] { display: none; }
+#jogo-avisos kbd {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 .45em;
+  border-radius: 999px;
+  border: 2px solid var(--cor, #fff);
+  background: rgba(10, 8, 18, 0.92);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35), 0 2px 10px rgba(0, 0, 0, 0.5);
+  color: #fff;
+  font: 800 14px/1 'Plus Jakarta Sans', system-ui, sans-serif;
+  white-space: nowrap;
+  animation: aviso-entra .12s ease-out;
+  transition: left .1s linear, top .1s linear;
+}
+#jogo-avisos kbd.longa { border-radius: 8px; }
+@keyframes aviso-entra { from { opacity: 0; transform: translate(-50%, -50%) scale(.8); } }
+@media (prefers-reduced-motion: reduce) { #jogo-avisos kbd { animation: none; transition: none; } }
 #jogo-legenda span {
   display: flex;
   flex-direction: column;

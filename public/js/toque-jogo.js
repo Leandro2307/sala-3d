@@ -662,7 +662,7 @@ export class ToqueJogo {
     this.menu = false;
     this.slot = null;
     this.raiz.dataset.layout = id;
-    this.raiz.querySelector('.tj-tutorial').hidden = this.layoutId !== 'ps5';
+    this.raiz.querySelector('.tj-tutorial').hidden = !this.onTutorial || this.layoutId !== 'ps5'; // o /jogar não tem tutorial
     this.desenhar();
     // o controle virtual já aparece no PC de lá: o emulador só deixa escolher o controle que existe
     if (L.virtual && this.key) this.pad?.acordar();

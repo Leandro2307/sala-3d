@@ -3,6 +3,8 @@
 //   liso:     um buffer pequeno (LISO_MS) na imagem: segura o tremido do Wi-Fi, com um pouco de atraso
 //   menuAuto: quando o jogo mostra o cursor (menu, inventário), o mouse passa a ir pela posição
 //   selo:     o selo de desempenho no canto (qps, atraso, banda)
+//   avisos:   no PC, num jogo de PS5, a tecla do teclado em cima dos avisos de botão do jogo (o △ de
+//             "Arrombar" no GTA vira um F): avisos-botoes-tela.js
 //   giro:     no celular, mirar virando o aparelho (giroscópio)
 //   rapido:   menos atraso: quem compartilha manda 720p fixo e até 8 Mbps (quadros menores
 //             codificam, viajam e decodificam mais rápido, e o buffer do celular fica menor)
@@ -30,7 +32,7 @@ const TOQUE = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)'
 // de fábrica a imagem ocupa o celular todo; num aparelho mais quadrado (iPad) ela esticaria demais
 const TELA_PADRAO = typeof screen !== 'undefined' && Math.max(screen.width, screen.height) / Math.min(screen.width, screen.height) >= 1.7 ? 'cheia' : 'inteira';
 export const TELAS = { cheia: 'Tela toda', inteira: 'Com faixas', cortar: 'Sem bordas' };
-const PADRAO = { liso: true, menuAuto: true, selo: false, giro: false, rapido: false, turbo: true, turboLiso: true, vibrar: true, preencher: false, tela: TELA_PADRAO, lossless: 0, mouseSens: 3, nitidez: !APPLE, tratamento: !APPLE && !TOQUE };
+const PADRAO = { liso: true, menuAuto: true, selo: false, avisos: true, giro: false, rapido: false, turbo: true, turboLiso: true, vibrar: true, preencher: false, tela: TELA_PADRAO, lossless: 0, mouseSens: 3, nitidez: !APPLE, tratamento: !APPLE && !TOQUE };
 // mouseSens: no PC, num jogo de controle (PS5, Switch), quanto o mouse empurra o analógico direito
 // (teclado-pad.js): 2× chega ao fim do analógico com metade do movimento// Versão das opções (v2: turbo e 720p; v3: liso; v4: os modos de imagem de 2026-11-05; v5: os 4 modos
 // de 2026-11-16). O modo de imagem não fica guardado: toda vez que a página abre entra o PRESET_INICIAL.

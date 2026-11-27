@@ -2749,6 +2749,8 @@ export class TurboRecebe {
         s.tela.hidden = false;
         this.posicionar(s);
       }
+      // quem quer olhar a imagem (os avisos de botão do /jogar, avisos-botoes-tela.js) clona se quiser
+      this.espiar?.(frame);
     } finally {
       frame.close();
     }
