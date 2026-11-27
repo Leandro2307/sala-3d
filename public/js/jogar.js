@@ -545,6 +545,9 @@ function ouvirVoz(u) {
 }
 function volumes() {
   video.volume = ajustes.jogo / 100;
+  // o trilho colorido só até o volume; o resto fica branco (style da .jg-vol em jogar.html)
+  $('#jg-vol-jogo').style.setProperty('--v', `${ajustes.jogo}%`);
+  $('#jg-vol-voz').style.setProperty('--v', `${ajustes.voz}%`);
   for (const u of st.users.values()) {
     if (!u.audioEl) continue;
     u.audioEl.volume = ajustes.voz / 100;
@@ -594,7 +597,9 @@ async function alternarMic() {
 }
 function mostrarMic() {
   // o ícone do microfone (cortado quando desligado) e o texto curto; o completo fica no title
-  $('#jg-mic').innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>${mic.ligado ? '' : '<path d="M4 4l16 16"/>'}</svg>${mic.ligado ? 'Mic ligado' : 'Mic desligado'}`;
+  // só o ícone (pedido de 2026-11-27); o texto fica no title e no aria-label
+  $('#jg-mic').innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>${mic.ligado ? '' : '<path d="M4 4l16 16"/>'}</svg>`;
+  $('#jg-mic').setAttribute('aria-label', mic.ligado ? 'Microfone ligado' : 'Microfone desligado');
   $('#jg-mic').title = mic.ligado ? 'Microfone ligado: clique para desligar' : 'Microfone desligado: clique para falar com a sala';
   $('#jg-mic').classList.toggle('on', mic.ligado);
   $('#jg-mic').setAttribute('aria-pressed', String(mic.ligado));
@@ -603,6 +608,7 @@ $('#jg-mic').addEventListener('click', (e) => {
   e.currentTarget.blur();
   alternarMic();
 });
+mostrarMic(); // o ícone desde o começo (o HTML vem vazio)
 
 // ------------------------------------------------------------------ as telas
 const acharTela = (key) => {
@@ -739,7 +745,8 @@ const podeControlar = () => !!st.alvo?.sh.controle;
 const jogavel = () => podeControlar() && ['window', 'monitor', 'ps5'].includes(st.alvo.sh.superficie);
 function atualizarBarra() {
   const a = st.alvo;
-  $('#focus-name').textContent = a ? `Tela de ${a.u.name} · ${a.sh.titulo || NOME_MAQ[maquinaDaTela(a.sh)]}` : 'Sala 3D · Jogar';
+  // o nome da tela não aparece mais (pedido de 2026-11-27): fica o ponto ao vivo e a qualidade
+  $('#focus-name').textContent = a ? '' : 'Sala 3D · Jogar';
   const telas = telasNoAr();
   const html = telas.length > 1 ? telas.map((t) => `<button type="button" class="secondary small" data-tela="${esc(t.sh.key)}" aria-pressed="${t.sh.key === a?.sh.key}">${esc(t.sh.titulo || NOME_MAQ[maquinaDaTela(t.sh)])} · ${esc(t.u.name)}</button>`).join('') : '';
   if ($('#jg-telas').innerHTML !== html) $('#jg-telas').innerHTML = html;
@@ -758,7 +765,7 @@ function atualizarBarra() {
   eraJogo = emJogo;
   const ver = !emJogo && soVerLan();
   const cb = $('#focus-ctrl');
-  cb.hidden = !podeControlar() || emJogo || ver;
+  cb.hidden = true; // o "Controlar" saiu da barra (2026-11-27): o Modo jogo faz o mesmo
   cb.textContent = st.controlando ? 'Só assistir' : 'Controlar';
   cb.classList.toggle('on', st.controlando);
   const jb = $('#focus-jogo');

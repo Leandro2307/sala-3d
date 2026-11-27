@@ -134,19 +134,34 @@
   .focus-bar .whats-btn svg { width: 16px; height: 16px; flex: none; }
   .focus-bar #jg-mic { gap: 6px; }
   .focus-bar #jg-mic svg { width: 15px; height: 15px; }
-  .focus-bar #jg-mic:not(.on) { color: var(--vc-apagado); }
+  /* desligado: vermelho (pedido de 2026-11-27); ligado: o ciano do .on */
+  #focus .focus-bar #jg-mic:not(.on) { color: #fff; background: #e5484d; border-color: #e5484d; box-shadow: 0 4px 14px rgba(229, 72, 77, .35); }
+  #focus .focus-bar #jg-mic:not(.on):hover { background: #f05a5f; }
   .focus-bar #focus-full svg { width: 14px; height: 14px; }
   #focus .focus-bar #jg-sala { color: var(--vc-sol); text-decoration: none; white-space: nowrap; }
   #focus .focus-bar #jg-sala:hover { color: #fff; }
   .jg-telas button[aria-pressed="true"] { border-color: var(--vc-rosa); color: #ffd1e3; }
   /* os volumes: o trilho no degradê do pôr do sol */
   .jg-vol { gap: 7px; padding: 0 4px; color: var(--vc-apagado); font-weight: 700; font-size: 11.5px; text-transform: uppercase; letter-spacing: .6px; }
-  .jg-vol input { width: 74px; height: 4px; margin: 0 6px; appearance: none; -webkit-appearance: none; border-radius: 999px; background: var(--vc-degrade); cursor: pointer; }
+  .jg-vol input { width: 74px; height: 4px; margin: 0 6px; appearance: none; -webkit-appearance: none; border-radius: 999px; background: linear-gradient(90deg, var(--vc-rosa), var(--vc-laranja)) 0 0 / var(--v, 100%) 100% no-repeat, rgba(255, 255, 255, .85); cursor: pointer; }
   .jg-vol input::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 3px solid var(--vc-rosa); box-shadow: 0 0 10px rgba(255, 61, 139, .6); }
   .jg-vol input::-moz-range-thumb { width: 10px; height: 10px; border-radius: 50%; background: #fff; border: 3px solid var(--vc-rosa); }
   /* o botão grande no meio da imagem */
-  #jg-jogar { background: linear-gradient(90deg, var(--vc-rosa), var(--vc-laranja)); color: #2a0716; letter-spacing: .3px;
+  /* o texto branco, como o "Alugar PC ou PS5" */
+  #jg-jogar { background: linear-gradient(90deg, #f0287a, #ff6b35); color: #fff; letter-spacing: .3px; text-shadow: 0 1px 2px rgba(80, 0, 30, .45);
     box-shadow: 0 10px 44px rgba(255, 61, 139, .45), inset 0 1px 0 rgba(255, 255, 255, .35); }
+  /* o som: o ícone e, no hover, os dois volumes embaixo dele (o padding de cima é a ponte para o mouse não cair) */
+  .jg-som { position: relative; display: inline-flex; }
+  .focus-bar .jg-som-bt { width: 34px; padding: 0; justify-content: center; }
+  #focus .focus-bar .jg-som-bt svg, #focus .focus-bar #jg-mic svg { width: 16px; height: 16px; min-width: 16px; flex: none; }
+  .jg-som-pop { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); z-index: 5; display: none; padding-top: 8px; }
+  .jg-som:hover .jg-som-pop, .jg-som:focus-within .jg-som-pop { display: grid; }
+  .jg-som-pop::before { content: ''; position: absolute; inset: 8px 0 0; z-index: -1; border-radius: 14px; background: rgba(18, 10, 34, .97);
+    border: 1px solid rgba(255, 61, 139, .35); box-shadow: 0 18px 48px rgba(0, 0, 0, .55); }
+  .jg-som-pop .jg-vol { justify-content: space-between; padding: 10px 14px 0; white-space: nowrap; }
+  .jg-som-pop .jg-vol:last-child { padding-bottom: 12px; }
+  .focus-bar #jg-mic { width: 34px; padding: 0; justify-content: center; }
+  body.touch .jg-som { display: none; }
   #jg-jogar:hover { filter: brightness(1.07); }
   /* as opções do modo jogo */
   .focus-bar .jogo-op-pop { background: rgba(18, 10, 34, .97); border: 1px solid rgba(255, 61, 139, .35); box-shadow: 0 18px 48px rgba(0, 0, 0, .55); }
@@ -207,9 +222,15 @@
       <span class="lan-vez" id="lan-vez-ps5" hidden></span>
     </div>
     <div class="focus-actions">
-      <label class="jg-vol" title="Volume do jogo">Jogo <input type="range" id="jg-vol-jogo" min="0" max="100" aria-label="Volume do jogo"></label>
-      <label class="jg-vol" title="Volume da voz das pessoas (0 desliga)">Voz <input type="range" id="jg-vol-voz" min="0" max="100" aria-label="Volume da voz"></label>
-      <button type="button" class="secondary small" id="jg-mic" aria-pressed="false">Microfone desligado</button>
+      <!-- os volumes: só o ícone na barra; passando o mouse (ou com o foco) eles aparecem embaixo dele -->
+      <span class="jg-som">
+        <button type="button" class="secondary small jg-som-bt" aria-label="Volume" title="Volume do jogo e da voz"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg></button>
+        <span class="jg-som-pop">
+          <label class="jg-vol" title="Volume do jogo">Jogo <input type="range" id="jg-vol-jogo" min="0" max="100" aria-label="Volume do jogo"></label>
+          <label class="jg-vol" title="Volume da voz das pessoas (0 desliga)">Voz <input type="range" id="jg-vol-voz" min="0" max="100" aria-label="Volume da voz"></label>
+        </span>
+      </span>
+      <button type="button" class="secondary small" id="jg-mic" aria-pressed="false" aria-label="Microfone desligado" title="Microfone desligado"></button>
       <span class="jg-sep" aria-hidden="true"></span>
       <button type="button" class="secondary small" id="lan-reservar" hidden>Alugar PC ou PS5</button>
       <a class="secondary small whats-btn" href="https://wa.me/5562998609537?text=Gostaria%20de%20alugar." target="_blank" rel="noopener" title="Falar no WhatsApp para alugar"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38a9.9 9.9 0 0 0 4.74 1.21h.01c5.46 0 9.9-4.45 9.9-9.91A9.85 9.85 0 0 0 12.04 2Zm0 18.15h-.01a8.2 8.2 0 0 1-4.19-1.15l-.3-.18-3.12.82.83-3.04-.2-.31a8.22 8.22 0 0 1-1.26-4.38c0-4.54 3.7-8.24 8.25-8.24 2.2 0 4.27.86 5.83 2.42a8.18 8.18 0 0 1 2.41 5.83c0 4.54-3.7 8.23-8.24 8.23Zm4.52-6.16c-.25-.12-1.47-.72-1.7-.8-.23-.09-.39-.13-.56.12-.16.25-.64.8-.78.97-.15.17-.29.19-.54.06-.25-.12-1.05-.39-1.99-1.23-.74-.66-1.23-1.47-1.38-1.72-.14-.25-.01-.38.11-.51.11-.11.25-.29.37-.43.13-.15.17-.25.25-.42.08-.17.04-.31-.02-.43-.06-.13-.56-1.34-.76-1.84-.2-.48-.41-.42-.56-.42h-.48c-.17 0-.43.06-.66.31-.22.25-.86.85-.86 2.07 0 1.22.89 2.4 1.01 2.56.12.17 1.75 2.67 4.23 3.74.59.26 1.05.41 1.41.52.59.19 1.13.16 1.56.1.47-.07 1.47-.6 1.67-1.18.21-.58.21-1.07.15-1.18-.06-.1-.23-.16-.48-.29Z"/></svg>WhatsApp</a>
