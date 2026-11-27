@@ -1966,6 +1966,9 @@ export class TurboRecebe {
     this.tratamentoLento = false; // a placa daqui não deu conta: sem ele até recarregar
     this.lisoPct = LISO_PCT; // quanto do tremido a folga do liso cobre (presets de teste)
     this.somCurto = false; // o tocador do som guarda menos (ver SOM_WORKLET): /tv e /jogar
+    // celular: com a página escondida (tela travada, outro app) o som volta para o WebRTC (ver vigiarSom)
+    this.somEscondidoWebrtc = false;
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', () => { if (this.s) this.vigiarSom(this.s); });
     this.lisoSoluco = false; // o soluço do Wi-Fi não infla a folga do liso (ver LISO_SOLUCO): /tv e /jogar
     this.lisoMax = LISO_MAX; // a folga máxima (ms): o Turbo rápido troca o atraso pelo tremido
     this.soH264 = false; // este modo pede só H.264 (o Turbo da TV na sala): vale na próxima vez que ligar
@@ -2551,12 +2554,16 @@ export class TurboRecebe {
     const som = s.som;
     if (!som) return;
     const v = this.somDaTela?.(s.key) || null;
-    const vol = !v || v.muted ? 0 : Math.min(1, Math.max(0, this.volume ? Number(this.volume()) || 0 : v.volume));
+    // Celular com a tela travada: o Android/iPhone desacelera a página, os pacotes do canal chegam em
+    // rajadas e o tocador (30–80 ms de folga) fica sem som a cada pouco — picotava ouvindo a dublagem
+    // com o celular travado (2026-11-27). O som do WebRTC toca fora da página, com o buffer dele: vale ele.
+    const escondida = this.somEscondidoWebrtc && typeof document !== 'undefined' && document.hidden;
+    const vol = escondida || !v || v.muted ? 0 : Math.min(1, Math.max(0, this.volume ? Number(this.volume()) || 0 : v.volume));
     if (Math.abs(som.ganho.gain.value - vol) > 0.005) som.ganho.gain.setTargetAtTime(vol, som.ctx.currentTime, 0.02);
     // Para ligar, o tocador tem que estar tocando; depois, só os pacotes parando por SOM_PARADO_MS
     // devolvem o som ao WebRTC. Uma falha curta (o tocador enchendo de novo) não troca: no teste com
     // Wi-Fi ruim, trocar a cada falha alternava os dois sons, com atrasos diferentes.
-    const chegando = !!v && som.ctx.state === 'running' && !!som.no && performance.now() - som.chegouEm < SOM_PARADO_MS;
+    const chegando = !escondida && !!v && som.ctx.state === 'running' && !!som.no && performance.now() - som.chegouEm < SOM_PARADO_MS;
     const ativo = chegando && (som.ativo || !!som.estado?.tocando);
     const trilha = (v || s.video).srcObject?.getAudioTracks?.()[0] || null;
     // a conexão trocou a trilha: a antiga volta como estava

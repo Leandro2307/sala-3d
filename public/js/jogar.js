@@ -553,6 +553,7 @@ function ouvirVoz(u) {
 }
 function volumes() {
   video.volume = ajustes.jogo / 100;
+  if (travado.audio) travado.audio.volume = ajustes.jogo / 100;
   // o trilho colorido só até o volume; o resto fica branco (style da .jg-vol em jogar.html)
   $('#jg-vol-jogo').style.setProperty('--v', `${ajustes.jogo}%`);
   $('#jg-vol-voz').style.setProperty('--v', `${ajustes.voz}%`);
@@ -577,6 +578,119 @@ function tocarTudo() {
   for (const u of st.users.values()) if (u.audioEl?.srcObject && u.audioEl.paused) u.audioEl.play().catch(() => {});
 }
 for (const ev of ['pointerdown', 'click', 'keydown']) document.addEventListener(ev, tocarTudo, { capture: true, passive: true });
+
+// ------------------------------------------------------------------ ouvir com o celular travado
+// Entrar, travar o celular e seguir ouvindo (o jogo e a dublagem): picotava (2026-11-27). Como na sala
+// (main.js, "ouvir com o celular travado"):
+// 1) um <audio> silencioso em loop com a Media Session: o Android trata a página como "tocando mídia"
+//    (controle na tela de bloqueio) e não a congela; destravado no 1º toque, só toca com ela escondida;
+// 2) o som da tela sai do <video> (que escondido fica sem quadro e o celular pode pausar) para um
+//    <audio> só dele, e a imagem deixa de ser pedida (enviarInteresse) fora do jogo;
+// 3) o som do turbo volta para o do WebRTC (turbo.js somEscondidoWebrtc).
+const travado = { silencio: null, destravado: false, audio: null, src: null, mudoAntes: false, calado: false };
+function audioDoSilencio() {
+  if (travado.silencio) return travado.silencio;
+  // 10 s de silêncio (WAV 8 kHz, 8 bits): menos de 5 s o Android não trata como mídia
+  const n = 8000 * 10;
+  const buf = new ArrayBuffer(44 + n);
+  const d = new DataView(buf);
+  const txt = (o, t) => [...t].forEach((c, i) => d.setUint8(o + i, c.charCodeAt(0)));
+  txt(0, 'RIFF'); d.setUint32(4, 36 + n, true); txt(8, 'WAVE'); txt(12, 'fmt ');
+  d.setUint32(16, 16, true); d.setUint16(20, 1, true); d.setUint16(22, 1, true);
+  d.setUint32(24, 8000, true); d.setUint32(28, 8000, true); d.setUint16(32, 1, true); d.setUint16(34, 8, true);
+  txt(36, 'data'); d.setUint32(40, n, true);
+  new Uint8Array(buf, 44).fill(128);
+  const a = document.createElement('audio');
+  a.loop = true;
+  a.src = URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+  sink.appendChild(a);
+  travado.silencio = a;
+  return a;
+}
+// no toque: toca e pausa, para depois o play() em segundo plano não ser barrado (iPhone)
+function destravarSilencio() {
+  if (!isTouch || travado.destravado || !st.entrou) return;
+  travado.destravado = true;
+  const a = audioDoSilencio();
+  a.play().then(() => { if (!document.hidden) a.pause(); }).catch(() => { travado.destravado = false; });
+}
+function calarTravado(calar) {
+  travado.calado = calar;
+  if (travado.audio) travado.audio.muted = calar;
+  for (const u of st.users.values()) if (u.audioEl) u.audioEl.muted = calar || st.semVoz || ajustes.voz <= 0;
+  if ('mediaSession' in navigator) navigator.mediaSession.playbackState = calar ? 'paused' : 'playing';
+}
+function somDaTelaNoAudio(ligar) {
+  const antes = travado.audio;
+  if (!ligar || !video.srcObject) {
+    if (antes) {
+      antes.pause();
+      antes.srcObject = null;
+      antes.remove();
+      travado.audio = null;
+      travado.src = null;
+      if (ligar) return; // a tela saiu do ar com a página escondida: o <video> fica como está
+      video.muted = travado.mudoAntes;
+      if (video.srcObject) video.play().catch(() => {});
+    }
+    return;
+  }
+  const src = video.srcObject;
+  if (antes && travado.src === src) {
+    video.muted = true; // tocarTudo/mostrarVideo podem ter religado o som do vídeo
+    return;
+  }
+  if (antes) {
+    antes.srcObject = null;
+    antes.remove();
+  } else travado.mudoAntes = video.muted;
+  const trilhas = src.getAudioTracks();
+  if (!trilhas.length) {
+    travado.audio = null;
+    travado.src = null;
+    return;
+  }
+  const a = document.createElement('audio');
+  a.srcObject = new MediaStream(trilhas);
+  a.volume = ajustes.jogo / 100;
+  a.muted = travado.calado || travado.mudoAntes; // o vídeo estava mudo (som ainda barrado): continua
+  sink.appendChild(a);
+  a.play().catch(() => {});
+  video.muted = true;
+  travado.audio = a;
+  travado.src = src;
+}
+function paginaEscondida() {
+  if (!isTouch) return;
+  enviarInteresse();
+  if (document.hidden && st.entrou) {
+    audioDoSilencio().play().catch(() => {});
+    if ('mediaSession' in navigator) {
+      try {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: 'Jogar',
+          artist: 'Ouvindo o jogo',
+          artwork: [{ src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' }],
+        });
+        navigator.mediaSession.playbackState = travado.calado ? 'paused' : 'playing';
+        // o pausar da tela de bloqueio cala o som (sem ele, o Chrome pausaria só o silêncio)
+        navigator.mediaSession.setActionHandler('pause', () => calarTravado(true));
+        navigator.mediaSession.setActionHandler('play', () => calarTravado(false));
+      } catch { /* sem Media Session */ }
+    }
+    somDaTelaNoAudio(true);
+  } else {
+    travado.silencio?.pause();
+    somDaTelaNoAudio(false);
+    if (travado.calado) calarTravado(false);
+    volumes();
+    if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'none';
+  }
+}
+document.addEventListener('visibilitychange', paginaEscondida);
+for (const ev of ['pointerdown', 'touchend']) document.addEventListener(ev, destravarSilencio, { capture: true, passive: true });
+// com a página escondida, a tela que trocou (ou voltou) também passa para o <audio>
+setInterval(() => { if (isTouch && document.hidden && st.entrou) somDaTelaNoAudio(true); }, 2000);
 for (const [id, k] of [['#jg-vol-jogo', 'jogo'], ['#jg-vol-voz', 'voz']]) {
   $(id).value = String(ajustes[k]);
   $(id).addEventListener('input', (e) => {
@@ -711,7 +825,9 @@ function enviarInteresse(forcar = false) {
     if ((!u.shares.size && !u.cam) || !rtc.peers.has(u.id)) continue;
     const mapa = {};
     // atrás do login a imagem nem aparece (o fundo é a página da TV): só depois dele
-    for (const sh of u.shares.values()) mapa[sh.key] = sh.key === st.alvo?.sh.key && $('#entrada').hidden ? 'max' : 'off';
+    // celular travado só ouvindo (fora do jogo): a imagem não vem, o som continua (ver "ouvir com o celular travado")
+    const escondida = isTouch && document.hidden && !jogandoLa;
+    for (const sh of u.shares.values()) mapa[sh.key] = sh.key === st.alvo?.sh.key && $('#entrada').hidden && !escondida ? 'max' : 'off';
     if (u.cam) mapa.cam = 'off';
     const json = JSON.stringify(mapa);
     if (!forcar && st.interesse.get(u.id) === json) continue;
@@ -1317,6 +1433,7 @@ turboRecebe.codecsForcados = ['avc1.640033', 'avc1.4d0033', 'avc1.42e033', 'avc1
 turboRecebe.aceleracoes = ['prefer-hardware', 'prefer-hardware@2a', 'prefer-hardware@28', 'prefer-hardware@1f', 'no-preference'];
 turboRecebe.semImagemMs = 12_000;
 turboRecebe.somCurto = !SINCRONIA;
+turboRecebe.somEscondidoWebrtc = isTouch; // celular travado: o som do turbo picotava (turbo.js vigiarSom)
 turboRecebe.lisoSoluco = !SINCRONIA;
 const MODOS = [PRESET_TV, ...PRESETS];
 const presetAtual = () => MODOS.find((p) => p.id === opcoesJogo.get('preset')) || null;

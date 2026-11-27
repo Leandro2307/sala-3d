@@ -3868,6 +3868,7 @@ const turboRecebe = new TurboRecebe({
 });
 turboRecebe.liso = opcoesJogo.get('turboLiso');
 turboRecebe.socorro = true;
+turboRecebe.somEscondidoWebrtc = isTouch; // celular travado: o som do turbo picotava (turbo.js vigiarSom)
 const modoTv = () => !!presetAtual()?.semRealce;
 function ligarTurbo() {
   if (!jogandoLa || entrando === jogandoLa) return; // no meio do teste da conexão: entrarNoTurbo liga no fim
