@@ -88,6 +88,9 @@
   .dia b { display: block; font-size: 16px; font-weight: 800; }
   .dia small { color: var(--muted); font-size: 11px; text-transform: capitalize; }
   .dia[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+  /* o dia com hora escolhida (a faixa pode passar da meia-noite) */
+  .dia { position: relative; }
+  .dia.tem::after { content: ''; position: absolute; top: 5px; right: 6px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
   .horas { display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 6px; }
   .hora { padding: 6px 4px; text-align: center; font-weight: 700; border-radius: 10px; line-height: 1.25; }
   .hora small { display: block; font-weight: 500; font-size: 10.5px; color: var(--muted); }
@@ -211,7 +214,7 @@
     </div>
     <p class="dica ja-ou" id="ja-ou" hidden>Ou escolha um horário na agenda:</p>
     <div class="dias" id="dias"></div>
-    <p class="dica" id="dica-horas">Clique na <b>primeira</b> e na <b>última</b> hora para pegar o intervalo (até 8 horas). Horário de Brasília.</p>
+    <p class="dica" id="dica-horas">Clique na <b>primeira</b> e na <b>última</b> hora para pegar o intervalo (quantas quiser). Horário de Brasília.</p>
     <div class="horas" id="horas"></div>
     <label class="dublagem" id="dublagem" hidden>
       <input type="checkbox" id="dublagem-on" checked>
@@ -372,7 +375,8 @@
     for (let d = dados.hoje; d <= dados.ultimo; d = somaDias(d, 1)) nomes.push(d);
     $('#dias').innerHTML = nomes.map((d, i) => {
       const sem = i === 0 ? 'hoje' : i === 1 ? 'amanhã' : new Date(`${d}T12:00:00Z`).toLocaleDateString('pt-BR', { weekday: 'short', timeZone: 'UTC' }).replace('.', '');
-      return `<button type="button" class="dia" data-dia="${d}" aria-pressed="${d === dia}"><small>${sem}</small><b>${d.slice(8)}</b><small>${d.slice(5, 7)}</small></button>`;
+      const tem = [...escolhidas].some((i) => diaDeMs(i) === d);
+      return `<button type="button" class="dia${tem ? ' tem' : ''}" data-dia="${d}" aria-pressed="${d === dia}"><small>${sem}</small><b>${d.slice(8)}</b><small>${d.slice(5, 7)}</small></button>`;
     }).join('');
   }
   function desenharHoras() {
@@ -389,6 +393,9 @@
   // "Jogar agora": livre agora, começa no minuto seguinte e vai até a mesma hora e minuto, n horas depois
   let jaN = 1;
   const hm = (ms) => new Date(ms).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' });
+  const diaBr = (ms) => new Date(ms).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+  const diaDiferente = (ms) => diaBr(ms) !== diaBr(Date.now());
+  const dataCurta = (ms) => new Date(ms).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', timeZone: 'America/Sao_Paulo' });
   function desenharJa() {
     const j = dados?.jogarAgora;
     $('#ja').hidden = !j;
@@ -399,7 +406,7 @@
     $('#ja-menos').disabled = jaN <= 1;
     $('#ja-mais').disabled = jaN >= j.max;
     // até quando está livre hoje (a próxima reserva ou o fechamento), ou o máximo de uma compra
-    const limite = j.livreAte ? `livre até as ${hm(j.livreAte)}` : `até ${j.max} h seguidas${j.dia24 ? ' · aberto 24 h' : ''}`;
+    const limite = j.livreAte ? `livre até as ${hm(j.livreAte)}${diaDiferente(j.livreAte) ? ` de ${dataCurta(j.livreAte)}` : ''}` : `livre sem limite${j.dia24 ? ' · aberto 24 h' : ''}`;
     $('#ja-quando').textContent = `Das ${hm(j.inicio)} às ${hm(j.inicio + jaN * 3600_000)} · começa 1 min depois de pagar · ${limite}`;
     const p = j.preco || dados.preco;
     const faltaJogo = maquina === 'pc' && jogos.length && !jogo;
@@ -412,7 +419,10 @@
     desenharJa();
     const n = escolhidas.size;
     const p = dados?.preco;
-    $('#resumo').textContent = n ? `${n} hora${n > 1 ? 's' : ''}${p ? ` · ${dinheiro(p.valor * n, p.moeda)}` : ''}` : p ? `${dinheiro(p.valor, p.moeda)} por hora` : '';
+    const ord = [...escolhidas].sort((a, b) => a - b);
+    const quando = (ms) => `${dataBr(diaDeMs(ms)).slice(0, 5)} ${new Date(ms).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' })}`;
+    const faixa = n && diaDeMs(ord[0]) !== diaDeMs(ord.at(-1)) ? ` · de ${quando(ord[0])} até ${quando(ord.at(-1) + 3600_000)}` : '';
+    $('#resumo').textContent = n ? `${n} hora${n > 1 ? 's' : ''}${faixa}${p ? ` · ${dinheiro(p.valor * n, p.moeda)}` : ''}` : p ? `${dinheiro(p.valor, p.moeda)} por hora` : '';
     const faltaJogo = maquina === 'pc' && jogos.length && !jogo;
     $('#pagar').disabled = !n || faltaJogo;
     $('#pagar').textContent = !conta ? 'Entre para pagar' : faltaJogo ? 'Escolha o jogo' : n && p ? `Pagar ${dinheiro(p.valor * n, p.moeda)}` : 'Pagar';
@@ -433,7 +443,7 @@
     }
   }
   function escolherMaquina(m) {
-    if (m !== maquina) escolhidas.clear();
+    if (m !== maquina) { escolhidas.clear(); horasDoDia.clear(); } // as horas guardadas eram da outra máquina
     maquina = m;
     for (const b of document.querySelectorAll('[data-maquina]')) b.setAttribute('aria-pressed', String(b.dataset.maquina === m));
     $('#maquina-nome').textContent = `— ${NOMES[m]}`;
@@ -483,6 +493,7 @@
     }
     dados = r;
     dia = r.dia;
+    horasDoDia.set(r.dia, r.horas);
     // as escolhidas que deixaram de estar livres saem
     const livres = new Set(r.horas.filter((h) => h.estado === 'livre').map((h) => h.inicio));
     for (const h of r.horas) if (h.estado === 'esperando') livres.add(h.inicio);
@@ -514,16 +525,30 @@
   // pega tudo de uma até a outra (17h e depois 23h = 17h às 23h). Com a faixa pronta, clicar numa
   // hora fora dela começa outra; clicar numa escolhida tira só ela.
   const pode = (h) => h && (h.estado === 'livre' || h.estado === 'esperando');
-  const maxHoras = () => dados?.maxHoras || 8;
+  const maxHoras = () => dados?.maxHoras || 360; // sem limite: só o fim da agenda
   let avisoDaFaixa = false;
-  // a faixa entre a hora já escolhida (sozinha) e a hora i: null se não dá para usar
+  // As horas de cada dia que já vieram do servidor: a faixa pode passar da meia-noite (23h de hoje até 5h de
+  // amanhã), então junta as horas dos dias do meio. 2026-11-26: quem queria das 23h às 5h não conseguia.
+  const horasDoDia = new Map();
+  const diaDeMs = (ms) => new Date(ms - 3 * 3600_000).toISOString().slice(0, 10); // o dia em Brasília
+  async function carregarDia(d) {
+    const r = await post('/lan/horarios', { sala, dia: d, maquina, token: conta?.token });
+    if (r.ok && r.ligada) horasDoDia.set(r.dia, r.horas);
+  }
+  // a faixa entre a hora já escolhida (sozinha) e a hora i: null se não dá para usar; { falta: [dias] } se ainda
+  // não vieram as horas de algum dia do meio
   function faixaAte(i) {
     if (escolhidas.size !== 1 || !dados) return null;
     const [ini] = escolhidas;
-    const a = dados.horas.findIndex((h) => h.inicio === ini);
-    const b = dados.horas.findIndex((h) => h.inicio === i);
-    if (a < 0 || b < 0 || a === b) return null;
-    const trecho = dados.horas.slice(Math.min(a, b), Math.max(a, b) + 1);
+    if (ini === i) return null;
+    const a = Math.min(ini, i);
+    const b = Math.max(ini, i);
+    const dias = [];
+    for (let d = diaDeMs(a); d <= diaDeMs(b); d = somaDias(d, 1)) dias.push(d);
+    const falta = dias.filter((d) => !horasDoDia.has(d));
+    if (falta.length) return { falta };
+    const trecho = dias.flatMap((d) => horasDoDia.get(d)).filter((h) => h.inicio >= a && h.inicio <= b).sort((x, y) => x.inicio - y.inicio);
+    if (trecho.length !== (b - a) / 3600_000 + 1) return { trecho, erro: 'A sala fica fechada no meio desse intervalo: escolha horas seguidas.' };
     if (!trecho.every(pode)) return { trecho, erro: 'Tem hora ocupada no meio: escolha um intervalo todo livre.' };
     if (trecho.length > maxHoras()) return { trecho, erro: `No máximo ${maxHoras()} horas por vez.` };
     return { trecho };
@@ -533,16 +558,22 @@
     if (!d) return;
     const n = escolhidas.size;
     d.innerHTML = n === 1
-      ? 'Agora clique na <b>última</b> hora (ou pague só esta).'
+      ? 'Agora clique na <b>última</b> hora. Para passar da meia-noite, toque no dia seguinte e escolha lá. Ou pague só esta.'
       : n > 1
         ? 'Clique numa hora fora da faixa para começar outra, ou numa escolhida para tirar.'
-        : `Clique na <b>primeira</b> e na <b>última</b> hora para pegar o intervalo (até ${maxHoras()} horas). Horário de Brasília.`;
+        : 'Clique na <b>primeira</b> e na <b>última</b> hora para pegar o intervalo (quantas quiser). Horário de Brasília.';
   }
-  $('#horas').addEventListener('click', (e) => {
+  $('#horas').addEventListener('click', async (e) => {
     const b = e.target.closest('.hora.livre, .hora.esperando');
     if (!b) return;
     const i = Number(b.dataset.inicio);
-    const f = faixaAte(i);
+    let f = faixaAte(i);
+    // a faixa passa por um dia que ainda não veio (ex.: escolheu 23h de hoje e 5h de depois de amanhã)
+    if (f?.falta) {
+      await Promise.all(f.falta.map(carregarDia));
+      f = faixaAte(i);
+      if (f?.falta) return aviso('Não deu para carregar os dias do meio. Tente de novo.', 'erro');
+    }
     if (f?.erro) {
       avisoDaFaixa = true;
       return aviso(f.erro, 'info');
@@ -557,6 +588,7 @@
       escolhidas.add(i);
     }
     desenharHoras();
+    desenharDias();
     resumo();
   });
   // a prévia da faixa ao passar o mouse
@@ -565,7 +597,7 @@
     for (const x of document.querySelectorAll('.hora.previa')) x.classList.remove('previa', 'invalida');
     if (!b || e.pointerType !== 'mouse') return;
     const f = faixaAte(Number(b.dataset.inicio));
-    if (!f) return;
+    if (!f || f.falta) return;
     const dentro = new Set(f.trecho.map((h) => String(h.inicio)));
     for (const x of document.querySelectorAll('.hora')) {
       if (!dentro.has(x.dataset.inicio) || x.getAttribute('aria-pressed') === 'true') continue;
@@ -648,9 +680,22 @@
   }
   if (maquina) escolherMaquina(maquina);
   else carregar();
-  // veio do fim da vez de quem assistia (jogar.js/main.js acabouVezAssistindo): o "Jogar agora" em destaque
+  // veio do fim da vez de quem assistia (jogar.js/main.js acabouVezAssistindo): o "Jogar agora" em destaque; fora
+  // da janela dele (antes das xx:10 ou a partir das xx:50), a hora cheia que vale já escolhida na agenda
   if (params.get('agora') === '1') {
-    const ver = () => { if ($('#ja').hidden) return; $('#ja').scrollIntoView({ block: 'center' }); $('#ja').classList.add('destaque'); };
+    const ver = () => {
+      if (!dados) return void setTimeout(ver, 400);
+      if (!$('#ja').hidden) {
+        $('#ja').scrollIntoView({ block: 'center' });
+        $('#ja').classList.add('destaque');
+      } else if (dados.horaSugerida && !escolhidas.size) {
+        escolhidas.add(dados.horaSugerida);
+        desenharHoras();
+        desenharDias();
+        resumo();
+        $('#pagar').scrollIntoView({ block: 'center' });
+      }
+    };
     setTimeout(ver, 800);
   }
   setInterval(carregar, 60_000);

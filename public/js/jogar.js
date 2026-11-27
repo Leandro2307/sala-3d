@@ -549,7 +549,9 @@ async function alternarMic() {
   mostrarMic();
 }
 function mostrarMic() {
-  $('#jg-mic').textContent = mic.ligado ? 'Microfone ligado' : 'Microfone desligado';
+  // o ícone do microfone (cortado quando desligado) e o texto curto; o completo fica no title
+  $('#jg-mic').innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>${mic.ligado ? '' : '<path d="M4 4l16 16"/>'}</svg>${mic.ligado ? 'Mic ligado' : 'Mic desligado'}`;
+  $('#jg-mic').title = mic.ligado ? 'Microfone ligado: clique para desligar' : 'Microfone desligado: clique para falar com a sala';
   $('#jg-mic').classList.toggle('on', mic.ligado);
   $('#jg-mic').setAttribute('aria-pressed', String(mic.ligado));
 }
@@ -612,6 +614,8 @@ function mostrarVideo() {
     aplicarBuffer();
   } else if (!ok && video.srcObject) video.srcObject = null;
   $('#jg-vazio').hidden = ok;
+  // nada no telão (nem PC nem PS5 na sala): o WhatsApp do dono em destaque, para alugar
+  $('#jg-vazio-whats').hidden = ok || !st.entrou || !!a || !!queda;
   if (!ok) mostrarBarra();
   if (ok) return void tentarVoltar();
   $('#jg-vazio b').textContent = !st.entrou ? 'Conectando à sala…' : a ? 'Carregando a imagem…' : queda ? 'A tela do jogo saiu do ar' : 'Nada no telão agora';

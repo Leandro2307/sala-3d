@@ -174,3 +174,38 @@ test('aberta 24 h e a próxima reserva às 02h: livre até as 02:00, e a agenda 
   assert.equal(j.dia24, true);
   assert.equal(j.preco.valor, 1500);
 });
+
+test('sem o limite de 8 h: aberta 24 h e nada reservado, joga agora 12 h e reserva 10 h seguidas na agenda', async (t) => {
+  const x = await montar(t);
+  x.cfg.abre = 0;
+  await x.religar();
+  const ana = await x.entrar('ana');
+  const beto = await x.entrar('beto');
+  const j = (await x.horarios(ana)).jogarAgora;
+  assert.ok(j.max > 8);
+  assert.equal(j.livreAte, null);
+  const r = await x.agora(ana, 12);
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(x.pedidos[0]['line_items[0][quantity]'], '12');
+  const dez = Array.from({ length: 10 }, (_, i) => ms(48 + i, 0));
+  assert.equal((await x.reservar(beto, dez)).ok, true);
+});
+
+test('jogar agora só entre xx:10 e xx:50: antes vale a hora de agora, depois a próxima', async (t) => {
+  const x = await montar(t);
+  const ana = await x.entrar('ana');
+  x.rel.agora = ms(22, 5);
+  let h = await x.horarios(ana);
+  assert.equal(h.jogarAgora, null);
+  assert.equal(h.horaSugerida, ms(22, 0));
+  assert.match((await x.agora(ana, 1)).erro, /hora mal começou/);
+  x.rel.agora = ms(22, 50);
+  h = await x.horarios(ana);
+  assert.equal(h.jogarAgora, null);
+  assert.equal(h.horaSugerida, ms(23, 0));
+  assert.match((await x.agora(ana, 1)).erro, /próxima hora/);
+  x.rel.agora = ms(22, 10);
+  h = await x.horarios(ana);
+  assert.ok(h.jogarAgora);
+  assert.equal(h.horaSugerida, null);
+});

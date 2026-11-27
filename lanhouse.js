@@ -22,7 +22,9 @@ const PRODUTO_AGORA_PADRAO = 'prod_VhePW44U1zjLbZ';
 const HORA = 3600_000;
 const FUSO = -3; // horário de Brasília (sem horário de verão desde 2019)
 const DIAS_A_FRENTE = 14;
-const MAX_HORAS = 8; // horas numa compra só
+const MAX_HORAS = (DIAS_A_FRENTE + 1) * 24; // só o teto da agenda (não é limite de uma compra)
+// Sem limite de horas numa compra (pedido de 2026-11-26; antes eram 8): o teto é só a agenda, que vai até
+// DIAS_A_FRENTE dias à frente.
 // o que se aluga: cada máquina tem a sua agenda (a tela de PS5 é a do PS5 direto, o resto é PC)
 const MAQUINAS = { pc: 'PC', ps5: 'PS5' };
 const maquinaDe = (m) => (Object.hasOwn(MAQUINAS, m) ? m : 'pc');
@@ -181,9 +183,15 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
   // meio (fimCedo, como o liberado pelo dono). O resto da última hora fica livre para outro "jogar agora".
   // A máquina tem que estar livre agora (ou no "até alguém novo", que dá lugar à hora paga).
   const inicioAgora = (agora) => Math.floor(agora / 60_000) * 60_000 + 60_000; // 23:32:40 → 23:33
+  // Só entre xx:10 e xx:50 (pedido de 2026-11-27): antes das xx:10 a pessoa aluga a hora de agora, que mal
+  // começou; a partir das xx:50, a próxima hora cheia. horaSugerida: a hora cheia que vale nesses casos.
+  const minutoDaHora = (agora) => Math.floor((agora % HORA) / 60_000);
+  const agoraNaJanela = (agora) => minutoDaHora(agora) >= 10 && minutoDaHora(agora) < 50;
+  const horaSugerida = (agora) => (agoraNaJanela(agora) ? null : Math.floor(agora / HORA) * HORA + (minutoDaHora(agora) >= 50 ? HORA : 0));
   function planoAgora(sala, maquina, conta, cfg, n, agora = Date.now()) {
     const atual = jogadorAgora(sala, maquina, agora);
     if (atual && !atual.aberta) return { erro: atual.conta === conta ? 'A vez agora já é sua.' : `O ${MAQUINAS[maquina]} está com ${atual.conta} agora. Escolha um horário na agenda.` };
+    if (!agoraNaJanela(agora)) return { erro: minutoDaHora(agora) < 10 ? 'A hora mal começou: alugue a hora de agora na agenda.' : 'Falta pouco para a próxima hora: alugue ela na agenda.' };
     const inicio = inicioAgora(agora);
     const fim = inicio + n * HORA;
     const slots = [];
@@ -197,19 +205,26 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
     return { inicio, fim, slots };
   }
   // quantas horas dá para jogar agora (0: não dá) e até quando a máquina está livre (livreAte: o começo da
-  // hora que já é de alguém ou em que a sala fecha; null: livre além das MAX_HORAS de uma compra)
+  // hora que já é de alguém ou em que a sala fecha; null: livre até o fim da agenda). Anda hora por hora uma vez
+  // só (sem limite de horas, chamar planoAgora para cada n seria quadrático).
   function maxAgora(sala, maquina, conta, cfg, agora = Date.now()) {
-    let max = 0;
+    const dia24 = cfg.abre <= 0 && cfg.fecha >= 24;
+    if (!agoraNaJanela(agora)) return { max: 0, livreAte: null, dia24 };
+    const atual = jogadorAgora(sala, maquina, agora);
+    if (atual && !atual.aberta) return { max: 0, livreAte: null, dia24 };
+    const inicio = inicioAgora(agora);
+    const teto = agora + DIAS_A_FRENTE * 86400_000;
     let livreAte = null;
-    for (let n = 1; n <= MAX_HORAS; n++) {
-      const p = planoAgora(sala, maquina, conta, cfg, n, agora);
-      if (p.erro) {
-        livreAte = p.bloqueio ?? null;
+    let s = Math.floor(agora / HORA) * HORA;
+    for (; s < teto; s += HORA) {
+      const h = horaDe(s);
+      const tem = daHora(sala, maquina, s, agora);
+      if (h < cfg.abre || h >= cfg.fecha || (tem && !(tem.conta === conta && tem.status === 'pendente'))) {
+        livreAte = s;
         break;
       }
-      max = n;
     }
-    return { max, livreAte, dia24: cfg.abre <= 0 && cfg.fecha >= 24 };
+    return { max: Math.max(0, Math.floor(((livreAte ?? s) - inicio) / HORA)), livreAte, dia24 };
   }
 
   async function guardar(r) {
@@ -437,8 +452,11 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
       const lim = maxAgora(sala, maquina, conta, cfg, agora);
       let pAgora = null;
       try { pAgora = CHAVE && lim.max ? await lerPreco(PRODUTO_AGORA) : null; } catch { /* mostra sem o preço */ }
+      // fora da janela do jogar agora: a hora cheia que vale (a de agora antes das xx:10, a próxima a partir das xx:50)
+      const sug = horaSugerida(agora);
+      const sugerida = sug != null && !daHora(sala, maquina, sug, agora) && horaDe(sug) >= cfg.abre && horaDe(sug) < cfg.fecha ? sug : null;
       const jogarAgora = lim.max ? { inicio: inicioAgora(agora), max: lim.max, livreAte: lim.livreAte, dia24: lim.dia24, preco: pAgora && { valor: pAgora.valor, moeda: pAgora.moeda } } : null;
-      res.json({ ok: true, ligada: true, sala, maquina, maquinas: MAQUINAS, dia, hoje, ultimo, horas, maxHoras: MAX_HORAS, jogarAgora, preco: p && { valor: p.valor, moeda: p.moeda, nome: p.nome }, pagar: !!CHAVE, agora: jogadorAgora(sala, maquina) });
+      res.json({ ok: true, ligada: true, sala, maquina, maquinas: MAQUINAS, dia, hoje, ultimo, horas, maxHoras: MAX_HORAS, jogarAgora, horaSugerida: sugerida, preco: p && { valor: p.valor, moeda: p.moeda, nome: p.nome }, pagar: !!CHAVE, agora: jogadorAgora(sala, maquina) });
     });
 
     // os jogos do PC da casa, para escolher ao alugar o PC
@@ -481,12 +499,12 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
       const agora = Date.now();
       // "Jogar agora" (b.agora, b.horas): começa no minuto seguinte, sem esperar a hora cheia (planoAgora)
       const nAgora = b.agora === true ? Math.floor(Number(b.horas)) : 0;
-      if (b.agora === true && !(nAgora >= 1 && nAgora <= MAX_HORAS)) return res.json({ ok: false, erro: `De 1 a ${MAX_HORAS} horas.` });
+      if (b.agora === true && !(nAgora >= 1 && nAgora <= MAX_HORAS)) return res.json({ ok: false, erro: 'Escolha quantas horas.' });
       const plano = nAgora ? planoAgora(sala, maquina, conta, cfg, nAgora, agora) : null;
       if (plano?.erro) return res.json({ ok: false, erro: plano.erro });
       const inicios = plano ? plano.slots : [...new Set(Array.isArray(b.inicios) ? b.inicios : [])].map(Number);
       if (!inicios.length) return res.json({ ok: false, erro: 'Escolha pelo menos um horário.' });
-      if (!plano && inicios.length > MAX_HORAS) return res.json({ ok: false, erro: `No máximo ${MAX_HORAS} horas por vez.` });
+      if (!plano && inicios.length > MAX_HORAS) return res.json({ ok: false, erro: 'Horários demais numa compra só.' });
       for (const inicio of plano ? [] : inicios) {
         const h = horaDe(inicio);
         const valido = Number.isInteger(inicio) && inicio % HORA === 0 && h >= cfg.abre && h < cfg.fecha
