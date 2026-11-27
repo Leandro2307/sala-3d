@@ -58,9 +58,12 @@ const MOTIVOS = {
 
 export class DiagJogo {
   // contexto(): { sala, nome } de quem está medindo, para achar o relatório no servidor
-  constructor({ toast, contexto = () => ({}) }) {
+  // verRelatorio(): os avisos com "Baixar relatório" aparecem (só o dono da sala; para quem joga o relatório
+  // continua indo para o servidor, mas sem aviso na tela — pedido de 2026-11-27)
+  constructor({ toast, contexto = () => ({}), verRelatorio = () => true }) {
     this.toast = toast;
     this.contexto = contexto;
+    this.verRelatorio = verRelatorio;
     this.sessao = null;
     // o que aconteceu fora das sessões (quedas do servidor, reconexões): a próxima sessão leva os
     // últimos 20 min no ambiente (marcar)
@@ -133,7 +136,7 @@ export class DiagJogo {
     this.enviar();
     this.ultimo = this.relatorio();
     this.sessao = null;
-    if (oferecer && (s.amostras.length >= 2 || s.parte > 1)) {
+    if (oferecer && (s.amostras.length >= 2 || s.parte > 1) && this.verRelatorio()) {
       const m = mediaDe(s.amostras.map((a) => a.fpsFinal));
       const juntos = s.quemJoga.size ? ' (com o que o aparelho de quem jogou mediu)' : '';
       this.toast(`Modo jogo encerrado${m != null ? ` — média de ${Math.round(m)} qps` : ''}. O relatório foi salvo no servidor${juntos}.`, 'info', 15000, null, { rotulo: 'Baixar relatório', fazer: () => this.baixar() });
@@ -573,7 +576,7 @@ export class DiagJogo {
     const altura = lado === 'joga' ? r.la?.altura ?? r.altura : r.altura;
     const como = fps >= BOM ? `com a imagem baixa${altura ? ` (${altura} linhas)` : ''}` : `a ${Math.round(fps)} qps${imagemBaixa && altura ? `, ${altura} linhas` : ''}`;
     this.evento('aviso', { fps, motivo, imagemBaixa, altura });
-    this.toast(`Modo jogo ${como}. ${onde}${texto}`, 'warn', 15000, null, { rotulo: 'Baixar relatório', fazer: () => this.baixar() });
+    if (this.verRelatorio()) this.toast(`Modo jogo ${como}. ${onde}${texto}`, 'warn', 15000, null, { rotulo: 'Baixar relatório', fazer: () => this.baixar() });
   }
 
   // ---------------------------------------------------------------- relatório

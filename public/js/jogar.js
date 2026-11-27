@@ -1088,7 +1088,8 @@ const controle = new Controle({
 });
 const avisoSite = new AvisoDoSite({ raiz: $('#aviso-site'), controle, responder: (key, ev) => controle.mandar(key, ev) });
 
-const diagJogo = new DiagJogo({ toast, contexto: () => ({ sala: SALA, nome: conta ? `${conta.nome} (jogar)` : null }) });
+// o aviso do relatório só para o dono da sala (o passe de dono que a sala guardou neste aparelho)
+const diagJogo = new DiagJogo({ toast, contexto: () => ({ sala: SALA, nome: conta ? `${conta.nome} (jogar)` : null }), verRelatorio: () => !!lerJSON('sala3d-papeis', {})[SALA]?.dono });
 let jogandoLa = null; // { key, video, cursorLivre, ps5 }
 const avisos = new Map();
 const tremores = { n: 0, como: {}, primeiro: false, desde: 0 };

@@ -3048,7 +3048,7 @@ const telaPesada = (key) => {
 const jogoNoMeuPc = () => !desenharMesmoAssim && [...jogandoAqui.keys()].some(telaPesada);
 // Eu jogo na tela de outra pessoa: { key, video }
 let jogandoLa = null;
-const diagJogo = new DiagJogo({ toast, contexto: () => ({ sala: state.room || null, nome: settings.name || null }) });
+const diagJogo = new DiagJogo({ toast, contexto: () => ({ sala: state.room || null, nome: settings.name || null }), verRelatorio: () => !!state.donoDaSala });
 
 // rapido: quem joga pediu menos atraso (opção "Menos atraso"): a tela vai para ela em 720p fixo
 function jogoAqui(key, deId, ligar, rapido = false) {
