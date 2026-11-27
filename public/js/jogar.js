@@ -1852,9 +1852,20 @@ function atualizarBotaoTouchpad() {
   const b = $('#jogo-touchpad');
   b.hidden = !temTouchpadHid() || !(touchpad.ativo || ehPs5(sh));
   b.textContent = ajustes.dualsense ? 'DualSense direto ligado ✓ (clique para desligar)' : 'Usar o DualSense direto (gatilhos e giroscópio; pode atrasar)';
+  // o mesmo, à vista na barra: abre a janela do navegador para vincular o DualSense (só no PC, numa tela de PS5)
+  const c = $('#jg-controle');
+  c.hidden = isTouch || !temTouchpadHid() || !ehPs5(sh);
+  c.textContent = ajustes.dualsense ? '🎮 Controle conectado ✓' : '🎮 Conectar controle';
+  c.classList.toggle('on', !!ajustes.dualsense);
   $('#jogo-mapear').hidden = !LAYOUTS[layoutDa(sh)]?.virtual;
 }
 
+// "Conectar controle" na barra: já conectado, só avisa (desligar continua nas Opções); senão, o mesmo das Opções
+$('#jg-controle').addEventListener('click', (e) => {
+  e.currentTarget.blur();
+  if (ajustes.dualsense) return void toast('O controle já está conectado. Para desligar o DualSense direto, use as Opções.', 'info', 5000);
+  $('#jogo-touchpad').click();
+});
 // O DualSense direto (WebHID: gatilhos adaptativos, touchpad, giroscópio), só para quem ligar nas Opções.
 // Depois de aberto assim, no Bluetooth o Chrome não o mostra mais pela Gamepad API até ele desligar.
 $('#jogo-touchpad').addEventListener('click', async (e) => {
