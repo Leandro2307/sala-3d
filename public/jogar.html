@@ -16,6 +16,10 @@
 <!-- Modo jogo do PC (ver public/js/jogar.js): a tela da sala principal com o mesmo modo jogo da sala, sem o
      mundo 3D. Não leva a <meta name="sala3d">: a extensão continua falando só com a sala de verdade. -->
 <link rel="stylesheet" href="/style.css">
+<!-- o three.js só para o treino 3D dos controles (treino-3d.js), baixado quando ele abre -->
+<script type="importmap">
+  { "imports": { "three": "/vendor/three/build/three.module.js", "three/addons/": "/vendor/three/examples/jsm/" } }
+</script>
 <style>
   body { background: #05070d; }
   /* a tela em foco da sala é a página inteira aqui */
@@ -168,6 +172,13 @@
   #entrada .primary:hover { filter: brightness(1.07); background: linear-gradient(90deg, #f0287a, #ff6b35); }
   body.touch #focus .focus-bar { gap: 6px; padding: max(8px, env(safe-area-inset-top)) 10px 8px; }
   body.touch .jg-sep { display: none; }
+  /* o teste da conexão em segundo plano (jogar.js mostrarDiagFundo): na entrada e por cima da imagem */
+  #en-diag { display: flex; align-items: center; gap: 8px; margin: 12px 0 0; font-size: 13px; color: #e9ddf3; }
+  #en-diag[hidden], #jg-diag[hidden] { display: none; }
+  #jg-diag { position: absolute; left: 50%; bottom: 84px; transform: translateX(-50%); z-index: 3; display: flex; align-items: center; gap: 8px;
+    padding: 8px 14px; border-radius: 999px; background: rgba(18, 10, 34, .86); border: 1px solid rgba(255, 61, 139, .4); color: #f3e9ff; font-size: 13px; pointer-events: none; white-space: nowrap; }
+  .en-gira { width: 12px; height: 12px; flex: none; border-radius: 50%; border: 2px solid rgba(255, 255, 255, .25); border-top-color: var(--vc-laranja, #ff8a3d); animation: en-gira .8s linear infinite; }
+  @keyframes en-gira { to { transform: rotate(360deg); } }
 </style>
 </head>
 <body>
@@ -191,6 +202,7 @@
     </div>
   </div></div>
   <button type="button" id="jg-jogar" hidden>▶ Modo jogo</button>
+  <div id="jg-diag" hidden role="status"></div>
   <div class="focus-bar">
     <div class="jg-esq">
       <div class="focus-name"><span class="live-dot"></span><span id="focus-name">Sala 3D · Jogar</span><small class="focus-qualidade" id="focus-qualidade"></small></div>
@@ -227,7 +239,7 @@
             <select id="jogo-lossless"><option value="0">Não uso</option><option value="2">×2</option><option value="3">×3</option><option value="4">×4</option></select></label>
           <button type="button" class="secondary small" id="jogo-touchpad" hidden>Usar o DualSense direto</button>
           <button type="button" class="secondary small" id="jogo-mapear" hidden>Mapear teclas (qual tecla é cada botão)</button>
-          <button type="button" class="secondary small" id="jogo-tutorial" hidden>Tutorial do controle (teclado e mouse)</button>
+          <button type="button" class="secondary small" id="jogo-tutorial" hidden>Treino dos controles (GTA 6)</button>
         </span>
       </span>
       <button type="button" class="secondary small" id="focus-engasgo" hidden title="Marca no relatório o momento em que a imagem engasgou (F9)">Engasgou <kbd>F9</kbd></button>
@@ -273,6 +285,7 @@
     <label id="en-sala-l" hidden>Senha da sala principal<input name="sala" type="password" maxlength="100" autocomplete="off"></label>
     <p class="erro" id="en-erro" role="alert" hidden></p>
     <button type="submit" class="primary">Entrar</button>
+    <p id="en-diag" role="status" hidden></p>
   </form>
 </div>
 

@@ -234,16 +234,19 @@ export class PainelTeste {
     return el;
   }
 
-  mostrar() {
+  // titulo/texto: outro cabeçalho (o /jogar mostra "Finalizando…" quando o teste começou durante o login)
+  mostrar({ titulo = 'Ajustando o jogo para a sua conexão', texto = 'É isto que deixa a imagem lisa: ele acha o melhor caminho até o PC do jogo.' } = {}) {
     const el = this.base();
     el.innerHTML = `<div class="tc-caixa" role="status" aria-label="Teste da conexão">
-<div class="tc-topo"><div><b>Ajustando o jogo para a sua conexão</b><p>É isto que deixa a imagem lisa: ele acha o melhor caminho até o PC do jogo.</p></div><button type="button">pular (F7)</button></div>
+<div class="tc-topo"><div><b></b><p></p></div><button type="button">pular (F7)</button></div>
 <ol class="tc-etapas">${ETAPAS.map(([id, nome]) => `<li data-e="${id}">${nome}</li>`).join('')}</ol>
 <div class="tc-graficos">
 <figure><figcaption>Velocidade<span><strong data-v="mbps">–</strong> <small>Mbps</small></span></figcaption><canvas data-g="mbps" role="img" aria-label="Velocidade ao longo do teste"></canvas></figure>
 <figure><figcaption>Tempo de resposta<span><strong data-v="rtt">–</strong> <small>ms</small></span></figcaption><canvas data-g="rtt" role="img" aria-label="Tempo de resposta ao longo do teste"></canvas></figure>
 </div>
 <div class="tc-pe"><span data-v="texto"></span><span class="tc-legenda"><span><i style="background:${COR.direto}"></i>direto</span><span><i style="background:${COR.turn}"></i>servidor (TURN)</span></span></div></div>`;
+    el.querySelector('.tc-topo b').textContent = titulo;
+    el.querySelector('.tc-topo p').textContent = texto;
     el.querySelector('button').addEventListener('click', () => this.pedirPular());
     const q = (s) => el.querySelector(s);
     this.v = { mbps: q('[data-v="mbps"]'), rtt: q('[data-v="rtt"]'), texto: q('[data-v="texto"]') };

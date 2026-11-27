@@ -1556,9 +1556,15 @@ function bindSocket() {
     }
   });
 
-  socket.on('user-update', ({ id, mic, cam, photo, shirt, char, color, arma, health, ko, status, inativo, gestor, desde }) => {
+  socket.on('user-update', ({ id, name, mic, cam, photo, shirt, char, color, arma, health, ko, status, inativo, gestor, desde }) => {
     const u = state.users.get(id);
     if (!u) return;
+    // o /jogar entra como "Visitante" (o teste da conexão roda durante o login) e vira a conta da pessoa sem reconectar
+    if (typeof name === 'string' && name && name !== u.name) {
+      u.name = name;
+      u.avatar.setName(name);
+      renderPeople();
+    }
     if (status !== undefined || inativo !== undefined || gestor !== undefined) {
       if (status !== undefined) u.status = status;
       if (inativo !== undefined) u.inativo = inativo;

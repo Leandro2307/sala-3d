@@ -1629,16 +1629,19 @@ function attachSockets(io) {
       const contaLan = data?.lan ? await lan.contaValida(data.lan) : null;
       // a TV (public/tv.html) entra sem conta para mostrar o telão e o QR do aluguel; só joga depois
       // que alguém a liga na conta pelo celular (ver 'tv-codigo' e /lan/tv)
-      const tvSemConta = !contaLan && data?.tv === true;
-      if (!contaLan && !tvSemConta) {
+      // o /jogar também entra sem conta enquanto a pessoa faz o login ("Visitante"): o teste da conexão com o PC do
+      // jogo já roda nesse tempo. Não joga nada (podeJogarLan pede a conta); o 'lan-entrar' o transforma na conta
+      const visita = !contaLan && data?.visita === true;
+      const tvSemConta = !contaLan && data?.tv === true && !visita;
+      if (!contaLan && !tvSemConta && !visita) {
         entrando = false;
         return ack?.({ erro: 'conta' });
       }
       const escrito = cleanText(data?.name, 20).replace(/\s+/g, ' ').trim();
-      const nome = tvSemConta ? 'TV' : escrito.toLowerCase() === contaLan ? escrito : contaLan;
+      const nome = tvSemConta ? 'TV' : visita ? 'Visitante' : escrito.toLowerCase() === contaLan ? escrito : contaLan;
       // configuração da sala e carteira vêm do banco: espera antes de entrar
       const sala = getRoom(roomId);
-      await Promise.all([carregarSala(sala), tvSemConta ? null : carregarCarteira(nome)]);
+      await Promise.all([carregarSala(sala), contaLan ? carregarCarteira(nome) : null]);
       if (!socket.connected) return;
       // sala com senha: só entra com o passe (ver /sala-acesso)
       if (!passeValido(sala, data?.passe)) {
@@ -1669,7 +1672,8 @@ function attachSockets(io) {
         gestor: false, // provou a senha de gestor (ou de dono): recebe os alertas da equipe
         ultimoChamado: 0,
         conta: contaLan, // a conta com que entrou (lanhouse.js): é ela que joga no horário reservado (null: TV sem conta)
-        tv: data?.tv === true, // a página da TV ou o celular como controle dela (public/tv.html)
+        tv: data?.tv === true && !visita, // a página da TV ou o celular como controle dela (public/tv.html)
+        visita, // o /jogar antes do login (vira a conta no 'lan-entrar')
         ip: ipDe(), // o teste grátis da lan house é um por conta e um por IP
         p: [0, 0, -4], r: Math.PI, a: 0, s: 0,
       };
@@ -1705,7 +1709,7 @@ function attachSockets(io) {
       if (user.conta) avisarLan(room);
       comecarLiberadasDe(room, user.conta);
       verNovoLan();
-      avisarGestores(room, user, 'entrou', `${user.name} entrou no sistema`);
+      if (!visita) avisarGestores(room, user, 'entrou', `${user.name} entrou no sistema`);
       lobbyMudou();
     });
 
@@ -1718,12 +1722,25 @@ function attachSockets(io) {
       const conta = msg?.token ? await lan.contaValida(msg.token) : null;
       if (!room) return r({ ok: false });
       if (msg?.token && !conta) return r({ ok: false, erro: 'login' });
-      if (user.conta === conta) return r({ ok: true, conta, lan: estadoLan(room) });
+      if (user.conta === conta) return r({ ok: true, conta, lan: estadoLan(room), nome: user.name });
       user.conta = conta;
+      // o "Visitante" do /jogar fez o login: ganha o nome da conta, a carteira e o aviso de entrada, sem refazer as
+      // conexões (o teste da conexão que começou no login continua)
+      if (user.visita && conta) {
+        user.visita = false;
+        const escrito = cleanText(msg?.nome, 20).replace(/\s+/g, ' ').trim();
+        user.name = escrito.toLowerCase() === conta ? escrito : conta;
+        await carregarCarteira(user.name);
+        if (!room) return r({ ok: false });
+        user.moedas = saldoDe(user.name);
+        io.to(room.id).emit('user-update', { id: user.id, name: user.name });
+        avisarGestores(room, user, 'entrou', `${user.name} entrou no sistema`);
+        lobbyMudou();
+      }
       avisarLan(room);
       comecarLiberadasDe(room, conta);
       verNovoLan();
-      r({ ok: true, conta, lan: estadoLan(room) });
+      r({ ok: true, conta, lan: estadoLan(room), nome: user.name });
     });
 
     // Lan house: entrou alguém que ainda tem o teste grátis: o liberado "até alguém novo entrar" acaba e a

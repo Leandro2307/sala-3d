@@ -42,6 +42,7 @@ import { TecladoPad } from './teclado-pad.js';
 import { MapaTeclasPainel, dicaTeclado, legendaBotoes, mapaTeclas } from './mapa-teclas.js';
 import { ModoCarroTela } from './modo-carro.js';
 import { TutorialControle } from './tutorial-controle.js';
+import { Treino3D } from './treino-3d.js';
 import { Ps5Touchpad, temTouchpadHid } from './ps5-touchpad.js';
 import { AvisoDoSite } from './aviso-site.js';
 import { isTouch } from './touch.js';
@@ -83,12 +84,14 @@ const st = {
   escolhida: null, // a tela escolhida à mão (chave)
   controlando: false, // "Controlar" ligado: mouse e teclado vão à tela mesmo fora do modo jogo
   entrou: false,
+  visita: false, // na sala como "Visitante", antes do login (visitar)
   versao: null, // a do servidor na primeira entrada
   semVoz: false, // escritório com salas à prova de som: aqui não há posição, então ninguém é ouvido
   interesse: new Map(),
 };
 let socket = null;
 let rtc = null;
+let fundo = null; // o teste da conexão em segundo plano (diagnosticarFundo): { quem, key, promessa, naEntrada, desde }
 const video = $('#focus-video');
 const sink = $('#media-sink');
 
@@ -131,7 +134,8 @@ function erroEntrada(txt) {
 // recebendo imagem à toa
 function fundoDaEntrada(ligar) {
   const f = $('#entrada-fundo');
-  const url = ligar ? '/tv?fundo=1' : 'about:blank';
+  // com o teste da conexão rodando por trás, a imagem do fundo fica de fora: ela disputaria a mesma internet
+  const url = ligar && !fundo ? '/tv?fundo=1' : 'about:blank';
   if ((f.getAttribute('src') || 'about:blank') !== url) f.src = url;
   f.hidden = !ligar;
 }
@@ -207,7 +211,9 @@ formEntrada.addEventListener('submit', async (e) => {
     }
     if (!(await liberarSala(f.sala.value))) return;
     fecharEntrada();
-    conectar();
+    // já na sala como "Visitante": vira a conta ali mesmo; com o join dele ainda a caminho, a resposta dele faz isso
+    if (st.visita) { if (st.entrou) virarConta(); } else if (!rtc) conectar();
+    else if (socket?.connected && !st.entrou) entrar();
   } finally {
     botao.disabled = false;
   }
@@ -216,10 +222,38 @@ formEntrada.addEventListener('submit', async (e) => {
 async function iniciar() {
   if (!conta?.token) {
     conta = null;
-    return pedirEntrada({ conta: true });
+    pedirEntrada({ conta: true });
+    return visitar();
   }
   preparar();
   if (await liberarSala()) conectar();
+}
+
+// Enquanto a pessoa digita o nome, a página já entra na sala como "Visitante" (sem jogar nada) para o teste da
+// conexão com o PC do jogo rodar nesse tempo (diagnosticarFundo). Sala com senha e sem o passe: espera o login.
+async function visitar() {
+  preparar();
+  let r;
+  try { r = await post('/sala-acesso', { sala: SALA, passe }); } catch { return; }
+  if (!r?.ok || conta || rtc) return;
+  passe = r.passe || passe;
+  st.visita = true;
+  conectar();
+}
+// fez o login com a página já na sala como "Visitante": vira a conta sem refazer as conexões (o teste continua)
+function virarConta() {
+  socket.emit('lan-entrar', { token: conta.token, nome: conta.nome }, (r) => {
+    if (r?.ok && r.nome) {
+      st.visita = false;
+      diagJogo.marcar('entrou na conta sem reconectar', { testando: !!fundo });
+      aplicarLan(r.lan);
+      return;
+    }
+    // servidor antigo ou recusou: entra de novo, do jeito de sempre
+    st.visita = false;
+    socket.disconnect();
+    socket.connect();
+  });
 }
 
 // O /config e a conexão com o servidor já vão saindo enquanto a entrada é conferida (duas idas e voltas a menos)
@@ -266,9 +300,18 @@ async function conectar() {
 }
 
 function entrar() {
+  const visita = !!st.visita && !conta;
+  st.visita = visita;
   socket.emit('join', {
-    room: SALA, name: conta?.nome, color: '#6ee7c8', mic: false, passe, lan: conta?.token || null, proto: 2,
+    room: SALA, name: visita ? 'Visitante' : conta?.nome, color: '#6ee7c8', mic: false, passe, lan: conta?.token || null, proto: 2,
+    ...(visita ? { visita: true } : {}),
   }, (data) => {
+    // o "Visitante" recusado (servidor sem ele): espera o login, sem recarregar
+    if (visita && !data?.selfId) {
+      st.visita = false;
+      if (conta) entrar(); // o login chegou enquanto isso
+      return;
+    }
     if (data?.erro === 'conta') {
       try { localStorage.removeItem(LAN_CHAVE); } catch { /* sem armazenamento */ }
       return location.reload();
@@ -298,6 +341,8 @@ function entrar() {
     aplicarLan(data.lan);
     if (mic.ligado) socket.emit('mic', true); // reconexão com o microfone aberto
     atualizar();
+    if (visita) diagJogo.marcar('entrou como visitante (o login ainda na tela)');
+    if (visita && conta) virarConta(); // fez o login enquanto o visitante entrava
   });
 }
 
@@ -629,7 +674,8 @@ let esperandoDesde = 0;
 let passoEspera = 0;
 setInterval(() => {
   const a = st.alvo;
-  if (!st.entrou || !a || vivo(a.u.streams.get(a.sh.streamId))) {
+  // atrás do login a imagem nem é pedida, e o teste da conexão para a imagem de propósito: refazer derrubaria o teste
+  if (!st.entrou || !a || !$('#entrada').hidden || testeJoga.testando || vivo(a.u.streams.get(a.sh.streamId))) {
     esperandoDesde = 0;
     passoEspera = 0;
     return;
@@ -651,7 +697,8 @@ function enviarInteresse(forcar = false) {
   for (const u of st.users.values()) {
     if ((!u.shares.size && !u.cam) || !rtc.peers.has(u.id)) continue;
     const mapa = {};
-    for (const sh of u.shares.values()) mapa[sh.key] = sh.key === st.alvo?.sh.key ? 'max' : 'off';
+    // atrás do login a imagem nem aparece (o fundo é a página da TV): só depois dele
+    for (const sh of u.shares.values()) mapa[sh.key] = sh.key === st.alvo?.sh.key && $('#entrada').hidden ? 'max' : 'off';
     if (u.cam) mapa.cam = 'off';
     const json = JSON.stringify(mapa);
     if (!forcar && st.interesse.get(u.id) === json) continue;
@@ -957,7 +1004,7 @@ function barrado(key) {
 // e os 2 min só começam quando terminam ou são pulados (o servidor não conta o 'modo' nem o 'vivo')
 function seguraNoPreparo(key, ev) {
   if (!st.lan || meuTesteLan || ev?.t === 'modo' || ev?.t === 'vivo') return false;
-  if (!testeJoga.testando && !tutorial.ativo) return false;
+  if (!testeJoga.testando && !tutorial.ativo && !treino.ativo) return false;
   const t = acharTela(key);
   if (!t) return false;
   const m = maquinaDaTela(t.sh);
@@ -1253,16 +1300,125 @@ function verCaminho(resumo) {
 }
 // ---------------------------------------------------------------- o teste da conexão antes do turbo (turbo-teste.js)
 const memoriaTeste = new MemoriaTeste();
-const painelTeste = new PainelTeste({ dentro: () => $('#focus'), onPular: () => testeJoga.pular(), onEvento: (texto, dados) => diagJogo.evento(texto, dados) });
+let pulouTesteEm = 0; // o "pular" do painel: o teste de segundo plano que acabou assim não roda de novo no jogo
+const painelTeste = new PainelTeste({ dentro: () => $('#focus'), onPular: () => { pulouTesteEm = Date.now(); testeJoga.pular(); }, onEvento: (texto, dados) => diagJogo.evento(texto, dados) });
+// onde o teste está (para o treino, a entrada e o aviso sobre a imagem)
+const PCT_ETAPA = { resposta: 8, direto: 25, turn: 55, imagem: 80, fim: 100 };
+const diagAgora = { etapa: null, texto: '', pct: null };
+let ultimoDiag = null; // o resumo do último teste que terminou ("caminho direto · Turbo da TV")
 const testeJoga = new TesteJoga({
   abrir: (id) => rtc?.abrirTeste(id) ?? null,
   caminho: (id) => rtc?.caminhoPara(id) ?? null,
   caminhos: (id) => rtc?.caminhosDe(id) ?? null,
   sonda: (sinal) => rtc?.sondaTurn(sinal) ?? null,
-  onProgresso: (p) => painelTeste.progresso(p),
+  onProgresso: (p) => {
+    if (p.etapa) Object.assign(diagAgora, { etapa: p.etapa, pct: Math.max(diagAgora.pct || 0, PCT_ETAPA[p.etapa] ?? 0) });
+    diagAgora.texto = p.texto || '';
+    painelTeste.progresso(p);
+    mostrarDiagFundo();
+  },
   onVivo: (v) => painelTeste.vivo(v),
   onEvento: (texto, dados) => diagJogo.evento(texto, dados),
 });
+const resumoDoTeste = (r) => `${r.rota === 'turn' ? 'pelo servidor' : 'caminho direto'} · ${MODOS.find((p) => p.id === r.modo)?.nome || 'Turbo'}`;
+// para o treino 3D: { testando, texto, pct } ou { pronto }
+function estadoDiag() {
+  if (testeJoga.testando) return { testando: true, texto: diagAgora.texto, pct: diagAgora.pct };
+  return ultimoDiag ? { testando: false, pronto: ultimoDiag } : null;
+}
+// o painel grande do teste, só com o jogo ligado e o treino fechado (com ele aberto, o treino mostra o andamento)
+let esperandoFundo = false;
+function painelSeTestando() {
+  if (!testeJoga.testando || treino.ativo || !controle.jogo || painelTeste.el) return;
+  painelTeste.mostrar(esperandoFundo ? { titulo: 'Finalizando o diagnóstico da conexão', texto: 'Ele começou enquanto você entrava. Falta pouco.' } : undefined);
+  if (diagAgora.etapa) painelTeste.progresso({ etapa: diagAgora.etapa, texto: diagAgora.texto });
+}
+
+// ---------------------------------------------------------------- o teste em segundo plano
+// Pedido de 2026-11-27: o diagnóstico roda enquanto a pessoa faz o login (a página entra como "Visitante", ver
+// visitar) ou assiste antes de apertar o Modo jogo. Quem entra rápido e aperta o Modo jogo vê "finalizando o
+// diagnóstico" (testarConexao espera este); quem demora já encontra o caminho e o modo escolhidos e guardados
+// (memoriaTeste, que vale o dia todo neste aparelho). Assistindo a vez de outra pessoa, não roda: o PC do jogo para a
+// imagem para quem testa.
+const tentouFundo = new Map(); // quem -> { n, em }
+async function diagnosticoFundoTalvez() {
+  if (fundo || testeJoga.testando || entrando || controle.jogo || !st.entrou || !rtc || document.hidden) return;
+  const a = st.alvo;
+  if (!a || !jogavel()) return;
+  const naEntrada = !$('#entrada').hidden;
+  if (!naEntrada && (soVerLan() || (st.lan && !podeJogarLan(maquinaDaTela(a.sh))))) return;
+  const dono = a.u.id;
+  const quem = a.u.name;
+  const t = tentouFundo.get(quem);
+  if (t && (t.n >= 2 || Date.now() - t.em < 60_000)) return;
+  const rede = await Promise.resolve(rtc.caminhoPara(dono)).catch(() => null);
+  if (!rede || fundo || testeJoga.testando || controle.jogo || st.alvo?.sh.key !== a.sh.key) return;
+  const valeu = memoriaTeste.valido(quem, rede);
+  if (valeu) {
+    ultimoDiag ||= resumoDoTeste(valeu);
+    return;
+  }
+  tentouFundo.set(quem, { n: (t?.n || 0) + 1, em: Date.now() });
+  diagnosticarFundo(a.sh.key, quem, dono, naEntrada);
+}
+setInterval(() => { diagnosticoFundoTalvez().catch(() => {}); }, 1500);
+
+function diagnosticarFundo(key, quem, dono, naEntrada) {
+  const f = { quem, key, naEntrada, desde: performance.now() };
+  fundo = f;
+  Object.assign(diagAgora, { etapa: null, texto: 'Começando…', pct: 2 });
+  fundoDaEntrada(!$('#entrada').hidden); // a imagem do fundo sai enquanto testa
+  mostrarDiagFundo();
+  const s = () => Math.round((performance.now() - f.desde) / 100) / 10;
+  f.promessa = (async () => {
+    let r = null;
+    try {
+      codecsDoTeste ??= await codecsDaqui(['avc1.640033', 'avc1.4d0033', 'avc1.42e033', 'avc1.42001f'], ['hvc1.1.6.L123.B0']);
+      if (rtc?.usarCaminho(dono, 'auto')) await esperarRota(dono, false);
+      const rede0 = await Promise.resolve(rtc?.caminhoPara(dono)).catch(() => null);
+      diagJogo.marcar('teste da conexão em segundo plano: começou', { naEntrada, quem });
+      r = await testeJoga.rodar(key, { codecs: codecsDoTeste, padrao: PRESET_TV.id, rapido: 16, tudo: false, toque: false });
+      if (r.tetoParcialKbps) memoriaTeste.guardarParcial(quem, r.tetoParcialKbps);
+      if (r.erro) {
+        diagJogo.marcar('teste da conexão em segundo plano: não terminou', { erro: r.erro, s: s() });
+        r = null;
+      } else {
+        memoriaTeste.guardar(quem, r, rede0 || await Promise.resolve(rtc?.caminhoPara(dono)).catch(() => null));
+        ultimoDiag = resumoDoTeste(r);
+        autoMostra.teste = textoDoResultado(r);
+        marcarPresets(document);
+        diagJogo.marcar('teste da conexão em segundo plano: pronto', { s: s(), rota: r.rota, modo: r.modo, tetoKbps: r.tetoKbps, codec: r.codec, trocarRota: !!r.trocarRota, nota: r.nota?.nota ?? null });
+      }
+    } catch (err) {
+      console.warn('[teste em segundo plano]', err);
+      r = null;
+    } finally {
+      if (fundo === f) fundo = null;
+      fundoDaEntrada(!$('#entrada').hidden);
+      mostrarDiagFundo();
+    }
+    return r;
+  })();
+}
+
+// o andamento na entrada (embaixo do botão) e por cima da imagem, antes do Modo jogo
+function mostrarDiagFundo() {
+  const testando = !!fundo && testeJoga.testando;
+  const pct = diagAgora.pct != null ? ` · ${diagAgora.pct}%` : '';
+  const en = $('#en-diag');
+  if (en) {
+    const html = testando ? `<span class="en-gira" aria-hidden="true"></span>Preparando a conexão com o PS5 enquanto você entra${pct}`
+      : ultimoDiag && st.entrou ? `✓ Conexão pronta (${esc(ultimoDiag)})` : '';
+    en.hidden = !html;
+    if (en.innerHTML !== html) en.innerHTML = html;
+  }
+  const sobre = $('#jg-diag');
+  if (sobre) {
+    const ver = testando && $('#entrada').hidden && !controle.jogo;
+    sobre.hidden = !ver;
+    if (ver) sobre.innerHTML = `<span class="en-gira" aria-hidden="true"></span>Ajustando a conexão com o PS5: a imagem volta em instantes${pct}`;
+  }
+}
 let codecsDoTeste = null;
 // espera (até 10 s) a conexão estar pelo TURN (ou direto)
 async function esperarRota(dono, turn) {
@@ -1277,28 +1433,51 @@ async function esperarRota(dono, turn) {
 async function testarConexao(deNovo) {
   const jl = jogandoLa;
   const dono = jl.key.split('~')[0];
+  const quem = jl.dono || dono; // o PC do jogo pelo nome: o id muda a cada entrada
+  // o de segundo plano ainda rodando (começou no login): espera ele, com o "finalizando" na tela
+  const f = fundo;
+  let esperou = false;
+  if (!deNovo && f && f.quem === quem) {
+    esperou = true;
+    esperandoFundo = true;
+    diagJogo.evento('teste da conexão: esperando o de segundo plano', { etapa: diagAgora.etapa, rodandoS: Math.round((performance.now() - f.desde) / 1000), naEntrada: f.naEntrada });
+    painelSeTestando();
+    try { await f.promessa; } finally { esperandoFundo = false; }
+    painelTeste.fechar();
+    if (jogandoLa !== jl) return null;
+    if (Date.now() - pulouTesteEm < 5000) {
+      diagJogo.evento('teste da conexão: o de segundo plano foi pulado');
+      return null;
+    }
+  }
   const rede = await Promise.resolve(rtc?.caminhoPara(dono)).catch(() => null);
   if (jogandoLa !== jl) return null;
-  const quem = jl.dono || dono; // o PC do jogo pelo nome: o id muda a cada entrada
   let r = deNovo ? null : memoriaTeste.valido(quem, rede);
   let rede0 = null;
-  if (r) diagJogo.evento('teste da conexão: vale o de hoje', { tetoKbps: r.tetoKbps, codec: r.codec, modo: r.modo });
-  else {
+  if (r) {
+    diagJogo.evento(esperou ? 'teste da conexão: vale o de segundo plano' : 'teste da conexão: vale o de hoje', { tetoKbps: r.tetoKbps, codec: r.codec, modo: r.modo });
+    ultimoDiag ||= resumoDoTeste(r);
+    // quem esperou vê o resultado por 2 s (no treino, o próprio treino mostra)
+    if (esperou && !treino.ativo) painelTeste.resultado(r, MODOS.find((p) => p.id === r.modo)?.nome || 'Turbo');
+  } else {
+    Object.assign(diagAgora, { etapa: null, texto: 'Começando…', pct: 2 });
     codecsDoTeste ??= await codecsDaqui(['avc1.640033', 'avc1.4d0033', 'avc1.42e033', 'avc1.42001f'], ['hvc1.1.6.L123.B0']);
     if (jogandoLa !== jl) return null;
     if (!deNovo && memoriaTeste.porque) diagJogo.evento('teste da conexão: o de há pouco não vale mais', { porque: memoriaTeste.porque });
     // testar de novo com o TURN escolhido antes: primeiro volta ao direto, para comparar os dois
     if (rtc?.usarCaminho(dono, 'auto')) await esperarRota(dono, false);
     if (jogandoLa !== jl) return null;
-    painelTeste.mostrar();
     rede0 = await Promise.resolve(rtc?.caminhoPara(dono)).catch(() => null); // o teste vale para este caminho direto
-    r = await testeJoga.rodar(jl.key, { codecs: codecsDoTeste, padrao: PRESET_TV.id, rapido: 16, tudo: deNovo, toque: false });
+    const rodando = testeJoga.rodar(jl.key, { codecs: codecsDoTeste, padrao: PRESET_TV.id, rapido: 16, tudo: deNovo, toque: false });
+    painelSeTestando(); // (com o treino aberto, aparece quando ele fechar)
+    r = await rodando;
     painelTeste.fechar();
     if (r.tetoParcialKbps) memoriaTeste.guardarParcial(quem, r.tetoParcialKbps);
     if (jogandoLa !== jl || r.erro) return null;
     memoriaTeste.guardar(quem, r, rede0 || await Promise.resolve(rtc?.caminhoPara(dono)).catch(() => null));
+    ultimoDiag = resumoDoTeste(r);
     if (jogandoLa !== jl) return null;
-    painelTeste.resultado(r, MODOS.find((p) => p.id === r.modo)?.nome || 'Turbo');
+    if (!treino.ativo) painelTeste.resultado(r, MODOS.find((p) => p.id === r.modo)?.nome || 'Turbo');
   }
   if (r.trocarRota && rtc?.usarCaminho(dono, 'turn')) {
     const foi = await esperarRota(dono, true);
@@ -1465,7 +1644,8 @@ const placaLida = { getExtension: () => ({ UNMASKED_RENDERER_WEBGL: 0 }), getPar
 function jogoLa(v, key) {
   turboVolta.parar();
   turboAuto.parar();
-  testeJoga.pular('saiu do jogo');
+  // o de segundo plano segue (entrando no jogo, testarConexao espera por ele; saindo, ele termina e fica guardado)
+  if (!fundo) testeJoga.pular('saiu do jogo');
   if (jogandoLa) rtc?.usarCaminho(jogandoLa.key.split('~')[0], 'auto'); // o TURN escolhido vale só para o jogo
   Object.assign(vigiaCaminho, { par: null, rtt: [], procurou: false });
   previsto = null;
@@ -1622,8 +1802,55 @@ const mapaPainel = new MapaTeclasPainel({
     if (controle.jogo) toast('Teclas salvas neste navegador. Clique na imagem para voltar a jogar.', 'success', 4000);
   },
 });
+// O treino dos controles do GTA 6 (treino-3d.js): um mini mapa 3D antes de jogar no PS5
+const TREINO_CHAVE = 'sala3d-jogar-treino';
+// os 2 min grátis ainda não começaram nesta máquina (é o "Começar" do treino que libera)
+function noTesteGratis() {
+  const sh = st.alvo?.sh;
+  if (!st.lan || !sh) return false;
+  const m = maquinaDaTela(sh);
+  return lanLivre(m) && !idsDaVez(m).includes(st.selfId) && !semTeste() && !meuTesteLan;
+}
+const treino = new Treino3D({
+  dentro: () => $('#focus'),
+  pad: padVirtual,
+  entrada: () => entradaDeAgora(),
+  toque: isTouch,
+  toqueRaiz: $('#toque-jogo'),
+  // no carro do treino o W do teclado acelera, como no jogo (modo carro de mapa-teclas.js)
+  carro: (sim) => { if (mapaTeclas.carroTroca() || !sim) tecladoPad.trocarCarro(sim); },
+  diag: estadoDiag,
+  gratis: noTesteGratis,
+  onEvento: (texto, dados) => diagJogo.evento(texto, dados),
+  onFechou: (comecou, onde) => {
+    diagJogo.evento(comecou ? 'treino 3D: começou a jogar' : 'treino 3D fechado no meio', onde);
+    if (comecou) {
+      try { localStorage.setItem(TREINO_CHAVE, '1'); } catch { /* sem armazenamento */ }
+      if (controle.jogo) toast(noTesteGratis() ? 'Valendo! Seus 2 minutos grátis começam no primeiro comando. Bom jogo!' : 'Valendo! Bom jogo!', 'success', 5000);
+    }
+    painelSeTestando();
+  },
+});
+// entrou no Modo jogo pelo botão (não na volta depois de uma queda): o treino abre no teste grátis e na primeira vez
+// neste aparelho; depois, só pelas Opções ("Treino dos controles")
+let pedirTreino = false;
+function abrirTreinoTalvez(key) {
+  const pediu = pedirTreino;
+  pedirTreino = false;
+  if (!pediu || treino.ativo || !ehPs5(acharTela(key)?.sh)) return false;
+  let viu = false;
+  try { viu = localStorage.getItem(TREINO_CHAVE) === '1'; } catch { /* sem armazenamento */ }
+  const gratis = noTesteGratis();
+  if (!gratis && viu) return false;
+  setTimeout(() => { if (controle.jogo?.key === key && !treino.ativo) treino.abrir(gratis ? 'teste grátis' : 'primeira vez'); }, 250);
+  return true;
+}
 controle.paraPad = (ev) => {
   if (mapaPainel.aberto) return true;
+  if (treino.ativo) {
+    if (!treino.tecla(ev)) tecladoPad.evento(ev);
+    return true;
+  }
   if (!tutorial.ativo) return tecladoPad.evento(ev);
   if (!tutorial.tecla(ev)) tecladoPad.evento(ev);
   return true;
@@ -1638,8 +1865,8 @@ const toqueJogo = new ToqueJogo({
   pad: padVirtual,
   toast,
   onEngasgo: () => marcarEngasgo(),
-  onTutorial: () => tutorial.abrir('toque'),
-  onLayout: () => { if (toqueJogo.key && toqueJogo.layoutId === 'ps5') tutorial.abrir('toque'); },
+  onTutorial: () => treino.abrir('pedido'),
+  onLayout: () => {},
   volume: {
     get: () => ajustes.jogo,
     set: (v) => {
@@ -1704,22 +1931,6 @@ $('#jogo-touchpad').addEventListener('click', async (e) => {
   atualizarBotaoTouchpad();
 });
 
-// sem controle de verdade numa tela de PS5: o tutorial do teclado. true: abriu (ou vai abrir)
-function tutorialDoPs5(key) {
-  if (isTouch ? toqueJogo.layoutId !== 'ps5' || toqueJogo.key !== key : !ehPs5(acharTela(key)?.sh)) {
-    tutorial.fechar(false);
-    return false;
-  }
-  if (isTouch) {
-    if (!tutorial.ativo) setTimeout(() => { if (controle.jogo?.key === key) tutorial.abrir('toque'); }, 900);
-    return true;
-  }
-  const temControle = () => fisico.pad() || touchpad.ligado;
-  if (tutorial.ativo || temControle()) return false;
-  setTimeout(() => { if (controle.jogo?.key === key && !temControle()) tutorial.abrir('pc'); }, 900);
-  return true;
-}
-
 // ------------------------------------------------------------------ ligar e desligar o modo jogo
 controle.onJogo = (v, key) => {
   const sh = v ? acharTela(key)?.sh : null;
@@ -1734,16 +1945,18 @@ controle.onJogo = (v, key) => {
   else touchpad.desligar();
   // no celular o teclado e a legenda não valem: quem joga é o controle de toque (ou um de verdade)
   const virtual = !isTouch && layout && LAYOUTS[layout]?.virtual ? layout : null;
-  if (isTouch && v) tutorialDoPs5(key);
+  // o treino 3D no lugar do tutorial antigo (tutorial-controle.js fica para a sala)
+  const abriuTreino = v ? abrirTreinoTalvez(key) : false;
   if (virtual) {
     padVirtual.acordar();
     tecladoPad.ligar(virtual);
     const dica = dicaTeclado(virtual);
-    if (!tutorialDoPs5(key) && dica) toast(`Teclado e mouse viram o controle. ${dica}`, 'info', 12000);
+    if (!abriuTreino && dica) toast(`Teclado e mouse viram o controle. ${dica}`, 'info', 12000);
   } else tecladoPad.desligar();
   mostrarLegenda(virtual);
   $('#jogo-tutorial').hidden = layout !== 'ps5';
   if (!v) {
+    treino.fechar(false);
     tutorial.fechar(false);
     mapaPainel.fechar();
     padVirtual.desligar(); // depois do controle: o último estado é tudo solto
@@ -1815,6 +2028,7 @@ function alternarJogo() {
   if (!jogavel() || !video.srcObject) return void toast('A imagem ainda não chegou.', 'warn');
   if (soVerLan()) return void verOuAlugar();
   if (!deixarJogar()) return;
+  pedirTreino = true;
   entrarNoJogo(true);
   if (isTouch) return; // o controle de toque avisa com que botões entrou
   if (ehPs5(st.alvo.sh) && entradaDeAgora() === 'teclado') {
@@ -1922,12 +2136,14 @@ $('#jogo-mapear').addEventListener('click', (e) => {
   e.currentTarget.blur();
   $('#jogo-op-pop').hidden = true;
   tutorial.fechar(true);
+  treino.fechar(false);
   mapaPainel.abrir(layoutDa(st.alvo?.sh) === 'switch' ? 'switch' : 'ps5');
 });
 $('#jogo-tutorial').addEventListener('click', (e) => {
   e.currentTarget.blur();
   $('#jogo-op-pop').hidden = true;
-  tutorial.abrir('pc');
+  if (!controle.jogo) return void toast('O treino abre com o Modo jogo ligado.', 'info', 4000);
+  treino.abrir('pedido');
 });
 
 volumes();
