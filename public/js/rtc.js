@@ -204,6 +204,47 @@ function preferirCodecDeJogo(transceiver, seguro) {
 // abertura nem espera número). O transporte nasce antes de ligar, como em qualquer conexão com canal
 // desde o começo, e os canais de depois entram num transporte que já existe.
 const CANAL_BASE_ID = 1000;
+
+// Defeito do Chrome 158 (27/11, reproduzido com duas RTCPeerConnection puras): um lado que montou uma
+// oferta (mesmo sem aplicar) antes de receber a do outro — a colisão normal de quem entra junto — guarda
+// os números de extensão do som dela (ssrc-audio-level=1); a sessão fecha com os do vídeo do outro
+// (toffset=1), e toda oferta seguinte desse lado sai com o mesmo número para duas coisas. O próprio
+// Chrome a recusa ("A BUNDLE group contains a codec collision for header extension id=1"), nada mais
+// negocia: a tela que volta ou entra fica preta e a voz não chega, até atualizar a página. Aqui cada
+// extensão fica com o número que já tem na sessão (o primeiro que aparece) e as novas com um livre; o
+// Chrome aceita a oferta assim, e as seguintes saem certas. Sem colisão, devolve a mesma.
+// ref: a descrição que já vale (os números dela mandam; uma seção nova pode ter ocupado um lugar antes delas)
+function acertarExtmap(desc, ref = null) {
+  if (!desc?.sdp) return desc;
+  const linhas = desc.sdp.split('\r\n');
+  const re = /^a=extmap:(\d+)((?:\/\w+)?) (\S+)(.*)$/;
+  const porUri = new Map(); // URI -> número
+  const donos = new Map(); // número -> URI
+  let colide = false;
+  for (const l of (ref?.sdp || '').split('\r\n')) {
+    const m = re.exec(l);
+    if (m && !porUri.has(m[3]) && !donos.has(Number(m[1]))) { porUri.set(m[3], Number(m[1])); donos.set(Number(m[1]), m[3]); }
+  }
+  for (const l of linhas) {
+    const m = re.exec(l);
+    if (!m) continue;
+    const id = Number(m[1]);
+    if ((porUri.has(m[3]) && porUri.get(m[3]) !== id) || (donos.has(id) && donos.get(id) !== m[3])) colide = true;
+    if (!porUri.has(m[3]) && !donos.has(id)) { porUri.set(m[3], id); donos.set(id, m[3]); }
+  }
+  if (!colide) return desc;
+  let livre = 1;
+  const proximo = () => { while (donos.has(livre)) livre++; return livre; };
+  const saida = linhas.map((l) => {
+    const m = re.exec(l);
+    if (!m) return l;
+    let id = porUri.get(m[3]);
+    if (id == null) { id = proximo(); porUri.set(m[3], id); donos.set(id, m[3]); }
+    return `a=extmap:${id}${m[2]} ${m[3]}${m[4]}`;
+  });
+  console.warn('[rtc] oferta com números de extensão repetidos: acertados');
+  return { type: desc.type, sdp: saida.join('\r\n') };
+}
 function fecharCanal(c) {
   if (!c) return;
   if (c.readyState === 'connecting') {
@@ -1500,11 +1541,21 @@ export class RTC {
           oferta = await pc.createOffer();
           if (pc.signalingState !== 'stable') return;
         }
-        await pc.setLocalDescription(comEstereo(comBandaInicial(oferta, ...this.bandaSdp(peer)), null));
+        await pc.setLocalDescription(comEstereo(comBandaInicial(acertarExtmap(oferta, pc.currentLocalDescription), ...this.bandaSdp(peer)), null));
         peer.ofertaDesde = performance.now();
         this.send(id, { description: trocarPerfil(pc.localDescription, this.midsDeJogo(peer), '42001f', '42e01f'), e: peer.epoca });
       } catch (err) {
         console.warn('[rtc] offer', err);
+        // O Chrome recusa a oferta que ele mesmo montou ("A BUNDLE group contains a codec collision for
+        // header extension id=1"): a tela que sai e volta (ou uma nova) numa conexão que já tem voz ganha
+        // o número de extensão que o som já usa (Chrome 158, testado em 27/11, já acontecia antes). Nada
+        // mais negocia e quem assiste fica no preto até atualizar a página. Refazer a conexão é o mesmo
+        // que atualizar, sem ninguém precisar fazer nada.
+        if (err?.name === 'InvalidAccessError' && this.peers.get(id) === peer && pc.signalingState === 'stable') {
+          peer.makingOffer = false;
+          // refeita há pouco (espera do refazer): o vigia tenta de novo e refaz quando puder
+          if (!this.refazer(id, 'o navegador recusou a própria oferta')) peer.renegociar = true;
+        }
       } finally {
         peer.makingOffer = false;
       }
