@@ -133,6 +133,7 @@ function entrar() {
     passe,
     lan: conta?.token || null,
     tv: true,
+    ...(FUNDO ? { fundo: true } : {}), // a imagem atrás do login do /jogar: oculta na sala (server.js)
     proto: 2,
   }, (data) => {
     if (data?.erro === 'conta') {

@@ -1514,8 +1514,11 @@ function bindSocket() {
   socket.on('user-joined', (u) => {
     addUser(u);
     rtc.getPeer(u.id);
-    sfx.join();
-    toast(`${u.name} entrou na sala`, 'info', 3500, u.color);
+    // oculto: o "Visitante" do /jogar antes do login e a imagem de fundo dele (aparece no login, ver user-update)
+    if (!u.oculto) {
+      sfx.join();
+      toast(`${u.name} entrou na sala`, 'info', 3500, u.color);
+    }
     renderPeople();
     updateRoomInfo();
     salas.atualizar();
@@ -1524,8 +1527,10 @@ function bindSocket() {
   socket.on('user-left', ({ id }) => {
     const u = state.users.get(id);
     if (!u) return;
-    sfx.leave();
-    toast(`${u.name} saiu`, 'info', 3000, u.color);
+    if (!u.oculto) {
+      sfx.leave();
+      toast(`${u.name} saiu`, 'info', 3000, u.color);
+    }
     criador.definirArma(id, null);
     removeUser(id);
     salas.atualizar();
@@ -1555,9 +1560,18 @@ function bindSocket() {
     }
   });
 
-  socket.on('user-update', ({ id, name, mic, cam, photo, shirt, char, color, arma, health, ko, status, inativo, gestor, desde }) => {
+  socket.on('user-update', ({ id, name, mic, cam, photo, shirt, char, color, arma, health, ko, status, inativo, gestor, desde, oculto }) => {
     const u = state.users.get(id);
     if (!u) return;
+    // o "Visitante" fez o login: agora aparece, com o nome da conta
+    if (oculto === false && u.oculto) {
+      u.oculto = false;
+      u.avatar.group.visible = true;
+      sfx.join();
+      toast(`${(typeof name === 'string' && name) || u.name} entrou na sala`, 'info', 3500, u.color); // o nome muda logo abaixo
+      updateRoomInfo();
+      salas.atualizar();
+    }
     // o /jogar entra como "Visitante" (o teste da conexão roda durante o login) e vira a conta da pessoa sem reconectar
     if (typeof name === 'string' && name && name !== u.name) {
       u.name = name;
@@ -1835,6 +1849,7 @@ function addUser(data) {
   avatar.setNetworkState(data.p, data.r, data.a);
   avatar.setPresenca(COR_STATUS[presencaDe(data)]);
   world.scene.add(avatar.group);
+  if (data.oculto) avatar.group.visible = false; // o "Visitante" do /jogar antes do login, a imagem de fundo dele
   const shares = new Map((data.shares || []).map((sh) => [sh.key, { ...sh, video: null }]));
   const u = { ...data, shares, isSelf: false, avatar, streams: new Map(), audioEl: null, speaking: false };
   state.users.set(u.id, u);
@@ -1880,7 +1895,7 @@ function removeUser(id, quiet = false) {
 }
 
 function updateRoomInfo() {
-  const n = state.users.size;
+  const n = [...state.users.values()].filter((u) => !u.oculto).length;
   const empresa = state.sala?.empresa;
   $('#room-name').textContent = empresa || state.room;
   $('#bar-room').textContent = empresa ? `${empresa} · #${state.room}` : `#${state.room}`;
@@ -1912,7 +1927,7 @@ function renderPeople() {
   // fala e status de cada pessoa não remontam HTML escondido
   if (!$('#share-pop').hidden) renderSharePop();
   if (state.panel !== 'people') return;
-  const users = [...state.users.values()].sort((a, b) => (a.isSelf ? -1 : b.isSelf ? 1 : a.name.localeCompare(b.name)));
+  const users = [...state.users.values()].filter((u) => !u.oculto).sort((a, b) => (a.isSelf ? -1 : b.isSelf ? 1 : a.name.localeCompare(b.name)));
   $('#people-list').innerHTML = users.map((u) => {
     const telas = [...u.shares.values()].sort(ordemDasTelas);
     // presença + onde está no escritório ("Ocupado · TI"); compartilhando tem prioridade
@@ -11272,7 +11287,8 @@ function atualizarAvatares(dt, t, desenhando) {
     const a = u.avatar;
     // jogando futebol de carro: quem aparece é o carro dele no campo (futebol.js), não o boneco
     // (e no caça-fantasmas, quem morreu ou está escondido no armário some)
-    const noCampo = futebol.joga(u.id) || fantasmas.oculto(u.id);
+    // (e o "Visitante" do /jogar antes do login, oculto, não tem boneco)
+    const noCampo = !!u.oculto || futebol.joga(u.id) || fantasmas.oculto(u.id);
     if (a.group.visible === noCampo) a.group.visible = !noCampo;
     if (noCampo) continue;
     caberNaMesa(u, t);

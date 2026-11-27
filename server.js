@@ -391,10 +391,10 @@ app.post('/salas-status', express.json({ limit: '8kb' }), (req, res) => {
       const pode = passeValido(room, passes[id]);
       return {
         id,
-        pessoas: room.users.size,
+        pessoas: visiveis(room).length,
         temSenha: !!room.entradaHash,
         empresa: room.config.empresa || '',
-        nomes: pode ? [...room.users.values()].slice(0, 8).map((u) => ({ nome: u.name, cor: u.color })) : [],
+        nomes: pode ? visiveis(room).slice(0, 8).map((u) => ({ nome: u.name, cor: u.color })) : [],
       };
     }),
   });
@@ -500,20 +500,22 @@ const NOMES_STATUS = { disponivel: 'Disponível', ocupado: 'Ocupado', reuniao: '
 // servidor mantém aberta e onde empurra a lista nova sempre que alguém entra, sai ou muda a sala.
 // Sala que o dono tirou da lista não aparece; sala com senha mostra só quantas pessoas, sem nomes.
 const ouvintesLobby = new Set();
+// quem conta como pessoa na sala: sem os ocultos (o "Visitante" do /jogar antes do login, a imagem de fundo dele)
+const visiveis = (room) => [...room.users.values()].filter((u) => !u.oculto);
 // o compression() segura o que é escrito até juntar bastante: flush() manda na hora
 const mandar = (res, txt) => { res.write(txt); res.flush?.(); };
 function salasAoVivo() {
   const lista = [];
   for (const room of rooms.values()) {
-    if (!room.config || !room.users.size || room.config.listada === false) continue;
+    if (!room.config || !visiveis(room).length || room.config.listada === false) continue;
     const fechada = !!room.entradaHash;
     lista.push({
       id: room.id,
       empresa: room.config.empresa || '',
       modulo: room.config.departamentos?.length && room.config.modulo === 'escritorio' ? 'escritorio' : 'lazer',
-      pessoas: room.users.size,
+      pessoas: visiveis(room).length,
       temSenha: fechada,
-      nomes: fechada ? [] : [...room.users.values()].slice(0, 12).map((u) => ({ nome: u.name, cor: u.color, status: u.inativo ? 'inativo' : u.status })),
+      nomes: fechada ? [] : visiveis(room).slice(0, 12).map((u) => ({ nome: u.name, cor: u.color, status: u.inativo ? 'inativo' : u.status })),
     });
   }
   lista.sort((a, b) => b.pessoas - a.pessoas || a.id.localeCompare(b.id));
@@ -1369,6 +1371,7 @@ function publicUser(u) {
     status: u.status, inativo: u.inativo, gestor: u.gestor, desde: u.statusDesde,
     p: u.p, r: u.r, a: u.a, photo: u.photo, shirt: u.shirt, char: u.char, arma: u.arma, health: u.health, ko: u.ko, moedas: u.moedas,
     criador: u.criador || null,
+    oculto: !!u.oculto,
   };
 }
 
@@ -1713,6 +1716,8 @@ function attachSockets(io) {
       // jogo já roda nesse tempo. Não joga nada (podeJogarLan pede a conta); o 'lan-entrar' o transforma na conta
       const visita = !contaLan && data?.visita === true;
       const tvSemConta = !contaLan && data?.tv === true && !visita;
+      // a imagem do PS5 atrás do login do /jogar (tv.js ?fundo=1) é a TV sem conta, mas não é ninguém: oculta
+      const fundoDoLogin = tvSemConta && data?.fundo === true;
       if (!contaLan && !tvSemConta && !visita) {
         entrando = false;
         return ack?.({ erro: 'conta' });
@@ -1754,6 +1759,9 @@ function attachSockets(io) {
         conta: contaLan, // a conta com que entrou (lanhouse.js): é ela que joga no horário reservado (null: TV sem conta)
         tv: data?.tv === true && !visita, // a página da TV ou o celular como controle dela (public/tv.html)
         visita, // o /jogar antes do login (vira a conta no 'lan-entrar')
+        // conectado (recebe a imagem, faz o teste da conexão), mas fora do boneco, da lista, das contas e dos avisos
+        // de entrada: o "Visitante" até o login e a imagem de fundo do login (pedido de 2026-11-27)
+        oculto: visita || fundoDoLogin,
         ip: ipDe(), // o teste grátis da lan house é um por conta e um por IP
         p: [0, 0, -4], r: Math.PI, a: 0, s: 0,
       };
@@ -1789,7 +1797,7 @@ function attachSockets(io) {
       if (user.conta) avisarLan(room);
       comecarLiberadasDe(room, user.conta);
       verNovoLan();
-      if (!visita) avisarGestores(room, user, 'entrou', `${user.name} entrou no sistema`);
+      if (!user.oculto) avisarGestores(room, user, 'entrou', `${user.name} entrou no sistema`);
       lobbyMudou();
     });
 
@@ -1808,12 +1816,13 @@ function attachSockets(io) {
       // conexões (o teste da conexão que começou no login continua)
       if (user.visita && conta) {
         user.visita = false;
+        user.oculto = false; // agora aparece, já com o nome da conta (user-update com oculto: false)
         const escrito = cleanText(msg?.nome, 20).replace(/\s+/g, ' ').trim();
         user.name = escrito.toLowerCase() === conta ? escrito : conta;
         await carregarCarteira(user.name);
         if (!room) return r({ ok: false });
         user.moedas = saldoDe(user.name);
-        io.to(room.id).emit('user-update', { id: user.id, name: user.name });
+        io.to(room.id).emit('user-update', { id: user.id, name: user.name, oculto: false });
         avisarGestores(room, user, 'entrou', `${user.name} entrou no sistema`);
         lobbyMudou();
       }
@@ -2932,7 +2941,7 @@ function attachSockets(io) {
       io.to(room.id).emit('user-left', { id: user.id });
       if (user.conta) avisarLan(room); // saiu no meio do teste grátis: a máquina fica livre já (testeNaMaquina)
       if (socket.data.hub) io.to(room.id).emit('hub-mudou'); // o PC de jogos saiu
-      avisarGestores(room, user, 'saiu', `${user.name} saiu do sistema`);
+      if (!user.oculto) avisarGestores(room, user, 'saiu', `${user.name} saiu do sistema`);
       lobbyMudou();
       for (const mesa of levantarDeTudo(room, user.id)) io.to(room.id).emit('jogo', { mesa, ...jogoPublico(room.jogos[mesa]) });
       if (hadSlot) {
