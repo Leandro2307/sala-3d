@@ -1175,6 +1175,7 @@ const avisosBotoes = new AvisosBotoes({
   // o modo carro entra (o W acelera); o △ seguinte volta a pé (tecladoPad.soSaiNoTriangulo) e o carro só
   // volta quando o quadro some e aparece de novo (onCarro é na chegada dele, ver avisos-botoes-tela.js).
   querCarro: () => mapaTeclas.carroTroca(),
+  noCarro: () => tecladoPad.noCarro(),
   onCarro: () => {
     if (tecladoPad.carro || !mapaTeclas.carroTroca()) return;
     diagJogo.evento('modo carro: o quadro do carro apareceu no jogo');

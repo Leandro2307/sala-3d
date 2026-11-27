@@ -1,5 +1,5 @@
 // Acha na imagem do jogo os avisos de botão do PS5 (o GTA e outros põem um círculo branco com o símbolo
-// escuro dentro: ✕ ○ □ △, e R/L dos analógicos) para o /jogar mostrar em cima a tecla do
+// escuro dentro: ✕ ○ □ △, e R/L dos analógicos; e a placa de L1 R1 L2 R2) para o /jogar mostrar em cima a tecla do
 // teclado que faz aquele botão (mapa-teclas.js). Roda num worker (avisos-botoes-worker.js) sobre uma cópia
 // pequena do quadro; aqui fica só a conta, sem nada do navegador, para o teste rodar no Node.
 //
@@ -10,7 +10,7 @@
 // farol e letra de texto caem no (3) ou no (4).
 
 // o R e o L no círculo são os analógicos (mexer a câmera / andar), não o afundar: no teclado, o mouse e o WASD
-export const SIMBOLOS = { xis: 'b0', bola: 'b1', quadrado: 'b2', triangulo: 'b3', L: 'andar', R: 'olhar' };
+export const SIMBOLOS = { xis: 'b0', bola: 'b1', quadrado: 'b2', triangulo: 'b3', L: 'andar', R: 'olhar', L1: 'b4', R1: 'b5', L2: 'b6', R2: 'b7' };
 
 const N = 12; // a grade do símbolo
 const LADO = 0.8; // a grade cobre [-LADO, LADO] × raio em volta do centro
@@ -18,6 +18,7 @@ const DENTRO = 0.92; // células fora deste raio (o fundo atrás do disco) não 
 const MIN_D = 11, MAX_D = 90; // diâmetro do disco em pixels da imagem analisada
 const MIN_SCORE = 0.72; // correlação mínima com o símbolo
 const MIN_MARGEM = 0.1; // e à frente do segundo símbolo por pelo menos isto
+const MIN_PLACA = 0.85; // a placa de L1/R1/L2/R2: medida num print só de cada, então bem parecida
 
 // distância do ponto ao segmento
 function distSeg(px, py, ax, ay, bx, by) {
@@ -83,6 +84,8 @@ const MEDIDOS = {
     '310000000027101100011002002530252001001683771000000388940000000179710000000179820000000595960000002861582000002420142001110100011003310010000138',
   ],
   triangulo: ['610026610016100069950001000399993000001795697100004971289400028930049810169600017950399301113992799777778996699999999995223333333322610000000015'],
+  // o ○ grande (anel escuro grosso com o miolo branco): sem ele saía como o □ grande
+  bola: ['721134421048204799986104048976689720288411137950596100003882793000001793793000001793694000002882388300015961159864479820115899997302411356642027'],
   // o □ grande do aviso de segurar (entrar no carro), traço grosso quase até a borda
   quadrado: ['720000010028268788888852089999999960188222224960188000003960188000003960088000003970088000003960088322224960089999999960168888888842610000000028'],
   // o L de empurrar o analógico (com o tracinho e o arco do lado para onde empurrar)
@@ -146,6 +149,74 @@ function grade(img, cx, cy, r) {
     v[j * N + i] = s / 9;
   }
   return v;
+}
+
+// Os ombros e gatilhos (L1 R1 L2 R2) não vêm num disco: é uma placa branca quase quadrada (um lado reto e o
+// outro arredondado) com o nome escuro. A grade cobre a caixa da placa e é comparada com as medidas em prints
+// do GTA 6 (MEDIDOS_PLACA); só a de cima e por boa margem vale (L1 e R1 diferem numa letra).
+const MEDIDOS_PLACA = {
+  L1: ['122122222211000000000000000620046000001930389000001930699100001930249100001930039000001930039000101965549101400888838004810222212019971000000289'],
+  R1: ['000000000000000000000000006665004600009879439910009418969910009769833910009999203910009578003910109439203911509318803915923102301329984000000489'],
+  L2: ['983000001389710000000028100000001003068000599810068001964940068000101940068000028700068221288320069995999960012220211110000000000000000000000000'],
+  R2: ['983000001399710000000028200000001003099980089940095486683870095396010770099970005930093780069630093095699991020011111110000000000000000000000000'],
+};
+const MODELOS_PLACA = Object.entries(MEDIDOS_PLACA).flatMap(([nome, lista]) => lista.map((t) => ({ nome, v: normalizarTudo(deTexto(t)) })));
+function normalizarTudo(v) {
+  let m = 0;
+  for (const x of v) m += x;
+  m /= v.length;
+  let q = 0;
+  for (let k = 0; k < v.length; k++) { v[k] -= m; q += v[k] * v[k]; }
+  const z = Math.sqrt(q) || 1;
+  for (let k = 0; k < v.length; k++) v[k] /= z;
+  return v;
+}
+function gradePlaca(img, x0, y0, w, h) {
+  const { width: W, data: d } = img;
+  const v = new Float32Array(N * N);
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    let s = 0, n = 0;
+    for (let b = 0; b < 3; b++) for (let a = 0; a < 3; a++) {
+      const x = Math.min(x0 + w - 1, Math.round(x0 + ((i + (a + 0.5) / 3) / N) * w - 0.5)), y = Math.min(y0 + h - 1, Math.round(y0 + ((j + (b + 0.5) / 3) / N) * h - 0.5));
+      s += Math.max(0, Math.min(1, (235 - lum(d, (y * W + x) * 4)) / 175));
+      n++;
+    }
+    v[j * N + i] = s / n;
+  }
+  return v;
+}
+export function medirPlaca(img, x0, y0, w, h) {
+  return Array.from(gradePlaca(img, x0, y0, w, h), (x) => Math.round(x * 9)).join('');
+}
+// a placa da caixa (x0, y0, w, h)? { nome, c, seg } ou null
+function placa(img, x0, y0, w, h) {
+  if (!MODELOS_PLACA.length || h < w * 0.7 || h > w * 1.25) return null;
+  // logo em volta da caixa (2–3 px fora) é fundo: não é um pedaço de algo branco maior
+  const { width: W, height: H, data: d } = img;
+  const fora = Math.max(2, Math.round(w * 0.1));
+  let sim = 0, tot = 0;
+  const olhar = (x, y) => {
+    if (x < 0 || y < 0 || x >= W || y >= H) return;
+    tot++;
+    if (claro(d, (y * W + x) * 4)) sim++;
+  };
+  for (let k = 0; k <= 20; k++) {
+    const x = Math.round(x0 - fora + ((w + 2 * fora) * k) / 20), y = Math.round(y0 - fora + ((h + 2 * fora) * k) / 20);
+    olhar(x, y0 - fora); olhar(x, y0 + h - 1 + fora); olhar(x0 - fora, y); olhar(x0 + w - 1 + fora, y);
+  }
+  if (!tot || sim / tot > 0.25) return null;
+  const v = gradePlaca(img, x0, y0, w, h);
+  const t = v.reduce((a, b) => a + b, 0) / v.length;
+  if (t < 0.12 || t > 0.5) return null;
+  normalizarTudo(v);
+  const por = {};
+  for (const m of MODELOS_PLACA) {
+    let c = 0;
+    for (let k = 0; k < v.length; k++) c += v[k] * m.v[k];
+    if (!(c <= por[m.nome])) por[m.nome] = c;
+  }
+  const ord = Object.entries(por).sort((a, b) => b[1] - a[1]);
+  return { nome: ord[0][0], c: ord[0][1], seg: ord[1]?.[1] ?? 0 };
 }
 
 // Para onde empurrar o analógico (L e R): o jogo põe um tracinho claro fora do disco, do lado da direção
@@ -250,12 +321,23 @@ export function detectar(img, { minScore = MIN_SCORE, minMargem = MIN_MARGEM } =
   for (const { x0, y0, x1, y1, cnt } of candidatos) {
     const w = x1 - x0 + 1, h = y1 - y0 + 1;
     if (w < MIN_D || h < MIN_D || w > MAX_D || h > MAX_D) continue;
-    if (Math.abs(w - h) > Math.max(w, h) * 0.2) continue;
     const preench = cnt / (w * h);
-    if (preench < 0.3 || preench > 0.8) continue; // disco cheio (sem símbolo) dá ~0,78 ou mais
     const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, r = (w + h) / 4;
+    // a placa de L1/R1/L2/R2 (mais cheia que o disco: só o nome escuro dentro)
+    if (preench >= 0.5 && preench <= 0.9) {
+      const p = placa(img, x0, y0, w, h);
+      if (p && p.c >= MIN_PLACA && p.c - p.seg >= 0.08) {
+        if (globalThis.__avisosPlaca) globalThis.__avisosPlaca(p, x0, y0, w, h);
+        if (!achados.some((o) => Math.hypot(o.cx - cx, o.cy - cy) < r)) {
+          achados.push({ cx, cy, rp: r, simbolo: p.nome, id: SIMBOLOS[p.nome], x: cx / W, y: cy / H, r: r / H, score: +p.c.toFixed(3), margem: +(p.c - p.seg).toFixed(3) });
+        }
+        continue;
+      }
+    }
+    if (Math.abs(w - h) > Math.max(w, h) * 0.2) continue; // o disco é redondo (a placa pode ser mais larga)
+    if (preench < 0.3 || preench > 0.8) continue; // disco cheio (sem símbolo) dá ~0,78 ou mais
     if (anelClaro(img, cx, cy, r * 0.88) < 0.8) continue;
-    if (anelClaro(img, cx, cy, r * 0.78) < 0.6) continue; // letra O e anéis finos: o branco é só uma borda
+    // (a letra O do texto cai no modelo 'nada'; o anel a 0,78 que a barrava também barrava o ○ grande)
     if (anelClaro(img, cx, cy, r * 1.3) > 0.35) continue;
     const v = grade(img, cx, cy, r);
     const t = tinta(v);
@@ -271,6 +353,14 @@ export function detectar(img, { minScore = MIN_SCORE, minMargem = MIN_MARGEM } =
     const ord = Object.entries(por).sort((a, b) => b[1] - a[1]);
     const melhor = { nome: ord[0][0], c: ord[0][1] }, seg = ord[1][1];
     if (melhor.nome === 'nada' || melhor.c < minScore || melhor.c - seg < minMargem) continue;
+    // o ○ tem o miolo branco; a letra o do texto (legendas), escuro. E o vão entre letras de legenda às vezes
+    // desenha um anel com ponto (0,83–0,89 nos prints): o ○ pede mais parecença
+    if (melhor.nome === 'bola' && melhor.c < 0.9) continue;
+    if (melhor.nome === 'bola') {
+      let claros = 0;
+      for (const [dx, dy] of [[0, 0], [0.12, 0], [-0.12, 0], [0, 0.12], [0, -0.12]]) if (claro(d, (Math.round(cy + dy * r) * W + Math.round(cx + dx * r)) * 4)) claros++;
+      if (claros < 3) continue;
+    }
     // o mesmo disco achado inteiro e em pedaços: fica o de maior correlação
     const igual = achados.findIndex((o) => Math.hypot(o.cx - cx, o.cy - cy) < r);
     if (igual >= 0) { if (achados[igual].score >= melhor.c) continue; achados.splice(igual, 1); }
@@ -310,12 +400,85 @@ export class Rastreio {
   limpar() { this.itens = []; }
 }
 
-// Dentro de um veículo o GTA 6 mostra, em cima do minimapa, o quadro com a marca e o modelo (texto branco)
-// e dois ícones redondos escuros lado a lado: o motor e a gasolina. É isso que se procura aqui: duas
-// manchas escuras redondas do mesmo tamanho, na mesma altura, com os centros a ~2,7 raios um do outro,
-// num painel cinza um pouco mais claro e com texto claro logo acima. true: está no veículo.
-// Só o canto de baixo à esquerda (onde fica o minimapa) é olhado: menos conta e menos chance de engano.
+// Dentro de um veículo o GTA 6 mostra, logo acima do minimapa, um quadro escuro com a marca e o modelo (duas
+// linhas de texto claro centralizadas: "KARIN" / "REBEL (1984)") e, embaixo delas, dois ícones redondos
+// escuros: o motor e a gasolina. veiculo() procura os dois jeitos (os ícones às vezes não aparecem bem): true
+// é estar no veículo. Só o canto de baixo à esquerda (onde fica o minimapa) é olhado.
 export function veiculo(img) {
+  return quadroDoCarro(img) || iconesDoCarro(img);
+}
+
+// o quadro: duas linhas de texto claro, uma embaixo da outra e com o mesmo centro, num painel escuro e liso
+function quadroDoCarro(img) {
+  const { width: W, height: H, data: d } = img;
+  const xMax = Math.round(W * 0.42), yMin = Math.round(H * 0.4);
+  const L = (x, y) => lum(d, (y * W + x) * 4);
+  // o texto: claro e sem cor (a marca vem cinza, ~150)
+  const texto = (x, y) => {
+    const i = (y * W + x) * 4, r = d[i], g = d[i + 1], b = d[i + 2];
+    const mn = Math.min(r, g, b);
+    return mn > 115 && Math.max(r, g, b) - mn < 45;
+  };
+  // 1) as letras: manchas de texto do tamanho de letra
+  const vis = new Uint8Array(W * H);
+  const pilha = [];
+  const letras = [];
+  for (let y = yMin; y < H; y++) for (let x = 0; x < xMax; x++) {
+    const s = y * W + x;
+    if (vis[s] || !texto(x, y)) continue;
+    let x0 = W, y0 = H, x1 = -1, y1 = -1, n = 0;
+    pilha.push(s);
+    vis[s] = 1;
+    while (pilha.length) {
+      const p = pilha.pop();
+      n++;
+      const px = p % W, py = (p / W) | 0;
+      if (px < x0) x0 = px;
+      if (px > x1) x1 = px;
+      if (py < y0) y0 = py;
+      if (py > y1) y1 = py;
+      if (px > 0 && !vis[p - 1] && texto(px - 1, py)) { vis[p - 1] = 1; pilha.push(p - 1); }
+      if (px < xMax - 1 && !vis[p + 1] && texto(px + 1, py)) { vis[p + 1] = 1; pilha.push(p + 1); }
+      if (py > yMin && !vis[p - W] && texto(px, py - 1)) { vis[p - W] = 1; pilha.push(p - W); }
+      if (py < H - 1 && !vis[p + W] && texto(px, py + 1)) { vis[p + W] = 1; pilha.push(p + W); }
+    }
+    const h = y1 - y0 + 1, w = x1 - x0 + 1;
+    if (h >= 4 && h <= 30 && w <= h * 1.8 && n >= 4) letras.push({ x0, x1, y0, y1, h });
+  }
+  // 2) as linhas: letras da mesma altura, na mesma faixa, uma depois da outra
+  letras.sort((p, q) => p.x0 - q.x0);
+  const linhas = [];
+  for (const l of letras) {
+    const ln = linhas.find((k) => Math.abs(k.y0 - l.y0) <= k.h * 0.35 && Math.abs(k.h - l.h) <= k.h * 0.35 && l.x0 - k.x1 <= k.h * 1.2 && l.x0 >= k.x1 - 1);
+    if (ln) Object.assign(ln, { x1: Math.max(ln.x1, l.x1), y0: Math.min(ln.y0, l.y0), y1: Math.max(ln.y1, l.y1), n: ln.n + 1 });
+    else linhas.push({ ...l, n: 1 });
+  }
+  const boas = linhas.filter((k) => k.n >= 3 && k.x1 - k.x0 >= k.h * 2.5);
+  // 3) duas empilhadas e centralizadas, com painel escuro e liso dos lados e em cima
+  for (const a of boas) for (const b of boas) {
+    if (b === a || b.y0 <= a.y1) continue;
+    const h = Math.max(a.h, b.h);
+    if (b.y0 - a.y1 > h * 1.5 || Math.abs((a.x0 + a.x1) / 2 - (b.x0 + b.x1) / 2) > h * 0.8) continue;
+    const xs = [Math.round(Math.min(a.x0, b.x0) - h * 2), Math.round(Math.max(a.x1, b.x1) + h * 1.2)];
+    let n = 0, escuro = 0, s = 0, s2 = 0;
+    for (let y = a.y0 - Math.round(h * 0.8); y <= b.y1; y++) for (const xi of xs) for (let x = xi; x < xi + h * 0.8; x++) {
+      if (x < 0 || x >= W || y < 0 || y >= H) continue;
+      const l = L(x | 0, y);
+      n++;
+      s += l;
+      s2 += l * l;
+      if (l < 90) escuro++;
+    }
+    if (!n) continue;
+    const m = s / n;
+    if (escuro / n >= 0.9 && Math.sqrt(Math.max(0, s2 / n - m * m)) < 18) return true;
+  }
+  return false;
+}
+
+// os ícones do motor e da gasolina: duas manchas escuras redondas do mesmo tamanho, na mesma altura, com os
+// centros a ~2,7 raios, num painel cinza um pouco mais claro e com texto claro logo acima
+function iconesDoCarro(img) {
   const { width: W, height: H, data: d } = img;
   const xMax = Math.round(W * 0.5), yMin = Math.round(H * 0.45);
   const L = (x, y) => lum(d, (y * W + x) * 4);

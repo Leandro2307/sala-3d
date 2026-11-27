@@ -1010,9 +1010,8 @@
     <!-- modo jogo no celular: analógico e botões por cima da tela (ver toque-jogo.js) -->
     <div id="toque-jogo" hidden></div>
     <!-- modo jogo no PS5: o tutorial do controle na primeira vez (ver tutorial-controle.js) -->
-    <div id="tut-controle" hidden></div>
     <!-- modo jogo no PC (PS5, Switch): o que cada botão faz, no canto de baixo à direita (ver mostrarLegendaJogo) -->
-    <div id="jogo-legenda" hidden aria-hidden="true"></div>
+    <div id="jogo-avisos" hidden aria-hidden="true"></div>
     <div id="jogo-modo" hidden aria-hidden="true"></div>
     <div id="jogo-modo-aviso" hidden role="status"></div>
     <!-- modo jogo no PC: o painel para trocar a tecla de cada botão do controle (ver mapa-teclas.js) -->
@@ -1045,6 +1044,7 @@
             <label><input type="checkbox" data-op="nitidez"><span>Realce de nitidez <small>(turbo: contornos mais nítidos)</small></span></label>
             <label><input type="checkbox" data-op="tratamento"><span>Tratamento de imagem <small>(turbo: céu e sombras sem degraus, com um grão fino)</small></span></label>
             <label><input type="checkbox" data-op="selo"><span>Mostrar desempenho</span></label>
+            <label><input type="checkbox" data-op="avisos"><span>Tecla nos avisos do jogo <small>(PS5: o △ de "Arrombar" mostra a tecla que faz o △)</small></span></label>
             <label><input type="checkbox" data-op="vibrar"><span>Vibrar com o jogo <small>(PS5: o controle ligado neste PC treme)</small></span></label>
             <label class="jogo-op-vol"><span>Sensibilidade do mouse <small>(PS5 e Switch: o mouse vira o analógico)</small></span>
               <span class="jogo-op-vol-linha"><input type="range" id="jogo-mouse-sens" min="0.3" max="3" step="0.1" value="3" aria-label="Sensibilidade do mouse"><output id="jogo-mouse-sens-n">3.0×</output></span></label>
@@ -1055,7 +1055,6 @@
               <select id="jogo-lossless"><option value="0">Não uso</option><option value="2">×2</option><option value="3">×3</option><option value="4">×4</option></select></label>
             <button type="button" class="secondary small" id="jogo-touchpad" hidden>Usar o DualSense (gatilhos, vibração e touchpad)</button>
             <button type="button" class="secondary small" id="jogo-mapear" hidden>Mapear teclas (qual tecla é cada botão)</button>
-            <button type="button" class="secondary small" id="jogo-tutorial" hidden>Tutorial do controle (teclado e mouse)</button>
           </span>
         </span>
         <button type="button" class="secondary small" id="focus-engasgo" hidden title="Marca no relatório do modo jogo o momento em que a imagem engasgou (F9)">Engasgou <kbd>F9</kbd></button>

@@ -32,9 +32,8 @@ import { ToqueJogo, jogoDaJanela, LAYOUTS, layoutDoTitulo } from './toque-jogo.j
 import { ControleFisico } from './gamepad-jogo.js';
 import { PadVirtual } from './pad-virtual.js';
 import { TecladoPad } from './teclado-pad.js';
-import { MapaTeclasPainel, dicaTeclado, legendaBotoes, mapaTeclas } from './mapa-teclas.js';
-import { ModoCarroTela } from './modo-carro.js';
-import { TutorialControle } from './tutorial-controle.js';
+import { MapaTeclasPainel, mapaTeclas } from './mapa-teclas.js';
+import { AvisosBotoes } from './avisos-botoes-tela.js';
 import { TurboEnvio, TurboRecebe, TTL_MS, vidaDoCanal, LISO_PCT, LISO_MAX } from './turbo.js';
 import { TurboAuto, TurboVolta, foraDoModo } from './turbo-auto.js';
 import { TesteEnvio, TesteJoga, MemoriaTeste, codecsDaqui } from './turbo-teste.js';
@@ -1699,7 +1698,6 @@ function bindSocket() {
       // reconheceu o jogo da janela agora: o controle de toque passa para os botões dele
       toqueJogo.jogoDaTela(key, tinha.titulo);
       fisico.jogoDaTela(key, tinha.titulo);
-      if (controle.jogo?.key === key) tutorialDoPs5(key);
     } else if (u.isSelf) {
       return;
     } else if (gone) {
@@ -3048,7 +3046,7 @@ const telaPesada = (key) => {
 const jogoNoMeuPc = () => !desenharMesmoAssim && [...jogandoAqui.keys()].some(telaPesada);
 // Eu jogo na tela de outra pessoa: { key, video }
 let jogandoLa = null;
-const diagJogo = new DiagJogo({ toast, contexto: () => ({ sala: state.room || null, nome: settings.name || null }), verRelatorio: () => !!state.donoDaSala });
+const diagJogo = new DiagJogo({ toast, contexto: () => ({ sala: state.room || null, nome: settings.name || null }), verRelatorio: () => false }); // sem aviso de relatório (pedido de 2026-11-27): ele vai para o servidor do mesmo jeito
 
 // rapido: quem joga pediu menos atraso (opção "Menos atraso"): a tela vai para ela em 720p fixo
 function jogoAqui(key, deId, ligar, rapido = false) {
@@ -3839,17 +3837,6 @@ function mudarVolumePs5(v) {
   if (saida) saida.textContent = `${volumePs5}%`;
 }
 
-const MOTIVO_TURBO = {
-  navegador: 'este navegador não tem o que o modo turbo precisa',
-  'sem-controle': 'a tela não está com o controle liberado',
-  'sem-tela': 'a tela saiu do ar',
-  codificador: 'o PC de quem compartilha não conseguiu codificar',
-  decodificador: 'este aparelho não conseguiu decodificar',
-  conexao: 'a conexão direta com quem compartilha não está aberta',
-  'sem-imagem': 'nenhuma imagem chegou em 4 s',
-  lento: 'a conexão com quem compartilha não aguenta (a imagem atrasava ou parava)',
-};
-const turboAvisado = new Set(); // motivos já avisados nesta página (o turbo vem ligado de fábrica)
 const turboRecebe = new TurboRecebe({
   abrir: (id, vida) => rtc?.abrirTurbo(id, vida),
   abrirSom: (id) => rtc?.abrirTurboSom(id, modoTv()), // o Turbo da TV: canais sem prazo, como no /jogar
@@ -3861,10 +3848,7 @@ const turboRecebe = new TurboRecebe({
   onFalhou: (motivo) => {
     diagJogo.evento('modo turbo falhou: vídeo normal de volta', { motivo });
     if (turboRecebe.ultimaFalha) diagJogo.evento('turbo: como estava ao desistir', turboRecebe.ultimaFalha);
-    const volta = turboVolta.falhou(motivo);
-    if (turboAvisado.has(motivo)) return;
-    turboAvisado.add(motivo);
-    toast(`Modo turbo desligado: ${MOTIVO_TURBO[motivo] || motivo}. A imagem voltou ao normal${volta ? ' e o turbo tenta de novo sozinho' : ''}.`, 'warn', 8000);
+    turboVolta.falhou(motivo); // sem aviso na tela: o vídeo normal entra sozinho e o relatório guarda o motivo
   },
 });
 turboRecebe.liso = opcoesJogo.get('turboLiso');
@@ -3995,7 +3979,7 @@ function verCaminho(resumo) {
 }
 // ---------------------------------------------------------------- o teste da conexão antes do turbo (turbo-teste.js)
 const memoriaTeste = new MemoriaTeste();
-const painelTeste = new PainelTeste({ dentro: () => $('#focus'), onPular: () => testeJoga.pular(), onEvento: (texto, dados) => diagJogo.evento(texto, dados) });
+const painelTeste = new PainelTeste({ dentro: () => $('#focus'), onPular: () => { if (jogandoLa) memoriaTeste.marcarPulado(acharTela(jogandoLa.key)?.user?.name || jogandoLa.key.split('~')[0]); testeJoga.pular(); }, onEvento: (texto, dados) => diagJogo.evento(texto, dados) });
 const testeJoga = new TesteJoga({
   abrir: (id) => rtc?.abrirTeste(id) ?? null,
   caminho: (id) => rtc?.caminhoPara(id) ?? null,
@@ -4033,7 +4017,12 @@ async function testarConexao(deNovo) {
   const rede = await Promise.resolve(rtc?.caminhoPara(dono)).catch(() => null);
   if (jogandoLa !== jl) return null;
   const quem = acharTela(jl.key)?.user?.name || dono; // o PC do jogo pelo nome: o id muda a cada entrada
-  let r = deNovo ? null : memoriaTeste.valido(quem, rede);
+  // uma vez por dia (como no /jogar): o de hoje vale mesmo com a ida e volta diferente; pulado hoje, entra sem testar
+  let r = deNovo ? null : memoriaTeste.valido(quem, rede) || memoriaTeste.doDia(quem);
+  if (!r && !deNovo && memoriaTeste.pulouHoje(quem)) {
+    diagJogo.evento('teste da conexão: pulado hoje, entrando sem testar');
+    return null;
+  }
   let rede0 = null;
   if (r) diagJogo.evento('teste da conexão: vale o de hoje', { tetoKbps: r.tetoKbps, codec: r.codec, modo: r.modo });
   else {
@@ -4081,7 +4070,8 @@ function conferirPrevisto(resumo) {
   const med = (k) => { const v = p.am.map((a) => a[k]).filter((x) => x != null).sort((a, b) => a - b); return v.length ? Math.round(v[v.length >> 1] * 10) / 10 : null; };
   const realMin = Math.round((p.am.reduce((n, a) => n + a.travadas, 0) / (p.am.length / 30)) * 10) / 10;
   // bem pior que o previsto: na próxima entrada testa de novo
-  if (realMin > Math.max(10, (p.travadasMin || 0) * 3)) { memoriaTeste.esquecer(p.quem); diagJogo.evento('teste da conexão: o jogo saiu pior que o previsto, testa de novo na próxima', { travadasMin: realMin }); }
+  // bem pior que o previsto: só anota (o teste não volta sozinho no mesmo dia; "Testar de novo" nas Opções roda)
+  if (realMin > Math.max(10, (p.travadasMin || 0) * 3)) diagJogo.evento('teste da conexão: o jogo saiu pior que o previsto', { travadasMin: realMin });
   diagJogo.evento('teste da conexão: previsto x real', { previsto: { atrasoMs: p.atrasoMs, travadasMin: p.travadasMin }, real: { atrasoMs: med('atraso'), qps: med('qps'), tremidoMs: med('tremido'), travadasMin: realMin, travadasDaFonte: p.daFonte || 0 } });
 }
 // Entrar no turbo: com o Automático, primeiro o teste; sem ele (versão antiga lá, pulado, sem conexão), direto
@@ -4200,7 +4190,7 @@ mostrarAuto();
 // com os últimos 3 s do turbo quadro a quadro (a caixa-preta), para cruzar o que se sentiu com os números.
 function marcarEngasgo() {
   if (!jogandoLa) return;
-  if (diagJogo.marcarEngasgo(turboRecebe.ligado ? turboRecebe.caixaPreta() : null)) toast('Engasgo marcado no relatório', 'info', 1500);
+  diagJogo.marcarEngasgo(turboRecebe.ligado ? turboRecebe.caixaPreta() : null);
 }
 
 // ---------------------------------------------------------------- voltar ao jogo depois de uma queda
@@ -5039,8 +5029,7 @@ $('#focus-jogo').addEventListener('click', async () => {
       if (!document.fullscreenElement) telaCheiaNoProximoGesto(fv);
       return;
     }
-    jogoNoPc(true);
-    toast('Modo jogo ligado: tela cheia, o mouse gira a câmera e o teclado anda com o personagem (Ctrl+W e Esc vão para o jogo). Esc duas vezes (ou F8) desliga o modo jogo; segure Esc para sair da tela cheia.', 'info', 9000);
+    jogoNoPc(true); // sem aviso ao ligar (pedido de 2026-11-27)
   } else if (!isTouch) jogoNoPc(false);
 });
 
@@ -5096,7 +5085,6 @@ async function conectarDualSense() {
     // fechou a lista sem escolher: não pergunta mais neste navegador (o botão das Opções continua lá)
     try { localStorage.setItem(RECUSOU_DUALSENSE, '1'); } catch { /* ok */ }
     toast('Sem o DualSense: dá para ligar depois em Opções → "Usar o DualSense".', 'info', 6000);
-    if (controle.jogo?.key) tutorialDoPs5(controle.jogo.key); // sem controle: o tutorial do teclado
   }
   atualizarBotaoTouchpad();
 }
@@ -5107,7 +5095,6 @@ function desligarModoJogoNoFoco() {
   controle.modoJogo($('#focus-video'), false);
   updateFocusCtrl();
   if (!isTouch) jogoNoPc(false);
-  toast('Modo jogo desligado. Esc de novo volta para a sala.', 'info', 3500);
 }
 
 // Modo jogo no PC: tela cheia da tela em foco, sem moldura, com o teclado travado (Keyboard Lock).
@@ -5238,27 +5225,37 @@ document.addEventListener('pointerdown', (e) => {
 // Controle virtual (pad-virtual.js): no layout PS5 o toque e o controle de videogame viram um
 // controle de Xbox no PC de quem compartilha, em vez de teclado e mouse
 const padVirtual = new PadVirtual({ controle });
-const modoCarroTela = new ModoCarroTela({ quadro: $('#jogo-modo'), aviso: $('#jogo-modo-aviso') });
 const tecladoPad = new TecladoPad({
   pad: padVirtual,
   sens: () => opcoesJogo.get('mouseSens'),
   aviso: (texto) => toast(texto, 'info', 5000),
-  // A sala não vê o jogo: se o F não entrou no carro (longe dele, animação cortada), o modo fica
-  // trocado e o W atira em vez de andar. A legenda mostra o modo o tempo todo para isso saltar à vista.
+  // sem o quadro "a pé / no carro" (desde 2026-11-27): o modo entra pelo quadro do carro no jogo (avisosBotoes)
+  // e o △ seguinte volta a pé
   onCarro: (sim) => {
     if (sim !== noCarro) diagJogo.evento(sim ? 'modo carro: no carro' : 'modo carro: a pé');
-    const trocou = sim !== noCarro;
     noCarro = sim;
-    if (layoutLegenda) mostrarLegendaJogo(layoutLegenda);
-    if (trocou && layoutLegenda && tecladoPad.ativo) modoCarroTela.trocou(sim);
   },
 });
+tecladoPad.soSaiNoTriangulo = true;
+// A tecla em cima dos avisos de botão do jogo (avisos-botoes-tela.js), como no /jogar: no PC, numa tela de PS5,
+// jogando no teclado. Também acha o quadro do carro do GTA (acima do minimapa) e liga o modo carro.
+const avisosBotoes = new AvisosBotoes({
+  camada: $('#jogo-avisos'),
+  video: $('#focus-video'),
+  telaTurbo: () => $('#focus-video').parentElement.querySelector('.turbo-tela:not([hidden])'),
+  querCarro: () => mapaTeclas.carroTroca(),
+  noCarro: () => tecladoPad.noCarro(),
+  onCarro: () => {
+    if (tecladoPad.carro || !mapaTeclas.carroTroca()) return;
+    diagJogo.evento('modo carro: o quadro do carro apareceu no jogo');
+    tecladoPad.trocarCarro(true);
+  },
+});
+turboRecebe.espiar = (frame) => avisosBotoes.espiar(frame);
 // tremores que chegaram aqui (quem joga), para o relatório (ver receberVolta)
 const tremoresAqui = { n: 0, como: {}, primeiro: false, desde: 0 };
 padVirtual.onErroTremor = (erro) => diagJogo.evento('o controle não aceitou o tremor', { erro, ...padVirtual.comoVibra() });
-// Tutorial do controle (tutorial-controle.js): toda vez que entra no modo jogo numa tela de PS5.
-// Aberto, o teclado e o mouse ficam todos com ele: nada vai para o jogo (P ou Esc pulam).
-const tutorialControle = new TutorialControle({ raiz: $('#tut-controle'), pad: padVirtual, toqueRaiz: $('#toque-jogo'), onAbriu: (modo) => diagJogo.evento('tutorial aberto', { modo }), onFechou: (concluiu, onde) => diagJogo.evento(concluiu ? 'tutorial fechado (terminou ou pulou)' : 'tutorial fechado no meio (o jogo acabou)', onde) });
+// Sem tutorial do controle (desde 2026-11-27, como no /jogar): no teclado as teclas aparecem nos avisos do jogo.
 // Mapear teclas (mapa-teclas.js): pelas Opções do modo jogo. Aberto, o teclado e o mouse são do painel
 // (nada vai para o jogo) e o que o teclado segurava no controle solta.
 const mapaPainel = new MapaTeclasPainel({
@@ -5272,19 +5269,18 @@ const mapaPainel = new MapaTeclasPainel({
 $('#jogo-mapear').addEventListener('click', (e) => {
   e.currentTarget.blur();
   $('#jogo-op-pop').hidden = true;
-  tutorialControle.fechar(true);
   const t = state.focus?.kind === 'share' ? acharTela(state.focus.key) : null;
   mapaPainel.abrir(layoutDoTitulo(t?.share?.titulo) === 'switch' ? 'switch' : 'ps5');
 });
 controle.paraPad = (ev) => {
   if (mapaPainel.aberto) return true;
-  if (!tutorialControle.ativo) return tecladoPad.evento(ev);
-  if (!tutorialControle.tecla(ev)) tecladoPad.evento(ev);
-  return true;
+  return tecladoPad.evento(ev);
 };
 // Touchpad do DualSense (ps5-touchpad.js): no modo jogo numa tela de PS5, no PC. Com a permissão dada
 // uma vez, volta sozinho; antes disso, pelo botão nas opções do modo jogo.
-const touchpad = new Ps5Touchpad({ pad: padVirtual, onMudou: () => { atualizarBotaoTouchpad(); avisarRapido(); } });
+// controle ligado ou desligado: as teclas nos avisos são só para quem joga no teclado
+const entradaMudou = () => { if (layoutLegenda) mostrarLegendaJogo(layoutLegenda); };
+const touchpad = new Ps5Touchpad({ pad: padVirtual, onMudou: () => { atualizarBotaoTouchpad(); avisarRapido(); entradaMudou(); } });
 padVirtual.hid = touchpad; // com o DualSense aberto pelo WebHID, a vibração vai direto nele
 function atualizarBotaoTouchpad() {
   const b = $('#jogo-touchpad');
@@ -5312,19 +5308,16 @@ const fisico = new ControleFisico({
   controle,
   pad: padVirtual,
   toast,
-  onAtivo: (sim) => $('#toque-jogo').classList.toggle('tj-pad', sim),
+  onAtivo: (sim) => { $('#toque-jogo').classList.toggle('tj-pad', sim); entradaMudou(); },
 });
 // o controle de toque aparece e some junto com o modo jogo (inclusive quando ele desliga sozinho)
 const toqueJogo = new ToqueJogo({
   raiz: $('#toque-jogo'),
   controle,
   pad: padVirtual,
-  toast,
+  toast: (texto, tipo, ...resto) => { if (tipo !== 'info') toast(texto, tipo, ...resto); }, // sem os avisos de entrada
   onEngasgo: () => marcarEngasgo(),
   onTv: isTouch ? () => naTv.abrir() : null,
-  onTutorial: () => tutorialControle.abrir('toque'),
-  // trocou à mão no painel: para o PS5 abre o tutorial, para outro fecha
-  onLayout: () => { if (toqueJogo.key) tutorialDoPs5(toqueJogo.key); },
   // "Volume do jogo" no painel: o mesmo "Volume das telas compartilhadas" dos Ajustes
   volume: {
     get: () => settings.screen,
@@ -5383,15 +5376,9 @@ controle.onJogo = (video, key) => {
   if (layoutPc && LAYOUTS[layoutPc]?.virtual) {
     padVirtual.acordar();
     tecladoPad.ligar(layoutPc);
-    const dica = dicaTeclado(layoutPc);
-    if (dica && !tutorialDoPs5(key)) toast(`Teclado e mouse viram o controle. ${dica}`, 'info', 12000);
   } else tecladoPad.desligar();
   mostrarLegendaJogo(layoutPc && LAYOUTS[layoutPc]?.virtual ? layoutPc : null);
-  $('#jogo-tutorial').hidden = layoutPc !== 'ps5';
-  if (!video) {
-    tutorialControle.fechar(false);
-    mapaPainel.fechar();
-  } else if (isTouch) tutorialDoPs5(key);
+  if (!video) mapaPainel.fechar();
   if (!video) padVirtual.desligar(); // depois do toque e do controle: o último estado é tudo solto
   // o modo jogo desligou por fora do botão (a tela fechou, saiu do foco): sai da tela cheia também
   if (!video && !isTouch && document.body.classList.contains('jogo-pc')) jogoNoPc(false);
@@ -5412,50 +5399,18 @@ function placaNoJogo(jogando) {
     if (controle.jogoNo && state.focus?.kind === 'share' && world.liberarPlaca()) diagJogo.marcar('3D solto da placa enquanto joga (celular)');
   }, 1500);
 }
-// A legenda do canto de baixo à direita no modo jogo do PC: ✕ = Espaço, ○ = C... (segue o mapa de
-// teclas; muda junto quando a pessoa troca uma tecla). layout null: some.
+// Sem a legenda dos botões no canto nem o quadro do modo carro (desde 2026-11-27, como no /jogar): no teclado as
+// teclas aparecem em cima dos avisos do próprio jogo. layout: o do jogo no PC (null: fora do modo jogo).
 let layoutLegenda = null;
-let noCarro = false; // o modo carro do teclado (teclado-pad.js), para a legenda
-const CLASSE_LEGENDA = { b0: 'lg-xis', b1: 'lg-bol', b2: 'lg-qua', b3: 'lg-tri' };
+let noCarro = false; // o modo carro do teclado (teclado-pad.js)
 function mostrarLegendaJogo(layout) {
   layoutLegenda = layout;
-  const el = $('#jogo-legenda');
-  el.hidden = !layout;
-  if (!layout) {
-    modoCarroTela.esconder();
-    return void (el.innerHTML = '');
-  }
-  // modo carro: a pé ou no carro, sempre à vista
-  modoCarroTela.mostrar(noCarro);
-  el.innerHTML = legendaBotoes(layout, noCarro || mapaTeclas.modoCarro() === 'sempre')
-    .map((b) => `<span class="${b.id === 'b4' ? 'lg-sep' : ''}${b.carro ? ' lg-no-carro' : ''}"><b class="${layout === 'ps5' ? CLASSE_LEGENDA[b.id] || '' : ''}">${esc(b.botao)}</b><kbd>${esc(b.teclas)}</kbd></span>`).join('');
+  const noTeclado = !!layout && !isTouch && !fisico.pad() && !touchpad.ligado;
+  avisosBotoes.ligar(noTeclado && layout === 'ps5' && opcoesJogo.get('avisos'));
 }
 mapaTeclas.ouvir(() => { if (layoutLegenda) mostrarLegendaJogo(layoutLegenda); });
-// Tutorial do controle toda vez que entra no modo jogo numa tela de PS5 (no PC, só sem controle de
-// verdade ligado: quem tem um não precisa do teclado). true: abriu (ou vai abrir). Saiu do PS5: fecha.
-function tutorialDoPs5(key) {
-  const ps5 = isTouch ? toqueJogo.layoutId === 'ps5' && toqueJogo.key === key
-    : layoutDoTitulo(acharTela(key)?.share.titulo) === 'ps5';
-  if (!ps5) {
-    tutorialControle.fechar(false);
-    return false;
-  }
-  const modo = isTouch ? 'toque' : 'pc';
-  // com controle de verdade não precisa (o DualSense pelo WebHID conta: ligado, com permissão — liga
-  // num instante — ou com a lista do Chrome aberta para escolher)
-  const temControle = () => fisico.pad() || touchpad.ligado || dualSensePermitido || pedindoDualSense;
-  if (tutorialControle.ativo || (!isTouch && temControle())) return false;
-  // um instante para a tela cheia e o controle de toque montarem
-  setTimeout(() => {
-    if (controle.jogo?.key === key && (isTouch || !temControle())) tutorialControle.abrir(modo);
-  }, 900);
-  return true;
-}
-$('#jogo-tutorial').addEventListener('click', (e) => {
-  e.currentTarget.blur();
-  $('#jogo-op-pop').hidden = true;
-  tutorialControle.abrir('pc');
-});
+for (const ev of ['gamepadconnected', 'gamepaddisconnected']) addEventListener(ev, () => { if (layoutLegenda) mostrarLegendaJogo(layoutLegenda); });
+opcoesJogo.ouvir((k) => { if (k === 'avisos' && layoutLegenda) mostrarLegendaJogo(layoutLegenda); });
 // a aba sumiu (celular bloqueou, outro app): o que o toque e o controle seguravam sobe já
 controle.onEscondeu = () => {
   toqueJogo.soltarTudo();
@@ -5464,9 +5419,6 @@ controle.onEscondeu = () => {
 };
 // o jogo mostrou ou escondeu o cursor: no celular, os botões de menu entram e saem sozinhos
 controle.onCursorLivre = (livre) => toqueJogo.cursorDoJogo(livre);
-controle.onJogoSoltou = () => {
-  if (controle.jogoNo) toast('Esc soltou o mouse (o jogo recebeu o Esc). Clique na tela para voltar a jogar, ou F8 para desligar o modo jogo.', 'info', 6000);
-};
 
 // ------------------------------------------------------------------ sala da empresa
 // O dono da sala (quem criou a senha) escolhe o ambiente, quais jogos aparecem e o nome da
@@ -6213,11 +6165,11 @@ function contaNoTesteLan(ev) {
   if (ev.t === 'pad') return !!(ev.b || ev.tp || ev.m || ['lx', 'ly', 'rx', 'ry', 'lt', 'rt'].some((k) => ev[k]));
   return true;
 }
-// Quem joga de graça: enquanto o diagnóstico (teste da conexão) ou o tutorial do controle estão na tela, nada
+// Quem joga de graça: enquanto o diagnóstico (teste da conexão) está na tela, nada
 // vai ao jogo, e os 2 min só começam quando terminam ou são pulados
 function seguraNoPreparo(key, ev) {
   if (!state.lan || state.lan.teste?.[state.selfId] || ev?.t === 'modo' || ev?.t === 'vivo') return false;
-  if (!testeJoga.testando && !tutorialControle.ativo) return false;
+  if (!testeJoga.testando) return false;
   const dono = String(key).split('~')[0];
   if (dono === state.selfId) return false;
   const sh = state.users.get(dono)?.shares.get(key);

@@ -6,11 +6,11 @@
 // a gente clona um de vez em quando); no vídeo normal, um VideoFrame tirado do <video>. Um quadro por vez
 // no worker, no máximo a cada INTERVALO_MS: a tecla aparece ~0,5 s depois do ícone (2 análises seguidas).
 
-import { visiveis, nomeEntrada } from './mapa-teclas.js';
+import { visiveis, nomeEntrada, mapaTeclas } from './mapa-teclas.js';
 
 const INTERVALO_MS = 250; // 150 pesava no PC com placa fraca (ver avisos-botoes-worker.js)
 // a cor de cada símbolo, a mesma da legenda do PS5 (✕ azul, ○ vermelho, □ rosa, △ verde)
-const COR = { b0: '#93c5fd', b1: '#fca5a5', b2: '#f9a8d4', b3: '#6ee7b7', andar: '#e5e7eb', olhar: '#e5e7eb' };
+const COR = { b0: '#93c5fd', b1: '#fca5a5', b2: '#f9a8d4', b3: '#6ee7b7', andar: '#e5e7eb', olhar: '#e5e7eb', b4: '#e5e7eb', b5: '#e5e7eb', b6: '#e5e7eb', b7: '#e5e7eb' };
 
 // O mouse desenhado: o botão que a ação usa aceso (esquerdo, direito ou a rodinha) ou, para o R (mexer a
 // câmera), setas do lado para onde mexer (as duas de lado quando o jogo não diz)
@@ -45,21 +45,25 @@ function daEntrada(e) {
   return { html: esc(t), texto: t, letras: [...t].length };
 }
 // o que aparece no lugar do ícone: { html, texto (para comparar), icone | letras } ou null (sem tecla)
-function rotuloDe(id, dir) {
+// noCarro: no modo carro o L2 e o R2 são as teclas do carro (S freia, W acelera no padrão)
+function rotuloDe(id, dir, noCarro = false) {
   if (id === 'olhar') return { html: mouse('', dir || 'lados'), texto: `mouse ${dir || ''}`, icone: true };
   if (id === 'andar') {
     const e = dir && visiveis(ANDAR[dir])[0];
     return e ? daEntrada(e) : { html: 'WASD', texto: 'WASD', letras: 4 };
   }
-  const e = visiveis(id).find((x) => !/^Roda/.test(x));
+  const doCarro = noCarro ? mapaTeclas.entradasCarro(id)[0] : null;
+  const e = doCarro || visiveis(id).find((x) => !/^Roda/.test(x));
   return e ? daEntrada(e) : null;
 }
 
 export class AvisosBotoes {
   // camada: a div por cima da imagem; video: o <video> da tela; telaTurbo(): o canvas do turbo à vista (ou null)
   // querCarro(): procurar também o quadro do carro; onCarro(): ele apareceu (visto em 2 análises seguidas)
-  constructor({ camada, video, telaTurbo, querCarro = () => false, onCarro = () => {} }) {
+  // noCarro(): as teclas do carro valem agora (o L2 e o R2 mostram as do carro)
+  constructor({ camada, video, telaTurbo, querCarro = () => false, onCarro = () => {}, noCarro = () => false }) {
     this.camada = camada;
+    this.noCarro = noCarro;
     this.querCarro = querCarro;
     this.onCarro = onCarro;
     this.vistoCarro = 0;
@@ -171,8 +175,9 @@ export class AvisosBotoes {
 
   mostrar(lista) {
     const rotulos = {};
+    const carro = !!this.noCarro();
     const chave = (av) => `${av.id} ${av.dir || ''}`;
-    for (const av of lista) if (!(chave(av) in rotulos)) rotulos[chave(av)] = rotuloDe(av.id, av.dir);
+    for (const av of lista) if (!(chave(av) in rotulos)) rotulos[chave(av)] = rotuloDe(av.id, av.dir, carro);
     const avisos = lista.filter((av) => rotulos[chave(av)]); // botão sem tecla: nada a mostrar
     this.avisos = avisos;
     const cam = this.camada;
