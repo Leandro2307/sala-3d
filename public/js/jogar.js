@@ -39,7 +39,7 @@ import { LAYOUTS, layoutDoTitulo, ToqueJogo } from './toque-jogo.js';
 import { ControleFisico } from './gamepad-jogo.js';
 import { PadVirtual } from './pad-virtual.js';
 import { TecladoPad } from './teclado-pad.js';
-import { MapaTeclasPainel, dicaTeclado, legendaBotoes, mapaTeclas } from './mapa-teclas.js';
+import { MapaTeclasPainel, dicaTeclado, mapaTeclas } from './mapa-teclas.js';
 import { ModoCarroTela } from './modo-carro.js';
 import { AvisosBotoes } from './avisos-botoes-tela.js';
 import { Ps5Touchpad, temTouchpadHid } from './ps5-touchpad.js';
@@ -1843,22 +1843,17 @@ const toqueJogo = new ToqueJogo({
 controle.onCursorLivre = (livre) => toqueJogo.cursorDoJogo(livre);
 if (isTouch) document.body.classList.add('touch'); // a barra no jeito do celular (style.css body.touch, jogar.html)
 
-const CLASSE_LEGENDA = { b0: 'lg-xis', b1: 'lg-bol', b2: 'lg-qua', b3: 'lg-tri' };
+// Sem a legenda dos botões no canto (desde 2026-11-27, pedido do usuário): as teclas aparecem em cima dos
+// avisos do próprio jogo (avisos-botoes-tela.js). Fica o quadro do modo carro (a pé / no carro).
 function mostrarLegenda(layout) {
   layoutLegenda = layout;
-  const el = $('#jogo-legenda');
   // com controle não serve para nada, e menos coisa por cima da imagem é menos trabalho para mostrá-la
-  el.hidden = !layout || entradaDeAgora() !== 'teclado';
+  const noTeclado = !!layout && entradaDeAgora() === 'teclado';
   // a tecla em cima dos avisos de botão do jogo: só com os ícones do PS5 e jogando no teclado
-  avisosBotoes.ligar(!el.hidden && layout === 'ps5' && opcoesJogo.get('avisos'));
-  if (el.hidden) {
-    modoCarroTela.esconder();
-    return void (el.innerHTML = '');
-  }
+  avisosBotoes.ligar(noTeclado && layout === 'ps5' && opcoesJogo.get('avisos'));
+  if (!noTeclado) return void modoCarroTela.esconder();
   // modo carro: a pé ou no carro, sempre à vista
   modoCarroTela.mostrar(noCarro);
-  el.innerHTML = legendaBotoes(layout, noCarro || mapaTeclas.modoCarro() === 'sempre')
-    .map((b) => `<span class="${b.id === 'b4' ? 'lg-sep' : ''}${b.carro ? ' lg-no-carro' : ''}"><b class="${layout === 'ps5' ? CLASSE_LEGENDA[b.id] || '' : ''}">${esc(b.botao)}</b><kbd>${esc(b.teclas)}</kbd></span>`).join('');
 }
 mapaTeclas.ouvir(() => { if (layoutLegenda) mostrarLegenda(layoutLegenda); });
 for (const ev of ['gamepadconnected', 'gamepaddisconnected']) addEventListener(ev, () => { if (layoutLegenda) mostrarLegenda(layoutLegenda); });

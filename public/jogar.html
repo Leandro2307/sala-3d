@@ -190,6 +190,8 @@
     padding: 8px 14px; border-radius: 999px; background: rgba(18, 10, 34, .86); border: 1px solid rgba(255, 61, 139, .4); color: #f3e9ff; font-size: 13px; pointer-events: none; white-space: nowrap; }
   .en-gira { width: 12px; height: 12px; flex: none; border-radius: 50%; border: 2px solid rgba(255, 255, 255, .25); border-top-color: var(--vc-laranja, #ff8a3d); animation: en-gira .8s linear infinite; }
   @keyframes en-gira { to { transform: rotate(360deg); } }
+  /* sem a legenda dos botões embaixo: o quadro do modo carro desce para o lugar dela */
+  #jogo-modo { bottom: max(8px, env(safe-area-inset-bottom)); }
 </style>
 </head>
 <body>
@@ -198,7 +200,6 @@
 <div id="focus">
   <video id="focus-video" playsinline autoplay muted></video>
   <div id="toque-jogo" hidden></div>
-  <div id="jogo-legenda" hidden aria-hidden="true"></div>
   <div id="jogo-avisos" hidden aria-hidden="true"></div>
   <div id="jogo-modo" hidden aria-hidden="true"></div>
   <div id="jogo-modo-aviso" hidden role="status"></div>
