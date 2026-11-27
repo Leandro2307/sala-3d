@@ -42,7 +42,6 @@ import { TecladoPad } from './teclado-pad.js';
 import { MapaTeclasPainel, dicaTeclado, legendaBotoes, mapaTeclas } from './mapa-teclas.js';
 import { ModoCarroTela } from './modo-carro.js';
 import { TutorialControle } from './tutorial-controle.js';
-import { Treino3D } from './treino-3d.js';
 import { Ps5Touchpad, temTouchpadHid } from './ps5-touchpad.js';
 import { AvisoDoSite } from './aviso-site.js';
 import { isTouch } from './touch.js';
@@ -1004,7 +1003,7 @@ function barrado(key) {
 // e os 2 min só começam quando terminam ou são pulados (o servidor não conta o 'modo' nem o 'vivo')
 function seguraNoPreparo(key, ev) {
   if (!st.lan || meuTesteLan || ev?.t === 'modo' || ev?.t === 'vivo') return false;
-  if (!testeJoga.testando && !tutorial.ativo && !treino.ativo) return false;
+  if (!testeJoga.testando && !tutorial.ativo) return false;
   const t = acharTela(key);
   if (!t) return false;
   const m = maquinaDaTela(t.sh);
@@ -1302,7 +1301,7 @@ function verCaminho(resumo) {
 const memoriaTeste = new MemoriaTeste();
 let pulouTesteEm = 0; // o "pular" do painel: o teste de segundo plano que acabou assim não roda de novo no jogo
 const painelTeste = new PainelTeste({ dentro: () => $('#focus'), onPular: () => { pulouTesteEm = Date.now(); testeJoga.pular(); }, onEvento: (texto, dados) => diagJogo.evento(texto, dados) });
-// onde o teste está (para o treino, a entrada e o aviso sobre a imagem)
+// onde o teste está (para a entrada e o aviso sobre a imagem)
 const PCT_ETAPA = { resposta: 8, direto: 25, turn: 55, imagem: 80, fim: 100 };
 const diagAgora = { etapa: null, texto: '', pct: null };
 let ultimoDiag = null; // o resumo do último teste que terminou ("caminho direto · Turbo da TV")
@@ -1321,15 +1320,10 @@ const testeJoga = new TesteJoga({
   onEvento: (texto, dados) => diagJogo.evento(texto, dados),
 });
 const resumoDoTeste = (r) => `${r.rota === 'turn' ? 'pelo servidor' : 'caminho direto'} · ${MODOS.find((p) => p.id === r.modo)?.nome || 'Turbo'}`;
-// para o treino 3D: { testando, texto, pct } ou { pronto }
-function estadoDiag() {
-  if (testeJoga.testando) return { testando: true, texto: diagAgora.texto, pct: diagAgora.pct };
-  return ultimoDiag ? { testando: false, pronto: ultimoDiag } : null;
-}
-// o painel grande do teste, só com o jogo ligado e o treino fechado (com ele aberto, o treino mostra o andamento)
+// o painel grande do teste, só com o jogo ligado
 let esperandoFundo = false;
 function painelSeTestando() {
-  if (!testeJoga.testando || treino.ativo || !controle.jogo || painelTeste.el) return;
+  if (!testeJoga.testando || !controle.jogo || painelTeste.el) return;
   painelTeste.mostrar(esperandoFundo ? { titulo: 'Finalizando o diagnóstico da conexão', texto: 'Ele começou enquanto você entrava. Falta pouco.' } : undefined);
   if (diagAgora.etapa) painelTeste.progresso({ etapa: diagAgora.etapa, texto: diagAgora.texto });
 }
@@ -1457,8 +1451,8 @@ async function testarConexao(deNovo) {
   if (r) {
     diagJogo.evento(esperou ? 'teste da conexão: vale o de segundo plano' : 'teste da conexão: vale o de hoje', { tetoKbps: r.tetoKbps, codec: r.codec, modo: r.modo });
     ultimoDiag ||= resumoDoTeste(r);
-    // quem esperou vê o resultado por 2 s (no treino, o próprio treino mostra)
-    if (esperou && !treino.ativo) painelTeste.resultado(r, MODOS.find((p) => p.id === r.modo)?.nome || 'Turbo');
+    // quem esperou vê o resultado por 2 s
+    if (esperou) painelTeste.resultado(r, MODOS.find((p) => p.id === r.modo)?.nome || 'Turbo');
   } else {
     Object.assign(diagAgora, { etapa: null, texto: 'Começando…', pct: 2 });
     codecsDoTeste ??= await codecsDaqui(['avc1.640033', 'avc1.4d0033', 'avc1.42e033', 'avc1.42001f'], ['hvc1.1.6.L123.B0']);
@@ -1469,7 +1463,7 @@ async function testarConexao(deNovo) {
     if (jogandoLa !== jl) return null;
     rede0 = await Promise.resolve(rtc?.caminhoPara(dono)).catch(() => null); // o teste vale para este caminho direto
     const rodando = testeJoga.rodar(jl.key, { codecs: codecsDoTeste, padrao: PRESET_TV.id, rapido: 16, tudo: deNovo, toque: false });
-    painelSeTestando(); // (com o treino aberto, aparece quando ele fechar)
+    painelSeTestando();
     r = await rodando;
     painelTeste.fechar();
     if (r.tetoParcialKbps) memoriaTeste.guardarParcial(quem, r.tetoParcialKbps);
@@ -1477,7 +1471,7 @@ async function testarConexao(deNovo) {
     memoriaTeste.guardar(quem, r, rede0 || await Promise.resolve(rtc?.caminhoPara(dono)).catch(() => null));
     ultimoDiag = resumoDoTeste(r);
     if (jogandoLa !== jl) return null;
-    if (!treino.ativo) painelTeste.resultado(r, MODOS.find((p) => p.id === r.modo)?.nome || 'Turbo');
+    painelTeste.resultado(r, MODOS.find((p) => p.id === r.modo)?.nome || 'Turbo');
   }
   if (r.trocarRota && rtc?.usarCaminho(dono, 'turn')) {
     const foi = await esperarRota(dono, true);
@@ -1802,55 +1796,8 @@ const mapaPainel = new MapaTeclasPainel({
     if (controle.jogo) toast('Teclas salvas neste navegador. Clique na imagem para voltar a jogar.', 'success', 4000);
   },
 });
-// O treino dos controles do GTA 6 (treino-3d.js): um mini mapa 3D antes de jogar no PS5
-const TREINO_CHAVE = 'sala3d-jogar-treino';
-// os 2 min grátis ainda não começaram nesta máquina (é o "Começar" do treino que libera)
-function noTesteGratis() {
-  const sh = st.alvo?.sh;
-  if (!st.lan || !sh) return false;
-  const m = maquinaDaTela(sh);
-  return lanLivre(m) && !idsDaVez(m).includes(st.selfId) && !semTeste() && !meuTesteLan;
-}
-const treino = new Treino3D({
-  dentro: () => $('#focus'),
-  pad: padVirtual,
-  entrada: () => entradaDeAgora(),
-  toque: isTouch,
-  toqueRaiz: $('#toque-jogo'),
-  // no carro do treino o W do teclado acelera, como no jogo (modo carro de mapa-teclas.js)
-  carro: (sim) => { if (mapaTeclas.carroTroca() || !sim) tecladoPad.trocarCarro(sim); },
-  diag: estadoDiag,
-  gratis: noTesteGratis,
-  onEvento: (texto, dados) => diagJogo.evento(texto, dados),
-  onFechou: (comecou, onde) => {
-    diagJogo.evento(comecou ? 'treino 3D: começou a jogar' : 'treino 3D fechado no meio', onde);
-    if (comecou) {
-      try { localStorage.setItem(TREINO_CHAVE, '1'); } catch { /* sem armazenamento */ }
-      if (controle.jogo) toast(noTesteGratis() ? 'Valendo! Seus 2 minutos grátis começam no primeiro comando. Bom jogo!' : 'Valendo! Bom jogo!', 'success', 5000);
-    }
-    painelSeTestando();
-  },
-});
-// entrou no Modo jogo pelo botão (não na volta depois de uma queda): o treino abre no teste grátis e na primeira vez
-// neste aparelho; depois, só pelas Opções ("Treino dos controles")
-let pedirTreino = false;
-function abrirTreinoTalvez(key) {
-  const pediu = pedirTreino;
-  pedirTreino = false;
-  if (!pediu || treino.ativo || !ehPs5(acharTela(key)?.sh)) return false;
-  let viu = false;
-  try { viu = localStorage.getItem(TREINO_CHAVE) === '1'; } catch { /* sem armazenamento */ }
-  const gratis = noTesteGratis();
-  if (!gratis && viu) return false;
-  setTimeout(() => { if (controle.jogo?.key === key && !treino.ativo) treino.abrir(gratis ? 'teste grátis' : 'primeira vez'); }, 250);
-  return true;
-}
 controle.paraPad = (ev) => {
   if (mapaPainel.aberto) return true;
-  if (treino.ativo) {
-    if (!treino.tecla(ev)) tecladoPad.evento(ev);
-    return true;
-  }
   if (!tutorial.ativo) return tecladoPad.evento(ev);
   if (!tutorial.tecla(ev)) tecladoPad.evento(ev);
   return true;
@@ -1865,8 +1812,8 @@ const toqueJogo = new ToqueJogo({
   pad: padVirtual,
   toast,
   onEngasgo: () => marcarEngasgo(),
-  onTutorial: () => treino.abrir('pedido'),
-  onLayout: () => {},
+  onTutorial: () => tutorial.abrir('toque'),
+  onLayout: () => { if (toqueJogo.key && toqueJogo.layoutId === 'ps5') tutorial.abrir('toque'); },
   volume: {
     get: () => ajustes.jogo,
     set: (v) => {
@@ -1931,6 +1878,22 @@ $('#jogo-touchpad').addEventListener('click', async (e) => {
   atualizarBotaoTouchpad();
 });
 
+// sem controle de verdade numa tela de PS5: o tutorial do teclado. true: abriu (ou vai abrir)
+function tutorialDoPs5(key) {
+  if (isTouch ? toqueJogo.layoutId !== 'ps5' || toqueJogo.key !== key : !ehPs5(acharTela(key)?.sh)) {
+    tutorial.fechar(false);
+    return false;
+  }
+  if (isTouch) {
+    if (!tutorial.ativo) setTimeout(() => { if (controle.jogo?.key === key) tutorial.abrir('toque'); }, 900);
+    return true;
+  }
+  const temControle = () => fisico.pad() || touchpad.ligado;
+  if (tutorial.ativo || temControle()) return false;
+  setTimeout(() => { if (controle.jogo?.key === key && !temControle()) tutorial.abrir('pc'); }, 900);
+  return true;
+}
+
 // ------------------------------------------------------------------ ligar e desligar o modo jogo
 controle.onJogo = (v, key) => {
   const sh = v ? acharTela(key)?.sh : null;
@@ -1945,18 +1908,16 @@ controle.onJogo = (v, key) => {
   else touchpad.desligar();
   // no celular o teclado e a legenda não valem: quem joga é o controle de toque (ou um de verdade)
   const virtual = !isTouch && layout && LAYOUTS[layout]?.virtual ? layout : null;
-  // o treino 3D no lugar do tutorial antigo (tutorial-controle.js fica para a sala)
-  const abriuTreino = v ? abrirTreinoTalvez(key) : false;
+  if (isTouch && v) tutorialDoPs5(key);
   if (virtual) {
     padVirtual.acordar();
     tecladoPad.ligar(virtual);
     const dica = dicaTeclado(virtual);
-    if (!abriuTreino && dica) toast(`Teclado e mouse viram o controle. ${dica}`, 'info', 12000);
+    if (!tutorialDoPs5(key) && dica) toast(`Teclado e mouse viram o controle. ${dica}`, 'info', 12000);
   } else tecladoPad.desligar();
   mostrarLegenda(virtual);
   $('#jogo-tutorial').hidden = layout !== 'ps5';
   if (!v) {
-    treino.fechar(false);
     tutorial.fechar(false);
     mapaPainel.fechar();
     padVirtual.desligar(); // depois do controle: o último estado é tudo solto
@@ -2028,7 +1989,6 @@ function alternarJogo() {
   if (!jogavel() || !video.srcObject) return void toast('A imagem ainda não chegou.', 'warn');
   if (soVerLan()) return void verOuAlugar();
   if (!deixarJogar()) return;
-  pedirTreino = true;
   entrarNoJogo(true);
   if (isTouch) return; // o controle de toque avisa com que botões entrou
   if (ehPs5(st.alvo.sh) && entradaDeAgora() === 'teclado') {
@@ -2136,14 +2096,12 @@ $('#jogo-mapear').addEventListener('click', (e) => {
   e.currentTarget.blur();
   $('#jogo-op-pop').hidden = true;
   tutorial.fechar(true);
-  treino.fechar(false);
   mapaPainel.abrir(layoutDa(st.alvo?.sh) === 'switch' ? 'switch' : 'ps5');
 });
 $('#jogo-tutorial').addEventListener('click', (e) => {
   e.currentTarget.blur();
   $('#jogo-op-pop').hidden = true;
-  if (!controle.jogo) return void toast('O treino abre com o Modo jogo ligado.', 'info', 4000);
-  treino.abrir('pedido');
+  tutorial.abrir('pc');
 });
 
 volumes();
