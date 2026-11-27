@@ -17,6 +17,8 @@ const crypto = require('crypto');
 const express = require('express');
 
 const PRODUTO_PADRAO = 'prod_Ve7zvIChkAKvic';
+// "Jogar agora" (começa no minuto seguinte, sem esperar a hora cheia) tem o seu preço: R$ 15 a hora (2026-11-26)
+const PRODUTO_AGORA_PADRAO = 'prod_VhePW44U1zjLbZ';
 const HORA = 3600_000;
 const FUSO = -3; // horário de Brasília (sem horário de verão desde 2019)
 const DIAS_A_FRENTE = 14;
@@ -52,6 +54,7 @@ const horaDe = (ms) => new Date(ms + FUSO * HORA).getUTCHours();
 module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTentar, bloqueado, configDaSala, jogosDaSala, aoMudar }) {
   const CHAVE = process.env.STRIPE_KEY || '';
   const PRODUTO = process.env.STRIPE_PRODUTO || PRODUTO_PADRAO;
+  const PRODUTO_AGORA = process.env.STRIPE_PRODUTO_AGORA || PRODUTO_AGORA_PADRAO;
   const SEGREDO = process.env.LAN_SEGREDO || process.env.PASSE_SECRET
     || (CHAVE ? crypto.createHash('sha256').update(`sala3d-lan|${CHAVE}`).digest('hex') : crypto.randomBytes(32).toString('hex'));
 
@@ -76,12 +79,15 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
     return j;
   }
 
-  async function lerPreco() {
-    if (preco) return preco;
-    const prod = await stripe('GET', `products/${encodeURIComponent(PRODUTO)}?expand[]=default_price`);
+  // o preço padrão de um produto da Stripe (o da agenda ou o do "jogar agora"), guardado depois da 1ª vez
+  const precos = new Map();
+  async function lerPreco(produto = PRODUTO) {
+    if (precos.has(produto)) return precos.get(produto);
+    const prod = await stripe('GET', `products/${encodeURIComponent(produto)}?expand[]=default_price`);
     const p = prod.default_price;
     if (!p?.id || p.type !== 'one_time') throw new Error('O produto da Stripe precisa de um preço padrão de pagamento único');
-    preco = { id: p.id, valor: p.unit_amount, moeda: p.currency, nome: prod.name };
+    const preco = { id: p.id, valor: p.unit_amount, moeda: p.currency, nome: prod.name };
+    precos.set(produto, preco);
     return preco;
   }
 
@@ -170,6 +176,42 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
     return { conta: r.conta, inicio: h, fim, jogo: r.jogo || null, jogoNome: r.jogoNome || null, semDublagem: Number(r.dublagem) === 0 && r.dublagem !== null };
   }
 
+  // "Jogar agora": a vez começa no minuto seguinte (sempre 1 min a mais) e vai até a mesma hora e minuto, n horas
+  // depois (23:32 → 23:33 às 00:33). Usa as horas cheias da agenda: a de agora inteira e a última com o fim no
+  // meio (fimCedo, como o liberado pelo dono). O resto da última hora fica livre para outro "jogar agora".
+  // A máquina tem que estar livre agora (ou no "até alguém novo", que dá lugar à hora paga).
+  const inicioAgora = (agora) => Math.floor(agora / 60_000) * 60_000 + 60_000; // 23:32:40 → 23:33
+  function planoAgora(sala, maquina, conta, cfg, n, agora = Date.now()) {
+    const atual = jogadorAgora(sala, maquina, agora);
+    if (atual && !atual.aberta) return { erro: atual.conta === conta ? 'A vez agora já é sua.' : `O ${MAQUINAS[maquina]} está com ${atual.conta} agora. Escolha um horário na agenda.` };
+    const inicio = inicioAgora(agora);
+    const fim = inicio + n * HORA;
+    const slots = [];
+    for (let s = Math.floor(agora / HORA) * HORA; s < fim; s += HORA) slots.push(s);
+    for (const s of slots) {
+      const h = horaDe(s);
+      if (h < cfg.abre || h >= cfg.fecha) return { bloqueio: s, erro: `A sala aluga das ${cfg.abre}h às ${cfg.fecha}h: ${n} hora${n > 1 ? 's' : ''} a partir de agora passa do horário.` };
+      const tem = daHora(sala, maquina, s, agora);
+      if (tem && !(tem.conta === conta && tem.status === 'pendente')) return { bloqueio: s, erro: `A hora das ${h}h já é de ${tem.conta === conta ? 'você' : 'outra pessoa'}: dá para jogar agora só até ela.` };
+    }
+    return { inicio, fim, slots };
+  }
+  // quantas horas dá para jogar agora (0: não dá) e até quando a máquina está livre (livreAte: o começo da
+  // hora que já é de alguém ou em que a sala fecha; null: livre além das MAX_HORAS de uma compra)
+  function maxAgora(sala, maquina, conta, cfg, agora = Date.now()) {
+    let max = 0;
+    let livreAte = null;
+    for (let n = 1; n <= MAX_HORAS; n++) {
+      const p = planoAgora(sala, maquina, conta, cfg, n, agora);
+      if (p.erro) {
+        livreAte = p.bloqueio ?? null;
+        break;
+      }
+      max = n;
+    }
+    return { max, livreAte, dia24: cfg.abre <= 0 && cfg.fecha >= 24 };
+  }
+
   async function guardar(r) {
     try {
       await banco.salvarReserva(r);
@@ -203,9 +245,13 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
     if (s.payment_status === 'paid' || s.payment_status === 'no_payment_required') {
       // cancelada com expira 0: o dono encerrou a vez (ver encerrar), não volta
       const novas = lista.filter((r) => r.status === 'pendente' || (r.status === 'cancelada' && r.expira));
-      const tarde = novas.filter((r) => tardeDemais(r, agora));
-      await mudarStatus(novas.filter((r) => !tarde.includes(r)), 'paga');
+      // "jogar agora" pago depois da virada da hora: a hora que já passou só sai (o tempo conta do pagamento)
+      const passou = novas.filter((r) => r.agoraHoras && r.inicio + HORA <= agora);
+      const tarde = novas.filter((r) => !passou.includes(r) && tardeDemais(r, agora));
+      await mudarStatus(novas.filter((r) => !tarde.includes(r) && !passou.includes(r)), 'paga');
+      await mudarStatus(passou, 'cancelada');
       await mudarStatus(tarde, 'devolver');
+      await acertarFimAgora(novas.filter((r) => r.agoraHoras && r.status === 'paga'), agora);
       for (const r of tarde) console.warn(`[lan] DEVOLVER ${r.conta}: pagou ${diaDe(r.inicio)} ${horaDe(r.inicio)}h tarde demais (${sessao.slice(0, 24)})`);
     } else if (s.status === 'expired') await mudarStatus(pendentes, 'cancelada');
     // Pix gerado e ainda não pago: segura a hora só até o código vencer. O prazo conta de quando o
@@ -221,6 +267,19 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
       if (vencidas.length) await mudarStatus(vencidas, 'cancelada');
     }
     return lista;
+  }
+
+  // "Jogar agora" pago: as n horas contam do minuto seguinte ao pagamento, até o fim da última hora segurada
+  async function acertarFimAgora(lista, agora) {
+    if (!lista.length || lista.some((r) => r.fimAcertado)) return;
+    const ultima = lista.reduce((a, b) => (b.inicio > a.inicio ? b : a));
+    const fim = Math.min(inicioAgora(agora) + ultima.agoraHoras * HORA, ultima.inicio + HORA);
+    for (const r of lista) r.fimAcertado = true;
+    if (fim < ultima.inicio + HORA) Object.assign(ultima, { fimCedo: fim, expira: fim });
+    else delete ultima.fimCedo;
+    await guardar(ultima);
+    vigiarFimCedo(ultima);
+    console.log(`[lan] ${ultima.sala} ${MAQUINAS[maquinaDe(ultima.maquina)]} (${ultima.conta}): jogar agora pago, até ${new Date(fim).toISOString()}`);
   }
 
   let conferindo = false;
@@ -262,6 +321,7 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
       for (const r of await banco.lerReservas(Date.now() - 2 * 86400_000)) {
         // teste curto do dono (liberar com minutos): o fim fica no "expira", antes do fim da hora
         if (r.sessao === 'cortesia' && r.status === 'paga' && r.expira > r.inicio && r.expira < r.inicio + HORA) r.fimCedo = r.expira;
+        if (!r.fimCedo) delete r.fimCedo; // do banco: null quando a vez vai até o fim da hora
         reservas.set(r.id, r);
         // já acabou enquanto o servidor estava fora: vira cancelada (o timer de liberar não existe mais)
         if (r.fimCedo && r.fimCedo <= Date.now()) {
@@ -373,7 +433,12 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
       }
       let p = null;
       try { p = CHAVE ? await lerPreco() : null; } catch { /* mostra sem o preço */ }
-      res.json({ ok: true, ligada: true, sala, maquina, maquinas: MAQUINAS, dia, hoje, ultimo, horas, maxHoras: MAX_HORAS, preco: p && { valor: p.valor, moeda: p.moeda, nome: p.nome }, pagar: !!CHAVE, agora: jogadorAgora(sala, maquina) });
+      // jogar agora: quantas horas cabem, até quando está livre, e o preço dele (outro produto da Stripe)
+      const lim = maxAgora(sala, maquina, conta, cfg, agora);
+      let pAgora = null;
+      try { pAgora = CHAVE && lim.max ? await lerPreco(PRODUTO_AGORA) : null; } catch { /* mostra sem o preço */ }
+      const jogarAgora = lim.max ? { inicio: inicioAgora(agora), max: lim.max, livreAte: lim.livreAte, dia24: lim.dia24, preco: pAgora && { valor: pAgora.valor, moeda: pAgora.moeda } } : null;
+      res.json({ ok: true, ligada: true, sala, maquina, maquinas: MAQUINAS, dia, hoje, ultimo, horas, maxHoras: MAX_HORAS, jogarAgora, preco: p && { valor: p.valor, moeda: p.moeda, nome: p.nome }, pagar: !!CHAVE, agora: jogadorAgora(sala, maquina) });
     });
 
     // os jogos do PC da casa, para escolher ao alugar o PC
@@ -390,7 +455,7 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
       const lista = [...reservas.values()]
         .filter((r) => r.conta === conta && r.inicio + HORA > agora && (segura(r, agora) || r.status === 'devolver'))
         .sort((a, b) => a.inicio - b.inicio)
-        .map((r) => ({ sala: r.sala, maquina: MAQUINAS[maquinaDe(r.maquina)], jogo: r.jogoNome || null, inicio: r.inicio, dia: diaDe(r.inicio), hora: horaDe(r.inicio), status: r.status }));
+        .map((r) => ({ sala: r.sala, maquina: MAQUINAS[maquinaDe(r.maquina)], jogo: r.jogoNome || null, inicio: r.inicio, dia: diaDe(r.inicio), hora: horaDe(r.inicio), status: r.status, fimCedo: r.fimCedo || null }));
       res.json({ ok: true, conta, lista });
     });
 
@@ -413,11 +478,16 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
         jogo = jogos.find((j) => j.id === String(b.jogo ?? '')) || null;
         if (jogos.length && !jogo) return res.json({ ok: false, erro: 'Escolha o jogo que você vai jogar.' });
       }
-      const inicios = [...new Set(Array.isArray(b.inicios) ? b.inicios : [])].map(Number);
-      if (!inicios.length) return res.json({ ok: false, erro: 'Escolha pelo menos um horário.' });
-      if (inicios.length > MAX_HORAS) return res.json({ ok: false, erro: `No máximo ${MAX_HORAS} horas por vez.` });
       const agora = Date.now();
-      for (const inicio of inicios) {
+      // "Jogar agora" (b.agora, b.horas): começa no minuto seguinte, sem esperar a hora cheia (planoAgora)
+      const nAgora = b.agora === true ? Math.floor(Number(b.horas)) : 0;
+      if (b.agora === true && !(nAgora >= 1 && nAgora <= MAX_HORAS)) return res.json({ ok: false, erro: `De 1 a ${MAX_HORAS} horas.` });
+      const plano = nAgora ? planoAgora(sala, maquina, conta, cfg, nAgora, agora) : null;
+      if (plano?.erro) return res.json({ ok: false, erro: plano.erro });
+      const inicios = plano ? plano.slots : [...new Set(Array.isArray(b.inicios) ? b.inicios : [])].map(Number);
+      if (!inicios.length) return res.json({ ok: false, erro: 'Escolha pelo menos um horário.' });
+      if (!plano && inicios.length > MAX_HORAS) return res.json({ ok: false, erro: `No máximo ${MAX_HORAS} horas por vez.` });
+      for (const inicio of plano ? [] : inicios) {
         const h = horaDe(inicio);
         const valido = Number.isInteger(inicio) && inicio % HORA === 0 && h >= cfg.abre && h < cfg.fecha
           && inicio + HORA > agora && inicio < agora + (DIAS_A_FRENTE + 1) * 86400_000;
@@ -454,17 +524,22 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
       const lista = inicios.map((inicio) => ({
         id: crypto.randomBytes(12).toString('hex'), sala, maquina, conta, inicio, status: 'pendente', sessao: null, expira: agora + ESPERA_CHECKOUT, criada: agora,
         jogo: jogo?.id || null, jogoNome: jogo?.nome || null, dublagem,
+        ...(plano ? { agoraHoras: nAgora } : {}),
       }));
+      // jogar agora: a última hora acaba no meio (o fim de verdade é acertado no pagamento, acertarFimAgora)
+      if (plano && plano.fim < inicios.at(-1) + HORA) lista.at(-1).fimCedo = plano.fim;
       for (const r of lista) reservas.set(r.id, r);
       try {
-        const p = await lerPreco();
+        const p = await lerPreco(plano ? PRODUTO_AGORA : PRODUTO);
         const origem = origemDe(req);
         const volta = `${origem}/lan?sala=${encodeURIComponent(sala)}`;
-        const quando = inicios.sort((a, c) => a - c).map((i) => `${diaDe(i).split('-').reverse().slice(0, 2).join('/')} ${horaDe(i)}h`).join(', ');
+        const hm = (ms) => new Date(ms + FUSO * HORA).toISOString().slice(11, 16);
+        const quando = plano ? `${diaDe(plano.inicio).split('-').reverse().slice(0, 2).join('/')} ${hm(plano.inicio)}–${hm(plano.fim)} (agora)`
+          : inicios.sort((a, c) => a - c).map((i) => `${diaDe(i).split('-').reverse().slice(0, 2).join('/')} ${horaDe(i)}h`).join(', ');
         const s = await stripe('POST', 'checkout/sessions', {
           mode: 'payment',
           'line_items[0][price]': p.id,
-          'line_items[0][quantity]': String(lista.length),
+          'line_items[0][quantity]': String(nAgora || lista.length),
           success_url: `${volta}&pago={CHECKOUT_SESSION_ID}`,
           cancel_url: `${volta}&cancelado=1`,
           expires_at: String(Math.floor((agora + ESPERA_CHECKOUT) / 1000)),
@@ -501,7 +576,11 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
         if (!lista) return res.json({ ok: false });
         // algumas horas podem ter ficado e outras não (ver tardeDemais): o que vale é o que a pessoa ganhou
         const status = ['paga', 'devolver', 'pendente'].find((x) => lista.some((r) => r.status === x)) || lista[0].status;
-        res.json({ ok: true, status, pixAte: lista.find((r) => r.status === 'pendente')?.pixAte || null, devolver: lista.some((r) => r.status === 'devolver'), horas: lista.filter((r) => r.status === status).map((r) => ({ sala: r.sala, maquina: MAQUINAS[maquinaDe(r.maquina)], jogo: r.jogoNome || null, dia: diaDe(r.inicio), hora: horaDe(r.inicio) })) });
+        // jogar agora: até quando (o fim no meio da última hora, ou o fim dela)
+        const pagas = lista.filter((r) => r.status === 'paga');
+        const ultima = pagas.length ? pagas.reduce((a, c) => (c.inicio > a.inicio ? c : a)) : null;
+        const agoraAte = lista.some((r) => r.agoraHoras) && ultima ? ultima.fimCedo || ultima.inicio + HORA : null;
+        res.json({ ok: true, status, agoraAte, pixAte: lista.find((r) => r.status === 'pendente')?.pixAte || null, devolver: lista.some((r) => r.status === 'devolver'), horas: lista.filter((r) => r.status === status).map((r) => ({ sala: r.sala, maquina: MAQUINAS[maquinaDe(r.maquina)], jogo: r.jogoNome || null, dia: diaDe(r.inicio), hora: horaDe(r.inicio) })) });
       } catch (err) {
         console.warn('[lan] confirmar', err.message);
         res.json({ ok: false, erro: 'Não deu para falar com a Stripe agora. O pagamento é conferido de novo em 1 minuto.' });

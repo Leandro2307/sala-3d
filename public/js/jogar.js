@@ -26,7 +26,7 @@
 // tela do jogo que saiu e voltou põe a pessoa no jogo sozinha, ainda em tela cheia (tentarVoltar). Segurar
 // Create + Options por 2 s sai do modo jogo, como na TV.
 import { RTC } from './rtc.js';
-import { precisaOferecer, oferecerAluguel, proximoLivre } from './oferta-aluguel.js';
+import { precisaOferecer, oferecerAluguel } from './oferta-aluguel.js';
 import { Controle } from './controle.js';
 import { TurboRecebe, TTL_MS, vidaDoCanal, LISO_PCT, LISO_MAX } from './turbo.js';
 import { TurboAuto, TurboVolta, foraDoModo } from './turbo-auto.js';
@@ -812,8 +812,8 @@ function soVerLan(sh = st.alvo?.sh) {
   return !v.aberta || semTeste();
 }
 const vezDeQuem = () => (st.alvo ? st.lan?.[maquinaDaTela(st.alvo.sh)]?.conta || 'outra pessoa' : 'outra pessoa');
-// Eu assistia a vez de outra pessoa e ela acabou com a máquina livre: sai da tela cheia e abre o aluguel, já
-// com a hora de agora (ou a próxima livre) escolhida. Com a página escondida, fica para quando voltar a ela.
+// Eu assistia a vez de outra pessoa e ela acabou com a máquina livre: sai da tela cheia e abre o aluguel no
+// "Jogar agora" (começa no minuto seguinte). Com a página escondida, fica para quando voltar a ela.
 let fimVezPendente = null;
 async function acabouVezAssistindo(m, conta) {
   if (document.visibilityState !== 'visible') return void (fimVezPendente = { m, conta });
@@ -822,9 +822,8 @@ async function acabouVezAssistindo(m, conta) {
   const nome = { pc: 'PC', ps5: 'PS5' }[m];
   const temTeste = !st.lan?.semTeste?.includes(st.selfId);
   toast(`A vez de ${conta || 'quem jogava'} no ${nome} acabou: o ${nome} está livre.${temTeste ? ' Use seus 2 min grátis ou alugue para jogar.' : ' Alugue para jogar agora.'}`, 'info', 10000);
-  const prox = await proximoLivre(SALA, m, { jaComecou: true }).catch(() => null);
   if (!st.lan || !lanLivre(m) || !$('#lan-modal').hidden) return; // alguém pegou nesse meio-tempo, ou já está aberto
-  abrirAluguel({ maquina: m, ...(prox ? { dia: prox.dia, inicio: prox.inicio } : {}) });
+  abrirAluguel({ maquina: m, agora: true }); // o "Jogar agora" do aluguel: começa no minuto seguinte
 }
 document.addEventListener('visibilitychange', () => {
   const p = fimVezPendente;
@@ -1001,7 +1000,7 @@ function deixarJogar() {
 // pedido: { maquina, dia, inicio } — a página do aluguel já abre nessa máquina, com essa hora escolhida
 function abrirAluguel(pedido = null) {
   if (document.pointerLockElement) document.exitPointerLock();
-  const extra = pedido?.maquina ? `&maquina=${pedido.maquina}${pedido.dia ? `&dia=${pedido.dia}&hora=${pedido.inicio}` : ''}` : '';
+  const extra = pedido?.maquina ? `&maquina=${pedido.maquina}${pedido.agora ? '&agora=1' : pedido.dia ? `&dia=${pedido.dia}&hora=${pedido.inicio}` : ''}` : '';
   $('#lan-frame').src = `/lan?sala=${encodeURIComponent(SALA)}&embed=1${extra}`;
   $('#lan-modal').hidden = false;
 }

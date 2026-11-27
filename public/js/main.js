@@ -8,7 +8,7 @@ import { CatalogoJogos } from './catalogo-jogos.js';
 import { PcJogos } from './pc-jogos.js';
 import { Ps5Nativo, temPs5Nativo } from './ps5-nativo.js';
 import { Dublagem } from './voz-universal.js';
-import { precisaOferecer, oferecerAluguel, proximoLivre } from './oferta-aluguel.js';
+import { precisaOferecer, oferecerAluguel } from './oferta-aluguel.js';
 import { PcDireto, temPcDireto } from './pc-direto.js';
 import { Diretas } from './diretas.js';
 import { Ps5Touchpad, temTouchpadHid } from './ps5-touchpad.js';
@@ -5139,8 +5139,8 @@ document.addEventListener('fullscreenchange', () => {
   else if (controle.jogoNo && !isTouch) document.body.classList.add('jogo-pc');
   if ($('#focus-jogo').dataset.ver) updateFocusCtrl(); // o "Tela cheia" de quem só assiste troca o texto
 });
-// Eu assistia a vez de outra pessoa e ela acabou com a máquina livre: sai da tela cheia e abre o aluguel, já
-// com a hora de agora (ou a próxima livre) escolhida. Com a página escondida, fica para quando voltar a ela.
+// Eu assistia a vez de outra pessoa e ela acabou com a máquina livre: sai da tela cheia e abre o aluguel no
+// "Jogar agora" (começa no minuto seguinte). Com a página escondida, fica para quando voltar a ela.
 let fimVezPendente = null;
 async function acabouVezAssistindo(m, conta) {
   if (document.visibilityState !== 'visible') return void (fimVezPendente = { m, conta });
@@ -5149,9 +5149,8 @@ async function acabouVezAssistindo(m, conta) {
   const nome = { pc: 'PC', ps5: 'PS5' }[m];
   const temTeste = !state.lan?.semTeste?.includes(state.selfId);
   toast(`A vez de ${conta || 'quem jogava'} no ${nome} acabou: o ${nome} está livre.${temTeste ? ' Use seus 2 min grátis ou alugue para jogar.' : ' Alugue para jogar agora.'}`, 'info', 10000);
-  const prox = await proximoLivre(state.room || '', m, { jaComecou: true }).catch(() => null);
   if (!state.lan || !lanLivre(m) || !$('#lan-modal').hidden) return; // alguém pegou nesse meio-tempo, ou já está aberto
-  abrirAluguel({ maquina: m, ...(prox ? { dia: prox.dia, inicio: prox.inicio } : {}) });
+  abrirAluguel({ maquina: m, agora: true }); // o "Jogar agora" do aluguel: começa no minuto seguinte
 }
 document.addEventListener('visibilitychange', () => {
   const p = fimVezPendente;
@@ -6382,7 +6381,7 @@ function mostrarLan() {
 // pedido: { maquina, dia, inicio } — a página do aluguel já abre nessa máquina, com essa hora escolhida
 function abrirAluguel(pedido = null) {
   if (document.pointerLockElement) document.exitPointerLock();
-  const extra = pedido?.maquina ? `&maquina=${pedido.maquina}${pedido.dia ? `&dia=${pedido.dia}&hora=${pedido.inicio}` : ''}` : '';
+  const extra = pedido?.maquina ? `&maquina=${pedido.maquina}${pedido.agora ? '&agora=1' : pedido.dia ? `&dia=${pedido.dia}&hora=${pedido.inicio}` : ''}` : '';
   $('#lan-frame').src = `/lan?sala=${encodeURIComponent(state.room || '')}&embed=1${extra}`;
   $('#lan-modal').hidden = false;
 }

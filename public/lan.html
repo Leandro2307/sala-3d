@@ -26,6 +26,17 @@
   h2 { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; margin: 0 0 10px; }
   h2 .passo { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 800; }
   .sub { color: var(--muted); margin: 2px 0 0; font-size: 13px; }
+  /* jogar agora: começa no minuto seguinte, sem esperar a hora cheia */
+  .ja { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin: 0 0 12px; padding: 12px; border: 1px solid var(--accent); border-radius: 14px; background: var(--accent-soft); }
+  .ja[hidden], .ja-ou[hidden] { display: none; }
+  .ja.destaque { animation: ja-pisca 1.2s ease 2; }
+  @keyframes ja-pisca { 50% { box-shadow: 0 0 0 4px var(--accent-soft); } }
+  .ja-txt { flex: 1 1 160px; display: grid; gap: 2px; }
+  .ja-txt small { color: var(--muted); font-size: 12.5px; }
+  .ja-horas { display: flex; align-items: center; gap: 4px; }
+  .ja-horas b { min-width: 34px; text-align: center; }
+  .ja-horas button { font-size: 18px; padding: 2px 12px; }
+  .ja-ou { margin: 0 0 8px; }
   /* PS5: a pergunta da dublagem, logo antes de pagar */
   label.dublagem { display: flex; align-items: flex-start; gap: 10px; margin: 12px 0 0; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: 12px; color: var(--text); font-size: 13.5px; cursor: pointer; }
   label.dublagem[hidden] { display: none; }
@@ -189,6 +200,16 @@
       <h2 style="margin:0"><span class="passo" id="passo-agenda">2</span>Dia e horas <span id="maquina-nome"></span></h2>
       <span class="agora" id="agora"></span>
     </div>
+    <div class="ja" id="ja" hidden>
+      <div class="ja-txt"><b>Jogar agora</b><small id="ja-quando"></small></div>
+      <div class="ja-horas">
+        <button type="button" class="link" id="ja-menos" aria-label="Menos uma hora">−</button>
+        <b id="ja-n">1 h</b>
+        <button type="button" class="link" id="ja-mais" aria-label="Mais uma hora">+</button>
+      </div>
+      <button type="button" class="primary" id="ja-pagar">Pagar e jogar</button>
+    </div>
+    <p class="dica ja-ou" id="ja-ou" hidden>Ou escolha um horário na agenda:</p>
     <div class="dias" id="dias"></div>
     <p class="dica" id="dica-horas">Clique na <b>primeira</b> e na <b>última</b> hora para pegar o intervalo (até 8 horas). Horário de Brasília.</p>
     <div class="horas" id="horas"></div>
@@ -365,7 +386,30 @@
     const a = dados.agora;
     $('#agora').textContent = a ? `Jogando agora: ${a.conta}` : '';
   }
+  // "Jogar agora": livre agora, começa no minuto seguinte e vai até a mesma hora e minuto, n horas depois
+  let jaN = 1;
+  const hm = (ms) => new Date(ms).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' });
+  function desenharJa() {
+    const j = dados?.jogarAgora;
+    $('#ja').hidden = !j;
+    $('#ja-ou').hidden = !j;
+    if (!j) return;
+    jaN = Math.min(Math.max(1, jaN), j.max);
+    $('#ja-n').textContent = `${jaN} h`;
+    $('#ja-menos').disabled = jaN <= 1;
+    $('#ja-mais').disabled = jaN >= j.max;
+    // até quando está livre hoje (a próxima reserva ou o fechamento), ou o máximo de uma compra
+    const limite = j.livreAte ? `livre até as ${hm(j.livreAte)}` : `até ${j.max} h seguidas${j.dia24 ? ' · aberto 24 h' : ''}`;
+    $('#ja-quando').textContent = `Das ${hm(j.inicio)} às ${hm(j.inicio + jaN * 3600_000)} · começa 1 min depois de pagar · ${limite}`;
+    const p = j.preco || dados.preco;
+    const faltaJogo = maquina === 'pc' && jogos.length && !jogo;
+    $('#ja-pagar').textContent = !conta ? 'Entre para pagar' : faltaJogo ? 'Escolha o jogo' : p ? `Pagar ${dinheiro(p.valor * jaN, p.moeda)} e jogar` : 'Pagar e jogar';
+    $('#ja-pagar').disabled = !!faltaJogo;
+  }
+  $('#ja-menos').addEventListener('click', () => { jaN--; desenharJa(); });
+  $('#ja-mais').addEventListener('click', () => { jaN++; desenharJa(); });
   function resumo() {
+    desenharJa();
     const n = escolhidas.size;
     const p = dados?.preco;
     $('#resumo').textContent = n ? `${n} hora${n > 1 ? 's' : ''}${p ? ` · ${dinheiro(p.valor * n, p.moeda)}` : ''}` : p ? `${dinheiro(p.valor, p.moeda)} por hora` : '';
@@ -456,7 +500,7 @@
     if (sairPorLogin(r)) return;
     if (!r.ok) return;
     $('#minhas-lista').innerHTML = r.lista.length
-      ? r.lista.map((m) => `<li><span><b>${m.maquina}</b>${m.jogo ? ` · ${esc(m.jogo)}` : ''} · ${dataBr(m.dia)} · ${hh(m.hora)}–${hh((m.hora + 1) % 24)}${m.sala !== sala ? ` · sala ${m.sala}` : ''}</span><span class="tag ${m.status === 'paga' ? '' : 'esperando'}">${m.status === 'paga' ? 'pago' : m.status === 'devolver' ? 'pago tarde: será devolvido' : 'aguardando pagamento'}</span></li>`).join('')
+      ? r.lista.map((m) => `<li><span><b>${m.maquina}</b>${m.jogo ? ` · ${esc(m.jogo)}` : ''} · ${dataBr(m.dia)} · ${hh(m.hora)}–${m.fimCedo ? hm(m.fimCedo) : hh((m.hora + 1) % 24)}${m.sala !== sala ? ` · sala ${m.sala}` : ''}</span><span class="tag ${m.status === 'paga' ? '' : 'esperando'}">${m.status === 'paga' ? 'pago' : m.status === 'devolver' ? 'pago tarde: será devolvido' : 'aguardando pagamento'}</span></li>`).join('')
       : '<li class="vazia">Nenhuma reserva ainda. Escolha a máquina e o horário acima.</li>';
   }
 
@@ -532,20 +576,22 @@
   $('#horas').addEventListener('pointerleave', () => {
     for (const x of document.querySelectorAll('.hora.previa')) x.classList.remove('previa', 'invalida');
   });
-  $('#pagar').addEventListener('click', async () => {
+  $('#pagar').addEventListener('click', () => pagar({ inicios: [...escolhidas] }, $('#pagar')));
+  $('#ja-pagar').addEventListener('click', () => pagar({ agora: true, horas: jaN }, $('#ja-pagar')));
+  async function pagar(oQue, botao) {
     if (!conta) {
       $('#form-login').elements.nome.focus();
       return aviso('Entre ou crie sua conta para reservar.', 'info');
     }
-    $('#pagar').disabled = true;
+    botao.disabled = true;
     // dentro da sala o checkout da Stripe abre numa aba nova (ele não abre dentro de uma janela da
     // página); a aba é aberta já no toque, senão o navegador bloqueia
     const aba = embed ? window.open('', '_blank') : null;
-    const r = await post('/lan/reservar', { token: conta.token, sala, maquina, jogo: maquina === 'pc' ? jogo : null, inicios: [...escolhidas], ...(maquina === 'ps5' ? { dublagem: $('#dublagem-on').checked } : {}) });
+    const r = await post('/lan/reservar', { token: conta.token, sala, maquina, jogo: maquina === 'pc' ? jogo : null, ...oQue, ...(maquina === 'ps5' ? { dublagem: $('#dublagem-on').checked } : {}) });
+    botao.disabled = false;
     // entrou só com o nome (teste grátis): cria a senha antes de pagar
     if (r.erro === 'senha') {
       aba?.close();
-      $('#pagar').disabled = false;
       mostrarFormSenha(true);
       return aviso('Para alugar, crie uma senha para a sua conta (assim só você usa as horas pagas).', 'info');
     }
@@ -559,13 +605,16 @@
     escolhidas.clear();
     aviso('O pagamento abriu numa aba nova. Depois de pagar, o horário aparece aqui em "Minhas reservas".', 'info');
     carregar();
-  });
+  }
 
   // ------------------------------------------------ volta do checkout
   async function confirmar(sessao, tentativa = 0) {
     if (!tentativa) aviso('Conferindo o pagamento…', 'info');
     const r = await post('/lan/confirmar', { sessao });
-    if (r.ok && r.status === 'paga') {
+    if (r.ok && r.status === 'paga' && r.agoraAte) {
+      const h0 = r.horas[0] || {};
+      aviso(`Pagamento confirmado! ${h0.maquina || ''}${h0.jogo ? ` (${h0.jogo})` : ''}: pode jogar agora, até as ${hm(r.agoraAte)}. Entre na sala com a sua conta${h0.jogo ? ': o jogo já vai estar abrindo' : ''}. Pode fechar esta aba.`, 'ok');
+    } else if (r.ok && r.status === 'paga') {
       const quando = r.horas.map((h) => `${dataBr(h.dia)} às ${hh(h.hora)}`).join(', ');
       const h0 = r.horas[0] || {};
       aviso(`Pagamento confirmado! ${h0.maquina || ''}${h0.jogo ? ` (${h0.jogo})` : ''}: ${quando}. Na hora, entre na sala com a sua conta${h0.jogo ? ': o jogo já vai estar abrindo' : ' para jogar'}. Pode fechar esta aba.${r.devolver ? ' Parte das horas já tinha sido ocupada quando o pagamento caiu: o valor delas será devolvido.' : ''}`, r.devolver ? 'info' : 'ok');
@@ -599,6 +648,11 @@
   }
   if (maquina) escolherMaquina(maquina);
   else carregar();
+  // veio do fim da vez de quem assistia (jogar.js/main.js acabouVezAssistindo): o "Jogar agora" em destaque
+  if (params.get('agora') === '1') {
+    const ver = () => { if ($('#ja').hidden) return; $('#ja').scrollIntoView({ block: 'center' }); $('#ja').classList.add('destaque'); };
+    setTimeout(ver, 800);
+  }
   setInterval(carregar, 60_000);
   // voltou para esta janela depois de pagar na outra aba: atualiza na hora
   window.addEventListener('focus', () => carregar());
