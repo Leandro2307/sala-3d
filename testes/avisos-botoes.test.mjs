@@ -45,3 +45,35 @@ test('o rastreio só mostra depois de 2 análises e some depois de 2 sem', () =>
   assert.equal(r.passo([]).length, 1);
   assert.equal(r.passo([]).length, 0);
 });
+
+// o disco meio transparente do The Last of Us (~165 em vez de 235): o branco fixo em 170 o perdia
+test('acha o □ no disco cinza-claro', () => {
+  const QUAD = [[-0.46, -0.46, 0.46, -0.46], [0.46, -0.46, 0.46, 0.46], [0.46, 0.46, -0.46, 0.46], [-0.46, 0.46, -0.46, -0.46]];
+  const img = imagem(320, 180, 100, 90, 14, QUAD, 0.12);
+  for (let i = 0; i < img.data.length; i += 4) if (img.data[i] === 235) img.data.fill(165, i, i + 3);
+  assert.equal(detectar(img)[0]?.simbolo, 'quadrado');
+});
+
+// o anel vazado do canto (The Last of Us, "Largar"): anel cinza fino, o □ em contorno com um quadrado cheio
+// menor no meio, tudo sobre fundo escuro
+function anelQuadrado(W, H, cx, cy, r) {
+  const data = new Uint8ClampedArray(W * H * 4);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const u = (x + 0.5 - cx) / r, w = (y + 0.5 - cy) / r, d = Math.hypot(u, w), m = Math.max(Math.abs(u), Math.abs(w));
+    let v = 25;
+    if (d >= 0.88 && d <= 1) v = 115;
+    else if (m >= 0.45 && m <= 0.56) v = 115;
+    else if (m <= 0.28) v = 90;
+    data.set([v, v, v, 255], (y * W + x) * 4);
+  }
+  return { width: W, height: H, data };
+}
+test('acha o □ no anel vazado, e anel sem símbolo não é aviso', () => {
+  for (const r of [12, 14, 20]) assert.equal(detectar(anelQuadrado(320, 180, 160, 90, r))[0]?.simbolo, 'quadrado', `raio ${r}`);
+  const vazio = anelQuadrado(320, 180, 160, 90, 14);
+  for (let y = 70; y < 110; y++) for (let x = 140; x < 180; x++) {
+    const d = Math.hypot(x + 0.5 - 160, y + 0.5 - 90) / 14;
+    if (d < 0.88) vazio.data.fill(25, (y * 320 + x) * 4, (y * 320 + x) * 4 + 3);
+  }
+  assert.deepEqual(detectar(vazio), []);
+});

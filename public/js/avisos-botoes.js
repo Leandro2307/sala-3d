@@ -68,7 +68,7 @@ function desenhado(f) {
     let c = 0;
     for (let b = 0; b < 4; b++) for (let a = 0; a < 4; a++) {
       const x = ((i + (a + 0.5) / 4) / N * 2 - 1) * LADO, y = ((j + (b + 0.5) / 4) / N * 2 - 1) * LADO;
-      const d = f.anel != null ? Math.abs(Math.hypot(x, y) - f.anel) : Math.min(...f.segs.map((s) => distSeg(x, y, ...s)));
+      const d = f.pred ? (f.pred(x, y) ? 0 : 1) : f.anel != null ? Math.abs(Math.hypot(x, y) - f.anel) : Math.min(...f.segs.map((s) => distSeg(x, y, ...s)));
       if (d <= f.e) c++;
     }
     v[j * N + i] = c / 16;
@@ -92,17 +92,29 @@ const MEDIDOS = {
   L: ['730000000027300010000002000143000000000287100022000297100067000297100179000297100179000298321156000289884111000156663000200011110002730000000026'],
   R: ['400000000016000111100001000588862000001798896100001793498100001798896000000798992000001794793000000782397100000341144100100000000002610000000027'],
 };
+// os do anel vazado: os desenhados (os medidos são do disco branco do GTA) e o □ do The Last of Us (medido no
+// print de "Largar": o contorno de 0,45 a 0,57 do raio e um quadrado cheio menor, até 0,28, no meio)
+const dentroTri = (x, y, k) => y <= 0.5 * k && y >= -0.6 * k + (Math.abs(x) / (0.68 * k)) * 1.1 * k;
+const FORMAS_ANEL = {
+  ...FORMAS,
+  quadrado2: { nome: 'quadrado', segs: linhas([[-0.55, -0.55], [0.55, -0.55], [0.55, 0.55], [-0.55, 0.55]], true), e: 0.1 },
+  quadrado3: { nome: 'quadrado', pred: (x, y) => { const m = Math.max(Math.abs(x), Math.abs(y)); return m <= 0.28 || (m >= 0.45 && m <= 0.57); }, e: 0 },
+  triangulo2: { nome: 'triangulo', pred: (x, y) => dentroTri(x, y, 1), e: 0 },
+};
+const MODELOS_ANEL = Object.entries(FORMAS_ANEL).map(([nome, f]) => ({ nome: f.nome || nome, v: normalizar(desenhado(f)) }));
 const deTexto = (t) => Float32Array.from(t, (c) => +c / 9);
 const MODELOS = [
   ...Object.entries(FORMAS).map(([nome, f]) => ({ nome, v: normalizar(desenhado(f)) })),
   ...Object.entries(MEDIDOS).flatMap(([nome, lista]) => lista.map((t) => ({ nome, v: normalizar(deTexto(t)) }))),
 ];
 
-// claro e sem cor: o branco do disco (o vídeo comprimido o deixa entre 200 e 250)
+// claro e sem cor: o branco do disco (o vídeo comprimido o deixa entre 200 e 250 no GTA; o The Last of Us
+// põe o disco meio transparente, ~180, e no vídeo ao vivo ele caía abaixo de 170 e o aviso sumia)
+const BRANCO_MIN = 120;
 const claro = (d, i) => {
   const r = d[i], g = d[i + 1], b = d[i + 2];
   const mx = r > g ? (r > b ? r : b) : (g > b ? g : b), mn = r < g ? (r < b ? r : b) : (g < b ? g : b);
-  return mn > 170 && mx - mn < 50;
+  return mn > BRANCO_MIN && mx - mn < 50;
 };
 const lum = (d, i) => (d[i] * 2 + d[i + 1] * 5 + d[i + 2]) / 8;
 
@@ -173,12 +185,18 @@ function normalizarTudo(v) {
 }
 function gradePlaca(img, x0, y0, w, h) {
   const { width: W, data: d } = img;
+  // o branco da placa: o claro de verdade dela (85% dos pixels abaixo), não 235 fixo — no vídeo mais escuro
+  // (o The Last of Us, a TV em modo limitado) a placa toda parecia tinta
+  const ls = [];
+  for (let y = y0; y < y0 + h; y += 2) for (let x = x0; x < x0 + w; x += 2) ls.push(lum(d, (y * W + x) * 4));
+  ls.sort((a, b) => a - b);
+  const branco = Math.min(235, Math.max(150, ls[Math.floor(ls.length * 0.85)] ?? 235)), faixa = branco * 0.745;
   const v = new Float32Array(N * N);
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
     let s = 0, n = 0;
     for (let b = 0; b < 3; b++) for (let a = 0; a < 3; a++) {
       const x = Math.min(x0 + w - 1, Math.round(x0 + ((i + (a + 0.5) / 3) / N) * w - 0.5)), y = Math.min(y0 + h - 1, Math.round(y0 + ((j + (b + 0.5) / 3) / N) * h - 0.5));
-      s += Math.max(0, Math.min(1, (235 - lum(d, (y * W + x) * 4)) / 175));
+      s += Math.max(0, Math.min(1, (branco - lum(d, (y * W + x) * 4)) / faixa));
       n++;
     }
     v[j * N + i] = s / n;
@@ -268,7 +286,7 @@ export function detectar(img, { minScore = MIN_SCORE, minMargem = MIN_MARGEM } =
   const vis = new Uint8Array(W * H);
   for (let p = 0, i = 0; p < W * H; p++, i += 4) {
     const r = d[i], g = d[i + 1], b = d[i + 2];
-    if (r <= 170 || g <= 170 || b <= 170) continue;
+    if (r <= BRANCO_MIN || g <= BRANCO_MIN || b <= BRANCO_MIN) continue;
     const mx = r > g ? (r > b ? r : b) : (g > b ? g : b), mn = r < g ? (r < b ? r : b) : (g < b ? g : b);
     if (mx - mn < 50) vis[p] = 1;
   }
@@ -367,7 +385,101 @@ export function detectar(img, { minScore = MIN_SCORE, minMargem = MIN_MARGEM } =
     const dir = melhor.nome === 'L' || melhor.nome === 'R' ? direcao(img, cx, cy, r) : null;
     achados.push({ cx, cy, rp: r, simbolo: melhor.nome, id: SIMBOLOS[melhor.nome], ...(dir ? { dir } : {}), x: cx / W, y: cy / H, r: r / H, score: +melhor.c.toFixed(3), margem: +(melhor.c - seg).toFixed(3) });
   }
+  aneis(img, achados, minScore, minMargem);
   return achados.map(({ cx, cy, rp, ...a }) => a);
+}
+
+// O outro jeito de ícone (The Last of Us e outros, na lista de ações do canto): um anel fino cinza ou branco,
+// vazado, com o símbolo também em traço claro sobre o fundo escuro (o □ de "Largar"). Acha os anéis (manchas
+// acesas, redondas e ocas) e compara a grade de claridade de dentro (o anel apagado) com os mesmos símbolos.
+const ACESO_MIN = 72; // o anel apagado vem ~115 no print e ~80 depois de reduzido
+function aneis(img, achados, minScore, minMargem) {
+  const { width: W, height: H, data: d } = img;
+  const vis = new Uint8Array(W * H);
+  for (let p = 0, i = 0; p < W * H; p++, i += 4) {
+    const r = d[i], g = d[i + 1], b = d[i + 2];
+    if (r < ACESO_MIN || g < ACESO_MIN || b < ACESO_MIN) continue;
+    const mx = r > g ? (r > b ? r : b) : (g > b ? g : b), mn = r < g ? (r < b ? r : b) : (g < b ? g : b);
+    if (mx - mn < 40) vis[p] = 1;
+  }
+  const L = (x, y) => {
+    x = Math.round(x); y = Math.round(y);
+    return x < 0 || y < 0 || x >= W || y >= H ? null : lum(d, (y * W + x) * 4);
+  };
+  const mediana = (cx, cy, rr, n = 32) => {
+    const v = [];
+    for (let k = 0; k < n; k++) {
+      const a = (k / n) * Math.PI * 2, l = L(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr);
+      if (l != null) v.push(l);
+    }
+    v.sort((a, b) => a - b);
+    return v.length ? v[v.length >> 1] : null;
+  };
+  const pilha = new Int32Array(W * H);
+  for (let s = 0; s < W * H; s++) {
+    if (vis[s] !== 1) continue;
+    let topo = 0, cnt = 0, x0 = W, y0 = H, x1 = -1, y1 = -1;
+    pilha[topo++] = s;
+    vis[s] = 2;
+    while (topo) {
+      const p = pilha[--topo];
+      cnt++;
+      const x = p % W, y = (p / W) | 0;
+      if (x < x0) x0 = x;
+      if (x > x1) x1 = x;
+      if (y < y0) y0 = y;
+      if (y > y1) y1 = y;
+      if (x > 0 && vis[p - 1] === 1) { vis[p - 1] = 2; pilha[topo++] = p - 1; }
+      if (x < W - 1 && vis[p + 1] === 1) { vis[p + 1] = 2; pilha[topo++] = p + 1; }
+      if (y > 0 && vis[p - W] === 1) { vis[p - W] = 2; pilha[topo++] = p - W; }
+      if (y < H - 1 && vis[p + W] === 1) { vis[p + W] = 2; pilha[topo++] = p + W; }
+    }
+    const w = x1 - x0 + 1, h = y1 - y0 + 1;
+    if (w < 14 || h < 14 || w > MAX_D || h > MAX_D || Math.abs(w - h) > Math.max(w, h) * 0.15) continue;
+    // oco: só o anel (às vezes com o símbolo encostado), longe de um disco cheio
+    if (cnt / (w * h) > 0.5) continue;
+    const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, r = (w + h) / 4;
+    if (achados.some((o) => Math.hypot(o.cx - cx, o.cy - cy) < Math.max(r, o.rp))) continue; // já achado como disco ou placa
+    // o anel aceso por inteiro na borda, e o fundo escuro dentro (entre o anel e o símbolo) e fora
+    let acesos = 0, tot = 0;
+    for (let k = 0; k < 40; k++) {
+      const a = (k / 40) * Math.PI * 2;
+      let m = 0;
+      for (const f of [0.86, 0.93, 1]) m = Math.max(m, L(cx + Math.cos(a) * r * f, cy + Math.sin(a) * r * f) ?? 0);
+      tot++;
+      if (m >= ACESO_MIN) acesos++;
+    }
+    if (acesos / tot < 0.85) continue;
+    const anelL = mediana(cx, cy, r * 0.95), fora = mediana(cx, cy, r * 1.35), vao = mediana(cx, cy, r * 0.76);
+    if (anelL == null || fora == null || vao == null || anelL - fora < 45 || anelL - vao < 35) continue;
+    // a grade de claridade (0 = fundo, 1 = o cinza do anel); o próprio anel (de 0,84 r para fora) não entra
+    const fundo = (fora + vao) / 2, faixa = Math.max(30, anelL - fundo);
+    const v = new Float32Array(N * N);
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+      let sm = 0;
+      for (let b = 0; b < 3; b++) for (let a = 0; a < 3; a++) {
+        const u = ((i + (a + 0.5) / 3) / N * 2 - 1) * LADO, z = ((j + (b + 0.5) / 3) / N * 2 - 1) * LADO;
+        if (Math.hypot(u, z) > 0.84) continue;
+        sm += Math.max(0, Math.min(1, ((L(cx + u * r, cy + z * r) ?? fundo) - fundo) / faixa));
+      }
+      v[j * N + i] = sm / 9;
+    }
+    const t = tinta(v);
+    if (t < 0.08 || t > 0.6) continue;
+    normalizar(v);
+    const por = {};
+    for (const m of MODELOS_ANEL) {
+      let c = 0;
+      for (let k = 0; k < N * N; k++) c += v[k] * m.v[k];
+      if (!(c <= por[m.nome])) por[m.nome] = c;
+    }
+    const ord = Object.entries(por).sort((a, b) => b[1] - a[1]);
+    const melhor = { nome: ord[0][0], c: ord[0][1] }, seg = ord[1][1];
+    if (melhor.nome === 'nada' || melhor.c < minScore || melhor.c - seg < minMargem) continue;
+    if (melhor.nome === 'bola' && melhor.c < 0.9) continue;
+    if (globalThis.__avisosAnel) globalThis.__avisosAnel(melhor, cx, cy, r);
+    achados.push({ cx, cy, rp: r, simbolo: melhor.nome, id: SIMBOLOS[melhor.nome], x: cx / W, y: cy / H, r: r / H, score: +melhor.c.toFixed(3), margem: +(melhor.c - seg).toFixed(3) });
+  }
 }
 
 // O que está na tela de verdade: um aviso só aparece depois de visto em 2 análises seguidas (no mesmo
