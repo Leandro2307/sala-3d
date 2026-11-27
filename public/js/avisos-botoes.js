@@ -262,7 +262,12 @@ const MEDIDOS_PLACA = {
     '866655555556400000000000401333002200403887336700404746658800404877525800404989304700604868204801814625404705953302312429992000000179799877778998',
   ],
   L2: ['983000001389710000000028100000001003068000599810068001964940068000101940068000028700068221288320069995999960012220211110000000000000000000000000'],
-  R2: ['983000001399710000000028200000001003099980089940095486683870095396010770099970005930093780069630093095699991020011111110000000000000000000000000'],
+  R2: [
+    '983000001399710000000028200000001003099980089940095486683870095396010770099970005930093780069630093095699991020011111110000000000000000000000000',
+    // a placa de "Zoom" (de cima redondo, dentro de um anel cinza como a do R1 de "Escanear")
+    '863000000168710000000015534420024312389896388862387388352683388796110772388783026720386386389873265166488884100000000000100000000000544444444444',
+    '794100000288940000000019812210013204559995379942567477674792468787111671569984015921567595169732556257689993501001112212500000000001500000000002',
+  ],
 };
 const MODELOS_PLACA = Object.entries(MEDIDOS_PLACA).flatMap(([nome, lista]) => lista.map((t) => ({ nome, v: normalizarTudo(deTexto(t)) })));
 function normalizarTudo(v) {
@@ -442,7 +447,10 @@ function discos(img, achados, passada, pilha, minScore, minMargem) {
       const p = placa(img, x0, y0, w, h);
       if (p && p.c >= MIN_PLACA && p.c - p.seg >= 0.08) {
         if (globalThis.__avisosPlaca) globalThis.__avisosPlaca(p, x0, y0, w, h);
-        if (!achados.some((o) => Math.hypot(o.cx - cx, o.cy - cy) < r)) {
+        // a placa dentro do anel também passa por disco (e lá o R2 parecia R3): fica a de maior parecença
+        const igual = achados.findIndex((o) => Math.hypot(o.cx - cx, o.cy - cy) < Math.max(r, o.rp));
+        if (igual >= 0 && achados[igual].score < p.c) achados.splice(igual, 1);
+        if (!achados.some((o) => Math.hypot(o.cx - cx, o.cy - cy) < Math.max(r, o.rp))) {
           achados.push({ cx, cy, rp: r, simbolo: p.nome, id: SIMBOLOS[p.nome], x: cx / W, y: cy / H, r: r / H, score: +p.c.toFixed(3), margem: +(p.c - p.seg).toFixed(3) });
         }
         continue;
@@ -482,7 +490,7 @@ function discos(img, achados, passada, pilha, minScore, minMargem) {
       if (claros < 3) continue;
     }
     // o mesmo disco achado inteiro e em pedaços: fica o de maior correlação
-    const igual = achados.findIndex((o) => Math.hypot(o.cx - cx, o.cy - cy) < r);
+    const igual = achados.findIndex((o) => Math.hypot(o.cx - cx, o.cy - cy) < Math.max(r, o.rp));
     if (igual >= 0) { if (achados[igual].score >= melhor.c) continue; achados.splice(igual, 1); }
     const dir = melhor.nome === 'L' || melhor.nome === 'R' ? direcao(img, cx, cy, r) : null;
     achados.push({ cx, cy, rp: r, simbolo: melhor.nome, id: SIMBOLOS[melhor.nome], ...(dir ? { dir } : {}), x: cx / W, y: cy / H, r: r / H, score: +melhor.c.toFixed(3), margem: +(melhor.c - seg).toFixed(3) });
