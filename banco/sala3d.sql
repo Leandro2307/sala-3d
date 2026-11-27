@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS sala3d_reservas (
   maquina   VARCHAR(8)   NOT NULL DEFAULT 'pc', -- pc ou ps5: cada um tem a sua agenda
   jogo      VARCHAR(120) NULL,     -- PC: o jogo escolhido (id do atalho no PC da casa), abre sozinho no horário
   jogo_nome VARCHAR(60)  NULL,
+  dublagem  TINYINT      NULL,
   inicio    BIGINT       NOT NULL,   -- ms desde 1970 (UTC), começo da hora reservada
   status    VARCHAR(12)  NOT NULL,   -- pendente (no checkout da Stripe), paga, cancelada, devolver (Pix pago tarde)
   sessao    VARCHAR(255) NULL,       -- id da sessão de checkout da Stripe

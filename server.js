@@ -867,7 +867,8 @@ function estadoLan(room) {
     const atual = vezLan(room, m);
     const ids = atual ? [...room.users.values()].filter((u) => u.conta === atual.conta).map((u) => u.id) : [];
     // aberta: liberado até alguém novo entrar (sem fim)
-    e[m] = { conta: atual?.conta ?? null, inicio: atual?.inicio ?? null, fim: atual?.fim ?? null, preparando: !!atual?.preparando, aberta: !!atual?.aberta, ids };
+    // semDublagem: quem alugou desmarcou a dublagem (o PC da casa manda só o som do jogo para ela)
+    e[m] = { conta: atual?.conta ?? null, inicio: atual?.inicio ?? null, fim: atual?.fim ?? null, preparando: !!atual?.preparando, aberta: !!atual?.aberta, semDublagem: !!atual?.semDublagem, ids };
   }
   // teste grátis (máquina sem ninguém alugado): quem está com os 2 min correndo (id -> fim) e quem já
   // usou o seu (pela conta ou pelo IP) e não joga mais de graça
@@ -901,8 +902,8 @@ function avisarLan(room, forcar = false) {
 // Lan house no PC: na virada da vez, o PC da casa (o hub, ver 'hub-jogos') abre o jogo que a pessoa
 // escolheu ao reservar; acabou a vez e ninguém reservou a seguinte, fecha o que tinha aberto. Sem o
 // hub na sala, tenta de novo a cada 5 s (vigiarLan).
-// O mesmo com o PS5: na vez de alguém, o PC da casa liga o PS5 direto e põe na sala; acabou a vez e
-// ninguém pegou a seguinte, tira. O PC entra na sala na vez mesmo sem jogo escolhido.
+// O mesmo com o PS5: na vez de alguém, o PC da casa liga o PS5 direto e põe na sala; acabou a vez, ele
+// continua na sala (só sai se o dono tirar). O PC entra na sala na vez mesmo sem jogo escolhido.
 async function vigiarJogoLan(room) {
   if (!ioLan || !room.config?.lanhouse?.ligada) return;
   room.lanMaquinas ??= {};
@@ -917,7 +918,9 @@ async function vigiarJogoLan(room) {
     hubs ??= (await ioLan.in(room.id).fetchSockets()).filter((s) => s.data.tela && s.data.hub);
     if (!hubs.length) return;
     if (chave === st.chave && hubs.some((s) => st.hubs.includes(s.id))) continue;
-    const acao = a ? 'abrir' : st.aberto ? 'fechar' : null;
+    // O PS5 fica na tela quando a vez acaba (pedido de 2026-11-26): quem estiver na sala continua vendo, e o
+    // próximo (teste grátis ou aluguel) já entra jogando. Só o PC fecha o jogo que abriu para a vez.
+    const acao = a ? 'abrir' : st.aberto && m !== 'ps5' ? 'fechar' : null;
     st.chave = chave;
     st.hubs = hubs.map((s) => s.id);
     if (!acao) continue;

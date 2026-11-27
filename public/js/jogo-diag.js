@@ -13,7 +13,8 @@ import { contarCulpa, culpaDe } from './culpa.js';
 const BOM = 50; // abaixo disso (quadros por segundo) a jogatina já engasga
 const SEGUIDAS = 3; // amostras ruins em seguida (6 s) antes de avisar
 const ENTRE_AVISOS = 45_000;
-const GUARDA = 900; // amostras guardadas (30 min a cada 2 s)
+const GUARDA = 900; // amostras por parte do relatório (30 min a cada 2 s)
+const EVENTOS_PARTE = 3000; // eventos por parte (os tremores do jogo dão ~6 por minuto)
 const ENVIO_MS = 60_000; // de quanto em quanto tempo o relatório da sessão vai para o servidor
 // A sonda: durante a sessão, cada aparelho mede a ida e volta até o servidor (/ping-jogo) a cada SONDA_MS.
 // O caminho até o servidor não é o mesmo que liga os dois aparelhos, mas começa pela mesma rede de casa
@@ -92,9 +93,15 @@ export class DiagJogo {
   comecar(lado, info = {}) {
     if (this.sessao?.lado === lado) return;
     if (this.sessao) this.parar(false);
+    const id = idNovo();
     this.sessao = {
       lado,
-      id: idNovo(),
+      id,
+      // A sessão longa vai em partes de 30 min (virarParte), cada uma guardada no servidor com o seu id
+      // (<sessão>-p2, -p3…): antes só os últimos 30 min ficavam (2026-11-26, Davizinks jogou 2 h e o
+      // relatório só tinha o fim). Cada envio leva só a parte de agora, então não cresce com a sessão.
+      idSessao: id,
+      parte: 1,
       inicio: new Date().toISOString(),
       ambiente: { ...ambiente(info.gl), ...info.extra, antes: this.historico.filter((h) => Date.now() - Date.parse(h.quando) < 20 * 60_000).slice(-20) },
       eventos: [],
@@ -126,7 +133,7 @@ export class DiagJogo {
     this.enviar();
     this.ultimo = this.relatorio();
     this.sessao = null;
-    if (oferecer && s.amostras.length >= 2) {
+    if (oferecer && (s.amostras.length >= 2 || s.parte > 1)) {
       const m = mediaDe(s.amostras.map((a) => a.fpsFinal));
       const juntos = s.quemJoga.size ? ' (com o que o aparelho de quem jogou mediu)' : '';
       this.toast(`Modo jogo encerrado${m != null ? ` — média de ${Math.round(m)} qps` : ''}. O relatório foi salvo no servidor${juntos}.`, 'info', 15000, null, { rotulo: 'Baixar relatório', fazer: () => this.baixar() });
@@ -236,7 +243,23 @@ export class DiagJogo {
     const e = { quando: new Date().toISOString(), texto, ...(dados ? { dados } : {}) };
     console.info('[modo-jogo]', texto, dados ?? '');
     this.sessao?.eventos.push(e);
-    if (this.sessao && this.sessao.eventos.length > 300) this.sessao.eventos.shift();
+    if (this.sessao && this.sessao.eventos.length > EVENTOS_PARTE) this.sessao.eventos.shift();
+  }
+
+  // A parte de agora encheu (GUARDA amostras): vai inteira para o servidor e a próxima começa vazia, com
+  // o mesmo começo da sessão e o id seguinte. Os relatórios de cada parte se juntam no relatorios.js.
+  virarParte() {
+    const s = this.sessao;
+    if (!s || s.amostras.length < GUARDA) return;
+    s.enviadoEm = 0;
+    this.enviar();
+    s.parte++;
+    s.id = `${s.idSessao}-p${s.parte}`;
+    s.inicioParte = new Date().toISOString();
+    s.amostras = [];
+    s.eventos = [];
+    for (const q of s.quemJoga.values()) q.amostras = [];
+    this.evento('relatório: parte nova', { parte: s.parte });
   }
 
   // Quadros que chegam de verdade na tela (o <video> chama a cada quadro mostrado) e o ritmo deles
@@ -367,7 +390,7 @@ export class DiagJogo {
     if (ant && resumo.codificador && ant !== resumo.codificador) this.evento('codificador trocou', { de: ant, para: resumo.codificador, enviado: `${resumo.largura}x${resumo.altura}`, captura: resumo.capturaRes });
     resumo.sonda = this.tirarSonda(); // vai também para quem joga (culpa.js)
     s.amostras.push({ ...resumo, sala, trilha: s.amostras.length % 15 === 0 ? cru.trilha : undefined, cru: s.amostras.length % 15 === 0 ? cru : undefined });
-    if (s.amostras.length > GUARDA) s.amostras.shift();
+    this.virarParte();
     console.log(`[modo-jogo] envio: captura ${resumo.captura} qps (${resumo.capturaRes}) → codificado ${resumo.codificado} → enviado ${resumo.enviado} qps · ${resumo.largura}x${resumo.altura} · ${resumo.kbps} kbps (alvo ${resumo.alvoKbps}, teto ${resumo.tetoKbps}) · ${resumo.codMs} ms/quadro · ${resumo.codificador}${resumo.placa ? ' (placa)' : ''} · limite ${resumo.limite} ${JSON.stringify(resumo.limitePct)} · rtt ${resumo.rttMs} ms · perda lá ${resumo.perdaLa}% · fila ${resumo.filaMs} ms · ${resumo.caminho}${resumo.imagemBaixa ? ' · IMAGEM BAIXA' : ''}${resumo.motivo ? ` · MOTIVO: ${resumo.motivo}` : ''}`, { resumo, sala });
     this.julgar(resumo, 'compartilha');
     return resumo;
@@ -483,10 +506,10 @@ export class DiagJogo {
     resumo.sonda = this.tirarSonda();
     // de quem é a culpa desta amostra (o selo mostra) e a conta da sessão
     // (as 2 primeiras amostras, 4 s, são o jogo entrando: não contam)
-    resumo.culpa = s.amostras.length < 2 ? null : culpaDe(resumo, la, CELULAR ? 'seu celular' : 'seu PC');
+    resumo.culpa = s.parte === 1 && s.amostras.length < 2 ? null : culpaDe(resumo, la, CELULAR ? 'seu celular' : 'seu PC');
     s.culpas = contarCulpa(s.culpas || {}, resumo.culpa);
     s.amostras.push({ ...resumo, sala, cru: s.amostras.length % 15 === 0 ? cru : undefined });
-    if (s.amostras.length > GUARDA) s.amostras.shift();
+    this.virarParte();
     console.log(`[modo-jogo] chegada: recebido ${resumo.recebido} → decodificado ${resumo.decodificado} → na tela ${resumo.naTela} qps · ${resumo.largura}x${resumo.altura} · ${resumo.kbps} kbps · decodifica ${resumo.decMs} ms (${resumo.decodificador}${resumo.placa ? ', placa' : ''}) · buffer ${resumo.bufferMs} ms (som ${resumo.somBufferMs} ms) · controle ${resumo.controleRttMs} ms · atraso total ~${resumo.atrasoMs} ms · perdidos ${resumo.perdidos} · congelou ${resumo.congelou} (${resumo.congeladoMs} ms) · rtt ${resumo.rttMs} ms · ${resumo.caminho}${la ? ` · lá: captura ${la.captura}, enviado ${la.enviado}, limite ${la.limite}` : ' · sem notícia de lá'}${resumo.motivo ? ` · MOTIVO: ${resumo.motivo}` : ''}`, { resumo, sala });
     this.julgar(resumo, 'joga');
     return resumo;
@@ -523,7 +546,7 @@ export class DiagJogo {
     if (Array.isArray(r.engasgos) && r.engasgos.length) this.evento('quem joga marcou engasgo', { nome, quando: r.engasgos.slice(0, 10) });
     if (amb && typeof amb === 'object') q.ambiente = amb;
     q.amostras.push({ ...r, chegou: Date.now() });
-    if (q.amostras.length > GUARDA) q.amostras.shift();
+    if (q.amostras.length > GUARDA * 2) q.amostras.shift(); // a parte vira pelas amostras daqui (virarParte)
   }
 
   // várias amostras ruins em seguida (poucos quadros ou a imagem em migalhas): avisa (com o
@@ -562,6 +585,10 @@ export class DiagJogo {
       lado: s.lado,
       inicio: s.inicio,
       fim: new Date().toISOString(),
+      // a parte deste relatório na sessão (virarParte): a 1ª começa no início da sessão
+      sessao: s.idSessao,
+      parte: s.parte,
+      inicioParte: s.inicioParte || s.inicio,
       resumo: { ...resumoDe(s.amostras), culpas: s.culpas || null },
       ambiente: s.ambiente,
       // relógio do servidor − o daqui (ms), medido com ida e volta ao mandar o relatório: some à hora dos

@@ -40,7 +40,9 @@ async function main() {
   for (const it of lista) {
     const quando = String(it.inicio || it.criado || '').slice(0, 16).replace(/[T:]/g, '-');
     const quem = String(it.nome || 'sem-nome').replace(/[^\p{L}\p{N}_-]+/gu, '_').slice(0, 30);
-    const arq = path.join(dir, `${quando}_${it.lado}_${quem}_${it.id.slice(0, 8)}.json`);
+    // a sessão longa vem em partes de 30 min (jogo-diag.js virarParte): <sessão>-p2, -p3…
+    const parte = Number(String(it.id).match(/-p(\d+)$/)?.[1]) || 1;
+    const arq = path.join(dir, `${quando}_${it.lado}_${quem}_${it.id.slice(0, 8)}${parte > 1 ? `_p${parte}` : ''}.json`);
     const mudou = new Date(it.mudou).getTime();
     const st = fs.existsSync(arq) ? fs.statSync(arq) : null;
     // o relógio do aparelho que mandou − o do servidor (s): a hora dos eventos dele menos isso = a do servidor.
@@ -63,6 +65,51 @@ async function main() {
     console.log(`${st && st.mtimeMs >= mudou ? ' ' : '*'} ${quando}  ${it.lado.padEnd(11)} ${String(it.nome || '-').padEnd(16)} sala ${it.sala || '-'}  ${extras}`);
   }
   console.log(`\n${lista.length} relatórios no servidor, ${novos} baixados agora em ${dir}`);
+  juntarPartes(dir);
+}
+
+// As partes de uma sessão (…_<id>.json, …_<id>_p2.json…) viram um arquivo só, …_<id>_completo.json, com as
+// amostras e os eventos em ordem e o resumo de cada parte em "partes". Refeito quando chega parte nova.
+function juntarPartes(dir) {
+  const grupos = new Map();
+  for (const f of fs.readdirSync(dir)) {
+    const m = f.match(/^(.+_[0-9a-f]{8})(?:_p(\d+))?\.json$/i);
+    if (!m) continue;
+    if (!grupos.has(m[1])) grupos.set(m[1], []);
+    grupos.get(m[1]).push({ f, parte: Number(m[2]) || 1 });
+  }
+  for (const [base, partes] of grupos) {
+    if (partes.length < 2) continue;
+    partes.sort((a, b) => a.parte - b.parte);
+    const destino = path.join(dir, `${base}_completo.json`);
+    const maisNova = Math.max(...partes.map((p) => fs.statSync(path.join(dir, p.f)).mtimeMs));
+    if (fs.existsSync(destino) && fs.statSync(destino).mtimeMs >= maisNova) continue;
+    const rels = partes.map((p) => JSON.parse(fs.readFileSync(path.join(dir, p.f), 'utf8')));
+    const ultimo = rels.at(-1);
+    const quemJoga = new Map();
+    for (const r of rels) {
+      for (const q of r.quemJoga || []) {
+        const j = quemJoga.get(q.id) || { ...q, amostras: [] };
+        j.amostras.push(...(q.amostras || []));
+        j.resumo = q.resumo;
+        if (q.ambiente) j.ambiente = q.ambiente;
+        quemJoga.set(q.id, j);
+      }
+    }
+    const furo = partes.some((p, i) => p.parte !== i + 1);
+    const junto = {
+      ...rels[0],
+      fim: ultimo.fim,
+      ...(furo ? { faltando: 'alguma parte não chegou ao servidor' } : {}),
+      partes: rels.map((r) => ({ parte: r.parte || 1, inicio: r.inicioParte || r.inicio, fim: r.fim, amostras: r.amostras?.length || 0, resumo: r.resumo })),
+      resumo: ultimo.resumo,
+      eventos: rels.flatMap((r) => r.eventos || []),
+      amostras: rels.flatMap((r) => r.amostras || []),
+      quemJoga: [...quemJoga.values()],
+    };
+    fs.writeFileSync(destino, JSON.stringify(junto, null, 1));
+    console.log(`  sessão inteira em ${path.basename(destino)} (${partes.length} partes, ${junto.amostras.length} amostras)`);
+  }
 }
 
 main().catch((err) => {

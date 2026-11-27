@@ -26,6 +26,7 @@
 // tela do jogo que saiu e voltou põe a pessoa no jogo sozinha, ainda em tela cheia (tentarVoltar). Segurar
 // Create + Options por 2 s sai do modo jogo, como na TV.
 import { RTC } from './rtc.js';
+import { precisaOferecer, oferecerAluguel, proximoLivre } from './oferta-aluguel.js';
 import { Controle } from './controle.js';
 import { TurboRecebe, TTL_MS, vidaDoCanal, LISO_PCT, LISO_MAX } from './turbo.js';
 import { TurboAuto, TurboVolta, foraDoModo } from './turbo-auto.js';
@@ -705,21 +706,24 @@ function atualizarBarra() {
   if (document.body.classList.toggle('jg-controlando', st.controlando && !emJogo) !== eraControlando || emJogo !== eraJogo) mostrarBarra();
   eraControlando = st.controlando && !emJogo;
   eraJogo = emJogo;
+  const ver = !emJogo && soVerLan();
   const cb = $('#focus-ctrl');
-  cb.hidden = !podeControlar() || emJogo;
+  cb.hidden = !podeControlar() || emJogo || ver;
   cb.textContent = st.controlando ? 'Só assistir' : 'Controlar';
   cb.classList.toggle('on', st.controlando);
   const jb = $('#focus-jogo');
   jb.hidden = !jogavel();
-  jb.textContent = emJogo ? 'Desligar modo jogo' : 'Modo jogo';
-  jb.classList.toggle('on', emJogo);
-  jb.title = 'Mouse gira a câmera e WASD anda. F8 liga e desliga.';
-  $('#focus-jogo-op-wrap').hidden = jb.hidden;
+  const cheia = !!document.fullscreenElement;
+  jb.textContent = ver ? (cheia ? 'Sair da tela cheia' : 'Tela cheia') : emJogo ? 'Desligar modo jogo' : 'Modo jogo';
+  jb.classList.toggle('on', emJogo || (ver && cheia));
+  jb.title = ver ? `Agora é a vez de ${vezDeQuem()}: dá para assistir em tela cheia. F8 entra e sai.` : 'Mouse gira a câmera e WASD anda. F8 liga e desliga.';
+  $('#focus-jogo-op-wrap').hidden = jb.hidden || ver;
   if (jb.hidden) $('#jogo-op-pop').hidden = true;
   $('#focus-engasgo').hidden = !emJogo;
   const grande = $('#jg-jogar');
-  grande.hidden = jb.hidden || st.controlando;
-  grande.textContent = voltaAoJogo() ? '▶ Voltar ao jogo' : `▶ Modo jogo · ${a ? a.sh.titulo || NOME_MAQ[maquinaDaTela(a.sh)] : ''}`;
+  grande.hidden = jb.hidden || st.controlando || (ver && cheia);
+  grande.textContent = ver ? `▶ Ver em tela cheia · vez de ${vezDeQuem()}`
+    : voltaAoJogo() ? '▶ Voltar ao jogo' : `▶ Modo jogo · ${a ? a.sh.titulo || NOME_MAQ[maquinaDaTela(a.sh)] : ''}`;
   atualizarBotaoTouchpad();
 }
 // Como no modo TV: a imagem ocupa a janela toda e a barra some com o mouse parado. Jogando (ou controlando em tela
@@ -750,7 +754,7 @@ addEventListener('mousemove', (e) => {
 }, { capture: true, passive: true });
 $('.focus-bar').addEventListener('focusin', () => mostrarBarra());
 addEventListener('keydown', (e) => { if (e.code === 'Tab' && !controle.jogo && !st.controlando) mostrarBarra(); });
-document.addEventListener('fullscreenchange', () => mostrarBarra());
+document.addEventListener('fullscreenchange', () => { atualizarBarra(); mostrarBarra(); }); // o "Tela cheia" de quem só assiste troca o texto
 // no celular não há mouse: um toque fora do jogo traz a barra
 addEventListener('pointerdown', (e) => { if (e.pointerType !== 'mouse' && !controle.jogo) mostrarBarra(); }, { capture: true, passive: true });
 
@@ -797,6 +801,56 @@ const lanLivre = (m) => !st.lan?.[m]?.conta;
 const semTeste = () => !!st.lan?.semTeste?.includes(st.selfId);
 const podeJogarLan = (m) => !st.lan || idsDaVez(m).includes(st.selfId) || (lanLivre(m) && !semTeste());
 function minhasMaquinas() { return Object.keys(NOME_MAQ).filter((m) => idsDaVez(m).includes(st.selfId)); }
+// A máquina está alugada para outra pessoa: quem não é da vez só assiste. O "Modo jogo" vira "Tela cheia": a
+// imagem na tela toda, sem controle, sem tutorial e sem o teste da conexão (nada disso iria ao jogo). No
+// "até alguém novo", quem ainda tem o teste grátis não entra aqui: em segundos a vez é dela (deixarJogar avisa).
+function soVerLan(sh = st.alvo?.sh) {
+  if (!st.lan || !sh) return false;
+  const m = maquinaDaTela(sh);
+  const v = st.lan[m];
+  if (!v?.conta || idsDaVez(m).includes(st.selfId)) return false;
+  return !v.aberta || semTeste();
+}
+const vezDeQuem = () => (st.alvo ? st.lan?.[maquinaDaTela(st.alvo.sh)]?.conta || 'outra pessoa' : 'outra pessoa');
+// Eu assistia a vez de outra pessoa e ela acabou com a máquina livre: sai da tela cheia e abre o aluguel, já
+// com a hora de agora (ou a próxima livre) escolhida. Com a página escondida, fica para quando voltar a ela.
+let fimVezPendente = null;
+async function acabouVezAssistindo(m, conta) {
+  if (document.visibilityState !== 'visible') return void (fimVezPendente = { m, conta });
+  fimVezPendente = null;
+  if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
+  const nome = { pc: 'PC', ps5: 'PS5' }[m];
+  const temTeste = !st.lan?.semTeste?.includes(st.selfId);
+  toast(`A vez de ${conta || 'quem jogava'} no ${nome} acabou: o ${nome} está livre.${temTeste ? ' Use seus 2 min grátis ou alugue para jogar.' : ' Alugue para jogar agora.'}`, 'info', 10000);
+  const prox = await proximoLivre(SALA, m, { jaComecou: true }).catch(() => null);
+  if (!st.lan || !lanLivre(m) || !$('#lan-modal').hidden) return; // alguém pegou nesse meio-tempo, ou já está aberto
+  abrirAluguel({ maquina: m, ...(prox ? { dia: prox.dia, inicio: prox.inicio } : {}) });
+}
+document.addEventListener('visibilitychange', () => {
+  const p = fimVezPendente;
+  if (p && document.visibilityState === 'visible' && st.lan && lanLivre(p.m)) acabouVezAssistindo(p.m, p.conta);
+});
+// antes da 1ª tela cheia desta vez: a oferta do próximo horário livre (oferta-aluguel.js)
+async function verOuAlugar() {
+  const m = maquinaDaTela(st.alvo.sh);
+  const vez = st.lan?.[m];
+  if (document.fullscreenElement || !precisaOferecer(m, vez)) return telaCheiaSoVer();
+  const r = await oferecerAluguel({ sala: SALA, maquina: m, vez });
+  diagJogo.marcar('lan: oferta de aluguel ao assistir', { maquina: m, escolheu: r?.alugar ? 'alugar' : r || 'fechou' });
+  if (r === 'ver') telaCheiaSoVer();
+  else if (r?.alugar) abrirAluguel({ maquina: m, ...r.alugar });
+}
+function telaCheiaSoVer() {
+  if (document.fullscreenElement) {
+    document.exitFullscreen().catch(() => {});
+    if (isTouch) screen.orientation?.unlock?.();
+    return;
+  }
+  $('#focus').requestFullscreen({ navigationUI: 'hide' })
+    .then(() => (isTouch ? screen.orientation?.lock?.('landscape') : null))
+    .catch(() => { /* iPhone: sem tela cheia de elemento; a página deitada já serve */ });
+  diagJogo.marcar('lan: assistindo em tela cheia (a vez é de outra pessoa)', { vez: vezDeQuem() });
+}
 const hora = (ms) => new Date(ms).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 function falta(fim) {
   const s = Math.max(0, Math.round((fim - (Date.now() + lanDif)) / 1000));
@@ -853,7 +907,10 @@ function mostrarVezLan() {
 setInterval(() => { if (st.lan) mostrarVezLan(); }, 1000);
 
 function aplicarLan(e) {
+  const assistia = st.alvo && soVerLan() ? maquinaDaTela(st.alvo.sh) : null; // a máquina que eu assistia sem ser a minha vez
+  const vezQueAssistia = assistia ? st.lan[assistia].conta : null;
   st.lan = e?.ligada ? e : null;
+  if (assistia && st.lan && lanLivre(assistia)) acabouVezAssistindo(assistia, vezQueAssistia);
   if (typeof e?.agora === 'number') lanDif = e.agora - Date.now();
   const agora = new Set(minhasMaquinas());
   for (const m of agora) {
@@ -941,9 +998,11 @@ function deixarJogar() {
   if (lanLivre(m)) abrirAluguel();
   return false;
 }
-function abrirAluguel() {
+// pedido: { maquina, dia, inicio } — a página do aluguel já abre nessa máquina, com essa hora escolhida
+function abrirAluguel(pedido = null) {
   if (document.pointerLockElement) document.exitPointerLock();
-  $('#lan-frame').src = `/lan?sala=${encodeURIComponent(SALA)}&embed=1`;
+  const extra = pedido?.maquina ? `&maquina=${pedido.maquina}${pedido.dia ? `&dia=${pedido.dia}&hora=${pedido.inicio}` : ''}` : '';
+  $('#lan-frame').src = `/lan?sala=${encodeURIComponent(SALA)}&embed=1${extra}`;
   $('#lan-modal').hidden = false;
 }
 function fecharAluguel() {
@@ -1751,6 +1810,7 @@ function alternarJogo() {
     return;
   }
   if (!jogavel() || !video.srcObject) return void toast('A imagem ainda não chegou.', 'warn');
+  if (soVerLan()) return void verOuAlugar();
   if (!deixarJogar()) return;
   entrarNoJogo(true);
   if (isTouch) return; // o controle de toque avisa com que botões entrou

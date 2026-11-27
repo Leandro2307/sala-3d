@@ -81,6 +81,7 @@ const TABELAS = [
     maquina   VARCHAR(8)   NOT NULL DEFAULT 'pc',
     jogo      VARCHAR(120) NULL,
     jogo_nome VARCHAR(60)  NULL,
+    dublagem  TINYINT      NULL,
     inicio    BIGINT       NOT NULL,
     status    VARCHAR(12)  NOT NULL,
     sessao    VARCHAR(255) NULL,
@@ -137,6 +138,8 @@ async function iniciar() {
     // o jogo escolhido ao alugar o PC (abre sozinho no horário)
     await pool.query('ALTER TABLE sala3d_reservas ADD COLUMN jogo VARCHAR(120) NULL AFTER maquina').catch(() => {});
     await pool.query('ALTER TABLE sala3d_reservas ADD COLUMN jogo_nome VARCHAR(60) NULL AFTER jogo').catch(() => {});
+    // a dublagem escolhida ao alugar o PS5 (0: sem a voz da tradução; null: a de sempre, com ela)
+    await pool.query('ALTER TABLE sala3d_reservas ADD COLUMN dublagem TINYINT NULL AFTER jogo_nome').catch(() => {});
     await pool.query('SELECT 1 FROM sala3d_salas LIMIT 1');
     await pool.query('SELECT 1 FROM sala3d_moedas LIMIT 1');
     console.log(`  Dados:         MySQL em ${DB_HOST}`);
@@ -304,7 +307,7 @@ async function trocarSenhaConta(nome, senhaHash) {
 // as reservas que começam a partir de "desde" (ms)
 async function lerReservas(desde) {
   if (!pool) return Object.values(reservasArq.mapa).filter((r) => r.inicio >= desde);
-  const [linhas] = await pool.query('SELECT id, sala, conta, maquina, jogo, jogo_nome AS jogoNome, inicio, status, sessao, expira, criada FROM sala3d_reservas WHERE inicio >= ?', [desde]);
+  const [linhas] = await pool.query('SELECT id, sala, conta, maquina, jogo, jogo_nome AS jogoNome, dublagem, inicio, status, sessao, expira, criada FROM sala3d_reservas WHERE inicio >= ?', [desde]);
   return linhas.map((l) => ({ ...l, inicio: Number(l.inicio), expira: Number(l.expira), criada: Number(l.criada) }));
 }
 
@@ -317,9 +320,9 @@ async function salvarReserva(r) {
     return;
   }
   await pool.query(
-    `INSERT INTO sala3d_reservas (id, sala, conta, maquina, jogo, jogo_nome, inicio, status, sessao, expira, criada) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE status = VALUES(status), sessao = VALUES(sessao), expira = VALUES(expira)`,
-    [r.id, r.sala, r.conta, r.maquina || 'pc', r.jogo || null, r.jogoNome || null, r.inicio, r.status, r.sessao || null, r.expira || 0, r.criada],
+    `INSERT INTO sala3d_reservas (id, sala, conta, maquina, jogo, jogo_nome, dublagem, inicio, status, sessao, expira, criada) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE status = VALUES(status), sessao = VALUES(sessao), expira = VALUES(expira), dublagem = VALUES(dublagem)`,
+    [r.id, r.sala, r.conta, r.maquina || 'pc', r.jogo || null, r.jogoNome || null, r.dublagem == null ? null : Number(r.dublagem) ? 1 : 0, r.inicio, r.status, r.sessao || null, r.expira || 0, r.criada],
   );
 }
 

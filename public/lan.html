@@ -26,6 +26,11 @@
   h2 { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; margin: 0 0 10px; }
   h2 .passo { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 800; }
   .sub { color: var(--muted); margin: 2px 0 0; font-size: 13px; }
+  /* PS5: a pergunta da dublagem, logo antes de pagar */
+  label.dublagem { display: flex; align-items: flex-start; gap: 10px; margin: 12px 0 0; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: 12px; color: var(--text); font-size: 13.5px; cursor: pointer; }
+  label.dublagem[hidden] { display: none; }
+  label.dublagem input { width: 18px; height: 18px; margin: 2px 0 0; padding: 0; accent-color: var(--accent); flex: none; }
+  label.dublagem small { display: block; margin-top: 3px; color: var(--muted); font-weight: 400; font-size: 12.5px; line-height: 1.4; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 14px; animation: entra 260ms var(--ease) both; }
   @keyframes entra { from { opacity: 0; transform: translateY(4px); } }
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
@@ -187,6 +192,11 @@
     <div class="dias" id="dias"></div>
     <p class="dica" id="dica-horas">Clique na <b>primeira</b> e na <b>última</b> hora para pegar o intervalo (até 8 horas). Horário de Brasília.</p>
     <div class="horas" id="horas"></div>
+    <label class="dublagem" id="dublagem" hidden>
+      <input type="checkbox" id="dublagem-on" checked>
+      <span><b>Quero o modo dublado</b>
+        <small>Uma voz em português lê as legendas do jogo na hora, por cima do som original (o jogo abaixa enquanto ela fala). Se desmarcar, você ouve só o som original do jogo, sem a tradução.</small></span>
+    </label>
     <div class="row spread rodape">
       <span id="resumo" class="sub"></span>
       <button type="button" class="primary" id="pagar" disabled>Pagar</button>
@@ -385,6 +395,7 @@
     $('#maquina-nome').textContent = `— ${NOMES[m]}`;
     $('#agenda').hidden = false;
     $('#passo-jogo').hidden = true;
+    $('#dublagem').hidden = m !== 'ps5'; // a dublagem é do PS5 (o PC da casa lê as legendas dele)
     $('#passo-agenda').textContent = '2';
     if (m === 'pc') carregarJogos();
     carregar();
@@ -530,7 +541,7 @@
     // dentro da sala o checkout da Stripe abre numa aba nova (ele não abre dentro de uma janela da
     // página); a aba é aberta já no toque, senão o navegador bloqueia
     const aba = embed ? window.open('', '_blank') : null;
-    const r = await post('/lan/reservar', { token: conta.token, sala, maquina, jogo: maquina === 'pc' ? jogo : null, inicios: [...escolhidas] });
+    const r = await post('/lan/reservar', { token: conta.token, sala, maquina, jogo: maquina === 'pc' ? jogo : null, inicios: [...escolhidas], ...(maquina === 'ps5' ? { dublagem: $('#dublagem-on').checked } : {}) });
     // entrou só com o nome (teste grátis): cria a senha antes de pagar
     if (r.erro === 'senha') {
       aba?.close();
@@ -579,6 +590,12 @@
   else if (params.get('cancelado')) {
     aviso('Pagamento cancelado. O horário fica separado para você por até 30 minutos: escolha de novo e pague para garantir.', 'info');
     history.replaceState(null, '', `/lan?sala=${encodeURIComponent(sala)}`);
+  }
+  // veio da oferta de quem assistia (oferta-aluguel.js): o dia e a hora livre já escolhidos (carregar tira se não estiver mais livre)
+  if (maquina && /^\d{4}-\d{2}-\d{2}$/.test(params.get('dia') || '')) {
+    dia = params.get('dia');
+    const h = Number(params.get('hora'));
+    if (Number.isInteger(h) && h > 0) escolhidas.add(h);
   }
   if (maquina) escolherMaquina(maquina);
   else carregar();

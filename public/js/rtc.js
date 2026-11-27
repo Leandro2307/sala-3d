@@ -3,6 +3,12 @@
 import { podeRecortar, recortarRosto } from './rosto.js';
 import { isTouch } from './touch.js';
 
+// o id de uma conexão (o mapa peers é id → peer)
+function peerIdDe(rtc, peer) {
+  for (const [id, p] of rtc.peers) if (p === peer) return id;
+  return null;
+}
+
 // Presets de qualidade: todos a 60 quadros por segundo. Se a internet ou o PC apertarem, o
 // navegador baixa a resolução e segura os 60 quadros ("maintain-framerate"). A captura já sai no
 // tamanho do preset (o navegador reduz na placa de vídeo, antes de codificar — sai mais barato).
@@ -1175,7 +1181,8 @@ export class RTC {
           // gastava ~220 kbps por conexão, e 96k mono já é transparente para música e filme
           init.sendEncodings = [{ maxBitrate: 96_000, networkPriority: 'high', priority: 'high' }];
         }
-        const tr = peer.pc.addTransceiver(track, init);
+        // o som pode ser outro para esta pessoa (somPara: quem desmarcou a dublagem recebe só o do PS5)
+        const tr = peer.pc.addTransceiver(this.somDaTela(peerIdDe(this, peer), key, track), init);
         if (track.kind === 'video' && peer.bandaJogo) preferirCodecDeJogo(tr, peer.recuoCodec >= 1);
         else if (track.kind === 'video') preferirCodec(tr);
         trs.push(tr);
@@ -1249,10 +1256,28 @@ export class RTC {
   // envio para quem entrou na sala enquanto o vídeo estava parado.
   replaceScreenTrack(key, track) {
     track.contentHint = track.kind === 'video' ? 'motion' : 'music';
-    for (const peer of this.peers.values()) {
+    for (const [id, peer] of this.peers) {
       const tr = (peer.screenTransceivers.get(key) || []).find((t) => t.receiver.track.kind === track.kind);
-      if (tr) tr.sender.replaceTrack(track).catch((err) => console.warn('[rtc] troca de trilha', err));
+      if (tr) tr.sender.replaceTrack(this.somDaTela(id, key, track)).catch((err) => console.warn('[rtc] troca de trilha', err));
       else this.addScreenTo(peer, key);
+    }
+  }
+
+  // O som de uma tela para uma pessoa: o da tela, ou o que somPara(id, key, trilha) devolver (main.js: a
+  // mistura com a voz da dublagem fica de fora para quem desmarcou ela ao alugar)
+  somDaTela(id, key, track) {
+    if (track?.kind !== 'audio' || !this.somPara) return track;
+    return this.somPara(id, key, track) || track;
+  }
+
+  // a escolha de alguém mudou (somPara): o som de cada pessoa volta a ser decidido, sem renegociar
+  atualizarSomDaTela(key) {
+    const track = this.screens.get(key)?.stream?.getAudioTracks()[0];
+    if (!track) return;
+    for (const [id, peer] of this.peers) {
+      const tr = (peer.screenTransceivers.get(key) || []).find((t) => t.receiver.track.kind === 'audio');
+      const quer = this.somDaTela(id, key, track);
+      if (tr && tr.sender.track !== quer) tr.sender.replaceTrack(quer).catch((err) => console.warn('[rtc] troca de trilha', err));
     }
   }
 

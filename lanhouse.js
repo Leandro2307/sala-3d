@@ -155,7 +155,7 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
       return a ? { conta: a.conta, inicio: a.inicio, fim: null, aberta: true, jogo: a.jogo || null, jogoNome: a.jogoNome || null } : null;
     }
     // liberação que acaba antes da hora cheia (o liberado pelo dono, ver comecarLiberadas)
-    if (r.fimCedo) return agora >= r.fimCedo ? null : { conta: r.conta, inicio: h, fim: r.fimCedo, jogo: r.jogo || null, jogoNome: r.jogoNome || null };
+    if (r.fimCedo) return agora >= r.fimCedo ? null : { conta: r.conta, inicio: h, fim: r.fimCedo, jogo: r.jogo || null, jogoNome: r.jogoNome || null, semDublagem: Number(r.dublagem) === 0 && r.dublagem !== null };
     let fim = h + HORA;
     for (let p = daHora(sala, maquina, fim, agora); p?.conta === r.conta && p.status === 'paga'; p = daHora(sala, maquina, fim, agora)) {
       // a seguinte dela acaba cedo (o liberado que passou da hora cheia): a vez vai até ali
@@ -166,7 +166,8 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
       fim += HORA;
     }
     // jogo: o que a pessoa escolheu para esta hora (o PC da casa abre sozinho, ver vigiarJogoLan)
-    return { conta: r.conta, inicio: h, fim, jogo: r.jogo || null, jogoNome: r.jogoNome || null };
+    // semDublagem: desmarcou a dublagem ao alugar (só o som do jogo para ela)
+    return { conta: r.conta, inicio: h, fim, jogo: r.jogo || null, jogoNome: r.jogoNome || null, semDublagem: Number(r.dublagem) === 0 && r.dublagem !== null };
   }
 
   async function guardar(r) {
@@ -447,9 +448,12 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
       }
       if (velhas.length) await mudarStatus([...reservas.values()].filter((r) => velhas.some((v) => v.sessao && v.sessao === r.sessao) || velhas.includes(r)), 'cancelada');
       // segura as horas antes de falar com a Stripe: ninguém pega enquanto o checkout abre
+      // PS5: a pessoa escolheu ao alugar se quer a dublagem (a voz que lê as legendas, por cima do jogo). Desmarcada,
+      // o PC da casa manda para ela só o som do jogo (main.js semDublagemPara). Sem a pergunta (cortesia, teste), vai com ela.
+      const dublagem = maquina === 'ps5' && b.dublagem === false ? 0 : null;
       const lista = inicios.map((inicio) => ({
         id: crypto.randomBytes(12).toString('hex'), sala, maquina, conta, inicio, status: 'pendente', sessao: null, expira: agora + ESPERA_CHECKOUT, criada: agora,
-        jogo: jogo?.id || null, jogoNome: jogo?.nome || null,
+        jogo: jogo?.id || null, jogoNome: jogo?.nome || null, dublagem,
       }));
       for (const r of lista) reservas.set(r.id, r);
       try {
@@ -470,6 +474,7 @@ module.exports = function criarLanhouse({ banco, hashSenha, confereSenha, podeTe
           'metadata[maquina]': MAQUINAS[maquina],
           'metadata[conta]': conta,
           'metadata[horarios]': quando.slice(0, 450),
+          ...(maquina === 'ps5' ? { 'metadata[dublagem]': dublagem === 0 ? 'não' : 'sim' } : {}),
           ...(jogo ? { 'metadata[jogo]': jogo.nome } : {}),
           'payment_intent_data[description]': `${MAQUINAS[maquina]}${jogo ? ` (${jogo.nome})` : ''} — sala ${sala} — ${conta} — ${quando}`.slice(0, 900),
         });

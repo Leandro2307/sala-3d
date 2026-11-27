@@ -1028,7 +1028,8 @@ export class TurboEnvio {
     this.desligar(id);
     const vez = (this.vez = (this.vez || 0) + 1);
     this.vezDe.set(id, vez);
-    const t = typeof key === 'string' ? this.tela(key) : null;
+    // a tela vista por esta pessoa (o id: quem desmarcou a dublagem recebe a tela sem a mistura, main.js)
+    const t = typeof key === 'string' ? this.tela(key, id) : null;
     const responder = (m) => { try { canal.send(JSON.stringify(m)); } catch { /* canal fechou */ } };
     if (!t?.controle) return responder({ erro: 'sem-controle' });
     // O caminho até quem joga (a banda que o WebRTC estimou, a mesma casa ou não): dele saem a banda

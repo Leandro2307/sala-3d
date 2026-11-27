@@ -8,6 +8,7 @@ import { CatalogoJogos } from './catalogo-jogos.js';
 import { PcJogos } from './pc-jogos.js';
 import { Ps5Nativo, temPs5Nativo } from './ps5-nativo.js';
 import { Dublagem } from './voz-universal.js';
+import { precisaOferecer, oferecerAluguel, proximoLivre } from './oferta-aluguel.js';
 import { PcDireto, temPcDireto } from './pc-direto.js';
 import { Diretas } from './diretas.js';
 import { Ps5Touchpad, temTouchpadHid } from './ps5-touchpad.js';
@@ -1163,6 +1164,12 @@ async function join() {
     },
   });
   rtc.onMicCaiu = religarMic;
+  // o som da tela do PS5 para quem alugou sem a dublagem: o do PS5 sozinho (semDublagemPara)
+  rtc.somPara = (id, key, track) => {
+    const sh = self()?.shares.get(key);
+    const m = sh?.somPc;
+    return m?.origem === 'voz' && track === m.mix && m.ps5?.readyState === 'live' && semDublagemPara(id, sh) ? m.ps5 : null;
+  };
   rtc.onControle = receberDireto;
   rtc.onTurbo = (id, canal) => turboEnvio.receber(id, canal);
   rtc.onTurboSom = (id, canal) => turboEnvio.receberSom(id, canal);
@@ -3139,11 +3146,15 @@ addEventListener('gamepaddisconnected', () => avisarRapido());
 const cargaDaPlaca = { usoPct: null, em: 0 };
 const turboEnvio = new TurboEnvio({
   gpu: () => (cargaDaPlaca.usoPct != null ? cargaDaPlaca : null),
-  tela: (key) => {
+  tela: (key, id = null) => {
     const sh = self()?.shares.get(key);
     const scr = rtc?.screens.get(key);
+    // quem alugou o PS5 sem a dublagem: o som do PS5 sozinho, no lugar da mistura com a voz (semDublagemPara)
+    const semVoz = id && sh?.somPc?.origem === 'voz' && sh.somPc.ps5?.readyState === 'live' && semDublagemPara(id, sh);
     // Lossless para todos (losslessParaTodos): a câmera do OBS é codificada como uma tela comum
-    if (sh?.lossless && scr) return { stream: sh.lossless, controle: !!sh.controle, ps5: null };
+    if (sh?.lossless && scr) return { stream: semVoz ? new MediaStream([...sh.lossless.getVideoTracks(), sh.somPc.ps5]) : sh.lossless, controle: !!sh.controle, ps5: null };
+    // sem a mistura, o PS5 direto repassa o próprio som (o Opus dele) e a tela comum leva o som do PS5
+    if (semVoz && scr) return { stream: new MediaStream([...scr.stream.getVideoTracks(), sh.somPc.ps5]), controle: !!sh.controle, ps5: sh.ps5 || sh.pcDireto || null, somMix: null };
     // somMix: o som do PS5 com o do PC (somDoPcNoPs5); o turbo codifica a mistura em vez de repassar o do PS5
     // PC direto: os quadros da placa vão como saíram, igual aos do PS5 (a mesma fonte)
     return sh && scr ? { stream: scr.stream, controle: !!sh.controle, ps5: sh.ps5 || sh.pcDireto || null, somMix: sh.somPc ? new MediaStream([sh.somPc.mix]) : null } : null;
@@ -3557,6 +3568,28 @@ function misturarNoPs5(sh, scr, ps5, pc, ctx, origem) {
 
 // ------------------------------------------------------------------ dublagem (Voz Universal)
 // Ligada no painel do PS5 direto, fica lembrada: toda vez que o PS5 entra numa tela, ela liga sozinha.
+// Quem aluga o PS5 escolhe se quer a dublagem (lan.html, "Quero o modo dublado"): desmarcada, a vez vem com
+// semDublagem e o som que vai para essa pessoa é o do PS5 sozinho, pelo turbo e pelo vídeo normal. Os outros
+// (e este PC) continuam com a voz.
+function semDublagemPara(id, sh) {
+  if (!state.lan || !sh || maquinaDaTela(sh) !== 'ps5') return false;
+  const v = state.lan.ps5;
+  return !!v?.semDublagem && (v.ids || []).includes(id);
+}
+// a escolha de quem tem a vez mudou (alugou, acabou a vez, entrou de novo): o som de cada um é refeito
+let semDublagemAntes = '';
+function conferirSomSemDublagem() {
+  const v = state.lan?.ps5;
+  const chave = v?.semDublagem ? (v.ids || []).join(',') : '';
+  if (chave === semDublagemAntes) return;
+  semDublagemAntes = chave;
+  for (const sh of self()?.shares.values() || []) {
+    if (sh.somPc?.origem !== 'voz' || maquinaDaTela(sh) !== 'ps5') continue;
+    rtc?.atualizarSomDaTela(sh.key);
+    turboEnvio.trocarFonte(sh.key);
+    if (chave) diagJogo.evento('lan: quem alugou não quer a dublagem — só o som do jogo para essa pessoa', { conta: v.conta });
+  }
+}
 const DUBLAGEM = 'sala3d-ps5-dublagem';
 let querDublagem = (() => {
   try { return localStorage.getItem(DUBLAGEM) === '1'; } catch { return false; }
@@ -4917,7 +4950,9 @@ function updateFocusCtrl() {
     const jogo = ['window', 'monitor', 'ps5'].includes(superficieDe(t.share)) && t.share.titulo ? ` · ${t.share.titulo}` : '';
     $('#focus-name').textContent = `${dono} · ${ondeEsta(t.share)}${!nav && t.share.site ? ` · ${t.share.site}` : ''}${jogo}`;
   }
-  if (!pode) controle.remover(fv);
+  // a máquina alugada para outra pessoa: só assistir (o "Modo jogo" vira "Tela cheia", ver soVerLan)
+  const ver = !!t && !t.user.isSelf && soVerLan(t.share);
+  if (!pode || ver) controle.remover(fv);
   // Liberada, já entra controlando — igual à mesa, sem botão no meio do caminho. "Só assistir"
   // para de mexer até fechar o foco (state.focus.soAssistir).
   else if (!controle.tem(fv) && !state.focus.soAssistir) {
@@ -4926,7 +4961,7 @@ function updateFocusCtrl() {
   }
   const liberar = !!t && !pode && t.user.isSelf && !t.share.file && t.share.aba != null;
   const on = controle.tem(fv);
-  btn.hidden = !pode && !liberar;
+  btn.hidden = (!pode && !liberar) || ver;
   btn.dataset.modo = liberar ? 'liberar' : 'controlar';
   btn.classList.toggle('on', on);
   btn.innerHTML = `${icon(liberar || !on ? 'cursor' : 'eye', 16)}${liberar ? 'Permitir controle' : on ? 'Só assistir' : 'Controlar'}`;
@@ -4937,12 +4972,20 @@ function updateFocusCtrl() {
   const sup = t ? superficieDe(t.share) : null;
   const janela = !!t && (sup === 'ps5' || (!t.user.isSelf && ['window', 'monitor'].includes(sup)));
   if ((!on || !janela) && controle.jogoNo === fv) controle.desligarJogo();
-  jb.hidden = !on || !janela;
+  jb.hidden = ver ? !janela : !on || !janela;
+  jb.dataset.ver = ver ? '1' : '';
   // as opções do modo jogo (no celular elas ficam no painel do controle de toque)
-  $('#focus-jogo-op-wrap').hidden = jb.hidden || isTouch;
-  $('#focus-engasgo').hidden = jb.hidden || isTouch || controle.jogoNo !== fv;
-  if (jb.hidden) $('#jogo-op-pop').hidden = true;
+  $('#focus-jogo-op-wrap').hidden = jb.hidden || isTouch || ver;
+  $('#focus-engasgo').hidden = jb.hidden || isTouch || ver || controle.jogoNo !== fv;
+  if (jb.hidden || ver) $('#jogo-op-pop').hidden = true;
   const emJogo = controle.jogoNo === fv;
+  if (ver) {
+    const cheia = !!document.fullscreenElement;
+    jb.classList.toggle('on', cheia);
+    jb.innerHTML = `${icon('eye', 16)}${cheia ? 'Sair da tela cheia' : 'Tela cheia'}`;
+    jb.title = `Agora é a vez de ${state.lan?.[maquinaDaTela(t.share)]?.conta || 'outra pessoa'}: dá para assistir em tela cheia. F8 entra e sai.`;
+    return;
+  }
   jb.classList.toggle('on', emJogo);
   jb.innerHTML = `${icon('gamepad', 16)}${emJogo ? 'Desligar modo jogo' : 'Modo jogo'}`;
   jb.title = isTouch ? 'Analógico e botões na tela, com os do Minecraft e do God of War' : 'Mouse gira a câmera e WASD anda (Minecraft e cia.). F8 liga e desliga.';
@@ -4966,6 +5009,8 @@ $('#focus-ctrl').addEventListener('click', async () => {
 // isso o F8 (ver controle.atalho).
 $('#focus-jogo').addEventListener('click', async () => {
   const fv = $('#focus-video');
+  // alugada para outra pessoa: só a tela cheia, sem controle, sem tutorial e sem o teste da conexão
+  if ($('#focus-jogo').dataset.ver && controle.jogoNo !== fv) return void verOuAlugar();
   const ligar = controle.jogoNo !== fv;
   if (!ligar) esquecerJogo(); // desligou de propósito (botão ou F8): nada de "Voltar ao jogo"
   // decidido antes de ligar (ainda no clique): a lista de aparelhos do Chrome tem que abrir antes da
@@ -5092,7 +5137,47 @@ async function jogoNoPc(ligar) {
 document.addEventListener('fullscreenchange', () => {
   if (!document.fullscreenElement) document.body.classList.remove('jogo-pc');
   else if (controle.jogoNo && !isTouch) document.body.classList.add('jogo-pc');
+  if ($('#focus-jogo').dataset.ver) updateFocusCtrl(); // o "Tela cheia" de quem só assiste troca o texto
 });
+// Eu assistia a vez de outra pessoa e ela acabou com a máquina livre: sai da tela cheia e abre o aluguel, já
+// com a hora de agora (ou a próxima livre) escolhida. Com a página escondida, fica para quando voltar a ela.
+let fimVezPendente = null;
+async function acabouVezAssistindo(m, conta) {
+  if (document.visibilityState !== 'visible') return void (fimVezPendente = { m, conta });
+  fimVezPendente = null;
+  if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
+  const nome = { pc: 'PC', ps5: 'PS5' }[m];
+  const temTeste = !state.lan?.semTeste?.includes(state.selfId);
+  toast(`A vez de ${conta || 'quem jogava'} no ${nome} acabou: o ${nome} está livre.${temTeste ? ' Use seus 2 min grátis ou alugue para jogar.' : ' Alugue para jogar agora.'}`, 'info', 10000);
+  const prox = await proximoLivre(state.room || '', m, { jaComecou: true }).catch(() => null);
+  if (!state.lan || !lanLivre(m) || !$('#lan-modal').hidden) return; // alguém pegou nesse meio-tempo, ou já está aberto
+  abrirAluguel({ maquina: m, ...(prox ? { dia: prox.dia, inicio: prox.inicio } : {}) });
+}
+document.addEventListener('visibilitychange', () => {
+  const p = fimVezPendente;
+  if (p && document.visibilityState === 'visible' && state.lan && lanLivre(p.m)) acabouVezAssistindo(p.m, p.conta);
+});
+// antes da 1ª tela cheia desta vez: a oferta do próximo horário livre (oferta-aluguel.js)
+async function verOuAlugar() {
+  const t = state.focus?.kind === 'share' ? acharTela(state.focus.key) : null;
+  if (!t) return;
+  const m = maquinaDaTela(t.share);
+  const vez = state.lan?.[m];
+  if (document.fullscreenElement || !precisaOferecer(m, vez)) return telaCheiaSoVer();
+  const r = await oferecerAluguel({ sala: state.room || '', maquina: m, vez });
+  if (r === 'ver') telaCheiaSoVer();
+  else if (r?.alugar) abrirAluguel({ maquina: m, ...r.alugar });
+}
+function telaCheiaSoVer() {
+  if (document.fullscreenElement) {
+    document.exitFullscreen().catch(() => {});
+    if (isTouch) screen.orientation?.unlock?.();
+    return;
+  }
+  $('#focus').requestFullscreen({ navigationUI: 'hide' })
+    .then(() => (isTouch ? screen.orientation?.lock?.('landscape') : null))
+    .catch(() => { /* iPhone: sem tela cheia de elemento */ });
+}
 
 // opções do modo jogo no PC (o celular tem as mesmas no painel do controle de toque)
 $('#focus-jogo-op').addEventListener('click', (e) => {
@@ -6094,6 +6179,20 @@ const idsDaVez = (m) => state.lan?.[m]?.ids || [];
 const lanLivre = (m) => !state.lan?.[m]?.conta;
 const semTesteLan = (id) => !!state.lan?.semTeste?.includes(id);
 const podeJogarLan = (m, id) => !state.lan || idsDaVez(m).includes(id) || (lanLivre(m) && !semTesteLan(id));
+// A máquina está alugada para outra pessoa e eu não sou da vez: só assisto (o mesmo do /jogar). No "até alguém
+// novo", quem ainda tem o teste grátis não entra aqui: em segundos a vez é dela.
+// a máquina da tela em foco, se eu estou só assistindo a vez de outra pessoa nela
+function assistindoLan() {
+  const t = state.focus?.kind === 'share' ? acharTela(state.focus.key) : null;
+  return t && !t.user.isSelf && soVerLan(t.share) ? maquinaDaTela(t.share) : null;
+}
+function soVerLan(sh) {
+  if (!state.lan || !sh) return false;
+  const m = maquinaDaTela(sh);
+  const v = state.lan[m];
+  if (!v?.conta || idsDaVez(m).includes(state.selfId)) return false;
+  return !v.aberta || semTesteLan(state.selfId);
+}
 // Quem compartilha a tela: o primeiro comando de quem joga de graça numa máquina livre começa os 2
 // min dessa pessoa no servidor (os comandos vêm direto, pelo WebRTC, e ele não os vê).
 const pediuTesteLan = new Map(); // id -> quando avisou
@@ -6230,7 +6329,10 @@ function mostrarVezLan() {
 }
 setInterval(() => { if (state.lan || !$('#lan-vez-foco')?.hidden) mostrarVezLan(); }, 1000);
 function aplicarLan(e) {
+  const assistia = assistindoLan(); // a máquina que eu assistia sem ser a minha vez
+  const vezQueAssistia = assistia ? state.lan[assistia].conta : null;
   state.lan = e?.ligada ? e : null;
+  if (assistia && state.lan && lanLivre(assistia)) acabouVezAssistindo(assistia, vezQueAssistia);
   if (typeof e?.agora === 'number') lanDif = e.agora - Date.now();
   // a vez mudou: quem jogava numa tela minha e não pode mais (a hora passou, ou alguém alugou a
   // máquina que estava livre) sai do modo jogo deste PC (a sala volta a ser desenhada normalmente)
@@ -6267,6 +6369,8 @@ function aplicarLan(e) {
   meuTesteLan = fimTeste;
   mostrarLan();
   mostrarVezLan();
+  conferirSomSemDublagem();
+  updateFocusCtrl(); // alugou ou acabou a vez: o "Modo jogo" vira "Tela cheia" para quem só assiste (e volta)
 }
 // o botão "Alugar PC ou PS5" no topo, à esquerda: só com a lan house ligada (o começo e o fim da
 // vez de cada um chegam como aviso, ver aplicarLan)
@@ -6275,9 +6379,11 @@ function mostrarLan() {
   $('.lan-sep').hidden = !state.lan;
 }
 // a reserva (/lan) abre numa janela dentro da sala; o pagamento abre numa aba nova
-function abrirAluguel() {
+// pedido: { maquina, dia, inicio } — a página do aluguel já abre nessa máquina, com essa hora escolhida
+function abrirAluguel(pedido = null) {
   if (document.pointerLockElement) document.exitPointerLock();
-  $('#lan-frame').src = `/lan?sala=${encodeURIComponent(state.room || '')}&embed=1`;
+  const extra = pedido?.maquina ? `&maquina=${pedido.maquina}${pedido.dia ? `&dia=${pedido.dia}&hora=${pedido.inicio}` : ''}` : '';
+  $('#lan-frame').src = `/lan?sala=${encodeURIComponent(state.room || '')}&embed=1${extra}`;
   $('#lan-modal').hidden = false;
 }
 function fecharAluguel() {
