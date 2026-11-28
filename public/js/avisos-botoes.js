@@ -805,6 +805,16 @@ function manchas(img, xa, ya, xb, yb, teste) {
   }
   return { lista, marca, RW, xa, ya };
 }
+// a claridade típica (mediana do menor canal) do retângulo: com céu claro atrás (~165) o "claro" do HUD sobe junto,
+// senão o céu entra junto com a estrela e os números (pedido do usuário em 2026-11-28, print com o céu nublado)
+function fundoDo(img, xa, ya, xb, yb) {
+  const { width: W, data: d } = img;
+  const v = [];
+  for (let y = ya; y < yb; y += 3) for (let x = xa; x < xb; x += 3) { const i = (y * W + x) * 4; v.push(Math.min(d[i], d[i + 1], d[i + 2])); }
+  v.sort((a, b) => a - b);
+  return v.length ? v[v.length >> 1] : 0;
+}
+const limiar = (base, fundo) => Math.max(base, Math.min(225, fundo + 30));
 const claroSemCor = (d, min) => (i) => {
   const r = d[i], g = d[i + 1], b = d[i + 2], mn = Math.min(r, g, b);
   return mn > min && Math.max(r, g, b) - mn < 45;
@@ -813,7 +823,8 @@ const claroSemCor = (d, min) => (i) => {
 // a estrela clara da direita: em pé, quase quadrada, meio cheia (cheia ~0,4; só o contorno ~0,27)
 function estrela(img) {
   const { width: W, height: H, data: d } = img;
-  const { lista } = manchas(img, Math.round(W * 0.8), Math.round(H * 0.01), W, Math.round(H * 0.22), claroSemCor(d, 90));
+  const xa = Math.round(W * 0.8), ya = Math.round(H * 0.01), yb = Math.round(H * 0.22);
+  const { lista } = manchas(img, xa, ya, W, yb, claroSemCor(d, limiar(90, fundoDo(img, xa, ya, W, yb))));
   // reduzida pela metade a estrela tem ~10 px e sai um pouco mais estreita (0,75–0,8 da altura)
   const cands = [];
   for (const m of lista) {
@@ -843,13 +854,14 @@ export function armaNaTela(img, y0 = Math.round(img.height * 0.03)) {
   const { width: W, height: H, data: d } = img;
   const yb = Math.round(H * 0.3);
   if (yb - y0 < 10) return null;
-  const { lista, marca, RW, xa, ya } = manchas(img, Math.round(W * 0.78), y0, W, yb, claroSemCor(d, 120));
+  const x0 = Math.round(W * 0.78);
+  const { lista, marca, RW, xa, ya } = manchas(img, x0, y0, W, yb, claroSemCor(d, limiar(120, fundoDo(img, x0, y0, W, yb))));
   const hMin = Math.max(5, H * 0.011), hMax = H * 0.035;
   const algs = [];
   for (const m of lista) {
     const w = m.x1 - m.x0 + 1, h = m.y1 - m.y0 + 1, f = m.n / (w * h);
     // um algarismo é mais alto que largo (a estrela, quase quadrada, não entra)
-    if (h >= hMin && h <= hMax && w >= h * 0.25 && w <= h * 0.85 && f >= 0.25 && f <= 0.85) algs.push({ ...m, h });
+    if (h >= hMin && h <= hMax && w >= h * 0.25 && w <= h * 0.85 && f >= 0.25 && f <= 0.92) algs.push({ ...m, h });
   }
   algs.sort((p, q) => p.x0 - q.x0);
   let melhor = null;

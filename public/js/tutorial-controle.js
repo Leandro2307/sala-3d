@@ -89,7 +89,7 @@ const PASSOS_PC_PADRAO = [
   },
   {
     tit: 'Pronto!',
-    txt: 'Mais: <b>Shift</b> L3 (correr) · <b>V</b> R3 · <b>H</b> PS · <b>M</b> clique do touchpad · <b>setas</b> ou <b>1 2 3 4</b> direcional.<br>O que cada botão faz fica no canto de baixo, à direita. Aperte <b>Espaço</b> (✕) para começar a jogar.',
+    txt: 'Mais: <b>Shift</b> L3 (correr) · <b>Q</b> R3 · <b>H</b> PS · <b>M</b> mapa · <b>setas</b> ou <b>1 2 3 4</b> direcional.<br>O que cada botão faz fica no canto de baixo, à direita. Aperte <b>Espaço</b> (✕) para começar a jogar.',
     de: teclas('Espaço'), para: GLIFO.xis,
     fim: true,
   },

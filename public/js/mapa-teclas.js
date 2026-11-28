@@ -14,28 +14,31 @@ const CHAVE = 'sala3d-mapa-teclas';
 // O padrão (desde 2026-11-19) é o layout de teclado e mouse mais usado para jogar no controle (o dos
 // adaptadores e programas como reWASD, XIM e Cronus, e o dos jogos de PlayStation que saíram no PC):
 // clique direito mira (L2), esquerdo atira (R2; pedido do usuário em 2026-11-25), Espaço pula (✕), C/Ctrl agacha (○), R recarrega ou
-// interage (□), F e a rodinha trocam de arma / entram no carro (△), Shift corre (L3), V golpeia (R3).
+// interage (□), F entra no carro (△), Shift corre (L3), Q golpeia (R3). Desde a v6 a rodinha e o Mouse 4 ficam
+// sem nada (pedido do usuário em 2026-11-28: o △ só no F e o L1 só no Tab).
 export const PADRAO = Object.freeze({
   Space: 'b0', Enter: 'b0',
   KeyC: 'b1', ControlLeft: 'b1', ControlRight: 'b1', Backspace: 'b1',
   KeyR: 'b2',
-  KeyF: 'b3', RodaCima: 'b3', RodaBaixo: 'b3',
-  Tab: 'b4', MouseX1: 'b4', KeyE: 'b5', MouseX2: 'b5',
+  KeyF: 'b3',
+  Tab: 'b4', KeyE: 'b5', MouseX2: 'b5',
   MouseRight: 'b6', MouseLeft: 'b7',
-  ShiftLeft: 'b10', ShiftRight: 'b10', KeyV: 'b11', MouseMiddle: 'b11',
-  KeyQ: 'b8', Escape: 'b9', KeyH: 'b16', KeyM: 'mapa', KeyN: 'b17',
+  ShiftLeft: 'b10', ShiftRight: 'b10', KeyQ: 'b11', MouseMiddle: 'b11',
+  KeyV: 'b8', Escape: 'b9', KeyH: 'b16', KeyM: 'mapa', KeyN: 'b17',
   ArrowUp: 'b12', ArrowDown: 'b13', ArrowLeft: 'b14', ArrowRight: 'b15',
   Digit1: 'b12', Digit2: 'b15', Digit3: 'b13', Digit4: 'b14',
   KeyW: 'ly-', KeyS: 'ly+', KeyA: 'lx-', KeyD: 'lx+',
   AltLeft: 'tp', AltRight: 'tp', KeyJ: 'giro',
 });
+// v6 (2026-11-28, pedido do usuário): o R3 sai do V e vai para o Q (o V fica com o Create/−); o Mouse 4 sai do L1
+// (fica só o Tab) e a rodinha sai do △ (fica só o F).
 // v5 (2026-11-28, pedido do usuário): o L1 sai do Q e vai para o Tab (a roda de armas do GTA no PC); o Q
 // fica com o Create/− (no PS5 travado; no Switch o − do emulador). O M abre o mapa do PS5 (ação 'mapa') e o
 // clique do touchpad que era dele vai para o N.
 // v2: o padrão novo. O mapa guardado na v1 (o padrão de antes, ou trocado em cima dele) dá lugar a ele.
 // v3 (um dia só): esquerdo mirava e direito atirava. v4: direito mira e esquerdo atira. No mapa guardado na
 // v3 só os dois cliques trocam, e só se estavam como no padrão dela.
-const VERSAO_MAPA = 5;
+const VERSAO_MAPA = 6;
 
 // as direções dos analógicos: ação -> [eixo, sinal]
 export const EIXO = {
@@ -151,7 +154,7 @@ function ler() {
   const r = { mapa: { ...PADRAO }, carro: { modo: 'soma', t: VERSAO_CARRO, mapa: { ...CARRO_PADRAO } } };
   try {
     const o = JSON.parse(localStorage.getItem(CHAVE) || 'null');
-    if (o && [1, 2, 3, 4, VERSAO_MAPA].includes(o.v) && o.mapa && typeof o.mapa === 'object') {
+    if (o && [1, 2, 3, 4, 5, VERSAO_MAPA].includes(o.v) && o.mapa && typeof o.mapa === 'object') {
       if (o.v >= 2) {
         r.mapa = {};
         for (const [e, a] of Object.entries(o.mapa)) if (POR_ID[a] && (!ehRoda(e) || ehBotao(a))) r.mapa[e] = a;
@@ -163,6 +166,12 @@ function ler() {
             r.mapa.KeyM = 'mapa';
             if (!r.mapa.KeyN) r.mapa.KeyN = 'b17';
           }
+        }
+        // antes da v6: o que estava como no padrão de antes muda (o trocado à mão fica)
+        if (o.v < 6) {
+          if (r.mapa.KeyV === 'b11' && (r.mapa.KeyQ === 'b8' || !r.mapa.KeyQ)) Object.assign(r.mapa, { KeyQ: 'b11', KeyV: 'b8' });
+          if (r.mapa.MouseX1 === 'b4') delete r.mapa.MouseX1;
+          for (const e of ['RodaCima', 'RodaBaixo']) if (r.mapa[e] === 'b3') delete r.mapa[e];
         }
       }
       if (o.carro && typeof o.carro === 'object') {

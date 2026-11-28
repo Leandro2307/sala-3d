@@ -7,8 +7,8 @@
 //   (o layout de teclado e mouse mais usado, o dos adaptadores e dos jogos de PlayStation no PC)
 //   clique direito: L2/ZL (mirar)   clique esquerdo: R2/ZR (atirar)   rodinha: △ (trava; o próximo dente solta)
 //   Espaço/Enter: ✕   C/Ctrl/⌫: ○   R: □   F: △ (pela posição: no Switch, B A Y X)
-//   Tab e Mouse 4: L1/L   E e Mouse 5: R1/R   Shift: L3 (correr)   V e meio: R3
-//   Q: −   Esc: +  (só no Switch; no PS5 o Create e o Options saíram do mapa)   H: PS/Home   M: mapa (PS5)   N: clique do touchpad   setas e 1 2 3 4: direcional
+//   Tab: L1/L   E e Mouse 5: R1/R   Shift: L3 (correr)   Q e meio: R3
+//   V: −   Esc: +  (só no Switch; no PS5 o Create e o Options saíram do mapa)   H: PS/Home   M: mapa (PS5)   N: clique do touchpad   setas e 1 2 3 4: direcional
 //   Alt segurado: o mouse vira um dedo no touchpad (encosta no meio ao descer o Alt, sai ao soltar);
 //   Alt + clique esquerdo afunda o touchpad. O touchpad só chega no PS5 direto (a ponte); o controle
 //   de Xbox (emulador, chiaki-ng) não tem.

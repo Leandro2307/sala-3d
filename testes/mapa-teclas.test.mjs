@@ -72,7 +72,8 @@ test('botão do mouse e analógico direito pelo teclado', () => {
 test('a rodinha só vira botão', () => {
   mapaTeclas.restaurar();
   assert.ok(mapaTeclas.definir('ly-', 'RodaBaixo').erro);
-  assert.equal(mapaTeclas.acao('RodaBaixo'), 'b3');
+  assert.equal(mapaTeclas.acao('RodaBaixo'), undefined); // desde a v6 a rodinha fica sem nada no padrão
+  assert.ok(!mapaTeclas.definir('b3', 'RodaBaixo').erro);
 });
 
 test('voltar ao padrão e o recado com as teclas de agora', () => {
@@ -97,7 +98,7 @@ test('legenda do canto: botões, ombros, gatilhos, L3/R3 e touchpad (sem analóg
   mapaTeclas.restaurar();
   const { legendaBotoes } = await import('../public/js/mapa-teclas.js');
   assert.deepEqual(legendaBotoes('ps5').map((b) => `${b.botao}=${b.teclas}`),
-    ['✕=Espaço', '○=C', '□=R', '△=F', 'L1=Tab', 'L2=🖱 dir', 'R1=E', 'R2=🖱 esq', 'L3=Shift', 'R3=V', 'Touch=Alt']);
+    ['✕=Espaço', '○=C', '□=R', '△=F', 'L1=Tab', 'L2=🖱 dir', 'R1=E', 'R2=🖱 esq', 'L3=Shift', 'R3=Q', 'Touch=Alt']);
   // no Switch não tem touchpad
   assert.equal(legendaBotoes('switch').some((b) => b.id === 'tp'), false);
 });
@@ -207,13 +208,19 @@ test('no tutorial (treino) o F e a tecla de troca não ligam o modo carro', () =
 
 test('v5: L1 no Tab, Q no Create, M abre o mapa e o touchpad vai para o N; o guardado na v4 migra', async () => {
   mapaTeclas.restaurar();
-  assert.deepEqual([mapaTeclas.acao('Tab'), mapaTeclas.acao('KeyQ'), mapaTeclas.acao('KeyM'), mapaTeclas.acao('KeyN')], ['b4', 'b8', 'mapa', 'b17']);
+  assert.deepEqual([mapaTeclas.acao('Tab'), mapaTeclas.acao('KeyQ'), mapaTeclas.acao('KeyV'), mapaTeclas.acao('KeyM'), mapaTeclas.acao('KeyN')], ['b4', 'b11', 'b8', 'mapa', 'b17']);
+  assert.deepEqual([mapaTeclas.acao('MouseX1'), mapaTeclas.acao('RodaCima'), mapaTeclas.acao('RodaBaixo'), mapaTeclas.acao('KeyF')], [undefined, undefined, undefined, 'b3']);
   const ler = async (mapa) => {
     guardado.set('sala3d-mapa-teclas', JSON.stringify({ v: 4, mapa }));
     return (await import(`../public/js/mapa-teclas.js?v5=${Math.random()}`)).mapaTeclas;
   };
-  let m = await ler({ ...PADRAO, KeyQ: 'b4', Tab: 'b8', KeyM: 'b17', KeyN: undefined, KeyP: 'b2' });
-  assert.deepEqual([m.acao('Tab'), m.acao('KeyQ'), m.acao('KeyM'), m.acao('KeyN'), m.acao('KeyP')], ['b4', 'b8', 'mapa', 'b17', 'b2']);
+  // o padrão da v4: Q no L1, Tab no Create, V no R3, Mouse 4 no L1, a rodinha no △, M no touchpad
+  let m = await ler({ KeyQ: 'b4', Tab: 'b8', KeyV: 'b11', MouseX1: 'b4', RodaCima: 'b3', RodaBaixo: 'b3', KeyF: 'b3', KeyM: 'b17', KeyP: 'b2' });
+  assert.deepEqual([m.acao('Tab'), m.acao('KeyQ'), m.acao('KeyV'), m.acao('KeyM'), m.acao('KeyN'), m.acao('KeyP')], ['b4', 'b11', 'b8', 'mapa', 'b17', 'b2']);
+  assert.deepEqual([m.acao('MouseX1'), m.acao('RodaCima'), m.acao('RodaBaixo'), m.acao('KeyF')], [undefined, undefined, undefined, 'b3']);
+  guardado.set('sala3d-mapa-teclas', JSON.stringify({ v: 5, mapa: { Tab: 'b4', KeyQ: 'b8', KeyV: 'b11', MouseX1: 'b4', RodaCima: 'b0' } }));
+  m = (await import(`../public/js/mapa-teclas.js?v6=${Math.random()}`)).mapaTeclas;
+  assert.deepEqual([m.acao('KeyQ'), m.acao('KeyV'), m.acao('MouseX1'), m.acao('RodaCima')], ['b11', 'b8', undefined, 'b0']);
   // quem trocou à mão fica com o seu
   m = await ler({ KeyQ: 'b0', Tab: 'b8', KeyM: 'b3' });
   assert.deepEqual([m.acao('KeyQ'), m.acao('Tab'), m.acao('KeyM')], ['b0', 'b8', 'b3']);
