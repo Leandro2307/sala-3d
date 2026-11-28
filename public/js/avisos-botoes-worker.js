@@ -1,13 +1,13 @@
 // O worker dos avisos de botão (avisos-botoes.js): recebe um quadro do jogo (VideoFrame ou ImageBitmap),
 // reduz para no máximo 960 de largura (os ícones ficam com ~17 px) e procura os ícones; devolve os que estão
-// firmes na tela (e, se pedido, se o quadro do carro está lá). Fora da página para não pesar no jogo.
+// firmes na tela (e, se pedido, se o quadro do carro está lá e onde está a munição). Fora da página para não pesar no jogo.
 //
 // Leve de propósito (2026-11-27: com 1280 e um quadro a cada 150 ms, o PC com Intel UHD passou de ~3% para
 // 13–33% de amostras travadas): a redução é na placa (canvas sem willReadFrequently) e só a imagem pequena
 // volta para a memória; o quadro do decodificador fecha logo depois de desenhado (segurá-lo durante a busca
 // tirava quadro do decodificador).
 
-import { detectar, veiculo, Rastreio } from './avisos-botoes.js';
+import { detectar, veiculo, armaNaTela, Rastreio } from './avisos-botoes.js';
 
 const LARGURA = 960;
 let tela = null, ctx = null;
@@ -69,7 +69,9 @@ self.onmessage = ({ data }) => {
     const achados = detectar(img);
     // dentro do carro? (o quadro do motor e da gasolina em cima do minimapa)
     const carro = data.carro ? veiculo(img) : false;
-    self.postMessage({ id: data.id, avisos: rastreio.passo(achados), carro, ms: performance.now() - t });
+    // a munição no canto de cima à direita (onde pôr o quadro "a pé / no carro")
+    const arma = data.hud ? armaNaTela(img) : null;
+    self.postMessage({ id: data.id, avisos: rastreio.passo(achados), carro, arma, hud: !!data.hud, ms: performance.now() - t });
   } catch (err) {
     self.postMessage({ id: data.id, erro: String(err?.message || err) });
   } finally {

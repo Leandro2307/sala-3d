@@ -97,7 +97,7 @@ test('legenda do canto: botões, ombros, gatilhos, L3/R3 e touchpad (sem analóg
   mapaTeclas.restaurar();
   const { legendaBotoes } = await import('../public/js/mapa-teclas.js');
   assert.deepEqual(legendaBotoes('ps5').map((b) => `${b.botao}=${b.teclas}`),
-    ['✕=Espaço', '○=C', '□=R', '△=F', 'L1=Q', 'L2=🖱 dir', 'R1=E', 'R2=🖱 esq', 'L3=Shift', 'R3=V', 'Touch=Alt']);
+    ['✕=Espaço', '○=C', '□=R', '△=F', 'L1=Tab', 'L2=🖱 dir', 'R1=E', 'R2=🖱 esq', 'L3=Shift', 'R3=V', 'Touch=Alt']);
   // no Switch não tem touchpad
   assert.equal(legendaBotoes('switch').some((b) => b.id === 'tp'), false);
 });
@@ -203,4 +203,32 @@ test('no tutorial (treino) o F e a tecla de troca não ligam o modo carro', () =
   tecla(tp, 'KeyY');
   assert.equal(tp.carro, true);
   tp.desligar();
+});
+
+test('v5: L1 no Tab, Q no Create, M abre o mapa e o touchpad vai para o N; o guardado na v4 migra', async () => {
+  mapaTeclas.restaurar();
+  assert.deepEqual([mapaTeclas.acao('Tab'), mapaTeclas.acao('KeyQ'), mapaTeclas.acao('KeyM'), mapaTeclas.acao('KeyN')], ['b4', 'b8', 'mapa', 'b17']);
+  const ler = async (mapa) => {
+    guardado.set('sala3d-mapa-teclas', JSON.stringify({ v: 4, mapa }));
+    return (await import(`../public/js/mapa-teclas.js?v5=${Math.random()}`)).mapaTeclas;
+  };
+  let m = await ler({ ...PADRAO, KeyQ: 'b4', Tab: 'b8', KeyM: 'b17', KeyN: undefined, KeyP: 'b2' });
+  assert.deepEqual([m.acao('Tab'), m.acao('KeyQ'), m.acao('KeyM'), m.acao('KeyN'), m.acao('KeyP')], ['b4', 'b8', 'mapa', 'b17', 'b2']);
+  // quem trocou à mão fica com o seu
+  m = await ler({ KeyQ: 'b0', Tab: 'b8', KeyM: 'b3' });
+  assert.deepEqual([m.acao('KeyQ'), m.acao('Tab'), m.acao('KeyM')], ['b0', 'b8', 'b3']);
+  guardado.delete('sala3d-mapa-teclas');
+});
+
+test('o M (mapa) aperta o Options no PS5; no Switch vai como tecla', async () => {
+  mapaTeclas.restaurar();
+  const { tp, pad } = novoPad();
+  tp.ligar('ps5');
+  assert.equal(tp.acionar('k', 'mapa', true), true);
+  assert.ok(pad.ultimo.b & (1 << 9));
+  tp.acionar('k', 'mapa', false);
+  await new Promise((r) => setTimeout(r, 200)); // o toque mínimo (MIN_MS)
+  assert.equal(pad.ultimo.b & (1 << 9), 0);
+  tp.ligar('switch');
+  assert.equal(tp.acionar('k', 'mapa', true), false);
 });

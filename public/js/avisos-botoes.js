@@ -767,3 +767,72 @@ function iconesDoCarro(img) {
   }
   return false;
 }
+
+// A munição do GTA 6 no canto de cima à direita (pedido do usuário em 2026-11-28: o quadro "a pé / no carro"
+// fica logo abaixo do ícone da arma quando há arma, e logo abaixo da estrela quando não há). Com arma, embaixo
+// das estrelas vêm os números da munição ("6 54": algarismos claros, ~2% da altura da tela, na mesma linha) e,
+// embaixo deles, o desenho da arma (~3 algarismos de altura). armaNaTela() procura essa linha de algarismos:
+// { dir, topo, base, h } em frações da imagem (a borda direita, o topo e a base da linha, a altura de um
+// algarismo) ou null sem arma.
+export function armaNaTela(img) {
+  const { width: W, height: H, data: d } = img;
+  const xa = Math.round(W * 0.78), ya = Math.round(H * 0.03), yb = Math.round(H * 0.26);
+  const RW = W - xa, RH = yb - ya;
+  const claro = (x, y) => {
+    const i = (y * W + x) * 4, r = d[i], g = d[i + 1], b = d[i + 2];
+    const mn = Math.min(r, g, b);
+    return mn > 120 && Math.max(r, g, b) - mn < 45;
+  };
+  const marca = new Uint8Array(RW * RH);
+  for (let y = 0; y < RH; y++) for (let x = 0; x < RW; x++) if (claro(xa + x, ya + y)) marca[y * RW + x] = 1;
+  const hMin = Math.max(5, H * 0.011), hMax = H * 0.035;
+  const algs = [];
+  const pilha = [];
+  for (let s0 = 0; s0 < marca.length; s0++) {
+    if (marca[s0] !== 1) continue;
+    let x0 = RW, y0 = RH, x1 = -1, y1 = -1, n = 0;
+    marca[s0] = 2;
+    pilha.push(s0);
+    while (pilha.length) {
+      const p = pilha.pop();
+      n++;
+      const px = p % RW, py = (p / RW) | 0;
+      if (px < x0) x0 = px;
+      if (px > x1) x1 = px;
+      if (py < y0) y0 = py;
+      if (py > y1) y1 = py;
+      if (px > 0 && marca[p - 1] === 1) { marca[p - 1] = 2; pilha.push(p - 1); }
+      if (px < RW - 1 && marca[p + 1] === 1) { marca[p + 1] = 2; pilha.push(p + 1); }
+      if (py > 0 && marca[p - RW] === 1) { marca[p - RW] = 2; pilha.push(p - RW); }
+      if (py < RH - 1 && marca[p + RW] === 1) { marca[p + RW] = 2; pilha.push(p + RW); }
+    }
+    const w = x1 - x0 + 1, h = y1 - y0 + 1, f = n / (w * h);
+    // um algarismo: em pé, do tamanho certo e com traço (não um bloco cheio nem um risco)
+    if (h >= hMin && h <= hMax && w >= h * 0.25 && w <= h * 1.1 && f >= 0.25 && f <= 0.85) algs.push({ x0, x1, y0, y1, h });
+  }
+  // a linha: algarismos da mesma altura, um do lado do outro (o espaço entre o pente e o resto é ~1 algarismo)
+  algs.sort((p, q) => p.x0 - q.x0);
+  let melhor = null;
+  for (const a of algs) {
+    const linha = [a];
+    for (const b of algs) {
+      const u = linha[linha.length - 1];
+      if (b.x0 <= u.x1 || b.x0 - u.x1 > a.h * 1.6) continue;
+      if (Math.abs(b.y0 - a.y0) > a.h * 0.2 || Math.abs(b.h - a.h) > a.h * 0.2) continue;
+      linha.push(b);
+    }
+    if (linha.length < 2) continue;
+    const dir = linha[linha.length - 1].x1, base = Math.max(...linha.map((k) => k.y1));
+    // perto da borda direita, e com fundo não claro em volta (céu claro não vira munição)
+    if (xa + dir < W * 0.93) continue;
+    let claros = 0, tot = 0;
+    for (const yy of [a.y0 - Math.round(a.h * 0.6), base + Math.round(a.h * 0.6)]) {
+      if (yy < 0 || yy >= RH) continue;
+      for (let x = a.x0; x <= dir; x++) { tot++; if (marca[yy * RW + x]) claros++; }
+    }
+    if (tot && claros / tot > 0.3) continue;
+    if (!melhor || linha.length > melhor.n) melhor = { n: linha.length, dir, topo: a.y0, base, h: a.h };
+  }
+  if (!melhor) return null;
+  return { dir: (xa + melhor.dir + 1) / W, topo: (ya + melhor.topo) / H, base: (ya + melhor.base + 1) / H, h: melhor.h / H };
+}

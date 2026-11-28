@@ -39,7 +39,7 @@ import { LAYOUTS, layoutDoTitulo, ToqueJogo } from './toque-jogo.js';
 import { ControleFisico } from './gamepad-jogo.js';
 import { PadVirtual } from './pad-virtual.js';
 import { TecladoPad } from './teclado-pad.js';
-import { MapaTeclasPainel, mapaTeclas } from './mapa-teclas.js';
+import { MapaTeclasPainel, mapaTeclas, textoModoCarro } from './mapa-teclas.js';
 import { AvisosBotoes } from './avisos-botoes-tela.js';
 import { Ps5Touchpad, temTouchpadHid } from './ps5-touchpad.js';
 import { AvisoDoSite } from './aviso-site.js';
@@ -1427,6 +1427,9 @@ const avisosBotoes = new AvisosBotoes({
     diagJogo.evento('modo carro: o quadro do carro apareceu no jogo');
     tecladoPad.trocarCarro(true);
   },
+  // a munição no canto de cima: o quadro "a pé / no carro" vai para baixo da arma (ou da estrela)
+  querHud: () => !$('#jogo-hud-modo').hidden,
+  onArma: () => posHudModo(),
 });
 turboRecebe.espiar = (frame) => avisosBotoes.espiar(frame);
 turboRecebe.socorro = true;
@@ -2107,10 +2110,11 @@ const tecladoPad = new TecladoPad({
   pad: padVirtual,
   sens: () => opcoesJogo.get('mouseSens'),
   aviso: (texto) => toast(texto, 'info', 5000),
-  // sem o quadro "a pé / no carro" na tela (desde 2026-11-27): o modo vem do △ e do quadro do carro no jogo
+  // o modo vem do △ e do quadro do carro no jogo; o quadro pequeno embaixo da arma/estrela mostra qual (posHudModo)
   onCarro: (sim) => {
     if (sim !== noCarro) diagJogo.evento(sim ? 'modo carro: no carro' : 'modo carro: a pé');
     noCarro = sim;
+    posHudModo();
   },
 });
 tecladoPad.soSaiNoTriangulo = true; // o modo carro entra pelo quadro do carro no jogo (avisosBotoes.onCarro)
@@ -2163,7 +2167,32 @@ function mostrarLegenda(layout) {
   const noTeclado = !!layout && entradaDeAgora() === 'teclado';
   // a tecla em cima dos avisos de botão do jogo: só com os ícones do PS5 e jogando no teclado
   avisosBotoes.ligar(noTeclado && layout === 'ps5' && opcoesJogo.get('avisos'));
+  posHudModo();
 }
+
+// O quadro "a pé / no carro" (pedido do usuário em 2026-11-28, depois de sair em 27/11): pequeno, no canto de
+// cima à direita, logo abaixo do ícone da arma do GTA quando há arma e logo abaixo da estrela quando não há.
+// A arma vem da munição achada na imagem (avisos-botoes.js armaNaTela); sem ela, fica embaixo da estrela —
+// no lugar medido da última munição vista ou, antes disso, no do print do usuário (tela 16:9).
+const HUD_ESTRELA = { dir: 0.982, topo: 0.045 }; // a borda direita e a base da estrela, em frações da imagem
+let ultimaArma = null;
+function posHudModo() {
+  const el = $('#jogo-hud-modo');
+  const t = layoutLegenda === 'ps5' && entradaDeAgora() === 'teclado' && mapaTeclas.carroTroca() ? textoModoCarro(noCarro) : null;
+  const a = t && avisosBotoes.areaDaImagem();
+  if (!a) return void (el.hidden = true);
+  const arma = avisosBotoes.arma;
+  if (arma) ultimaArma = arma;
+  // com arma: o desenho dela ocupa ~3 algarismos embaixo dos números; sem: a estrela acaba ~2,4 algarismos acima deles
+  const pos = arma ? { dir: arma.dir, topo: arma.base + arma.h * 3.4 }
+    : ultimaArma ? { dir: ultimaArma.dir, topo: ultimaArma.topo - ultimaArma.h * 2.2 } : HUD_ESTRELA;
+  const html = `<i>${t.icone}</i>${t.noCarro ? 'CARRO' : 'A PÉ'}${t.troca ? `<kbd>${t.troca.split(' ou ').pop()}</kbd>` : ''}`;
+  if (el.dataset.t !== html) { el.dataset.t = html; el.innerHTML = html; }
+  el.classList.toggle('carro', t.noCarro);
+  el.style.cssText = `left:${a.x + a.w * pos.dir}px;top:${a.y + a.h * pos.topo}px;--t:${Math.max(11, Math.round(a.h * 0.019))}px`;
+  el.hidden = false;
+}
+addEventListener('resize', () => posHudModo());
 mapaTeclas.ouvir(() => { if (layoutLegenda) mostrarLegenda(layoutLegenda); });
 for (const ev of ['gamepadconnected', 'gamepaddisconnected']) addEventListener(ev, () => { if (layoutLegenda) mostrarLegenda(layoutLegenda); });
 
@@ -2240,6 +2269,7 @@ controle.onJogo = (v, key) => {
     atualizar();
     acertarTrava();
     if (!controle.jogo) document.activeElement?.blur?.();
+    posHudModo(); // a imagem já no lugar (tela cheia)
   }, 0);
 };
 controle.onEscondeu = () => {

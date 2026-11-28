@@ -30,6 +30,15 @@ const OPCOES = 'sala3d-ps5'; // localStorage: { altura, qps, kbps, codec, ultimo
 const PADRAO = { altura: 1080, qps: 60, kbps: 0, codec: 'auto', ultimo: null, v: 2, psTravado: true, menuTravado: true };
 const BIT_PS = 1 << 16; // o botão PS/Home no mapa padrão do navegador
 const BIT_CREATE = 1 << 8, BIT_OPTIONS = 1 << 9; // Create e Options no mesmo mapa
+const BIT_X = 1 << 0, BIT_O = 1 << 1, BIT_L1 = 1 << 4, BIT_R1 = 1 << 5;
+// O mapa com o menu travado (pedido do usuário em 2026-11-28): no GTA 6 o mapa fica no menu do Options (a
+// lista Mapa, Jogo, Loja, Ajuda, Estúdio de fotos, Configurações), e nessa lista quem joga estragaria a
+// brincadeira dos outros. O Options de quem joga (o M do teclado) vira: aperta o Options daqui, espera a lista
+// aparecer e aperta o ✕ no Mapa (o primeiro, já marcado). Enquanto a lista abre, nada de quem joga chega (não
+// dá para descer nela); com o mapa aberto, o ○ (que voltaria para a lista), o L1/R1 e o Options de novo
+// fecham tudo com o Options. Os tempos são do GTA 6 no PS5; a página não vê o menu, só conta o tempo.
+const MAPA_LISTA_MS = 1200; // do Options até a lista do menu estar na tela
+const TOQUE_MS = 120; // um toque de botão daqui
 // A banda que o PS5 usa para cada resolução. Antes era 6 Mbps fixos (1080p a 60 ficava borrado no
 // movimento: o próprio chiaki-ng usa 15 em 1080p). Dá para pôr à mão até 50 Mbps.
 const BANDA = { 720: 10000, 1080: 15000 };
@@ -720,6 +729,8 @@ export class Ps5Nativo {
   constructor({ pedirPonte, compartilhar, pararTela, onTremor, onGatilhos, onEvento, toast, aoAbrir, aoFechar, jogarComLossless, losslessTodos, somPc, volume, dublagem, aoParar, aoCair }) {
     Object.assign(this, { pedirPonte, compartilhar, pararTela, onTremor, onGatilhos, onEvento, toast, aoAbrir, aoFechar, jogarComLossless, losslessTodos, somPc, volume, dublagem, aoParar, aoCair });
     this.ws = null;
+    this.toque = 0; // os bits que tocar() aperta agora por cima de quem joga
+    this.mapa = null; // o mapa pelo menu travado: null, 'abrindo' ou 'aberto' (pedirMapa)
     this.consoles = [];
     this.achados = null;
     this.fase = 'parado';
@@ -964,6 +975,8 @@ export class Ps5Nativo {
 
   // a sessão acabou (ou a tela saiu da sala): limpa tudo
   terminar(motivo) {
+    clearTimeout(this.mapaTimer);
+    this.mapa = null;
     const fonte = this.fonte;
     this.fonte = null;
     this.conectado = null;
@@ -1013,13 +1026,65 @@ export class Ps5Nativo {
     this.padSolto = !ev.b && !ev.lx && !ev.ly && !ev.rx && !ev.ry && !ev.lt && !ev.rt && tp[0] < 0 && tp[2] < 0 && !m;
     // os dedos no touchpad vão em números soltos (a ponte lê campo a campo): -1 é sem dedo
     let b = ev.b;
+    let parado = false;
     if (!livre && this.opcoes.psTravado) b &= ~BIT_PS;
-    if (!livre && this.opcoes.menuTravado) b &= ~(BIT_CREATE | BIT_OPTIONS);
-    const msg = { tipo: 'pad', b, lx: ev.lx, ly: ev.ly, rx: ev.rx, ry: ev.ry, lt: ev.lt, rt: ev.rt, t0x: tp[0], t0y: tp[1], t1x: tp[2], t1y: tp[3] };
+    if (!livre && this.opcoes.menuTravado) {
+      // o Options sozinho abre (ou fecha) o mapa; com o Create junto é o "sair do modo jogo" da página
+      const opt = !!(b & BIT_OPTIONS) && !(b & BIT_CREATE);
+      if (opt && !this.optAntes) this.pedirMapa();
+      this.optAntes = opt;
+      b &= ~(BIT_CREATE | BIT_OPTIONS);
+      if (this.mapa === 'abrindo') parado = true;
+      else if (this.mapa === 'aberto') {
+        const sai = b & (BIT_O | BIT_L1 | BIT_R1);
+        if (sai && !this.saiAntes) this.fecharMapa();
+        this.saiAntes = !!sai;
+        b &= ~(BIT_O | BIT_L1 | BIT_R1);
+      }
+      // o ○ (ou L1/R1) que fechou o mapa só volta ao jogo depois de solto
+      if (this.mapa !== 'aberto' && this.saiAntes) {
+        if (b & (BIT_O | BIT_L1 | BIT_R1)) b &= ~(BIT_O | BIT_L1 | BIT_R1);
+        else this.saiAntes = false;
+      }
+    } else if (this.mapa) this.mapa = null;
+    const msg = parado
+      ? { tipo: 'pad', b: 0, lx: 0, ly: 0, rx: 0, ry: 0, lt: 0, rt: 0, t0x: -1, t0y: -1, t1x: -1, t1y: -1 }
+      : { tipo: 'pad', b, lx: ev.lx, ly: ev.ly, rx: ev.rx, ry: ev.ry, lt: ev.lt, rt: ev.rt, t0x: tp[0], t0y: tp[1], t1x: tp[2], t1y: tp[3] };
     // o movimento também (ponte 1.1+): giroscópio, acelerômetro e orientação; sem ele, deitado e parado
     if (m) [msg.gx, msg.gy, msg.gz, msg.ax, msg.ay, msg.az, msg.ox, msg.oy, msg.oz, msg.ow] = m;
     this.ultimaMsgPad = msg;
-    this.mandar(msg);
+    this.mandar(this.toque ? { ...msg, b: msg.b | this.toque } : msg);
+  }
+
+  // um toque curto daqui por cima do que quem joga segura (o pad() de quem joga mantém o bit até soltar)
+  tocar(bit) {
+    this.toque |= bit;
+    const base = this.ultimaMsgPad || { tipo: 'pad', b: 0, lx: 0, ly: 0, rx: 0, ry: 0, lt: 0, rt: 0 };
+    this.mandar({ ...base, b: base.b | this.toque });
+    setTimeout(() => {
+      this.toque &= ~bit;
+      const m = this.ultimaMsgPad || base;
+      this.mandar({ ...m, b: m.b | this.toque });
+    }, TOQUE_MS);
+  }
+
+  // o Options de quem joga com o menu travado: abre o mapa (ou fecha, se já está aberto). Ver MAPA_LISTA_MS
+  pedirMapa() {
+    if (this.mapa) return this.fecharMapa();
+    this.mapa = 'abrindo';
+    this.tocar(BIT_OPTIONS);
+    clearTimeout(this.mapaTimer);
+    this.mapaTimer = setTimeout(() => {
+      if (this.mapa !== 'abrindo') return;
+      this.mapa = 'aberto';
+      this.tocar(BIT_X); // o Mapa, primeiro da lista
+    }, MAPA_LISTA_MS);
+  }
+
+  fecharMapa() {
+    clearTimeout(this.mapaTimer);
+    this.mapa = null;
+    this.tocar(BIT_OPTIONS);
   }
 
   // um botão apertado daqui (vale mesmo travado): um toque curto por cima do que quem joga segura

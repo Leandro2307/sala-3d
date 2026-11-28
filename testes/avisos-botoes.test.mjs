@@ -3,7 +3,7 @@
 // conferidos à mão na criação (ver o comentário de MEDIDOS).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { detectar, Rastreio } from '../public/js/avisos-botoes.js';
+import { detectar, Rastreio, armaNaTela } from '../public/js/avisos-botoes.js';
 
 const distSeg = (px, py, ax, ay, bx, by) => {
   const dx = bx - ax, dy = by - ay, t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)));
@@ -95,4 +95,23 @@ test('acha o aviso de contorno preto sobre fundo claro, branco ou cinza', () => 
     assert.equal(detectar(contornado(320, 180, 100, 90, r, XIS, 105, [215, 190, 165]))[0]?.simbolo, 'xis', `✕ cinza, raio ${r}`);
   }
   assert.deepEqual(detectar(contornado(320, 180, 100, 90, 10, [], 240, [205, 200, 195])), []);
+});
+
+// a munição do GTA ("6 54"): algarismos claros na mesma linha, no canto de cima à direita
+function canto(W, H, fundo, algs = []) {
+  const data = new Uint8ClampedArray(W * H * 4);
+  for (let i = 0; i < W * H; i++) data.set([fundo, fundo, fundo + 5, 255], i * 4);
+  for (const [x0, y0, w, h] of algs) for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) {
+    const borda = x < x0 + 2 || x >= x0 + w - 2 || y < y0 + 2 || y >= y0 + h - 2;
+    if (borda) data.set([235, 235, 235, 255], (y * 960 + x) * 4);
+  }
+  return { width: W, height: H, data };
+}
+test('armaNaTela: acha a linha da munição; sem ela, ou com céu claro, não', () => {
+  const a = armaNaTela(canto(960, 540, 35, [[880, 47, 7, 10], [896, 47, 7, 10], [904, 47, 7, 10]]));
+  assert.ok(a, 'com munição');
+  assert.ok(Math.abs(a.base - 57 / 540) < 0.003 && Math.abs(a.dir - 911 / 960) < 0.003);
+  assert.equal(armaNaTela(canto(960, 540, 35)), null, 'sem munição');
+  assert.equal(armaNaTela(canto(960, 540, 230, [[880, 47, 7, 10], [896, 47, 7, 10]])), null, 'céu claro');
+  assert.equal(armaNaTela(canto(960, 540, 35, [[880, 47, 7, 10]])), null, 'um algarismo solto');
 });

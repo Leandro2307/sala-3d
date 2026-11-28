@@ -20,19 +20,22 @@ export const PADRAO = Object.freeze({
   KeyC: 'b1', ControlLeft: 'b1', ControlRight: 'b1', Backspace: 'b1',
   KeyR: 'b2',
   KeyF: 'b3', RodaCima: 'b3', RodaBaixo: 'b3',
-  KeyQ: 'b4', MouseX1: 'b4', KeyE: 'b5', MouseX2: 'b5',
+  Tab: 'b4', MouseX1: 'b4', KeyE: 'b5', MouseX2: 'b5',
   MouseRight: 'b6', MouseLeft: 'b7',
   ShiftLeft: 'b10', ShiftRight: 'b10', KeyV: 'b11', MouseMiddle: 'b11',
-  Tab: 'b8', Escape: 'b9', KeyH: 'b16', KeyM: 'b17',
+  KeyQ: 'b8', Escape: 'b9', KeyH: 'b16', KeyM: 'mapa', KeyN: 'b17',
   ArrowUp: 'b12', ArrowDown: 'b13', ArrowLeft: 'b14', ArrowRight: 'b15',
   Digit1: 'b12', Digit2: 'b15', Digit3: 'b13', Digit4: 'b14',
   KeyW: 'ly-', KeyS: 'ly+', KeyA: 'lx-', KeyD: 'lx+',
   AltLeft: 'tp', AltRight: 'tp', KeyJ: 'giro',
 });
+// v5 (2026-11-28, pedido do usuário): o L1 sai do Q e vai para o Tab (a roda de armas do GTA no PC); o Q
+// fica com o Create/− (no PS5 travado; no Switch o − do emulador). O M abre o mapa do PS5 (ação 'mapa') e o
+// clique do touchpad que era dele vai para o N.
 // v2: o padrão novo. O mapa guardado na v1 (o padrão de antes, ou trocado em cima dele) dá lugar a ele.
 // v3 (um dia só): esquerdo mirava e direito atirava. v4: direito mira e esquerdo atira. No mapa guardado na
 // v3 só os dois cliques trocam, e só se estavam como no padrão dela.
-const VERSAO_MAPA = 4;
+const VERSAO_MAPA = 5;
 
 // as direções dos analógicos: ação -> [eixo, sinal]
 export const EIXO = {
@@ -73,6 +76,9 @@ export const ACOES = [
   { id: 'b16', ps5: 'PS', sw: 'Home', nome: 'Botão do meio' },
   { id: 'tp', grupo: 'Só no PS5', ps5: 'Touchpad', nome: 'Segure e mexa o mouse: o dedo no touchpad (com clique esquerdo, afunda)', so: 'ps5' },
   { id: 'b17', ps5: 'Afundar touchpad', nome: 'Clique do touchpad', so: 'ps5' },
+  // o Options está travado (ps5-nativo.js): o PC da casa aperta o Options e escolhe o Mapa, e não deixa voltar
+  // para a lista do menu (o ○ e o M de novo fecham tudo)
+  { id: 'mapa', ps5: 'Mapa', nome: 'Abre o mapa do jogo (o menu de pausa continua travado)', so: 'ps5' },
   { id: 'giro', ps5: 'Inclinar', nome: 'Liga/desliga: o mouse inclina o controle (giroscópio)', so: 'ps5' },
 ];
 const POR_ID = Object.fromEntries(ACOES.map((a) => [a.id, a]));
@@ -145,11 +151,19 @@ function ler() {
   const r = { mapa: { ...PADRAO }, carro: { modo: 'soma', t: VERSAO_CARRO, mapa: { ...CARRO_PADRAO } } };
   try {
     const o = JSON.parse(localStorage.getItem(CHAVE) || 'null');
-    if (o && [1, 2, 3, VERSAO_MAPA].includes(o.v) && o.mapa && typeof o.mapa === 'object') {
+    if (o && [1, 2, 3, 4, VERSAO_MAPA].includes(o.v) && o.mapa && typeof o.mapa === 'object') {
       if (o.v >= 2) {
         r.mapa = {};
         for (const [e, a] of Object.entries(o.mapa)) if (POR_ID[a] && (!ehRoda(e) || ehBotao(a))) r.mapa[e] = a;
         if (o.v === 3 && r.mapa.MouseLeft === 'b6' && r.mapa.MouseRight === 'b7') Object.assign(r.mapa, { MouseLeft: 'b7', MouseRight: 'b6' });
+        // antes da v5: o Q e o Tab trocam (se estavam como no padrão) e o M passa do touchpad para o mapa
+        if (o.v < 5) {
+          if (r.mapa.KeyQ === 'b4' && r.mapa.Tab === 'b8') Object.assign(r.mapa, { KeyQ: 'b8', Tab: 'b4' });
+          if (r.mapa.KeyM === 'b17') {
+            r.mapa.KeyM = 'mapa';
+            if (!r.mapa.KeyN) r.mapa.KeyN = 'b17';
+          }
+        }
       }
       if (o.carro && typeof o.carro === 'object') {
         const t = Number(o.carro.t) || 0;

@@ -65,8 +65,14 @@ export class AvisosBotoes {
   // camada: a div por cima da imagem; video: o <video> da tela; telaTurbo(): o canvas do turbo à vista (ou null)
   // querCarro(): procurar também o quadro do carro; onCarro(): ele apareceu (visto em 2 análises seguidas)
   // noCarro(): as teclas do carro valem agora (o L2 e o R2 mostram as do carro)
-  constructor({ camada, video, telaTurbo, querCarro = () => false, onCarro = () => {}, noCarro = () => false }) {
+  // querHud(): procurar também a munição (canto de cima à direita); onArma(geo|null): mudou (geo: armaNaTela)
+  constructor({ camada, video, telaTurbo, querCarro = () => false, onCarro = () => {}, noCarro = () => false, querHud = () => false, onArma = () => {} }) {
     this.camada = camada;
+    this.querHud = querHud;
+    this.onArma = onArma;
+    this.arma = null; // a munição à vista agora (com folga: 2 análises para entrar, 3 para sair)
+    this.armaSim = 0;
+    this.armaNao = 0;
     this.noCarro = noCarro;
     this.querCarro = querCarro;
     this.onCarro = onCarro;
@@ -93,6 +99,8 @@ export class AvisosBotoes {
     } else {
       clearInterval(this.relogio);
       this.worker?.postMessage({ limpar: true });
+      if (this.arma) { this.arma = null; this.onArma(null); }
+      this.armaSim = this.armaNao = 0;
       this.mostrar([]);
     }
   }
@@ -116,6 +124,7 @@ export class AvisosBotoes {
       this.msAnalise = data.ms;
       this.vistoCarro = data.carro ? this.vistoCarro + 1 : 0;
       if (this.vistoCarro === 2) this.onCarro();
+      if (data.hud) this.viuArma(data.arma);
     };
     this.worker.onerror = (e) => {
       console.warn('[avisos] o worker caiu', e.message);
@@ -124,6 +133,21 @@ export class AvisosBotoes {
       this.ligar(false);
     };
     return this.worker;
+  }
+
+  viuArma(geo) {
+    if (geo) {
+      this.armaNao = 0;
+      if (++this.armaSim < 2) return;
+      const mudou = !this.arma || Math.abs(this.arma.base - geo.base) > geo.h * 0.5 || Math.abs(this.arma.dir - geo.dir) > geo.h;
+      this.arma = geo;
+      if (mudou) this.onArma(geo);
+    } else {
+      this.armaSim = 0;
+      if (!this.arma || ++this.armaNao < 3) return;
+      this.arma = null;
+      this.onArma(null);
+    }
   }
 
   // é hora de mandar outro quadro? 'tudo' (a análise inteira), 'seguir' (só os recortes dos avisos) ou null
@@ -141,7 +165,7 @@ export class AvisosBotoes {
     this.enviadoEm = performance.now();
     if (tipo === 'seguir') return void w.postMessage({ id: ++this.seq, quadro, seguir: true }, [quadro]);
     this.completaEm = this.enviadoEm;
-    w.postMessage({ id: ++this.seq, quadro, carro: !!this.querCarro() }, [quadro]);
+    w.postMessage({ id: ++this.seq, quadro, carro: !!this.querCarro(), hud: !!this.querHud() }, [quadro]);
   }
 
   // o turbo.js chama com cada quadro desenhado (que ele fecha logo depois: aqui vai uma cópia)

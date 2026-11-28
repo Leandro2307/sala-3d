@@ -7,8 +7,8 @@
 //   (o layout de teclado e mouse mais usado, o dos adaptadores e dos jogos de PlayStation no PC)
 //   clique direito: L2/ZL (mirar)   clique esquerdo: R2/ZR (atirar)   rodinha: △ (trava; o próximo dente solta)
 //   Espaço/Enter: ✕   C/Ctrl/⌫: ○   R: □   F: △ (pela posição: no Switch, B A Y X)
-//   Q e Mouse 4: L1/L   E e Mouse 5: R1/R   Shift: L3 (correr)   V e meio: R3
-//   Tab: −   Esc: +  (só no Switch; no PS5 o Create e o Options saíram do mapa)   H: PS/Home   M: clique do touchpad   setas e 1 2 3 4: direcional
+//   Tab e Mouse 4: L1/L   E e Mouse 5: R1/R   Shift: L3 (correr)   V e meio: R3
+//   Q: −   Esc: +  (só no Switch; no PS5 o Create e o Options saíram do mapa)   H: PS/Home   M: mapa (PS5)   N: clique do touchpad   setas e 1 2 3 4: direcional
 //   Alt segurado: o mouse vira um dedo no touchpad (encosta no meio ao descer o Alt, sai ao soltar);
 //   Alt + clique esquerdo afunda o touchpad. O touchpad só chega no PS5 direto (a ponte); o controle
 //   de Xbox (emulador, chiaki-ng) não tem.
@@ -225,6 +225,13 @@ export class TecladoPad {
       if (desce) this.altSegura.add(quem);
       else this.altSegura.delete(quem);
       this.alt(this.altSegura.size > 0);
+      return true;
+    }
+    // o mapa do PS5 (M no padrão): vai como o Options, que o PC da casa (com o menu travado) troca por
+    // "Options + Mapa" e não deixa voltar para a lista do menu (ps5-nativo.js pedirMapa). No Switch: tecla
+    if (id === 'mapa') {
+      if (this.layout !== 'ps5') return false;
+      this.botao(quem, 9, desce);
       return true;
     }
     // Create e Options saíram do mapa do PS5 (travados como o PS; o dono aperta pelo painel): a tecla não

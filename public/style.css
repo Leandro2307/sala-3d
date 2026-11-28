@@ -4884,6 +4884,30 @@ body.touch :is(.hk-lista, #help-extra, #help-mais-btn) { display: none !importan
 #jogo-avisos kbd svg { display: block; height: 70%; width: auto; max-width: 86%; }
 @keyframes aviso-entra { from { opacity: 0; transform: translate(-50%, -50%) scale(.8); } }
 @media (prefers-reduced-motion: reduce) { #jogo-avisos kbd { animation: none; transition: none; } }
+/* a pé / no carro na /jogar (jogar.js posHudModo): pequeno, no canto de cima à direita, logo abaixo do ícone da
+   arma do GTA (com arma) ou da estrela (sem); a borda direita alinhada com a do jogo. --t: o tamanho da letra */
+#jogo-hud-modo {
+  position: absolute;
+  z-index: 5;
+  transform: translateX(-100%);
+  display: flex;
+  align-items: center;
+  gap: .35em;
+  padding: .22em .55em;
+  border-radius: 999px;
+  border: 2px solid #34d399;
+  background: rgba(10, 12, 20, .72);
+  color: #fff;
+  font: 800 var(--t, 14px)/1 'Plus Jakarta Sans', system-ui, sans-serif;
+  letter-spacing: .02em;
+  white-space: nowrap;
+  pointer-events: none;
+  transition: top .15s ease-out, left .15s ease-out;
+}
+#jogo-hud-modo[hidden] { display: none; }
+#jogo-hud-modo.carro { border-color: #fb923c; }
+#jogo-hud-modo i { font-style: normal; }
+#jogo-hud-modo kbd { font: 700 .72em/1 inherit; font-family: inherit; padding: .18em .4em; border-radius: 4px; background: rgba(255, 255, 255, .16); color: rgba(255, 255, 255, .85); }
 #jogo-legenda span {
   display: flex;
   flex-direction: column;

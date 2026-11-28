@@ -68,7 +68,7 @@ const PASSOS_PC_PADRAO = [
     txt: 'Clique com o botão <b>direito</b> (mirar) e com o <b>esquerdo</b> (atirar). Dá para segurar os dois juntos.',
     de: mouse('dir') + mouse('esq'), para: GLIFO.l2 + GLIFO.r2, feito: apertou('l2', 'r2'),
   },
-  { tit: 'Q = L1 · E = R1', txt: 'Aperte <b>Q</b> e depois <b>E</b>.', de: teclas('Q', 'E'), para: GLIFO.l1 + GLIFO.r1, feito: apertou('l1', 'r1') },
+  { tit: 'Tab = L1 · E = R1', txt: 'Aperte <b>Tab</b> e depois <b>E</b>.', de: teclas('Tab', 'E'), para: GLIFO.l1 + GLIFO.r1, feito: apertou('l1', 'r1') },
   {
     tit: 'W A S D = andar',
     txt: 'Ande com <b>W A S D</b>, como num jogo de PC.',
