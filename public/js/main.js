@@ -3864,6 +3864,7 @@ const turboRecebe = new TurboRecebe({
     diagJogo.evento('modo turbo falhou: vídeo normal de volta', { motivo });
     if (turboRecebe.ultimaFalha) diagJogo.evento('turbo: como estava ao desistir', turboRecebe.ultimaFalha);
     turboVolta.falhou(motivo); // sem aviso na tela: o vídeo normal entra sozinho e o relatório guarda o motivo
+    if (motivo === 'decodificador') decodificadorRecusou();
   },
 });
 turboRecebe.liso = opcoesJogo.get('turboLiso');
@@ -3946,6 +3947,53 @@ const turboVolta = new TurboVolta({
   pode: () => !!jogandoLa && !!opcoesJogo.get('turbo') && !turboRecebe.ligado && !(rttDoDono?.ms > 250),
   onEvento: (texto, dados) => diagJogo.evento(texto, dados),
 });
+// Aparelho que não dá conta do 1080p (como no /jogar desde 2026-11-27, jogar.js passarPara720; na sala pedido do
+// usuário em 2026-11-28): decodificando devagar (mais de FRACO_DEC_MS por quadro em 1080p) ou recusando o 1080p,
+// passa para o 720p Turbo rápido e o automático só mede ele; guardado neste aparelho por FRACO_DIAS. Recusou
+// também o 720p: o automático para (o vídeo normal fica, sem o turbo caindo de novo a cada troca de modo).
+const FRACO_CHAVE = 'sala-aparelho-720';
+const FRACO_DIAS = 3;
+const FRACO_DEC_MS = 20;
+const FRACO_AMOSTRAS = 8; // as últimas (16 s): FRACO_LENTAS delas acima do FRACO_DEC_MS
+const FRACO_LENTAS = 6;
+const MODO_720 = 15; // 720p Turbo rápido (jogo-opcoes.js)
+const aparelho = { ate: 0, lentas: [], recusas720: 0 };
+try { aparelho.ate = Number(localStorage.getItem(FRACO_CHAVE)) || 0; } catch { /* sem armazenamento */ }
+const so720 = () => aparelho.ate > Date.now();
+const modoDoAparelho = (m) => (so720() ? MODO_720 : m);
+if (so720()) turboAuto.modos = [MODO_720];
+function passarPara720(porque, dados = {}) {
+  if (!so720()) {
+    aparelho.ate = Date.now() + FRACO_DIAS * 86_400_000;
+    try { localStorage.setItem(FRACO_CHAVE, String(aparelho.ate)); } catch { /* sem armazenamento */ }
+  }
+  turboAuto.modos = [MODO_720];
+  diagJogo.evento('aparelho: o 1080p pesa demais aqui — 720p Turbo rápido', { porque, ...dados });
+  if (!jogandoLa || !turboAuto.ligado) return;
+  if (opcoesJogo.get('preset') !== MODO_720) aplicarPreset(MODO_720, `aparelho: ${porque}`);
+  turboAuto.comecarCom(MODO_720);
+  mostrarAuto();
+}
+function decodificadorRecusou() {
+  const cfg = turboRecebe.ultimaFalha?.cfg || '';
+  if (!/×(1080|1088)/.test(cfg)) {
+    if (++aparelho.recusas720 >= 2 && turboAuto.ativo) {
+      turboAuto.parar();
+      diagJogo.evento('aparelho: o decodificador recusou também o 720p — o automático para (vídeo normal)', { cfg });
+    }
+    return;
+  }
+  passarPara720('o decodificador recusou o 1080p', { cfg });
+}
+function vigiarDecodificador(resumo) {
+  const t = resumo?.turbo;
+  if (so720() || !turboRecebe.ligado || document.hidden || !t || !(t.altura >= 1000) || t.decMs == null) return;
+  aparelho.lentas.push(t.decMs > FRACO_DEC_MS);
+  if (aparelho.lentas.length > FRACO_AMOSTRAS) aparelho.lentas.shift();
+  if (aparelho.lentas.length < FRACO_AMOSTRAS || aparelho.lentas.filter(Boolean).length < FRACO_LENTAS) return;
+  aparelho.lentas = [];
+  passarPara720(`o decodificador leva mais de ${FRACO_DEC_MS} ms por quadro em 1080p`, { decMs: t.decMs, aceleracao: t.decAjuste || t.aceleracao || null });
+}
 // a cada amostra (2 s): a ida e volta de agora e o automático
 function amostraDoAuto(resumo) {
   if (!jogandoLa || !resumo) return;
@@ -3962,6 +4010,7 @@ function amostraDoAuto(resumo) {
   }
   // o turbo que voltou já dura: o próximo ligar não precisa mais começar por baixo
   if (turboRecebe.depoisDaFalha && turboRecebe.ligado && performance.now() - turboVolta.ligouEm > 60_000) turboRecebe.depoisDaFalha = null;
+  vigiarDecodificador(resumo);
   turboAuto.amostra(resumo, document.hidden);
   verCaminho(resumo);
   conferirPrevisto(resumo);
@@ -4006,6 +4055,39 @@ const testeJoga = new TesteJoga({
   onEvento: (texto, dados) => diagJogo.evento(texto, dados),
 });
 let codecsDoTeste = null;
+// Comando preso no caminho direto (como no /jogar desde 2026-11-27, jogar.js vigiarComando; na sala pedido do
+// usuário em 2026-11-28). No 4G do cucafado1 a imagem chegava em dia, mas o caminho direto perdia metade dos pacotes
+// de lá para cá e o comando chegava ao PC de 1 a 43 s depois. O ping do controle sem volta há COMANDO_PRESO_MS (ou
+// voltando com isso) em COMANDO_AMOSTRAS amostras seguidas, no caminho direto: a conexão passa para o TURN, uma vez
+// por sessão de jogo. viu: já voltou algum ping nesta conexão (um PC que não responde não é comando preso).
+const COMANDO_PRESO_MS = 1500;
+const COMANDO_AMOSTRAS = 2; // amostras de 2 s
+const comando = { fora: [], pc: null, viu: false, seguidas: 0, turnEm: null };
+async function vigiarComando(key, dono) {
+  if (!comando.viu) return;
+  const espera = comando.fora.length ? performance.now() - comando.fora[0] : 0;
+  const voltou = pingDoJogo.novo ? pingDoJogo.rtt : 0;
+  pingDoJogo.novo = false;
+  if (Math.max(espera, voltou) < COMANDO_PRESO_MS) {
+    comando.seguidas = 0;
+    return;
+  }
+  if (++comando.seguidas < COMANDO_AMOSTRAS || comando.turnEm === key) return;
+  const c = await Promise.resolve(rtc?.caminhoPara(dono)).catch(() => null);
+  if (!c || c.relay || jogandoLa?.key !== key) return; // já pelo TURN (ou sem conexão): não é o caminho direto
+  comando.turnEm = key;
+  comando.seguidas = 0;
+  const dados = { esperaMs: Math.round(espera), rttMs: pingDoJogo.rtt, iceRttMs: c.rttMs, caminho: `${c.local} → ${c.remoto}` };
+  if (!mudarRota(key, 'turn')) return void diagJogo.evento('comando preso no caminho direto (sem TURN para passar)', dados);
+  comando.fora.length = 0;
+  diagJogo.evento('comando preso no caminho direto: passando para o TURN', dados);
+  const foi = await esperarRota(dono, true);
+  diagJogo.evento('comando preso: TURN', { foi });
+  if (jogandoLa?.key !== key) return;
+  aplicarBuffer();
+  if (!foi) mudarRota(key, 'auto'); // não ligou: volta a valer qualquer caminho
+}
+
 // passa a conexão com o dono da tela para o TURN ou de volta (rtc.usarCaminho): a tela em foco espera a imagem nova
 function mudarRota(key, quer) {
   const antes = trocandoRota;
@@ -4121,10 +4203,10 @@ async function entrarNoTurbo(deNovo = false) {
     }
   }
   previsto = r?.previsto ? { ...r.previsto, desde: performance.now(), am: [], quem: acharTela(jl.key)?.user?.name || jl.key.split('~')[0] } : null;
-  if (r && turboAuto.ligado && opcoesJogo.get('preset') !== r.modo) aplicarPreset(r.modo, 'teste da conexão');
+  if (r && turboAuto.ligado && opcoesJogo.get('preset') !== modoDoAparelho(r.modo)) aplicarPreset(modoDoAparelho(r.modo), so720() ? 'teste da conexão (aparelho só 720p)' : 'teste da conexão');
   if (!turboRecebe.ligado) ligarTurbo();
   if (!turboAuto.ligado) return;
-  if (r) turboAuto.comecarCom(r.modo);
+  if (r) turboAuto.comecarCom(modoDoAparelho(r.modo));
   else turboAuto.comecar();
 }
 document.addEventListener('click', (e) => {
@@ -4256,6 +4338,7 @@ function jogoLa(video, key) {
   turboAuto.parar();
   testeJoga.pular('saiu do jogo');
   if (jogandoLa) mudarRota(jogandoLa.key, 'auto'); // o TURN escolhido vale só para o jogo
+  comando.turnEm = null;
   Object.assign(vigiaCaminho, { par: null, rtt: [], procurou: false });
   previsto = null;
   painelTeste.fechar();
@@ -4274,7 +4357,7 @@ function jogoLa(video, key) {
   }
   esquecerJogo(); // de volta ao jogo: o "Voltar ao jogo" de uma queda anterior não vale mais
   // o automático começa no modo que deu certo da última vez nesta página
-  if (turboAuto.ligado && opcoesJogo.get('turbo') && opcoesJogo.get('preset') !== turboAuto.inicial) aplicarPreset(turboAuto.inicial, 'automático');
+  if (turboAuto.ligado && opcoesJogo.get('turbo') && opcoesJogo.get('preset') !== modoDoAparelho(turboAuto.inicial)) aplicarPreset(modoDoAparelho(turboAuto.inicial), 'automático');
   jogandoLa = { key, video, cursorLivre: false };
   diagJogo.comecar('joga', {
     gl: world.renderer.getContext(),
@@ -4420,7 +4503,15 @@ async function amostrarJogo() {
       const dono = jogandoLa.key.split('~')[0];
       // o atraso do controle: um "ping" pelo canal do mouse e do teclado; a volta (receberDireto)
       // traz também quanto o PC de lá leva até o ajudante
-      rtc.mandarControle(dono, { p: performance.now() });
+      // a conexão refeita (outra RTCPeerConnection) perde os pings que estavam no caminho
+      const pc = rtc.peers.get(dono)?.pc || null;
+      if (pc !== comando.pc) Object.assign(comando, { pc, fora: [], seguidas: 0, viu: false });
+      vigiarComando(jogandoLa.key, dono).catch(() => {});
+      const pe = performance.now();
+      if (rtc.mandarControle(dono, { p: pe })) {
+        comando.fora.push(pe);
+        if (comando.fora.length > 60) comando.fora.shift();
+      }
       const trilha = jogandoLa.video.srcObject?.getVideoTracks()[0];
       const som = jogandoLa.video.srcObject?.getAudioTracks()[0] || null;
       const extra = { preset: opcoesJogo.get('preset') || 0, turbo: turboRecebe.stats(), controleRttMs: pingDoJogo.rtt, controleIdaMs: pingDoJogo.ida, ajudanteMs: pingDoJogo.ajudante, movimentoCru: controle.movimentoCru, controleFisico: fisico.usado, cursorLivre: jogandoLa.cursorLivre };
@@ -4630,7 +4721,10 @@ function receberDireto(id, m) {
       // de menor ida e volta). A volta do ping vem pelo caminho da imagem e espera atrás dela.
       const dif = turboRecebe.dif;
       const ida = typeof m.t === 'number' && dif != null ? Math.max(0, Math.round((m.t - dif - m.pe) * 10) / 10) : null;
-      Object.assign(pingDoJogo, { rtt: Math.round((performance.now() - m.pe) * 10) / 10, ida, ajudante: typeof m.aj === 'number' ? m.aj : null });
+      Object.assign(pingDoJogo, { rtt: Math.round((performance.now() - m.pe) * 10) / 10, ida, ajudante: typeof m.aj === 'number' ? m.aj : null, novo: true });
+      // o canal é ordenado: esta volta responde também por todos os pings de antes dela
+      while (comando.fora.length && comando.fora[0] <= m.pe) comando.fora.shift();
+      comando.viu = true;
     }
     return;
   }
