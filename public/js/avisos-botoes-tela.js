@@ -156,7 +156,7 @@ export class AvisosBotoes {
     if (geo) {
       this.armaNao = 0;
       if (++this.armaSim < 2) return;
-      const mudou = !this.arma || this.arma.arma !== geo.arma || Math.abs(this.arma.base - geo.base) > 0.008 || Math.abs(this.arma.dir - geo.dir) > 0.008;
+      const mudou = !this.arma || this.arma.arma !== geo.arma; // só importa qual dos 3 lugares (jogar.js posHudModo)
       this.arma = geo;
       if (mudou) this.onArma(geo);
     } else {

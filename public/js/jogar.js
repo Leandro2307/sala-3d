@@ -2176,6 +2176,12 @@ function mostrarLegenda(layout) {
 // HUD muda com o recorte da tela (o 1º jeito, com a altura fixa de um print, ficou em cima das estrelas).
 // Sem nada achado (nem a estrela nem a arma: no mar, num menu…), no canto de cima à direita (pedido do usuário
 // em 2026-11-28), logo abaixo da linha do diagnóstico (#jogo-selo) quando ela está ali.
+// Depois (pedido do usuário): o X nunca muda e o Y é um de 3 lugares fixos, medidos nos prints do GTA em 1080p
+// (estrelas de 26 a 48 px com a borda direita em ~1897, os ícones vermelhos até 83, a munição de 99 a 119 e o
+// desenho da arma até ~178). A imagem só escolhe qual dos três (avisos-botoes.js hudCanto).
+const HUD_DIR = 0.988; // a borda direita das estrelas
+const HUD_Y_ESTRELA = 0.084; // 91 px: embaixo da estrela (e dos ícones vermelhos, quando há)
+const HUD_Y_ARMA = 0.172; // 186 px: embaixo do desenho da arma
 function posHudModo() {
   const el = $('#jogo-hud-modo');
   const t = layoutLegenda === 'ps5' && entradaDeAgora() === 'teclado' && mapaTeclas.carroTroca() ? textoModoCarro(noCarro) : null;
@@ -2191,9 +2197,8 @@ function posHudModo() {
     if (r.height && r.right > f.right - 400 && r.top < f.top + 120) min = r.bottom - f.top + 6;
   }
   const hud = avisosBotoes.arma;
-  // embaixo do HUD: um respiro de ~0,8% da altura; sem HUD: o canto
-  const topo = Math.max(min, hud ? a.y + a.h * (hud.base + 0.008) : a.y + 10);
-  const dir = Math.min(hud ? a.x + a.w * hud.dir : a.x + a.w - 10, innerWidth - 8);
+  const topo = Math.max(min, hud ? a.y + a.h * (hud.arma ? HUD_Y_ARMA : HUD_Y_ESTRELA) : a.y + 10);
+  const dir = Math.min(a.x + a.w * HUD_DIR, innerWidth - 8);
   el.style.cssText = `left:${dir}px;top:${topo}px;--t:${Math.max(11, Math.round(a.h * 0.019))}px`;
   el.hidden = false;
 }
