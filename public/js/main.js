@@ -32,7 +32,7 @@ import { ToqueJogo, jogoDaJanela, LAYOUTS, layoutDoTitulo } from './toque-jogo.j
 import { ControleFisico } from './gamepad-jogo.js';
 import { PadVirtual } from './pad-virtual.js';
 import { TecladoPad } from './teclado-pad.js';
-import { MapaTeclasPainel, mapaTeclas } from './mapa-teclas.js';
+import { MapaTeclasPainel, mapaTeclas, textoModoCarro, visiveis, nomeEntrada } from './mapa-teclas.js';
 import { AvisosBotoes } from './avisos-botoes-tela.js';
 import { TurboEnvio, TurboRecebe, TTL_MS, vidaDoCanal, LISO_PCT, LISO_MAX } from './turbo.js';
 import { TurboAuto, TurboVolta, foraDoModo } from './turbo-auto.js';
@@ -5249,11 +5249,12 @@ const tecladoPad = new TecladoPad({
   pad: padVirtual,
   sens: () => opcoesJogo.get('mouseSens'),
   aviso: (texto) => toast(texto, 'info', 5000),
-  // sem o quadro "a pé / no carro" (desde 2026-11-27): o modo entra pelo quadro do carro no jogo (avisosBotoes)
-  // e o △ seguinte volta a pé
+  // o modo entra pelo quadro do carro no jogo (avisosBotoes) e o △ seguinte volta a pé; o quadro pequeno no
+  // canto de baixo à direita mostra qual (posHudModo, como no /jogar)
   onCarro: (sim) => {
     if (sim !== noCarro) diagJogo.evento(sim ? 'modo carro: no carro' : 'modo carro: a pé');
     noCarro = sim;
+    posHudModo();
   },
 });
 tecladoPad.soSaiNoTriangulo = true;
@@ -5270,6 +5271,9 @@ const avisosBotoes = new AvisosBotoes({
     diagJogo.evento('modo carro: o quadro do carro apareceu no jogo');
     tecladoPad.trocarCarro(true);
   },
+  // texto do jogo (CELULAR, DORMIR…) no canto de baixo à direita: as dicas e o "a pé" saem da frente
+  querCanto: () => !$('#jogo-hud-modo').hidden || textoNoCantoAgora,
+  onTexto: (sim) => { textoNoCantoAgora = sim; posHudModo(); },
 });
 turboRecebe.espiar = (frame) => avisosBotoes.espiar(frame);
 // tremores que chegaram aqui (quem joga), para o relatório (ver receberVolta)
@@ -5406,6 +5410,7 @@ controle.onJogo = (video, key) => {
   // a própria tela (PS5 direto): a imagem já é daqui, sem turbo nem diagnóstico de quem joga longe
   jogoLa(video && !acharTela(key)?.user.isSelf ? video : null, key);
   placaNoJogo(!!video);
+  setTimeout(posHudModo, 0); // a imagem já no lugar (tela cheia)
 };
 // Celular no modo jogo: o 3D sai da memória da placa enquanto o jogo cobre a tela (World.liberarPlaca)
 // e volta ao sair. No iPhone a memória da placa é a da página: 3D + vídeo do jogo derrubavam a aba.
@@ -5419,15 +5424,44 @@ function placaNoJogo(jogando) {
     if (controle.jogoNo && state.focus?.kind === 'share' && world.liberarPlaca()) diagJogo.marcar('3D solto da placa enquanto joga (celular)');
   }, 1500);
 }
-// Sem a legenda dos botões no canto nem o quadro do modo carro (desde 2026-11-27, como no /jogar): no teclado as
-// teclas aparecem em cima dos avisos do próprio jogo. layout: o do jogo no PC (null: fora do modo jogo).
+// Sem a legenda dos botões no canto (desde 2026-11-27, como no /jogar): no teclado as teclas aparecem em cima
+// dos avisos do próprio jogo. layout: o do jogo no PC (null: fora do modo jogo).
 let layoutLegenda = null;
 let noCarro = false; // o modo carro do teclado (teclado-pad.js)
+const noTecladoAgora = () => !!layoutLegenda && !isTouch && !fisico.pad() && !touchpad.ligado;
 function mostrarLegendaJogo(layout) {
   layoutLegenda = layout;
-  const noTeclado = !!layout && !isTouch && !fisico.pad() && !touchpad.ligado;
-  avisosBotoes.ligar(noTeclado && layout === 'ps5' && opcoesJogo.get('avisos'));
+  avisosBotoes.ligar(noTecladoAgora() && layout === 'ps5' && opcoesJogo.get('avisos'));
+  posHudModo();
 }
+
+// O quadro "a pé / no carro" fixo no canto de baixo à direita da imagem e, em cima dele, as dicas de correr
+// (L3, Shift) e das armas (L1, Tab) com a tecla do mapa de quem joga: o mesmo do /jogar (jogar.js posHudModo,
+// pedido do usuário em 2026-11-28 para a sala ter tudo do /jogar). Some com texto do jogo no canto (onTexto).
+let textoNoCantoAgora = false;
+const DICAS_CANTO = [['b10', 'corre'], ['b4', 'armas']];
+function posHudModo() {
+  const el = $('#jogo-hud-modo');
+  if (!el) return;
+  const t = layoutLegenda === 'ps5' && noTecladoAgora() && mapaTeclas.carroTroca() ? textoModoCarro(noCarro) : null;
+  const a = t && avisosBotoes.areaDaImagem();
+  if (!a) return void (el.hidden = true);
+  if (textoNoCantoAgora) return void el.classList.add('some');
+  el.classList.remove('some');
+  const dicas = DICAS_CANTO.map(([id, faz]) => {
+    const e = visiveis(id).find((x) => !/^Roda/.test(x));
+    return e ? `<span class="hm-dica"><kbd>${esc(nomeEntrada(e))}</kbd>${faz}</span>` : '';
+  }).join('');
+  const modo = `<span class="hm-modo${t.noCarro ? ' carro' : ''}"><i>${t.icone}</i>${t.noCarro ? 'CARRO' : 'A PÉ'}${t.troca ? `<kbd>${esc(t.troca.split(' ou ').pop())}</kbd>` : ''}</span>`;
+  const html = dicas + modo;
+  if (el.dataset.t !== html) { el.dataset.t = html; el.innerHTML = html; }
+  const dir = Math.min(a.x + a.w - 12, innerWidth - 8);
+  const base = Math.min(a.y + a.h - 12, innerHeight - 8);
+  el.style.cssText = `left:${dir}px;top:${base}px;--t:${Math.max(11, Math.round(a.h * 0.019))}px`;
+  el.hidden = false;
+}
+addEventListener('resize', () => posHudModo());
+new ResizeObserver(() => { if (layoutLegenda) posHudModo(); }).observe($('#focus-video')); // a tela em foco muda de tamanho sem a janela mudar
 mapaTeclas.ouvir(() => { if (layoutLegenda) mostrarLegendaJogo(layoutLegenda); });
 for (const ev of ['gamepadconnected', 'gamepaddisconnected']) addEventListener(ev, () => { if (layoutLegenda) mostrarLegendaJogo(layoutLegenda); });
 opcoesJogo.ouvir((k) => { if (k === 'avisos' && layoutLegenda) mostrarLegendaJogo(layoutLegenda); });
