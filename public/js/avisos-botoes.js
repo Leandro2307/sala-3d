@@ -901,7 +901,8 @@ export function telaDoMenu(img) {
     tot++;
     if (r >= 15 && r <= 60 && g >= 15 && g <= 60 && b - r >= 0 && b - r <= 30) liso++;
   }
-  const painel = tot > 0 && liso / tot >= 0.85;
+  // 0,75: com o jogo claro atrás o painel pega um pouco do desfoque (a lista do "Estúdio de fotos" deu 0,86)
+  const painel = tot > 0 && liso / tot >= 0.75;
   let barra = null;
   if (painel) {
     let y0 = -1;

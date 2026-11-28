@@ -2174,22 +2174,26 @@ function mostrarLegenda(layout) {
 // cima à direita, logo abaixo do ícone da arma do GTA quando há arma e logo abaixo da estrela (e da fila de
 // ícones vermelhos, se houver) quando não há. Onde fica vem da imagem (avisos-botoes.js hudCanto): a altura do
 // HUD muda com o recorte da tela (o 1º jeito, com a altura fixa de um print, ficou em cima das estrelas).
-// Sem nada achado fica onde estava; antes da 1ª vez, um lugar abaixo das estrelas numa tela 16:9.
-const HUD_PADRAO = { dir: 0.985, base: 0.1 };
-let ultimoHud = null;
+// Sem nada achado (nem a estrela nem a arma: no mar, num menu…), no canto de cima à direita (pedido do usuário
+// em 2026-11-28), logo abaixo da linha do diagnóstico (#jogo-selo) quando ela está ali.
 function posHudModo() {
   const el = $('#jogo-hud-modo');
   const t = layoutLegenda === 'ps5' && entradaDeAgora() === 'teclado' && mapaTeclas.carroTroca() ? textoModoCarro(noCarro) : null;
   const a = t && avisosBotoes.areaDaImagem();
   if (!a) return void (el.hidden = true);
-  if (avisosBotoes.arma) ultimoHud = avisosBotoes.arma;
-  const pos = ultimoHud || HUD_PADRAO;
   const html = `<i>${t.icone}</i>${t.noCarro ? 'CARRO' : 'A PÉ'}${t.troca ? `<kbd>${t.troca.split(' ou ').pop()}</kbd>` : ''}`;
   if (el.dataset.t !== html) { el.dataset.t = html; el.innerHTML = html; }
   el.classList.toggle('carro', t.noCarro);
-  // um respiro de ~0,8% da altura embaixo do HUD; nunca fora da tela
-  const topo = Math.max(4, a.y + a.h * (pos.base + 0.008));
-  const dir = Math.min(a.x + a.w * pos.dir, innerWidth - 4);
+  let min = 4;
+  const selo = $('#jogo-selo');
+  if (selo && !selo.hidden) {
+    const f = $('#focus').getBoundingClientRect(), r = selo.getBoundingClientRect();
+    if (r.height && r.right > f.right - 400 && r.top < f.top + 120) min = r.bottom - f.top + 6;
+  }
+  const hud = avisosBotoes.arma;
+  // embaixo do HUD: um respiro de ~0,8% da altura; sem HUD: o canto
+  const topo = Math.max(min, hud ? a.y + a.h * (hud.base + 0.008) : a.y + 10);
+  const dir = Math.min(hud ? a.x + a.w * hud.dir : a.x + a.w - 10, innerWidth - 8);
   el.style.cssText = `left:${dir}px;top:${topo}px;--t:${Math.max(11, Math.round(a.h * 0.019))}px`;
   el.hidden = false;
 }

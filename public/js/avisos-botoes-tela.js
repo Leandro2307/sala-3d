@@ -44,6 +44,10 @@ const ANDAR = { cima: 'ly-', baixo: 'ly+', esq: 'lx-', dir: 'lx+' };
 // empurrar o analógico esquerdo para a direita (D) e puxar o direito para a esquerda (o mouse para a esquerda),
 // pedido do usuário em 2026-11-28 (a direção lida do L saía "A"). Em cima dos dois vai um card com o mouse
 // sendo arrastado para a esquerda.
+// Visto o par, ele fica pelo menos PAR_MS (pedido do usuário: um dos dois às vezes não era achado e o card
+// piscava): enquanto um dos dois continua na tela o par continua, e sem nenhum ele fica mais PAR_MS; o que
+// faltar fica no último lugar visto.
+const PAR_MS = 3000;
 const CARD_PAR = `<span class="par-mouse">${mouse('', 'esq')}</span><b>Arraste o mouse para a esquerda</b><small>e segure D</small>`;
 function parLR(lista) {
   const l = lista.find((a) => a.id === 'andar'), r = lista.find((a) => a.id === 'olhar');
@@ -111,6 +115,7 @@ export class AvisosBotoes {
     } else {
       clearInterval(this.relogio);
       this.worker?.postMessage({ limpar: true });
+      this.parVisto = null;
       if (this.arma) { this.arma = null; this.onArma(null); }
       this.armaSim = this.armaNao = 0;
       this.mostrar([]);
@@ -223,7 +228,21 @@ export class AvisosBotoes {
   }
 
   mostrar(lista) {
-    const par = parLR(lista);
+    let par = parLR(lista);
+    const agora = performance.now();
+    if (par) this.parVisto = { l: { ...par.l }, r: { ...par.r }, em: agora };
+    else if (this.parVisto && agora - this.parVisto.em < PAR_MS) {
+      const pv = this.parVisto, perto = (a, b) => Math.hypot(a.x - b.x, a.y - b.y) < b.r * 4;
+      const l = lista.find((a) => a.id === 'andar' && perto(a, pv.l)), r = lista.find((a) => a.id === 'olhar' && perto(a, pv.r));
+      // o que está na tela leva o outro junto (a câmera mexeu); o que falta fica onde estava
+      if (l) pv.r = { ...pv.r, x: pv.r.x + l.x - pv.l.x, y: pv.r.y + l.y - pv.l.y };
+      else if (r) pv.l = { ...pv.l, x: pv.l.x + r.x - pv.r.x, y: pv.l.y + r.y - pv.r.y };
+      if (l || r) pv.em = agora; // um dos dois ainda na tela: continua
+      if (l) pv.l = { ...pv.l, x: l.x, y: l.y };
+      if (r) pv.r = { ...pv.r, x: r.x, y: r.y };
+      par = { l: l || pv.l, r: r || pv.r };
+      lista = [...lista.filter((a) => a !== l && a !== r && a.id !== 'andar' && a.id !== 'olhar'), par.l, par.r];
+    } else this.parVisto = null;
     if (par) lista = lista.map((a) => (a === par.l ? { ...a, dir: 'dir' } : a === par.r ? { ...a, dir: 'esq' } : a));
     const rotulos = {};
     const carro = !!this.noCarro();
