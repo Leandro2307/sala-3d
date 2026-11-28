@@ -1427,6 +1427,9 @@ const avisosBotoes = new AvisosBotoes({
     diagJogo.evento('modo carro: o quadro do carro apareceu no jogo');
     tecladoPad.trocarCarro(true);
   },
+  // texto do jogo (CELULAR, DORMIR…) no canto de baixo à direita: as dicas e o "a pé" saem da frente
+  querCanto: () => !$('#jogo-hud-modo').hidden || textoNoCantoAgora,
+  onTexto: (sim) => { textoNoCantoAgora = sim; posHudModo(); },
 });
 turboRecebe.espiar = (frame) => avisosBotoes.espiar(frame);
 turboRecebe.socorro = true;
@@ -2172,6 +2175,7 @@ function mostrarLegenda(layout) {
 // (avisos-botoes.js hudCanto), mas nem sempre achava (céu claro) e ele ia parar em cima das estrelas: o usuário
 // pediu fixo, "para garantir". Em cima dele, as dicas de correr (L3, Shift) e das armas (L1, Tab), com a tecla
 // do mapa de quem joga (pedido do usuário em 2026-11-28).
+let textoNoCantoAgora = false; // o jogo escreveu no canto (avisosBotoes.onTexto): o quadro some até o texto sair
 const DICAS_CANTO = [['b10', 'corre'], ['b4', 'armas']];
 const escHud = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 function posHudModo() {
@@ -2179,6 +2183,8 @@ function posHudModo() {
   const t = layoutLegenda === 'ps5' && entradaDeAgora() === 'teclado' && mapaTeclas.carroTroca() ? textoModoCarro(noCarro) : null;
   const a = t && avisosBotoes.areaDaImagem();
   if (!a) return void (el.hidden = true);
+  if (textoNoCantoAgora) return void el.classList.add('some');
+  el.classList.remove('some');
   const dicas = DICAS_CANTO.map(([id, faz]) => {
     const e = visiveis(id).find((x) => !/^Roda/.test(x));
     return e ? `<span class="hm-dica"><kbd>${escHud(nomeEntrada(e))}</kbd>${faz}</span>` : '';

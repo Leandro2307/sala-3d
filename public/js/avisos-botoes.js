@@ -889,6 +889,43 @@ export function armaNaTela(img, y0 = Math.round(img.height * 0.03)) {
   return { dir: (melhor.dir + 1) / W, topo: melhor.topo / H, base: (melhor.base + 1) / H, h: melhor.h / H };
 }
 
+// Texto do jogo no canto de baixo à direita, onde ficam as dicas "Shift corre / Tab armas" e o "a pé" da
+// /jogar (pedido do usuário em 2026-11-28: as ações do GTA, como CELULAR, DORMIR, LEVANTAR-SE, ficavam por
+// baixo delas). Uma linha de texto é ≥ 4 letras claras sem cor, em pé, da mesma altura, lado a lado, com fundo
+// não claro em cima e embaixo (céu ou parede clara não vira texto). true/false.
+export function textoNoCanto(img) {
+  const { width: W, height: H, data: d } = img;
+  const xa = Math.round(W * 0.62), ya = Math.round(H * 0.55), xb = Math.round(W * 0.995), yb = Math.round(H * 0.98);
+  const { lista, marca, RW } = manchas(img, xa, ya, xb, yb, claroSemCor(d, limiar(150, fundoDo(img, xa, ya, xb, yb))));
+  const hMin = Math.max(6, H * 0.012), hMax = H * 0.05;
+  const letras = [];
+  for (const m of lista) {
+    const w = m.x1 - m.x0 + 1, h = m.y1 - m.y0 + 1, f = m.n / (w * h);
+    if (h >= hMin && h <= hMax && w >= 2 && w <= h * 1.5 && f >= 0.2 && f <= 0.95) letras.push({ ...m, h });
+  }
+  if (letras.length < 4) return false;
+  letras.sort((p, q) => p.x0 - q.x0);
+  for (const a of letras) {
+    const linha = [a];
+    for (const b of letras) {
+      const u = linha[linha.length - 1];
+      if (b.x0 <= u.x1 || b.x0 - u.x1 > a.h * 1.2) continue;
+      if (Math.abs(b.y1 - a.y1) > a.h * 0.25 || Math.abs(b.h - a.h) > a.h * 0.3) continue;
+      linha.push(b);
+    }
+    if (linha.length < 4) continue;
+    const dir = linha[linha.length - 1].x1, base = Math.max(...linha.map((k) => k.y1));
+    let claros = 0, tot = 0;
+    for (const yy of [a.y0 - Math.round(a.h * 0.6), base + Math.round(a.h * 0.6)]) {
+      if (yy < ya || yy >= yb) continue;
+      for (let x = a.x0; x <= dir; x++) { tot++; if (marca[(yy - ya) * RW + x - xa]) claros++; }
+    }
+    if (tot && claros / tot > 0.3) continue;
+    return true;
+  }
+  return false;
+}
+
 export function hudCanto(img) {
   const { width: W, height: H } = img;
   const e = estrela(img);

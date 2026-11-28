@@ -3,7 +3,7 @@
 // conferidos à mão na criação (ver o comentário de MEDIDOS).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { detectar, Rastreio, armaNaTela, telaDoMenu } from '../public/js/avisos-botoes.js';
+import { detectar, Rastreio, armaNaTela, telaDoMenu, textoNoCanto } from '../public/js/avisos-botoes.js';
 
 const distSeg = (px, py, ax, ay, bx, by) => {
   const dx = bx - ax, dy = by - ay, t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)));
@@ -133,4 +133,14 @@ test('telaDoMenu: a lista principal, a de dentro e o item marcado; o jogo escuro
   m = telaDoMenu(menu(960, 540, { barra: 0.3, logo: false }));
   assert.ok(m.lista && !m.logo && m.barra > 0.27);
   assert.equal(telaDoMenu(canto(960, 540, 35)).lista, false);
+});
+
+// as ações do GTA (CELULAR, DORMIR…) no canto de baixo à direita: letras claras numa linha
+test('textoNoCanto: uma palavra no canto de baixo à direita; nada, letra solta ou céu claro, não', () => {
+  const palavra = (x, y, n) => Array.from({ length: n }, (_, k) => [x + k * 11, y, 8, 14]);
+  assert.equal(textoNoCanto(canto(960, 540, 35, palavra(780, 430, 6))), true, 'DORMIR');
+  assert.equal(textoNoCanto(canto(960, 540, 35)), false, 'sem texto');
+  assert.equal(textoNoCanto(canto(960, 540, 35, palavra(780, 430, 2))), false, 'duas letras');
+  assert.equal(textoNoCanto(canto(960, 540, 35, palavra(100, 430, 6))), false, 'texto do outro lado');
+  assert.equal(textoNoCanto(canto(960, 540, 230, palavra(780, 430, 6))), false, 'céu claro');
 });

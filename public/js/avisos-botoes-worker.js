@@ -7,7 +7,7 @@
 // volta para a memória; o quadro do decodificador fecha logo depois de desenhado (segurá-lo durante a busca
 // tirava quadro do decodificador).
 
-import { detectar, veiculo, hudCanto, Rastreio } from './avisos-botoes.js';
+import { detectar, veiculo, hudCanto, textoNoCanto, Rastreio } from './avisos-botoes.js';
 
 const LARGURA = 960;
 let tela = null, ctx = null;
@@ -71,7 +71,9 @@ self.onmessage = ({ data }) => {
     const carro = data.carro ? veiculo(img) : false;
     // a estrela e a munição no canto de cima à direita (onde pôr o quadro "a pé / no carro")
     const arma = data.hud ? hudCanto(img) : null;
-    self.postMessage({ id: data.id, avisos: rastreio.passo(achados), carro, arma, hud: !!data.hud, ms: performance.now() - t });
+    // texto do jogo no canto de baixo à direita (as dicas e o "a pé" da /jogar saem da frente)
+    const texto = data.canto ? textoNoCanto(img) : false;
+    self.postMessage({ id: data.id, avisos: rastreio.passo(achados), carro, arma, hud: !!data.hud, texto, canto: !!data.canto, ms: performance.now() - t });
   } catch (err) {
     self.postMessage({ id: data.id, erro: String(err?.message || err) });
   } finally {

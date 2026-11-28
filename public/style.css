@@ -4923,8 +4923,10 @@ body.touch :is(.hk-lista, #help-extra, #help-mais-btn) { display: none !importan
   letter-spacing: .02em;
   white-space: nowrap;
   pointer-events: none;
+  transition: opacity .15s;
 }
 #jogo-hud-modo[hidden] { display: none; }
+#jogo-hud-modo.some { opacity: 0; } /* texto do jogo no canto (jogar.js textoNoCantoAgora) */
 #jogo-hud-modo > span {
   display: flex;
   align-items: center;
