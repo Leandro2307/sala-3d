@@ -4403,7 +4403,9 @@ async function amostrarJogo() {
         if (!turbo) ajustarJogo(id, resumo);
         // a captura e o codificador são um só por tela
         if (id === quem.keys().next().value) {
-          ajustarCaptura(key, resumo);
+          // PS5 direto: o ritmo da "captura" é o que o PS5 manda — caindo, é a rede até o PS5, não a captura.
+          // Em 2026-11-27 20:03 o PS5 perdendo no Wi-Fi fez o teste achar que o 720p "ajudou" e prender a tela nele
+          if (!self()?.shares.get(key)?.ps5) ajustarCaptura(key, resumo);
           if (!turbo) vigiarCodificador(key, resumo);
         }
         const { t, captura, enviado, codificado, altura, kbps, limite, motivo, codificador, placa, imagemBaixa, codMs, filaMs } = resumo;

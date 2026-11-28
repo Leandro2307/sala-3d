@@ -1407,6 +1407,7 @@ const turboRecebe = new TurboRecebe({
     diagJogo.evento('modo turbo falhou: vídeo normal de volta', { motivo });
     if (turboRecebe.ultimaFalha) diagJogo.evento('turbo: como estava ao desistir', turboRecebe.ultimaFalha);
     turboVolta.falhou(motivo); // sem aviso na tela: o vídeo normal entra sozinho e o relatório guarda o motivo
+    if (motivo === 'decodificador') decodificadorRecusou();
   },
 });
 // como na TV: só H.264, os mesmos perfis, e a placa antes de qualquer outra coisa; o PC leva 3–4 s para começar
@@ -1497,6 +1498,58 @@ const turboAuto = new TurboAuto({
     if (quem && memoriaTeste.trocarModo(quem, id)) diagJogo.evento('teste da conexão: a próxima entrada começa no modo do automático', { modo: id });
   },
 });
+// ------------------------------------------------------------------ aparelho que não dá conta do 1080p
+// Testes de 2026-11-27: o Davizinks (Adreno 610) decodificava o 1080p em 26–60 ms por quadro (precisa de
+// menos de 16,7) e o automático só media modos em 1080p; o Victor (iPhone com iOS 16) teve o decodificador
+// recusando o 1080p, e a cada modo medido o turbo era ligado de novo e caía (3 vezes em 3 min). Agora:
+// decodificando devagar ou recusando o 1080p, o aparelho passa para o 720p Turbo rápido e o automático só
+// mede ele; a escolha fica guardada neste aparelho por FRACO_DIAS. Recusou também o 720p: o automático para
+// (o vídeo normal fica, sem o turbo caindo de novo a cada troca de modo).
+const FRACO_CHAVE = 'jogar-aparelho-720';
+const FRACO_DIAS = 3;
+const FRACO_DEC_MS = 20; // por quadro, em 1080p
+const FRACO_AMOSTRAS = 8; // as últimas (16 s): FRACO_LENTAS delas acima do FRACO_DEC_MS
+const FRACO_LENTAS = 6;
+const MODO_720 = 15;
+const aparelho = { ate: 0, lentas: [], recusas720: 0 };
+try { aparelho.ate = Number(localStorage.getItem(FRACO_CHAVE)) || 0; } catch { /* sem armazenamento */ }
+const so720 = () => aparelho.ate > Date.now();
+const modoDoAparelho = (m) => (so720() ? MODO_720 : m);
+if (so720()) turboAuto.modos = [MODO_720];
+function passarPara720(porque, dados = {}) {
+  if (!so720()) {
+    aparelho.ate = Date.now() + FRACO_DIAS * 86_400_000;
+    try { localStorage.setItem(FRACO_CHAVE, String(aparelho.ate)); } catch { /* sem armazenamento */ }
+  }
+  turboAuto.modos = [MODO_720];
+  diagJogo.evento('aparelho: o 1080p pesa demais aqui — 720p Turbo rápido', { porque, ...dados });
+  if (!jogandoLa || !turboAuto.ligado) return;
+  if (opcoesJogo.get('preset') !== MODO_720) aplicarPreset(MODO_720, `aparelho: ${porque}`);
+  turboAuto.comecarCom(MODO_720);
+  mostrarAuto();
+}
+function decodificadorRecusou() {
+  const cfg = turboRecebe.ultimaFalha?.cfg || '';
+  if (!/×(1080|1088)/.test(cfg)) {
+    if (++aparelho.recusas720 >= 2 && turboAuto.ativo) {
+      turboAuto.parar();
+      diagJogo.evento('aparelho: o decodificador recusou também o 720p — o automático para (vídeo normal)', { cfg });
+    }
+    return;
+  }
+  passarPara720('o decodificador recusou o 1080p', { cfg });
+}
+// a cada amostra do turbo em 1080p: o decodificador dá conta?
+function vigiarDecodificador(resumo) {
+  const t = resumo?.turbo;
+  if (so720() || !turboRecebe.ligado || document.hidden || !t || !(t.altura >= 1000) || t.decMs == null) return;
+  aparelho.lentas.push(t.decMs > FRACO_DEC_MS);
+  if (aparelho.lentas.length > FRACO_AMOSTRAS) aparelho.lentas.shift();
+  if (aparelho.lentas.length < FRACO_AMOSTRAS || aparelho.lentas.filter(Boolean).length < FRACO_LENTAS) return;
+  aparelho.lentas = [];
+  passarPara720(`o decodificador leva mais de ${FRACO_DEC_MS} ms por quadro em 1080p`, { decMs: t.decMs, aceleracao: t.decAjuste || t.aceleracao || null });
+}
+
 const turboVolta = new TurboVolta({
   ligar: () => {
     turboRecebe.depoisDaFalha = { kbps: turboRecebe.ultimaFalha?.bandaKbps || 3000 };
@@ -1521,6 +1574,7 @@ function amostraDoAuto(resumo) {
   }
   // o turbo que voltou já dura: o próximo ligar não precisa mais começar por baixo
   if (turboRecebe.depoisDaFalha && turboRecebe.ligado && performance.now() - turboVolta.ligouEm > 60_000) turboRecebe.depoisDaFalha = null;
+  vigiarDecodificador(resumo);
   turboAuto.amostra(resumo, document.hidden);
   verCaminho(resumo);
   conferirPrevisto(resumo);
@@ -1796,10 +1850,10 @@ async function entrarNoTurbo(deNovo = false) {
     }
   }
   previsto = r?.previsto ? { ...r.previsto, desde: performance.now(), am: [], quem: jl.dono || jl.key.split('~')[0] } : null;
-  if (r && turboAuto.ligado && opcoesJogo.get('preset') !== r.modo) aplicarPreset(r.modo, 'teste da conexão');
+  if (r && turboAuto.ligado && opcoesJogo.get('preset') !== modoDoAparelho(r.modo)) aplicarPreset(modoDoAparelho(r.modo), so720() ? 'teste da conexão (aparelho só em 720p)' : 'teste da conexão');
   if (!turboRecebe.ligado) ligarTurbo();
   if (!turboAuto.ligado) return;
-  if (r) turboAuto.comecarCom(r.modo);
+  if (r) turboAuto.comecarCom(modoDoAparelho(r.modo));
   else turboAuto.comecar();
 }
 document.addEventListener('click', (e) => {
@@ -1921,7 +1975,7 @@ function jogoLa(v, key) {
   }
   esquecerJogo();
   // o automático começa no modo que deu certo da última vez nesta página
-  if (turboAuto.ligado && opcoesJogo.get('turbo') && opcoesJogo.get('preset') !== turboAuto.inicial) aplicarPreset(turboAuto.inicial, 'automático');
+  if (turboAuto.ligado && opcoesJogo.get('turbo') && opcoesJogo.get('preset') !== modoDoAparelho(turboAuto.inicial)) aplicarPreset(modoDoAparelho(turboAuto.inicial), 'automático');
   const t = acharTela(key);
   jogandoLa = { key, video: v, cursorLivre: false, dono: t?.u.name ?? null, maquina: maquinaDaTela(t?.sh) };
   const op = (k) => opcoesJogo.get(k);
