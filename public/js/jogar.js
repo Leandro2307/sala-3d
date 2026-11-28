@@ -2171,25 +2171,26 @@ function mostrarLegenda(layout) {
 }
 
 // O quadro "a pé / no carro" (pedido do usuário em 2026-11-28, depois de sair em 27/11): pequeno, no canto de
-// cima à direita, logo abaixo do ícone da arma do GTA quando há arma e logo abaixo da estrela quando não há.
-// A arma vem da munição achada na imagem (avisos-botoes.js armaNaTela); sem ela, fica embaixo da estrela —
-// no lugar medido da última munição vista ou, antes disso, no do print do usuário (tela 16:9).
-const HUD_ESTRELA = { dir: 0.982, topo: 0.045 }; // a borda direita e a base da estrela, em frações da imagem
-let ultimaArma = null;
+// cima à direita, logo abaixo do ícone da arma do GTA quando há arma e logo abaixo da estrela (e da fila de
+// ícones vermelhos, se houver) quando não há. Onde fica vem da imagem (avisos-botoes.js hudCanto): a altura do
+// HUD muda com o recorte da tela (o 1º jeito, com a altura fixa de um print, ficou em cima das estrelas).
+// Sem nada achado fica onde estava; antes da 1ª vez, um lugar abaixo das estrelas numa tela 16:9.
+const HUD_PADRAO = { dir: 0.985, base: 0.1 };
+let ultimoHud = null;
 function posHudModo() {
   const el = $('#jogo-hud-modo');
   const t = layoutLegenda === 'ps5' && entradaDeAgora() === 'teclado' && mapaTeclas.carroTroca() ? textoModoCarro(noCarro) : null;
   const a = t && avisosBotoes.areaDaImagem();
   if (!a) return void (el.hidden = true);
-  const arma = avisosBotoes.arma;
-  if (arma) ultimaArma = arma;
-  // com arma: o desenho dela ocupa ~3 algarismos embaixo dos números; sem: a estrela acaba ~2,4 algarismos acima deles
-  const pos = arma ? { dir: arma.dir, topo: arma.base + arma.h * 3.4 }
-    : ultimaArma ? { dir: ultimaArma.dir, topo: ultimaArma.topo - ultimaArma.h * 2.2 } : HUD_ESTRELA;
+  if (avisosBotoes.arma) ultimoHud = avisosBotoes.arma;
+  const pos = ultimoHud || HUD_PADRAO;
   const html = `<i>${t.icone}</i>${t.noCarro ? 'CARRO' : 'A PÉ'}${t.troca ? `<kbd>${t.troca.split(' ou ').pop()}</kbd>` : ''}`;
   if (el.dataset.t !== html) { el.dataset.t = html; el.innerHTML = html; }
   el.classList.toggle('carro', t.noCarro);
-  el.style.cssText = `left:${a.x + a.w * pos.dir}px;top:${a.y + a.h * pos.topo}px;--t:${Math.max(11, Math.round(a.h * 0.019))}px`;
+  // um respiro de ~0,8% da altura embaixo do HUD; nunca fora da tela
+  const topo = Math.max(4, a.y + a.h * (pos.base + 0.008));
+  const dir = Math.min(a.x + a.w * pos.dir, innerWidth - 4);
+  el.style.cssText = `left:${dir}px;top:${topo}px;--t:${Math.max(11, Math.round(a.h * 0.019))}px`;
   el.hidden = false;
 }
 addEventListener('resize', () => posHudModo());

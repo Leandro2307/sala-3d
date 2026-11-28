@@ -12,6 +12,7 @@
 //
 // Mensagens da ponte: ver o cabeçalho de ponte.c. Binário: [tipo, marcas, perdidos u16, seq u32] + dados.
 import { icon } from './icons.js';
+import { telaDoMenu, jogoNaTela } from './avisos-botoes.js';
 import { descricaoSemReordenar, temTocadorSom, criarTocadorSom, paraOTocador } from './turbo.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -33,11 +34,17 @@ const BIT_CREATE = 1 << 8, BIT_OPTIONS = 1 << 9; // Create e Options no mesmo ma
 const BIT_X = 1 << 0, BIT_O = 1 << 1, BIT_L1 = 1 << 4, BIT_R1 = 1 << 5;
 // O mapa com o menu travado (pedido do usuário em 2026-11-28): no GTA 6 o mapa fica no menu do Options (a
 // lista Mapa, Jogo, Loja, Ajuda, Estúdio de fotos, Configurações), e nessa lista quem joga estragaria a
-// brincadeira dos outros. O Options de quem joga (o M do teclado) vira: aperta o Options daqui, espera a lista
-// aparecer e aperta o ✕ no Mapa (o primeiro, já marcado). Enquanto a lista abre, nada de quem joga chega (não
-// dá para descer nela); com o mapa aberto, o ○ (que voltaria para a lista), o L1/R1 e o Options de novo
-// fecham tudo com o Options. Os tempos são do GTA 6 no PS5; a página não vê o menu, só conta o tempo.
-const MAPA_LISTA_MS = 1200; // do Options até a lista do menu estar na tela
+// brincadeira dos outros (Salvar / Carregar / Novo jogo). O Options de quem joga (o M do teclado) vira: daqui
+// aperta o Options e olha a imagem do PS5 (avisos-botoes.js telaDoMenu) até a lista aparecer; na lista de dentro
+// aperta o ○, fora do 1º item aperta o ↑ e no Mapa marcado aperta o ✕. Nada de quem joga chega ao PS5 até o mapa
+// abrir (a 1ª versão contava 1,2 s: o ✕ chegava antes da lista e a pessoa descia até "Jogo"). Com o mapa aberto,
+// o ○ (que voltaria para a lista), o L1/R1 e o Options de novo fecham: daqui o Options e o ○ até a estrela do jogo
+// aparecer de novo, e também nada de quem joga chega até lá. A lista aparecendo com o mapa aberto também fecha.
+const OLHAR_MS = 120; // de quanto em quanto tempo olha a imagem durante o mapa
+const MAPA_ABRIR_MAX_MS = 8000; // não abriu nisso: desiste e fecha
+const MAPA_FECHAR_MAX_MS = 6000; // não voltou ao jogo nisso: solta quem joga assim mesmo
+const PRIMEIRO_ITEM = 0.27; // a barra branca acima disto (fração da altura): o 1º item (Mapa) marcado
+const BIT_CIMA = 1 << 12;
 const TOQUE_MS = 120; // um toque de botão daqui
 // A banda que o PS5 usa para cada resolução. Antes era 6 Mbps fixos (1080p a 60 ficava borrado no
 // movimento: o próprio chiaki-ng usa 15 em 1080p). Dá para pôr à mão até 50 Mbps.
@@ -537,6 +544,10 @@ export class Ps5Fonte {
     }
     if (this.parada) { frame.close(); return; }
     this.conta.desenhados++;
+    // o mapa com o menu travado (Ps5Nativo.olhar) olha o quadro antes de ele seguir
+    if (this.vigia) {
+      try { this.vigia(frame); } catch (err) { console.warn('[ps5] vigia', err); }
+    }
     // a dublagem (voz-universal.js) tira uma cópia de alguns quadros antes de o quadro seguir
     if (this.espiar) {
       try { this.espiar(frame); } catch (err) { console.warn('[ps5] espiar', err); }
@@ -975,8 +986,7 @@ export class Ps5Nativo {
 
   // a sessão acabou (ou a tela saiu da sala): limpa tudo
   terminar(motivo) {
-    clearTimeout(this.mapaTimer);
-    this.mapa = null;
+    this.pararMapa();
     const fonte = this.fonte;
     this.fonte = null;
     this.conectado = null;
@@ -1034,7 +1044,7 @@ export class Ps5Nativo {
       if (opt && !this.optAntes) this.pedirMapa();
       this.optAntes = opt;
       b &= ~(BIT_CREATE | BIT_OPTIONS);
-      if (this.mapa === 'abrindo') parado = true;
+      if (this.mapa === 'abrindo' || this.mapa === 'fechando') parado = true;
       else if (this.mapa === 'aberto') {
         const sai = b & (BIT_O | BIT_L1 | BIT_R1);
         if (sai && !this.saiAntes) this.fecharMapa();
@@ -1046,7 +1056,7 @@ export class Ps5Nativo {
         if (b & (BIT_O | BIT_L1 | BIT_R1)) b &= ~(BIT_O | BIT_L1 | BIT_R1);
         else this.saiAntes = false;
       }
-    } else if (this.mapa) this.mapa = null;
+    } else if (this.mapa) this.pararMapa();
     const msg = parado
       ? { tipo: 'pad', b: 0, lx: 0, ly: 0, rx: 0, ry: 0, lt: 0, rt: 0, t0x: -1, t0y: -1, t1x: -1, t1y: -1 }
       : { tipo: 'pad', b, lx: ev.lx, ly: ev.ly, rx: ev.rx, ry: ev.ry, lt: ev.lt, rt: ev.rt, t0x: tp[0], t0y: tp[1], t1x: tp[2], t1y: tp[3] };
@@ -1068,23 +1078,85 @@ export class Ps5Nativo {
     }, TOQUE_MS);
   }
 
-  // o Options de quem joga com o menu travado: abre o mapa (ou fecha, se já está aberto). Ver MAPA_LISTA_MS
+  // o Options de quem joga com o menu travado: abre o mapa (ou fecha, se já está aberto). Ver OLHAR_MS
   pedirMapa() {
-    if (this.mapa) return this.fecharMapa();
+    if (this.mapa === 'aberto') return this.fecharMapa();
+    if (this.mapa) return; // abrindo ou fechando: espera
+    if (!this.fonte) return; // sem a imagem do PS5 aqui não dá para ver o menu: o Options não vai
     this.mapa = 'abrindo';
+    this.mapaDesde = this.acaoEm = performance.now();
+    this.entrou = false;
+    this.olhos = { lista: 0, fora: 0, jogo: 0 };
+    this.fonte.vigia = (frame) => this.olhar(frame);
+    this.onEvento?.('mapa: abrindo (Options)');
     this.tocar(BIT_OPTIONS);
-    clearTimeout(this.mapaTimer);
-    this.mapaTimer = setTimeout(() => {
-      if (this.mapa !== 'abrindo') return;
-      this.mapa = 'aberto';
-      this.tocar(BIT_X); // o Mapa, primeiro da lista
-    }, MAPA_LISTA_MS);
   }
 
-  fecharMapa() {
-    clearTimeout(this.mapaTimer);
+  fecharMapa(comOptions = true) {
+    this.mapa = 'fechando';
+    this.mapaDesde = this.acaoEm = performance.now();
+    this.olhos = { lista: 0, fora: 0, jogo: 0 };
+    if (this.fonte) this.fonte.vigia = (frame) => this.olhar(frame);
+    if (comOptions) this.tocar(BIT_OPTIONS);
+  }
+
+  pararMapa(motivo) {
+    if (motivo) this.onEvento?.(`mapa: ${motivo}`);
     this.mapa = null;
-    this.tocar(BIT_OPTIONS);
+    if (this.fonte) this.fonte.vigia = null;
+  }
+
+  // um quadro do PS5 durante o mapa: o que está na tela (a lista do menu, o jogo ou nenhum dos dois: o mapa)
+  olhar(frame) {
+    const agora = performance.now();
+    if (agora - (this.olhouEm || 0) < OLHAR_MS) return;
+    this.olhouEm = agora;
+    const fw = frame.displayWidth, fh = frame.displayHeight;
+    if (!fw || !fh) return;
+    const w = 960, h = Math.round((960 * fh) / fw);
+    if (!this.olho || this.olho.width !== w || this.olho.height !== h) {
+      this.olho = new OffscreenCanvas(w, h);
+      this.olhoCtx = this.olho.getContext('2d', { willReadFrequently: true });
+    }
+    this.olhoCtx.drawImage(frame, 0, 0, w, h);
+    const img = this.olhoCtx.getImageData(0, 0, w, h);
+    const m = telaDoMenu(img);
+    const jogo = !m.lista && jogoNaTela(img);
+    const o = this.olhos;
+    o.lista = m.lista ? o.lista + 1 : 0;
+    o.jogo = jogo ? o.jogo + 1 : 0;
+    o.fora = !m.lista ? o.fora + 1 : 0;
+    this.passoMapa(m, agora);
+  }
+
+  passoMapa(m, agora) {
+    const o = this.olhos, desde = agora - this.mapaDesde, espera = agora - this.acaoEm;
+    const tocar = (bit) => { this.tocar(bit); this.acaoEm = agora; };
+    if (this.mapa === 'abrindo') {
+      if (desde > MAPA_ABRIR_MAX_MS) { this.onEvento?.('mapa: não abriu, fechando'); return this.fecharMapa(false); }
+      // o ✕ foi e a lista saiu: é o mapa
+      if (this.entrou && o.fora >= 2 && !o.jogo) { this.mapa = 'aberto'; this.onEvento?.('mapa: aberto'); return; }
+      if (o.lista >= 2 && espera >= 400) {
+        if (!m.logo) { this.entrou = false; return tocar(BIT_O); } // numa lista de dentro: volta
+        if (m.barra > PRIMEIRO_ITEM) { this.entrou = false; return tocar(BIT_CIMA); }
+        if (!this.entrou || espera >= 1500) { this.entrou = true; return tocar(BIT_X); } // o Mapa
+      }
+      // o Options não abriu a lista (o jogo continua na tela): mais uma vez
+      if (!this.entrou && o.jogo >= 3 && espera >= 2000) tocar(BIT_OPTIONS);
+      return;
+    }
+    if (this.mapa === 'aberto') {
+      if (o.lista >= 2) { this.onEvento?.('mapa: a lista do menu apareceu, fechando'); return this.fecharMapa(false); }
+      if (o.jogo >= 3) this.pararMapa('o mapa fechou sozinho');
+      return;
+    }
+    if (this.mapa === 'fechando') {
+      if (o.jogo >= 2) return this.pararMapa('de volta ao jogo');
+      if (desde > MAPA_FECHAR_MAX_MS) return this.pararMapa('sem ver o jogo, quem joga volta assim mesmo');
+      // na lista (a de fora ou uma de dentro) o ○ volta até sair do menu; no mapa ainda, o Options
+      if (o.lista >= 2 && espera >= 600) return tocar(BIT_O);
+      if (o.fora >= 3 && !o.jogo && espera >= 1500) tocar(BIT_OPTIONS);
+    }
   }
 
   // um botão apertado daqui (vale mesmo travado): um toque curto por cima do que quem joga segura

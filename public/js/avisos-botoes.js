@@ -768,26 +768,21 @@ function iconesDoCarro(img) {
   return false;
 }
 
-// A munição do GTA 6 no canto de cima à direita (pedido do usuário em 2026-11-28: o quadro "a pé / no carro"
-// fica logo abaixo do ícone da arma quando há arma, e logo abaixo da estrela quando não há). Com arma, embaixo
-// das estrelas vêm os números da munição ("6 54": algarismos claros, ~2% da altura da tela, na mesma linha) e,
-// embaixo deles, o desenho da arma (~3 algarismos de altura). armaNaTela() procura essa linha de algarismos:
-// { dir, topo, base, h } em frações da imagem (a borda direita, o topo e a base da linha, a altura de um
-// algarismo) ou null sem arma.
-export function armaNaTela(img) {
-  const { width: W, height: H, data: d } = img;
-  const xa = Math.round(W * 0.78), ya = Math.round(H * 0.03), yb = Math.round(H * 0.26);
-  const RW = W - xa, RH = yb - ya;
-  const claro = (x, y) => {
-    const i = (y * W + x) * 4, r = d[i], g = d[i + 1], b = d[i + 2];
-    const mn = Math.min(r, g, b);
-    return mn > 120 && Math.max(r, g, b) - mn < 45;
-  };
+// O canto de cima à direita do GTA 6 (pedido do usuário em 2026-11-28: o quadro "a pé / no carro" fica logo
+// abaixo do ícone da arma quando há arma, e logo abaixo da estrela quando não há). De cima para baixo: as 5
+// estrelas (as de procurado claras, as outras só contorno escuro; a da direita sempre clara), às vezes uma fila
+// de ícones em disco vermelho (cabide, alfinete, carro), e com arma os números da munição ("6 54", algarismos
+// claros) e o desenho da arma (~3 algarismos de altura) embaixo deles.
+// hudCanto() devolve { dir, base, arma } em frações da imagem (a borda direita do HUD e onde ele acaba) ou null
+// sem a estrela nem a munição. A posição sai sempre da imagem: a altura do HUD muda com o recorte da tela.
+
+// as manchas (4-vizinhas) do retângulo [xa, xb) × [ya, yb) em que teste(i) vale: { x0, x1, y0, y1, n } na imagem
+function manchas(img, xa, ya, xb, yb, teste) {
+  const { width: W } = img;
+  const RW = xb - xa, RH = yb - ya;
   const marca = new Uint8Array(RW * RH);
-  for (let y = 0; y < RH; y++) for (let x = 0; x < RW; x++) if (claro(xa + x, ya + y)) marca[y * RW + x] = 1;
-  const hMin = Math.max(5, H * 0.011), hMax = H * 0.035;
-  const algs = [];
-  const pilha = [];
+  for (let y = 0; y < RH; y++) for (let x = 0; x < RW; x++) if (teste(((ya + y) * W + xa + x) * 4)) marca[y * RW + x] = 1;
+  const lista = [], pilha = [];
   for (let s0 = 0; s0 < marca.length; s0++) {
     if (marca[s0] !== 1) continue;
     let x0 = RW, y0 = RH, x1 = -1, y1 = -1, n = 0;
@@ -806,11 +801,56 @@ export function armaNaTela(img) {
       if (py > 0 && marca[p - RW] === 1) { marca[p - RW] = 2; pilha.push(p - RW); }
       if (py < RH - 1 && marca[p + RW] === 1) { marca[p + RW] = 2; pilha.push(p + RW); }
     }
-    const w = x1 - x0 + 1, h = y1 - y0 + 1, f = n / (w * h);
-    // um algarismo: em pé, do tamanho certo e com traço (não um bloco cheio nem um risco)
-    if (h >= hMin && h <= hMax && w >= h * 0.25 && w <= h * 1.1 && f >= 0.25 && f <= 0.85) algs.push({ x0, x1, y0, y1, h });
+    lista.push({ x0: xa + x0, x1: xa + x1, y0: ya + y0, y1: ya + y1, n });
   }
-  // a linha: algarismos da mesma altura, um do lado do outro (o espaço entre o pente e o resto é ~1 algarismo)
+  return { lista, marca, RW, xa, ya };
+}
+const claroSemCor = (d, min) => (i) => {
+  const r = d[i], g = d[i + 1], b = d[i + 2], mn = Math.min(r, g, b);
+  return mn > min && Math.max(r, g, b) - mn < 45;
+};
+
+// a estrela clara da direita: em pé, quase quadrada, meio cheia (cheia ~0,4; só o contorno ~0,27)
+function estrela(img) {
+  const { width: W, height: H, data: d } = img;
+  const { lista } = manchas(img, Math.round(W * 0.8), Math.round(H * 0.01), W, Math.round(H * 0.22), claroSemCor(d, 90));
+  // reduzida pela metade a estrela tem ~10 px e sai um pouco mais estreita (0,75–0,8 da altura)
+  const cands = [];
+  for (const m of lista) {
+    const w = m.x1 - m.x0 + 1, h = m.y1 - m.y0 + 1, f = m.n / (w * h);
+    if (h < H * 0.013 || h > H * 0.045 || w < h * 0.7 || w > h * 1.4 || f < 0.2 || f > 0.6 || m.x1 < W * 0.9) continue;
+    cands.push({ ...m, h });
+  }
+  if (!cands.length) return null;
+  // as estrelas são o que há mais em cima no HUD: a fila de cima e, nela, a da direita
+  const topo = Math.min(...cands.map((m) => m.y0));
+  return cands.filter((m) => m.y0 - topo <= m.h * 0.5).reduce((a, b) => (b.x1 > a.x1 ? b : a));
+}
+
+// a fila de ícones vermelhos logo embaixo da estrela: a base dela (em pixels) ou null
+function iconesVermelhos(img, e) {
+  const { width: W, height: H, data: d } = img;
+  const xa = Math.max(0, Math.round(e.x1 - e.h * 5)), xb = Math.min(W, e.x1 + 2);
+  const ya = e.y1 + 1, yb = Math.min(H, Math.round(e.y1 + e.h * 1.8));
+  if (yb <= ya) return null;
+  const { lista } = manchas(img, xa, ya, xb, yb, (i) => d[i] > 110 && d[i] - Math.max(d[i + 1], d[i + 2]) > 50);
+  const discos = lista.filter((m) => m.y1 - m.y0 + 1 >= e.h * 0.3 && m.n >= e.h * e.h * 0.1);
+  return discos.length ? Math.max(...discos.map((m) => m.y1)) : null;
+}
+
+// a linha da munição: algarismos claros em pé, da mesma altura, um do lado do outro; abaixo de y0 (a estrela)
+export function armaNaTela(img, y0 = Math.round(img.height * 0.03)) {
+  const { width: W, height: H, data: d } = img;
+  const yb = Math.round(H * 0.3);
+  if (yb - y0 < 10) return null;
+  const { lista, marca, RW, xa, ya } = manchas(img, Math.round(W * 0.78), y0, W, yb, claroSemCor(d, 120));
+  const hMin = Math.max(5, H * 0.011), hMax = H * 0.035;
+  const algs = [];
+  for (const m of lista) {
+    const w = m.x1 - m.x0 + 1, h = m.y1 - m.y0 + 1, f = m.n / (w * h);
+    // um algarismo é mais alto que largo (a estrela, quase quadrada, não entra)
+    if (h >= hMin && h <= hMax && w >= h * 0.25 && w <= h * 0.85 && f >= 0.25 && f <= 0.85) algs.push({ ...m, h });
+  }
   algs.sort((p, q) => p.x0 - q.x0);
   let melhor = null;
   for (const a of algs) {
@@ -823,16 +863,67 @@ export function armaNaTela(img) {
     }
     if (linha.length < 2) continue;
     const dir = linha[linha.length - 1].x1, base = Math.max(...linha.map((k) => k.y1));
-    // perto da borda direita, e com fundo não claro em volta (céu claro não vira munição)
-    if (xa + dir < W * 0.93) continue;
+    if (dir < W * 0.93) continue;
+    // fundo não claro em cima e embaixo da linha (céu claro não vira munição)
     let claros = 0, tot = 0;
     for (const yy of [a.y0 - Math.round(a.h * 0.6), base + Math.round(a.h * 0.6)]) {
-      if (yy < 0 || yy >= RH) continue;
-      for (let x = a.x0; x <= dir; x++) { tot++; if (marca[yy * RW + x]) claros++; }
+      if (yy < ya || yy >= yb) continue;
+      for (let x = a.x0; x <= dir; x++) { tot++; if (marca[(yy - ya) * RW + x - xa]) claros++; }
     }
     if (tot && claros / tot > 0.3) continue;
     if (!melhor || linha.length > melhor.n) melhor = { n: linha.length, dir, topo: a.y0, base, h: a.h };
   }
   if (!melhor) return null;
-  return { dir: (xa + melhor.dir + 1) / W, topo: (ya + melhor.topo) / H, base: (ya + melhor.base + 1) / H, h: melhor.h / H };
+  return { dir: (melhor.dir + 1) / W, topo: melhor.topo / H, base: (melhor.base + 1) / H, h: melhor.h / H };
 }
+
+export function hudCanto(img) {
+  const { width: W, height: H } = img;
+  const e = estrela(img);
+  const arma = armaNaTela(img, e ? e.y1 + 1 : undefined);
+  // com arma: o desenho dela ocupa ~3,4 algarismos embaixo dos números
+  if (arma) return { dir: e ? (e.x1 + 1) / W : arma.dir, base: arma.base + arma.h * 3.4, arma: true };
+  if (!e) return null;
+  const base = Math.max(e.y1, iconesVermelhos(img, e) ?? 0);
+  return { dir: (e.x1 + 1) / W, base: (base + 1) / H, arma: false };
+}
+
+// O menu do Options do GTA 6 (a lista Mapa, Jogo, Loja… e as de dentro, como a "Jogo": Salvar, Carregar,
+// Novo jogo): um painel azul-escuro liso (~33,32,43) no terço da esquerda, com o item marcado numa barra
+// branca; a lista principal tem o "VI" rosa em cima, as de dentro um título branco. telaDoMenu() devolve
+// { lista, logo, barra }: barra é o meio da barra branca (fração da altura; o 1º item fica em ~0,23) ou null.
+export function telaDoMenu(img) {
+  const { width: W, height: H, data: d } = img;
+  const at = (x, y) => (Math.round(y) * W + Math.round(x)) * 4;
+  let liso = 0, tot = 0;
+  for (let y = H * 0.4; y < H * 0.9; y += H / 60) for (let x = W * 0.02; x < W * 0.24; x += W / 120) {
+    const i = at(x, y), r = d[i], g = d[i + 1], b = d[i + 2];
+    tot++;
+    if (r >= 15 && r <= 60 && g >= 15 && g <= 60 && b - r >= 0 && b - r <= 30) liso++;
+  }
+  const painel = tot > 0 && liso / tot >= 0.85;
+  let barra = null;
+  if (painel) {
+    let y0 = -1;
+    for (let y = Math.round(H * 0.1); y < H * 0.7; y++) {
+      let brancos = 0, n = 0;
+      // a barra clareia da esquerda para a direita e tem o nome do item escuro por cima: basta metade clara
+      for (let x = W * 0.02; x < W * 0.2; x += 2) { const i = at(x, y); n++; if (Math.min(d[i], d[i + 1], d[i + 2]) > 140) brancos++; }
+      const cheia = brancos / n >= 0.5;
+      if (cheia && y0 < 0) y0 = y;
+      if (!cheia && y0 >= 0) {
+        if (y - y0 >= H * 0.03) { barra = (y0 + y) / 2 / H; break; }
+        y0 = -1;
+      }
+    }
+  }
+  let rosa = 0;
+  for (let y = 0; y < H * 0.15; y++) for (let x = 0; x < W * 0.12; x++) {
+    const i = at(x, y), r = d[i], g = d[i + 1], b = d[i + 2];
+    if (r > 150 && r - g > 60 && b > 90) rosa++;
+  }
+  return { lista: painel && barra != null, logo: rosa >= 10, barra };
+}
+
+// o jogo na tela (fora dos menus e do mapa): a estrela do canto de cima à direita
+export const jogoNaTela = (img) => !!estrela(img);

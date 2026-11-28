@@ -40,6 +40,18 @@ const CURTO = { ShiftLeft: '⇧', ShiftRight: '⇧', Enter: '↵', Tab: '⇥', B
 // o analógico esquerdo empurrado para um lado: a tecla daquela direção (W, A, S, D no padrão)
 const ANDAR = { cima: 'ly-', baixo: 'ly+', esq: 'lx-', dir: 'lx+' };
 
+// O par L + R lado a lado (GTA 6: dois arcos, o do L aberto para a direita e o do R para a esquerda): é sempre
+// empurrar o analógico esquerdo para a direita (D) e puxar o direito para a esquerda (o mouse para a esquerda),
+// pedido do usuário em 2026-11-28 (a direção lida do L saía "A"). Em cima dos dois vai um card com o mouse
+// sendo arrastado para a esquerda.
+const CARD_PAR = `<span class="par-mouse">${mouse('', 'esq')}</span><b>Arraste o mouse para a esquerda</b><small>e segure D</small>`;
+function parLR(lista) {
+  const l = lista.find((a) => a.id === 'andar'), r = lista.find((a) => a.id === 'olhar');
+  if (!l || !r || r.x <= l.x) return null;
+  const raio = Math.max(l.r, r.r);
+  return Math.abs(l.y - r.y) < raio * 1.5 && r.x - l.x < raio * 12 ? { l, r } : null;
+}
+
 const esc = (t) => t.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 // o rótulo de uma entrada (tecla ou botão do mouse)
 function daEntrada(e) {
@@ -65,7 +77,7 @@ export class AvisosBotoes {
   // camada: a div por cima da imagem; video: o <video> da tela; telaTurbo(): o canvas do turbo à vista (ou null)
   // querCarro(): procurar também o quadro do carro; onCarro(): ele apareceu (visto em 2 análises seguidas)
   // noCarro(): as teclas do carro valem agora (o L2 e o R2 mostram as do carro)
-  // querHud(): procurar também a munição (canto de cima à direita); onArma(geo|null): mudou (geo: armaNaTela)
+  // querHud(): procurar também o HUD do canto de cima à direita; onArma(geo|null): mudou (geo: hudCanto)
   constructor({ camada, video, telaTurbo, querCarro = () => false, onCarro = () => {}, noCarro = () => false, querHud = () => false, onArma = () => {} }) {
     this.camada = camada;
     this.querHud = querHud;
@@ -139,7 +151,7 @@ export class AvisosBotoes {
     if (geo) {
       this.armaNao = 0;
       if (++this.armaSim < 2) return;
-      const mudou = !this.arma || Math.abs(this.arma.base - geo.base) > geo.h * 0.5 || Math.abs(this.arma.dir - geo.dir) > geo.h;
+      const mudou = !this.arma || this.arma.arma !== geo.arma || Math.abs(this.arma.base - geo.base) > 0.008 || Math.abs(this.arma.dir - geo.dir) > 0.008;
       this.arma = geo;
       if (mudou) this.onArma(geo);
     } else {
@@ -211,6 +223,8 @@ export class AvisosBotoes {
   }
 
   mostrar(lista) {
+    const par = parLR(lista);
+    if (par) lista = lista.map((a) => (a === par.l ? { ...a, dir: 'dir' } : a === par.r ? { ...a, dir: 'esq' } : a));
     const rotulos = {};
     const carro = !!this.noCarro();
     const chave = (av) => `${av.id} ${av.dir || ''}`;
@@ -226,8 +240,9 @@ export class AvisosBotoes {
     const a = this.areaDaImagem();
     if (!a) return;
     cam.hidden = false;
+    this.mostrarCard(par, a);
     // reaproveita as que já estão (só mexe na posição): não pisca a cada análise
-    const velhas = [...cam.children];
+    const velhas = [...cam.querySelectorAll(':scope > kbd')];
     avisos.forEach((av, i) => {
       const r = rotulos[chave(av)];
       let el = velhas[i];
@@ -246,5 +261,20 @@ export class AvisosBotoes {
       el.classList.toggle('icone', !!r.icone);
     });
     for (const el of velhas.slice(avisos.length)) el.remove();
+  }
+
+  // o card do par L + R (parLR): centrado em cima dos dois ícones
+  mostrarCard(par, a) {
+    if (!par) return void this.card?.remove();
+    if (!this.card) {
+      this.card = document.createElement('div');
+      this.card.className = 'aviso-card';
+      this.card.innerHTML = CARD_PAR;
+    }
+    if (!this.card.isConnected) this.camada.append(this.card);
+    const x = a.x + ((par.l.x + par.r.x) / 2) * a.w;
+    const y = a.y + (Math.min(par.l.y, par.r.y) - Math.max(par.l.r, par.r.r) * 1.6) * a.h;
+    this.card.style.left = `${x}px`;
+    this.card.style.top = `${y}px`;
   }
 }

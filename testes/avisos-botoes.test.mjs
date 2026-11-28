@@ -3,7 +3,7 @@
 // conferidos à mão na criação (ver o comentário de MEDIDOS).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { detectar, Rastreio, armaNaTela } from '../public/js/avisos-botoes.js';
+import { detectar, Rastreio, armaNaTela, telaDoMenu } from '../public/js/avisos-botoes.js';
 
 const distSeg = (px, py, ax, ay, bx, by) => {
   const dx = bx - ax, dy = by - ay, t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)));
@@ -114,4 +114,23 @@ test('armaNaTela: acha a linha da munição; sem ela, ou com céu claro, não', 
   assert.equal(armaNaTela(canto(960, 540, 35)), null, 'sem munição');
   assert.equal(armaNaTela(canto(960, 540, 230, [[880, 47, 7, 10], [896, 47, 7, 10]])), null, 'céu claro');
   assert.equal(armaNaTela(canto(960, 540, 35, [[880, 47, 7, 10]])), null, 'um algarismo solto');
+});
+
+// o menu do Options do GTA 6: painel azul-escuro liso à esquerda, barra branca no item marcado, "VI" rosa
+function menu(W, H, { barra = 0.23, logo = true } = {}) {
+  const data = new Uint8ClampedArray(W * H * 4);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    let c = x < W * 0.28 ? [33, 32, 43] : [110, 100, 120];
+    if (x > W * 0.017 && x < W * 0.27 && Math.abs(y / H - barra) < 0.03) c = x < W * 0.15 ? [249, 249, 251] : [180, 180, 185];
+    if (logo && x > W * 0.02 && x < W * 0.07 && y > H * 0.04 && y < H * 0.11 && (x + y) % 5 === 0) c = [230, 100, 170];
+    data.set([...c, 255], (y * W + x) * 4);
+  }
+  return { width: W, height: H, data };
+}
+test('telaDoMenu: a lista principal, a de dentro e o item marcado; o jogo escuro não é lista', () => {
+  let m = telaDoMenu(menu(960, 540));
+  assert.ok(m.lista && m.logo && Math.abs(m.barra - 0.23) < 0.01);
+  m = telaDoMenu(menu(960, 540, { barra: 0.3, logo: false }));
+  assert.ok(m.lista && !m.logo && m.barra > 0.27);
+  assert.equal(telaDoMenu(canto(960, 540, 35)).lista, false);
 });
