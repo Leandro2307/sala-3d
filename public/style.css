@@ -4908,30 +4908,38 @@ body.touch :is(.hk-lista, #help-extra, #help-mais-btn) { display: none !importan
 #jogo-avisos .aviso-card .par-mouse svg { width: 100%; height: 100%; }
 @keyframes par-arrasta { 0% { transform: translateX(14px); opacity: 0; } 15% { opacity: 1; } 75% { transform: translateX(-14px); opacity: 1; } 100% { transform: translateX(-14px); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { #jogo-avisos .aviso-card .par-mouse { animation: none; } }
-/* a pé / no carro na /jogar (jogar.js posHudModo): pequeno, no canto de cima à direita, logo abaixo do ícone da
-   arma do GTA (com arma) ou da estrela (sem); a borda direita alinhada com a do jogo. --t: o tamanho da letra */
+/* o canto de baixo à direita da /jogar (jogar.js posHudModo): as dicas (Shift corre, Tab armas) empilhadas em
+   cima do a pé / no carro, todos alinhados à direita. --t: o tamanho da letra */
 #jogo-hud-modo {
   position: absolute;
   z-index: 5;
-  transform: translateX(-100%);
+  transform: translate(-100%, -100%);
   display: flex;
-  align-items: center;
-  gap: .35em;
-  padding: .22em .55em;
-  border-radius: 999px;
-  border: 2px solid #34d399;
-  background: rgba(10, 12, 20, .72);
+  flex-direction: column;
+  align-items: flex-end;
+  gap: .3em;
   color: #fff;
   font: 800 var(--t, 14px)/1 'Plus Jakarta Sans', system-ui, sans-serif;
   letter-spacing: .02em;
   white-space: nowrap;
   pointer-events: none;
-  transition: top .15s ease-out, left .15s ease-out;
 }
 #jogo-hud-modo[hidden] { display: none; }
-#jogo-hud-modo.carro { border-color: #fb923c; }
+#jogo-hud-modo > span {
+  display: flex;
+  align-items: center;
+  gap: .35em;
+  padding: .22em .55em;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, .35);
+  background: rgba(10, 12, 20, .72);
+}
+#jogo-hud-modo .hm-dica { font-weight: 700; font-size: .85em; }
+#jogo-hud-modo .hm-modo { border-color: #34d399; }
+#jogo-hud-modo .hm-modo.carro { border-color: #fb923c; }
 #jogo-hud-modo i { font-style: normal; }
-#jogo-hud-modo kbd { font-family: inherit; font-size: .72em; font-weight: 700; line-height: 1; padding: .18em .4em; border-radius: 4px; background: rgba(255, 255, 255, .16); color: rgba(255, 255, 255, .85); }
+#jogo-hud-modo kbd { font-family: inherit; font-size: .8em; font-weight: 800; line-height: 1; padding: .18em .4em; border-radius: 4px; background: rgba(255, 255, 255, .16); color: #fff; }
+#jogo-hud-modo .hm-modo kbd { font-size: .72em; font-weight: 700; color: rgba(255, 255, 255, .85); }
 #jogo-legenda span {
   display: flex;
   flex-direction: column;

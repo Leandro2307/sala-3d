@@ -39,7 +39,7 @@ import { LAYOUTS, layoutDoTitulo, ToqueJogo } from './toque-jogo.js';
 import { ControleFisico } from './gamepad-jogo.js';
 import { PadVirtual } from './pad-virtual.js';
 import { TecladoPad } from './teclado-pad.js';
-import { MapaTeclasPainel, mapaTeclas, textoModoCarro } from './mapa-teclas.js';
+import { MapaTeclasPainel, mapaTeclas, textoModoCarro, visiveis, nomeEntrada } from './mapa-teclas.js';
 import { AvisosBotoes } from './avisos-botoes-tela.js';
 import { Ps5Touchpad, temTouchpadHid } from './ps5-touchpad.js';
 import { AvisoDoSite } from './aviso-site.js';
@@ -1427,9 +1427,6 @@ const avisosBotoes = new AvisosBotoes({
     diagJogo.evento('modo carro: o quadro do carro apareceu no jogo');
     tecladoPad.trocarCarro(true);
   },
-  // a munição no canto de cima: o quadro "a pé / no carro" vai para baixo da arma (ou da estrela)
-  querHud: () => !$('#jogo-hud-modo').hidden,
-  onArma: () => posHudModo(),
 });
 turboRecebe.espiar = (frame) => avisosBotoes.espiar(frame);
 turboRecebe.socorro = true;
@@ -2110,7 +2107,7 @@ const tecladoPad = new TecladoPad({
   pad: padVirtual,
   sens: () => opcoesJogo.get('mouseSens'),
   aviso: (texto) => toast(texto, 'info', 5000),
-  // o modo vem do △ e do quadro do carro no jogo; o quadro pequeno embaixo da arma/estrela mostra qual (posHudModo)
+  // o modo vem do △ e do quadro do carro no jogo; o quadro pequeno no canto de baixo à direita mostra qual (posHudModo)
   onCarro: (sim) => {
     if (sim !== noCarro) diagJogo.evento(sim ? 'modo carro: no carro' : 'modo carro: a pé');
     noCarro = sim;
@@ -2170,36 +2167,28 @@ function mostrarLegenda(layout) {
   posHudModo();
 }
 
-// O quadro "a pé / no carro" (pedido do usuário em 2026-11-28, depois de sair em 27/11): pequeno, no canto de
-// cima à direita, logo abaixo do ícone da arma do GTA quando há arma e logo abaixo da estrela (e da fila de
-// ícones vermelhos, se houver) quando não há. Onde fica vem da imagem (avisos-botoes.js hudCanto): a altura do
-// HUD muda com o recorte da tela (o 1º jeito, com a altura fixa de um print, ficou em cima das estrelas).
-// Sem nada achado (nem a estrela nem a arma: no mar, num menu…), no canto de cima à direita (pedido do usuário
-// em 2026-11-28), logo abaixo da linha do diagnóstico (#jogo-selo) quando ela está ali.
-// Depois (pedido do usuário): o X nunca muda e o Y é um de 3 lugares fixos, medidos nos prints do GTA em 1080p
-// (estrelas de 26 a 48 px com a borda direita em ~1897, os ícones vermelhos até 83, a munição de 99 a 119 e o
-// desenho da arma até ~178). A imagem só escolhe qual dos três (avisos-botoes.js hudCanto).
-const HUD_DIR = 0.988; // a borda direita das estrelas
-const HUD_Y_ESTRELA = 0.084; // 91 px: embaixo da estrela (e dos ícones vermelhos, quando há)
-const HUD_Y_ARMA = 0.172; // 186 px: embaixo do desenho da arma
+// O quadro "a pé / no carro" (pedido do usuário em 2026-11-28, depois de sair em 27/11): pequeno e fixo no canto
+// de baixo à direita da imagem. Antes ficou embaixo da estrela ou da arma do GTA, achadas na imagem
+// (avisos-botoes.js hudCanto), mas nem sempre achava (céu claro) e ele ia parar em cima das estrelas: o usuário
+// pediu fixo, "para garantir". Em cima dele, as dicas de correr (L3, Shift) e das armas (L1, Tab), com a tecla
+// do mapa de quem joga (pedido do usuário em 2026-11-28).
+const DICAS_CANTO = [['b10', 'corre'], ['b4', 'armas']];
+const escHud = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 function posHudModo() {
   const el = $('#jogo-hud-modo');
   const t = layoutLegenda === 'ps5' && entradaDeAgora() === 'teclado' && mapaTeclas.carroTroca() ? textoModoCarro(noCarro) : null;
   const a = t && avisosBotoes.areaDaImagem();
   if (!a) return void (el.hidden = true);
-  const html = `<i>${t.icone}</i>${t.noCarro ? 'CARRO' : 'A PÉ'}${t.troca ? `<kbd>${t.troca.split(' ou ').pop()}</kbd>` : ''}`;
+  const dicas = DICAS_CANTO.map(([id, faz]) => {
+    const e = visiveis(id).find((x) => !/^Roda/.test(x));
+    return e ? `<span class="hm-dica"><kbd>${escHud(nomeEntrada(e))}</kbd>${faz}</span>` : '';
+  }).join('');
+  const modo = `<span class="hm-modo${t.noCarro ? ' carro' : ''}"><i>${t.icone}</i>${t.noCarro ? 'CARRO' : 'A PÉ'}${t.troca ? `<kbd>${escHud(t.troca.split(' ou ').pop())}</kbd>` : ''}</span>`;
+  const html = dicas + modo;
   if (el.dataset.t !== html) { el.dataset.t = html; el.innerHTML = html; }
-  el.classList.toggle('carro', t.noCarro);
-  let min = 4;
-  const selo = $('#jogo-selo');
-  if (selo && !selo.hidden) {
-    const f = $('#focus').getBoundingClientRect(), r = selo.getBoundingClientRect();
-    if (r.height && r.right > f.right - 400 && r.top < f.top + 120) min = r.bottom - f.top + 6;
-  }
-  const hud = avisosBotoes.arma;
-  const topo = Math.max(min, hud ? a.y + a.h * (hud.arma ? HUD_Y_ARMA : HUD_Y_ESTRELA) : a.y + 10);
-  const dir = Math.min(a.x + a.w * HUD_DIR, innerWidth - 8);
-  el.style.cssText = `left:${dir}px;top:${topo}px;--t:${Math.max(11, Math.round(a.h * 0.019))}px`;
+  const dir = Math.min(a.x + a.w - 12, innerWidth - 8);
+  const base = Math.min(a.y + a.h - 12, innerHeight - 8);
+  el.style.cssText = `left:${dir}px;top:${base}px;--t:${Math.max(11, Math.round(a.h * 0.019))}px`;
   el.hidden = false;
 }
 addEventListener('resize', () => posHudModo());
